@@ -15,6 +15,8 @@ const TemplateSchema = new mongoose.Schema<CollectionTypes.Template>({
   requiredOnceContractTerminated: Boolean
 });
 
+TemplateSchema.index({ realmId: 1 });
+
 export default mongoose.model<CollectionTypes.Template>(
   'Template',
   TemplateSchema

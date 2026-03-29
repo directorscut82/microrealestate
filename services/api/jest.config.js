@@ -1,18 +1,14 @@
-/*
- * For a detailed explanation regarding each configuration property, visit:
- * https://jestjs.io/docs/configuration
- */
-
 export default {
-  // Indicates whether the coverage information should be collected while executing the test
   collectCoverage: true,
-
-  // An array of glob patterns indicating a set of files for which coverage information should be collected
-  collectCoverageFrom: ['./src/**/*.js'],
-
-  // The directory where Jest should output its coverage files
+  collectCoverageFrom: ['./src/**/*.{js,ts}'],
   coverageDirectory: 'coverage',
-
-  // Indicates which provider should be used to instrument code for coverage
-  coverageProvider: 'v8'
+  coverageProvider: 'v8',
+  testMatch: ['**/src/**/__tests__/**/*.test.js'],
+  moduleFileExtensions: ['ts', 'js', 'json'],
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1'
+  },
+  transform: {
+    '^.+\\.(js|ts)$': ['@swc/jest', { jsc: { parser: { syntax: 'typescript' } } }]
+  }
 };

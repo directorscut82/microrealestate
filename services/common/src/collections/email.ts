@@ -11,4 +11,7 @@ const EmailSchema = new mongoose.Schema<CollectionTypes.Email>({
   emailId: String
 });
 
+EmailSchema.index({ recordId: 1 });
+EmailSchema.index({ templateName: 1, recordId: 1 });
+
 export default mongoose.model<CollectionTypes.Email>('Email', EmailSchema);

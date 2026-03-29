@@ -9,11 +9,12 @@ COPY .yarn/plugins .yarn/plugins
 COPY .yarn/releases .yarn/releases
 COPY types types
 COPY services/common services/common
-COPY services/authenticator/package.json services/authenticator/package.json
+COPY services/authenticator services/authenticator
 RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/authenticator && \
     yarn workspace @microrealestate/types run build && \
-    yarn workspace @microrealestate/common run build
+    yarn workspace @microrealestate/common run build && \
+    yarn workspace @microrealestate/authenticator run transpile:service
 
 FROM base AS deps
 WORKDIR /usr/app
@@ -33,7 +34,7 @@ FROM gcr.io/distroless/nodejs20-debian12
 ENV NODE_ENV production
 WORKDIR /usr/app
 COPY --from=deps /usr/app ./
-COPY services/authenticator /usr/app/services/authenticator
+COPY --from=build /usr/app/services/authenticator/dist /usr/app/services/authenticator/dist
 
 USER 1000
-CMD ["services/authenticator/src/index.js"]
+CMD ["services/authenticator/dist/index.js"]

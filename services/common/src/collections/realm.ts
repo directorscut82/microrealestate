@@ -90,6 +90,10 @@ const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
   locale: String,
   currency: String
 });
+
+RealmSchema.index({ name: 1 });
+RealmSchema.index({ 'members.email': 1 });
+
 //
 // hash application secrets before saving into database
 RealmSchema.pre('save', function (next) {

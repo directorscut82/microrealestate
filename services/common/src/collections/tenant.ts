@@ -131,4 +131,9 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   stepperMode: { type: Boolean, default: false }
 });
 
+TenantSchema.index({ realmId: 1 });
+TenantSchema.index({ realmId: 1, name: 1 });
+TenantSchema.index({ leaseId: 1 });
+TenantSchema.index({ 'properties.propertyId': 1 });
+
 export default mongoose.model<CollectionTypes.Tenant>('Occupant', TenantSchema);

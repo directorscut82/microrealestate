@@ -23,6 +23,10 @@ const DocumentSchema = new mongoose.Schema<CollectionTypes.Document>({
   updatedDate: Date
 });
 
+DocumentSchema.index({ realmId: 1 });
+DocumentSchema.index({ tenantId: 1 });
+DocumentSchema.index({ realmId: 1, tenantId: 1 });
+
 DocumentSchema.pre('save', function (next) {
   const now = new Date();
   if (!this.createdDate) {

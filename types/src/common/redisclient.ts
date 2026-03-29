@@ -3,7 +3,8 @@ export namespace RedisClientTypes {
   export type GetFunction = (key: string) => Promise<string | null>;
   export type SetFunction = (
     key: string,
-    value: string
+    value: string,
+    options?: { EX?: number }
   ) => Promise<string | null>;
   export type DelFunction = (key: string) => Promise<number>;
   export type KeysFunction = (pattern: string) => Promise<string[]>;

@@ -1,0 +1,20 @@
+graph LR
+    subgraph Trigger
+        Push["Push to master"]
+    end
+
+    subgraph Pipeline
+        Lint["Lint\nall workspaces"]
+        Build["Build and Push\nDocker Images\n9 images in parallel"]
+        Deploy["Deploy to\nCI Server"]
+        Health["Health Check"]
+        E2E["Cypress E2E\nTests"]
+    end
+
+    subgraph Registry
+        GHCR["GitHub Container\nRegistry ghcr.io"]
+    end
+
+    Push --> Lint --> Build --> Deploy --> Health --> E2E
+    Build --> GHCR
+    GHCR --> Deploy

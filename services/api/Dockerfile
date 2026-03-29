@@ -12,11 +12,12 @@ COPY .yarn/plugins .yarn/plugins
 COPY .yarn/releases .yarn/releases
 COPY types types
 COPY services/common services/common
-COPY services/api/package.json services/api/package.json
+COPY services/api services/api
 RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/api && \
     yarn workspace @microrealestate/types run build && \
-    yarn workspace @microrealestate/common run build
+    yarn workspace @microrealestate/common run build && \
+    yarn workspace @microrealestate/api run transpile:service
 
 FROM base AS deps
 WORKDIR /usr/app
@@ -37,7 +38,8 @@ ENV NODE_ENV production
 RUN apk --no-cache add mongodb-tools
 WORKDIR /usr/app
 COPY --from=deps /usr/app ./
-COPY services/api /usr/app/services/api
+COPY --from=build /usr/app/services/api/dist ./services/api/dist
+COPY services/api/scripts ./services/api/scripts
 
 USER 1000
-CMD ["node", "services/api/src/index.js"]
+CMD ["node", "services/api/dist/index.js"]

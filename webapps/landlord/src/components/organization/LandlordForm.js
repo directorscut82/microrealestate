@@ -79,6 +79,7 @@ const languages = [
   { id: 'en', label: 'English', value: 'en' },
   { id: 'fr-FR', label: 'Français (France)', value: 'fr-FR' },
   { id: 'de-DE', label: 'Deutsch (Deutschland)', value: 'de-DE' },
+  { id: 'el', label: 'Ελληνικά', value: 'el' },
   { id: 'es-CO', label: 'Español (Colombia)', value: 'es-CO' }
 ];
 
@@ -182,6 +183,7 @@ export default function LandlordForm({ organization, firstAccess }) {
         const isLocaleChanged =
           savedOrganization.locale !== initialValues.locale;
         if (isOrgNameChanged || isLocaleChanged) {
+          document.cookie = `locale=${savedOrganization.locale};path=/landlord;max-age=31536000`;
           window.location.assign(
             `${config.BASE_PATH}/${savedOrganization.locale}/${savedOrganization.name}/settings/landlord`
           );

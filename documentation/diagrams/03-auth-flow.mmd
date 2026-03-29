@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant B as Browser
+    participant GW as Gateway
+    participant AUTH as Authenticator
+    participant API as API Service
+    participant DB as MongoDB
+    participant R as Redis
+
+    Note over B,R: Login Flow
+    B->>GW: POST /api/v2/authenticator/signin
+    GW->>AUTH: proxy request
+    AUTH->>DB: find account by email
+    AUTH->>AUTH: verify password with bcrypt
+    AUTH->>R: store refresh token
+    AUTH-->>GW: accessToken + refreshToken cookie
+    GW-->>B: response
+
+    Note over B,R: Authenticated API Request
+    B->>GW: GET /api/v2/tenants with Bearer token
+    GW->>API: proxy request
+    API->>API: needAccessToken - verify JWT
+    API->>DB: checkOrganization middleware
+    API->>API: notRoles tenant middleware
+    API->>DB: query tenants by realmId
+    API-->>GW: tenants list
+    GW-->>B: response
+
+    Note over B,R: Tenant Sign-In Flow
+    B->>GW: POST /tenantapi/signin
+    GW->>AUTH: proxy to authenticator
+    AUTH->>AUTH: generate magic link or OTP
+    AUTH->>GW: call emailer
+    GW->>B: check your email
+    B->>GW: GET /tenantapi with sessionToken cookie
+    GW->>TAPI: proxy request
+    TAPI->>TAPI: verify sessionToken cookie
+    TAPI-->>B: tenant data

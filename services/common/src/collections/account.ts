@@ -27,8 +27,8 @@ const AccountSchema = new mongoose.Schema<CollectionTypes.Account>({
   createdDate: Date
 });
 
-// lowercase email
-// hash user password before saving into database
+AccountSchema.index({ email: 1 }, { unique: true });
+
 AccountSchema.pre('save', function (next) {
   if (!this.createdDate) {
     this.createdDate = new Date();

@@ -37,6 +37,10 @@ export type EnvironmentValues = {
   LANDLORD_APP_URL?: string;
   TENANT_APP_URL?: string;
   CHROMIUM_BIN?: string;
+  SIGNUP?: boolean;
+  RESTORE_DB?: boolean;
+  APPCREDZ_TOKEN_SECRET?: string;
+  TOKEN_COOKIE_ATTRIBUTES?: Record<string, any>;
   GMAIL?: {
     email: string;
     appPassword: string;

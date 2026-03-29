@@ -23,6 +23,10 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
 
   price: Number
 });
+
+PropertySchema.index({ realmId: 1 });
+PropertySchema.index({ realmId: 1, name: 1 });
+
 export default mongoose.model<CollectionTypes.Property>(
   'Property',
   PropertySchema

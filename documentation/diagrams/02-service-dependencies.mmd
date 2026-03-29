@@ -1,0 +1,40 @@
+graph LR
+    subgraph Infrastructure
+        MONGO[("MongoDB")]
+        REDIS[("Redis")]
+    end
+
+    subgraph Services
+        GW[Gateway]
+        AUTH[Authenticator]
+        API[API]
+        TAPI[TenantAPI]
+        EMAIL[Emailer]
+        PDF[PDFGenerator]
+        RESET[ResetService]
+    end
+
+    subgraph Frontends
+        LF[Landlord Frontend]
+        TF[Tenant Frontend]
+    end
+
+    MONGO --> PDF
+    MONGO --> EMAIL
+    PDF --> EMAIL
+    MONGO --> AUTH
+    REDIS --> AUTH
+    EMAIL --> AUTH
+    MONGO --> API
+    EMAIL --> API
+    PDF --> API
+    MONGO --> TAPI
+    REDIS --> RESET
+    MONGO --> RESET
+    AUTH --> GW
+    API --> GW
+    TAPI --> GW
+    PDF --> GW
+    EMAIL --> GW
+    GW --> LF
+    GW --> TF

@@ -1,0 +1,22 @@
+{
+  "name": "default",
+  "description": "Default agent with all tools auto-approved",
+  "allowedTools": [
+    "fs_read",
+    "fs_write",
+    "execute_bash",
+    "grep",
+    "glob",
+    "code",
+    "knowledge",
+    "thinking",
+    "todo_list",
+    "use_subagent",
+    "use_aws",
+    "web_search",
+    "web_fetch",
+    "introspect",
+    "session",
+    "report_issue"
+  ]
+}

@@ -1,0 +1,57 @@
+graph TB
+    subgraph Clients["Clients - Browser"]
+        Landlord["Landlord User"]
+        TenantUser["Tenant User"]
+    end
+
+    subgraph ReverseProxy["Reverse Proxy"]
+        Caddy["Caddy - auto HTTPS"]
+    end
+
+    subgraph Gateway["Gateway :8080"]
+        GW["Gateway Service"]
+    end
+
+    subgraph Frontends["Frontend Apps"]
+        LF["Landlord Frontend :8180\nNext.js 14 Pages Router\nReact + MobX + Tailwind"]
+        TF["Tenant Frontend :8190\nNext.js 14 App Router\nReact + RSC + Tailwind"]
+    end
+
+    subgraph BackendServices["Backend Services"]
+        AUTH["Authenticator :8000\nJWT + bcrypt"]
+        API["API :8200\nLandlord REST API"]
+        TAPI["Tenant API :8250\nTenant REST API"]
+        EMAIL["Emailer :8400\nGmail / Mailgun / SMTP"]
+        PDF["PDFGenerator :8300\nPuppeteer + EJS"]
+        RESET["ResetService :8900\nDEV/CI only"]
+    end
+
+    subgraph DataStores["Data Stores"]
+        MONGO[("MongoDB 7\n:27017")]
+        REDIS[("Redis 7.4\n:6379")]
+    end
+
+    Landlord -->|HTTPS| Caddy
+    TenantUser -->|HTTPS| Caddy
+    Caddy --> GW
+
+    GW -->|/landlord| LF
+    GW -->|/tenant| TF
+    GW -->|/api/v2/authenticator| AUTH
+    GW -->|/api/v2| API
+    GW -->|/api/v2/documents\n/api/v2/templates| PDF
+    GW -->|/tenantapi| TAPI
+    GW -.->|/api/reset| RESET
+
+    AUTH --> MONGO
+    AUTH --> REDIS
+    AUTH --> EMAIL
+    API --> MONGO
+    API --> EMAIL
+    API --> PDF
+    TAPI --> MONGO
+    EMAIL --> MONGO
+    EMAIL --> PDF
+    PDF --> MONGO
+    RESET --> MONGO
+    RESET --> REDIS

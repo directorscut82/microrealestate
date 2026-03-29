@@ -13,11 +13,12 @@ COPY .yarn/plugins .yarn/plugins
 COPY .yarn/releases .yarn/releases
 COPY types types
 COPY services/common services/common
-COPY services/pdfgenerator/package.json services/pdfgenerator/package.json
+COPY services/pdfgenerator services/pdfgenerator
 RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/pdfgenerator && \
     yarn workspace @microrealestate/types run build && \
-    yarn workspace @microrealestate/common run build
+    yarn workspace @microrealestate/common run build && \
+    yarn workspace @microrealestate/pdfgenerator run transpile:service
 
 FROM base AS deps
 WORKDIR /usr/app
@@ -46,7 +47,9 @@ ENV NODE_ENV production
 ENV CHROMIUM_BIN /usr/bin/chromium-browser  
 WORKDIR /usr/app
 COPY --from=deps /usr/app ./
-COPY services/pdfgenerator ./services/pdfgenerator
+COPY --from=build /usr/app/services/pdfgenerator/dist ./services/pdfgenerator/dist
+COPY services/pdfgenerator/data ./services/pdfgenerator/data
+COPY services/pdfgenerator/templates ./services/pdfgenerator/templates
 # prepare temp directories
 RUN mkdir -p ./services/pdfgenerator/tmp \
     && mkdir -p ./services/pdfgenerator/pdf_documents \
@@ -59,4 +62,4 @@ RUN chown -R 1000 ./services/pdfgenerator/data \
     && chown -R 1000 ./services/pdfgenerator/uploads
 
 USER 1000
-CMD ["node", "services/pdfgenerator/src/index.js"]
+CMD ["node", "services/pdfgenerator/dist/index.js"]

@@ -1,0 +1,18 @@
+{
+  "cash": "Μετρητά",
+  "cheque": "Επιταγή",
+  "Contract begin date": "Ημερομηνία έναρξης σύμβασης",
+  "Contract end date": "Ημερομηνία λήξης σύμβασης",
+  "Contract termination date": "Ημερομηνία καταγγελίας σύμβασης",
+  "Deposit": "Εγγύηση",
+  "Deposit: {{deposit}}": "Εγγύηση: {{deposit}}",
+  "Final balance": "Τελικό υπόλοιπο",
+  "Last rent balance": "Υπόλοιπο τελευταίου ενοικίου",
+  "levy": "Εισφορά",
+  "Name": "Όνομα",
+  "Properties": "Ακίνητα",
+  "Reference": "Αναφορά",
+  "Refunded deposit": "Επιστροφή εγγύησης",
+  "Tenant": "Ενοικιαστής",
+  "transfer": "Μεταφορά"
+}

@@ -70,6 +70,10 @@ async function findCRI() {
     return ['podman', 'compose'];
   }
 
+  if (await which('finch', { nothrow: true })) {
+    return ['finch', 'compose'];
+  }
+
   throw new Error('Cannot find a valid runtime to run containers');
 }
 

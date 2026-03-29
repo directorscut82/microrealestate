@@ -1,0 +1,68 @@
+erDiagram
+    Account {
+        string _id PK
+        string firstname
+        string lastname
+        string email UK
+        string password
+    }
+
+    Realm {
+        string _id PK
+        string name
+        boolean isCompany
+        string locale
+        string currency
+    }
+
+    Realm ||--o{ Property : contains
+    Property {
+        string _id PK
+        string realmId FK
+        string type
+        string name
+        number price
+        number surface
+    }
+
+    Realm ||--o{ Lease : defines
+    Lease {
+        string _id PK
+        string realmId FK
+        string name
+        number numberOfTerms
+        string timeRange
+        boolean active
+    }
+
+    Realm ||--o{ Tenant : manages
+    Tenant {
+        string _id PK
+        string realmId FK
+        string name
+        string leaseId FK
+        date beginDate
+        date endDate
+        boolean isCompany
+    }
+
+    Tenant }o--o{ Property : rents
+
+    Realm ||--o{ Template : has
+    Template {
+        string _id PK
+        string realmId FK
+        string name
+        string type
+        string html
+    }
+
+    Tenant ||--o{ Document : generates
+    Document {
+        string _id PK
+        string realmId FK
+        string tenantId FK
+        string templateId FK
+        string type
+        string name
+    }

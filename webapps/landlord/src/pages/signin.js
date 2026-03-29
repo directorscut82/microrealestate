@@ -29,6 +29,16 @@ export default function SignIn() {
   const router = useRouter();
 
   useEffect(() => {
+    // Redirect to saved locale if available
+    const match = document.cookie.match(/(?:^|; )locale=([^;]*)/);
+    const savedLocale = match ? match[1] : null;
+    if (savedLocale && savedLocale !== router.locale) {
+      router.replace('/signin', undefined, { locale: savedLocale });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (config.DEMO_MODE) {
       setInitialValues({
         email: 'demo@demo.com',
@@ -64,6 +74,8 @@ export default function SignIn() {
             );
           }
           setOrganizationId(store.organization.selected._id);
+          const orgLocale = store.organization.selected.locale;
+          document.cookie = `locale=${orgLocale};path=/landlord;max-age=31536000`;
           router.push(
             `/${store.organization.selected.name}/dashboard`,
             undefined,

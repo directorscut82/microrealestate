@@ -50,7 +50,11 @@ function getRequestLocale(request: NextRequest) {
     requestHeaders[key] = value;
   });
   const languages = new Negotiator({ headers: requestHeaders }).languages();
-  return match(languages, LOCALES, DEFAULT_LOCALE) as Locale;
+  try {
+    return match(languages, LOCALES, DEFAULT_LOCALE) as Locale;
+  } catch {
+    return DEFAULT_LOCALE as Locale;
+  }
 }
 
 function injectLocale(request: NextRequest) {

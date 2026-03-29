@@ -9,11 +9,12 @@ COPY .yarn/plugins .yarn/plugins
 COPY .yarn/releases .yarn/releases
 COPY types types
 COPY services/common services/common
-COPY services/emailer/package.json services/emailer/package.json
+COPY services/emailer services/emailer
 RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/emailer && \
     yarn workspace @microrealestate/types run build && \
-    yarn workspace @microrealestate/common run build
+    yarn workspace @microrealestate/common run build && \
+    yarn workspace @microrealestate/emailer run build
 
 FROM base AS deps
 WORKDIR /usr/app
@@ -26,6 +27,7 @@ COPY --from=build /usr/app/types/package.json types/package.json
 COPY --from=build /usr/app/services/common/package.json ./services/common/package.json
 COPY --from=build /usr/app/services/emailer/package.json ./services/emailer/package.json
 COPY --from=build /usr/app/services/common/dist ./services/common/dist
+COPY --from=build /usr/app/services/emailer/dist ./services/emailer/dist
 RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus --production @microrealestate/emailer
 # prepare temp directory
@@ -36,7 +38,6 @@ FROM gcr.io/distroless/nodejs20-debian12
 ENV NODE_ENV production
 WORKDIR /usr/app
 COPY --from=deps /usr/app ./
-COPY services/emailer/src ./services/emailer/src
 
 USER 1000
-CMD ["services/emailer/src/index.js"]
+CMD ["services/emailer/dist/index.js"]

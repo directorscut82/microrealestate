@@ -14,4 +14,6 @@ const LeaseSchema = new mongoose.Schema<CollectionTypes.Lease>({
   stepperMode: { type: Boolean, default: false }
 });
 
+LeaseSchema.index({ realmId: 1 });
+
 export default mongoose.model<CollectionTypes.Lease>('Lease', LeaseSchema);

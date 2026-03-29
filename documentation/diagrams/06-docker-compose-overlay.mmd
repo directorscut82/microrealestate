@@ -1,0 +1,16 @@
+graph TD
+    BASE["docker-compose.microservices.base.yml\nall service definitions, env vars, networking"]
+
+    DEV["docker-compose.microservices.dev.yml\nvolume mounts, debug ports,\nhot reload, resetservice"]
+    PROD["docker-compose.microservices.prod.yml\nrestart policies, resource limits,\nmulti-stage Dockerfiles"]
+    TEST["docker-compose.microservices.test.yml\nresetservice for DB cleanup"]
+    STANDALONE["docker-compose.yml\nstandalone prod with Caddy reverse proxy"]
+
+    BASE --> DEV
+    BASE --> PROD
+    BASE --> TEST
+
+    DEV -->|yarn dev| DevMode["DEV Mode\nNODE_ENV=development"]
+    PROD -->|yarn start| ProdMode["PROD Mode\nNODE_ENV=production"]
+    TEST -->|yarn ci| CIMode["CI Mode\nNODE_ENV=test"]
+    STANDALONE -->|docker compose up| StandaloneMode["Standalone\nSelf-hosted"]
