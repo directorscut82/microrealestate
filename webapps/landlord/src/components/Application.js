@@ -1,8 +1,6 @@
 import { useContext, useEffect, useState } from 'react';
 
-import DateFnsUtils from '@date-io/moment';
 import Layout from './Layout';
-import { MuiPickersUtilsProvider } from '@material-ui/pickers';
 import { observer } from 'mobx-react-lite';
 import { StoreContext } from '../store';
 import { useRouter } from 'next/router';
@@ -36,12 +34,7 @@ function Application({ children }) {
   }, [router]);
 
   return (
-    <MuiPickersUtilsProvider
-      utils={DateFnsUtils}
-      locale={store?.organization?.selected?.locale ?? 'en'}
-    >
-      <Layout hideMenu={hideMenu}>{!routeloading && children}</Layout>
-    </MuiPickersUtilsProvider>
+    <Layout hideMenu={hideMenu}>{!routeloading && children}</Layout>
   );
 }
 

@@ -1,13 +1,3 @@
-import * as Yup from 'yup';
-import {
-  DateField,
-  NumberField,
-  RangeDateField,
-  SelectField,
-  SubmitButton,
-  TextField
-} from '@microrealestate/commonui/components';
-import { Form, Formik, validateYupSchema, yupToFormErrors } from 'formik';
 import {
   Fragment,
   useCallback,
@@ -16,144 +6,120 @@ import {
   useMemo,
   useState
 } from 'react';
-import { ArrayField } from '../../formfields/ArrayField';
+import { useForm, useFieldArray } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Button } from '../../ui/button';
+import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
+import { Separator } from '../../ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../../ui/select';
+import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import moment from 'moment';
 import { nanoid } from 'nanoid';
 import { observer } from 'mobx-react-lite';
-import { Section } from '../../formfields/Section';
 import { StoreContext } from '../../../store';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  leaseId: Yup.string().required(),
-  beginDate: Yup.date().required(),
-  endDate: Yup.date().required(),
-  terminationDate: Yup.date()
-    .min(Yup.ref('beginDate'))
-    .max(Yup.ref('endDate'))
-    .nullable(),
-  properties: Yup.array()
-    .of(
-      Yup.object().shape({
-        _id: Yup.string().required(),
-        rent: Yup.number().moreThan(0).required(),
-        expenses: Yup.array().of(
-          Yup.object().shape({
-            title: Yup.mixed().when('amount', {
-              is: (val) => val > 0,
-              then: Yup.string().required()
-            }),
-            amount: Yup.number().min(0),
-            beginDate: Yup.date().required(),
-            endDate: Yup.date().required()
-          })
-        ),
-        entryDate: Yup.date()
-          .required()
-          .test(
-            'entryDate',
-            'Date not included in the contract date range',
-            (value, context) => {
-              const beginDate = context.options.context.beginDate;
-              if (value && beginDate) {
-                return moment(value).isSameOrAfter(beginDate);
-              }
-              return true;
-            }
-          ),
-        exitDate: Yup.date()
-          .min(Yup.ref('entryDate'))
-          .required()
-          .test(
-            'exitDate',
-            'Date not included in the contract date range',
-            (value, context) => {
-              const endDate = context.options.context.endDate;
-              if (value && endDate) {
-                return moment(value).isSameOrBefore(endDate);
-              }
-              return true;
-            }
-          )
-      })
-    )
-    .min(1),
-  guaranty: Yup.number().min(0).required(),
-  guarantyPayback: Yup.number().min(0)
+const expenseSchema = z.object({
+  key: z.string().optional(),
+  title: z.string().optional(),
+  amount: z.coerce.number().min(0).optional(),
+  beginDate: z.string().optional(),
+  endDate: z.string().optional()
+});
+
+const propertySchema = z.object({
+  key: z.string().optional(),
+  _id: z.string().min(1),
+  rent: z.coerce.number().min(0),
+  expenses: z.array(expenseSchema),
+  entryDate: z.string().min(1),
+  exitDate: z.string().min(1)
+});
+
+const schema = z.object({
+  leaseId: z.string().min(1),
+  beginDate: z.string().min(1),
+  endDate: z.string().min(1),
+  terminated: z.boolean().optional(),
+  terminationDate: z.string().optional(),
+  properties: z.array(propertySchema).min(1),
+  guaranty: z.coerce.number().min(0),
+  guarantyPayback: z.coerce.number().min(0).optional()
 });
 
 const emptyExpense = () => ({
   key: nanoid(),
   title: '',
   amount: 0,
-  beginDate: null,
-  endDate: null
+  beginDate: '',
+  endDate: ''
 });
 
 const emptyProperty = () => ({
   key: nanoid(),
   _id: '',
   rent: 0,
-  expenses: [{ ...emptyExpense() }]
+  expenses: [emptyExpense()],
+  entryDate: '',
+  exitDate: ''
 });
 
+function toDateStr(val, fmt = 'DD/MM/YYYY') {
+  if (!val) return '';
+  const m = moment(val, fmt);
+  return m.isValid() ? m.format('YYYY-MM-DD') : '';
+}
+
 const initValues = (tenant) => {
-  const beginDate = tenant?.beginDate
-    ? moment(tenant.beginDate, 'DD/MM/YYYY').startOf('day')
-    : null;
-  const endDate = tenant?.endDate
-    ? moment(tenant.endDate, 'DD/MM/YYYY').endOf('day')
-    : null;
+  const beginDate = toDateStr(tenant?.beginDate);
+  const endDate = toDateStr(tenant?.endDate);
 
   return {
     leaseId: tenant?.leaseId || '',
     beginDate,
     endDate,
     terminated: !!tenant?.terminationDate,
-    terminationDate: tenant?.terminationDate
-      ? moment(tenant.terminationDate, 'DD/MM/YYYY').endOf('day')
-      : null,
+    terminationDate: toDateStr(tenant?.terminationDate),
     properties: tenant?.properties?.length
-      ? tenant.properties.map((property) => {
-          return {
-            key: property.property._id,
-            _id: property.property._id,
-            rent: property.rent || '',
-            expenses: property.expenses.map((expense) => ({
-              ...expense,
-              beginDate: moment(expense.beginDate, 'DD/MM/YYYY'),
-              endDate: moment(expense.endDate, 'DD/MM/YYYY')
-            })) || [...emptyExpense(), beginDate, endDate],
-            entryDate: property.entryDate
-              ? moment(property.entryDate, 'DD/MM/YYYY')
-              : moment(beginDate),
-            exitDate: property.exitDate
-              ? moment(property.exitDate, 'DD/MM/YYYY')
-              : moment(endDate)
-          };
-        })
-      : [
-          {
-            ...emptyProperty(),
-            expenses: [{ ...emptyExpense(), beginDate, endDate }],
-            entryDate: beginDate,
-            exitDate: endDate
-          }
-        ],
+      ? tenant.properties.map((property) => ({
+          key: property.property._id,
+          _id: property.property._id,
+          rent: property.rent || 0,
+          expenses: property.expenses?.map((expense) => ({
+            ...expense,
+            key: nanoid(),
+            beginDate: toDateStr(expense.beginDate),
+            endDate: toDateStr(expense.endDate)
+          })) || [{ ...emptyExpense(), beginDate, endDate }],
+          entryDate: toDateStr(property.entryDate) || beginDate,
+          exitDate: toDateStr(property.exitDate) || endDate
+        }))
+      : [{ ...emptyProperty(), expenses: [{ ...emptyExpense(), beginDate, endDate }], entryDate: beginDate, exitDate: endDate }],
     guaranty: tenant?.guaranty || 0,
     guarantyPayback: tenant?.guarantyPayback || 0
   };
 };
 
-export const validate = (tenant) => {
-  const values = initValues(tenant);
-  return validationSchema.validate(values, {
-    context: {
-      beginDate: values.beginDate,
-      endDate: values.endDate
-    }
-  });
-};
+export const validate = (tenant) => schema.parseAsync(initValues(tenant));
+
+function Section({ label, visible = true, children }) {
+  if (!visible) return children;
+  return (
+    <div className="pb-10">
+      <div className="text-xl">{label}</div>
+      <Separator className="mt-1 mb-2" />
+      {children}
+    </div>
+  );
+}
 
 function LeaseContractForm({ readOnly, onSubmit }) {
   const { t } = useTranslation('common');
@@ -163,295 +129,250 @@ function LeaseContractForm({ readOnly, onSubmit }) {
   useEffect(() => {
     const lease = store.tenant.selected?.lease;
     if (lease) {
-      setContractDuration(
-        moment.duration(lease.numberOfTerms, lease.timeRange)
-      );
+      setContractDuration(moment.duration(lease.numberOfTerms, lease.timeRange));
     } else {
-      setContractDuration();
+      setContractDuration(undefined);
     }
   }, [store.tenant.selected?.lease]);
 
-  const initialValues = useMemo(() => {
-    const initialValues = initValues(store.tenant?.selected);
+  const initialValues = useMemo(() => initValues(store.tenant?.selected), [store.tenant.selected]);
 
-    return initialValues;
-  }, [store.tenant.selected]);
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: initialValues
+  });
 
-  const availableLeases = useMemo(() => {
-    return store.lease.items.map(({ _id, name, active }) => ({
-      id: _id,
-      value: _id,
-      label: name,
-      disabled: !active
-    }));
-  }, [store.lease.items]);
+  const { fields: propertyFields, append: appendProperty, remove: removeProperty } = useFieldArray({ control, name: 'properties' });
+
+  const leaseId = watch('leaseId');
+  const beginDate = watch('beginDate');
+  const endDate = watch('endDate');
+  const terminated = watch('terminated');
+  const properties = watch('properties');
+
+  const availableLeases = useMemo(() =>
+    store.lease.items.map(({ _id, name, active }) => ({ id: _id, value: _id, label: name, disabled: !active })),
+    [store.lease.items]
+  );
 
   const availableProperties = useMemo(() => {
-    const currentProperties = store.tenant.selected?.properties
-      ? store.tenant.selected.properties.map(({ propertyId }) => propertyId)
-      : [];
+    const currentProps = store.tenant.selected?.properties?.map(({ propertyId }) => propertyId) || [];
     return [
       { id: '', label: '', value: '' },
       ...store.property.items.map(({ _id, name, status, occupantLabel }) => ({
-        id: _id,
-        value: _id,
+        id: _id, value: _id,
         label: t('{{name}} - {{status}}', {
           name,
-          status:
-            status === 'occupied'
-              ? !currentProperties.includes(_id)
-                ? t('occupied by {{tenantName}}', {
-                    tenantName: occupantLabel
-                  })
-                : t('occupied by current tenant')
-              : t('vacant')
+          status: status === 'occupied'
+            ? !currentProps.includes(_id) ? t('occupied by {{tenantName}}', { tenantName: occupantLabel }) : t('occupied by current tenant')
+            : t('vacant')
         })
       }))
     ];
-  }, [t, store.tenant.selected.properties, store.property.items]);
+  }, [t, store.tenant.selected?.properties, store.property.items]);
 
-  const _onSubmit = useCallback(
-    async (lease) => {
-      await onSubmit({
-        leaseId: lease.leaseId,
-        frequency: store.lease.items.find(({ _id }) => _id === lease.leaseId)
-          .timeRange,
-        beginDate: lease.beginDate?.format('DD/MM/YYYY') || '',
-        endDate: lease.endDate?.format('DD/MM/YYYY') || '',
-        terminationDate: lease.terminationDate?.format('DD/MM/YYYY') || '',
-        guaranty: lease.guaranty || 0,
-        guarantyPayback: lease.guarantyPayback || 0,
-        properties: lease.properties
-          .filter((property) => !!property._id)
-          .map((property) => {
-            return {
-              propertyId: property._id,
-              rent: property.rent,
-              expenses: property.expenses.length
-                ? property.expenses.map((expense) => ({
-                    ...expense,
-                    beginDate: expense.beginDate.format('DD/MM/YYYY'),
-                    endDate: expense.endDate.format('DD/MM/YYYY')
-                  }))
-                : [],
-              entryDate: property.entryDate?.format('DD/MM/YYYY'),
-              exitDate: property.exitDate?.format('DD/MM/YYYY')
-            };
-          })
-      });
-    },
-    [onSubmit, store.lease.items]
-  );
-
-  const handleFormValidation = useCallback((value) => {
-    try {
-      validateYupSchema(value, validationSchema, true, value);
-    } catch (err) {
-      return yupToFormErrors(err); //for rendering validation errors
+  const onLeaseChange = useCallback((val) => {
+    setValue('leaseId', val);
+    const lease = store.lease.items.find(({ _id }) => _id === val);
+    if (lease) {
+      setContractDuration(moment.duration(lease.numberOfTerms, lease.timeRange));
+      if (beginDate) {
+        const newEnd = moment(beginDate).add(moment.duration(lease.numberOfTerms, lease.timeRange)).subtract(1, 'second');
+        setValue('endDate', newEnd.format('YYYY-MM-DD'));
+      }
     }
-    return {};
-  }, []);
+  }, [store.lease.items, setValue, beginDate]);
+
+  const onPropertyChange = useCallback((val, index) => {
+    const property = store.property.items.find(({ _id }) => _id === val);
+    setValue(`properties.${index}._id`, val);
+    if (property) {
+      setValue(`properties.${index}.rent`, property.price || 0);
+      setValue(`properties.${index}.expenses`, [{
+        key: nanoid(),
+        title: t('General expenses'),
+        amount: Math.round((property.price || 0) * 100 * 0.1) / 100,
+        beginDate,
+        endDate
+      }]);
+    }
+  }, [store.property.items, setValue, beginDate, endDate, t]);
+
+  const _onSubmit = useCallback(async (lease) => {
+    await onSubmit({
+      leaseId: lease.leaseId,
+      frequency: store.lease.items.find(({ _id }) => _id === lease.leaseId)?.timeRange,
+      beginDate: lease.beginDate ? moment(lease.beginDate).format('DD/MM/YYYY') : '',
+      endDate: lease.endDate ? moment(lease.endDate).format('DD/MM/YYYY') : '',
+      terminationDate: lease.terminationDate ? moment(lease.terminationDate).format('DD/MM/YYYY') : '',
+      guaranty: lease.guaranty || 0,
+      guarantyPayback: lease.guarantyPayback || 0,
+      properties: lease.properties
+        .filter((p) => !!p._id)
+        .map((p) => ({
+          propertyId: p._id,
+          rent: p.rent,
+          expenses: p.expenses?.map((e) => ({
+            ...e,
+            beginDate: e.beginDate ? moment(e.beginDate).format('DD/MM/YYYY') : '',
+            endDate: e.endDate ? moment(e.endDate).format('DD/MM/YYYY') : ''
+          })) || [],
+          entryDate: p.entryDate ? moment(p.entryDate).format('DD/MM/YYYY') : '',
+          exitDate: p.exitDate ? moment(p.exitDate).format('DD/MM/YYYY') : ''
+        }))
+    });
+  }, [onSubmit, store.lease.items]);
 
   return (
-    <Formik
-      initialValues={initialValues}
-      validate={handleFormValidation}
-      onSubmit={_onSubmit}
-    >
-      {({ values, isSubmitting, handleChange }) => {
-        const onLeaseChange = (evt) => {
-          const lease = store.lease.items.find(
-            ({ _id }) => _id === evt.target.value
-          );
-          if (lease) {
-            setContractDuration(
-              moment.duration(lease.numberOfTerms, lease.timeRange)
-            );
-          } else {
-            setContractDuration();
-          }
-          handleChange(evt);
-        };
-        const onPropertyChange = (evt, previousProperty) => {
-          const property = store.property.items.find(
-            ({ _id }) => _id === evt.target.value
-          );
-          if (previousProperty) {
-            previousProperty._id = property?._id;
-            previousProperty.rent = property?.price || '';
-            previousProperty.expenses = [
-              {
-                title: t('General expenses'),
-                // TODO: find another way to have expenses configurable
-                amount: Math.round(property.price * 100 * 0.1) / 100,
-                beginDate: values.beginDate,
-                endDate: values.endDate
-              }
-            ];
-          }
-          handleChange(evt);
-        };
+    <form onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
+      {terminated && (
+        <Section label={t('Termination')}>
+          <div className="space-y-2 mb-2">
+            <Label htmlFor="terminationDate">{t('Termination date')}</Label>
+            <Input id="terminationDate" type="date" min={beginDate} max={endDate} disabled={readOnly} {...register('terminationDate')} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="guarantyPayback">{t('Amount of the deposit refund')}</Label>
+            <Input id="guarantyPayback" type="number" disabled={readOnly} {...register('guarantyPayback')} />
+          </div>
+        </Section>
+      )}
 
-        return (
-          <Form autoComplete="off">
-            {values.terminated && (
-              <Section label={t('Termination')}>
-                <DateField
-                  label={t('Termination date')}
-                  name="terminationDate"
-                  minDate={values.beginDate.toISOString()}
-                  maxDate={values.endDate.toISOString()}
-                  disabled={readOnly}
-                />
-                <NumberField
-                  label={t('Amount of the deposit refund')}
-                  name="guarantyPayback"
-                  disabled={readOnly}
-                />
-              </Section>
-            )}
-            <Section
-              label={t('Lease')}
-              visible={!store.tenant.selected.stepperMode}
-            >
-              <SelectField
-                label={t('Lease')}
-                name="leaseId"
-                values={availableLeases}
-                onChange={onLeaseChange}
-                disabled={readOnly}
-              />
-              <RangeDateField
-                beginLabel={t('Start date')}
-                beginName="beginDate"
-                endLabel={t('End date')}
-                endName="endDate"
-                duration={contractDuration}
-                disabled={!values.leaseId || readOnly}
-              />
-              <NumberField
-                label={t('Deposit')}
-                name="guaranty"
-                disabled={!values.leaseId || readOnly}
-              />
-            </Section>
-            <Section label={t('Properties')}>
-              <ArrayField
-                name="properties"
-                addLabel={t('Add a property')}
-                emptyItem={{
-                  ...emptyProperty(),
-                  expenses: [
-                    {
-                      ...emptyExpense(),
-                      beginDate: values.beginDate,
-                      endDate: values.endDate
-                    }
-                  ],
-                  entryDate: values.beginDate,
-                  endDate: values.endDate
-                }}
-                items={values.properties}
-                renderTitle={(property, index) =>
-                  t('Property #{{count}}', { count: index + 1 })
-                }
-                renderContent={(property, index) => (
-                  <Fragment key={property.key}>
-                    <div className="sm:flex sm:gap-2">
-                      <div className="md:w-3/4">
-                        <SelectField
-                          label={t('Property')}
-                          name={`properties[${index}]._id`}
-                          values={availableProperties}
-                          onChange={(evt) => onPropertyChange(evt, property)}
-                          disabled={readOnly}
-                        />
-                      </div>
-                      <div className="md:w-1/4">
-                        <NumberField
-                          label={t('Rent')}
-                          name={`properties[${index}].rent`}
-                          disabled={!values.properties[index]?._id || readOnly}
-                        />
-                      </div>
-                    </div>
-                    <ArrayField
-                      name={`properties[${index}].expenses`}
-                      addLabel={t('Add a expense')}
-                      emptyItem={{
-                        ...emptyExpense(),
-                        beginDate: values.beginDate,
-                        endDate: values.endDate
-                      }}
-                      items={values.properties[index]?.expenses}
-                      renderTitle={(expense, index_expense) =>
-                        t('Expense #{{count}}', { count: index_expense + 1 })
-                      }
-                      renderContent={(expense, index_expense) => (
-                        <Fragment key={expense.key}>
-                          <div className="sm:flex sm:gap-2">
-                            <div className="md:w-1/2">
-                              <TextField
-                                label={t('Expense')}
-                                name={`properties[${index}].expenses[${index_expense}].title`}
-                                disabled={
-                                  !values.properties[index]?._id || readOnly
-                                }
-                              />
-                            </div>
+      <Section label={t('Lease')} visible={!store.tenant.selected.stepperMode}>
+        <div className="space-y-2 mb-2">
+          <Label>{t('Lease')}</Label>
+          <Select value={leaseId} onValueChange={onLeaseChange} disabled={readOnly}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {availableLeases.map((l) => (
+                <SelectItem key={l.id} value={l.value} disabled={l.disabled}>{l.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {errors.leaseId && <p className="text-sm text-destructive">{errors.leaseId.message}</p>}
+        </div>
+        <div className="sm:flex sm:gap-2 mb-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="beginDate">{t('Start date')}</Label>
+            <Input id="beginDate" type="date" disabled={!leaseId || readOnly} {...register('beginDate')} />
+            {errors.beginDate && <p className="text-sm text-destructive">{errors.beginDate.message}</p>}
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="endDate">{t('End date')}</Label>
+            <Input id="endDate" type="date" disabled={!leaseId || readOnly} {...register('endDate')} />
+            {errors.endDate && <p className="text-sm text-destructive">{errors.endDate.message}</p>}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="guaranty">{t('Deposit')}</Label>
+          <Input id="guaranty" type="number" disabled={!leaseId || readOnly} {...register('guaranty')} />
+        </div>
+      </Section>
 
-                            <div className="md:w-1/6">
-                              <NumberField
-                                label={t('Amount')}
-                                name={`properties[${index}].expenses[${index_expense}].amount`}
-                                disabled={
-                                  !values.properties[index]?._id || readOnly
-                                }
-                              />
-                            </div>
+      <Section label={t('Properties')}>
+        {propertyFields.map((field, index) => (
+          <div key={field.id} className="mb-4 p-4 border rounded-md">
+            <div className="flex justify-between items-center mb-2">
+              <div className="font-medium">{t('Property #{{count}}', { count: index + 1 })}</div>
+              {!readOnly && propertyFields.length > 1 && (
+                <Button type="button" variant="ghost" size="icon" onClick={() => removeProperty(index)}>
+                  <LuTrash2 className="size-4" />
+                </Button>
+              )}
+            </div>
+            <div className="sm:flex sm:gap-2 mb-2">
+              <div className="space-y-2 md:w-3/4">
+                <Label>{t('Property')}</Label>
+                <Select value={properties?.[index]?._id || ''} onValueChange={(val) => onPropertyChange(val, index)} disabled={readOnly}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {availableProperties.filter((p) => p.value).map((p) => (
+                      <SelectItem key={p.id} value={p.value}>{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.properties?.[index]?._id && <p className="text-sm text-destructive">{errors.properties[index]._id.message}</p>}
+              </div>
+              <div className="space-y-2 md:w-1/4">
+                <Label htmlFor={`properties.${index}.rent`}>{t('Rent')}</Label>
+                <Input id={`properties.${index}.rent`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.rent`)} />
+              </div>
+            </div>
 
-                            <div>
-                              <RangeDateField
-                                beginLabel={t('Start date')}
-                                beginName={`properties[${index}].expenses[${index_expense}].beginDate`}
-                                endLabel={t('End date')}
-                                endName={`properties[${index}].expenses[${index_expense}].endDate`}
-                                minDate={values?.beginDate}
-                                maxDate={values?.endDate}
-                                disabled={
-                                  !values.properties[index]?._id || readOnly
-                                }
-                              />
-                            </div>
-                          </div>
-                        </Fragment>
-                      )}
-                      readOnly={readOnly}
-                    />
-                    <RangeDateField
-                      beginLabel={t('Entry date')}
-                      beginName={`properties[${index}].entryDate`}
-                      endLabel={t('Exit date')}
-                      endName={`properties[${index}].exitDate`}
-                      minDate={values?.beginDate}
-                      maxDate={values?.endDate}
-                      disabled={!property?._id || readOnly}
-                    />
-                  </Fragment>
-                )}
-                readOnly={readOnly}
-              />
-            </Section>
+            {/* Expenses */}
+            {properties?.[index]?.expenses?.map((expense, ei) => (
+              <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
+                <div className="flex justify-between items-center mb-1">
+                  <div className="text-sm font-medium">{t('Expense #{{count}}', { count: ei + 1 })}</div>
+                  {!readOnly && properties[index].expenses.length > 1 && (
+                    <Button type="button" variant="ghost" size="icon" onClick={() => {
+                      const exps = [...properties[index].expenses];
+                      exps.splice(ei, 1);
+                      setValue(`properties.${index}.expenses`, exps);
+                    }}><LuTrash2 className="size-3" /></Button>
+                  )}
+                </div>
+                <div className="sm:flex sm:gap-2">
+                  <div className="space-y-1 md:w-1/2">
+                    <Label htmlFor={`properties.${index}.expenses.${ei}.title`}>{t('Expense')}</Label>
+                    <Input id={`properties.${index}.expenses.${ei}.title`} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.title`)} />
+                  </div>
+                  <div className="space-y-1 md:w-1/6">
+                    <Label htmlFor={`properties.${index}.expenses.${ei}.amount`}>{t('Amount')}</Label>
+                    <Input id={`properties.${index}.expenses.${ei}.amount`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.amount`)} />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('Start date')}</Label>
+                    <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('End date')}</Label>
+                    <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
+                  </div>
+                </div>
+              </div>
+            ))}
             {!readOnly && (
-              <SubmitButton
-                size="large"
-                label={!isSubmitting ? t('Save') : t('Saving')}
-              />
+              <Button type="button" variant="ghost" size="sm" className="ml-4" onClick={() => {
+                const exps = [...(properties?.[index]?.expenses || []), { ...emptyExpense(), beginDate, endDate }];
+                setValue(`properties.${index}.expenses`, exps);
+              }}>
+                <LuPlus className="size-3 mr-1" />{t('Add a expense')}
+              </Button>
             )}
-          </Form>
-        );
-      }}
-    </Formik>
+
+            <div className="sm:flex sm:gap-2 mt-2">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor={`properties.${index}.entryDate`}>{t('Entry date')}</Label>
+                <Input id={`properties.${index}.entryDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.entryDate`)} />
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor={`properties.${index}.exitDate`}>{t('Exit date')}</Label>
+                <Input id={`properties.${index}.exitDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.exitDate`)} />
+              </div>
+            </div>
+          </div>
+        ))}
+        {!readOnly && (
+          <Button type="button" variant="outline" onClick={() => appendProperty({ ...emptyProperty(), expenses: [{ ...emptyExpense(), beginDate, endDate }], entryDate: beginDate, exitDate: endDate })} data-cy="addPropertiesItem">
+            <LuPlus className="size-4 mr-1" />{t('Add a property')}
+          </Button>
+        )}
+      </Section>
+
+      {!readOnly && (
+        <Button type="submit" disabled={isSubmitting} data-cy="submit">
+          {!isSubmitting ? t('Save') : t('Saving')}
+        </Button>
+      )}
+    </form>
   );
 }
 

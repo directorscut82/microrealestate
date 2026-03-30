@@ -1,5 +1,3 @@
-import * as Yup from 'yup';
-import { Form, Formik } from 'formik';
 import React, {
   useCallback,
   useContext,
@@ -7,61 +5,40 @@ import React, {
   useRef,
   useState
 } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { Button } from './ui/button';
-import { DateField } from '../components/formfields/DateField';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from './ui/select';
 import moment from 'moment';
-import ResponsiveDialog from '../components/ResponsiveDialog';
-import { SelectField } from '../components/formfields/SelectField';
+import ResponsiveDialog from './ResponsiveDialog';
 import { StoreContext } from '../store';
 import { toast } from 'sonner';
 import { toJS } from 'mobx';
 import { uploadDocument } from '../utils/fetch';
-import { UploadField } from '@microrealestate/commonui/components';
 import useTranslation from 'next-translate/useTranslation';
 
-const UPLOAD_MAX_SIZE = 2_000_000_000; // 2Gb
+const UPLOAD_MAX_SIZE = 2_000_000_000;
 const SUPPORTED_MIMETYPES = [
-  'image/gif',
-  'image/png',
-  'image/jpeg',
-  'image/jpg',
-  'image/jpe',
-  'application/pdf'
+  'image/gif', 'image/png', 'image/jpeg', 'image/jpg', 'image/jpe', 'application/pdf'
 ];
-const validationSchema = Yup.object().shape({
-  template: Yup.object().required(),
-  description: Yup.string(),
-  file: Yup.mixed()
-    .nullable()
-    .required()
-    .test(
-      'UPLOAD_MAX_SIZE',
-      'File is too big. Maximum size is 2Go.',
-      (value) => value && value.size <= UPLOAD_MAX_SIZE
-    )
-    .test(
-      'FILE_FORMAT',
-      'File is not allowed. Only images or pdf are accepted.',
-      (value) => value && SUPPORTED_MIMETYPES.includes(value.type)
-    ),
-  expiryDate: Yup.mixed()
-    .when('template', (template, schema) => {
-      return template?.hasExpiryDate ? schema.required() : schema;
-    })
-    .test('expiryDate', 'Date is invalid', (value) => {
-      if (value) {
-        return moment(value).isValid();
-      }
-      return true;
-    })
-});
 
-const defaultValues = {
-  template: '',
-  description: '',
-  file: '',
-  expiryDate: null
-};
+const schema = z.object({
+  templateId: z.string().min(1),
+  expiryDate: z.string().optional(),
+  file: z.any()
+    .refine((f) => f instanceof File, { message: 'File is required' })
+    .refine((f) => f instanceof File && f.size <= UPLOAD_MAX_SIZE, { message: 'File is too big. Maximum size is 2Go.' })
+    .refine((f) => f instanceof File && SUPPORTED_MIMETYPES.includes(f.type), { message: 'Only images or pdf are accepted.' })
+});
 
 export default function UploadDialog({
   open,
@@ -74,48 +51,62 @@ export default function UploadDialog({
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
 
-  const templates = useMemo(() => {
-    return store.template.items
-      .filter(
-        (template) =>
-          template.type === 'fileDescriptor' &&
-          template.linkedResourceIds?.includes(store.tenant.selected?.leaseId)
-      )
-      .map((template) => ({
-        id: template._id,
-        label: template.name,
-        description: template.description,
-        value: toJS(template)
-      }));
-  }, [store.template.items, store.tenant.selected]);
+  const templates = useMemo(() =>
+    store.template.items
+      .filter((tpl) => tpl.type === 'fileDescriptor' && tpl.linkedResourceIds?.includes(store.tenant.selected?.leaseId))
+      .map((tpl) => ({ id: tpl._id, label: tpl.name, value: tpl._id, template: toJS(tpl) })),
+    [store.template.items, store.tenant.selected]
+  );
 
-  const initialValues = {
-    ...defaultValues,
-    template: selectedTemplate || ''
-  };
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      templateId: selectedTemplate?._id || '',
+      expiryDate: '',
+      file: undefined
+    }
+  });
+
+  const templateId = watch('templateId');
+  const selectedTpl = useMemo(
+    () => templates.find((t) => t.id === templateId)?.template || selectedTemplate,
+    [templateId, templates, selectedTemplate]
+  );
 
   const handleClose = useCallback(() => {
     setOpen(false);
-  }, [setOpen]);
+    reset();
+  }, [setOpen, reset]);
 
   const _onSubmit = useCallback(
-    async (doc, { resetForm }) => {
+    async (data) => {
       try {
         setIsLoading(true);
-        doc.name = doc.template.name;
-        doc.description = doc.template.description;
-        doc.mimeType = doc.file.type;
+        const template = selectedTpl;
+        const doc = {
+          template,
+          name: template.name,
+          description: template.description,
+          mimeType: data.file.type,
+          expiryDate: data.expiryDate || null
+        };
         try {
           const response = await uploadDocument({
             endpoint: '/documents/upload',
-            documentName: doc.template.name,
-            file: doc.file,
+            documentName: template.name,
+            file: data.file,
             folder: [
               store.tenant.selected.name.replace(/[/\\]/g, '_'),
               'contract_scanned_documents'
             ].join('/')
           });
-
           doc.url = response.data.key;
           doc.versionId = response.data.versionId;
         } catch (error) {
@@ -126,7 +117,6 @@ export default function UploadDialog({
         handleClose();
         try {
           await onSave(doc);
-          resetForm();
         } catch (error) {
           console.error(error);
           toast.error(t('Cannot save document'));
@@ -135,7 +125,7 @@ export default function UploadDialog({
         setIsLoading(false);
       }
     },
-    [handleClose, t, onSave, store]
+    [handleClose, t, onSave, store, selectedTpl]
   );
 
   return (
@@ -145,47 +135,47 @@ export default function UploadDialog({
       isLoading={isLoading}
       renderHeader={() => t('Document to upload')}
       renderContent={() => (
-        <Formik
-          initialValues={initialValues}
-          validationSchema={validationSchema}
-          onSubmit={_onSubmit}
-          innerRef={formRef}
-        >
-          {({ values }) => {
-            return (
-              <Form autoComplete="off">
-                {selectedTemplate ? (
-                  selectedTemplate.name
-                ) : (
-                  <SelectField
-                    label={t('Document')}
-                    name="template"
-                    values={templates}
-                  />
-                )}
-                {values.template?.hasExpiryDate && (
-                  <DateField label={t('Expiry date')} name="expiryDate" />
-                )}
-                <UploadField name="file" />
-              </Form>
-            );
-          }}
-        </Formik>
+        <form ref={formRef} onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
+          <div className="space-y-4">
+            {selectedTemplate ? (
+              <div className="font-medium">{selectedTemplate.name}</div>
+            ) : (
+              <div className="space-y-2">
+                <Label>{t('Document')}</Label>
+                <Select value={templateId} onValueChange={(val) => setValue('templateId', val)}>
+                  <SelectTrigger><SelectValue placeholder={t('Select a document')} /></SelectTrigger>
+                  <SelectContent>
+                    {templates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.value}>{tpl.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.templateId && <p className="text-sm text-destructive">{errors.templateId.message}</p>}
+              </div>
+            )}
+            {selectedTpl?.hasExpiryDate && (
+              <div className="space-y-2">
+                <Label htmlFor="expiryDate">{t('Expiry date')}</Label>
+                <Input id="expiryDate" type="date" {...register('expiryDate')} />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="file">{t('File')}</Label>
+              <Input
+                id="file"
+                type="file"
+                accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf"
+                onChange={(e) => setValue('file', e.target.files?.[0], { shouldValidate: true })}
+              />
+              {errors.file && <p className="text-sm text-destructive">{errors.file.message}</p>}
+            </div>
+          </div>
+        </form>
       )}
       renderFooter={() => (
         <>
-          <Button
-            variant="outline"
-            onClick={() => {
-              formRef.current.resetForm();
-              handleClose();
-            }}
-          >
-            {t('Cancel')}
-          </Button>
-          <Button onClick={() => formRef.current.submitForm()}>
-            {t('Upload')}
-          </Button>
+          <Button variant="outline" onClick={handleClose}>{t('Cancel')}</Button>
+          <Button onClick={() => formRef.current?.requestSubmit()}>{t('Upload')}</Button>
         </>
       )}
     />

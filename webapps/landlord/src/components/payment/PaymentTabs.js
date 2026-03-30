@@ -1,6 +1,4 @@
-import * as Yup from 'yup';
 import { Card, CardContent, CardHeader } from '../ui/card';
-import { Form, Formik } from 'formik';
 import {
   forwardRef,
   useCallback,
@@ -9,165 +7,58 @@ import {
   useRef,
   useState
 } from 'react';
+import { useForm, useFieldArray } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import _ from 'lodash';
-import { ArrayField } from '../formfields/ArrayField';
 import { Button } from '../ui/button';
 import { Collapse } from '../ui/collapse';
-import { DateField } from '../formfields/DateField';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Textarea } from '../ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../ui/select';
+import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import moment from 'moment';
-import { NumberField } from '../formfields/NumberField';
 import { QueryKeys } from '../../utils/restcalls';
-import { SelectField } from '../formfields/SelectField';
 import { StoreContext } from '../../store';
-import { TextAreaField } from '../formfields/TextAreaField';
-import { TextField } from '../formfields/TextField';
 import { toast } from 'sonner';
 import usePaymentTypes from '../../hooks/usePaymentTypes';
 import { useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  payments: Yup.array()
-    .of(
-      Yup.object().shape({
-        amount: Yup.number().min(0),
-        date: Yup.mixed().when('amount', {
-          is: (val) => val > 0,
-          then: Yup.date().required()
-        }),
-        type: Yup.mixed()
-          .oneOf(['cash', 'transfer', 'levy', 'cheque'])
-          .required(),
-        reference: Yup.mixed().when(['type', 'amount'], {
-          is: (type, amount) => type !== 'cash' && amount > 0,
-          then: Yup.string().required()
-        })
-      })
-    )
-    .min(1),
-  description: Yup.string(),
-  extracharge: Yup.number().min(0),
-  noteextracharge: Yup.mixed().when('extracharge', {
-    is: (val) => val > 0,
-    then: Yup.string().required()
-  }),
-  promo: Yup.number().min(0),
-  notepromo: Yup.mixed().when('promo', {
-    is: (val) => val > 0,
-    then: Yup.string().required()
-  })
+const paymentSchema = z.object({
+  amount: z.coerce.number().min(0).optional(),
+  date: z.string().optional(),
+  type: z.enum(['cash', 'transfer', 'levy', 'cheque']),
+  reference: z.string().optional()
 });
 
-const emptyPayment = {
-  amount: '',
-  date: null,
-  type: 'transfer',
-  reference: ''
-};
+const schema = z.object({
+  payments: z.array(paymentSchema).min(1),
+  description: z.string().optional(),
+  extracharge: z.coerce.number().min(0).optional(),
+  noteextracharge: z.string().optional(),
+  promo: z.coerce.number().min(0).optional(),
+  notepromo: z.string().optional()
+});
 
-function PaymentPartForm({ term, payments }) {
-  const { t } = useTranslation('common');
-  const paymentTypes = usePaymentTypes();
-  const momentTerm = moment(term, 'YYYYMMDDHH');
-
-  return (
-    <Card>
-      <CardHeader className="text-lg px-6 pt-3 pb-0">
-        {t('Settlement')}
-      </CardHeader>
-      <CardContent>
-        <ArrayField
-          name="payments"
-          addLabel={t('Add a settlement')}
-          emptyItem={emptyPayment}
-          items={payments}
-          renderTitle={(payment, index) =>
-            `${t('Settlement #{{count}}', { count: index + 1 })}`
-          }
-          renderContent={(payment, index) => (
-            <div className="grid gap-2 items-center grid-cols-1 md:grid-cols-2 lg:grid-cols-4 mb-2">
-              <DateField
-                label={t('Date')}
-                name={`payments[${index}].date`}
-                minDate={moment(momentTerm).startOf('month')}
-                maxDate={moment(momentTerm).endOf('month')}
-              />
-              <SelectField
-                label={t('Type')}
-                name={`payments[${index}].type`}
-                values={paymentTypes.itemList}
-              />
-              {payment.type !== 'cash' ? (
-                <TextField
-                  label={t('Reference')}
-                  name={`payments[${index}].reference`}
-                  disabled={payment.type === 'cash'}
-                />
-              ) : null}
-              <NumberField
-                label={t('Amount')}
-                name={`payments[${index}].amount`}
-              />
-            </div>
-          )}
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
-function NotePartForm({ description }) {
-  const { t } = useTranslation('common');
-
-  return (
-    <TextAreaField
-      label={t('Note (only visible to landlord)')}
-      name="description"
-      value={description}
-    />
-  );
-}
-
-function DiscountPartForm({ promo, notepromo }) {
-  const { t } = useTranslation('common');
-
-  return (
-    <div className="space-y-2">
-      <NumberField label={t('Amount')} name="promo" value={promo} />
-      <TextAreaField
-        label={t('Description (visible to tenant)')}
-        name="notepromo"
-        value={notepromo}
-      />
-    </div>
-  );
-}
-
-function AdditionalCostPartForm({ extracharge, noteextracharge }) {
-  const { t } = useTranslation('common');
-  return (
-    <div className="space-y-2">
-      <NumberField label={t('Amount')} name="extracharge" value={extracharge} />
-      <TextAreaField
-        label={t('Description (visible to tenant)')}
-        name="noteextracharge"
-        value={noteextracharge}
-      />
-    </div>
-  );
-}
+const emptyPayment = { amount: '', date: '', type: 'transfer', reference: '' };
 
 function initialFormValues(rent) {
   return {
     payments: rent?.payments?.length
-      ? rent.payments.map(({ amount, date, type, reference }) => {
-          return {
-            amount: amount === 0 ? '' : amount,
-            date: date ? moment(date, 'DD/MM/YYYY') : null,
-            type: type,
-            reference: reference || ''
-          };
-        })
+      ? rent.payments.map(({ amount, date, type, reference }) => ({
+          amount: amount === 0 ? '' : amount,
+          date: date ? moment(date, 'DD/MM/YYYY').format('YYYY-MM-DD') : '',
+          type,
+          reference: reference || ''
+        }))
       : [emptyPayment],
     description: rent?.description?.trimEnd() || '',
     extracharge: rent?.extracharge !== 0 ? rent.extracharge : '',
@@ -178,63 +69,49 @@ function initialFormValues(rent) {
 }
 
 function PaymentTabs({ rent, onSubmit }, ref) {
-  const formRef = useRef();
-  const submitButtonRef = useRef();
   const queryClient = useQueryClient();
   const store = useContext(StoreContext);
   const { t } = useTranslation('common');
-  const initialValues = initialFormValues(rent);
-  const [expandedNote, setExpandedNote] = useState(!!initialValues.description);
-  const [expandedDiscount, setExpandedDiscount] = useState(
-    initialValues.promo > 0
-  );
-  const [expandedAdditionalCost, setExpandedAdditionalCost] = useState(
-    initialValues.extracharge > 0
-  );
+  const paymentTypes = usePaymentTypes();
+  const initVals = initialFormValues(rent);
+  const [expandedNote, setExpandedNote] = useState(!!initVals.description);
+  const [expandedDiscount, setExpandedDiscount] = useState(initVals.promo > 0);
+  const [expandedAdditionalCost, setExpandedAdditionalCost] = useState(initVals.extracharge > 0);
+  const formRef = useRef();
 
-  const handleChange =
-    ({ note = false, discount = false, additionalCost = false }) =>
-    () => {
-      if (note) {
-        setExpandedNote((prev) => !prev);
-      }
-      if (discount) {
-        setExpandedDiscount((prev) => !prev);
-      }
-      if (additionalCost) {
-        setExpandedAdditionalCost((prev) => !prev);
-      }
-    };
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    setValue,
+    reset,
+    formState: { errors, isDirty }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: initVals
+  });
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      isDirty() {
-        return formRef?.current?.dirty;
-      },
-      async submit() {
-        // Hack to workaround a formik issue when calling submitForm imperatively: form errors are not shown.
-        // Imperativly clicking on the button makes the form behaving properly.
-        submitButtonRef?.current?.click();
-      },
-      setValues(rent) {
-        formRef?.current?.setValues(initialFormValues(rent));
-      }
-    }),
-    []
-  );
+  const { fields, append, remove } = useFieldArray({ control, name: 'payments' });
 
-  const handleSubmit = useCallback(
+  useImperativeHandle(ref, () => ({
+    isDirty: () => isDirty,
+    async submit() { formRef.current?.requestSubmit(); },
+    setValues(rent) { reset(initialFormValues(rent)); }
+  }), [isDirty, reset]);
+
+  const momentTerm = moment(rent.term, 'YYYYMMDDHH');
+  const minDate = moment(momentTerm).startOf('month').format('YYYY-MM-DD');
+  const maxDate = moment(momentTerm).endOf('month').format('YYYY-MM-DD');
+
+  const _handleSubmit = useCallback(
     async (values) => {
       const clonedValues = _.cloneDeep(values);
       clonedValues.payments = clonedValues.payments
         .filter(({ amount }) => amount > 0)
         .map((payment) => {
-          // convert moment into string for the DB
-          payment.date = payment.date.format('DD/MM/YYYY');
-          if (payment.type === 'cash') {
-            delete payment.reference;
-          }
+          payment.date = moment(payment.date).format('DD/MM/YYYY');
+          if (payment.type === 'cash') delete payment.reference;
           return payment;
         });
 
@@ -256,74 +133,96 @@ function PaymentTabs({ rent, onSubmit }, ref) {
         toast.error(t('Something went wrong'));
       }
     },
-    [
-      onSubmit,
-      queryClient,
-      rent._id,
-      rent.month,
-      rent.term,
-      rent.year,
-      store.rent,
-      t
-    ]
+    [onSubmit, queryClient, rent._id, rent.month, rent.term, rent.year, store.rent, t]
   );
 
-  return (
-    <Formik
-      innerRef={formRef}
-      initialValues={initialValues}
-      validationSchema={validationSchema}
-      onSubmit={handleSubmit}
-    >
-      {({
-        values: {
-          payments,
-          description,
-          promo,
-          notepromo,
-          extracharge,
-          noteextracharge
-        }
-      }) => {
-        return (
-          <Form autoComplete="off">
-            <div className="space-y-4">
-              <PaymentPartForm term={rent.term} payments={payments} />
-              <Collapse
-                title={t('Note')}
-                open={expandedNote}
-                onOpenChange={setExpandedNote}
-              >
-                <NotePartForm description={description} />
-              </Collapse>
-              <Collapse
-                title={t('Discount')}
-                open={expandedDiscount}
-                onOpenChange={setExpandedDiscount}
-              >
-                <DiscountPartForm promo={promo} notepromo={notepromo} />
-              </Collapse>
-              <Collapse
-                title={t('Additional cost')}
-                open={expandedAdditionalCost}
-                onOpenChange={setExpandedAdditionalCost}
-              >
-                <AdditionalCostPartForm
-                  extracharge={extracharge}
-                  noteextracharge={noteextracharge}
-                />
-              </Collapse>
-            </div>
+  const payments = watch('payments');
 
-            {/* 
-                Hack to workaround a formik issue when calling submitForm imperatively: form errors are not shown.
-                Imperativly clicking on the button makes the form behaving properly. 
-              */}
-            <Button ref={submitButtonRef} className="hidden" type="submit" />
-          </Form>
-        );
-      }}
-    </Formik>
+  return (
+    <form ref={formRef} onSubmit={handleSubmit(_handleSubmit)} autoComplete="off">
+      <div className="space-y-4">
+        <Card>
+          <CardHeader className="text-lg px-6 pt-3 pb-0">{t('Settlement')}</CardHeader>
+          <CardContent>
+            {fields.map((field, index) => (
+              <div key={field.id} className="mb-4 p-3 border rounded-md">
+                <div className="flex justify-between items-center mb-2">
+                  <div className="font-medium">{t('Settlement #{{count}}', { count: index + 1 })}</div>
+                  {fields.length > 1 && (
+                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
+                      <LuTrash2 className="size-4" />
+                    </Button>
+                  )}
+                </div>
+                <div className="grid gap-2 items-end grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+                  <div className="space-y-1">
+                    <Label htmlFor={`payments.${index}.date`}>{t('Date')}</Label>
+                    <Input id={`payments.${index}.date`} type="date" min={minDate} max={maxDate} {...register(`payments.${index}.date`)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('Type')}</Label>
+                    <Select value={payments?.[index]?.type || 'transfer'} onValueChange={(val) => setValue(`payments.${index}.type`, val)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {paymentTypes.itemList.map((pt) => (
+                          <SelectItem key={pt.id} value={pt.value}>{pt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {payments?.[index]?.type !== 'cash' && (
+                    <div className="space-y-1">
+                      <Label htmlFor={`payments.${index}.reference`}>{t('Reference')}</Label>
+                      <Input id={`payments.${index}.reference`} {...register(`payments.${index}.reference`)} />
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <Label htmlFor={`payments.${index}.amount`}>{t('Amount')}</Label>
+                    <Input id={`payments.${index}.amount`} type="number" {...register(`payments.${index}.amount`)} />
+                  </div>
+                </div>
+              </div>
+            ))}
+            <Button type="button" variant="outline" onClick={() => append(emptyPayment)}>
+              <LuPlus className="size-4 mr-1" />{t('Add a settlement')}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Collapse title={t('Note')} open={expandedNote} onOpenChange={setExpandedNote}>
+          <div className="space-y-1">
+            <Label htmlFor="description">{t('Note (only visible to landlord)')}</Label>
+            <Textarea id="description" {...register('description')} />
+          </div>
+        </Collapse>
+
+        <Collapse title={t('Discount')} open={expandedDiscount} onOpenChange={setExpandedDiscount}>
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label htmlFor="promo">{t('Amount')}</Label>
+              <Input id="promo" type="number" {...register('promo')} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="notepromo">{t('Description (visible to tenant)')}</Label>
+              <Textarea id="notepromo" {...register('notepromo')} />
+            </div>
+          </div>
+        </Collapse>
+
+        <Collapse title={t('Additional cost')} open={expandedAdditionalCost} onOpenChange={setExpandedAdditionalCost}>
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label htmlFor="extracharge">{t('Amount')}</Label>
+              <Input id="extracharge" type="number" {...register('extracharge')} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="noteextracharge">{t('Description (visible to tenant)')}</Label>
+              <Textarea id="noteextracharge" {...register('noteextracharge')} />
+            </div>
+          </div>
+        </Collapse>
+      </div>
+    </form>
   );
 }
 
