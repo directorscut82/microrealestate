@@ -1,29 +1,30 @@
-import * as Yup from 'yup';
 import {
   createAppCredentials,
   QueryKeys,
   updateOrganization
 } from '../../../utils/restcalls';
-import { Form, Formik } from 'formik';
 import { mergeOrganization, updateStoreOrganization } from '../utils';
 import { RENTER_ROLE, ROLES } from '../../../store/User';
 import { useCallback, useContext, useMemo, useRef } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../ui/button';
-import { DateField } from '../../formfields/DateField';
+import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../../ui/select';
 import moment from 'moment';
 import ResponsiveDialog from '../../ResponsiveDialog';
-import { SelectField } from '../../formfields/SelectField';
 import { StoreContext } from '../../../store';
-import { TextField } from '../../formfields/TextField';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
-
-const applicationInitialValues = {
-  name: '',
-  expiryDate: null,
-  role: RENTER_ROLE
-};
 
 export default function ApplicationFormDialog({
   open,
@@ -43,84 +44,84 @@ export default function ApplicationFormDialog({
     }
   });
   const { mutateAsync: mutateAppCredzAsync, isError: isAppCredzError } =
-    useMutation({
-      mutationFn: createAppCredentials
-    });
+    useMutation({ mutationFn: createAppCredentials });
 
-  const handleClose = useCallback(
-    (appCredz) => {
-      setOpen(false);
-      appCredz && onClose?.(appCredz);
-    },
-    [onClose, setOpen]
+  const existingNames = useMemo(
+    () => organization?.applications.map(({ name }) => name) || [],
+    [organization?.applications]
   );
 
-  const handleCancel = useCallback(() => {
-    setOpen(false);
-  }, [setOpen]);
-
-  const _onSubmit = useCallback(
-    async (app) => {
-      if (!store.user.isAdministrator) {
-        return;
-      }
-      // create app credentials
-      const appCredz = await mutateAppCredzAsync({
-        organization,
-        expiryDate: app.expiryDate
-      });
-
-      await mutateAsync({
-        store,
-        organization: mergeOrganization(organization, {
-          applications: [...organization.applications, { ...app, ...appCredz }]
-        })
-      });
-
-      handleClose(appCredz);
-    },
-    [store, mutateAppCredzAsync, organization, mutateAsync, handleClose]
+  const schema = useMemo(
+    () =>
+      z.object({
+        name: z
+          .string()
+          .min(1)
+          .refine((val) => !existingNames.includes(val), {
+            message: 'Name already exists'
+          }),
+        expiryDate: z.string().min(1).refine(
+          (val) => moment(val).isValid() && moment(val).isAfter(moment(), 'days'),
+          { message: 'Date must be valid and in the future' }
+        ),
+        role: z.string().min(1)
+      }),
+    [existingNames]
   );
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: { name: '', expiryDate: '', role: RENTER_ROLE }
+  });
+
+  const roleValue = watch('role');
 
   const roleValues = useMemo(
     () => ROLES.map((role) => ({ id: role, label: t(role), value: role })),
     [t]
   );
 
-  const validationSchema = useMemo(
-    () =>
-      Yup.object().shape({
-        name: Yup.string()
-          .notOneOf(organization?.applications.map(({ name }) => name) || [])
-          .required(),
-        expiryDate: Yup.mixed()
-          .required()
-          .test('expiryDate_invalid', 'Date is invalid', (value) => {
-            if (value) {
-              return moment(value).isValid();
-            }
-            return true;
-          })
-          .test('expiryDate_past', 'Date must be in the future', (value) => {
-            if (value) {
-              return moment(value).isAfter(moment(), 'days');
-            }
-            return true;
-          }),
-        role: Yup.string()
-          .required()
-          .oneOf(roleValues.map(({ value }) => value))
-      }),
-    [organization?.applications, roleValues]
+  const handleClose = useCallback(
+    (appCredz) => {
+      setOpen(false);
+      reset();
+      appCredz && onClose?.(appCredz);
+    },
+    [onClose, setOpen, reset]
   );
 
-  if (isError) {
-    toast.error(t('Error adding application'));
-  }
+  const handleCancel = useCallback(() => {
+    setOpen(false);
+    reset();
+  }, [setOpen, reset]);
 
-  if (isAppCredzError) {
-    toast.error(t('Error creating application credentials'));
-  }
+  const _onSubmit = useCallback(
+    async (app) => {
+      if (!store.user.isAdministrator) return;
+      const appCredz = await mutateAppCredzAsync({
+        organization,
+        expiryDate: moment(app.expiryDate)
+      });
+      await mutateAsync({
+        store,
+        organization: mergeOrganization(organization, {
+          applications: [...organization.applications, { ...app, ...appCredz }]
+        })
+      });
+      handleClose(appCredz);
+    },
+    [store, mutateAppCredzAsync, organization, mutateAsync, handleClose]
+  );
+
+  if (isError) toast.error(t('Error adding application'));
+  if (isAppCredzError) toast.error(t('Error creating application credentials'));
 
   return (
     <ResponsiveDialog
@@ -129,44 +130,42 @@ export default function ApplicationFormDialog({
       isLoading={isLoading}
       renderHeader={() => t('New application')}
       renderContent={() => (
-        <Formik
-          initialValues={applicationInitialValues}
-          validationSchema={validationSchema}
-          onSubmit={_onSubmit}
-          innerRef={formRef}
-        >
-          {() => {
-            return (
-              <Form autoComplete="off">
-                <div className="pt-6 space-y-4">
-                  <div>
-                    {t('Add an application credential to your organization')}
-                  </div>
-                  <TextField label={t('Name')} name="name" />
-                  <SelectField
-                    label={t('Role')}
-                    name="role"
-                    values={roleValues}
-                  />
-                  <DateField
-                    label={t('Expiry date')}
-                    name="expiryDate"
-                    minDate={moment()}
-                  />
-                </div>
-              </Form>
-            );
-          }}
-        </Formik>
+        <form ref={formRef} onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
+          <div className="pt-6 space-y-4">
+            <div>{t('Add an application credential to your organization')}</div>
+            <div className="space-y-2">
+              <Label htmlFor="name">{t('Name')}</Label>
+              <Input id="name" {...register('name')} />
+              {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label>{t('Role')}</Label>
+              <Select value={roleValue} onValueChange={(val) => setValue('role', val)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {roleValues.map((r) => (
+                    <SelectItem key={r.id} value={r.value}>{r.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="expiryDate">{t('Expiry date')}</Label>
+              <Input
+                id="expiryDate"
+                type="date"
+                min={moment().add(1, 'day').format('YYYY-MM-DD')}
+                {...register('expiryDate')}
+              />
+              {errors.expiryDate && <p className="text-sm text-destructive">{errors.expiryDate.message}</p>}
+            </div>
+          </div>
+        </form>
       )}
       renderFooter={() => (
         <>
-          <Button variant="outline" onClick={handleCancel}>
-            {t('Cancel')}
-          </Button>
-          <Button onClick={() => formRef.current.submitForm()}>
-            {t('Add')}
-          </Button>
+          <Button variant="outline" onClick={handleCancel}>{t('Cancel')}</Button>
+          <Button onClick={() => formRef.current?.requestSubmit()}>{t('Add')}</Button>
         </>
       )}
     />
