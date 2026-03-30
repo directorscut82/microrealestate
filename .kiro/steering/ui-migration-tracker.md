@@ -3,7 +3,7 @@ inclusion: always
 ---
 # MRE — UI Migration Tracker
 
-Last updated: 2026-03-30 13:50
+Last updated: 2026-03-30 20:55
 
 ## Goal
 Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlord app per `frontend-patterns.md`. Replace with shadcn/ui+Tailwind, react-hook-form+zod, and React Query.
@@ -13,10 +13,26 @@ Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlor
 - **Form migration:** ✅ COMPLETE — all 22 forms migrated from Formik+Yup to react-hook-form+zod
 - **Dependency cleanup:** ✅ COMPLETE — formik, yup, @material-ui/*, @date-io/*, material-ui-formik-components removed
 - **formfields/ directory:** ✅ DELETED — 10 legacy Formik wrapper files removed
-- **E2E tests:** 0/100 written — NEXT TASK
-- **MobX→React Query:** Not started (Phase 2, after E2E validation)
-- **E2E tests:** 0/100 written.
-- **MobX→React Query:** Not started (Phase 2, after forms).
+- **E2E tests:** ✅ COMPLETE — 100/100 passing (9 suites, 2m34s)
+- **MobX→React Query:** 🔄 IN PROGRESS — migrating stores one by one
+
+## MobX → React Query Migration Plan
+12 MobX stores (1,427 lines), 71 consumer files, 155 store references.
+`@tanstack/react-query` v5.29 already installed.
+
+Migration order (simplest → most impactful):
+| # | Store | Lines | Consumer files | Status |
+|---|-------|-------|----------------|--------|
+| 1 | Dashboard | 41 | 4 | ⬜ |
+| 2 | Accounting | 60 | 4 | ⬜ |
+| 3 | Lease | 91 | 10 | ⬜ |
+| 4 | Property | 136 | 6 | ⬜ |
+| 5 | Tenant | 162 | 16 | ⬜ |
+| 6 | Rent | 250 | 7 | ⬜ |
+| 7 | Template + Document | 193 | 9 | ⬜ |
+| 8 | Organization + User | 254 | 55 | ⬜ |
+| 9 | AppHistory | 16 | 9 | ⬜ |
+| 10 | Remove MobX deps | — | — | ⬜ |
 
 ## Installed Dependencies
 - `react-hook-form@7.54.2`, `@hookform/resolvers@3.3.2`, `zod@3.24.2` added to landlord package.json

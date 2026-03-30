@@ -9,7 +9,6 @@ import NewLeaseDialog from '../organization/lease/NewLeaseDialog';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
 import NewPropertyDialog from '../properties/NewPropertyDialog';
 import NewTenantDialog from '../tenants/NewTenantDialog';
-import { observer } from 'mobx-react-lite';
 import { RiContractLine } from 'react-icons/ri';
 import ShortcutButton from '../ShortcutButton';
 import { StoreContext } from '../../store';
@@ -19,7 +18,7 @@ import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { WelcomeIllustration } from '../../components/Illustrations';
 
-function Shortcuts({ firstConnection = false, className }) {
+function Shortcuts({ firstConnection = false, className, dashboardData = {}, tenants = [], leases = [] }) {
   const store = useContext(StoreContext);
   const router = useRouter();
   const { t } = useTranslation('common');
@@ -32,13 +31,13 @@ function Shortcuts({ firstConnection = false, className }) {
     useState(false);
 
   const tenantsNotTerminated = useMemo(
-    () => store.tenant.items.filter((t) => !t.terminated),
-    [store.tenant.items]
+    () => tenants.filter((t) => !t.terminated),
+    [tenants]
   );
 
-  const hasContract = !!store.lease?.items?.length;
-  const hasProperty = !!store.dashboard.data.overview?.propertyCount;
-  const hasTenant = !!store.tenant?.items?.length;
+  const hasContract = !!leases?.length;
+  const hasProperty = !!dashboardData?.overview?.propertyCount;
+  const hasTenant = !!tenants?.length;
 
   const handleCreateContract = useCallback(() => {
     setOpenNewLeaseDialog(true);
@@ -89,7 +88,7 @@ function Shortcuts({ firstConnection = false, className }) {
           <ShortcutButton
             Icon={TbCashRegister}
             label={isDesktop ? t('Pay a rent') : t('Pay')}
-            disabled={!store.dashboard.data?.overview?.tenantCount}
+            disabled={!dashboardData?.overview?.tenantCount}
             onClick={handlePayment}
             className="md:flex md:flex-col md:items-center md:justify-start"
             data-cy="shortcutSettleRent"
@@ -155,4 +154,4 @@ function Shortcuts({ firstConnection = false, className }) {
   );
 }
 
-export default observer(Shortcuts);
+export default Shortcuts;

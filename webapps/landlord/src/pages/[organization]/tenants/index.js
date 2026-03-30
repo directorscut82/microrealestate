@@ -80,7 +80,7 @@ function Tenants() {
   const store = useContext(StoreContext);
   const { isError, data, isLoading } = useQuery({
     queryKey: [QueryKeys.TENANTS],
-    queryFn: () => fetchTenants(store)
+    queryFn: () => fetchTenants()
   });
   const [openNewTenantDialog, setOpenNewTenantDialog] = useState(false);
 

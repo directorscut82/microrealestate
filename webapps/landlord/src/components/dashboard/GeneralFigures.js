@@ -2,18 +2,17 @@ import { LuCoins, LuKeyRound, LuPercent, LuUserCircle } from 'react-icons/lu';
 import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import NumberFormat from '../NumberFormat';
-import { observer } from 'mobx-react-lite';
 import { StoreContext } from '../../store';
 import { useContext } from 'react';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-function GeneralFigures({ className }) {
+export default function GeneralFigures({ className, dashboardData }) {
   const store = useContext(StoreContext);
   const router = useRouter();
   const { t } = useTranslation('common');
 
-  const overview = store.dashboard.data.overview;
+  const overview = dashboardData?.overview;
   return (
     <div className={cn('space-y-4', className)}>
       <DashboardCard
@@ -62,5 +61,3 @@ function GeneralFigures({ className }) {
     </div>
   );
 }
-
-export default observer(GeneralFigures);

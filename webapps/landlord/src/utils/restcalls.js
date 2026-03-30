@@ -10,8 +10,8 @@ export const QueryKeys = {
   LEASES: 'leases'
 };
 
-export async function fetchDashboard(store) {
-  const response = await store.dashboard.fetch();
+export async function fetchDashboard() {
+  const response = await apiFetcher().get('/dashboard');
   return response.data;
 }
 
@@ -38,13 +38,13 @@ export async function createAppCredentials({ organization, expiryDate }) {
   return response.data;
 }
 
-export async function fetchProperties(store) {
-  const response = await store.property.fetch();
+export async function fetchProperties() {
+  const response = await apiFetcher().get('/properties');
   return response.data;
 }
 
-export async function fetchTenants(store) {
-  const response = await store.tenant.fetch();
+export async function fetchTenants() {
+  const response = await apiFetcher().get('/tenants');
   return response.data;
 }
 
@@ -64,8 +64,8 @@ export async function fetchRents(store, yearMonth) {
   return response.data;
 }
 
-export async function fetchLeases(store) {
-  const response = await store.lease.fetch();
+export async function fetchLeases() {
+  const response = await apiFetcher().get('/leases');
   return response.data;
 }
 

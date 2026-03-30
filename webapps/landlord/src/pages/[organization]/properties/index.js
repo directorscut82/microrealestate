@@ -56,7 +56,7 @@ function Properties() {
   const router = useRouter();
   const { data, isError, isLoading } = useQuery({
     queryKey: [QueryKeys.PROPERTIES],
-    queryFn: () => fetchProperties(store)
+    queryFn: () => fetchProperties()
   });
 
   const [openNewPropertyDialog, setOpenNewPropertyDialog] = useState(false);

@@ -5,14 +5,13 @@ import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import { LuBanknote } from 'react-icons/lu';
 import moment from 'moment';
-import { observer } from 'mobx-react-lite';
 import { StoreContext } from '../../store';
 import useFormatNumber from '../../hooks/useFormatNumber';
 import { useMediaQuery } from 'usehooks-ts';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-function YearFigures({ className }) {
+export default function YearFigures({ className, dashboardData }) {
   const store = useContext(StoreContext);
   const router = useRouter();
   const { t } = useTranslation('common');
@@ -21,7 +20,7 @@ function YearFigures({ className }) {
 
   const data = useMemo(() => {
     const now = moment();
-    return store.dashboard.data.revenues?.reduce((acc, revenues) => {
+    return dashboardData?.revenues?.reduce((acc, revenues) => {
       const revenuesMoment = moment(revenues.month, 'MMYYYY');
       const graphData = {
         ...revenues,
@@ -31,14 +30,11 @@ function YearFigures({ className }) {
       if (revenuesMoment.isSameOrBefore(now)) {
         acc.push(graphData);
       } else {
-        acc.push({
-          ...graphData,
-          notPaid: 0
-        });
+        acc.push({ ...graphData, notPaid: 0 });
       }
       return acc;
-    }, []);
-  }, [store.dashboard.data.revenues]);
+    }, []) || [];
+  }, [dashboardData?.revenues]);
 
   const hasRevenues = useMemo(() => {
     return data.some((r) => r.notPaid !== 0 || r.paid !== 0);
@@ -57,9 +53,7 @@ function YearFigures({ className }) {
   return hasRevenues ? (
     <DashboardCard
       Icon={LuBanknote}
-      title={t('Rents of {{year}}', {
-        year: moment().format('YYYY')
-      })}
+      title={t('Rents of {{year}}', { year: moment().format('YYYY') })}
       description={t('Rents for the year')}
       renderContent={() => (
         <ChartContainer
@@ -153,5 +147,3 @@ function YearFigures({ className }) {
     />
   ) : null;
 }
-
-export default observer(YearFigures);

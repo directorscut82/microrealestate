@@ -8,20 +8,27 @@ import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
-import { observer } from 'mobx-react-lite';
 import { StoreContext } from '../../store';
 import useFormatNumber from '../../hooks/useFormatNumber';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-function MonthFigures({ className }) {
+export default function MonthFigures({ className, dashboardData }) {
   const { t } = useTranslation('common');
   const router = useRouter();
   const store = useContext(StoreContext);
   const formatNumber = useFormatNumber();
   const yearMonth = moment().format('YYYY.MM');
+
+  const currentRevenues = useMemo(() => {
+    const currentMonth = moment().format('MMYYYY');
+    const revenues = dashboardData?.revenues?.find(
+      ({ month }) => currentMonth === month
+    ) || { month: currentMonth, paid: 0, notPaid: 0 };
+    return { ...revenues, notPaid: Math.abs(revenues.notPaid) };
+  }, [dashboardData?.revenues]);
+
   const data = useMemo(() => {
-    const currentRevenues = store.dashboard.currentRevenues;
     return [
       {
         notPaid: currentRevenues.notPaid,
@@ -29,18 +36,16 @@ function MonthFigures({ className }) {
         yearMonth
       }
     ];
-  }, [store.dashboard.currentRevenues, yearMonth]);
+  }, [currentRevenues, yearMonth]);
 
   const handleClick = (data) => {
     if (!data?.payload) {
       return;
     }
-
     const status = data.tooltipPayload?.[0].dataKey?.toLowerCase() || '';
     const {
       payload: { yearMonth }
     } = data;
-
     store.rent.setFilters({ status: [status] });
     store.rent.setPeriod(moment(yearMonth, 'YYYY.MM', true));
     router.push(
@@ -51,47 +56,43 @@ function MonthFigures({ className }) {
   return (
     <div className={cn('grid grid-cols-1 gap-4', className)}>
       <DashboardCard
-        Icon={store.dashboard.data.topUnpaid?.length ? LuAlertTriangle : null}
+        Icon={dashboardData?.topUnpaid?.length ? LuAlertTriangle : null}
         title={
-          store.dashboard.data.topUnpaid?.length
-            ? t('Top 5 of not paid rents')
-            : ''
+          dashboardData?.topUnpaid?.length ? t('Top 5 of not paid rents') : ''
         }
         description={
-          store.dashboard.data.topUnpaid?.length
+          dashboardData?.topUnpaid?.length
             ? t('Tenants with the highest unpaid balance')
             : ''
         }
         renderContent={() =>
-          store.dashboard.data.topUnpaid?.length ? (
+          dashboardData?.topUnpaid?.length ? (
             <div className="flex flex-col gap-2 min-h-48">
-              {store.dashboard.data.topUnpaid.map(
-                ({ tenant, balance, rent }) => (
-                  <div
-                    key={tenant._id}
-                    className="flex items-center text-sm md:text-base"
+              {dashboardData.topUnpaid.map(({ tenant, balance, rent }) => (
+                <div
+                  key={tenant._id}
+                  className="flex items-center text-sm md:text-base"
+                >
+                  <Button
+                    variant="link"
+                    onClick={() => {
+                      store.rent.setSelected(rent);
+                      store.rent.setFilters({ searchText: tenant.name });
+                      router.push(
+                        `/${store.organization.selected.name}/rents/${yearMonth}?search=${tenant.name}`
+                      );
+                    }}
+                    className="justify-start flex-grow p-0 m-0"
                   >
-                    <Button
-                      variant="link"
-                      onClick={() => {
-                        store.rent.setSelected(rent);
-                        store.rent.setFilters({ searchText: tenant.name });
-                        router.push(
-                          `/${store.organization.selected.name}/rents/${yearMonth}?search=${tenant.name}`
-                        );
-                      }}
-                      className="justify-start flex-grow p-0 m-0"
-                    >
-                      {tenant.name}
-                    </Button>
-                    <NumberFormat
-                      value={balance}
-                      withColor
-                      className="font-semibold"
-                    />
-                  </div>
-                )
-              )}
+                    {tenant.name}
+                  </Button>
+                  <NumberFormat
+                    value={balance}
+                    withColor
+                    className="font-semibold"
+                  />
+                </div>
+              ))}
             </div>
           ) : (
             <CelebrationIllustration
@@ -173,5 +174,3 @@ function MonthFigures({ className }) {
     </div>
   );
 }
-
-export default observer(MonthFigures);

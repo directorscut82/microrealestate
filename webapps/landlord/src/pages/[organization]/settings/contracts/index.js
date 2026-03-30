@@ -34,7 +34,7 @@ function LeasesSettings() {
   const [openNewLeaseDialog, setOpenNewLeaseDialog] = useState(false);
   const leasesQuery = useQuery({
     queryKey: [QueryKeys.LEASES],
-    queryFn: () => fetchLeases(store)
+    queryFn: () => fetchLeases()
   });
   const leaseMutation = useMutation({
     mutationFn: updateLease,
