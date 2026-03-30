@@ -1,5 +1,15 @@
 import { Button } from '../../ui/button';
-import { Section } from '../../formfields/Section';
+import { Separator } from '../../ui/separator';
+
+function Section({ label, children }) {
+  return (
+    <div className="pb-10">
+      <div className="text-xl">{label}</div>
+      <Separator className="mt-1 mb-2" />
+      {children}
+    </div>
+  );
+}
 import TenantDocumentList from '../TenantDocumentList';
 import UploadFileList from '../UploadFileList';
 import { useCallback } from 'react';
