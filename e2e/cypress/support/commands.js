@@ -36,8 +36,10 @@ Cypress.Commands.add(
   ({ orgName, locale, currency, company }) => {
     cy.get('[data-cy=companyFalse]').click();
     cy.get('input[name=name]').type(orgName);
-    cy.muiSelect('locale', locale);
-    cy.muiSelect('currency', currency);
+    // shadcn Select for locale
+    cy.selectByName('locale', locale);
+    // shadcn Select for currency
+    cy.selectByName('currency', currency);
     if (company) {
       const { name, legalRepresentative, legalStructure, ein, capital } =
         company;
@@ -110,7 +112,7 @@ Cypress.Commands.add(
     cy.get('input[name=name]').type(name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
-    cy.muiSelectText(
+    cy.selectByLabel(
       'type',
       i18n.getFixedT('fr-FR')(type.replace(/^./, type[0].toUpperCase()))
     );
@@ -169,14 +171,14 @@ Cypress.Commands.add(
 
     if (lease) {
       const { contract, beginDate, properties } = lease;
-      cy.muiSelectText('leaseId', contract);
+      cy.selectByLabel('leaseId', contract);
       cy.get('input[name=beginDate]').clear();
       cy.get('input[name=beginDate]').type(beginDate);
       properties.forEach(({ name, expense, entryDate, exitDate }, index) => {
         if (index > 0) {
           cy.get('[data-cy=addPropertiesItem]').click();
         }
-        cy.muiSelectText(`properties[${index}]._id`, name);
+        cy.selectByLabel(`properties[${index}]._id`, name);
         cy.get(`input[name="properties[${index}].expenses[0].title"]`).type(
           expense.title
         );
@@ -244,14 +246,23 @@ Cypress.Commands.add('navOrgMenu', (pageName) => {
   cy.checkPage(pageName);
 });
 
+Cypress.Commands.add('selectByName', (name, value) => {
+  // Click the shadcn Select trigger that has the given name attribute
+  cy.get(`button[name="${name}"], [name="${name}"]`).first().click({ force: true });
+  cy.get('[role="option"]').contains(value).click({ force: true });
+});
+
+Cypress.Commands.add('selectByLabel', (name, text) => {
+  cy.get(`button[name="${name}"], [name="${name}"]`).first().click({ force: true });
+  cy.get('[role="option"]').contains(text).click({ force: true });
+});
+
 Cypress.Commands.add('muiSelect', (name, value) => {
-  cy.get(`input[name="${name}"]`).parent().click();
-  cy.get(`.MuiList-root [data-value="${value}"]`).click();
+  cy.selectByName(name, value);
 });
 
 Cypress.Commands.add('muiSelectText', (name, text) => {
-  cy.get(`input[name="${name}"]`).parent().click();
-  cy.get('.MuiList-root').contains(text).click();
+  cy.selectByLabel(name, text);
 });
 
 Cypress.Commands.add('checkUrl', (url) => {
