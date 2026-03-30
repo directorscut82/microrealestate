@@ -1,36 +1,51 @@
-import * as Yup from 'yup';
-import {
-  AddressField,
-  NumberField,
-  SelectField,
-  SubmitButton,
-  TextField
-} from '@microrealestate/commonui/components';
-import { Form, Formik } from 'formik';
 import { useContext, useMemo } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Separator } from '../ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../ui/select';
 import { observer } from 'mobx-react-lite';
 import PropertyIcon from './PropertyIcon';
-import { Section } from '../formfields/Section';
 import { StoreContext } from '../../store';
 import types from './types';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  type: Yup.string().required(),
-  name: Yup.string().required(),
-  description: Yup.string(),
-  phone: Yup.string(),
-  digicode: Yup.string(),
-  address: Yup.object().shape({
-    street1: Yup.string(),
-    street2: Yup.string(),
-    city: Yup.string(),
-    zipCode: Yup.string(),
-    state: Yup.string(),
-    country: Yup.string()
+const schema = z.object({
+  type: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  surface: z.union([z.string(), z.number()]).optional(),
+  phone: z.string().optional(),
+  digicode: z.string().optional(),
+  address: z.object({
+    street1: z.string().optional(),
+    street2: z.string().optional(),
+    city: z.string().optional(),
+    zipCode: z.string().optional(),
+    state: z.string().optional(),
+    country: z.string().optional()
   }),
-  rent: Yup.number().min(0).required()
+  rent: z.coerce.number().min(0)
 });
+
+function Section({ label, children }) {
+  return (
+    <div className="pb-10">
+      <div className="text-xl">{label}</div>
+      <Separator className="mt-1 mb-2" />
+      {children}
+    </div>
+  );
+}
 
 const PropertyForm = observer(({ onSubmit }) => {
   const { t } = useTranslation('common');
@@ -57,69 +72,132 @@ const PropertyForm = observer(({ onSubmit }) => {
     [store.property.selected]
   );
 
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: initialValues
+  });
+
+  const typeValue = watch('type');
+
   const propertyTypes = useMemo(
     () =>
       types.map((type) => ({
         id: type.id,
         value: type.id,
         label: t(type.labelId),
-        renderIcon: () => <PropertyIcon type={type.id} />
+        type: type.id
       })),
     [t]
   );
 
   return (
-    <Formik
-      initialValues={initialValues}
-      validationSchema={validationSchema}
-      onSubmit={onSubmit}
-    >
-      {({ values, isSubmitting }) => {
-        return (
-          <Form autoComplete="off">
-            <Section label={t('Property information')}>
-              <div className="sm:flex sm:gap-2">
-                <SelectField
-                  label={t('Property Type')}
-                  name="type"
-                  values={propertyTypes}
-                />
-                <TextField label={t('Name')} name="name" />
-              </div>
-              <TextField label={t('Description')} name="description" />
-
-              {[
-                'store',
-                'building',
-                'apartment',
-                'room',
-                'office',
-                'garage'
-              ].includes(values.type) && (
-                <div className="sm:flex sm:gap-2">
-                  <NumberField label={t('Surface')} name="surface" />
-                  <TextField label={t('Phone')} name="phone" />
-                  <TextField label={t('Digicode')} name="digicode" />
-                </div>
-              )}
-            </Section>
-            <Section label={t('Address')}>
-              <AddressField />
-            </Section>
-            <Section label={t('Rent')}>
-              <NumberField
-                label={t('Rent excluding tax and expenses')}
-                name="rent"
-              />
-            </Section>
-            <SubmitButton
-              size="large"
-              label={!isSubmitting ? t('Save') : t('Saving')}
-            />
-          </Form>
-        );
-      }}
-    </Formik>
+    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+      <Section label={t('Property information')}>
+        <div className="sm:flex sm:gap-2">
+          <div className="space-y-2 flex-1">
+            <Label>{t('Property Type')}</Label>
+            <Select
+              value={typeValue}
+              onValueChange={(val) => setValue('type', val)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={t('Select a type')} />
+              </SelectTrigger>
+              <SelectContent>
+                {propertyTypes.map((pt) => (
+                  <SelectItem key={pt.id} value={pt.value}>
+                    <div className="flex items-center gap-2">
+                      <PropertyIcon type={pt.type} />
+                      {pt.label}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.type && (
+              <p className="text-sm text-destructive">{errors.type.message}</p>
+            )}
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="name">{t('Name')}</Label>
+            <Input id="name" {...register('name')} />
+            {errors.name && (
+              <p className="text-sm text-destructive">{errors.name.message}</p>
+            )}
+          </div>
+        </div>
+        <div className="space-y-2 mt-2">
+          <Label htmlFor="description">{t('Description')}</Label>
+          <Input id="description" {...register('description')} />
+        </div>
+        {['store', 'building', 'apartment', 'room', 'office', 'garage'].includes(
+          typeValue
+        ) && (
+          <div className="sm:flex sm:gap-2 mt-2">
+            <div className="space-y-2 flex-1">
+              <Label htmlFor="surface">{t('Surface')}</Label>
+              <Input id="surface" type="number" {...register('surface')} />
+            </div>
+            <div className="space-y-2 flex-1">
+              <Label htmlFor="phone">{t('Phone')}</Label>
+              <Input id="phone" {...register('phone')} />
+            </div>
+            <div className="space-y-2 flex-1">
+              <Label htmlFor="digicode">{t('Digicode')}</Label>
+              <Input id="digicode" {...register('digicode')} />
+            </div>
+          </div>
+        )}
+      </Section>
+      <Section label={t('Address')}>
+        <div className="space-y-2">
+          <Label htmlFor="address.street1">{t('Street 1')}</Label>
+          <Input id="address.street1" {...register('address.street1')} />
+        </div>
+        <div className="space-y-2 mt-2">
+          <Label htmlFor="address.street2">{t('Street 2')}</Label>
+          <Input id="address.street2" {...register('address.street2')} />
+        </div>
+        <div className="sm:flex sm:gap-2 mt-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="address.zipCode">{t('Zip code')}</Label>
+            <Input id="address.zipCode" {...register('address.zipCode')} />
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="address.city">{t('City')}</Label>
+            <Input id="address.city" {...register('address.city')} />
+          </div>
+        </div>
+        <div className="sm:flex sm:gap-2 mt-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="address.state">{t('State')}</Label>
+            <Input id="address.state" {...register('address.state')} />
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="address.country">{t('Country')}</Label>
+            <Input id="address.country" {...register('address.country')} />
+          </div>
+        </div>
+      </Section>
+      <Section label={t('Rent')}>
+        <div className="space-y-2">
+          <Label htmlFor="rent">{t('Rent excluding tax and expenses')}</Label>
+          <Input id="rent" type="number" {...register('rent')} />
+          {errors.rent && (
+            <p className="text-sm text-destructive">{errors.rent.message}</p>
+          )}
+        </div>
+      </Section>
+      <Button type="submit" disabled={isSubmitting} data-cy="submit">
+        {!isSubmitting ? t('Save') : t('Saving')}
+      </Button>
+    </form>
   );
 });
 

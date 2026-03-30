@@ -1,21 +1,24 @@
-import * as Yup from 'yup';
 import {
   createOrganization,
   QueryKeys,
   updateOrganization
 } from '../../utils/restcalls';
-import { Form, Formik } from 'formik';
 import { mergeOrganization, updateStoreOrganization } from './utils';
-import {
-  NumberField,
-  RadioField,
-  RadioFieldGroup,
-  SelectField,
-  SubmitButton,
-  TextField
-} from '@microrealestate/commonui/components';
 import { useCallback, useContext, useMemo } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../ui/select';
 import cc from 'currency-codes';
 import config from '../../config';
 import getSymbolFromCurrency from 'currency-symbol-map';
@@ -24,32 +27,33 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  name: Yup.string().required(),
-  locale: Yup.string().required(),
-  currency: Yup.string().required(),
-  isCompany: Yup.string().required(),
-  legalStructure: Yup.mixed().when('isCompany', {
-    is: 'true',
-    then: Yup.string().required()
-  }),
-  company: Yup.mixed().when('isCompany', {
-    is: 'true',
-    then: Yup.string().required()
-  }),
-  ein: Yup.mixed().when('isCompany', {
-    is: 'true',
-    then: Yup.string().required()
-  }),
-  dos: Yup.mixed().when('isCompany', {
-    is: 'true',
-    then: Yup.string()
-  }),
-  capital: Yup.mixed().when('isCompany', {
-    is: 'true',
-    then: Yup.number().moreThan(0).required()
-  })
+const baseSchema = z.object({
+  name: z.string().min(1),
+  locale: z.string().min(1),
+  currency: z.string().min(1),
+  isCompany: z.string().min(1),
+  legalRepresentative: z.string().optional(),
+  legalStructure: z.string().optional(),
+  company: z.string().optional(),
+  ein: z.string().optional(),
+  dos: z.string().optional(),
+  capital: z.union([z.string(), z.coerce.number()]).optional()
 });
+
+const schema = baseSchema.refine(
+  (data) => {
+    if (data.isCompany === 'true') {
+      return (
+        data.legalStructure?.length > 0 &&
+        data.company?.length > 0 &&
+        data.ein?.length > 0 &&
+        data.capital !== '' && data.capital !== undefined && Number(data.capital) > 0
+      );
+    }
+    return true;
+  },
+  { message: 'Required', path: ['company'] }
+);
 
 const currencies = [
   { id: 'none', label: '', value: '' },
@@ -57,11 +61,7 @@ const currencies = [
     .reduce((acc, { code, currency }) => {
       const symbol = getSymbolFromCurrency(code);
       if (symbol) {
-        acc.push({
-          code,
-          currency,
-          symbol
-        });
+        acc.push({ code, currency, symbol });
       }
       return acc;
     }, [])
@@ -105,7 +105,6 @@ export default function LandlordForm({ organization, firstAccess }) {
   if (mutateCreateOrganization.isError) {
     toast.error(t('Error creating organization'));
   }
-
   if (mutateUpdateOrganization.isError) {
     toast.error(t('Error updating organization'));
   }
@@ -125,6 +124,22 @@ export default function LandlordForm({ organization, firstAccess }) {
     }),
     [organization]
   );
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: initialValues,
+    values: initialValues
+  });
+
+  const isCompany = watch('isCompany');
+  const locale = watch('locale');
+  const currency = watch('currency');
 
   const onSubmit = useCallback(
     async (landlord) => {
@@ -147,9 +162,7 @@ export default function LandlordForm({ organization, firstAccess }) {
         router.push(
           `/${store.organization.selected.name}/dashboard`,
           undefined,
-          {
-            locale: store.organization.selected.locale
-          }
+          { locale: store.organization.selected.locale }
         );
       } else {
         const updatedOrgPart = {
@@ -173,12 +186,9 @@ export default function LandlordForm({ organization, firstAccess }) {
 
         const savedOrganization = await mutateUpdateOrganization.mutateAsync({
           store,
-          organization: mergeOrganization(organization, {
-            ...updatedOrgPart
-          })
+          organization: mergeOrganization(organization, { ...updatedOrgPart })
         });
 
-        // Redirect to the new organization landlord page if the organization name or locale has changed
         const isOrgNameChanged = savedOrganization.name !== initialValues.name;
         const isLocaleChanged =
           savedOrganization.locale !== initialValues.locale;
@@ -203,70 +213,123 @@ export default function LandlordForm({ organization, firstAccess }) {
   );
 
   return (
-    <Formik
-      initialValues={initialValues}
-      validationSchema={validationSchema}
-      onSubmit={onSubmit}
-    >
-      {({ values, isSubmitting }) => {
-        return (
-          <Form autoComplete="off">
-            <TextField label={t('Name')} name="name" />
-            <SelectField
-              label={t('Language')}
-              name="locale"
-              values={languages}
-            />
-            <SelectField
-              label={t('Currency')}
-              name="currency"
-              values={currencies}
-            />
-            <RadioFieldGroup
-              aria-label="organization type"
-              label={t('The organization/landlord belongs to')}
-              name="isCompany"
-            >
-              <RadioField
+    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="name">{t('Name')}</Label>
+          <Input id="name" {...register('name')} />
+          {errors.name && (
+            <p className="text-sm text-destructive">{errors.name.message}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label>{t('Language')}</Label>
+          <Select
+            name="locale"
+            value={locale}
+            onValueChange={(val) => setValue('locale', val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {languages
+                .filter((l) => l.value)
+                .map((l) => (
+                  <SelectItem key={l.id} value={l.value}>
+                    {l.label}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          {errors.locale && (
+            <p className="text-sm text-destructive">{errors.locale.message}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label>{t('Currency')}</Label>
+          <Select
+            name="currency"
+            value={currency}
+            onValueChange={(val) => setValue('currency', val)}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {currencies
+                .filter((c) => c.value)
+                .map((c) => (
+                  <SelectItem key={c.id} value={c.value}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          {errors.currency && (
+            <p className="text-sm text-destructive">{errors.currency.message}</p>
+          )}
+        </div>
+        <div className="space-y-2">
+          <Label>{t('The organization/landlord belongs to')}</Label>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 cursor-pointer" data-cy="companyFalse">
+              <input
+                type="radio"
                 value="false"
-                label={t('A personal account')}
-                data-cy="companyFalse"
+                checked={isCompany === 'false'}
+                onChange={() => setValue('isCompany', 'false')}
+                className="accent-primary"
               />
-              <RadioField
+              {t('A personal account')}
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer" data-cy="companyTrue">
+              <input
+                type="radio"
                 value="true"
-                label={t('A business or an institution')}
-                data-cy="companyTrue"
+                checked={isCompany === 'true'}
+                onChange={() => setValue('isCompany', 'true')}
+                className="accent-primary"
               />
-            </RadioFieldGroup>
-            {values.isCompany === 'true' && (
-              <>
-                <TextField
-                  label={t('Legal representative')}
-                  name="legalRepresentative"
-                />
-                <TextField label={t('Legal structure')} name="legalStructure" />
-                <TextField
-                  label={t('Name of business or institution')}
-                  name="company"
-                />
-                <TextField
-                  label={t('Employer Identification Number')}
-                  name="ein"
-                />
-                <TextField
-                  label={t('Administrative jurisdiction')}
-                  name="dos"
-                />
-                <NumberField label={t('Capital')} name="capital" />
-              </>
-            )}
-            <SubmitButton
-              size="large"
-              label={!isSubmitting ? t('Save') : t('Saving')}
-            />
-          </Form>
-        );
-      }}
-    </Formik>
+              {t('A business or an institution')}
+            </label>
+          </div>
+        </div>
+        {isCompany === 'true' && (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="legalRepresentative">{t('Legal representative')}</Label>
+              <Input id="legalRepresentative" {...register('legalRepresentative')} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="legalStructure">{t('Legal structure')}</Label>
+              <Input id="legalStructure" {...register('legalStructure')} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="company">{t('Name of business or institution')}</Label>
+              <Input id="company" {...register('company')} />
+              {errors.company && (
+                <p className="text-sm text-destructive">{errors.company.message}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ein">{t('Employer Identification Number')}</Label>
+              <Input id="ein" {...register('ein')} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dos">{t('Administrative jurisdiction')}</Label>
+              <Input id="dos" {...register('dos')} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="capital">{t('Capital')}</Label>
+              <Input id="capital" type="number" {...register('capital')} />
+            </div>
+          </>
+        )}
+      </div>
+      <Button type="submit" className="mt-6" disabled={isSubmitting} data-cy="submit">
+        {!isSubmitting ? t('Save') : t('Saving')}
+      </Button>
+    </form>
   );
 }

@@ -1,33 +1,37 @@
-import * as Yup from 'yup';
-import { Form, Formik } from 'formik';
 import React, { useCallback, useContext, useRef, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Switch } from '../ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../ui/select';
 import { contractEndMoment } from '@microrealestate/commonui/utils/contract';
 import moment from 'moment';
 import ResponsiveDialog from '../ResponsiveDialog';
-import { SelectField } from '../formfields/SelectField';
 import { StoreContext } from '../../store';
-import { SwitchField } from '../formfields/SwitchField';
-import { TextField } from '../formfields/TextField';
 import { toast } from 'sonner';
 import { toJS } from 'mobx';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  name: Yup.string().required(),
-  isCopyFrom: Yup.boolean(),
-  copyFrom: Yup.mixed().when('isCopyFrom', {
-    is: true,
-    then: Yup.string().required()
+const schema = z
+  .object({
+    name: z.string().min(1),
+    isCopyFrom: z.boolean(),
+    copyFrom: z.string()
   })
-});
-
-const initialValues = {
-  name: '',
-  copyFrom: '',
-  isCopyFrom: false
-};
+  .refine(
+    (data) => !data.isCopyFrom || data.copyFrom.length > 0,
+    { message: 'Required', path: ['copyFrom'] }
+  );
 
 export default function NewTenantDialog({ open, setOpen }) {
   const { t } = useTranslation('common');
@@ -36,9 +40,24 @@ export default function NewTenantDialog({ open, setOpen }) {
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
 
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: { name: '', copyFrom: '', isCopyFrom: false }
+  });
+
+  const isCopyFrom = watch('isCopyFrom');
+
   const handleClose = useCallback(() => {
     setOpen(false);
-  }, [setOpen]);
+    reset();
+  }, [setOpen, reset]);
 
   const _onSubmit = useCallback(
     async (tenantPart) => {
@@ -67,10 +86,7 @@ export default function NewTenantDialog({ open, setOpen }) {
             store.tenant.items.find(({ _id }) => tenantPart.copyFrom === _id)
           );
 
-          tenant = {
-            ...originalTenant,
-            ...tenant
-          };
+          tenant = { ...originalTenant, ...tenant };
 
           if (originalTenant.lease) {
             const lease = store.lease.items.find(
@@ -99,7 +115,6 @@ export default function NewTenantDialog({ open, setOpen }) {
         }
 
         handleClose();
-
         store.tenant.setSelected(data);
         store.appHistory.setPreviousPath(router.asPath);
         await router.push(
@@ -113,7 +128,6 @@ export default function NewTenantDialog({ open, setOpen }) {
   );
 
   const tenants = store.tenant.items
-    // remove duplicates from tenant list
     .filter((tenant, index, tenants) => {
       return (
         tenants.findIndex(
@@ -121,10 +135,7 @@ export default function NewTenantDialog({ open, setOpen }) {
         ) === index
       );
     })
-    // transform to use it in select field
-    .map(({ _id, name }) => {
-      return { id: _id, label: name, value: _id };
-    });
+    .map(({ _id, name }) => ({ id: _id, label: name, value: _id }));
 
   return (
     <ResponsiveDialog
@@ -133,35 +144,60 @@ export default function NewTenantDialog({ open, setOpen }) {
       isLoading={isLoading}
       renderHeader={() => t('Add a tenant')}
       renderContent={() => (
-        <Formik
-          initialValues={initialValues}
-          validationSchema={validationSchema}
-          onSubmit={_onSubmit}
-          innerRef={formRef}
+        <form
+          ref={formRef}
+          onSubmit={handleSubmit(_onSubmit)}
+          autoComplete="off"
         >
-          {({ values }) => (
-            <Form autoComplete="off">
-              <div className="pt-6 space-y-4">
-                <TextField label={t('Name')} name="name" />
-                {tenants?.length ? (
-                  <>
-                    <SwitchField
-                      name="isCopyFrom"
-                      label={t('Copy from an existing tenant')}
-                      aria-label={t('Copy from an existing tenant')}
-                    />
-                    <SelectField
-                      name="copyFrom"
-                      label={t('Tenant')}
-                      values={tenants}
-                      disabled={!values.isCopyFrom}
-                    />
-                  </>
-                ) : null}
-              </div>
-            </Form>
-          )}
-        </Formik>
+          <div className="pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">{t('Name')}</Label>
+              <Input id="name" {...register('name')} />
+              {errors.name && (
+                <p className="text-sm text-destructive">{errors.name.message}</p>
+              )}
+            </div>
+            {tenants?.length ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="isCopyFrom"
+                    checked={isCopyFrom}
+                    onCheckedChange={(checked) =>
+                      setValue('isCopyFrom', checked)
+                    }
+                  />
+                  <Label htmlFor="isCopyFrom">
+                    {t('Copy from an existing tenant')}
+                  </Label>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('Tenant')}</Label>
+                  <Select
+                    disabled={!isCopyFrom}
+                    onValueChange={(val) => setValue('copyFrom', val)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('Select a tenant')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tenants.map((ten) => (
+                        <SelectItem key={ten.id} value={ten.value}>
+                          {ten.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {errors.copyFrom && (
+                    <p className="text-sm text-destructive">
+                      {errors.copyFrom.message}
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </div>
+        </form>
       )}
       renderFooter={() => (
         <>
@@ -169,7 +205,7 @@ export default function NewTenantDialog({ open, setOpen }) {
             {t('Cancel')}
           </Button>
           <Button
-            onClick={() => formRef.current.submitForm()}
+            onClick={() => formRef.current?.requestSubmit()}
             data-cy="submitTenant"
           >
             {t('Add')}

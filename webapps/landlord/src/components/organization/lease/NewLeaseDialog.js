@@ -1,40 +1,49 @@
-import * as Yup from 'yup';
-import { Form, Formik } from 'formik';
-import React, { useCallback, useContext, useRef, useState } from 'react';
+import React, { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { Button } from '../../ui/button';
+import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
 import ResponsiveDialog from '../../ResponsiveDialog';
 import { StoreContext } from '../../../store';
-import { TextField } from '../../formfields/TextField';
 import { toast } from 'sonner';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  name: Yup.string().required(),
-  stepperMode: Yup.boolean()
+const schema = z.object({
+  name: z.string().min(1)
 });
-
-const initialValues = {
-  name: '',
-  stepperMode: true
-};
 
 export default function NewLeaseDialog({ open, setOpen }) {
   const { t } = useTranslation('common');
-  const formRef = useRef();
   const store = useContext(StoreContext);
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
 
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: { name: '' }
+  });
+
   const handleClose = useCallback(() => {
     setOpen(false);
-  }, [setOpen]);
+    reset();
+  }, [setOpen, reset]);
 
   const _onSubmit = useCallback(
     async (leasePart) => {
       try {
         setIsLoading(true);
-        const { status, data } = await store.lease.create(leasePart);
+        const { status, data } = await store.lease.create({
+          ...leasePart,
+          stepperMode: true
+        });
         if (status !== 200) {
           switch (status) {
             case 422:
@@ -61,6 +70,8 @@ export default function NewLeaseDialog({ open, setOpen }) {
     [store, handleClose, router, t]
   );
 
+  const formRef = useRef();
+
   return (
     <ResponsiveDialog
       open={open}
@@ -68,20 +79,19 @@ export default function NewLeaseDialog({ open, setOpen }) {
       isLoading={isLoading}
       renderHeader={() => t('Create a contract')}
       renderContent={() => (
-        <Formik
-          initialValues={initialValues}
-          validationSchema={validationSchema}
-          onSubmit={_onSubmit}
-          innerRef={formRef}
+        <form
+          ref={formRef}
+          onSubmit={handleSubmit(_onSubmit)}
+          autoComplete="off"
         >
-          {() => {
-            return (
-              <Form autoComplete="off">
-                <TextField label={t('Name')} name="name" />
-              </Form>
-            );
-          }}
-        </Formik>
+          <div className="space-y-2">
+            <Label htmlFor="name">{t('Name')}</Label>
+            <Input id="name" {...register('name')} />
+            {errors.name && (
+              <p className="text-sm text-destructive">{errors.name.message}</p>
+            )}
+          </div>
+        </form>
       )}
       renderFooter={() => (
         <>
@@ -89,7 +99,7 @@ export default function NewLeaseDialog({ open, setOpen }) {
             {t('Cancel')}
           </Button>
           <Button
-            onClick={() => formRef.current.submitForm()}
+            onClick={() => formRef.current?.requestSubmit()}
             data-cy="submitContract"
           >
             {t('Create')}

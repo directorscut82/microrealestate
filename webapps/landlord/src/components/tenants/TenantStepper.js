@@ -7,10 +7,7 @@ import LeaseContractForm, {
 import TenantForm, { validate as TenantFormValidate } from './forms/TenantForm';
 import { useCallback, useContext, useState } from 'react';
 import DocumentsForm from './forms/DocumentsForm';
-import Step from '@material-ui/core/Step';
-import StepContent from '@material-ui/core/StepContent';
-import StepLabel from '@material-ui/core/StepLabel';
-import Stepper from '@material-ui/core/Stepper';
+import { Step, Stepper } from '../Stepper';
 import { StoreContext } from '../../store';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -42,38 +39,26 @@ export default function TenantStepper({ onSubmit }) {
   );
 
   return (
-    <Stepper activeStep={activeStep} orientation="vertical">
-      <Step>
-        <StepLabel>{t('Tenant information')}</StepLabel>
-        <StepContent>
-          <div className="px-2">
-            <TenantForm onSubmit={handleSubmit} />
-          </div>
-        </StepContent>
+    <Stepper activeStep={activeStep}>
+      <Step stepLabel={t('Tenant information')}>
+        <div className="px-2">
+          <TenantForm onSubmit={handleSubmit} />
+        </div>
       </Step>
-      <Step>
-        <StepLabel>{t('Lease')}</StepLabel>
-        <StepContent>
-          <div className="px-2">
-            <LeaseContractForm onSubmit={handleSubmit} />
-          </div>
-        </StepContent>
+      <Step stepLabel={t('Lease')}>
+        <div className="px-2">
+          <LeaseContractForm onSubmit={handleSubmit} />
+        </div>
       </Step>
-      <Step>
-        <StepLabel>{t('Billing information')}</StepLabel>
-        <StepContent>
-          <div className="px-2">
-            <BillingForm onSubmit={handleSubmit} />
-          </div>
-        </StepContent>
+      <Step stepLabel={t('Billing information')}>
+        <div className="px-2">
+          <BillingForm onSubmit={handleSubmit} />
+        </div>
       </Step>
-      <Step>
-        <StepLabel>{t('Documents')}</StepLabel>
-        <StepContent>
-          <div className="px-2">
-            <DocumentsForm onSubmit={handleSubmit} />
-          </div>
-        </StepContent>
+      <Step stepLabel={t('Documents')}>
+        <div className="px-2">
+          <DocumentsForm onSubmit={handleSubmit} />
+        </div>
       </Step>
     </Stepper>
   );

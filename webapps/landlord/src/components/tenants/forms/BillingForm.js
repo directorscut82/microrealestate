@@ -1,39 +1,32 @@
-import * as Yup from 'yup';
-
-import { Form, Formik } from 'formik';
-import {
-  NumberField,
-  SubmitButton,
-  TextField
-} from '@microrealestate/commonui/components';
 import { useContext, useMemo } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Button } from '../../ui/button';
+import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
+import { Separator } from '../../ui/separator';
+import { Switch } from '../../ui/switch';
 import { observer } from 'mobx-react-lite';
-import { Section } from '../../formfields/Section';
 import { StoreContext } from '../../../store';
-import { SwitchField } from '../../formfields/SwitchField';
 import useTranslation from 'next-translate/useTranslation';
 
-const validationSchema = Yup.object().shape({
-  reference: Yup.string().required(),
-  isVat: Yup.boolean().required(),
-  vatRatio: Yup.mixed().when('isVat', {
-    is: true,
-    then: Yup.number().moreThan(0).max(100)
-  }),
-  discount: Yup.number().min(0)
+const schema = z.object({
+  reference: z.string().min(1),
+  isVat: z.boolean(),
+  vatRatio: z.coerce.number().min(0).max(100).optional(),
+  discount: z.coerce.number().min(0).optional()
 });
 
-const initValues = (tenant) => {
-  return {
-    reference: tenant?.reference || '',
-    isVat: !!tenant?.isVat,
-    vatRatio: tenant?.vatRatio * 100 || 0,
-    discount: tenant?.discount || 0
-  };
-};
+const initValues = (tenant) => ({
+  reference: tenant?.reference || '',
+  isVat: !!tenant?.isVat,
+  vatRatio: tenant?.vatRatio * 100 || 0,
+  discount: tenant?.discount || 0
+});
 
 export const validate = (tenant) => {
-  return validationSchema.validate(initValues(tenant));
+  return schema.parseAsync(initValues(tenant));
 };
 
 const Billing = observer(({ readOnly, onSubmit }) => {
@@ -45,6 +38,21 @@ const Billing = observer(({ readOnly, onSubmit }) => {
     [store.tenant?.selected]
   );
 
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting }
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: initialValues
+  });
+
+  const isVat = watch('isVat');
+  const discount = watch('discount');
+  const stepperMode = store.tenant.selected.stepperMode;
+
   const _onSubmit = async (billing) => {
     await onSubmit({
       reference: billing.reference,
@@ -55,58 +63,65 @@ const Billing = observer(({ readOnly, onSubmit }) => {
   };
 
   return (
-    <Formik
-      initialValues={initialValues}
-      validationSchema={validationSchema}
-      onSubmit={_onSubmit}
-    >
-      {({ isSubmitting, values }) => {
-        return (
-          <Form autoComplete="off">
-            <Section
-              label={t('Billing information')}
-              visible={!store.tenant.selected.stepperMode}
-              className="space-y-6"
-            >
-              <TextField
-                label={t('Tenant reference')}
-                name="reference"
+    <form onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
+      {!stepperMode && (
+        <div className="pb-4">
+          <div className="text-xl">{t('Billing information')}</div>
+          <Separator className="mt-1 mb-2" />
+        </div>
+      )}
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Label htmlFor="reference">{t('Tenant reference')}</Label>
+          <Input
+            id="reference"
+            disabled={readOnly}
+            {...register('reference')}
+          />
+          {errors.reference && (
+            <p className="text-sm text-destructive">{errors.reference.message}</p>
+          )}
+        </div>
+        {store.organization.selected?.isCompany && (
+          <>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="isVat"
+                checked={isVat}
                 disabled={readOnly}
+                onCheckedChange={(checked) => setValue('isVat', checked)}
               />
-              {store.organization.selected &&
-                store.organization.selected.isCompany && (
-                  <>
-                    <SwitchField
-                      name="isVat"
-                      label={t('Subject to VAT')}
-                      aria-label={t('Subject to VAT')}
-                      disabled={readOnly}
-                    />
-                    <NumberField
-                      label={t('VAT percentage')}
-                      name="vatRatio"
-                      disabled={readOnly || !values.isVat}
-                    />
-                  </>
-                )}
-              {values.discount > 0 ? (
-                <NumberField
-                  label={t('Discount')}
-                  name="discount"
-                  disabled={readOnly}
-                />
-              ) : null}
-            </Section>
-            {!readOnly && (
-              <SubmitButton
-                size="large"
-                label={!isSubmitting ? t('Save') : t('Saving')}
+              <Label htmlFor="isVat">{t('Subject to VAT')}</Label>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="vatRatio">{t('VAT percentage')}</Label>
+              <Input
+                id="vatRatio"
+                type="number"
+                disabled={readOnly || !isVat}
+                {...register('vatRatio')}
               />
-            )}
-          </Form>
-        );
-      }}
-    </Formik>
+            </div>
+          </>
+        )}
+        {discount > 0 ? (
+          <div className="space-y-2">
+            <Label htmlFor="discount">{t('Discount')}</Label>
+            <Input
+              id="discount"
+              type="number"
+              disabled={readOnly}
+              {...register('discount')}
+            />
+          </div>
+        ) : null}
+      </div>
+      {!readOnly && (
+        <Button type="submit" className="mt-6" disabled={isSubmitting} data-cy="submit">
+          {!isSubmitting ? t('Save') : t('Saving')}
+        </Button>
+      )}
+    </form>
   );
 });
 

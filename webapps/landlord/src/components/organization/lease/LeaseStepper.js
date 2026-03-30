@@ -1,9 +1,6 @@
 import LeaseForm, { validate as LeaseFormValidate } from './LeaseForm';
 import { useCallback, useContext, useState } from 'react';
-import Step from '@material-ui/core/Step';
-import StepContent from '@material-ui/core/StepContent';
-import StepLabel from '@material-ui/core/StepLabel';
-import Stepper from '@material-ui/core/Stepper';
+import { Step, Stepper } from '../../Stepper';
 import { StoreContext } from '../../../store';
 import TemplateForm from './TemplateForm';
 import useTranslation from 'next-translate/useTranslation';
@@ -35,22 +32,16 @@ export default function LeaseStepper({ onSubmit }) {
   );
 
   return (
-    <Stepper activeStep={activeStep} orientation="vertical">
-      <Step>
-        <StepLabel>{t('Contract information')}</StepLabel>
-        <StepContent>
-          <div className="px-2">
-            <LeaseForm onSubmit={handleSubmit} />
-          </div>
-        </StepContent>
+    <Stepper activeStep={activeStep}>
+      <Step stepLabel={t('Contract information')}>
+        <div className="px-2">
+          <LeaseForm onSubmit={handleSubmit} />
+        </div>
       </Step>
-      <Step>
-        <StepLabel>{t('Template documents')}</StepLabel>
-        <StepContent>
-          <div className="px-2">
-            <TemplateForm onSubmit={handleSubmit} />
-          </div>
-        </StepContent>
+      <Step stepLabel={t('Template documents')}>
+        <div className="px-2">
+          <TemplateForm onSubmit={handleSubmit} />
+        </div>
       </Step>
     </Stepper>
   );

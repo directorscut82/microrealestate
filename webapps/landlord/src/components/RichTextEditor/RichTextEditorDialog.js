@@ -1,18 +1,14 @@
-import { Dialog } from '@material-ui/core';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle
+} from '../ui/dialog';
 import dynamic from 'next/dynamic';
 import { useCallback } from 'react';
-import { withStyles } from '@material-ui/core/styles';
 
 const RichTextEditor = dynamic(import('./RichTextEditor'), {
   ssr: false
 });
-
-const StyledDialog = withStyles((theme) => ({
-  paperFullScreen: {
-    backgroundColor: theme.palette.background.default,
-    overflow: 'hidden'
-  }
-}))(Dialog);
 
 export default function RichTextEditorDialog({
   open,
@@ -28,21 +24,23 @@ export default function RichTextEditorDialog({
   }, [setOpen]);
 
   return (
-    <StyledDialog
-      fullScreen
-      disableEscapeKeyDown
-      open={!!open}
-      aria-labelledby="form-dialog-title"
-    >
-      <RichTextEditor
-        title={title}
-        fields={fields}
-        onLoad={onLoad}
-        onSave={onSave}
-        onClose={handleClose}
-        showPrintButton
-        editable={editable}
-      />
-    </StyledDialog>
+    <Dialog open={!!open} onOpenChange={setOpen}>
+      <DialogContent
+        className="max-w-full h-full p-0 border-0 rounded-none"
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <DialogTitle className="hidden">{title}</DialogTitle>
+        <RichTextEditor
+          title={title}
+          fields={fields}
+          onLoad={onLoad}
+          onSave={onSave}
+          onClose={handleClose}
+          showPrintButton
+          editable={editable}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
