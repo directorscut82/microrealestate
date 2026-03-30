@@ -3,14 +3,18 @@ inclusion: always
 ---
 # MRE — UI Migration Tracker
 
-Last updated: 2026-03-30 13:30
+Last updated: 2026-03-30 13:50
 
 ## Goal
 Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlord app per `frontend-patterns.md`. Replace with shadcn/ui+Tailwind, react-hook-form+zod, and React Query.
 
 ## Status Summary
-- **MUI removal:** 7/8 component files migrated. Only `Application.js` (MuiPickersUtilsProvider) remains — blocked until DateField forms are migrated.
-- **Form migration:** 19/22 forms migrated from Formik+Yup to react-hook-form+zod.
+- **MUI removal:** ✅ COMPLETE — zero @material-ui imports remain
+- **Form migration:** ✅ COMPLETE — all 22 forms migrated from Formik+Yup to react-hook-form+zod
+- **Dependency cleanup:** ✅ COMPLETE — formik, yup, @material-ui/*, @date-io/*, material-ui-formik-components removed
+- **formfields/ directory:** ✅ DELETED — 10 legacy Formik wrapper files removed
+- **E2E tests:** 0/100 written — NEXT TASK
+- **MobX→React Query:** Not started (Phase 2, after E2E validation)
 - **E2E tests:** 0/100 written.
 - **MobX→React Query:** Not started (Phase 2, after forms).
 
