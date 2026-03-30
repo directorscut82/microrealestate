@@ -3,14 +3,14 @@ inclusion: always
 ---
 # MRE — UI Migration Tracker
 
-Last updated: 2026-03-30 13:04
+Last updated: 2026-03-30 13:30
 
 ## Goal
 Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlord app per `frontend-patterns.md`. Replace with shadcn/ui+Tailwind, react-hook-form+zod, and React Query.
 
 ## Status Summary
 - **MUI removal:** 7/8 component files migrated. Only `Application.js` (MuiPickersUtilsProvider) remains — blocked until DateField forms are migrated.
-- **Form migration:** 13/22 forms migrated from Formik+Yup to react-hook-form+zod.
+- **Form migration:** 19/22 forms migrated from Formik+Yup to react-hook-form+zod.
 - **E2E tests:** 0/100 written.
 - **MobX→React Query:** Not started (Phase 2, after forms).
 
@@ -89,21 +89,21 @@ const formRef = useRef();
 | C8 | PropertyForm.js | name, type, description, surface, phone, digicode, address, rent | ✅ |
 | C9 | UploadDialog.js | file upload | ❌ TODO |
 | C10 | LandlordForm.js | org settings (already uses React Query mutations) | ✅ |
-| C11 | BillingForm.js (org) | billing settings (already uses React Query mutations) | ❌ TODO |
+| C11 | BillingForm.js (org) | billing settings (already uses React Query mutations) | ✅ |
 | C13 | MemberFormDialog.js | member management | ✅ |
-| C14 | ApplicationFormDialog.js | API credentials | ❌ TODO |
+| C14 | ApplicationFormDialog.js | API credentials | ✅ |
 | C15 | LeaseForm.js | lease settings | ✅ |
 | C16 | FileDescriptorDialog.js | file descriptor in lease | ✅ |
 | C20 | BillingForm.js (tenant) | VAT toggle, billing | ✅ |
-| C21 | TerminateLeaseDialog.js | termination date | ❌ TODO |
+| C21 | TerminateLeaseDialog.js | termination date | ✅ |
 | C22 | firstaccess.js | delegates to LandlordForm | ❌ TODO (done when C10 done) |
 
 ### Complex forms
 | # | File | Fields | Status |
 |---|------|--------|--------|
-| C12 | ThirdPartiesForm.js | ~400 lines, third-party configs | ❌ TODO |
+| C12 | ThirdPartiesForm.js | ~400 lines, third-party configs | ✅ |
 | C17 | PaymentTabs.js | multi-tab payment form | ❌ TODO |
-| C18 | TenantForm.js | contacts array | ❌ TODO |
+| C18 | TenantForm.js | contacts array | ✅ |
 | C19 | LeaseContractForm.js | ~400 lines, properties array, dates, expenses | ❌ TODO |
 
 ### Cleanup
