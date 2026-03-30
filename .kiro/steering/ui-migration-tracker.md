@@ -25,8 +25,8 @@ Migration order (simplest → most impactful):
 |---|-------|-------|----------------|--------|
 | 1 | Dashboard | 41 | 4 | ✅ |
 | 2 | Accounting | 60 | 4 | ✅ |
-| 3 | Lease | 91 | 10 | 🔄 IN PROGRESS |
-| 4 | Property | 136 | 6 | ⬜ |
+| 3 | Lease | 91 | 10 | ✅ |
+| 4 | Property | 136 | 6 | 🔄 IN PROGRESS |
 | 5 | Tenant | 162 | 16 | ⬜ |
 | 6 | Rent | 250 | 7 | ⬜ |
 | 7 | Template + Document | 193 | 9 | ⬜ |

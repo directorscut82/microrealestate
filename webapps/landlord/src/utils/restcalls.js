@@ -49,6 +49,25 @@ export async function fetchProperties() {
   return response.data;
 }
 
+export async function fetchProperty(id) {
+  const response = await apiFetcher().get(`/properties/${id}`);
+  return response.data;
+}
+
+export async function createProperty(property) {
+  const response = await apiFetcher().post('/properties', property);
+  return response.data;
+}
+
+export async function updateProperty(property) {
+  const response = await apiFetcher().patch(`/properties/${property._id}`, property);
+  return response.data;
+}
+
+export async function deleteProperty(ids) {
+  await apiFetcher().delete(`/properties/${ids.join(',')}`);
+}
+
 export async function fetchTenants() {
   const response = await apiFetcher().get('/tenants');
   return response.data;

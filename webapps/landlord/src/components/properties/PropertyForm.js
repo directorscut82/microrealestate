@@ -1,4 +1,4 @@
-import { useContext, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -13,9 +13,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '../ui/select';
-import { observer } from 'mobx-react-lite';
 import PropertyIcon from './PropertyIcon';
-import { StoreContext } from '../../store';
 import types from './types';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -47,19 +45,18 @@ function Section({ label, children }) {
   );
 }
 
-const PropertyForm = observer(({ onSubmit }) => {
+const PropertyForm = ({ property, onSubmit }) => {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
 
   const initialValues = useMemo(
     () => ({
-      type: store.property.selected?.type || '',
-      name: store.property.selected?.name || '',
-      description: store.property.selected?.description || '',
-      surface: store.property.selected?.surface || '',
-      phone: store.property.selected?.phone || '',
-      digicode: store.property.selected?.digicode || '',
-      address: store.property.selected?.address || {
+      type: property?.type || '',
+      name: property?.name || '',
+      description: property?.description || '',
+      surface: property?.surface || '',
+      phone: property?.phone || '',
+      digicode: property?.digicode || '',
+      address: property?.address || {
         street1: '',
         street2: '',
         city: '',
@@ -67,9 +64,9 @@ const PropertyForm = observer(({ onSubmit }) => {
         state: '',
         country: ''
       },
-      rent: store.property.selected?.price || ''
+      rent: property?.price || ''
     }),
-    [store.property.selected]
+    [property]
   );
 
   const {
@@ -199,6 +196,6 @@ const PropertyForm = observer(({ onSubmit }) => {
       </Button>
     </form>
   );
-});
+};
 
 export default PropertyForm;
