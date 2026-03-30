@@ -2,6 +2,7 @@ import { apiFetcher } from '../utils/fetch';
 import moment from 'moment';
 
 export const QueryKeys = {
+  ACCOUNTING: 'accounting',
   DASHBOARD: 'dashboard',
   ORGANIZATIONS: 'organizations',
   PROPERTIES: 'properties',
@@ -12,6 +13,11 @@ export const QueryKeys = {
 
 export async function fetchDashboard() {
   const response = await apiFetcher().get('/dashboard');
+  return response.data;
+}
+
+export async function fetchAccounting(year) {
+  const response = await apiFetcher().get(`/accounting/${year}`);
   return response.data;
 }
 

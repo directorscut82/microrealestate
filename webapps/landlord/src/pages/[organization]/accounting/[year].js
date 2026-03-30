@@ -4,19 +4,19 @@ import {
   TabsList,
   TabsTrigger
 } from '../../../components/ui/tabs';
-import { useCallback, useContext } from 'react';
+import { useCallback, useContext, useMemo, useState } from 'react';
 import { Card } from '../../../components/ui/card';
 import { downloadDocument } from '../../../utils/fetch';
+import { fetchAccounting, QueryKeys } from '../../../utils/restcalls';
 import IncomingTenants from '../../../components/accounting/IncomingTenants';
 import moment from 'moment';
-import { observer } from 'mobx-react-lite';
 import OutgoingTenants from '../../../components/accounting/OutgoingTenants';
 import Page from '../../../components/Page';
 import PeriodPicker from '../../../components/PeriodPicker';
 import SearchFilterBar from '../../../components/SearchFilterBar';
 import { StoreContext } from '../../../store';
 import TenantSettlements from '../../../components/accounting/TenantSettlements';
-import useFillStore from '../../../hooks/useFillStore';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
@@ -51,74 +51,88 @@ function TopBar({ onSearch }) {
   );
 }
 
-async function fetchData(store, router) {
-  return await store.accounting.fetch(router.query.year);
-}
-
 function Accounting() {
   const { t } = useTranslation('common');
   const router = useRouter();
-  const store = useContext(StoreContext);
-  const [fetching] = useFillStore(fetchData, [router]);
+  const year = router.query.year;
+  const [searchText, setSearchText] = useState('');
+
+  const { data: accountingData, isLoading } = useQuery({
+    queryKey: [QueryKeys.ACCOUNTING, year],
+    queryFn: () => fetchAccounting(year),
+    enabled: !!year
+  });
+
+  const filteredData = useMemo(() => {
+    if (!accountingData) return {};
+    if (!searchText) return accountingData;
+    const lc = searchText.toLowerCase();
+    return {
+      ...accountingData,
+      incomingTenants:
+        accountingData.incomingTenants?.filter((t) =>
+          t.name.toLowerCase().includes(lc)
+        ) || [],
+      outgoingTenants:
+        accountingData.outgoingTenants?.filter((t) =>
+          t.name.toLowerCase().includes(lc)
+        ) || [],
+      settlements:
+        accountingData.settlements?.filter((s) =>
+          s.tenant.toLowerCase().includes(lc)
+        ) || []
+    };
+  }, [accountingData, searchText]);
 
   const getSettlementsAsCsv = useCallback(
     async (e) => {
       e.stopPropagation();
       downloadDocument({
-        endpoint: `/csv/settlements/${router.query.year}`,
-        documentName: t('Settlements - {{year}}.csv', {
-          year: router.query.year
-        })
+        endpoint: `/csv/settlements/${year}`,
+        documentName: t('Settlements - {{year}}.csv', { year })
       });
     },
-    [t, router.query.year]
+    [t, year]
   );
 
   const getIncomingTenantsAsCsv = useCallback(
     async (e) => {
       e.stopPropagation();
       downloadDocument({
-        endpoint: `/csv/tenants/incoming/${router.query.year}`,
-        documentName: t('Incoming tenants - {{year}}.csv', {
-          year: router.query.year
-        })
+        endpoint: `/csv/tenants/incoming/${year}`,
+        documentName: t('Incoming tenants - {{year}}.csv', { year })
       });
     },
-    [t, router.query.year]
+    [t, year]
   );
 
   const getOutgoingTenantsAsCsv = useCallback(
     async (e) => {
       e.stopPropagation();
       downloadDocument({
-        endpoint: `/csv/tenants/outgoing/${router.query.year}`,
-        documentName: t('Outgoing tenants - {{year}}.csv', {
-          year: router.query.year
-        })
+        endpoint: `/csv/tenants/outgoing/${year}`,
+        documentName: t('Outgoing tenants - {{year}}.csv', { year })
       });
     },
-    [t, router.query.year]
+    [t, year]
   );
 
   const getYearInvoices = useCallback(
     (tenant) => () => {
       downloadDocument({
-        endpoint: `/documents/invoice/${tenant._id}/${router.query.year}`,
-        documentName: `${tenant.name}-${router.query.year}-${t('invoice')}.pdf`
+        endpoint: `/documents/invoice/${tenant._id}/${year}`,
+        documentName: `${tenant.name}-${year}-${t('invoice')}.pdf`
       });
     },
-    [router.query.year, t]
+    [year, t]
   );
 
-  const handleSearch = useCallback(
-    (_, searchText) => {
-      store.accounting.setSearch(searchText);
-    },
-    [store.accounting]
-  );
+  const handleSearch = useCallback((_, text) => {
+    setSearchText(text);
+  }, []);
 
   return (
-    <Page loading={fetching} dataCy="accountingPage">
+    <Page loading={isLoading} dataCy="accountingPage">
       <Card className="px-4 py-2 mb-6">
         <TopBar onSearch={handleSearch} />
       </Card>
@@ -126,28 +140,32 @@ function Accounting() {
         <TabsList className="flex justify-start w-screen-nomargin-sm md:w-full overflow-x-auto overflow-y-hidden">
           <TabsTrigger value="incoming" className="min-w-48 sm:w-full">{`${t(
             'Incoming tenants'
-          )} (${
-            store.accounting.filteredData.incomingTenants?.length || 0
-          })`}</TabsTrigger>
+          )} (${filteredData.incomingTenants?.length || 0})`}</TabsTrigger>
           <TabsTrigger value="outgoing" className="min-w-48 sm:w-full">{`${t(
             'Outgoing tenants'
-          )} (${
-            store.accounting.filteredData.outgoingTenants?.length || 0
-          })`}</TabsTrigger>
-          <TabsTrigger value="settlements" className="min-w-48 sm:w-full">{`${t(
-            'Settlements'
-          )} (${
-            store.accounting.filteredData.settlements?.length || 0
+          )} (${filteredData.outgoingTenants?.length || 0})`}</TabsTrigger>
+          <TabsTrigger
+            value="settlements"
+            className="min-w-48 sm:w-full"
+          >{`${t('Settlements')} (${
+            filteredData.settlements?.length || 0
           })`}</TabsTrigger>
         </TabsList>
         <TabsContent value="incoming">
-          <IncomingTenants onCSVClick={getIncomingTenantsAsCsv} />
+          <IncomingTenants
+            data={filteredData.incomingTenants}
+            onCSVClick={getIncomingTenantsAsCsv}
+          />
         </TabsContent>
         <TabsContent value="outgoing">
-          <OutgoingTenants onCSVClick={getOutgoingTenantsAsCsv} />
+          <OutgoingTenants
+            data={filteredData.outgoingTenants}
+            onCSVClick={getOutgoingTenantsAsCsv}
+          />
         </TabsContent>
         <TabsContent value="settlements">
           <TenantSettlements
+            data={filteredData.settlements}
             onCSVClick={getSettlementsAsCsv}
             onDownloadYearInvoices={getYearInvoices}
           />
@@ -157,4 +175,4 @@ function Accounting() {
   );
 }
 
-export default withAuthentication(observer(Accounting));
+export default withAuthentication(Accounting);

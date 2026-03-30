@@ -6,14 +6,11 @@ import { GrDocumentCsv } from 'react-icons/gr';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import PropertyIcon from '../properties/PropertyIcon';
-import { StoreContext } from '../../store';
-import { useContext } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function OutgoingTenants({ onCSVClick }) {
+export default function OutgoingTenants({ data, onCSVClick }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
-  const hasData = !!store.accounting?.filteredData?.outgoingTenants?.length;
+  const hasData = !!data?.length;
 
   return hasData ? (
     <Card>
@@ -26,7 +23,7 @@ export default function OutgoingTenants({ onCSVClick }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {store.accounting.filteredData.outgoingTenants.map((tenant) => (
+        {data.map((tenant) => (
           <div
             key={tenant._id}
             className={cn(
@@ -57,25 +54,19 @@ export default function OutgoingTenants({ onCSVClick }) {
                 <div className="text-muted-foreground text-xs">
                   {t('Deposit')}
                 </div>
-                <div>
-                  <NumberFormat value={tenant.guaranty} />
-                </div>
+                <NumberFormat value={tenant.guaranty} />
               </div>
               <div>
                 <div className="text-muted-foreground text-xs">
                   {t('Deposit reimbursement')}
                 </div>
-                <div>
-                  <NumberFormat value={tenant.guarantyPayback} />
-                </div>
+                <NumberFormat value={tenant.guarantyPayback} />
               </div>
               <div>
                 <div className="text-muted-foreground text-xs">
                   {t('Last rent balance')}
                 </div>
-                <div>
-                  <NumberFormat value={tenant.balance} />
-                </div>
+                <NumberFormat value={tenant.balance} />
               </div>
             </div>
             <div>

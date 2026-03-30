@@ -6,8 +6,6 @@ import { GrDocumentCsv } from 'react-icons/gr';
 import { LuPaperclip } from 'react-icons/lu';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
-import { StoreContext } from '../../store';
-import { useContext } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
 const months = moment.localeData().months();
@@ -49,12 +47,12 @@ function SettlementList({ month, tenantId, settlements }) {
 }
 
 export default function TenantSettlements({
+  data,
   onCSVClick,
   onDownloadYearInvoices
 }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
-  const hasData = !!store.accounting?.filteredData?.settlements?.length;
+  const hasData = !!data?.length;
   return hasData ? (
     <Card>
       <CardHeader>
@@ -66,7 +64,7 @@ export default function TenantSettlements({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {store.accounting.filteredData.settlements.map((settlement) => (
+        {data.map((settlement) => (
           <div
             key={settlement.tenantId}
             className="border-b first:border-t last:border-none py-4"

@@ -6,14 +6,11 @@ import { GrDocumentCsv } from 'react-icons/gr';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import PropertyIcon from '../properties/PropertyIcon';
-import { StoreContext } from '../../store';
-import { useContext } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function IncomingTenants({ onCSVClick }) {
+export default function IncomingTenants({ data, onCSVClick }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
-  const hasData = !!store.accounting?.filteredData?.incomingTenants?.length;
+  const hasData = !!data?.length;
 
   return hasData ? (
     <Card>
@@ -26,7 +23,7 @@ export default function IncomingTenants({ onCSVClick }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
-        {store.accounting.filteredData.incomingTenants.map((tenant) => (
+        {data.map((tenant) => (
           <div
             key={tenant._id}
             className={cn(
