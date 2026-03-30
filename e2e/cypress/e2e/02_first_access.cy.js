@@ -55,9 +55,10 @@ describe('First Access & Organization Setup', () => {
 
   // Test 15
   it('Name field is required', () => {
+    const t = i18n.getFixedT('en');
     cy.get('[data-cy=companyFalse]').click();
-    cy.selectByName('locale', 'en');
-    cy.selectByName('currency', 'EUR');
+    cy.selectByLabel(t('Language'), 'English');
+    cy.selectByLabel(t('Currency'), 'Euro');
     cy.get('[data-cy=submit]').click();
     cy.get('.text-destructive').should('exist');
   });

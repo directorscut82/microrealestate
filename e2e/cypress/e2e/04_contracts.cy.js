@@ -17,15 +17,15 @@ describe('Contract/Lease Management', () => {
     cy.get('[data-cy=shortcutCreateContract]').click();
     cy.get('input[name=name]').type(contract369.name);
     cy.get('[data-cy=submitContract]').click();
-    cy.contains(contract369.name);
+    cy.get('input[name=name]').should('have.value', contract369.name);
   });
 
   // Test 30
   it('Set contract description, timeRange, numberOfTerms', () => {
-    cy.get('textarea[name=description]').type(contract369.description);
-    cy.selectByLabel('timeRange', t(contract369.timeRange));
-    cy.get('input[name=numberOfTerms]').type(contract369.numberOfTerms);
-    cy.get('[data-cy=submit]').click();
+    cy.get('textarea[name=description]').first().type(contract369.description);
+    cy.selectByLabel(t('Schedule type'), t(contract369.timeRange));
+    cy.get('input[name=numberOfTerms]').first().type(contract369.numberOfTerms);
+    cy.get('[data-cy=submit]').first().click();
   });
 
   // Test 31
@@ -47,7 +47,7 @@ describe('Contract/Lease Management', () => {
       cy.get('input[name=name]').type(fileTemplate.title);
       cy.get('input[name=description]').type(fileTemplate.description);
       if (fileTemplate.hasExpiryDate) {
-        cy.get('div:has(>input[name=hasExpiryDate]) > button, #hasExpiryDate').first().click();
+        cy.get('#hasExpiryDate').click();
       }
       if (fileTemplate.required) {
         cy.get('[data-cy=fileRequired]').click();
@@ -58,7 +58,7 @@ describe('Contract/Lease Management', () => {
 
   // Test 33
   it('Complete contract stepper', () => {
-    cy.get('[data-cy=submit]').click();
+    cy.get('[data-cy=submit]').first().click();
   });
 
   // Test 34
@@ -77,8 +77,8 @@ describe('Contract/Lease Management', () => {
 
   // Test 36
   it('Contract info shows correct values', () => {
-    cy.get('textarea[name=description]').should('have.text', contract369.description);
-    cy.get('input[name=numberOfTerms]').should('have.value', contract369.numberOfTerms);
+    cy.get('textarea[name=description]').should('have.value', contract369.description);
+    cy.get('input[name=numberOfTerms]').should('have.value', String(contract369.numberOfTerms));
   });
 
   // Test 37

@@ -18,6 +18,12 @@ describe('Tenant Management', () => {
 
   const t = i18n.getFixedT('fr-FR');
 
+  // Convert DD/MM/YYYY to YYYY-MM-DD for date inputs
+  const toISODate = (d) => {
+    const [day, month, year] = d.split('/');
+    return `${year}-${month}-${day}`;
+  };
+
   // Test 51
   it('Add tenant from stepper - name field', () => {
     cy.get('[data-cy=shortcutAddTenant]').click();
@@ -65,20 +71,20 @@ describe('Tenant Management', () => {
 
   // Test 56
   it('Save tenant info step', () => {
-    cy.get('[data-cy=submit]').click();
+    cy.get('[data-cy=submit]').first().click();
   });
 
   // Test 57
   it('Set lease contract for tenant', () => {
     if (tenants[0].lease) {
-      cy.selectByLabel('leaseId', tenants[0].lease.contract);
+      cy.selectByLabel(t('Lease'), tenants[0].lease.contract);
     }
   });
 
   // Test 58
   it('Set lease begin date', () => {
     if (tenants[0].lease) {
-      cy.get('input[name=beginDate]').clear().type(tenants[0].lease.beginDate);
+      cy.get('input[name=beginDate]').clear().type(toISODate(tenants[0].lease.beginDate));
     }
   });
 
@@ -86,7 +92,7 @@ describe('Tenant Management', () => {
   it('Set property for tenant lease', () => {
     if (tenants[0].lease?.properties?.length) {
       const prop = tenants[0].lease.properties[0];
-      cy.selectByLabel('properties[0]._id', prop.name);
+      cy.selectByLabel(t('Property'), prop.name);
     }
   });
 
@@ -103,14 +109,14 @@ describe('Tenant Management', () => {
   it('Set property entry/exit dates', () => {
     if (tenants[0].lease?.properties?.length) {
       const prop = tenants[0].lease.properties[0];
-      cy.get('input[name="properties.0.entryDate"]').clear().type(prop.entryDate);
-      cy.get('input[name="properties.0.exitDate"]').clear().type(prop.exitDate);
+      cy.get('input[name="properties.0.entryDate"]').clear().type(toISODate(prop.entryDate));
+      cy.get('input[name="properties.0.exitDate"]').clear().type(toISODate(prop.exitDate));
     }
   });
 
   // Test 62
   it('Save lease step', () => {
-    cy.get('[data-cy=submit]').click();
+    cy.get('[data-cy=submit]').first().click();
   });
 
   // Test 63
@@ -123,12 +129,12 @@ describe('Tenant Management', () => {
 
   // Test 64
   it('Save billing step', () => {
-    cy.get('[data-cy=submit]').click();
+    cy.get('[data-cy=submit]').first().click();
   });
 
   // Test 65
   it('Save documents step (complete stepper)', () => {
-    cy.get('[data-cy=submit]').click();
+    cy.get('[data-cy=submit]').first().click();
   });
 
   // Test 66

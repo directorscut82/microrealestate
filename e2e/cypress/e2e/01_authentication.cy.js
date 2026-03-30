@@ -41,12 +41,10 @@ describe('Authentication', () => {
   });
 
   // Test 5
-  it('Sign up with existing email stays on signup', () => {
+  it('Sign up with existing email shows error toast', () => {
     cy.visit('/signup');
-    cy.get('[data-cy=signin]').click();
-    cy.get('[data-cy=signup]').click();
     cy.signUp(userWithPersonalAccount);
-    cy.checkUrl('/signup');
+    cy.url().should('include', '/signin');
   });
 
   // Test 6

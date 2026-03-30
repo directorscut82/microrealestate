@@ -22,7 +22,7 @@ describe('Property Management', () => {
 
   // Test 40
   it('Set property type via select', () => {
-    cy.selectByLabel('type', t(properties[0].type.replace(/^./, properties[0].type[0].toUpperCase())));
+    cy.selectByLabel(t('Property Type'), t(properties[0].type.replace(/^./, properties[0].type[0].toUpperCase())));
   });
 
   // Test 41

@@ -30,6 +30,7 @@ module.exports = defineConfig({
     GATEWAY_BASEURL
   },
   e2e: {
+    testIsolation: false,
     baseUrl:
       process.env.LANDLORD_APP_URL ||
       env.LANDLORD_APP_URL ||

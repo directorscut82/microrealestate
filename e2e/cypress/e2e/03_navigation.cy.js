@@ -58,42 +58,42 @@ describe('Navigation', () => {
   // Test 22
   it('Navigate to Landlord settings via org menu', () => {
     cy.navOrgMenu('landlord');
-    cy.checkUrl('/landlord');
+    cy.checkUrl('/settings/landlord');
     cy.contains(t('Landlord'));
   });
 
   // Test 23
   it('Navigate to Billing settings via org menu', () => {
     cy.navOrgMenu('billing');
-    cy.checkUrl('/billing');
+    cy.checkUrl('/settings/billing');
     cy.contains(t('Billing'));
   });
 
   // Test 24
   it('Navigate to Contracts settings via org menu', () => {
     cy.navOrgMenu('contracts');
-    cy.checkUrl('/contracts');
+    cy.checkUrl('/settings/contracts');
     cy.contains(t('Contracts'));
   });
 
   // Test 25
   it('Navigate to Access settings via org menu', () => {
     cy.navOrgMenu('access');
-    cy.checkUrl('/access');
+    cy.checkUrl('/settings/access');
     cy.contains(t('Access'));
   });
 
   // Test 26
   it('Navigate to Third-parties settings via org menu', () => {
     cy.navOrgMenu('thirdparties');
-    cy.checkUrl('/thirdparties');
+    cy.checkUrl('/settings/thirdparties');
     cy.contains(t('Third-parties'));
   });
 
   // Test 27
   it('Navigate to Organizations via org menu', () => {
     cy.navOrgMenu('organizations');
-    cy.checkUrl('/organizations');
+    cy.checkUrl('/settings/organizations');
     cy.contains(t('Organizations'));
   });
 
