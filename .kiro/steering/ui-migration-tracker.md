@@ -3,7 +3,7 @@ inclusion: always
 ---
 # MRE — UI Migration Tracker
 
-Last updated: 2026-03-30 20:55
+Last updated: 2026-03-30 21:50
 
 ## Goal
 Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlord app per `frontend-patterns.md`. Replace with shadcn/ui+Tailwind, react-hook-form+zod, and React Query.
@@ -26,8 +26,8 @@ Migration order (simplest → most impactful):
 | 1 | Dashboard | 41 | 4 | ✅ |
 | 2 | Accounting | 60 | 4 | ✅ |
 | 3 | Lease | 91 | 10 | ✅ |
-| 4 | Property | 136 | 6 | 🔄 IN PROGRESS |
-| 5 | Tenant | 162 | 16 | ⬜ |
+| 4 | Property | 136 | 6 | ✅ |
+| 5 | Tenant | 162 | 16 | 🔄 IN PROGRESS |
 | 6 | Rent | 250 | 7 | ⬜ |
 | 7 | Template + Document | 193 | 9 | ⬜ |
 | 8 | Organization + User | 254 | 55 | ⬜ |
