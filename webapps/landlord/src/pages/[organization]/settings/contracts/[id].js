@@ -1,58 +1,69 @@
 import { LuArrowLeft, LuTrash } from 'react-icons/lu';
 import { useCallback, useContext, useState } from 'react';
+import {
+  createLease,
+  deleteLease,
+  fetchLease,
+  fetchLeases,
+  QueryKeys,
+  updateLease
+} from '../../../../utils/restcalls';
 import { ADMIN_ROLE } from '../../../../store/User';
 import { Card } from '../../../../components/ui/card';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
 import LeaseStepper from '../../../../components/organization/lease/LeaseStepper';
 import LeaseTabs from '../../../../components/organization/lease/LeaseTabs';
-import { observer } from 'mobx-react-lite';
 import Page from '../../../../components/Page';
 import router from 'next/router';
 import ShortcutButton from '../../../../components/ShortcutButton';
 import { StoreContext } from '../../../../store';
 import { toast } from 'sonner';
-import useFillStore from '../../../../hooks/useFillStore';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../../components/Authentication';
-
-async function fetchData(store, router) {
-  const results = await Promise.all([
-    store.lease.fetchOne(router.query.id),
-    store.template.fetch(),
-    store.template.fetchFields()
-  ]);
-
-  store.lease.setSelected(
-    store.lease.items.find(({ _id }) => _id === router.query.id)
-  );
-
-  return results;
-}
 
 function Contract() {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
+  const queryClient = useQueryClient();
   const [openRemoveContractDialog, setOpenRemoveContractDialog] =
     useState(false);
-  const [fetching] = useFillStore(fetchData, [router]);
+
+  const leaseId = router.query.id;
+
+  const { data: lease, isLoading: leaseLoading } = useQuery({
+    queryKey: [QueryKeys.LEASES, leaseId],
+    queryFn: () => fetchLease(leaseId),
+    enabled: !!leaseId
+  });
+
+  const { data: leases = [] } = useQuery({
+    queryKey: [QueryKeys.LEASES],
+    queryFn: fetchLeases
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (data) =>
+      data._id ? updateLease(data) : createLease(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
+    }
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (ids) => deleteLease(ids),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
+    }
+  });
 
   const onLeaseAddUpdate = useCallback(
     async (leasePart) => {
-      const lease = {
-        ...store.lease.selected,
-        ...leasePart
-      };
-
-      let status;
-      if (!store.lease.selected._id) {
-        const response = await store.lease.create(lease);
-        status = response.status;
-      } else {
-        const response = await store.lease.update(lease);
-        status = response.status;
-      }
-
-      if (status !== 200) {
+      const data = { ...lease, ...leasePart };
+      try {
+        await saveMutation.mutateAsync(data);
+      } catch (error) {
+        const status = error?.response?.status;
         switch (status) {
           case 422:
             return toast.error(t('Some fields are missing'));
@@ -67,7 +78,7 @@ function Contract() {
         }
       }
     },
-    [store, t]
+    [lease, saveMutation, t]
   );
 
   const handleBack = useCallback(() => {
@@ -75,8 +86,11 @@ function Contract() {
   }, [store.appHistory.previousPath]);
 
   const onLeaseRemove = useCallback(async () => {
-    const { status } = await store.lease.delete([store.lease.selected._id]);
-    if (status !== 200) {
+    try {
+      await removeMutation.mutateAsync([lease._id]);
+      router.push(`/${store.organization.selected.name}/settings/contracts`);
+    } catch (error) {
+      const status = error?.response?.status;
       switch (status) {
         case 422:
           return toast.error(
@@ -88,12 +102,11 @@ function Contract() {
           return toast.error(t('Something went wrong'));
       }
     }
-    router.push(`/${store.organization.selected.name}/settings/contracts`);
-  }, [store, t]);
+  }, [lease, removeMutation, store.organization.selected.name, t]);
 
   return (
     <Page
-      loading={fetching}
+      loading={leaseLoading}
       ActionBar={
         <div className="grid grid-cols-5 gap-1.5 md:gap-4">
           <ShortcutButton
@@ -106,8 +119,7 @@ function Contract() {
             Icon={LuTrash}
             onClick={() => setOpenRemoveContractDialog(true)}
             disabled={
-              store.lease.selected?.usedByTenants ||
-              store.user.role !== ADMIN_ROLE
+              lease?.usedByTenants || store.user.role !== ADMIN_ROLE
             }
             className="col-start-2 col-end-2"
             dataCy="removeResourceButton"
@@ -116,16 +128,24 @@ function Contract() {
       }
       dataCy="contractPage"
     >
-      {store.lease.selected?.stepperMode ? (
+      {lease?.stepperMode ? (
         <Card>
-          <LeaseStepper onSubmit={onLeaseAddUpdate} onRemove={onLeaseRemove} />
+          <LeaseStepper
+            lease={lease}
+            leases={leases}
+            onSubmit={onLeaseAddUpdate}
+          />
         </Card>
       ) : (
-        <LeaseTabs onSubmit={onLeaseAddUpdate} onRemove={onLeaseRemove} />
+        <LeaseTabs
+          lease={lease}
+          leases={leases}
+          onSubmit={onLeaseAddUpdate}
+        />
       )}
       <ConfirmDialog
         title={t('Are you sure to remove this contract?')}
-        subTitle={store.lease.selected?.name}
+        subTitle={lease?.name}
         open={openRemoveContractDialog}
         setOpen={setOpenRemoveContractDialog}
         onConfirm={onLeaseRemove}
@@ -134,4 +154,4 @@ function Contract() {
   );
 }
 
-export default withAuthentication(observer(Contract), ADMIN_ROLE);
+export default withAuthentication(Contract, ADMIN_ROLE);

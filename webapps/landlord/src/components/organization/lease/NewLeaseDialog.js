@@ -5,9 +5,11 @@ import { z } from 'zod';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
+import { createLease, QueryKeys } from '../../../utils/restcalls';
 import ResponsiveDialog from '../../ResponsiveDialog';
 import { StoreContext } from '../../../store';
 import { toast } from 'sonner';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -19,7 +21,13 @@ export default function NewLeaseDialog({ open, setOpen }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
+
+  const createMutation = useMutation({
+    mutationFn: createLease,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] })
+  });
 
   const {
     register,
@@ -40,34 +48,32 @@ export default function NewLeaseDialog({ open, setOpen }) {
     async (leasePart) => {
       try {
         setIsLoading(true);
-        const { status, data } = await store.lease.create({
+        const data = await createMutation.mutateAsync({
           ...leasePart,
           stepperMode: true
         });
-        if (status !== 200) {
-          switch (status) {
-            case 422:
-              return toast.error(t('Contract name is missing'));
-            case 403:
-              return toast.error(t('You are not allowed to create a contract'));
-            case 409:
-              return toast.error(t('The contract already exists'));
-            default:
-              return toast.error(t('Something went wrong'));
-          }
-        }
-
         handleClose();
-        store.lease.setSelected(data);
         store.appHistory.setPreviousPath(router.asPath);
         await router.push(
           `/${store.organization.selected.name}/settings/contracts/${data._id}`
         );
+      } catch (error) {
+        const status = error?.response?.status;
+        switch (status) {
+          case 422:
+            return toast.error(t('Contract name is missing'));
+          case 403:
+            return toast.error(t('You are not allowed to create a contract'));
+          case 409:
+            return toast.error(t('The contract already exists'));
+          default:
+            return toast.error(t('Something went wrong'));
+        }
       } finally {
         setIsLoading(false);
       }
     },
-    [store, handleClose, router, t]
+    [createMutation, handleClose, router, store, t]
   );
 
   const formRef = useRef();

@@ -4,7 +4,7 @@ import LeaseForm from './LeaseForm';
 import TemplateForm from './TemplateForm';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function LeaseTabs({ onSubmit }) {
+export default function LeaseTabs({ lease, leases, onSubmit }) {
   const { t } = useTranslation('common');
   return (
     <Tabs defaultValue="contract">
@@ -26,7 +26,7 @@ export default function LeaseTabs({ onSubmit }) {
       </TabsList>
       <TabsContent value="contract">
         <Card className="p-6">
-          <LeaseForm onSubmit={onSubmit} />
+          <LeaseForm lease={lease} leases={leases} onSubmit={onSubmit} />
         </Card>
       </TabsContent>
       <TabsContent value="documents">

@@ -1,12 +1,10 @@
 import LeaseForm, { validate as LeaseFormValidate } from './LeaseForm';
-import { useCallback, useContext, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Step, Stepper } from '../../Stepper';
-import { StoreContext } from '../../../store';
 import TemplateForm from './TemplateForm';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function LeaseStepper({ onSubmit }) {
-  const store = useContext(StoreContext);
+export default function LeaseStepper({ lease, leases, onSubmit }) {
   const { t } = useTranslation('common');
   const [activeStep, setActiveStep] = useState(0);
 
@@ -15,27 +13,26 @@ export default function LeaseStepper({ onSubmit }) {
       try {
         let isFormsValid = false;
         try {
-          await LeaseFormValidate(store.lease?.selected, store.lease?.items);
+          await LeaseFormValidate(lease, leases);
           isFormsValid = activeStep >= 1;
         } catch (error) {
           console.log(error);
           isFormsValid = false;
         }
         await onSubmit({ ...leasePart, stepperMode: !isFormsValid });
-
         setActiveStep(activeStep + 1);
       } catch (error) {
         // do nothing on error
       }
     },
-    [onSubmit, store.lease?.selected, store.lease?.items, activeStep]
+    [onSubmit, lease, leases, activeStep]
   );
 
   return (
     <Stepper activeStep={activeStep}>
       <Step stepLabel={t('Contract information')}>
         <div className="px-2">
-          <LeaseForm onSubmit={handleSubmit} />
+          <LeaseForm lease={lease} leases={leases} onSubmit={handleSubmit} />
         </div>
       </Step>
       <Step stepLabel={t('Template documents')}>

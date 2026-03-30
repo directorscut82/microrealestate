@@ -13,7 +13,7 @@ Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlor
 - **Form migration:** ✅ COMPLETE — all 22 forms migrated from Formik+Yup to react-hook-form+zod
 - **Dependency cleanup:** ✅ COMPLETE — formik, yup, @material-ui/*, @date-io/*, material-ui-formik-components removed
 - **formfields/ directory:** ✅ DELETED — 10 legacy Formik wrapper files removed
-- **E2E tests:** ✅ COMPLETE — 100/100 passing (9 suites, 2m34s)
+- **E2E tests:** ✅ 100/100 passing (9 suites, 2m34s) — BUT shallow: only happy paths and basic validation. No multi-tenant, payment, edit, termination, error state, or role-based tests. Not indicative of real usage. 50+ deeper tests still needed.
 - **MobX→React Query:** 🔄 IN PROGRESS — migrating stores one by one
 
 ## MobX → React Query Migration Plan
@@ -23,9 +23,9 @@ Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlor
 Migration order (simplest → most impactful):
 | # | Store | Lines | Consumer files | Status |
 |---|-------|-------|----------------|--------|
-| 1 | Dashboard | 41 | 4 | ⬜ |
-| 2 | Accounting | 60 | 4 | ⬜ |
-| 3 | Lease | 91 | 10 | ⬜ |
+| 1 | Dashboard | 41 | 4 | ✅ |
+| 2 | Accounting | 60 | 4 | ✅ |
+| 3 | Lease | 91 | 10 | 🔄 IN PROGRESS |
 | 4 | Property | 136 | 6 | ⬜ |
 | 5 | Tenant | 162 | 16 | ⬜ |
 | 6 | Rent | 250 | 7 | ⬜ |
@@ -33,6 +33,9 @@ Migration order (simplest → most impactful):
 | 8 | Organization + User | 254 | 55 | ⬜ |
 | 9 | AppHistory | 16 | 9 | ⬜ |
 | 10 | Remove MobX deps | — | — | ⬜ |
+
+## Future Tasks
+- **Landlord app → TypeScript:** Migrate all JS files to TS after MobX removal is complete (touching all files anyway)
 
 ## Installed Dependencies
 - `react-hook-form@7.54.2`, `@hookform/resolvers@3.3.2`, `zod@3.24.2` added to landlord package.json

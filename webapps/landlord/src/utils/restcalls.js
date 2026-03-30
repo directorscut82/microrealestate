@@ -75,7 +75,21 @@ export async function fetchLeases() {
   return response.data;
 }
 
-export async function updateLease({ store, lease }) {
-  const response = await store.lease.update(lease);
+export async function fetchLease(id) {
+  const response = await apiFetcher().get(`/leases/${id}`);
   return response.data;
+}
+
+export async function createLease(lease) {
+  const response = await apiFetcher().post('/leases', lease);
+  return response.data;
+}
+
+export async function updateLease(lease) {
+  const response = await apiFetcher().patch(`/leases/${lease._id}`, lease);
+  return response.data;
+}
+
+export async function deleteLease(ids) {
+  await apiFetcher().delete(`/leases/${ids.join(',')}`);
 }

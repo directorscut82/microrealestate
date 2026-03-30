@@ -1,4 +1,4 @@
-import { useContext, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -14,8 +14,6 @@ import {
   SelectTrigger,
   SelectValue
 } from '../../ui/select';
-import { observer } from 'mobx-react-lite';
-import { StoreContext } from '../../../store';
 import useTranslation from 'next-translate/useTranslation';
 
 const timeRanges = ['days', 'weeks', 'months', 'years'];
@@ -31,7 +29,7 @@ function initValues(lease) {
 }
 
 function getSchema(newLease, existingLeases) {
-  const existingNames = existingLeases
+  const existingNames = (existingLeases || [])
     .filter(({ _id }) => newLease?._id !== _id)
     .map(({ name }) => name);
 
@@ -50,19 +48,15 @@ export const validate = (newLease, existingLeases) => {
   return getSchema(newLease, existingLeases).parseAsync(initValues(newLease));
 };
 
-const LeaseForm = ({ onSubmit }) => {
+export default function LeaseForm({ lease, leases, onSubmit }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
 
   const schema = useMemo(
-    () => getSchema(store.lease.selected, store.lease.items),
-    [store.lease.selected, store.lease.items]
+    () => getSchema(lease, leases),
+    [lease, leases]
   );
 
-  const initialValues = useMemo(
-    () => initValues(store.lease.selected),
-    [store.lease.selected]
-  );
+  const initialValues = useMemo(() => initValues(lease), [lease]);
 
   const {
     register,
@@ -75,8 +69,8 @@ const LeaseForm = ({ onSubmit }) => {
     defaultValues: initialValues
   });
 
-  const usedByTenants = store.lease.selected?.usedByTenants;
-  const stepperMode = store.lease.selected?.stepperMode;
+  const usedByTenants = lease?.usedByTenants;
+  const stepperMode = lease?.stepperMode;
   const timeRange = watch('timeRange');
 
   return (
@@ -146,6 +140,4 @@ const LeaseForm = ({ onSubmit }) => {
       </form>
     </>
   );
-};
-
-export default observer(LeaseForm);
+}
