@@ -116,9 +116,9 @@ export default function BillingForm({ organization }) {
         ],
         addresses: [billing.address]
       });
-      await mutateAsync({ store, organization: updatedOrganization });
+      await mutateAsync(updatedOrganization);
     },
-    [mutateAsync, organization, store]
+    [mutateAsync, organization]
   );
 
   return (

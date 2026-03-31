@@ -1,12 +1,12 @@
 import config from '../config';
-import Image from 'next/image';
 import useTranslation from 'next-translate/useTranslation';
 
 function Illustration({ src, label, alt, priority = false }) {
   return (
     <div className="flex flex-col gap-4 items-center w-full h-full">
       <div className="relative w-full h-full">
-        <Image src={src} alt={alt} priority={priority} fill />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt={alt} className="w-full h-full object-contain" />
       </div>
       {!!label && <p className="text-xl text-muted-foreground">{label}</p>}
     </div>

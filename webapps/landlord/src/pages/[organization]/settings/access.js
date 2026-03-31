@@ -25,7 +25,7 @@ function AccessSettings() {
   const store = useContext(StoreContext);
   const { data, isError, isLoading } = useQuery({
     queryKey: [QueryKeys.ORGANIZATIONS],
-    queryFn: () => fetchOrganizations(store)
+    queryFn: () => fetchOrganizations()
   });
   const [openMemberFormDialog, setOpenMemberFormDialog] = useState(false);
   const [selectedOrgForMember, setSelectedOrgForMember] = useState(null);

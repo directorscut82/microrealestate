@@ -1,7 +1,6 @@
 import { useContext, useEffect, useState } from 'react';
 
 import Layout from './Layout';
-import { observer } from 'mobx-react-lite';
 import { StoreContext } from '../store';
 import { useRouter } from 'next/router';
 
@@ -38,4 +37,4 @@ function Application({ children }) {
   );
 }
 
-export default observer(Application);
+export default Application;

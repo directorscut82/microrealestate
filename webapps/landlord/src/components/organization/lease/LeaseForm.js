@@ -66,7 +66,8 @@ export default function LeaseForm({ lease, leases, onSubmit }) {
     formState: { errors, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: initialValues
+    defaultValues: initialValues,
+    values: initialValues
   });
 
   const usedByTenants = lease?.usedByTenants;

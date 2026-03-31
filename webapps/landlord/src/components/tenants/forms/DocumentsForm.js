@@ -1,5 +1,11 @@
 import { Button } from '../../ui/button';
 import { Separator } from '../../ui/separator';
+import { fetchDocuments, fetchTemplates, QueryKeys } from '../../../utils/restcalls';
+import TenantDocumentList from '../TenantDocumentList';
+import UploadFileList from '../UploadFileList';
+import { useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import useTranslation from 'next-translate/useTranslation';
 
 function Section({ label, children }) {
   return (
@@ -10,13 +16,19 @@ function Section({ label, children }) {
     </div>
   );
 }
-import TenantDocumentList from '../TenantDocumentList';
-import UploadFileList from '../UploadFileList';
-import { useCallback } from 'react';
-import useTranslation from 'next-translate/useTranslation';
 
-export default function DocumentsForm({ onSubmit, readOnly }) {
+export default function DocumentsForm({ tenant, onSubmit, readOnly }) {
   const { t } = useTranslation('common');
+
+  const { data: templates = [] } = useQuery({
+    queryKey: [QueryKeys.TEMPLATES],
+    queryFn: fetchTemplates
+  });
+
+  const { data: documents = [] } = useQuery({
+    queryKey: [QueryKeys.DOCUMENTS],
+    queryFn: fetchDocuments
+  });
 
   const handleNext = useCallback(() => {
     onSubmit();
@@ -25,11 +37,11 @@ export default function DocumentsForm({ onSubmit, readOnly }) {
   return (
     <>
       <Section label={t('Uploaded documents')}>
-        <UploadFileList disabled={readOnly} mb={4} />
+        <UploadFileList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} mb={4} />
       </Section>
 
       <Section label={t('Text documents')}>
-        <TenantDocumentList disabled={readOnly} />
+        <TenantDocumentList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} />
       </Section>
 
       {!readOnly && (

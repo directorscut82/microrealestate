@@ -4,9 +4,11 @@ import moment from 'moment';
 export const QueryKeys = {
   ACCOUNTING: 'accounting',
   DASHBOARD: 'dashboard',
+  DOCUMENTS: 'documents',
   ORGANIZATIONS: 'organizations',
   PROPERTIES: 'properties',
   TENANTS: 'tenants',
+  TEMPLATES: 'templates',
   RENTS: 'rents',
   LEASES: 'leases'
 };
@@ -21,18 +23,21 @@ export async function fetchAccounting(year) {
   return response.data;
 }
 
-export async function fetchOrganizations(store) {
-  const response = await store.organization.fetch();
+export async function fetchOrganizations() {
+  const response = await apiFetcher().get('/realms');
   return response.data;
 }
 
-export async function createOrganization({ store, organization }) {
-  const response = await store.organization.create(organization);
+export async function createOrganization(organization) {
+  const response = await apiFetcher().post('/realms', organization);
   return response.data;
 }
 
-export async function updateOrganization({ store, organization }) {
-  const response = await store.organization.update(organization);
+export async function updateOrganization(organization) {
+  const response = await apiFetcher().patch(
+    `/realms/${organization._id}`,
+    organization
+  );
   return response.data;
 }
 
@@ -73,7 +78,26 @@ export async function fetchTenants() {
   return response.data;
 }
 
-export async function fetchRents(store, yearMonth) {
+export async function fetchTenant(id) {
+  const response = await apiFetcher().get(`/tenants/${id}`);
+  return response.data;
+}
+
+export async function createTenant(tenant) {
+  const response = await apiFetcher().post('/tenants', tenant);
+  return response.data;
+}
+
+export async function updateTenant(tenant) {
+  const response = await apiFetcher().patch(`/tenants/${tenant._id}`, tenant);
+  return response.data;
+}
+
+export async function deleteTenant(ids) {
+  await apiFetcher().delete(`/tenants/${ids.join(',')}`);
+}
+
+export async function fetchRents(yearMonth) {
   let period;
   if (yearMonth) {
     period = moment(yearMonth, 'YYYY.MM', true);
@@ -83,9 +107,10 @@ export async function fetchRents(store, yearMonth) {
     period = moment();
   }
 
-  store.rent.setPeriod(period);
+  const year = period.year();
+  const month = period.month() + 1;
 
-  const response = await store.rent.fetch();
+  const response = await apiFetcher().get(`/rents/${year}/${month}`);
   return response.data;
 }
 
@@ -111,4 +136,45 @@ export async function updateLease(lease) {
 
 export async function deleteLease(ids) {
   await apiFetcher().delete(`/leases/${ids.join(',')}`);
+}
+
+export async function sendRentEmails(payload) {
+  await apiFetcher().post('/emails', payload);
+}
+
+export async function payRent({ term, payment }) {
+  const response = await apiFetcher().patch(
+    `/rents/payment/${payment._id}/${term}`,
+    payment
+  );
+  return response.data;
+}
+
+export async function fetchTenantRents(tenantId) {
+  const response = await apiFetcher().get(`/rents/tenant/${tenantId}`);
+  return response.data;
+}
+
+export async function fetchTemplates() {
+  const response = await apiFetcher().get('/templates');
+  return response.data;
+}
+
+export async function createTemplate(template) {
+  const response = await apiFetcher().post('/templates', template);
+  return response.data;
+}
+
+export async function updateTemplate(template) {
+  const response = await apiFetcher().patch('/templates', template);
+  return response.data;
+}
+
+export async function deleteTemplate(ids) {
+  await apiFetcher().delete(`/templates/${ids.join(',')}`);
+}
+
+export async function fetchDocuments() {
+  const response = await apiFetcher().get('/documents');
+  return response.data;
 }

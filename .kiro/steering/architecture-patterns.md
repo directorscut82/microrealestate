@@ -80,11 +80,13 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 ### Landlord App (Pages Router)
 
 - Uses Next.js Pages Router with `src/pages/[organization]/` for org-scoped routes
-- MobX stores in `src/store/` — one store per domain (Rent, Tenant, Property, Lease, etc.)
-- Root `Store` class aggregates all domain stores, hydrated via `getStoreInstance()`
-- `StoreContext` provides the store to components via React Context
-- Server-side data fetching in `getServerSideProps` with store hydration
-- API calls go through `src/utils/restcalls.js` → gateway → backend services
+- `@tanstack/react-query` v5.29 for all server state (data fetching/mutations)
+- API calls via `src/utils/restcalls.js` (plain async functions) wrapped in `useQuery`/`useMutation`
+- Auth/session state in plain class store (`src/store/`): Organization, User, AppHistory (no MobX)
+- `StoreContext` provides auth/org context to components via React Context
+- `getStoreInstance()` singleton used by `fetch.js` interceptor for token refresh
+- All forms use react-hook-form + zod (Formik+Yup fully removed, MUI fully removed)
+- Data flows as props from pages to child components (no global observable state)
 
 ### Tenant App (App Router)
 
@@ -102,7 +104,6 @@ Both apps use shadcn/ui pattern:
 - `src/components/ui/` contains primitive UI components (Button, Dialog, Select, etc.)
 - Tailwind CSS with CSS variables for theming (HSL color system)
 - Radix UI primitives for accessible, unstyled components
-- The landlord app also has legacy Material UI v4 components (being migrated)
 
 ## Docker Build Pattern
 

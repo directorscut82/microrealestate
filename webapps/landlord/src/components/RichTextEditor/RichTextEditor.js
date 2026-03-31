@@ -13,7 +13,6 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableRow from '@tiptap/extension-table-row';
 import TemplateNode from './TemplateNode';
 import TextAlign from '@tiptap/extension-text-align';
-import { toJS } from 'mobx';
 import Underline from '@tiptap/extension-underline';
 import useTimeout from '../../hooks/useTimeout';
 import useTranslation from 'next-translate/useTranslation';
@@ -73,7 +72,7 @@ const RichTextEditor = ({
       }
       const data = await onLoad();
       if (data) {
-        editor.commands.setContent(toJS(data));
+        editor.commands.setContent(data);
       }
       handlePageBreaks(editor);
     })();

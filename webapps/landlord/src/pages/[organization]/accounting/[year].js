@@ -4,7 +4,7 @@ import {
   TabsList,
   TabsTrigger
 } from '../../../components/ui/tabs';
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Card } from '../../../components/ui/card';
 import { downloadDocument } from '../../../utils/fetch';
 import { fetchAccounting, QueryKeys } from '../../../utils/restcalls';
@@ -14,7 +14,6 @@ import OutgoingTenants from '../../../components/accounting/OutgoingTenants';
 import Page from '../../../components/Page';
 import PeriodPicker from '../../../components/PeriodPicker';
 import SearchFilterBar from '../../../components/SearchFilterBar';
-import { StoreContext } from '../../../store';
 import TenantSettlements from '../../../components/accounting/TenantSettlements';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -22,19 +21,18 @@ import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
 function TopBar({ onSearch }) {
-  const store = useContext(StoreContext);
   const router = useRouter();
   const year = router.query.year || moment().year();
 
   const onChange = useCallback(
     async (period) => {
       await router.push(
-        `/${store.organization.selected.name}/accounting/${period.format(
+        `/${router.query.organization}/accounting/${period.format(
           'YYYY'
         )}`
       );
     },
-    [router, store.organization.selected.name]
+    [router]
   );
 
   return (

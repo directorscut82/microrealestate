@@ -2,11 +2,8 @@ import { createContext, useEffect, useState } from 'react';
 import { isClient, isServer } from '@microrealestate/commonui/utils';
 
 import config from '../config';
-import { enableStaticRendering } from 'mobx-react-lite';
 import { setOrganizationId } from '../utils/fetch';
 import Store from './Store';
-
-enableStaticRendering(isServer());
 
 let _store;
 
@@ -56,7 +53,6 @@ export async function setupOrganizationsInStore(selectedOrgName) {
   }
 
   await _store.organization.fetch();
-  // Select the organization if set in the url otherwise take the firstone in the list
   if (_store.organization.items.length && !_store.organization.selected) {
     let selectedOrganization;
     if (selectedOrgName) {

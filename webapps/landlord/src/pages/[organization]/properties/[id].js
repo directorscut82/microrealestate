@@ -5,7 +5,7 @@ import {
   TabsList,
   TabsTrigger
 } from '../../../components/ui/tabs';
-import { useCallback, useContext, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   createProperty,
   deleteProperty,
@@ -22,7 +22,6 @@ import NumberFormat from '../../../components/NumberFormat';
 import Page from '../../../components/Page';
 import PropertyForm from '../../../components/properties/PropertyForm';
 import ShortcutButton from '../../../components/ShortcutButton';
-import { StoreContext } from '../../../store';
 import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -82,7 +81,6 @@ function OccupancyHistoryCard({ property }) {
 
 function Property() {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [openConfirmDeletePropertyDialog, setOpenConfirmDeletePropertyDialog] =
@@ -112,13 +110,13 @@ function Property() {
   });
 
   const handleBack = useCallback(() => {
-    router.push(store.appHistory.previousPath);
-  }, [router, store.appHistory.previousPath]);
+    router.back();
+  }, [router]);
 
   const onDeleteProperty = useCallback(async () => {
     try {
       await removeMutation.mutateAsync([property._id]);
-      await router.push(store.appHistory.previousPath);
+      router.back();
     } catch (error) {
       const status = error?.response?.status;
       switch (status) {
@@ -132,7 +130,7 @@ function Property() {
           return toast.error(t('Something went wrong'));
       }
     }
-  }, [property, removeMutation, store.appHistory.previousPath, router, t]);
+  }, [property, removeMutation, router, t]);
 
   const onSubmit = useCallback(
     async (propertyPart) => {
@@ -145,7 +143,7 @@ function Property() {
         const result = await saveMutation.mutateAsync(data);
         if (!data._id) {
           await router.push(
-            `/${store.organization.selected.name}/properties/${result._id}`
+            `/${router.query.organization}/properties/${result._id}`
           );
         }
       } catch (error) {
@@ -164,7 +162,7 @@ function Property() {
         }
       }
     },
-    [property, saveMutation, store.organization.selected.name, t, router]
+    [property, saveMutation, t, router]
   );
 
   return (

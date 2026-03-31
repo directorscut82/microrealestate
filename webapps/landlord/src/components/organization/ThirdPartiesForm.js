@@ -168,9 +168,9 @@ export default function ThirdPartiesForm({ organization }) {
       } else {
         formData.thirdParties.b2 = null;
       }
-      await mutateAsync({ store, organization: mergeOrganization(organization, formData) });
+      await mutateAsync(mergeOrganization(organization, formData));
     },
-    [mutateAsync, store, organization, initialValues]
+    [mutateAsync, organization, initialValues]
   );
 
   return (

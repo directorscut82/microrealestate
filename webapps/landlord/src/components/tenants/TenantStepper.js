@@ -5,14 +5,12 @@ import LeaseContractForm, {
   validate as LeaseContractFormValidate
 } from './forms/LeaseContractForm';
 import TenantForm, { validate as TenantFormValidate } from './forms/TenantForm';
-import { useCallback, useContext, useState } from 'react';
+import { useCallback, useState } from 'react';
 import DocumentsForm from './forms/DocumentsForm';
 import { Step, Stepper } from '../Stepper';
-import { StoreContext } from '../../store';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function TenantStepper({ onSubmit }) {
-  const store = useContext(StoreContext);
+export default function TenantStepper({ tenant, leases, properties, organization, onSubmit }) {
   const { t } = useTranslation('common');
   const [activeStep, setActiveStep] = useState(0);
 
@@ -21,9 +19,9 @@ export default function TenantStepper({ onSubmit }) {
       try {
         let isFormsValid = false;
         try {
-          await TenantFormValidate(store.tenant?.selected);
-          await LeaseContractFormValidate(store.tenant?.selected);
-          await BillingFormValidate(store.tenant?.selected);
+          await TenantFormValidate(tenant);
+          await LeaseContractFormValidate(tenant);
+          await BillingFormValidate(tenant);
           isFormsValid = activeStep >= 3;
         } catch (error) {
           console.log(error);
@@ -35,29 +33,29 @@ export default function TenantStepper({ onSubmit }) {
         // do nothing on error
       }
     },
-    [onSubmit, store.tenant?.selected, activeStep]
+    [onSubmit, tenant, activeStep]
   );
 
   return (
     <Stepper activeStep={activeStep}>
       <Step stepLabel={t('Tenant information')}>
         <div className="px-2">
-          <TenantForm onSubmit={handleSubmit} />
+          <TenantForm tenant={tenant} onSubmit={handleSubmit} />
         </div>
       </Step>
       <Step stepLabel={t('Lease')}>
         <div className="px-2">
-          <LeaseContractForm onSubmit={handleSubmit} />
+          <LeaseContractForm tenant={tenant} leases={leases} properties={properties} onSubmit={handleSubmit} />
         </div>
       </Step>
       <Step stepLabel={t('Billing information')}>
         <div className="px-2">
-          <BillingForm onSubmit={handleSubmit} />
+          <BillingForm tenant={tenant} organization={organization} onSubmit={handleSubmit} />
         </div>
       </Step>
       <Step stepLabel={t('Documents')}>
         <div className="px-2">
-          <DocumentsForm onSubmit={handleSubmit} />
+          <DocumentsForm tenant={tenant} onSubmit={handleSubmit} />
         </div>
       </Step>
     </Stepper>

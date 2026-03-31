@@ -1,6 +1,5 @@
 import { getStoreInstance, setupOrganizationsInStore } from '../store';
 
-import { toJS } from 'mobx';
 import { useRouter } from 'next/router';
 
 export default function Index({ organization }) {
@@ -16,7 +15,6 @@ export default function Index({ organization }) {
 }
 
 export async function getServerSideProps(context) {
-  // redirect if not signed in
   const store = getStoreInstance();
 
   const { status } = await store.user.refreshTokens(context);
@@ -29,5 +27,5 @@ export async function getServerSideProps(context) {
     return { props: {} };
   }
 
-  return { props: { organization: toJS(store.organization.selected) } };
+  return { props: { organization: store.organization.selected } };
 }

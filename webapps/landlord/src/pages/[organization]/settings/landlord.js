@@ -20,7 +20,7 @@ function LandlordSettings() {
   const store = useContext(StoreContext);
   const { data, isError, isLoading } = useQuery({
     queryKey: [QueryKeys.ORGANIZATIONS],
-    queryFn: () => fetchOrganizations(store)
+    queryFn: () => fetchOrganizations()
   });
   if (isError) {
     toast.error(t('Error fetching organizations'));

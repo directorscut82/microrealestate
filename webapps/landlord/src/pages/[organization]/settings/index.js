@@ -8,16 +8,17 @@ import Link from '../../../components/Link';
 import Page from '../../../components/Page';
 import { StoreContext } from '../../../store';
 import { useContext } from 'react';
+import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
 function SettingLink({ href, title, description }) {
-  const store = useContext(StoreContext);
+  const router = useRouter();
 
   return (
     <div className="flex flex-col gap-2 p-3">
       <Link
-        href={`/${store.organization.selected.name}${href}`}
+        href={`/${router.query.organization}${href}`}
         className="text-base font-semibold"
       >
         {title}

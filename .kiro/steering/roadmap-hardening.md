@@ -57,6 +57,15 @@ Changes are grouped into phases. Each phase should be completed before the next.
 - Locale cookie for sign-in page language persistence
 - Finch CLI support added
 
+### 3.4 Remove MobX from landlord frontend ✅
+- All 12 MobX stores resolved: 9 deleted, 3 converted to plain classes
+- `mobx` and `mobx-react-lite` removed from package.json
+- All data fetching migrated to `@tanstack/react-query`
+- Organization, User, AppHistory remain as plain class contexts (no MobX)
+- All 22 forms on react-hook-form + zod
+- Material UI v4 fully removed
+- 100 E2E tests passing, 48 unit tests passing
+
 ---
 
 ## Phase 4 — Architecture Extensions (enables new features)

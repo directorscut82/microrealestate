@@ -1,16 +1,25 @@
 import {
+  createTenant,
+  deleteTenant,
+  fetchLeases,
+  fetchProperties,
+  fetchTenant,
+  QueryKeys,
+  updateTenant
+} from '../../../utils/restcalls';
+import {
   LuArrowLeft,
   LuHistory,
   LuPencil,
   LuStopCircle,
   LuTrash
 } from 'react-icons/lu';
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '../../../components/ui/card';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import ContractOverviewCard from '../../../components/tenants/ContractOverviewCard';
 import moment from 'moment';
-import { observer } from 'mobx-react-lite';
 import Page from '../../../components/Page';
 import RentHistoryDialog from '../../../components/rents/RentHistoryDialog';
 import RentOverviewCard from '../../../components/tenants/RentOverviewCard';
@@ -20,53 +29,70 @@ import TenantStepper from '../../../components/tenants/TenantStepper';
 import TenantTabs from '../../../components/tenants/TenantTabs';
 import TerminateLeaseDialog from '../../../components/tenants/TerminateLeaseDialog';
 import { toast } from 'sonner';
-import { toJS } from 'mobx';
-import useFillStore from '../../../hooks/useFillStore';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
-
-async function fetchData(store, router) {
-  const results = await Promise.all([
-    store.tenant.fetchOne(router.query.id),
-    store.property.fetch(),
-    store.lease.fetch(),
-    store.template.fetch(),
-    store.document.fetch()
-  ]);
-
-  store.tenant.setSelected(
-    store.tenant.items.find(({ _id }) => _id === router.query.id)
-  );
-
-  return results;
-}
 
 function Tenant() {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const tenantId = router.query.id;
+
+  const { data: tenant, isLoading: tenantLoading } = useQuery({
+    queryKey: [QueryKeys.TENANTS, tenantId],
+    queryFn: () => fetchTenant(tenantId),
+    enabled: !!tenantId
+  });
+
+  const { data: properties = [] } = useQuery({
+    queryKey: [QueryKeys.PROPERTIES],
+    queryFn: fetchProperties
+  });
+
+  const { data: leases = [] } = useQuery({
+    queryKey: [QueryKeys.LEASES],
+    queryFn: fetchLeases
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (data) => (data._id ? updateTenant(data) : createTenant(data)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    }
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (ids) => deleteTenant(ids),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    }
+  });
+
   const [openRentHistoryDialog, setOpenRentHistoryDialog] = useState(false);
   const [selectedRentHistory, setSelectedRentHistory] = useState(null);
   const [openConfirmEditTenant, setOpenConfirmEditTenant] = useState(false);
   const [openConfirmDeleteTenant, setOpenConfirmDeleteTenant] = useState(false);
-
-  const [readOnly, setReadOnly] = useState(
-    store.tenant.selected.terminated ||
-      !!store.tenant.selected.properties?.length
-  );
+  const [readOnly, setReadOnly] = useState(true);
   const [openTerminateLeaseDialog, setOpenTerminateLeaseDialog] =
     useState(false);
 
-  const [fetching] = useFillStore(fetchData, [router]);
+  // Update readOnly when tenant data loads
+  useEffect(() => {
+    if (tenant) {
+      setReadOnly(tenant.terminated || !!tenant.properties?.length);
+    }
+  }, [tenant]);
 
-  const onEditTenant = useCallback(() => {
-    setReadOnly(false);
-  }, []);
+  const onEditTenant = useCallback(() => setReadOnly(false), []);
 
   const onDeleteTenant = useCallback(async () => {
-    const { status } = await store.tenant.delete([store.tenant.selected._id]);
-    if (status !== 200) {
+    try {
+      await removeMutation.mutateAsync([tenant._id]);
+      router.back();
+    } catch (error) {
+      const status = error?.response?.status;
       switch (status) {
         case 422:
           return toast.error(
@@ -80,34 +106,34 @@ function Tenant() {
           return toast.error(t('Something went wrong'));
       }
     }
-
-    await router.push(store.appHistory.previousPath);
-  }, [store, router, t]);
+  }, [removeMutation, tenant, router, t]);
 
   const onSubmit = useCallback(
     async (tenantPart) => {
-      let tenant = toJS(store.tenant.selected);
-
-      tenant.properties = tenant.properties || [];
-      tenant = {
+      const current = tenant || {};
+      const properties = (current.properties || []).map(
+        ({ propertyId, entryDate, exitDate, rent, expenses }) => ({
+          propertyId, entryDate, exitDate, rent, expenses
+        })
+      );
+      const data = {
         isCompany: false,
         isVat: false,
-        ...tenant,
-        properties: tenant.properties.map(
-          ({ propertyId, entryDate, exitDate, rent, expenses }) => ({
-            propertyId,
-            entryDate,
-            exitDate,
-            rent,
-            expenses
-          })
-        ),
+        ...current,
+        properties,
         ...tenantPart
       };
 
-      if (tenant._id) {
-        const { status, data } = await store.tenant.update(tenant);
-        if (status !== 200) {
+      try {
+        const saved = await saveMutation.mutateAsync(data);
+        if (!data._id) {
+          await router.push(
+            `/${router.query.organization}/tenants/${saved._id}`
+          );
+        }
+      } catch (error) {
+        const status = error?.response?.status;
+        if (data._id) {
           switch (status) {
             case 422:
               return toast.error(t('Tenant name is missing'));
@@ -116,11 +142,7 @@ function Tenant() {
             default:
               return toast.error(t('Something went wrong'));
           }
-        }
-        store.tenant.setSelected(data);
-      } else {
-        const { status, data } = await store.tenant.create(tenant);
-        if (status !== 200) {
+        } else {
           switch (status) {
             case 422:
               return toast.error(t('Tenant name is missing'));
@@ -132,64 +154,57 @@ function Tenant() {
               return toast.error(t('Something went wrong'));
           }
         }
-        store.tenant.setSelected(data);
-        await router.push(
-          `/${store.organization.selected.name}/tenants/${data._id}`
-        );
       }
     },
-    [store, t, router]
+    [tenant, saveMutation, router, t]
   );
+
+  const selected = tenant || {};
 
   const showTerminateLeaseButton = useMemo(
     () =>
       !!(
-        store.tenant.selected.beginDate &&
-        store.tenant.selected.endDate &&
-        !store.tenant.selected.terminationDate &&
-        !store.tenant.selected.stepperMode &&
-        !store.tenant.selected.terminated
+        selected.beginDate &&
+        selected.endDate &&
+        !selected.terminationDate &&
+        !selected.stepperMode &&
+        !selected.terminated
       ),
-    [store.tenant.selected]
+    [selected]
   );
 
   const showEditButton = useMemo(
-    () =>
-      !store.tenant.selected.stepperMode &&
-      store.tenant.selected.properties?.length > 0,
-    [
-      store.tenant.selected.properties?.length,
-      store.tenant.selected.stepperMode
-    ]
+    () => !selected.stepperMode && selected.properties?.length > 0,
+    [selected.properties?.length, selected.stepperMode]
   );
 
   const handleBack = useCallback(() => {
-    router.push(store.appHistory.previousPath);
-  }, [router, store.appHistory.previousPath]);
+    router.back();
+  }, [router]);
 
   const handleDeleteTenant = useCallback(
     () => setOpenConfirmDeleteTenant(true),
-    [setOpenConfirmDeleteTenant]
+    []
   );
 
   const handleTerminateLease = useCallback(
     () => setOpenTerminateLeaseDialog(true),
-    [setOpenTerminateLeaseDialog]
+    []
   );
 
   const handleRentHistory = useCallback(() => {
-    setSelectedRentHistory(store.tenant.selected);
+    setSelectedRentHistory(selected);
     setOpenRentHistoryDialog(true);
-  }, [setOpenRentHistoryDialog, setSelectedRentHistory, store.tenant.selected]);
+  }, [selected]);
 
   const handleEditTenant = useCallback(
     () => setOpenConfirmEditTenant(true),
-    [setOpenConfirmEditTenant]
+    []
   );
 
   return (
     <Page
-      loading={fetching}
+      loading={tenantLoading}
       ActionBar={
         <div className="grid grid-cols-5 gap-1.5 md:gap-4">
           <ShortcutButton
@@ -200,7 +215,7 @@ function Tenant() {
           <ShortcutButton
             label={t('Delete')}
             Icon={LuTrash}
-            disabled={store.tenant.selected.hasPayments}
+            disabled={selected.hasPayments}
             onClick={handleDeleteTenant}
             dataCy="removeResourceButton"
           />
@@ -229,33 +244,34 @@ function Tenant() {
       }
       dataCy="tenantPage"
     >
-      {store.tenant.selected.stepperMode ? (
+      {selected.stepperMode ? (
         <Card>
-          <TenantStepper onSubmit={onSubmit} />
+          <TenantStepper tenant={selected} leases={leases} properties={properties} organization={store.organization.selected} onSubmit={onSubmit} />
         </Card>
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
-              <TenantTabs onSubmit={onSubmit} readOnly={readOnly} />
+              <TenantTabs tenant={selected} leases={leases} properties={properties} organization={store.organization.selected} onSubmit={onSubmit} readOnly={readOnly} />
             </div>
-            {!!store.tenant.selected.properties && (
+            {!!selected.properties && (
               <div className="hidden md:grid grid-cols-1 gap-4 h-fit">
-                <ContractOverviewCard />
-                <RentOverviewCard />
+                <ContractOverviewCard tenant={selected} />
+                <RentOverviewCard tenant={selected} />
               </div>
             )}
           </div>
           <TerminateLeaseDialog
             open={openTerminateLeaseDialog}
             setOpen={setOpenTerminateLeaseDialog}
+            tenant={selected}
           />
           <ConfirmDialog
             title={
-              store.tenant.selected.terminated
+              selected.terminated
                 ? t('Lease terminated on {{terminationDate}}', {
                     terminationDate: moment(
-                      store.tenant.selected.terminationDate,
+                      selected.terminationDate,
                       'DD/MM/YYYY'
                     ).format('LL')
                   })
@@ -278,29 +294,27 @@ function Tenant() {
       />
       <ConfirmDialog
         title={
-          store.tenant.selected.hasPayments
+          selected.hasPayments
             ? t('This tenant cannot be deleted')
             : t('Deletion of the tenant?')
         }
         subTitle={
-          store.tenant.selected.hasPayments
+          selected.hasPayments
             ? t(
                 'Deleting {{tenant}} is not allowed because some rent settlements have been recorded',
-                {
-                  tenant: store.tenant.selected.name
-                }
+                { tenant: selected.name }
               )
             : t('Do you confirm the permanent deletion of {{tenant}}?', {
-                tenant: store.tenant.selected.name
+                tenant: selected.name
               })
         }
         open={openConfirmDeleteTenant}
         setOpen={setOpenConfirmDeleteTenant}
-        justOkButton={store.tenant.selected.hasPayments}
-        onConfirm={!store.tenant.selected.hasPayments ? onDeleteTenant : null}
+        justOkButton={selected.hasPayments}
+        onConfirm={!selected.hasPayments ? onDeleteTenant : null}
       />
     </Page>
   );
 }
 
-export default withAuthentication(observer(Tenant));
+export default withAuthentication(Tenant);

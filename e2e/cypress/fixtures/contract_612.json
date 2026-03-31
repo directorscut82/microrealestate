@@ -1,0 +1,13 @@
+{
+  "name": "612",
+  "description": "Bail résidentiel 6-12",
+  "timeRange": "months",
+  "numberOfTerms": 12,
+  "templates": [
+    {
+      "type": "text",
+      "title": "Contrat résidentiel",
+      "content": "Contrat de location résidentielle standard."
+    }
+  ]
+}

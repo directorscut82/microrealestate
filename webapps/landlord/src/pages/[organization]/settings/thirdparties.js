@@ -24,7 +24,7 @@ function ThirdPartiesSettings() {
     isLoading
   } = useQuery({
     queryKey: [QueryKeys.ORGANIZATIONS],
-    queryFn: () => fetchOrganizations(store)
+    queryFn: () => fetchOrganizations()
   });
 
   if (isError) {

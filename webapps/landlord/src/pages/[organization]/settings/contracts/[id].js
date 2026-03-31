@@ -14,17 +14,18 @@ import ConfirmDialog from '../../../../components/ConfirmDialog';
 import LeaseStepper from '../../../../components/organization/lease/LeaseStepper';
 import LeaseTabs from '../../../../components/organization/lease/LeaseTabs';
 import Page from '../../../../components/Page';
-import router from 'next/router';
 import ShortcutButton from '../../../../components/ShortcutButton';
 import { StoreContext } from '../../../../store';
 import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../../components/Authentication';
 
 function Contract() {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [openRemoveContractDialog, setOpenRemoveContractDialog] =
     useState(false);
@@ -82,13 +83,13 @@ function Contract() {
   );
 
   const handleBack = useCallback(() => {
-    router.push(store.appHistory.previousPath);
-  }, [store.appHistory.previousPath]);
+    router.back();
+  }, [router]);
 
   const onLeaseRemove = useCallback(async () => {
     try {
       await removeMutation.mutateAsync([lease._id]);
-      router.push(`/${store.organization.selected.name}/settings/contracts`);
+      router.push(`/${router.query.organization}/settings/contracts`);
     } catch (error) {
       const status = error?.response?.status;
       switch (status) {
@@ -102,7 +103,7 @@ function Contract() {
           return toast.error(t('Something went wrong'));
       }
     }
-  }, [lease, removeMutation, store.organization.selected.name, t]);
+  }, [lease, removeMutation, router, t]);
 
   return (
     <Page

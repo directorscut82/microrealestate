@@ -79,15 +79,14 @@ export default function MemberFormDialog({
 
   const _onSubmit = useCallback(
     async (member) => {
-      await mutateAsync({
-        store,
-        organization: mergeOrganization(organization, {
+      await mutateAsync(
+        mergeOrganization(organization, {
           members: [...organization.members, member]
         })
-      });
+      );
       handleClose();
     },
-    [mutateAsync, store, organization, handleClose]
+    [mutateAsync, organization, handleClose]
   );
 
   const roleValues = useMemo(

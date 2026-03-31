@@ -5,14 +5,13 @@ import {
   CardHeader,
   CardTitle
 } from '../ui/card';
-import { useCallback, useContext, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import _ from 'lodash';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import moment from 'moment';
 import { Progress } from '../ui/progress';
-import { StoreContext } from '../../store';
 import TenantAvatar from './TenantAvatar';
 import TenantPropertyList from './TenantPropertyList';
 import TenantStatus from './TenantStatus';
@@ -21,22 +20,13 @@ import useTranslation from 'next-translate/useTranslation';
 
 export default function TenantListItem({ tenant }) {
   const router = useRouter();
-  const store = useContext(StoreContext);
   const { t } = useTranslation('common');
 
   const handleClick = useCallback(async () => {
-    store.tenant.setSelected(tenant);
-    store.appHistory.setPreviousPath(router.asPath);
     await router.push(
-      `/${store.organization.selected.name}/tenants/${tenant._id}`
+      `/${router.query.organization}/tenants/${tenant._id}`
     );
-  }, [
-    store.tenant,
-    store.appHistory,
-    store.organization.selected.name,
-    tenant,
-    router
-  ]);
+  }, [router, tenant]);
 
   // compute progress of duration of lease
   const progress = useMemo(() => {

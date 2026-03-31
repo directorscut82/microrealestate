@@ -4,18 +4,14 @@ import { Card } from '../ui/card';
 import DocumentsForm from './forms/DocumentsForm';
 import LeaseContractForm from './forms/LeaseContractForm';
 import { LuAlertTriangle } from 'react-icons/lu';
-import { observer } from 'mobx-react-lite';
-import { StoreContext } from '../../store';
 import TenantForm from './forms/TenantForm';
-import { useContext } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
-function TenantTabs({ onSubmit /*, setError*/, readOnly }) {
+function TenantTabs({ tenant, leases, properties, organization, onSubmit, readOnly }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
 
   const hasMissingCompulsaryDocuments =
-    store.tenant.selected.filesToUpload.some(({ missing }) => missing);
+    tenant?.filesToUpload?.some(({ missing }) => missing);
 
   return (
     <Tabs defaultValue="tenant">
@@ -40,26 +36,26 @@ function TenantTabs({ onSubmit /*, setError*/, readOnly }) {
       </TabsList>
       <TabsContent value="tenant">
         <Card className="p-6">
-          <TenantForm onSubmit={onSubmit} readOnly={readOnly} />
+          <TenantForm tenant={tenant} onSubmit={onSubmit} readOnly={readOnly} />
         </Card>
       </TabsContent>
       <TabsContent value="lease">
         <Card className="p-6">
-          <LeaseContractForm onSubmit={onSubmit} readOnly={readOnly} />
+          <LeaseContractForm tenant={tenant} leases={leases} properties={properties} onSubmit={onSubmit} readOnly={readOnly} />
         </Card>
       </TabsContent>
       <TabsContent value="billing">
         <Card className="p-6">
-          <BillingForm onSubmit={onSubmit} readOnly={readOnly} />
+          <BillingForm tenant={tenant} organization={organization} onSubmit={onSubmit} readOnly={readOnly} />
         </Card>
       </TabsContent>
       <TabsContent value="documents">
         <Card className="p-6">
-          <DocumentsForm onSubmit={onSubmit} readOnly={readOnly} />
+          <DocumentsForm tenant={tenant} onSubmit={onSubmit} readOnly={readOnly} />
         </Card>
       </TabsContent>
     </Tabs>
   );
 }
 
-export default observer(TenantTabs);
+export default TenantTabs;

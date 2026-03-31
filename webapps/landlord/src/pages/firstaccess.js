@@ -1,7 +1,6 @@
 import React, { useContext } from 'react';
 import { Card } from '../components/ui/card';
 import Landlord from '../components/organization/LandlordForm';
-import { observer } from 'mobx-react-lite';
 import { StoreContext } from '../store';
 
 import { useRouter } from 'next/router';
@@ -37,4 +36,4 @@ function FirstAccess() {
   );
 }
 
-export default withAuthentication(observer(FirstAccess));
+export default withAuthentication(FirstAccess);

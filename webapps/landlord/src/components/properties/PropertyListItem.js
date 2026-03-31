@@ -5,24 +5,21 @@ import {
   CardHeader,
   CardTitle
 } from '../../components/ui/card';
-import { useCallback, useContext } from 'react';
+import { useCallback } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../ui/button';
 import NumberFormat from '../../components/NumberFormat';
 import PropertyAvatar from './PropertyAvatar';
-import { StoreContext } from '../../store';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
 export default function PropertyListItem({ property }) {
   const router = useRouter();
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
 
   const onClick = useCallback(async () => {
-    store.appHistory.setPreviousPath(router.asPath);
-    await router.push(`/${store.organization.selected.name}/properties/${property._id}`);
-  }, [store.appHistory, store.organization.selected.name, property, router]);
+    await router.push(`/${router.query.organization}/properties/${property._id}`);
+  }, [router, property]);
 
   return (
     <Card className="cursor-pointer" onClick={onClick}>

@@ -1,18 +1,16 @@
 import { Bar, BarChart, Legend, ReferenceLine, XAxis, YAxis } from 'recharts';
-import { useContext, useMemo } from 'react';
+import { useMemo } from 'react';
 import { ChartContainer } from '../ui/chart';
 import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import { LuBanknote } from 'react-icons/lu';
 import moment from 'moment';
-import { StoreContext } from '../../store';
 import useFormatNumber from '../../hooks/useFormatNumber';
 import { useMediaQuery } from 'usehooks-ts';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
 export default function YearFigures({ className, dashboardData }) {
-  const store = useContext(StoreContext);
   const router = useRouter();
   const { t } = useTranslation('common');
   const formatNumber = useFormatNumber();
@@ -43,10 +41,8 @@ export default function YearFigures({ className, dashboardData }) {
   const handleClick = (dataKey) => (data) => {
     const { yearMonth } = data;
     const status = dataKey.toLowerCase();
-    store.rent.setFilters({ status: [status] });
-    store.rent.setPeriod(moment(yearMonth, 'YYYY.MM', true));
     router.push(
-      `/${store.organization.selected.name}/rents/${yearMonth}?statuses=${status}`
+      `/${router.query.organization}/rents/${yearMonth}?statuses=${status}`
     );
   };
 

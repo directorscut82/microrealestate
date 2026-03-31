@@ -1,0 +1,67 @@
+[
+  {
+    "name": "Camel Aissani",
+    "isCompany": false,
+    "address": {
+      "street1": "123 rue Saint-Jacques",
+      "street2": "",
+      "zipCode": "75005",
+      "city": "Paris",
+      "state": "Île-de-France",
+      "country": "France"
+    },
+    "contacts": [
+      { "name": "Camel Aissani", "email": "camel@test.com", "phone1": "0123456789", "phone2": "9876543210" }
+    ]
+  },
+  {
+    "name": "Marie Dupont",
+    "isCompany": false,
+    "address": {
+      "street1": "45 avenue Victor Hugo",
+      "street2": "Apt 3B",
+      "zipCode": "69002",
+      "city": "Lyon",
+      "state": "Rhône-Alpes",
+      "country": "France"
+    },
+    "contacts": [
+      { "name": "Marie Dupont", "email": "marie@test.com", "phone1": "0678901234", "phone2": "0678901235" }
+    ]
+  },
+  {
+    "name": "ACME Corp",
+    "isCompany": true,
+    "manager": "Pierre Martin",
+    "legalStructure": "SARL",
+    "ein": "RCS123456",
+    "capital": "50000",
+    "address": {
+      "street1": "12 quai du Port",
+      "street2": "",
+      "zipCode": "13002",
+      "city": "Marseille",
+      "state": "PACA",
+      "country": "France"
+    },
+    "contacts": [
+      { "name": "Pierre Martin", "email": "pierre@acme.com", "phone1": "0491000000", "phone2": "0491000002" },
+      { "name": "Sophie Bernard", "email": "sophie@acme.com", "phone1": "0491000001", "phone2": "0491000003" }
+    ]
+  },
+  {
+    "name": "Jean Petit",
+    "isCompany": false,
+    "address": {
+      "street1": "8 place du Commerce",
+      "street2": "",
+      "zipCode": "44000",
+      "city": "Nantes",
+      "state": "Pays de la Loire",
+      "country": "France"
+    },
+    "contacts": [
+      { "name": "Jean Petit", "email": "jean@test.com", "phone1": "0240000000", "phone2": "0240000001" }
+    ]
+  }
+]

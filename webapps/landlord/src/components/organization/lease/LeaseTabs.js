@@ -31,7 +31,7 @@ export default function LeaseTabs({ lease, leases, onSubmit }) {
       </TabsContent>
       <TabsContent value="documents">
         <Card className="p-6">
-          <TemplateForm onSubmit={onSubmit} />
+          <TemplateForm leaseId={lease?._id} onSubmit={onSubmit} />
         </Card>
       </TabsContent>
     </Tabs>

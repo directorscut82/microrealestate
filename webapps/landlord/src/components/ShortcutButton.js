@@ -7,7 +7,8 @@ export default function ShortcutButton({
   onClick,
   disabled,
   className,
-  dataCy
+  dataCy,
+  ...rest
 }) {
   const nbWords = label.split(' ').length;
 
@@ -16,7 +17,7 @@ export default function ShortcutButton({
       variant="secondary"
       onClick={onClick}
       disabled={disabled}
-      data-cy={dataCy}
+      data-cy={dataCy || rest['data-cy']}
       className={cn(
         'flex flex-col items-center justify-start gap-1 h-full w-full text-xs font-light rounded-none bg-card',
         'md:flex-row md:justify-center md:gap-2 md:text-base md:font-semibold md:rounded md:bg-secondary',

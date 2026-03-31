@@ -1,26 +1,23 @@
 import { LuCalendar, LuTrendingDown, LuTrendingUp } from 'react-icons/lu';
-import { useCallback, useContext } from 'react';
+import { useCallback } from 'react';
 import { BsReceipt } from 'react-icons/bs';
 import { DashboardCard } from '../dashboard/DashboardCard';
 import NumberFormat from '../NumberFormat';
 import PeriodPicker from '../PeriodPicker';
-import { StoreContext } from '../../store';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
 export function RentOverview({ data }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
   const router = useRouter();
 
   const handlePeriodChange = useCallback(
     async (period) => {
-      store.rent.setPeriod(period);
       await router.push(
-        `/${store.organization.selected.name}/rents/${store.rent.periodAsString}`
+        `/${router.query.organization}/rents/${period.format('YYYY.MM')}`
       );
     },
-    [router, store.rent, store.organization.selected.name]
+    [router]
   );
 
   return (

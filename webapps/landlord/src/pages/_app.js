@@ -17,7 +17,6 @@ import Head from 'next/head';
 import { InjectStoreContext } from '../store';
 import moment from 'moment';
 import { Roboto } from 'next/font/google';
-import { useEffect } from 'react';
 
 const queryClient = new QueryClient();
 
@@ -37,14 +36,6 @@ const roboto = Roboto({
 function MyApp(props) {
   const { Component, pageProps } = props;
   moment.locale(pageProps?.__lang ?? 'en');
-
-  useEffect(() => {
-    // Remove the server-side injected CSS (legacy MUI cleanup).
-    const jssStyles = document.querySelector('#jss-server-side');
-    if (jssStyles) {
-      jssStyles.parentElement.removeChild(jssStyles);
-    }
-  }, []);
 
   return (
     <>

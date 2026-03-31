@@ -9,11 +9,11 @@ import { LuChevronDown, LuChevronsUpDown, LuPencil } from 'react-icons/lu';
 import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Button } from '../ui/button';
 import { getPeriod } from '../../utils';
+import { fetchTenantRents } from '../../utils/restcalls';
 import Loading from '../Loading';
 import moment from 'moment';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
 import RentDetails from './RentDetails';
-import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -77,7 +77,6 @@ function YearRentList({ tenant, year, onClick }) {
 
 function RentHistory({ tenantId }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
   const [loading, setLoading] = useState(true);
   const [tenant, setTenant] = useState();
   const [rentYears, setRentYears] = useState([]);
@@ -87,14 +86,11 @@ function RentHistory({ tenantId }) {
   const [openNewPaymentDialog, setOpenNewPaymentDialog] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
 
-  const fetchTenantRents = useCallback(
+  const fetchRents = useCallback(
     async (showLoadingAnimation = true) => {
       showLoadingAnimation && setLoading(true);
-      const response = await store.rent.fetchTenantRents(tenantId);
-      if (response.status !== 200) {
-        toast.error(t('Cannot get tenant information'));
-      } else {
-        const tenant = response.data;
+      try {
+        const tenant = await fetchTenantRents(tenantId);
         setTenant(tenant);
         setRentYears(
           Array.from(
@@ -104,15 +100,17 @@ function RentHistory({ tenantId }) {
             }, new Set())
           )
         );
+      } catch {
+        toast.error(t('Cannot get tenant information'));
       }
       showLoadingAnimation && setLoading(false);
     },
-    [store, t, tenantId]
+    [t, tenantId]
   );
 
   useEffect(() => {
-    fetchTenantRents();
-  }, [t, tenantId, store.rent, store, fetchTenantRents]);
+    fetchRents();
+  }, [fetchRents]);
 
   const handleAccordionChange = (year) => () => {
     setExpandedYear(expandedYear === year ? false : year);

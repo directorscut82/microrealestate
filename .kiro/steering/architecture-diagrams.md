@@ -22,7 +22,7 @@ graph TB
     end
 
     subgraph Frontends["Frontend Apps"]
-        LF["Landlord Frontend :8180<br/>Next.js 14 Pages Router<br/>React + MobX + Tailwind"]
+        LF["Landlord Frontend :8180<br/>Next.js 14 Pages Router<br/>React + React Query + Tailwind"]
         TF["Tenant Frontend :8190<br/>Next.js 14 App Router<br/>React + RSC + Tailwind"]
     end
 

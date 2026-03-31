@@ -1,0 +1,70 @@
+[
+  {
+    "name": "Appartement Paris",
+    "type": "apartment",
+    "description": "Mon appartement préféré sur Paris",
+    "surface": 60,
+    "phone": "0123456789",
+    "digiCode": "0412",
+    "address": {
+      "street1": "123 rue Saint-Jacques",
+      "street2": "",
+      "zipCode": "75005",
+      "city": "Paris",
+      "state": "Île-de-France",
+      "country": "France"
+    },
+    "rent": 100
+  },
+  {
+    "name": "Studio Lyon",
+    "type": "apartment",
+    "description": "Studio meublé centre Lyon",
+    "surface": 25,
+    "phone": "0456789012",
+    "digiCode": "1234",
+    "address": {
+      "street1": "45 rue de la République",
+      "street2": "Bâtiment B",
+      "zipCode": "69002",
+      "city": "Lyon",
+      "state": "Rhône-Alpes",
+      "country": "France"
+    },
+    "rent": 550
+  },
+  {
+    "name": "Bureau Marseille",
+    "type": "office",
+    "description": "Bureau commercial Vieux-Port",
+    "surface": 80,
+    "phone": "0491234567",
+    "digiCode": "5678",
+    "address": {
+      "street1": "12 quai du Port",
+      "street2": "",
+      "zipCode": "13002",
+      "city": "Marseille",
+      "state": "Provence-Alpes-Côte d'Azur",
+      "country": "France"
+    },
+    "rent": 1200
+  },
+  {
+    "name": "Parking Nantes",
+    "type": "parking",
+    "description": "Place de parking souterrain",
+    "surface": 12,
+    "phone": "",
+    "digiCode": "9999",
+    "address": {
+      "street1": "8 place du Commerce",
+      "street2": "Sous-sol -2",
+      "zipCode": "44000",
+      "city": "Nantes",
+      "state": "Pays de la Loire",
+      "country": "France"
+    },
+    "rent": 80
+  }
+]

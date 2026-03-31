@@ -1,13 +1,12 @@
 import * as jose from 'jose';
 
-import { action, computed, flow, makeObservable, observable } from 'mobx';
 import { apiFetcher, authApiFetcher, setAccessToken } from '../utils/fetch';
-
 import { isServer } from '@microrealestate/commonui/utils';
 
 export const ADMIN_ROLE = 'administrator';
 export const RENTER_ROLE = 'renter';
 export const ROLES = [ADMIN_ROLE, RENTER_ROLE];
+
 export default class User {
   constructor() {
     this.token = undefined;
@@ -16,25 +15,6 @@ export default class User {
     this.lastName = undefined;
     this.email = undefined;
     this.role = undefined;
-
-    makeObservable(this, {
-      token: observable,
-      tokenExpiry: observable,
-      firstName: observable,
-      lastName: observable,
-      email: observable,
-      role: observable,
-      signedIn: computed,
-      isAdministrator: computed,
-      setRole: action,
-      setUserFromToken: action,
-      signUp: flow,
-      signIn: flow,
-      signOut: flow,
-      refreshTokens: flow,
-      forgotPassword: flow,
-      resetPassword: flow
-    });
   }
 
   get signedIn() {
@@ -62,13 +42,10 @@ export default class User {
     setAccessToken(accessToken);
   }
 
-  *signUp(firstname, lastname, email, password) {
+  async signUp(firstname, lastname, email, password) {
     try {
-      yield apiFetcher().post('/authenticator/landlord/signup', {
-        firstname,
-        lastname,
-        email,
-        password
+      await apiFetcher().post('/authenticator/landlord/signup', {
+        firstname, lastname, email, password
       });
       return 200;
     } catch (error) {
@@ -76,14 +53,11 @@ export default class User {
     }
   }
 
-  *signIn(email, password) {
+  async signIn(email, password) {
     try {
-      const response = yield apiFetcher().post(
+      const response = await apiFetcher().post(
         '/authenticator/landlord/signin',
-        {
-          email,
-          password
-        }
+        { email, password }
       );
       const { accessToken } = response.data;
       this.setUserFromToken(accessToken);
@@ -93,9 +67,9 @@ export default class User {
     }
   }
 
-  *signOut() {
+  async signOut() {
     try {
-      yield apiFetcher().delete('/authenticator/landlord/signout');
+      await apiFetcher().delete('/authenticator/landlord/signout');
     } finally {
       this.firstName = null;
       this.lastName = null;
@@ -106,27 +80,24 @@ export default class User {
     }
   }
 
-  *refreshTokens(context) {
+  async refreshTokens(context) {
     try {
       let response;
-      // request to get the new tokens
       if (isServer()) {
         const authFetchApi = authApiFetcher(context.req.headers.cookie);
-        response = yield authFetchApi.post(
+        response = await authFetchApi.post(
           '/authenticator/landlord/refreshtoken'
         );
-
         const cookies = response.headers['set-cookie'];
         if (cookies) {
           context.res.setHeader('Set-Cookie', cookies);
         }
       } else {
-        response = yield apiFetcher().post(
+        response = await apiFetcher().post(
           '/authenticator/landlord/refreshtoken'
         );
       }
 
-      // set access token in store
       if (response?.data?.accessToken) {
         const { accessToken } = response.data;
         this.setUserFromToken(accessToken);
@@ -150,9 +121,9 @@ export default class User {
     }
   }
 
-  *forgotPassword(email) {
+  async forgotPassword(email) {
     try {
-      yield apiFetcher().post('/authenticator/landlord/forgotpassword', {
+      await apiFetcher().post('/authenticator/landlord/forgotpassword', {
         email
       });
       return 200;
@@ -161,11 +132,10 @@ export default class User {
     }
   }
 
-  *resetPassword(resetToken, password) {
+  async resetPassword(resetToken, password) {
     try {
-      yield apiFetcher().patch('/authenticator/landlord/resetpassword', {
-        resetToken,
-        password
+      await apiFetcher().patch('/authenticator/landlord/resetpassword', {
+        resetToken, password
       });
       return 200;
     } catch (error) {

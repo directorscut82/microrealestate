@@ -1,7 +1,5 @@
 import {
-  Fragment,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState
@@ -23,8 +21,6 @@ import {
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import moment from 'moment';
 import { nanoid } from 'nanoid';
-import { observer } from 'mobx-react-lite';
-import { StoreContext } from '../../../store';
 import useTranslation from 'next-translate/useTranslation';
 
 const expenseSchema = z.object({
@@ -121,21 +117,20 @@ function Section({ label, visible = true, children }) {
   );
 }
 
-function LeaseContractForm({ readOnly, onSubmit }) {
+function LeaseContractForm({ tenant, leases = [], properties: propertyItems = [], readOnly, onSubmit }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
   const [contractDuration, setContractDuration] = useState();
 
   useEffect(() => {
-    const lease = store.tenant.selected?.lease;
+    const lease = tenant?.lease;
     if (lease) {
       setContractDuration(moment.duration(lease.numberOfTerms, lease.timeRange));
     } else {
       setContractDuration(undefined);
     }
-  }, [store.tenant.selected?.lease]);
+  }, [tenant?.lease]);
 
-  const initialValues = useMemo(() => initValues(store.tenant?.selected), [store.tenant.selected]);
+  const initialValues = useMemo(() => initValues(tenant), [tenant]);
 
   const {
     register,
@@ -146,7 +141,8 @@ function LeaseContractForm({ readOnly, onSubmit }) {
     formState: { errors, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: initialValues
+    defaultValues: initialValues,
+    values: initialValues
   });
 
   const { fields: propertyFields, append: appendProperty, remove: removeProperty } = useFieldArray({ control, name: 'properties' });
@@ -158,15 +154,15 @@ function LeaseContractForm({ readOnly, onSubmit }) {
   const properties = watch('properties');
 
   const availableLeases = useMemo(() =>
-    store.lease.items.map(({ _id, name, active }) => ({ id: _id, value: _id, label: name, disabled: !active })),
-    [store.lease.items]
+    leases.map(({ _id, name, active }) => ({ id: _id, value: _id, label: name, disabled: !active })),
+    [leases]
   );
 
   const availableProperties = useMemo(() => {
-    const currentProps = store.tenant.selected?.properties?.map(({ propertyId }) => propertyId) || [];
+    const currentProps = tenant?.properties?.map(({ propertyId }) => propertyId) || [];
     return [
       { id: '', label: '', value: '' },
-      ...store.property.items.map(({ _id, name, status, occupantLabel }) => ({
+      ...propertyItems.map(({ _id, name, status, occupantLabel }) => ({
         id: _id, value: _id,
         label: t('{{name}} - {{status}}', {
           name,
@@ -176,11 +172,11 @@ function LeaseContractForm({ readOnly, onSubmit }) {
         })
       }))
     ];
-  }, [t, store.tenant.selected?.properties, store.property.items]);
+  }, [t, tenant?.properties, propertyItems]);
 
   const onLeaseChange = useCallback((val) => {
     setValue('leaseId', val);
-    const lease = store.lease.items.find(({ _id }) => _id === val);
+    const lease = leases.find(({ _id }) => _id === val);
     if (lease) {
       setContractDuration(moment.duration(lease.numberOfTerms, lease.timeRange));
       if (beginDate) {
@@ -188,10 +184,10 @@ function LeaseContractForm({ readOnly, onSubmit }) {
         setValue('endDate', newEnd.format('YYYY-MM-DD'));
       }
     }
-  }, [store.lease.items, setValue, beginDate]);
+  }, [leases, setValue, beginDate]);
 
   const onPropertyChange = useCallback((val, index) => {
-    const property = store.property.items.find(({ _id }) => _id === val);
+    const property = propertyItems.find(({ _id }) => _id === val);
     setValue(`properties.${index}._id`, val);
     if (property) {
       setValue(`properties.${index}.rent`, property.price || 0);
@@ -203,12 +199,12 @@ function LeaseContractForm({ readOnly, onSubmit }) {
         endDate
       }]);
     }
-  }, [store.property.items, setValue, beginDate, endDate, t]);
+  }, [propertyItems, setValue, beginDate, endDate, t]);
 
   const _onSubmit = useCallback(async (lease) => {
     await onSubmit({
       leaseId: lease.leaseId,
-      frequency: store.lease.items.find(({ _id }) => _id === lease.leaseId)?.timeRange,
+      frequency: leases.find(({ _id }) => _id === lease.leaseId)?.timeRange,
       beginDate: lease.beginDate ? moment(lease.beginDate).format('DD/MM/YYYY') : '',
       endDate: lease.endDate ? moment(lease.endDate).format('DD/MM/YYYY') : '',
       terminationDate: lease.terminationDate ? moment(lease.terminationDate).format('DD/MM/YYYY') : '',
@@ -228,7 +224,7 @@ function LeaseContractForm({ readOnly, onSubmit }) {
           exitDate: p.exitDate ? moment(p.exitDate).format('DD/MM/YYYY') : ''
         }))
     });
-  }, [onSubmit, store.lease.items]);
+  }, [onSubmit, leases]);
 
   return (
     <form onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
@@ -245,7 +241,7 @@ function LeaseContractForm({ readOnly, onSubmit }) {
         </Section>
       )}
 
-      <Section label={t('Lease')} visible={!store.tenant.selected.stepperMode}>
+      <Section label={t('Lease')} visible={!tenant?.stepperMode}>
         <div className="space-y-2 mb-2">
           <Label>{t('Lease')}</Label>
           <Select value={leaseId} onValueChange={onLeaseChange} disabled={readOnly}>
@@ -376,4 +372,4 @@ function LeaseContractForm({ readOnly, onSubmit }) {
   );
 }
 
-export default observer(LeaseContractForm);
+export default LeaseContractForm;

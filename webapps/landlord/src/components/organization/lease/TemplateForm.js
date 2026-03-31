@@ -1,8 +1,11 @@
-import { useCallback, useContext } from 'react';
+import { useCallback } from 'react';
 import { Button } from '../../ui/button';
 import { Separator } from '../../ui/separator';
+import TemplateList from './TemplateList';
+import useTranslation from 'next-translate/useTranslation';
 
-function Section({ label, children }) {
+function Section({ label, visible = true, children }) {
+  if (!visible) return children;
   return (
     <div className="pb-10">
       <div className="text-xl">{label}</div>
@@ -11,12 +14,8 @@ function Section({ label, children }) {
     </div>
   );
 }
-import { StoreContext } from '../../../store';
-import TemplateList from './TemplateList';
-import useTranslation from 'next-translate/useTranslation';
 
-export default function TemplateForm({ onSubmit }) {
-  const store = useContext(StoreContext);
+export default function TemplateForm({ leaseId, onSubmit, stepperMode = false }) {
   const { t } = useTranslation('common');
 
   const handleNext = useCallback(() => {
@@ -25,16 +24,11 @@ export default function TemplateForm({ onSubmit }) {
 
   return (
     <>
-      <Section
-        label={t('Template documents')}
-        visible={!store.lease.selected.stepperMode}
-      >
-        <TemplateList />
+      <Section label={t('Template documents')} visible={!stepperMode}>
+        <TemplateList leaseId={leaseId} />
       </Section>
-      {store.lease?.selected.stepperMode ? (
-        <Button onClick={handleNext} data-cy="submit">
-          {t('Save')}
-        </Button>
+      {stepperMode ? (
+        <Button onClick={handleNext} data-cy="submit">{t('Save')}</Button>
       ) : null}
     </>
   );

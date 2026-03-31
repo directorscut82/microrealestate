@@ -1,4 +1,4 @@
-import { useContext, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -7,8 +7,6 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Separator } from '../../ui/separator';
 import { Switch } from '../../ui/switch';
-import { observer } from 'mobx-react-lite';
-import { StoreContext } from '../../../store';
 import useTranslation from 'next-translate/useTranslation';
 
 const schema = z.object({
@@ -29,13 +27,12 @@ export const validate = (tenant) => {
   return schema.parseAsync(initValues(tenant));
 };
 
-const Billing = observer(({ readOnly, onSubmit }) => {
+const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
 
   const initialValues = useMemo(
-    () => initValues(store.tenant?.selected),
-    [store.tenant?.selected]
+    () => initValues(tenant),
+    [tenant]
   );
 
   const {
@@ -46,12 +43,13 @@ const Billing = observer(({ readOnly, onSubmit }) => {
     formState: { errors, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: initialValues
+    defaultValues: initialValues,
+    values: initialValues
   });
 
   const isVat = watch('isVat');
   const discount = watch('discount');
-  const stepperMode = store.tenant.selected.stepperMode;
+  const stepperMode = tenant?.stepperMode;
 
   const _onSubmit = async (billing) => {
     await onSubmit({
@@ -82,7 +80,7 @@ const Billing = observer(({ readOnly, onSubmit }) => {
             <p className="text-sm text-destructive">{errors.reference.message}</p>
           )}
         </div>
-        {store.organization.selected?.isCompany && (
+        {organization?.isCompany && (
           <>
             <div className="flex items-center gap-2">
               <Switch
@@ -123,6 +121,6 @@ const Billing = observer(({ readOnly, onSubmit }) => {
       )}
     </form>
   );
-});
+};
 
 export default Billing;

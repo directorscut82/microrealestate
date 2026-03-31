@@ -11,17 +11,17 @@ MicroRealEstate is an open-source property management application for landlords.
 ```
 microrealestate/
 ├── cli/                  # Node.js CLI tool for managing the app (dev/build/start/stop/configure)
-├── services/             # Backend microservices (Node.js)
+├── services/             # Backend microservices (Node.js, all TypeScript)
 │   ├── common/           # Shared library (Express, Mongoose, Redis, JWT, logging, crypto)
 │   ├── gateway/          # API gateway & reverse proxy (TypeScript)
-│   ├── authenticator/    # Auth service: login/logout, JWT tokens, password reset (JavaScript)
-│   ├── api/              # Landlord REST API: CRUD for tenants, properties, leases, rents (JavaScript)
+│   ├── authenticator/    # Auth service: login/logout, JWT tokens, password reset (TypeScript)
+│   ├── api/              # Landlord REST API: CRUD for tenants, properties, leases, rents (TypeScript)
 │   ├── tenantapi/        # Tenant REST API: read-only tenant access (TypeScript)
-│   ├── emailer/          # Email generation & sending via Gmail/Mailgun/SMTP (JavaScript)
-│   ├── pdfgenerator/     # PDF document generation using Puppeteer (JavaScript)
+│   ├── emailer/          # Email generation & sending via Gmail/Mailgun/SMTP (TypeScript)
+│   ├── pdfgenerator/     # PDF document generation using Puppeteer (TypeScript)
 │   └── resetservice/     # Database reset service (DEV/CI only) (TypeScript)
 ├── webapps/
-│   ├── commonui/         # Shared UI components and utilities (JavaScript)
+│   ├── commonui/         # Shared utilities, locales, runtime scripts (JavaScript)
 │   ├── landlord/         # Landlord web app — Next.js 14 Pages Router (JavaScript)
 │   └── tenant/           # Tenant web app — Next.js 14 App Router (TypeScript)
 ├── types/                # Shared TypeScript type definitions

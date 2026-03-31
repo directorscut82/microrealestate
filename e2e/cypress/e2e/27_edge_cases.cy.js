@@ -1,0 +1,175 @@
+import i18n from '../support/i18n';
+import contract369 from '../fixtures/contract_369.json';
+import properties from '../fixtures/properties_extended.json';
+import tenants from '../fixtures/tenants_extended.json';
+import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
+
+// Edge cases: empty states, validation boundaries, navigation edge cases
+
+describe('Edge Cases & Validation', () => {
+  const t = i18n.getFixedT('fr-FR');
+
+  before(() => {
+    cy.resetAppData();
+    cy.signUp(userWithCompanyAccount);
+    cy.signIn(userWithCompanyAccount);
+    cy.registerLandlord(userWithCompanyAccount);
+  });
+
+  // --- Empty states ---
+
+  it('Dashboard shows setup shortcuts when empty', () => {
+    cy.navAppMenu('dashboard');
+    cy.get('[data-cy=shortcutCreateContract]').should('be.visible');
+    cy.get('[data-cy=shortcutAddProperty]').should('be.visible');
+    cy.get('[data-cy=shortcutAddTenant]').should('be.visible');
+  });
+
+  it('Tenants page shows empty state', () => {
+    cy.navAppMenu('tenants');
+    cy.get('[data-cy=tenantsPage]').should('be.visible');
+  });
+
+  it('Properties page shows empty state', () => {
+    cy.navAppMenu('properties');
+    cy.get('[data-cy=propertiesPage]').should('be.visible');
+  });
+
+  it('Rents page shows empty state', () => {
+    cy.navAppMenu('rents');
+    cy.get('[data-cy=rentsPage]').should('be.visible');
+  });
+
+  it('Accounting page shows empty state', () => {
+    cy.navAppMenu('accounting');
+    cy.get('[data-cy=accountingPage]').should('be.visible');
+  });
+
+  // --- Contract validation ---
+
+  it('Create contract with empty name shows error', () => {
+    cy.navAppMenu('settings');
+    cy.contains(t('Contracts')).click();
+    cy.contains(t('New contract')).click();
+    cy.get('[data-cy=submitContract]').click();
+    cy.get('input[name=name]').then(($el) => {
+      expect($el[0].validationMessage).to.not.be.empty;
+    });
+  });
+
+  it('Close contract dialog', () => {
+    cy.get('[role=dialog]').find('button').first().click();
+  });
+
+  it('Create contract with very long name', () => {
+    cy.contains(t('New contract')).click();
+    cy.get('input[name=name]').type('A'.repeat(100));
+    cy.get('[data-cy=submitContract]').click();
+    cy.get('input[name=name]').should('have.value', 'A'.repeat(100));
+  });
+
+  it('Delete long-name contract', () => {
+    cy.get('[data-cy=removeResourceButton]').click();
+    cy.get('[role=dialog]').find('button').last().click();
+  });
+
+  // --- Property validation ---
+
+  it('Create property with empty name shows error', () => {
+    cy.navAppMenu('properties');
+    cy.get('[data-cy=shortcutAddProperty]').click();
+    cy.get('[data-cy=submitProperty]').click();
+    cy.get('input[name=name]').then(($el) => {
+      expect($el[0].validationMessage).to.not.be.empty;
+    });
+  });
+
+  it('Close property dialog', () => {
+    cy.get('[role=dialog]').find('button').first().click();
+  });
+
+  it('Create duplicate property shows error', () => {
+    cy.navAppMenu('dashboard');
+    cy.addPropertyFromStepper(properties[0]);
+    cy.navAppMenu('properties');
+    cy.get('[data-cy=shortcutAddProperty]').click();
+    cy.get('input[name=name]').type(properties[0].name);
+    cy.get('[data-cy=submitProperty]').click();
+    cy.get('[data-sonner-toast]').should('exist');
+    cy.get('[role=dialog]').find('button').first().click();
+  });
+
+  // --- Tenant validation ---
+
+  it('Create tenant with empty name shows error', () => {
+    cy.navAppMenu('tenants');
+    cy.get('[data-cy=shortcutAddTenant]').click();
+    cy.get('[data-cy=submitTenant]').click();
+    cy.get('input[name=name]').then(($el) => {
+      expect($el[0].validationMessage).to.not.be.empty;
+    });
+  });
+
+  it('Close tenant dialog', () => {
+    cy.get('[role=dialog]').find('button').first().click();
+  });
+
+  // --- Setup for further tests ---
+
+  it('Create contract for further tests', () => {
+    cy.navAppMenu('dashboard');
+    cy.createContractFromStepper(contract369);
+    cy.navAppMenu('dashboard');
+  });
+
+  it('Create second property', () => {
+    cy.addPropertyFromStepper(properties[1]);
+    cy.navAppMenu('dashboard');
+  });
+
+  // --- Navigation edge cases ---
+
+  it('Direct URL to nonexistent tenant shows error', () => {
+    cy.visit('/landlord/' + userWithCompanyAccount.orgName + '/tenants/000000000000000000000000', { failOnStatusCode: false });
+    cy.get('[data-cy=tenantPage]').should('be.visible');
+  });
+
+  it('Navigate back to dashboard', () => {
+    cy.navAppMenu('dashboard');
+    cy.get('[data-cy=dashboardPage]').should('be.visible');
+  });
+
+  it('Rapid navigation does not break app', () => {
+    cy.navAppMenu('tenants');
+    cy.navAppMenu('properties');
+    cy.navAppMenu('rents');
+    cy.navAppMenu('accounting');
+    cy.navAppMenu('settings');
+    cy.navAppMenu('dashboard');
+    cy.get('[data-cy=dashboardPage]').should('be.visible');
+  });
+
+  // --- Sign out/in preserves data ---
+
+  it('Sign out', () => {
+    cy.signOut();
+  });
+
+  it('Sign in again', () => {
+    cy.signIn(userWithCompanyAccount);
+    cy.checkPage('dashboard');
+  });
+
+  it('Data intact after sign out/in', () => {
+    cy.navAppMenu('properties');
+    cy.contains(properties[0].name).should('be.visible');
+    cy.contains(properties[1].name).should('be.visible');
+    cy.navAppMenu('settings');
+    cy.contains(t('Contracts')).click();
+    cy.contains(contract369.name).should('be.visible');
+  });
+
+  after(() => {
+    cy.resetAppData();
+  });
+});

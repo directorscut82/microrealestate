@@ -143,7 +143,7 @@ export function HamburgerMenu({ className, onChange }) {
       );
       pathname = pathname.replace('[year]', moment().year());
       router.push(
-        `/${store.organization.selected.name}${pathname}`,
+        `/${router.query.organization}${pathname}`,
         undefined,
         {
           locale: store.organization.selected.locale
@@ -153,8 +153,7 @@ export function HamburgerMenu({ className, onChange }) {
     [
       onChange,
       router,
-      store.organization.selected?.locale,
-      store.organization.selected?.name
+      store.organization.selected?.locale
     ]
   );
 
@@ -171,7 +170,7 @@ export function HamburgerMenu({ className, onChange }) {
         </SheetTrigger>
         <SheetContent side="left" className="flex flex-col px-0">
           <SheetHeader className="px-4">
-            <SheetTitle> {store.organization.selected?.name}</SheetTitle>
+            <SheetTitle> {router.query.organization}</SheetTitle>
             <SheetDescription>{config.APP_NAME}</SheetDescription>
           </SheetHeader>
           <Separator className="bg-secondary-foreground/25 flex-col" />
@@ -227,7 +226,7 @@ export function SideMenu({ className }) {
       );
       pathname = pathname.replace('[year]', moment().year());
       router.push(
-        `/${store.organization.selected.name}${pathname}`,
+        `/${router.query.organization}${pathname}`,
         undefined,
         {
           locale: store.organization.selected.locale
@@ -236,8 +235,7 @@ export function SideMenu({ className }) {
     },
     [
       router,
-      store.organization.selected?.locale,
-      store.organization.selected?.name
+      store.organization.selected?.locale
     ]
   );
 
@@ -249,7 +247,7 @@ export function SideMenu({ className }) {
       )}
     >
       <div className="whitespace-nowrap text-2xl font-semibold px-4 -mt-10">
-        {store.organization.selected.name}
+        {router.query.organization}
       </div>
       <div className="text-muted-foreground px-4 mt-2">{config.APP_NAME}</div>
       <Separator className="bg-secondary-foreground/25 my-4" />

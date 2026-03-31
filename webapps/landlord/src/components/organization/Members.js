@@ -44,33 +44,31 @@ export default function Members({ organization }) {
   const handleRemoveMember = useCallback(
     async (member) => {
       setUpdating(member);
-      await mutateAsync({
-        store,
-        organization: mergeOrganization(organization, {
+      await mutateAsync(
+        mergeOrganization(organization, {
           members: organization.members.filter(
             ({ email }) => email !== member.email
           )
         })
-      });
+      );
       setUpdating();
     },
-    [mutateAsync, organization, store]
+    [mutateAsync, organization]
   );
 
   const handleRemoveApplication = useCallback(
     async (app) => {
       setUpdating(app);
-      await mutateAsync({
-        store,
-        organization: mergeOrganization(organization, {
+      await mutateAsync(
+        mergeOrganization(organization, {
           applications: organization.applications.filter(
             ({ clientId }) => clientId !== app.clientId
           )
         })
-      });
+      );
       setUpdating();
     },
-    [mutateAsync, organization, store]
+    [mutateAsync, organization]
   );
 
   const onRoleChange = useCallback(
@@ -83,15 +81,14 @@ export default function Members({ organization }) {
         ...member,
         role: role
       });
-      await mutateAsync({
-        store,
-        organization: mergeOrganization(organization, {
+      await mutateAsync(
+        mergeOrganization(organization, {
           members: updatedMembers
         })
-      });
+      );
       setUpdating();
     },
-    [mutateAsync, organization, store]
+    [mutateAsync, organization]
   );
 
   if (isError) {

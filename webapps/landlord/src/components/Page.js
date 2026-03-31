@@ -11,7 +11,7 @@ function Page({ children, ActionBar, loading = false, dataCy, className }) {
         className
       )}
     >
-      {ActionBar ? (
+      {ActionBar && !loading ? (
         <Card
           className={cn(
             'fixed bottom-0 left-0 bg-card w-full z-50 border-t rounded-none',

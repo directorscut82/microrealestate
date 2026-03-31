@@ -40,20 +40,22 @@ const baseSchema = z.object({
   capital: z.union([z.string(), z.coerce.number()]).optional()
 });
 
-const schema = baseSchema.refine(
-  (data) => {
-    if (data.isCompany === 'true') {
-      return (
-        data.legalStructure?.length > 0 &&
-        data.company?.length > 0 &&
-        data.ein?.length > 0 &&
-        data.capital !== '' && data.capital !== undefined && Number(data.capital) > 0
-      );
+const schema = baseSchema.superRefine((data, ctx) => {
+  if (data.isCompany === 'true') {
+    if (!data.legalStructure?.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Required', path: ['legalStructure'] });
     }
-    return true;
-  },
-  { message: 'Required', path: ['company'] }
-);
+    if (!data.company?.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Required', path: ['company'] });
+    }
+    if (!data.ein?.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Required', path: ['ein'] });
+    }
+    if (data.capital === '' || data.capital === undefined || Number(data.capital) <= 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Required', path: ['capital'] });
+    }
+  }
+});
 
 const currencies = [
   { id: 'none', label: '', value: '' },
@@ -155,12 +157,9 @@ export default function LandlordForm({ organization, firstAccess }) {
             }
           ]
         };
-        await mutateCreateOrganization.mutateAsync({
-          store,
-          organization: createdOrgpanization
-        });
+        await mutateCreateOrganization.mutateAsync(createdOrgpanization);
         router.push(
-          `/${store.organization.selected.name}/dashboard`,
+          `/${router.query.organization}/dashboard`,
           undefined,
           { locale: store.organization.selected.locale }
         );
@@ -184,10 +183,9 @@ export default function LandlordForm({ organization, firstAccess }) {
           };
         }
 
-        const savedOrganization = await mutateUpdateOrganization.mutateAsync({
-          store,
-          organization: mergeOrganization(organization, { ...updatedOrgPart })
-        });
+        const savedOrganization = await mutateUpdateOrganization.mutateAsync(
+          mergeOrganization(organization, { ...updatedOrgPart })
+        );
 
         const isOrgNameChanged = savedOrganization.name !== initialValues.name;
         const isLocaleChanged =
@@ -304,6 +302,9 @@ export default function LandlordForm({ organization, firstAccess }) {
             <div className="space-y-2">
               <Label htmlFor="legalStructure">{t('Legal structure')}</Label>
               <Input id="legalStructure" {...register('legalStructure')} />
+              {errors.legalStructure && (
+                <p className="text-sm text-destructive">{errors.legalStructure.message}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="company">{t('Name of business or institution')}</Label>
@@ -315,6 +316,9 @@ export default function LandlordForm({ organization, firstAccess }) {
             <div className="space-y-2">
               <Label htmlFor="ein">{t('Employer Identification Number')}</Label>
               <Input id="ein" {...register('ein')} />
+              {errors.ein && (
+                <p className="text-sm text-destructive">{errors.ein.message}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="dos">{t('Administrative jurisdiction')}</Label>
@@ -323,6 +327,9 @@ export default function LandlordForm({ organization, firstAccess }) {
             <div className="space-y-2">
               <Label htmlFor="capital">{t('Capital')}</Label>
               <Input id="capital" type="number" {...register('capital')} />
+              {errors.capital && (
+                <p className="text-sm text-destructive">{errors.capital.message}</p>
+              )}
             </div>
           </>
         )}

@@ -3,78 +3,66 @@ import { useCallback, useContext, useMemo, useState } from 'react';
 import { Alert } from '../ui/alert';
 import ConfirmDialog from '../ConfirmDialog';
 import { downloadDocument } from '../../utils/fetch';
+import { QueryKeys } from '../../utils/restcalls';
 import ImageViewer from '../ImageViewer/ImageViewer';
 import { LuAlertTriangle } from 'react-icons/lu';
-import { observer } from 'mobx-react-lite';
 import PdfViewer from '../PdfViewer/PdfViewer';
 import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import UploadDialog from '../UploadDialog';
 import UploadFileItem from './UploadFileItem';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiFetcher } from '../../utils/fetch';
 import useTranslation from 'next-translate/useTranslation';
 
-function UploadFileList({ disabled }) {
+function UploadFileList({ tenant, templates = [], documents = [], disabled }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
-  const [
-    openDocumentToRemoveConfirmDialog,
-    setOpenDocumentToRemoveConfirmDialog
-  ] = useState(false);
-  const [selectedDocumentToRemove, setSelectedDocumentToRemove] =
-    useState(null);
-  const [openUploadDocumentDialog, setOpenUploadDocumentDialog] =
-    useState(false);
+  const queryClient = useQueryClient();
+  const [openDocumentToRemoveConfirmDialog, setOpenDocumentToRemoveConfirmDialog] = useState(false);
+  const [selectedDocumentToRemove, setSelectedDocumentToRemove] = useState(null);
+  const [openUploadDocumentDialog, setOpenUploadDocumentDialog] = useState(false);
   const [selectedUploadDocument, setSelectedUploadDocument] = useState(null);
   const [openImageViewer, setOpenImageViewer] = useState(false);
   const [pdfDoc, setPdfDoc] = useState();
   const [openPdfViewer, setOpenPdfViewer] = useState(false);
 
   const files = useMemo(() => {
-    const existingDocuments = store.document.items
-      .filter(
-        ({ tenantId, type }) =>
-          store.tenant.selected?._id === tenantId && type === 'file'
-      )
+    const existingDocuments = documents
+      .filter(({ tenantId, type }) => tenant?._id === tenantId && type === 'file')
       .reduce((acc, doc) => {
         acc[doc.templateId] = {
-          _id: doc._id,
-          url: doc.url,
-          versionId: doc.versionId,
-          mimeType: doc.mimeType,
-          expiryDate: doc.expiryDate,
-          createdDate: doc.createdDate,
-          updatedDate: doc.updatedDate
+          _id: doc._id, url: doc.url, versionId: doc.versionId,
+          mimeType: doc.mimeType, expiryDate: doc.expiryDate,
+          createdDate: doc.createdDate, updatedDate: doc.updatedDate
         };
         return acc;
       }, {});
 
-    return store.template.items
+    return templates
       .filter((template) => {
-        if (store.tenant.selected.terminated) {
-          return (
-            template.type === 'fileDescriptor' &&
-            template.linkedResourceIds?.includes(store.tenant.selected?.leaseId)
-          );
+        if (tenant?.terminated) {
+          return template.type === 'fileDescriptor' && template.linkedResourceIds?.includes(tenant?.leaseId);
         }
-        return (
-          template.type === 'fileDescriptor' &&
-          template.linkedResourceIds?.includes(
-            store.tenant.selected?.leaseId
-          ) &&
-          !template.requiredOnceContractTerminated
-        );
+        return template.type === 'fileDescriptor' && template.linkedResourceIds?.includes(tenant?.leaseId) && !template.requiredOnceContractTerminated;
       })
-      .map((template) => ({
-        template,
-        document: existingDocuments[template._id]
-      }));
-  }, [
-    store.document.items,
-    store.template.items,
-    store.tenant.selected?._id,
-    store.tenant.selected?.leaseId,
-    store.tenant.selected.terminated
-  ]);
+      .map((template) => ({ template, document: existingDocuments[template._id] }));
+  }, [documents, templates, tenant?._id, tenant?.leaseId, tenant?.terminated]);
+
+  const createDocMutation = useMutation({
+    mutationFn: async (doc) => {
+      const response = await apiFetcher().post('/documents', doc);
+      return response.data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+  });
+
+  const deleteDocMutation = useMutation({
+    mutationFn: async (ids) => {
+      await apiFetcher().delete(`/documents/${ids.join(',')}`);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+  });
 
   const handleView = useCallback((doc, template) => {
     if (doc.mimeType.indexOf('image/') !== -1) {
@@ -83,61 +71,42 @@ function UploadFileList({ disabled }) {
       setPdfDoc({ url: `/documents/${doc._id}`, title: template.name });
       setOpenPdfViewer(true);
     } else {
-      downloadDocument({
-        endpoint: `/documents/${doc._id}`,
-        documentName: doc.name
-      });
+      downloadDocument({ endpoint: `/documents/${doc._id}`, documentName: doc.name });
     }
   }, []);
 
-  const handleUpload = useCallback(
-    (template) => {
-      setSelectedUploadDocument(template);
-      setOpenUploadDocumentDialog(true);
-    },
-    [setOpenUploadDocumentDialog, setSelectedUploadDocument]
-  );
+  const handleUpload = useCallback((template) => {
+    setSelectedUploadDocument(template);
+    setOpenUploadDocumentDialog(true);
+  }, []);
 
-  const handleDelete = useCallback(
-    (doc) => {
-      setSelectedDocumentToRemove(doc);
-      setOpenDocumentToRemoveConfirmDialog(true);
-    },
-    [setOpenDocumentToRemoveConfirmDialog, setSelectedDocumentToRemove]
-  );
+  const handleDelete = useCallback((doc) => {
+    setSelectedDocumentToRemove(doc);
+    setOpenDocumentToRemoveConfirmDialog(true);
+  }, []);
 
-  const handleSaveUploadDocument = useCallback(
-    async (doc) => {
-      const { status } = await store.document.create({
-        tenantId: store.tenant.selected?._id,
-        leaseId: store.tenant.selected?.leaseId,
-        templateId: doc.template._id,
-        type: 'file',
-        name: doc.name || t('Untitled document'),
-        description: doc.description || '',
-        mimeType: doc.mimeType || '',
-        expiryDate: doc.expiryDate || '',
-        url: doc.url || '',
-        versionId: doc.versionId
+  const handleSaveUploadDocument = useCallback(async (doc) => {
+    try {
+      await createDocMutation.mutateAsync({
+        tenantId: tenant?._id, leaseId: tenant?.leaseId,
+        templateId: doc.template._id, type: 'file',
+        name: doc.name || t('Untitled document'), description: doc.description || '',
+        mimeType: doc.mimeType || '', expiryDate: doc.expiryDate || '',
+        url: doc.url || '', versionId: doc.versionId
       });
-      if (status !== 200) {
-        return toast.error(t('Something went wrong'));
-      }
-    },
-    [store, t]
-  );
+    } catch {
+      toast.error(t('Something went wrong'));
+    }
+  }, [createDocMutation, tenant, t]);
 
   const handleDeleteDocument = useCallback(async () => {
-    if (!selectedDocumentToRemove) {
-      return;
+    if (!selectedDocumentToRemove) return;
+    try {
+      await deleteDocMutation.mutateAsync([selectedDocumentToRemove._id]);
+    } catch {
+      toast.error(t('Something went wrong'));
     }
-    const { status } = await store.document.delete([
-      selectedDocumentToRemove._id
-    ]);
-    if (status !== 200) {
-      return toast.error(t('Something went wrong'));
-    }
-  }, [selectedDocumentToRemove, store, t]);
+  }, [selectedDocumentToRemove, deleteDocMutation, t]);
 
   return (
     <>
@@ -146,9 +115,7 @@ function UploadFileList({ disabled }) {
           <div className="flex items-center gap-4">
             <LuAlertTriangle className="size-6" />
             <div className="text-sm">
-              {t(
-                'Unable to upload documents without configuring the cloud storage service in Settings page'
-              )}
+              {t('Unable to upload documents without configuring the cloud storage service in Settings page')}
             </div>
           </div>
         </Alert>
@@ -156,21 +123,17 @@ function UploadFileList({ disabled }) {
 
       <Card>
         <CardContent className="p-0 h-72 overflow-y-auto">
-          {files.map(({ template, document }) => {
-            return (
-              <UploadFileItem
-                key={template._id}
-                template={template}
-                document={document}
-                disabled={
-                  disabled || !store.organization.canUploadDocumentsInCloud
-                }
-                onView={handleView}
-                onUpload={handleUpload}
-                onDelete={handleDelete}
-              />
-            );
-          })}
+          {files.map(({ template, document }) => (
+            <UploadFileItem
+              key={template._id}
+              template={template}
+              document={document}
+              disabled={disabled || !store.organization.canUploadDocumentsInCloud}
+              onView={handleView}
+              onUpload={handleUpload}
+              onDelete={handleDelete}
+            />
+          ))}
         </CardContent>
       </Card>
 
@@ -179,6 +142,8 @@ function UploadFileList({ disabled }) {
         setOpen={setOpenUploadDocumentDialog}
         data={selectedUploadDocument}
         onSave={handleSaveUploadDocument}
+        tenant={tenant}
+        templates={templates}
       />
 
       <ConfirmDialog
@@ -191,14 +156,9 @@ function UploadFileList({ disabled }) {
       />
 
       <ImageViewer open={openImageViewer} setOpen={setOpenImageViewer} />
-
-      <PdfViewer
-        open={openPdfViewer}
-        setOpen={setOpenPdfViewer}
-        pdfDoc={pdfDoc}
-      />
+      <PdfViewer open={openPdfViewer} setOpen={setOpenPdfViewer} pdfDoc={pdfDoc} />
     </>
   );
 }
 
-export default observer(UploadFileList);
+export default UploadFileList;

@@ -1,23 +1,9 @@
-import { action, computed, flow, makeObservable, observable } from 'mobx';
-
 import { apiFetcher } from '../utils/fetch';
 
 export default class Organization {
   constructor() {
     this.selected = undefined;
     this.items = [];
-
-    makeObservable(this, {
-      selected: observable,
-      items: observable,
-      setSelected: action,
-      setItems: action,
-      canSendEmails: computed,
-      canUploadDocumentsInCloud: computed,
-      fetch: flow,
-      create: flow,
-      update: flow
-    });
   }
 
   setSelected = (org, user) => {
@@ -43,9 +29,9 @@ export default class Organization {
     return !!this.selected?.thirdParties?.b2;
   }
 
-  *fetch() {
+  async fetch() {
     try {
-      const response = yield apiFetcher().get('/realms');
+      const response = await apiFetcher().get('/realms');
       this.setItems(response.data);
       return { status: 200, data: response.data };
     } catch (error) {
@@ -54,9 +40,9 @@ export default class Organization {
     }
   }
 
-  *create(organization) {
+  async create(organization) {
     try {
-      const response = yield apiFetcher().post('/realms', organization);
+      const response = await apiFetcher().post('/realms', organization);
       return { status: 200, data: response.data };
     } catch (error) {
       console.error(error);
@@ -64,9 +50,9 @@ export default class Organization {
     }
   }
 
-  *update(organization) {
+  async update(organization) {
     try {
-      const response = yield apiFetcher().patch(
+      const response = await apiFetcher().patch(
         `/realms/${organization._id}`,
         organization
       );

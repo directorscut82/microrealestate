@@ -27,7 +27,7 @@ function OrganizationsSettings() {
     isLoading
   } = useQuery({
     queryKey: [QueryKeys.ORGANIZATIONS],
-    queryFn: () => fetchOrganizations(store)
+    queryFn: () => fetchOrganizations()
   });
 
   const handleSwitchOrganization = (organization) => () => {

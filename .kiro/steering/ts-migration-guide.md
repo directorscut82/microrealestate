@@ -1,71 +1,33 @@
 # TypeScript Migration Guide
 
-## Current State
+## Current State — ✅ ALL SERVICES MIGRATED
 
-| Service | Language | Files | tsconfig.json | Notes |
-|---------|----------|-------|---------------|-------|
-| common | TypeScript | ✅ | ✅ | Already migrated, publishes types |
-| gateway | TypeScript | ✅ | ✅ | Already migrated |
-| tenantapi | TypeScript | ✅ | ✅ | Already migrated |
-| resetservice | TypeScript | ✅ | ✅ | Already migrated |
-| authenticator | JavaScript | 4 | ❌ | Smallest JS service |
-| pdfgenerator | JavaScript | 11 | ❌ | Medium complexity |
-| emailer | JavaScript | 23 | ❌ | Medium-high complexity |
-| api | JavaScript | 35 | ❌ | Largest, most critical |
+All backend services are now TypeScript. Migration completed in Phase 3.
+58 files converted across 4 services, 0 compilation errors, 200+ integration tests verified 0 regressions.
 
-## Recommended Migration Order
+| Service | Language | Files | Notes |
+|---------|----------|-------|-------|
+| common | TypeScript | ✅ | Shared library, publishes types |
+| gateway | TypeScript | ✅ | Reverse proxy |
+| tenantapi | TypeScript | ✅ | Tenant read-only API |
+| resetservice | TypeScript | ✅ | Dev/CI DB reset |
+| authenticator | TypeScript | ✅ | Migrated: 4 files |
+| pdfgenerator | TypeScript | ✅ | Migrated: 11 files |
+| emailer | TypeScript | ✅ | Migrated: 23 files |
+| api | TypeScript | ✅ | Migrated: 20 files |
 
-1. **authenticator** — Only 4 files. Quick win, builds confidence.
-2. **pdfgenerator** — 11 files, self-contained PDF logic.
-3. **emailer** — 23 files, similar patterns to pdfgenerator.
-4. **api** — 35 files, most complex. Migrate last when patterns are established.
+## Future: Landlord App → TypeScript
 
-## Infrastructure Already in Place
+The landlord frontend (`webapps/landlord`) is still JavaScript (JSX). It can be migrated to TypeScript after the MobX removal is complete (which it now is).
 
-All JS services already have:
-- `typescript` as a devDependency
-- `@typescript-eslint/*` parser and plugin
-- Build scripts that transpile `@microrealestate/common` (TS → JS)
-- ESM (`"type": "module"`) in package.json
+**⚠️ Known issue:** Bulk renaming `.js` → `.tsx` causes Next.js SWC compiler to generate different CSS output, specifically affecting `next/image` with `fill` prop (creates `position: absolute` elements that overlap form inputs). The migration must be done incrementally — file by file — with E2E testing after each batch. The `Illustrations.tsx` component specifically needs the `next/image` `fill` prop replaced with a plain `<img>` tag.
 
-What's missing per JS service:
-- A `tsconfig.json` (copy from gateway/tenantapi and adjust)
-- Build script to compile the service's own TS files
-- Updated `main` entry point to `dist/index.js`
-
-## Migration Steps Per Service
-
-1. **Add tsconfig.json** — Copy from an existing TS service:
-   ```json
-   {
-     "compilerOptions": {
-       "module": "NodeNext",
-       "moduleResolution": "NodeNext",
-       "outDir": "dist",
-       "skipLibCheck": true,
-       "strict": true,
-       "target": "ESNext",
-       "declaration": true
-     },
-     "include": ["src/**/*"]
-   }
-   ```
-
-2. **Rename files** — `*.js` → `*.ts`, one directory at a time.
-
-3. **Fix imports** — Change `.js` extensions to `.js` in imports (NodeNext resolution requires `.js` even for `.ts` files).
-
-4. **Add types** — Start with `any` where needed, tighten incrementally. Use types from `@microrealestate/types`.
-
-5. **Update package.json** — Change `main` to `dist/index.js`, add a `transpile:service` script:
-   ```json
-   "transpile:service": "tsc --build",
-   "watch:service": "nodemon -w dist --inspect=0.0.0.0:9226 ./dist/index.js"
-   ```
-
-6. **Update dev scripts** — Add the service transpile step to the `dev` and `build` scripts.
-
-7. **Test** — Run existing tests, verify the service starts correctly.
+Steps:
+1. Add `tsconfig.json` to `webapps/landlord` (already exists with `allowJs: true`)
+2. Rename `.js` → `.tsx` files incrementally, one directory at a time
+3. Run E2E tests after each batch to catch CSS rendering regressions
+4. Add types for props, state, and API responses
+5. Use types from `@microrealestate/types`
 
 ## Tips
 

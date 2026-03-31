@@ -9,8 +9,7 @@ inclusion: always
 - Node.js v20 (required, enforced in package.json `engines`)
 - Mixed JavaScript (ES Modules) and TypeScript codebase
 - All packages use `"type": "module"` (ESM imports throughout)
-- TypeScript 5.5.4 for typed services (gateway, tenantapi, resetservice, common, types)
-- JavaScript (ESM) for older services (api, authenticator, emailer, pdfgenerator)
+- TypeScript 5.5.4 for all backend services and types package
 - Landlord frontend: JavaScript (JSX), Tenant frontend: TypeScript (TSX)
 
 ## Package Management
@@ -47,17 +46,16 @@ inclusion: always
 
 - Next.js 14.2 with Pages Router (`src/pages/`)
 - React 18.2
-- MobX 6.12 + mobx-react-lite — state management (stores in `src/store/`)
-- Material UI v4 (legacy) — some form components
+- @tanstack/react-query v5.29 — all server state (data fetching/mutations)
+- Plain class store for auth/session only (Organization, User, AppHistory — no MobX)
 - Radix UI primitives — modern UI components
 - shadcn/ui pattern (components.json, `src/components/ui/`)
 - Tailwind CSS 3.4 with CSS variables for theming
 - TipTap 2.6 — rich text editor for contract templates
-- Formik + Yup — form handling and validation
+- react-hook-form + zod — form handling and validation (all 22 forms)
 - next-translate — i18n (locales in `locales/` directory)
 - next-themes — dark mode support
 - Recharts — dashboard charts
-- @tanstack/react-query — server state management
 - @react-pdf-viewer — PDF viewing
 - pigeon-maps — map display
 - sonner — toast notifications
@@ -80,10 +78,11 @@ inclusion: always
 
 ## Shared UI (`webapps/commonui`)
 
-- Shared React components (Loading, Illustration, FormFields)
-- Shared utilities (contract helpers)
+- Shared utilities (isClient, isServer, env helpers)
+- Shared contract helpers (contractEndMoment, durationEndMoment)
 - Shared localization strings
 - Runtime scripts: `generateruntimeenvfile.js`, `replacebasepath.js`, `runner.js`
+- No React components exported (FormFields deleted, Loading/Illustration moved to landlord app)
 
 ## Testing
 
@@ -115,7 +114,7 @@ inclusion: always
 
 ## Internationalization
 
-- 5 supported locales: `en`, `fr-FR`, `pt-BR`, `de-DE`, `es-CO`
+- 6 supported locales: `en`, `fr-FR`, `pt-BR`, `de-DE`, `es-CO`, `el`
 - Backend: `i18n` package with JSON locale files
 - Landlord frontend: `next-translate` with per-page namespace JSON files
 - Tenant frontend: custom i18n with `@formatjs/intl-localematcher` and `negotiator`

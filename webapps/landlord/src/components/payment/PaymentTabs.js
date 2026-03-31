@@ -25,11 +25,11 @@ import {
 } from '../ui/select';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import moment from 'moment';
-import { QueryKeys } from '../../utils/restcalls';
+import { payRent, QueryKeys } from '../../utils/restcalls';
 import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import usePaymentTypes from '../../hooks/usePaymentTypes';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
 const paymentSchema = z.object({
@@ -124,7 +124,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
 
       const period = moment(String(rent.term), 'YYYYMMDDHH').format('YYYY.MM');
       try {
-        await store.rent.pay(String(rent.term), payment);
+        await payRent({ term: String(rent.term), payment });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, period] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
         onSubmit?.();
@@ -133,7 +133,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
         toast.error(t('Something went wrong'));
       }
     },
-    [onSubmit, queryClient, rent._id, rent.month, rent.term, rent.year, store.rent, t]
+    [onSubmit, queryClient, rent._id, rent.month, rent.term, rent.year, t]
   );
 
   const payments = watch('payments');

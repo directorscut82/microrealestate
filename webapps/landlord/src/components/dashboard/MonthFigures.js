@@ -1,6 +1,6 @@
 import { Legend, RadialBar, RadialBarChart } from 'recharts';
 import { LuAlertTriangle, LuBanknote } from 'react-icons/lu';
-import { useContext, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Button } from '../ui/button';
 import { CelebrationIllustration } from '../../components/Illustrations';
 import { ChartContainer } from '../ui/chart';
@@ -8,7 +8,6 @@ import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
-import { StoreContext } from '../../store';
 import useFormatNumber from '../../hooks/useFormatNumber';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
@@ -16,7 +15,6 @@ import useTranslation from 'next-translate/useTranslation';
 export default function MonthFigures({ className, dashboardData }) {
   const { t } = useTranslation('common');
   const router = useRouter();
-  const store = useContext(StoreContext);
   const formatNumber = useFormatNumber();
   const yearMonth = moment().format('YYYY.MM');
 
@@ -46,10 +44,8 @@ export default function MonthFigures({ className, dashboardData }) {
     const {
       payload: { yearMonth }
     } = data;
-    store.rent.setFilters({ status: [status] });
-    store.rent.setPeriod(moment(yearMonth, 'YYYY.MM', true));
     router.push(
-      `/${store.organization.selected.name}/rents/${yearMonth}?statuses=${status}`
+      `/${router.query.organization}/rents/${yearMonth}?statuses=${status}`
     );
   };
 
@@ -76,10 +72,8 @@ export default function MonthFigures({ className, dashboardData }) {
                   <Button
                     variant="link"
                     onClick={() => {
-                      store.rent.setSelected(rent);
-                      store.rent.setFilters({ searchText: tenant.name });
                       router.push(
-                        `/${store.organization.selected.name}/rents/${yearMonth}?search=${tenant.name}`
+                        `/${router.query.organization}/rents/${yearMonth}?search=${tenant.name}`
                       );
                     }}
                     className="justify-start flex-grow p-0 m-0"

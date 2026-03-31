@@ -10,7 +10,7 @@ import {
   QueryKeys,
   updateLease
 } from '../../../../utils/restcalls';
-import { useCallback, useContext, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../../../components/ui/button';
 import { cn } from '../../../../utils';
@@ -19,7 +19,6 @@ import { LuPlusCircle } from 'react-icons/lu';
 import NewLeaseDialog from '../../../../components/organization/lease/NewLeaseDialog';
 import Page from '../../../../components/Page';
 import ShortcutButton from '../../../../components/ShortcutButton';
-import { StoreContext } from '../../../../store';
 import { Switch } from '../../../../components/ui/switch';
 import { toast } from 'sonner';
 import { useRouter } from 'next/router';
@@ -28,7 +27,6 @@ import { withAuthentication } from '../../../../components/Authentication';
 
 function LeasesSettings() {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [openNewLeaseDialog, setOpenNewLeaseDialog] = useState(false);
@@ -49,10 +47,9 @@ function LeasesSettings() {
 
   const handleLeaseChange = useCallback(
     async (active, lease) => {
-      lease.active = active;
-      await leaseMutation.mutateAsync({ store, lease });
+      await leaseMutation.mutateAsync({ ...lease, active });
     },
-    [leaseMutation, store]
+    [leaseMutation]
   );
 
   if (leasesQuery.isError) {
@@ -71,7 +68,7 @@ function LeasesSettings() {
           <ShortcutButton
             label={t('New contract')}
             Icon={LuPlusCircle}
-            disabled={store.tenant.selected.hasPayments}
+            disabled={false}
             onClick={handleNewLeaseDialog}
           />
         </div>
@@ -99,9 +96,8 @@ function LeasesSettings() {
                   <Button
                     variant="link"
                     onClick={() => {
-                      store.appHistory.setPreviousPath(router.asPath);
                       router.push(
-                        `/${store.organization.selected.name}/settings/contracts/${lease._id}`
+                        `/${router.query.organization}/settings/contracts/${lease._id}`
                       );
                     }}
                     className={cn(

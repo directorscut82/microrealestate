@@ -317,7 +317,7 @@ Cypress.Commands.add('openResource', (resourceName) => {
 Cypress.Commands.add('removeResource', () => {
   cy.get('button[data-cy=removeResourceButton]').click();
   cy.get('[role=dialog]')
-    .get('button')
+    .find('button')
     .contains(i18n.getFixedT('fr-FR')('Continue'))
     .click();
 });

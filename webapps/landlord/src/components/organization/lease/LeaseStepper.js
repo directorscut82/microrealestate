@@ -37,7 +37,7 @@ export default function LeaseStepper({ lease, leases, onSubmit }) {
       </Step>
       <Step stepLabel={t('Template documents')}>
         <div className="px-2">
-          <TemplateForm onSubmit={handleSubmit} />
+          <TemplateForm leaseId={lease?._id} onSubmit={handleSubmit} stepperMode />
         </div>
       </Step>
     </Stepper>

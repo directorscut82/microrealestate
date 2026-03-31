@@ -13,9 +13,9 @@ import React, {
   useState
 } from 'react';
 import { Button } from '../ui/button';
+import { fetchRents } from '../../utils/restcalls';
 import PaymentTabs from './PaymentTabs';
 import RentSelector from './RentSelector';
-import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -26,32 +26,30 @@ export default function NewPaymentDialog({
   onClose
 }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
   const [selectedRent, setSelectedRent] = useState();
   const [rents, setRents] = useState();
   const formRef = useRef();
 
   useEffect(() => {
-    const fetchRents = async () => {
-      const { status, data } = await store.rent.fetchWithoutUpdatingStore();
-
-      if (status !== 200) {
-        toast.error(t('Something went wrong'));
-        setRents([]);
-      } else {
+    const loadRents = async () => {
+      try {
+        const data = await fetchRents();
         setRents(data.rents);
         if (data.rents.length === 1) {
           setSelectedRent(data.rents[0]);
         }
+      } catch {
+        toast.error(t('Something went wrong'));
+        setRents([]);
       }
     };
 
     setSelectedRent(open ? defaultRent : null);
     setRents(open && defaultRent ? [defaultRent] : null);
     if (open && !defaultRent) {
-      fetchRents();
+      loadRents();
     }
-  }, [open, defaultRent, store, t]);
+  }, [open, defaultRent, t]);
 
   const handleRentChange = async (rent) => {
     setSelectedRent(rent);

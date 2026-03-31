@@ -11,7 +11,7 @@ describe('one property rented', () => {
       price: 300
     },
     rent: 300,
-    expenses: [{ title: 'expense', amount: 10 }]
+    expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2017', endDate: '31/08/2017' }]
   };
   const contract = {
     begin: '01/01/2017',
@@ -64,7 +64,7 @@ describe('two properties rented with one month offset', () => {
       price: 300
     },
     rent: 300,
-    expenses: [{ title: 'expense', amount: 10 }]
+    expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2017', endDate: '31/08/2017' }]
   };
   const property2 = {
     entryDate: moment('01/02/2017', 'DD/MM/YYYY').toDate(),
@@ -74,7 +74,7 @@ describe('two properties rented with one month offset', () => {
       price: 30
     },
     rent: 30,
-    expenses: [{ title: 'expense', amount: 5 }]
+    expenses: [{ title: 'expense', amount: 5, beginDate: '01/02/2017', endDate: '31/08/2017' }]
   };
   const contract = {
     begin: '01/01/2017',

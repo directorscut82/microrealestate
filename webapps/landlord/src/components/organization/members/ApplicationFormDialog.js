@@ -109,12 +109,11 @@ export default function ApplicationFormDialog({
         organization,
         expiryDate: moment(app.expiryDate)
       });
-      await mutateAsync({
-        store,
-        organization: mergeOrganization(organization, {
+      await mutateAsync(
+        mergeOrganization(organization, {
           applications: [...organization.applications, { ...app, ...appCredz }]
         })
-      });
+      );
       handleClose(appCredz);
     },
     [store, mutateAppCredzAsync, organization, mutateAsync, handleClose]

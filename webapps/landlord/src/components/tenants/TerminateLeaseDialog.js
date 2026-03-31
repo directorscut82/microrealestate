@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -13,12 +13,10 @@ import {
   SelectValue
 } from '../ui/select';
 import moment from 'moment';
-import { QueryKeys } from '../../utils/restcalls';
+import { QueryKeys, updateTenant } from '../../utils/restcalls';
 import ResponsiveDialog from '../ResponsiveDialog';
-import { StoreContext } from '../../store';
 import { toast } from 'sonner';
-import { toJS } from 'mobx';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
 const schema = z.object({
@@ -27,14 +25,20 @@ const schema = z.object({
   guarantyPayback: z.coerce.number().min(0).optional()
 });
 
-export default function TerminateLeaseDialog({ open, setOpen, tenantList }) {
+export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp, tenantList }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
-  const store = useContext(StoreContext);
-  const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
 
-  const selected = store.tenant.selected;
+  const selected = tenantProp;
+
+  const terminateMutation = useMutation({
+    mutationFn: updateTenant,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    }
+  });
 
   const initialValues = useMemo(
     () => ({
@@ -96,36 +100,29 @@ export default function TerminateLeaseDialog({ open, setOpen, tenantList }) {
   };
 
   const _onSubmit = async (tenantPart) => {
+    const tenant =
+      tenantList?.find(({ _id }) => _id === tenantPart.tenantId) || selected;
+    const updatedTenant = {
+      ...tenant,
+      terminationDate: moment(tenantPart.terminationDate).format('DD/MM/YYYY'),
+      guarantyPayback: tenantPart.guarantyPayback || 0
+    };
+
     try {
-      setIsLoading(true);
-      const tenant =
-        tenantList?.find(({ _id }) => _id === tenantPart.tenantId) || selected;
-      const updatedTenant = {
-        ...toJS(tenant),
-        terminationDate: moment(tenantPart.terminationDate).format('DD/MM/YYYY'),
-        guarantyPayback: tenantPart.guarantyPayback || 0
-      };
-
-      const { status, data } = await store.tenant.update(updatedTenant);
-      if (status !== 200) {
-        switch (status) {
-          case 422:
-            return toast.error(t('Tenant name is missing'));
-          case 403:
-            return toast.error(t('You are not allowed to update the tenant'));
-          case 409:
-            return toast.error(t('Termination date is out of the contract time frame'));
-          default:
-            return toast.error(t('Something went wrong'));
-        }
-      }
-
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
-      store.tenant.setSelected(data);
+      await terminateMutation.mutateAsync(updatedTenant);
       handleClose();
-    } finally {
-      setIsLoading(false);
+    } catch (error) {
+      const status = error?.response?.status;
+      switch (status) {
+        case 422:
+          return toast.error(t('Tenant name is missing'));
+        case 403:
+          return toast.error(t('You are not allowed to update the tenant'));
+        case 409:
+          return toast.error(t('Termination date is out of the contract time frame'));
+        default:
+          return toast.error(t('Something went wrong'));
+      }
     }
   };
 
@@ -133,7 +130,7 @@ export default function TerminateLeaseDialog({ open, setOpen, tenantList }) {
     <ResponsiveDialog
       open={!!open}
       setOpen={setOpen}
-      isLoading={isLoading}
+      isLoading={terminateMutation.isPending}
       renderHeader={() => t('Terminate a lease')}
       renderContent={() => (
         <form ref={formRef} onSubmit={handleSubmit(_onSubmit)} autoComplete="off" className="w-full">

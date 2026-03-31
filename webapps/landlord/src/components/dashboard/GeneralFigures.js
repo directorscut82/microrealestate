@@ -2,13 +2,10 @@ import { LuCoins, LuKeyRound, LuPercent, LuUserCircle } from 'react-icons/lu';
 import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import NumberFormat from '../NumberFormat';
-import { StoreContext } from '../../store';
-import { useContext } from 'react';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
 export default function GeneralFigures({ className, dashboardData }) {
-  const store = useContext(StoreContext);
   const router = useRouter();
   const { t } = useTranslation('common');
 
@@ -44,7 +41,7 @@ export default function GeneralFigures({ className, dashboardData }) {
         description={t('Total number of tenants')}
         renderContent={() => overview?.tenantCount}
         onClick={() => {
-          router.push(`/${store.organization.selected.name}/tenants`);
+          router.push(`/${router.query.organization}/tenants`);
         }}
         className="text-end"
       />
@@ -54,7 +51,7 @@ export default function GeneralFigures({ className, dashboardData }) {
         description={t('Total number of properties')}
         renderContent={() => overview?.propertyCount}
         onClick={() => {
-          router.push(`/${store.organization.selected.name}/properties`);
+          router.push(`/${router.query.organization}/properties`);
         }}
         className="text-end"
       />

@@ -1,4 +1,4 @@
-import { fetchRents, QueryKeys } from '../../../../utils/restcalls';
+import { fetchRents, QueryKeys, sendRentEmails } from '../../../../utils/restcalls';
 import { LuAlertTriangle, LuChevronDown, LuSend } from 'react-icons/lu';
 import {
   Popover,
@@ -6,7 +6,7 @@ import {
   PopoverTrigger
 } from '../../../../components/ui/popover';
 import { useCallback, useContext, useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert } from '../../../../components/ui/alert';
 import { Button } from '../../../../components/ui/button';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
@@ -85,50 +85,44 @@ function _filterData(data, filters) {
   return filteredItems;
 }
 
-function Actions({ values, onDone }) {
+function Actions({ values, yearMonth, onDone }) {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
-  const [sending, setSending] = useState(false);
+  const queryClient = useQueryClient();
   const [showConfirmDlg, setShowConfirmDlg] = useState(false);
   const [selectedDocumentName, setSelectedDocumentName] = useState(null);
   const disabled = !values?.length;
+
+  const sendMutation = useMutation({
+    mutationFn: sendRentEmails,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, yearMonth] });
+      onDone?.();
+    }
+  });
 
   const handleAction = useCallback(
     (docName) => async () => {
       setSelectedDocumentName(docName);
       setShowConfirmDlg(true);
     },
-    [setSelectedDocumentName, setShowConfirmDlg]
+    []
   );
 
   const handleConfirm = useCallback(async () => {
     try {
-      setSending(true);
-
-      const sendStatus = await store.rent.sendEmail({
+      await sendMutation.mutateAsync({
         document: selectedDocumentName,
         tenantIds: values.map((r) => r._id),
         terms: values.map((r) => r.term)
       });
-
-      if (sendStatus !== 200) {
-        return toast.error(t('Email delivery service cannot send emails'));
-      }
-
-      const response = await store.rent.fetch();
-      if (response.status !== 200) {
-        return toast.error(t('Cannot fetch rents from server'));
-      }
-
-      onDone?.();
-    } finally {
-      setSending(false);
+    } catch {
+      toast.error(t('Email delivery service cannot send emails'));
     }
-  }, [onDone, selectedDocumentName, store.rent, t, values]);
+  }, [selectedDocumentName, sendMutation, t, values]);
 
   return (
     <>
-      {sending ? (
+      {sendMutation.isPending ? (
         <div className="flex items-center gap-1 text-muted-foreground">
           <LuRotateCw className="animate-spin size-4" />
           {t('Sending...')}
@@ -206,26 +200,23 @@ function Actions({ values, onDone }) {
 
 function Rents() {
   const { t } = useTranslation('common');
-  const queryClient = useQueryClient();
   const store = useContext(StoreContext);
   const router = useRouter();
   const { yearMonth } = router.query;
+  const period = useMemo(
+    () =>
+      router.query.yearMonth ? moment(router.query.yearMonth, 'YYYY.MM') : moment(),
+    [router.query.yearMonth]
+  );
   const { data, isError, isLoading } = useQuery({
     queryKey: [QueryKeys.RENTS, yearMonth],
-    queryFn: () => fetchRents(store, yearMonth)
+    queryFn: () => fetchRents(yearMonth)
   });
   const [rentSelected, setRentSelected] = useState([]);
 
   const handleActionDone = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, yearMonth] });
     setRentSelected([]);
-  }, [queryClient, yearMonth]);
-
-  const period = useMemo(
-    () =>
-      router.query.yearMonth ? moment(router.query.yearMonth, 'YYYY.MM') : null,
-    [router.query.yearMonth]
-  );
+  }, []);
 
   if (isError) {
     toast.error(t('Error fetching rents'));
@@ -259,7 +250,7 @@ function Rents() {
         filterFn={_filterData}
         renderActions={() =>
           store.organization.canSendEmails ? (
-            <Actions values={rentSelected} onDone={handleActionDone} />
+            <Actions values={rentSelected} yearMonth={yearMonth} onDone={handleActionDone} />
           ) : null
         }
         renderList={({ data }) => (

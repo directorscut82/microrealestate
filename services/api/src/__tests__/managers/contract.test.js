@@ -343,7 +343,7 @@ describe('contract functionalities', () => {
             price: 100
           },
           rent: 100,
-          expenses: [{ title: 'expense', amount: 10 }]
+          expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2020', endDate: '31/12/2020' }]
         }
       ]
     });
@@ -413,7 +413,7 @@ describe('contract functionalities', () => {
         price: 300
       },
       rent: 300,
-      expenses: [{ title: 'expense', amount: 10 }]
+      expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2020', endDate: '31/12/2020' }]
     };
 
     let termP1 =
@@ -472,7 +472,7 @@ describe('contract functionalities', () => {
         price: 320
       },
       rent: 320,
-      expenses: [{ title: 'expense', amount: 32 }]
+      expenses: [{ title: 'expense', amount: 32, beginDate: '01/02/2020', endDate: '31/12/2020' }]
     };
 
     let termP2 =
@@ -538,7 +538,7 @@ describe('contract functionalities', () => {
         price: 300
       },
       rent: 300,
-      expenses: [{ title: 'expense', amount: 10 }]
+      expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2020', endDate: '31/08/2020' }]
     };
 
     let rentAmountProperty1 =
@@ -581,7 +581,7 @@ describe('contract functionalities', () => {
         price: 300
       },
       rent: 300,
-      expenses: [{ title: 'expense', amount: 10 }]
+      expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2020', endDate: '31/12/2020' }]
     };
 
     let termP1 =
@@ -600,7 +600,7 @@ describe('contract functionalities', () => {
         price: 320
       },
       rent: 320,
-      expenses: [{ title: 'expense', amount: 32 }]
+      expenses: [{ title: 'expense', amount: 32, beginDate: '01/07/2020', endDate: '31/12/2020' }]
     };
 
     let termP2 =

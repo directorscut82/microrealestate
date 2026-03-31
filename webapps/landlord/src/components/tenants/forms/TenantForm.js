@@ -1,4 +1,4 @@
-import { useContext, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -7,8 +7,6 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Separator } from '../../ui/separator';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
-import { observer } from 'mobx-react-lite';
-import { StoreContext } from '../../../store';
 import useTranslation from 'next-translate/useTranslation';
 
 const contactSchema = z.object({
@@ -67,13 +65,12 @@ const initValues = (tenant) => ({
 
 export const validate = (tenant) => schema.parseAsync(initValues(tenant));
 
-const TenantForm = observer(({ readOnly, onSubmit }) => {
+const TenantForm = ({ tenant, readOnly, onSubmit }) => {
   const { t } = useTranslation('common');
-  const store = useContext(StoreContext);
 
   const initialValues = useMemo(
-    () => initValues(store.tenant?.selected),
-    [store.tenant?.selected]
+    () => initValues(tenant),
+    [tenant]
   );
 
   const {
@@ -85,7 +82,8 @@ const TenantForm = observer(({ readOnly, onSubmit }) => {
     formState: { errors, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: initialValues
+    defaultValues: initialValues,
+    values: initialValues
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -94,7 +92,7 @@ const TenantForm = observer(({ readOnly, onSubmit }) => {
   });
 
   const isCompany = watch('isCompany');
-  const stepperMode = store.tenant.selected.stepperMode;
+  const stepperMode = tenant?.stepperMode;
 
   const _onSubmit = async (tenant) => {
     await onSubmit({
@@ -205,6 +203,6 @@ const TenantForm = observer(({ readOnly, onSubmit }) => {
       )}
     </form>
   );
-});
+};
 
 export default TenantForm;
