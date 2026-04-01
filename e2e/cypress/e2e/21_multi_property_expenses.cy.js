@@ -73,12 +73,7 @@ describe('Multi-Property Tenant & Expenses', () => {
 
   it('Add second property to tenant', () => {
     cy.get('[data-cy=addPropertiesItem]').click();
-    cy.get('input[name="properties.1.entryDate"]').clear().type('2023-01-01');
-    cy.get('input[name="properties.1.exitDate"]').clear().type('2031-12-31');
-  });
-
-  it('Select second property', () => {
-    // The second property select — find the second property section
+    // Select property first (dates are disabled until property is selected)
     cy.contains(t('Property #{{count}}', { count: 2 }))
       .parent()
       .parent()
@@ -86,6 +81,8 @@ describe('Multi-Property Tenant & Expenses', () => {
       .first()
       .click({ force: true });
     cy.get('[role="option"]').contains(properties[1].name).click({ force: true });
+    cy.get('input[name="properties.1.entryDate"]').clear().type('2023-01-01');
+    cy.get('input[name="properties.1.exitDate"]').clear().type('2031-12-31');
   });
 
   it('Add expense to second property', () => {
