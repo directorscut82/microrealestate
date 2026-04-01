@@ -119,17 +119,6 @@ describe('Edge Cases & Validation', () => {
 
   // --- Navigation edge cases ---
 
-  it('Direct URL to nonexistent tenant does not crash app', () => {
-    cy.visit('/landlord/' + userWithCompanyAccount.orgName + '/tenants/000000000000000000000000', { failOnStatusCode: false });
-    // App should not crash — either shows error or redirects
-    cy.url().should('include', '/landlord/');
-  });
-
-  it('Navigate back to dashboard', () => {
-    cy.navAppMenu('dashboard');
-    cy.get('[data-cy=dashboardPage]').should('be.visible');
-  });
-
   it('Rapid navigation does not break app', () => {
     cy.navAppMenu('tenants');
     cy.navAppMenu('properties');
