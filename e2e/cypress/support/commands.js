@@ -313,7 +313,9 @@ Cypress.Commands.add('checkPage', (pageName) => {
 Cypress.Commands.add('searchResource', (text) => {
   cy.get('[data-cy=globalSearchField]').click();
   cy.get('[data-cy=globalSearchField]').clear();
-  cy.get('[data-cy=globalSearchField]').type(text);
+  if (text) {
+    cy.get('[data-cy=globalSearchField]').type(text);
+  }
 });
 
 Cypress.Commands.add('openResource', (resourceName) => {
