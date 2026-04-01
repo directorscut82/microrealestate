@@ -46,17 +46,17 @@ describe('Tenant Document Management', () => {
   });
 
   it('Documents tab loads', () => {
-    cy.contains(t('Documents')).click();
+    cy.get('[role="tab"]').eq(3).click();
     cy.get('[data-cy=addTenantTextDocument]').should('exist');
   });
 
   it('Tenant info tab shows name', () => {
-    cy.contains(t('Tenant')).click();
+    cy.get('[role="tab"]').first().click();
     cy.get('input[name="name"]').should('have.value', tenants[0].name);
   });
 
   it('Lease tab shows property', () => {
-    cy.contains(t('Lease')).click();
+    cy.get('[role="tab"]').eq(1).click();
     cy.contains(t('Property #{{count}}', { count: 1 })).should('be.visible');
   });
 
