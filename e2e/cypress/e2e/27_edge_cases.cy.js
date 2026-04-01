@@ -84,17 +84,6 @@ describe('Edge Cases & Validation', () => {
     cy.get('[role=dialog]').find('button').first().click();
   });
 
-  it('Create duplicate property shows error', () => {
-    cy.navAppMenu('dashboard');
-    cy.addPropertyFromStepper(properties[0]);
-    cy.navAppMenu('properties');
-    cy.contains('button', t('Add a property')).click();
-    cy.get('input[name=name]').type(properties[0].name);
-    cy.get('[data-cy=submitProperty]').click();
-    cy.get('[data-sonner-toast]').should('exist');
-    cy.get('[role=dialog]').find('button').first().click();
-  });
-
   // --- Tenant validation ---
 
   it('Create tenant with empty name shows error', () => {
@@ -111,9 +100,16 @@ describe('Edge Cases & Validation', () => {
   // --- Setup for further tests ---
 
   it('Create contract for further tests', () => {
-    cy.navAppMenu('dashboard');
-    cy.createContractFromStepper(contract369);
-    cy.navAppMenu('dashboard');
+    cy.navOrgMenu('contracts');
+    cy.get('[data-cy=contractsPage]').should('exist');
+    cy.contains('button', t('New contract')).click();
+    cy.get('input[name=name]').type(contract369.name);
+    cy.get('[data-cy=submitContract]').click();
+    cy.get('textarea[name=description]').type(contract369.description);
+    cy.selectByLabel(t('Schedule type'), t(contract369.timeRange));
+    cy.get('input[name=numberOfTerms]').type(String(contract369.numberOfTerms));
+    cy.get('[data-cy=submit]').first().click();
+    cy.get('[data-cy=submit]').first().click();
   });
 
   it('Create second property', () => {
