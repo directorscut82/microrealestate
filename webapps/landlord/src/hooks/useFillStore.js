@@ -1,12 +1,12 @@
-import { useContext, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { StoreContext } from '../store';
+import { getStoreInstance } from '../store';
 
 export default function useFillStore(fetchData, params = []) {
   const paramsRef = useRef();
   paramsRef.current = params;
 
-  const store = useContext(StoreContext);
+  const store = getStoreInstance();
   const [fetching, setFetching] = useState(true);
   const [results, setResults] = useState();
 
