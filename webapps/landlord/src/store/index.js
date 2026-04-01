@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { isClient, isServer } from '@microrealestate/commonui/utils';
 
 import config from '../config';
@@ -26,22 +26,22 @@ export function getStoreInstance(initialData) {
 export const StoreContext = createContext();
 
 export function InjectStoreContext({ children, initialData }) {
-  const [store, setStore] = useState();
+  const store = getStoreInstance(initialData);
 
-  useEffect(() => {
-    const newStore = getStoreInstance(initialData);
-    setStore(newStore);
-  }, [initialData]);
+  const subscribe = useCallback((listener) => store.subscribe(listener), [store]);
+  const getSnapshot = useCallback(() => store.getVersion(), [store]);
+
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   useEffect(() => {
     if (isClient() && config.NODE_ENV === 'development') {
       window.__store = store;
     }
-  }, [store, store?.organization?.selected?.locale]);
+  }, [store]);
 
-  return store ? (
+  return (
     <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
-  ) : null;
+  );
 }
 
 export async function setupOrganizationsInStore(selectedOrgName) {

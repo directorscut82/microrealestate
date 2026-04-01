@@ -8,7 +8,8 @@ export const RENTER_ROLE = 'renter';
 export const ROLES = [ADMIN_ROLE, RENTER_ROLE];
 
 export default class User {
-  constructor() {
+  constructor(store) {
+    this._store = store;
     this.token = undefined;
     this.tokenExpiry = undefined;
     this.firstName = undefined;
@@ -27,6 +28,7 @@ export default class User {
 
   setRole(role) {
     this.role = role;
+    this._store.notify();
   }
 
   setUserFromToken(accessToken) {
@@ -40,6 +42,7 @@ export default class User {
     this.token = accessToken;
     this.tokenExpiry = exp;
     setAccessToken(accessToken);
+    this._store.notify();
   }
 
   async signUp(firstname, lastname, email, password) {
@@ -77,6 +80,7 @@ export default class User {
       this.token = null;
       this.tokenExpiry = undefined;
       setAccessToken(null);
+      this._store.notify();
     }
   }
 
@@ -109,6 +113,7 @@ export default class User {
         this.token = undefined;
         this.tokenExpiry = undefined;
         setAccessToken(null);
+        this._store.notify();
       }
     } catch (error) {
       this.firstName = undefined;
@@ -117,6 +122,7 @@ export default class User {
       this.token = undefined;
       this.tokenExpiry = undefined;
       setAccessToken(null);
+      this._store.notify();
       return { status: error?.response?.status, error };
     }
   }

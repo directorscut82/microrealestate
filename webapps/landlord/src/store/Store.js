@@ -6,9 +6,25 @@ import User from './User';
 
 export default class Store {
   constructor() {
-    this.appHistory = new AppHistory();
-    this.user = new User();
-    this.organization = new Organization();
+    this._listeners = new Set();
+    this._version = 0;
+    this.appHistory = new AppHistory(this);
+    this.user = new User(this);
+    this.organization = new Organization(this);
+  }
+
+  subscribe(listener) {
+    this._listeners.add(listener);
+    return () => this._listeners.delete(listener);
+  }
+
+  notify() {
+    this._version++;
+    this._listeners.forEach((listener) => listener());
+  }
+
+  getVersion() {
+    return this._version;
   }
 
   hydrate(initialData) {
@@ -35,5 +51,7 @@ export default class Store {
     setOrganizationId(organization.selected?._id);
 
     this.appHistory.previousPath = appHistory.previousPath;
+
+    this.notify();
   }
 }
