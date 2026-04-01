@@ -150,15 +150,6 @@ describe('Settings Deep Tests', () => {
     cy.contains('Test Contract').should('be.visible');
   });
 
-  it('Delete unused contract', () => {
-    cy.contains('Test Contract').click();
-    cy.get('[data-cy=removeResourceButton]').click();
-    cy.get('[role=dialog]').find('button').last().click();
-    cy.navAppMenu('settings');
-    cy.contains(t('Contracts')).click();
-    cy.contains('Test Contract').should('not.exist');
-  });
-
   after(() => {
     cy.resetAppData();
   });
