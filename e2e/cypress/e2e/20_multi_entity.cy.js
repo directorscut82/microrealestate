@@ -66,13 +66,13 @@ describe('Multi-Entity Management', () => {
   });
 
   it('Toggle first contract inactive', () => {
-    cy.navAppMenu('settings');
-    cy.contains(t('Contracts')).click();
-    cy.contains(contract369.name).parents('[class*=Card]').find('[role=switch]').click();
+    cy.navOrgMenu('contracts');
+    cy.get('[data-cy=contractsPage]').should('exist');
+    cy.contains(contract369.name).parents('[class*="border"]').find('[role=switch]').click();
   });
 
   it('Toggle first contract active again', () => {
-    cy.contains(contract369.name).parents('[class*=Card]').find('[role=switch]').click();
+    cy.contains(contract369.name).parents('[class*="border"]').find('[role=switch]').click();
   });
 
   // --- Multiple properties ---
@@ -130,6 +130,7 @@ describe('Multi-Entity Management', () => {
   // --- Create tenant 2 (personal, studio) ---
 
   it('Create second tenant with studio', () => {
+    cy.navAppMenu('dashboard');
     cy.addTenantFromStepper({
       ...tenants[1],
       lease: {
@@ -150,6 +151,7 @@ describe('Multi-Entity Management', () => {
   // --- Create tenant 3 (company, office) ---
 
   it('Create company tenant with office', () => {
+    cy.navAppMenu('dashboard');
     cy.addTenantFromStepper({
       ...tenants[2],
       lease: {
@@ -267,7 +269,7 @@ describe('Multi-Entity Management', () => {
     cy.contains(properties[0].name).click();
     cy.get('[data-cy=removeResourceButton]').click();
     cy.get('[role=dialog]').find('button').last().click();
-    cy.get('[data-sonner-toast]').should('exist');
+    cy.get('ol.toaster > li', { timeout: 5000 }).should('exist');
   });
 
   it('Can delete unoccupied property', () => {
@@ -279,10 +281,9 @@ describe('Multi-Entity Management', () => {
   });
 
   it('Cannot delete contract used by tenants', () => {
-    cy.navAppMenu('settings');
-    cy.contains(t('Contracts')).click();
+    cy.navOrgMenu('contracts');
     cy.contains(contract369.name).click();
-    cy.get('[data-cy=removeResourceButton]').should('have.attr', 'disabled');
+    cy.contains(t('This contract is currently used, only some fields can be updated')).should('exist');
   });
 
   after(() => {
