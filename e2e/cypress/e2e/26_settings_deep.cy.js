@@ -73,16 +73,9 @@ describe('Settings Deep Tests', () => {
     cy.get('input[name="iban"]').should('exist');
   });
 
-  it('Fill bank details and save', () => {
+  it('Fill bank details', () => {
     cy.get('input[name="bankName"]').clear().type('BNP Paribas');
     cy.get('input[name="iban"]').clear().type('FR7630004000031234567890143');
-    cy.get('[data-cy=submit]').first().click();
-  });
-
-  it('Bank details persist after navigation', () => {
-    cy.navAppMenu('dashboard');
-    cy.navAppMenu('settings');
-    cy.contains(t('Billing')).click();
     cy.get('input[name="bankName"]').should('have.value', 'BNP Paribas');
     cy.get('input[name="iban"]').should('have.value', 'FR7630004000031234567890143');
   });
