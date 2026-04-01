@@ -37,12 +37,12 @@ describe('Rapid Navigation & Data Freshness', () => {
     cy.navAppMenu('tenants');
     cy.contains(tenants[0].name).click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
-    cy.contains(tenants[0].name).should('be.visible');
+    cy.get('input[name="name"]').should('have.value', tenants[0].name);
     cy.go('back');
     cy.get('[data-cy=tenantsPage]').should('be.visible');
     cy.contains(tenants[0].name).click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
-    cy.contains(tenants[0].name).should('be.visible');
+    cy.get('input[name="name"]').should('have.value', tenants[0].name);
   });
 
   it('Property detail: open, back, reopen — no stale data', () => {

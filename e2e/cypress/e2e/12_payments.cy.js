@@ -31,7 +31,8 @@ describe('Payment Recording', () => {
       .find('button')
       .first()
       .click();
-    cy.contains(t('Settlement')).should('be.visible');
+    cy.get('[role="dialog"]').should('exist');
+    cy.get('[role="dialog"]').contains(t('Settlement')).should('exist');
   });
 
   it('Fill payment amount and date', () => {

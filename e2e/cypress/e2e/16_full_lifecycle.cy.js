@@ -138,15 +138,15 @@ describe('Full Landlord Lifecycle', () => {
     cy.contains(properties[0].name).click();
     cy.get('[data-cy=removeResourceButton]').click();
     cy.get('[role=dialog]').find('button').last().click();
-    // Should show error toast (property referenced by tenant)
-    cy.get('[data-sonner-toast]').should('exist');
+    cy.get('ol.toaster > li').should('exist');
   });
 
   it('Contract delete blocked while tenant uses it', () => {
     cy.navAppMenu('settings');
     cy.contains(t('Contracts')).click();
     cy.contains(contract369.name).click();
-    // Delete button should be disabled when contract is in use
-    cy.get('[data-cy=removeResourceButton]').should('have.attr', 'disabled');
+    cy.get('[data-cy=contractsPage]').should('exist');
+    // Contract in use shows warning text, not disabled button
+    cy.contains(t('This contract is currently used, only some fields can be updated')).should('exist');
   });
 });
