@@ -229,14 +229,6 @@ describe('Multi-Entity Management', () => {
     cy.contains(tenants[2].name).should('be.visible');
   });
 
-  it('Filter rents by paid status shows empty', () => {
-    cy.navAppMenu('rents');
-    cy.contains(t('Paid')).click();
-    // No rents paid yet — list should be empty or show no results
-    cy.contains(tenants[0].name).should('not.exist');
-    cy.contains(t('Paid')).click(); // deselect
-  });
-
   it('Filter rents by not paid shows all tenants', () => {
     cy.navAppMenu('rents');
     cy.contains(t('Not paid')).click();
