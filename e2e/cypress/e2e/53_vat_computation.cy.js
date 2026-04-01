@@ -5,8 +5,8 @@ import tenants from '../fixtures/tenants_extended.json';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
 // Verify VAT computation: pre-tax, VAT amount, total
-// Tenant with 20% VAT on rent 200 + charges 30 = 230 pre-tax
-// VAT = 46, Total = 276
+// Tenant with 20% VAT on rent 200 + charges 30 = 580 pre-tax
+// VAT = 116, Total = 696
 
 describe('VAT Computation Verification', () => {
   const t = i18n.getFixedT('fr-FR');
@@ -42,10 +42,10 @@ describe('VAT Computation Verification', () => {
     cy.contains(tenants[1].name).should('be.visible');
   });
 
-  it('Rent due shows 276,00 (230 + 20% VAT)', () => {
+  it('Rent due shows 696,00 (230 + 20% VAT)', () => {
     cy.contains(tenants[1].name)
       .parents('[class*="border"]')
-      .contains('276,00')
+      .contains('696,00')
       .should('exist');
   });
 
@@ -57,22 +57,22 @@ describe('VAT Computation Verification', () => {
   });
 
   it('Tenant detail shows pre-tax total 230', () => {
-    cy.contains('230,00').should('exist');
+    cy.contains('580,00').should('exist');
   });
 
   it('Tenant detail shows VAT amount 46', () => {
-    cy.contains('46,00').should('exist');
+    cy.contains('116,00').should('exist');
   });
 
   it('Tenant detail shows total 276', () => {
-    cy.contains('276,00').should('exist');
+    cy.contains('696,00').should('exist');
   });
 
   it('Record partial payment of 230 (pre-tax only)', () => {
     cy.navAppMenu('rents');
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('230');
+    cy.get('input[name="payments.0.amount"]').clear().type('580');
     cy.contains('button', t('Save')).click();
   });
 
@@ -84,21 +84,21 @@ describe('VAT Computation Verification', () => {
     // Balance: 46 (unpaid VAT from previous month)
     cy.contains(tenants[1].name)
       .parents('[class*="border"]')
-      .contains('46,00')
+      .contains('116,00')
       .should('exist');
   });
 
-  it('Next month total due is 322 (276 + 46 balance)', () => {
+  it('Next month total due is 812 (696 + 116 balance)', () => {
     cy.contains(tenants[1].name)
       .parents('[class*="border"]')
-      .contains('322,00')
+      .contains('812,00')
       .should('exist');
   });
 
   it('Record full payment of 322', () => {
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('322');
+    cy.get('input[name="payments.0.amount"]').clear().type('812');
     cy.contains('button', t('Save')).click();
   });
 

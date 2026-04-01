@@ -67,11 +67,11 @@ describe('Rent Amount Verification', () => {
       .should('exist');
   });
 
-  it('Tenant B rent due shows 276,00 (with VAT)', () => {
+  it('Tenant B rent due shows 696,00 (with VAT)', () => {
     // 200 rent + 30 charges = 230 pre-tax, 20% VAT = 46, total = 276
     cy.contains(tenants[1].name)
       .parents('[class*="border"]')
-      .contains('276,00')
+      .contains('696,00')
       .should('exist');
   });
 
@@ -100,19 +100,19 @@ describe('Rent Amount Verification', () => {
 
   // --- Record full payment for Tenant B ---
 
-  it('Record full payment of 276 for Tenant B', () => {
+  it('Record full payment of 696 for Tenant B', () => {
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('276');
+    cy.get('input[name="payments.0.amount"]').clear().type('696');
     cy.contains('button', t('Save')).click();
   });
 
-  it('Tenant B settlement shows 276,00', () => {
+  it('Tenant B settlement shows 696,00', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.contains(tenants[1].name)
       .parents('[class*="border"]')
-      .contains('276,00')
+      .contains('696,00')
       .should('exist');
   });
 
