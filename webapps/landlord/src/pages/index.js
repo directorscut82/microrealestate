@@ -1,16 +1,6 @@
 import { getStoreInstance, setupOrganizationsInStore } from '../store';
 
-import { useRouter } from 'next/router';
-
-export default function Index({ organization }) {
-  const router = useRouter();
-
-  if (organization) {
-    router.push(`/${organization.name}/dashboard`);
-  } else {
-    router.push('/signin');
-  }
-
+export default function Index() {
   return null;
 }
 
@@ -19,13 +9,18 @@ export async function getServerSideProps(context) {
 
   const { status } = await store.user.refreshTokens(context);
   if (status !== 200) {
-    return { props: {} };
+    return { redirect: { destination: '/signin', permanent: false } };
   }
 
   await setupOrganizationsInStore();
   if (!store.user.signedIn) {
-    return { props: {} };
+    return { redirect: { destination: '/signin', permanent: false } };
   }
 
-  return { props: { organization: store.organization.selected } };
+  return {
+    redirect: {
+      destination: `/${store.organization.selected.name}/dashboard`,
+      permanent: false
+    }
+  };
 }
