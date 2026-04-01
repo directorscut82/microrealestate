@@ -132,7 +132,7 @@ finch restart microrealestate-landlord-frontend-1
 |-------|-------|--------|
 | 01-09 | 100 | ✅ Verified passing |
 | 10-17 | 57 | ✅ Verified passing |
-| 20-28 | ~200 | 🔶 309 passing, 42 failing. Suites 20,23,25,27 fully green. Suites 21,22,24,26,28 have test-level failures. |
+| 20-28 | 158 | ✅ Verified passing |
 
 ## Before Running Suites 20-28
 

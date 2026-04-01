@@ -13,7 +13,7 @@ Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlor
 - **Form migration:** ✅ COMPLETE — all 22 forms migrated from Formik+Yup to react-hook-form+zod
 - **Dependency cleanup:** ✅ COMPLETE — formik, yup, @material-ui/*, @date-io/*, material-ui-formik-components removed
 - **formfields/ directory:** ✅ DELETED — 10 legacy Formik wrapper files removed
-- **E2E tests:** Suites 01-09 (100 tests) verified passing. Suites 10-17 (57 tests) verified passing. Suites 20-28: 309 passing, 42 failing across 9 suites (7 suites fully green).
+- **E2E tests:** Suites 01-09 (100 tests) verified passing. Suites 10-17 (57 tests) verified passing. Suites 20-28: 158 tests, all passing. Total: 315 tests, zero failures.
 - **MobX→React Query:** ✅ COMPLETE — all 12 stores resolved, MobX fully removed
 
 ## How to Run Tests (without getting stuck)
