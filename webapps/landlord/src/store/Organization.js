@@ -1,7 +1,8 @@
 import { apiFetcher } from '../utils/fetch';
 
 export default class Organization {
-  constructor() {
+  constructor(store) {
+    this._store = store;
     this.selected = undefined;
     this.items = [];
   }
@@ -11,10 +12,12 @@ export default class Organization {
     user.setRole(
       this.selected.members.find(({ email }) => email === user.email).role
     );
+    this._store.notify();
   };
 
   setItems = (organizations = []) => {
     this.items = organizations;
+    this._store.notify();
   };
 
   get canSendEmails() {
