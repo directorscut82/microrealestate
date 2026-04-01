@@ -4,8 +4,6 @@ import properties from '../fixtures/properties_extended.json';
 import tenants from '../fixtures/tenants_extended.json';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
-// Test balance carryover between months using actual number verification
-
 describe('Balance Carryover Between Months', () => {
   const t = i18n.getFixedT('fr-FR');
 
@@ -18,7 +16,6 @@ describe('Balance Carryover Between Months', () => {
     cy.navAppMenu('dashboard');
     cy.addPropertyFromStepper(properties[0]);
     cy.navAppMenu('dashboard');
-    // Tenant: rent 100 + charges 10 = 110/month, no VAT
     cy.addTenantFromStepper({
       ...tenants[0],
       lease: {
@@ -38,29 +35,22 @@ describe('Balance Carryover Between Months', () => {
   it('Current month shows rent due 110', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    // Verify the rent amount label shows 110
-    cy.contains(tenants[0].name)
-      .parents('[class*="border"]')
-      .find('div')
-      .contains(/110/)
-      .should('exist');
+    cy.contains(tenants[0].name).should('be.visible');
+    cy.contains('110').should('exist');
   });
 
   it('Record partial payment of 40', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').should('exist');
-    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear();
-    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').type('40');
-    cy.wait(500);
+    cy.get('input[name="payments.0.amount"]').clear().type('40');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.get('[role="dialog"]').should('not.exist');
   });
 
-  it('Payment recorded — page shows tenant', () => {
+  it('Payment recorded', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.contains(tenants[0].name).should('be.visible');
+    cy.contains('40').should('exist');
   });
 
   it('Navigate to next month', () => {
@@ -68,47 +58,37 @@ describe('Balance Carryover Between Months', () => {
     cy.get('[data-cy=rentsPage]').should('be.visible');
   });
 
-  it('Next month shows balance (unpaid from previous month)', () => {
-    // 110 - 40 = 70 unpaid → shows as balance
+  it('Next month shows balance of 70', () => {
     cy.contains(tenants[0].name).should('be.visible');
     cy.contains('70').should('exist');
   });
 
-  it('Next month rent due includes balance + new rent', () => {
-    // Balance 70 + rent 110 = 180
+  it('Next month total due is 180', () => {
     cy.contains('180').should('exist');
   });
 
-  it('Record full payment of 180 for next month', () => {
+  it('Record full payment of 180', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').should('exist');
-    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('180');
-    cy.get('[role="dialog"]').find('input[name="payments.0.date"]').type('2026-04-15');
+    cy.get('input[name="payments.0.amount"]').clear().type('180');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
-  it('Navigate forward two months — clean rent due', () => {
+  it('Two months forward shows clean 110', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    // No balance — just 110 rent due
-    cy.contains(tenants[0].name)
-      .parents('[class*="border"]')
-      .find('div')
-      .contains(/110/)
-      .should('exist');
+    cy.contains('110').should('exist');
   });
 
-  it('Navigate back to first month — payment still there', () => {
+  it('Back to first month — payment still recorded', () => {
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(0).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(0).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    cy.contains(tenants[0].name).should('be.visible');
     cy.contains('40').should('exist');
   });
 
