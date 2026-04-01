@@ -117,7 +117,7 @@ Cypress.Commands.add(
 Cypress.Commands.add(
   'addPropertyFromStepper',
   ({ name, type, description, surface, phone, digiCode, address, rent }) => {
-    cy.get('[data-cy=shortcutAddProperty]').click();
+    cy.get('[data-cy=shortcutAddProperty]').should('be.visible').click({ force: true });
     cy.get('input[name=name]').type(name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
