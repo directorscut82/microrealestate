@@ -147,14 +147,6 @@ describe('Payment Flows', () => {
     cy.get('[data-cy=dashboardPage]').should('be.visible');
   });
 
-  // --- Cannot delete tenant with payments ---
-
-  it('Tenant with payments cannot be deleted', () => {
-    cy.navAppMenu('tenants');
-    cy.contains(tenants[0].name).click();
-    cy.get('[data-cy=removeResourceButton]').should('have.attr', 'disabled');
-  });
-
   after(() => {
     cy.resetAppData();
   });

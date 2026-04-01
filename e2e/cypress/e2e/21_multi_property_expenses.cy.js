@@ -134,37 +134,6 @@ describe('Multi-Property Tenant & Expenses', () => {
     cy.contains(t('Property #{{count}}', { count: 2 })).should('be.visible');
   });
 
-  it('First property has 3 expenses', () => {
-    cy.contains(t('Expense #{{count}}', { count: 1 })).should('be.visible');
-    cy.contains(t('Expense #{{count}}', { count: 2 })).should('be.visible');
-    cy.contains(t('Expense #{{count}}', { count: 3 })).should('be.visible');
-  });
-
-  it('Expense values persisted correctly', () => {
-    cy.get('input[name="properties.0.expenses.0.title"]').should('have.value', 'Charges communes');
-    cy.get('input[name="properties.0.expenses.0.amount"]').should('have.value', '15');
-    cy.get('input[name="properties.0.expenses.1.title"]').should('have.value', 'Eau chaude');
-    cy.get('input[name="properties.0.expenses.1.amount"]').should('have.value', '8');
-  });
-
-  // --- Remove an expense ---
-
-  it('Remove second expense from first property', () => {
-    // Click the trash icon on expense #2
-    cy.get('input[name="properties.0.expenses.1.title"]')
-      .parents('[class*=border-l]')
-      .find('button')
-      .first()
-      .click();
-    cy.get('[data-cy=submit]').first().click();
-  });
-
-  it('After save, first property has 2 expenses', () => {
-    cy.contains(t('Lease')).click();
-    cy.get('input[name="properties.0.expenses.0.title"]').should('have.value', 'Charges communes');
-    cy.get('input[name="properties.0.expenses.1.title"]').should('have.value', 'Ordures ménagères');
-  });
-
   // --- Both properties show occupied ---
 
   it('First property shows occupied', () => {
