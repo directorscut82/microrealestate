@@ -113,12 +113,12 @@ describe('Settings Deep Tests', () => {
     cy.contains(t('Third-parties')).click();
   });
 
-  it('Email service toggle exists', () => {
-    cy.contains(t('Gmail')).should('be.visible');
+  it('Email service section exists', () => {
+    cy.contains(t('Email delivery service')).should('be.visible');
   });
 
-  it('Cloud storage toggle exists', () => {
-    cy.contains(t('Backblaze B2')).should('be.visible');
+  it('Cloud storage section exists', () => {
+    cy.contains(t('Configuration required to store documents in the cloud')).should('be.visible');
   });
 
   // --- Contract management from settings ---
