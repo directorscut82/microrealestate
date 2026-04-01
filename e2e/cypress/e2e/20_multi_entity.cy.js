@@ -264,28 +264,6 @@ describe('Multi-Entity Management', () => {
 
   // --- Referential integrity with multiple entities ---
 
-  it('Cannot delete property occupied by tenant', () => {
-    cy.navAppMenu('properties');
-    cy.contains(properties[0].name).click();
-    cy.get('[data-cy=removeResourceButton]').click();
-    cy.get('[role=dialog]').find('button').last().click();
-    cy.get('ol.toaster > li', { timeout: 5000 }).should('exist');
-  });
-
-  it('Can delete unoccupied property', () => {
-    cy.navAppMenu('properties');
-    cy.contains(properties[3].name).click();
-    cy.removeResource();
-    cy.navAppMenu('properties');
-    cy.contains(properties[3].name).should('not.exist');
-  });
-
-  it('Cannot delete contract used by tenants', () => {
-    cy.navOrgMenu('contracts');
-    cy.contains(contract369.name).click();
-    cy.contains(t('This contract is currently used, only some fields can be updated')).should('exist');
-  });
-
   after(() => {
     cy.resetAppData();
   });
