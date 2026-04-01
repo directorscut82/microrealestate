@@ -18,9 +18,9 @@ describe('Tenant Copy & Company Flows', () => {
     cy.navAppMenu('dashboard');
     cy.addPropertyFromStepper(properties[0]);
     cy.navAppMenu('dashboard');
-    cy.addPropertyFromStepper(properties[1]);
+    cy.addPropertyFromPage(properties[1]);
     cy.navAppMenu('dashboard');
-    cy.addPropertyFromStepper(properties[2]);
+    cy.addPropertyFromPage(properties[2]);
     cy.navAppMenu('dashboard');
     // Create first tenant (personal)
     cy.addTenantFromStepper({

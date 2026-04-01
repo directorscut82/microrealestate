@@ -18,7 +18,7 @@ describe('Payment Flows', () => {
     cy.navAppMenu('dashboard');
     cy.addPropertyFromStepper(properties[0]);
     cy.navAppMenu('dashboard');
-    cy.addPropertyFromStepper(properties[1]);
+    cy.addPropertyFromPage(properties[1]);
     cy.navAppMenu('dashboard');
     // Tenant 1 with property 1
     cy.addTenantFromStepper({
