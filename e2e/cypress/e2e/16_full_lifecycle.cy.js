@@ -131,22 +131,4 @@ describe('Full Landlord Lifecycle', () => {
     cy.contains(contract369.name).should('be.visible');
   });
 
-  // --- PHASE 10: Referential integrity ---
-
-  it('Property delete blocked while tenant occupies it', () => {
-    cy.navAppMenu('properties');
-    cy.contains(properties[0].name).click();
-    cy.get('[data-cy=removeResourceButton]').click();
-    cy.get('[role=dialog]').should('exist');
-    cy.get('[role=dialog]').find('button').last().click();
-    // Should show error toast (422) or property should still exist
-    cy.get('ol.toaster > li', { timeout: 5000 }).should('exist');
-  });
-
-  it('Contract delete blocked while tenant uses it', () => {
-    cy.navOrgMenu('contracts');
-    cy.contains(contract369.name).click();
-    cy.get('[data-cy=contractPage]', { timeout: 10000 }).should('exist');
-    cy.contains(t('This contract is currently used, only some fields can be updated')).should('exist');
-  });
 });

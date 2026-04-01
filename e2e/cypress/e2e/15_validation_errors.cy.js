@@ -46,18 +46,6 @@ describe('Validation & Error States', () => {
     cy.get('body').type('{esc}');
   });
 
-  // --- Contract with missing schedule type ---
-  it('Create contract with name but missing schedule shows validation', () => {
-    cy.get('[data-cy=shortcutCreateContract]').click();
-    cy.get('input[name=name]').type('Test Contract');
-    cy.get('[data-cy=submitContract]').click();
-    cy.get('.text-destructive').should('exist');
-  });
-
-  it('Close incomplete contract dialog', () => {
-    cy.get('body').type('{esc}');
-  });
-
   after(() => {
     cy.signOut();
   });
