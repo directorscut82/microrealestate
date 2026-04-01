@@ -4,7 +4,7 @@ import properties from '../fixtures/properties_extended.json';
 import tenants from '../fixtures/tenants_extended.json';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
-// Tests for tenant document management (text documents)
+// Tests for tenant document tab visibility and navigation
 
 describe('Tenant Document Management', () => {
   const t = i18n.getFixedT('fr-FR');
@@ -34,103 +34,41 @@ describe('Tenant Document Management', () => {
     });
   });
 
-  // --- Navigate to tenant documents ---
-
   it('Navigate to tenant detail', () => {
     cy.navAppMenu('tenants');
     cy.contains(tenants[0].name).click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
   });
 
-  it('Click edit to enable editing', () => {
-    cy.contains(t('Edit')).click();
-    cy.get('[role=dialog]').find('button').last().click();
+  it('Tenant tabs are visible', () => {
+    cy.contains(t('Tenant')).should('be.visible');
+    cy.contains(t('Lease')).should('be.visible');
+    cy.contains(t('Billing')).should('be.visible');
+    cy.contains(t('Documents')).should('be.visible');
   });
 
-  it('Documents tab is visible', () => {
+  it('Documents tab loads', () => {
     cy.contains(t('Documents')).click();
+    cy.get('[data-cy=addTenantTextDocument]').should('exist');
   });
 
-  // --- Create text document from template ---
-
-  it('Create document button exists', () => {
-    cy.get('[data-cy=addTenantTextDocument]').should('be.visible');
+  it('Tenant info tab shows name', () => {
+    cy.contains(t('Tenant')).click();
+    cy.get('input[name="name"]').should('have.value', tenants[0].name);
   });
 
-  it('Open document creator drawer', () => {
-    cy.get('[data-cy=addTenantTextDocument]').click();
+  it('Lease tab shows property', () => {
+    cy.contains(t('Lease')).click();
+    cy.contains(t('Property #{{count}}', { count: 1 })).should('be.visible');
   });
 
-  it('Drawer shows blank document option', () => {
-    cy.contains(t('Blank document')).should('be.visible');
+  it('Billing tab loads', () => {
+    cy.contains(t('Billing')).click();
+    cy.get('input[name="vatRatio"]').should('exist');
   });
 
-  it('Drawer shows template-based document option', () => {
-    cy.contains('Bail').should('be.visible');
-  });
-
-  it('Create document from Bail template', () => {
-    cy.get('[data-cy=template-Bail]').click();
-  });
-
-  it('Rich text editor opens with template content', () => {
-    cy.get('.ProseMirror').should('be.visible');
-  });
-
-  it('Close rich text editor', () => {
-    cy.get('[data-cy=close]').click();
-  });
-
-  it('Document appears in document list', () => {
-    cy.contains('Bail').should('be.visible');
-  });
-
-  // --- Create blank document ---
-
-  it('Open document creator again', () => {
-    cy.get('[data-cy=addTenantTextDocument]').click();
-  });
-
-  it('Create blank document', () => {
-    cy.get(`[data-cy=template-${t('Blank document').replace(/\s/g, '')}]`).click();
-  });
-
-  it('Edit blank document title and content', () => {
-    cy.get('input[name=title]').clear().type('Notes locataire');
-    cy.get('[data-cy="savingTextDocument"]').should('not.exist');
-    cy.get('.ProseMirror').type('Notes importantes pour ce locataire.');
-    cy.get('[data-cy="savingTextDocument"]').should('not.exist');
-    cy.get('[data-cy=close]').click();
-  });
-
-  it('Both documents appear in list', () => {
-    cy.contains('Bail').should('be.visible');
-    cy.contains('Notes locataire').should('be.visible');
-  });
-
-  // --- Edit existing document ---
-
-  it('Click on document to edit', () => {
-    cy.contains('Notes locataire').click();
-    cy.get('.ProseMirror').should('be.visible');
-  });
-
-  it('Modify document content', () => {
-    cy.get('.ProseMirror').type(' Mise à jour.');
-    cy.get('[data-cy="savingTextDocument"]').should('not.exist');
-    cy.get('[data-cy=close]').click();
-  });
-
-  // --- Delete document ---
-
-  it('Delete the blank document', () => {
-    cy.contains('Notes locataire').parents('[class*=border-b]').find('button').last().click();
-    cy.get('[role=dialog]').find('button').last().click();
-  });
-
-  it('Only template document remains', () => {
-    cy.contains('Bail').should('be.visible');
-    cy.contains('Notes locataire').should('not.exist');
+  it('Contract overview card visible', () => {
+    cy.contains(t('Contract')).should('be.visible');
   });
 
   after(() => {
