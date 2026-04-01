@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useContext, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -16,6 +16,7 @@ import {
 } from '../ui/select';
 import PropertyIcon from './PropertyIcon';
 import ResponsiveDialog from '../ResponsiveDialog';
+import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -34,6 +35,7 @@ const schema = z
 
 export default function NewPropertyDialog({ open, setOpen }) {
   const { t } = useTranslation('common');
+  const store = useContext(StoreContext);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
@@ -83,7 +85,9 @@ export default function NewPropertyDialog({ open, setOpen }) {
         const data = await createMutation.mutateAsync(property);
         handleClose();
         await router.push(
-          `/${router.query.organization}/properties/${data._id}`
+          `/${router.query.organization}/properties/${data._id}`,
+          undefined,
+          { locale: store.organization.selected?.locale }
         );
       } catch (error) {
         const status = error?.response?.status;

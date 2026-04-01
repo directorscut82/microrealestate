@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -7,6 +7,7 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { createLease, QueryKeys } from '../../../utils/restcalls';
 import ResponsiveDialog from '../../ResponsiveDialog';
+import { StoreContext } from '../../../store';
 import { toast } from 'sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -18,6 +19,7 @@ const schema = z.object({
 
 export default function NewLeaseDialog({ open, setOpen }) {
   const { t } = useTranslation('common');
+  const store = useContext(StoreContext);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
@@ -52,7 +54,9 @@ export default function NewLeaseDialog({ open, setOpen }) {
         });
         handleClose();
         await router.push(
-          `/${router.query.organization}/settings/contracts/${data._id}`
+          `/${router.query.organization}/settings/contracts/${data._id}`,
+          undefined,
+          { locale: store.organization.selected?.locale }
         );
       } catch (error) {
         const status = error?.response?.status;

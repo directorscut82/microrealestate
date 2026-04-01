@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useContext, useMemo, useRef } from 'react';
 import {
   createTenant,
   fetchLeases,
@@ -23,6 +23,7 @@ import { Label } from '../ui/label';
 import moment from 'moment';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Switch } from '../ui/switch';
+import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
@@ -40,6 +41,7 @@ const schema = z
 
 export default function NewTenantDialog({ open, setOpen }) {
   const { t } = useTranslation('common');
+  const store = useContext(StoreContext);
   const router = useRouter();
   const queryClient = useQueryClient();
   const formRef = useRef();
@@ -121,7 +123,9 @@ export default function NewTenantDialog({ open, setOpen }) {
         const data = await mutation.mutateAsync(tenant);
         handleClose();
         await router.push(
-          `/${router.query.organization}/tenants/${data._id}`
+          `/${router.query.organization}/tenants/${data._id}`,
+          undefined,
+          { locale: store.organization.selected?.locale }
         );
       } catch (error) {
         const status = error?.response?.status;
