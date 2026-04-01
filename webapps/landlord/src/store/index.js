@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { isClient, isServer } from '@microrealestate/commonui/utils';
 
 import config from '../config';
@@ -30,8 +30,13 @@ export function InjectStoreContext({ children, initialData }) {
 
   const subscribe = useCallback((listener) => store.subscribe(listener), [store]);
   const getSnapshot = useCallback(() => store.getVersion(), [store]);
+  const version = useSyncExternalStore(subscribe, getSnapshot, () => 0);
 
-  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  // Spread into new object so React Context sees a new reference on each notify
+  const contextValue = useMemo(
+    () => ({ user: store.user, organization: store.organization, appHistory: store.appHistory }),
+    [store, version]
+  );
 
   useEffect(() => {
     if (isClient() && config.NODE_ENV === 'development') {
@@ -40,7 +45,7 @@ export function InjectStoreContext({ children, initialData }) {
   }, [store]);
 
   return (
-    <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+    <StoreContext.Provider value={contextValue}>{children}</StoreContext.Provider>
   );
 }
 

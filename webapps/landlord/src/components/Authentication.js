@@ -1,8 +1,7 @@
-import { setupOrganizationsInStore, StoreContext } from '../store';
+import { getStoreInstance, setupOrganizationsInStore } from '../store';
 
 import config from '../config';
 import ErrorPage from 'next/error';
-import { useContext } from 'react';
 import useFillStore from '../hooks/useFillStore';
 import { useRouter } from 'next/router';
 
@@ -17,7 +16,7 @@ async function fetchData(store, router) {
 
 export function withAuthentication(PageComponent, grantedRole) {
   function WithAuth(pageProps) {
-    const store = useContext(StoreContext);
+    const store = getStoreInstance();
     const router = useRouter();
     const [fetching] = useFillStore(fetchData, [router]);
 
