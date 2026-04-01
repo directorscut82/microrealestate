@@ -47,7 +47,8 @@ describe('Payment Edge Cases', () => {
   it('Record overpayment of 150 (40 extra)', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('150');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').should('exist');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('150');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
@@ -73,7 +74,8 @@ describe('Payment Edge Cases', () => {
   it('Record exact payment of 70 for next month', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('70');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').should('exist');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('70');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 

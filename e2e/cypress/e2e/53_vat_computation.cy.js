@@ -72,7 +72,8 @@ describe('VAT Computation Verification', () => {
     cy.navAppMenu('rents');
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('580');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').should('exist');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('580');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
@@ -93,7 +94,8 @@ describe('VAT Computation Verification', () => {
   it('Record full payment of 322', () => {
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('812');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').should('exist');
+    cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('812');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
