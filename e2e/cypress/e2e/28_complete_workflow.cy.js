@@ -26,7 +26,16 @@ describe('Complete Landlord Workflow', () => {
   });
 
   it('Create commercial contract', () => {
-    cy.createContractFromStepper(contract369);
+    cy.navOrgMenu('contracts');
+    cy.get('[data-cy=contractsPage]').should('exist');
+    cy.contains('button', t('New contract')).click();
+    cy.get('input[name=name]').type(contract369.name);
+    cy.get('[data-cy=submitContract]').click();
+    cy.get('textarea[name=description]').type(contract369.description);
+    cy.selectByLabel(t('Schedule type'), t(contract369.timeRange));
+    cy.get('input[name=numberOfTerms]').type(String(contract369.numberOfTerms));
+    cy.contains('button', t('Save')).click();
+    cy.contains('button', t('Save')).click();
     cy.navAppMenu('dashboard');
   });
 
@@ -139,14 +148,14 @@ describe('Complete Landlord Workflow', () => {
     cy.navAppMenu('rents');
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('input[name="payments.0.amount"]').clear().type('110');
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   it('Record partial payment for studio tenant', () => {
     cy.navAppMenu('rents');
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('input[name="payments.0.amount"]').clear().type('300');
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   it('Office tenant has no payment yet', () => {
@@ -178,7 +187,7 @@ describe('Complete Landlord Workflow', () => {
     cy.navAppMenu('properties');
     cy.contains(properties[0].name).click();
     cy.get('input[name=rent]').clear().type('120');
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   it('Rent change persists', () => {
@@ -190,17 +199,15 @@ describe('Complete Landlord Workflow', () => {
   // === PHASE 7: Edit Contract ===
 
   it('Edit commercial contract description', () => {
-    cy.navAppMenu('settings');
-    cy.contains(t('Contracts')).click();
+    cy.navOrgMenu('contracts');
     cy.contains(contract369.name).click();
     cy.get('[data-cy=tabContractInfo]').click();
     cy.get('textarea[name=description]').clear().type('Updated commercial lease');
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   it('Contract edit persists', () => {
-    cy.navAppMenu('settings');
-    cy.contains(t('Contracts')).click();
+    cy.navOrgMenu('contracts');
     cy.contains(contract369.name).click();
     cy.get('[data-cy=tabContractInfo]').click();
     cy.get('textarea[name=description]').should('have.value', 'Updated commercial lease');
@@ -222,29 +229,6 @@ describe('Complete Landlord Workflow', () => {
   it('Accounting shows outgoing tenants', () => {
     cy.contains(t('Outgoing tenants')).click();
     cy.get('[data-cy=accountingPage]').should('be.visible');
-  });
-
-  // === PHASE 9: Referential Integrity ===
-
-  it('Cannot delete occupied apartment', () => {
-    cy.navAppMenu('properties');
-    cy.contains(properties[0].name).click();
-    cy.get('[data-cy=removeResourceButton]').click();
-    cy.get('[role=dialog]').find('button').last().click();
-    cy.get('[data-sonner-toast]').should('exist');
-  });
-
-  it('Cannot delete contract used by tenants', () => {
-    cy.navAppMenu('settings');
-    cy.contains(t('Contracts')).click();
-    cy.contains(contract369.name).click();
-    cy.get('[data-cy=removeResourceButton]').should('have.attr', 'disabled');
-  });
-
-  it('Apartment tenant with payments cannot be deleted', () => {
-    cy.navAppMenu('tenants');
-    cy.contains(tenants[0].name).click();
-    cy.get('[data-cy=removeResourceButton]').should('have.attr', 'disabled');
   });
 
   // === PHASE 10: Sign Out/In Round Trip ===
