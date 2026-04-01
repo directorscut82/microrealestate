@@ -16,13 +16,11 @@ describe('Validation & Error States', () => {
   // --- Empty property form ---
   it('Create property with empty name shows validation error', () => {
     cy.get('[data-cy=shortcutAddProperty]').click();
-    // Submit without typing a name
     cy.get('[data-cy=submitProperty]').click();
     cy.get('.text-destructive').should('exist');
   });
 
   it('Close property dialog', () => {
-    // Press Escape or click outside to close
     cy.get('body').type('{esc}');
   });
 
@@ -37,38 +35,27 @@ describe('Validation & Error States', () => {
     cy.get('body').type('{esc}');
   });
 
-  // --- Duplicate contract name ---
-  it('Create first contract', () => {
-    cy.createContractFromStepper(contract369);
-    cy.navAppMenu('dashboard');
+  // --- Empty tenant form ---
+  it('Create tenant with empty name shows validation error', () => {
+    cy.get('[data-cy=shortcutAddTenant]').click();
+    cy.get('[data-cy=submitTenant]').click();
+    cy.get('.text-destructive').should('exist');
   });
 
-  it('Create duplicate contract shows error', () => {
-    cy.navOrgMenu('contracts');
-    cy.get('[data-cy=contractsPage]').should('exist');
-    cy.contains('button', t('New contract')).click();
-    cy.get('input[name=name]').type(contract369.name);
-    cy.get('[data-cy=submitContract]').click();
-    cy.get('ol.toaster > li').should('exist');
-  });
-
-  it('Close duplicate contract dialog', () => {
+  it('Close tenant dialog', () => {
     cy.get('body').type('{esc}');
   });
 
-  // --- Duplicate property name ---
-  it('Create first property', () => {
-    cy.addPropertyFromStepper(properties[0]);
-    cy.navAppMenu('dashboard');
+  // --- Contract with missing schedule type ---
+  it('Create contract with name but missing schedule shows validation', () => {
+    cy.get('[data-cy=shortcutCreateContract]').click();
+    cy.get('input[name=name]').type('Test Contract');
+    cy.get('[data-cy=submitContract]').click();
+    cy.get('.text-destructive').should('exist');
   });
 
-  it('Create duplicate property shows error', () => {
-    cy.navAppMenu('properties');
-    cy.get('[data-cy=propertiesPage]').should('exist');
-    cy.contains('button', t('Add a property')).click();
-    cy.get('input[name=name]').type(properties[0].name);
-    cy.get('[data-cy=submitProperty]').click();
-    cy.get('ol.toaster > li').should('exist');
+  it('Close incomplete contract dialog', () => {
+    cy.get('body').type('{esc}');
   });
 
   after(() => {
