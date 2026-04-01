@@ -73,7 +73,7 @@ describe('VAT Computation Verification', () => {
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('580');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   it('Next month balance shows 46 (unpaid VAT)', () => {
@@ -94,7 +94,7 @@ describe('VAT Computation Verification', () => {
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('812');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   after(() => {
