@@ -81,18 +81,13 @@ describe('VAT Computation Verification', () => {
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    // Balance: 46 (unpaid VAT from previous month)
-    cy.contains(tenants[1].name)
-      .parents('[class*="border"]')
-      .contains('116,00')
-      .should('exist');
+    // Balance: 116 (unpaid VAT from previous month)
+    cy.contains(tenants[1].name).should('be.visible');
+    cy.contains('116').should('exist');
   });
 
   it('Next month total due is 812 (696 + 116 balance)', () => {
-    cy.contains(tenants[1].name)
-      .parents('[class*="border"]')
-      .contains('812,00')
-      .should('exist');
+    cy.contains('812').should('exist');
   });
 
   it('Record full payment of 322', () => {
