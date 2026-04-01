@@ -30,7 +30,9 @@ describe('Multi-Property Tenant & Expenses', () => {
   // --- Create tenant with 2 properties ---
 
   it('Create tenant via stepper - name step', () => {
-    cy.get('[data-cy=shortcutAddTenant]').click();
+    cy.navAppMenu('tenants');
+    cy.get('[data-cy=tenantsPage]').should('exist');
+    cy.contains('button', t('Add a tenant')).click();
     cy.get('input[name=name]').type('Multi-Property Tenant');
     cy.get('[data-cy=submitTenant]').click();
   });
