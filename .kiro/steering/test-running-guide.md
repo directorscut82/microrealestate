@@ -5,7 +5,7 @@ inclusion: always
 
 ## Rules
 
-1. **NEVER run tests without guardrails.** Every Cypress command must be wrapped with `timeout`.
+1. **NEVER run tests without guardrails.** Use `--config defaultCommandTimeout=15000,pageLoadTimeout=30000` to fail fast.
 2. **Read the test file before running it.** Identify obvious issues first.
 3. **Fix root causes before running.** If multiple suites share a broken command, fix the command first.
 4. **Lower timeouts for debugging.** Don't wait 60s for something that should appear in 5s.
@@ -33,13 +33,12 @@ curl -s -X DELETE http://localhost:8080/api/reset
 
 ```bash
 cd /Users/epitrogi/Development/microrealestate/e2e
-timeout 180 npx cypress run \
+npx cypress run \
   --spec "cypress/e2e/XX_suite_name.cy.js" \
   --config defaultCommandTimeout=15000,pageLoadTimeout=30000 \
   2>&1 | tail -40
 ```
 
-- `timeout 180` — kill after 3 minutes max
 - `defaultCommandTimeout=15000` — fail assertions after 15s, not 60s
 - `pageLoadTimeout=30000` — fail page loads after 30s
 
@@ -58,13 +57,12 @@ When debugging a suite with sequential tests (testIsolation: false):
 
 ```bash
 cd /Users/epitrogi/Development/microrealestate/e2e
-timeout 360 npx cypress run \
+npx cypress run \
   --spec "cypress/e2e/01_authentication.cy.js,cypress/e2e/02_first_access.cy.js,..." \
   --config defaultCommandTimeout=15000,pageLoadTimeout=30000 \
   2>&1 | tail -40
 ```
 
-- `timeout 360` — 6 minutes for batch of known-passing suites
 - Only batch suites that are already verified passing
 
 ### Using --bail
