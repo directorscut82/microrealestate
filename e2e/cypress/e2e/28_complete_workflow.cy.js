@@ -36,12 +36,12 @@ describe('Complete Landlord Workflow', () => {
   });
 
   it('Create studio property', () => {
-    cy.addPropertyFromStepper(properties[1]);
+    cy.addPropertyFromPage(properties[1]);
     cy.navAppMenu('dashboard');
   });
 
   it('Create office property', () => {
-    cy.addPropertyFromStepper(properties[2]);
+    cy.addPropertyFromPage(properties[2]);
     cy.navAppMenu('dashboard');
   });
 
@@ -137,14 +137,14 @@ describe('Complete Landlord Workflow', () => {
 
   it('Record full payment for apartment tenant', () => {
     cy.navAppMenu('rents');
-    cy.contains(tenants[0].name).parents('tr').find('[data-cy=payRent]').click();
+    cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('input[name="payments.0.amount"]').clear().type('110');
     cy.get('[data-cy=submit]').first().click();
   });
 
   it('Record partial payment for studio tenant', () => {
     cy.navAppMenu('rents');
-    cy.contains(tenants[1].name).parents('tr').find('[data-cy=payRent]').click();
+    cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('input[name="payments.0.amount"]').clear().type('300');
     cy.get('[data-cy=submit]').first().click();
   });

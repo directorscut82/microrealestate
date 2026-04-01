@@ -44,7 +44,7 @@ describe('Tenant Copy & Company Flows', () => {
 
   it('Open new tenant dialog', () => {
     cy.navAppMenu('tenants');
-    cy.get('[data-cy=shortcutAddTenant]').click();
+    cy.contains('button', i18n.getFixedT('fr-FR')('Add a tenant')).click();
   });
 
   it('Copy from existing toggle appears', () => {

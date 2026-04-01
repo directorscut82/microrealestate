@@ -100,7 +100,7 @@ describe('Settings Deep Tests', () => {
   });
 
   it('Add member button exists', () => {
-    cy.contains(t('Add a collaborator')).should('be.visible');
+    cy.contains(t('New collaborator')).should('be.visible');
   });
 
   // --- Account settings ---

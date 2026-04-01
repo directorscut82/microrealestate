@@ -71,7 +71,7 @@ describe('Payment Flows', () => {
 
   it('Open payment dialog for first tenant', () => {
     cy.navAppMenu('rents');
-    cy.contains(tenants[0].name).parents('tr').find('[data-cy=payRent]').click();
+    cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
   });
 
   it('Fill partial payment amount (50 of 110)', () => {
@@ -91,7 +91,7 @@ describe('Payment Flows', () => {
 
   it('Open payment dialog for second tenant', () => {
     cy.navAppMenu('rents');
-    cy.contains(tenants[1].name).parents('tr').find('[data-cy=payRent]').click();
+    cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
   });
 
   it('Fill full payment amount', () => {
@@ -111,7 +111,7 @@ describe('Payment Flows', () => {
 
   it('Open payment dialog for first tenant again', () => {
     cy.navAppMenu('rents');
-    cy.contains(tenants[0].name).parents('tr').find('[data-cy=payRent]').click();
+    cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
   });
 
   it('Fill remaining payment amount', () => {

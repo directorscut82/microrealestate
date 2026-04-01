@@ -77,7 +77,7 @@ describe('Edge Cases & Validation', () => {
 
   it('Create property with empty name shows error', () => {
     cy.navAppMenu('properties');
-    cy.get('[data-cy=shortcutAddProperty]').click();
+    cy.contains('button', t('Add a property')).click();
     cy.get('[data-cy=submitProperty]').click();
     cy.get('input[name=name]').then(($el) => {
       expect($el[0].validationMessage).to.not.be.empty;
@@ -92,7 +92,7 @@ describe('Edge Cases & Validation', () => {
     cy.navAppMenu('dashboard');
     cy.addPropertyFromStepper(properties[0]);
     cy.navAppMenu('properties');
-    cy.get('[data-cy=shortcutAddProperty]').click();
+    cy.contains('button', t('Add a property')).click();
     cy.get('input[name=name]').type(properties[0].name);
     cy.get('[data-cy=submitProperty]').click();
     cy.get('[data-sonner-toast]').should('exist');
@@ -103,7 +103,7 @@ describe('Edge Cases & Validation', () => {
 
   it('Create tenant with empty name shows error', () => {
     cy.navAppMenu('tenants');
-    cy.get('[data-cy=shortcutAddTenant]').click();
+    cy.contains('button', t('Add a tenant')).click();
     cy.get('[data-cy=submitTenant]').click();
     cy.get('input[name=name]').then(($el) => {
       expect($el[0].validationMessage).to.not.be.empty;
