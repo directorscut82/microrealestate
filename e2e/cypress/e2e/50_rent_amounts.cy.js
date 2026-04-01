@@ -86,7 +86,7 @@ describe('Rent Amount Verification', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('50');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   it('Tenant A shows payment recorded after partial payment', () => {
@@ -102,7 +102,7 @@ describe('Rent Amount Verification', () => {
     cy.contains(tenants[1].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('696');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   it('Tenant B settlement shows 696,00', () => {
@@ -120,7 +120,7 @@ describe('Rent Amount Verification', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('60');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   it('Tenant A settlement shows 110,00 (50 + 60)', () => {

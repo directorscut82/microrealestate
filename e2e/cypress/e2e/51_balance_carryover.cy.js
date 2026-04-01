@@ -50,7 +50,7 @@ describe('Balance Carryover Between Months', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('40');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   it('Payment recorded — page shows tenant', () => {
@@ -79,7 +79,7 @@ describe('Balance Carryover Between Months', () => {
     cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('180');
-    cy.contains('button', t('Save')).click();
+    cy.get('[role="dialog"]').contains('button', t('Save')).click();
   });
 
   it('Navigate forward two months — clean rent due', () => {
