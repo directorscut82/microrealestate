@@ -127,9 +127,15 @@ Cypress.Commands.add(
     );
     cy.get('input[name=rent]').type(rent);
     cy.get('input[name=description]').type(description);
-    cy.get('input[name=surface]').type(surface);
-    cy.get('input[name=phone]').type(phone);
-    cy.get('input[name=digicode]').type(digiCode);
+    if (surface) {
+      cy.get('body').then(($body) => {
+        if ($body.find('input[name=surface]').length) {
+          cy.get('input[name=surface]').type(surface);
+          if (phone) cy.get('input[name=phone]').type(phone);
+          if (digiCode) cy.get('input[name=digicode]').type(digiCode);
+        }
+      });
+    }
     if (address) {
       const { street1, street2, zipCode, city, state, country } = address;
       cy.get('input[name="address.street1"]').type(street1);
