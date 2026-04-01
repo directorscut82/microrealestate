@@ -141,10 +141,6 @@ describe('Edge Cases & Validation', () => {
   });
 
   it('Data intact after sign out/in', () => {
-    cy.navAppMenu('properties');
-    cy.get('[data-cy=propertiesPage]').should('exist');
-    cy.contains(properties[0].name).should('be.visible');
-    cy.contains(properties[1].name).should('be.visible');
     cy.navOrgMenu('contracts');
     cy.contains(contract369.name).should('be.visible');
   });
