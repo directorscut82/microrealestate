@@ -52,9 +52,7 @@ describe('Edge Cases & Validation', () => {
     cy.contains(t('Contracts')).click();
     cy.contains(t('New contract')).click();
     cy.get('[data-cy=submitContract]').click();
-    cy.get('input[name=name]').then(($el) => {
-      expect($el[0].validationMessage).to.not.be.empty;
-    });
+    cy.get('.text-destructive').should('exist');
   });
 
   it('Close contract dialog', () => {
@@ -79,9 +77,7 @@ describe('Edge Cases & Validation', () => {
     cy.navAppMenu('properties');
     cy.contains('button', t('Add a property')).click();
     cy.get('[data-cy=submitProperty]').click();
-    cy.get('input[name=name]').then(($el) => {
-      expect($el[0].validationMessage).to.not.be.empty;
-    });
+    cy.get('.text-destructive').should('exist');
   });
 
   it('Close property dialog', () => {
@@ -105,9 +101,7 @@ describe('Edge Cases & Validation', () => {
     cy.navAppMenu('tenants');
     cy.contains('button', t('Add a tenant')).click();
     cy.get('[data-cy=submitTenant]').click();
-    cy.get('input[name=name]').then(($el) => {
-      expect($el[0].validationMessage).to.not.be.empty;
-    });
+    cy.get('.text-destructive').should('exist');
   });
 
   it('Close tenant dialog', () => {
@@ -123,7 +117,7 @@ describe('Edge Cases & Validation', () => {
   });
 
   it('Create second property', () => {
-    cy.addPropertyFromStepper(properties[1]);
+    cy.addPropertyFromPage(properties[1]);
     cy.navAppMenu('dashboard');
   });
 
