@@ -78,6 +78,12 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
 5. If code bug → fix the app, re-run
 6. If test bug → fix the test, re-run
 7. **Never weaken assertions to make tests pass**
+8. **Check backend logs** when failures are unexpected:
+   ```bash
+   finch logs microrealestate-api-1 2>&1 | tail -20
+   finch logs microrealestate-gateway-1 2>&1 | tail -20
+   finch logs microrealestate-authenticator-1 2>&1 | tail -20
+   ```
 
 ## Common Issues
 
@@ -89,36 +95,33 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
 | `[data-cy=orgMenu]` not found after reload | Store reactivity issue | Verify InjectStoreContext uses useSyncExternalStore |
 | Page redirects to firstaccess after reload | Auth flow race condition | Verify Authentication.js uses getStoreInstance() |
 | Next.js serves stale code | Dev server cache | Restart landlord-frontend container |
+| Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
+| Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
+| `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
 
-### Run unit tests (no Docker needed)
+## Running Unit Tests (no Docker needed)
+
 ```bash
 cd services/api && npx jest --no-coverage
 # Expects: 3 suites, 48 tests, all passing
 ```
 
-### Run E2E tests
-```bash
-cd e2e && npx cypress run
-# Expects: 9 suites, 100 tests (suites 01-09)
-# Runtime: ~5 minutes in dev mode
-```
+## Container Management
 
-### Run single E2E suite (for debugging)
+### Start services (dev mode)
 ```bash
-cd e2e && npx cypress run --spec cypress/e2e/04_contracts.cy.js
+cd /Users/epitrogi/Development/microrealestate
+finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml up -d
 ```
-
-### Common failures and fixes
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
-| Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
-| `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
-| Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
 
 ### Stop everything
 ```bash
 finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
+```
+
+### Restart landlord frontend (after code changes)
+```bash
+finch restart microrealestate-landlord-frontend-1
 ```
 
 ---
