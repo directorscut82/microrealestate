@@ -13,7 +13,7 @@ Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlor
 - **Form migration:** ✅ COMPLETE — all 22 forms migrated from Formik+Yup to react-hook-form+zod
 - **Dependency cleanup:** ✅ COMPLETE — formik, yup, @material-ui/*, @date-io/*, material-ui-formik-components removed
 - **formfields/ directory:** ✅ DELETED — 10 legacy Formik wrapper files removed
-- **E2E tests:** Suites 01-09 (100 tests) verified passing. Suites 10-17 (62 tests) written but not re-verified after MobX migration. Suites 20-28 (204 tests) written but never run.
+- **E2E tests:** Suites 01-09 (100 tests) verified passing. Suites 10-17 (57 tests) verified passing. Suites 20-28: 309 passing, 42 failing across 9 suites (7 suites fully green).
 - **MobX→React Query:** ✅ COMPLETE — all 12 stores resolved, MobX fully removed
 
 ## How to Run Tests (without getting stuck)
@@ -88,8 +88,8 @@ All 12 MobX stores resolved. `mobx` and `mobx-react-lite` removed from package.j
 | 5 | Tenant | 162 | ✅ Store deleted (data via RQ, passed as props to 14 child components) |
 | 6 | Rent | 250 | ✅ Store deleted (zero refs, data via RQ) |
 | 7 | Template + Document | 193 | ✅ Stores deleted (data via RQ in DocumentsForm + TemplateList) |
-| 8 | Organization + User | 254 | ✅ Converted to plain classes (no MobX). Still in StoreContext for auth/session. |
-| 9 | AppHistory | 16 | ✅ Converted to plain class (no MobX) |
+| 8 | Organization + User | 254 | ✅ Converted to plain classes with subscribe/notify. `useSyncExternalStore` in StoreContext for auth/session reactivity. |
+| 9 | AppHistory | 16 | ✅ Converted to plain class with subscribe/notify |
 | 10 | Remove MobX deps | — | ✅ mobx, mobx-react-lite removed from package.json |
 
 ## Future Tasks
