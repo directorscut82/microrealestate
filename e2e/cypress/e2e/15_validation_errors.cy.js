@@ -44,10 +44,11 @@ describe('Validation & Error States', () => {
   });
 
   it('Create duplicate contract shows error', () => {
-    cy.get('[data-cy=shortcutCreateContract]').click();
+    cy.navOrgMenu('contracts');
+    cy.get('[data-cy=contractsPage]').should('exist');
+    cy.contains('button', t('New contract')).click();
     cy.get('input[name=name]').type(contract369.name);
     cy.get('[data-cy=submitContract]').click();
-    // Should show error toast for duplicate name (409)
     cy.get('ol.toaster > li').should('exist');
   });
 
@@ -62,10 +63,11 @@ describe('Validation & Error States', () => {
   });
 
   it('Create duplicate property shows error', () => {
-    cy.get('[data-cy=shortcutAddProperty]').click();
+    cy.navAppMenu('properties');
+    cy.get('[data-cy=propertiesPage]').should('exist');
+    cy.contains('button', t('Add a property')).click();
     cy.get('input[name=name]').type(properties[0].name);
     cy.get('[data-cy=submitProperty]').click();
-    // Should show error toast for duplicate name (409)
     cy.get('ol.toaster > li').should('exist');
   });
 
