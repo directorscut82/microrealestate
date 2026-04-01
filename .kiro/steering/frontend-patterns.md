@@ -4,7 +4,7 @@ inclusion: always
 
 # Frontend Patterns for New Pages (Landlord App)
 
-This project has completed its migration from Material UI v4, Formik+Yup to shadcn/ui, react-hook-form+zod. MobX has been fully removed — all data fetching uses React Query, auth/session uses plain class contexts. **Follow the patterns below for all new code.**
+This project has completed its migration from Material UI v4, Formik+Yup to shadcn/ui, react-hook-form+zod. MobX has been fully removed — all data fetching uses React Query, auth/session uses store classes with subscribe/notify reactivity via `useSyncExternalStore`. **Follow the patterns below for all new code.**
 
 ## UI Framework
 
@@ -19,7 +19,7 @@ Use **shadcn/ui + Tailwind CSS** (already configured in `components.json`).
 | Concern | Use | Do NOT use |
 |---------|-----|------------|
 | Server state (API data) | `@tanstack/react-query` (`useQuery`, `useMutation`) | Direct fetch without caching |
-| Auth/session state | `StoreContext` (plain class: Organization, User) | — |
+| Auth/session state | `StoreContext` (Organization, User with subscribe/notify + `useSyncExternalStore`) | — |
 | Local/UI state | `useState`, `useReducer`, React Context | — |
 
 ## Forms

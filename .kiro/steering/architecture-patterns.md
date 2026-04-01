@@ -82,9 +82,9 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 - Uses Next.js Pages Router with `src/pages/[organization]/` for org-scoped routes
 - `@tanstack/react-query` v5.29 for all server state (data fetching/mutations)
 - API calls via `src/utils/restcalls.js` (plain async functions) wrapped in `useQuery`/`useMutation`
-- Auth/session state in plain class store (`src/store/`): Organization, User, AppHistory (no MobX)
-- `StoreContext` provides auth/org context to components via React Context
-- `getStoreInstance()` singleton used by `fetch.js` interceptor for token refresh
+- Auth/session state in store classes (`src/store/`): Organization, User, AppHistory with subscribe/notify reactivity
+- `StoreContext` provides auth/org context to components via React Context + `useSyncExternalStore`
+- `getStoreInstance()` singleton used by `fetch.js` interceptor for token refresh and by `withAuthentication` for redirect checks
 - All forms use react-hook-form + zod (Formik+Yup fully removed, MUI fully removed)
 - Data flows as props from pages to child components (no global observable state)
 
