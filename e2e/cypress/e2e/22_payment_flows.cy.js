@@ -79,7 +79,7 @@ describe('Payment Flows', () => {
   });
 
   it('Save partial payment', () => {
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   it('Rent shows partially paid status after partial payment', () => {
@@ -99,7 +99,7 @@ describe('Payment Flows', () => {
   });
 
   it('Save full payment', () => {
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   it('Second tenant shows paid status', () => {
@@ -119,7 +119,7 @@ describe('Payment Flows', () => {
   });
 
   it('Save remaining payment', () => {
-    cy.get('[data-cy=submit]').first().click();
+    cy.contains('button', t('Save')).click();
   });
 
   // --- Filter verification ---
