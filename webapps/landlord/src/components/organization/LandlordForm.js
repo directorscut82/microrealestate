@@ -147,7 +147,10 @@ export default function LandlordForm({ organization, firstAccess }) {
     async (landlord) => {
       if (firstAccess) {
         const createdOrgpanization = {
-          ...landlord,
+          name: landlord.name,
+          isCompany: landlord.isCompany === 'true',
+          currency: landlord.currency,
+          locale: landlord.locale,
           members: [
             {
               name: `${store.user.firstName} ${store.user.lastName}`,
@@ -157,6 +160,16 @@ export default function LandlordForm({ organization, firstAccess }) {
             }
           ]
         };
+        if (createdOrgpanization.isCompany) {
+          createdOrgpanization.companyInfo = {
+            name: landlord.company,
+            ein: landlord.ein,
+            dos: landlord.dos,
+            legalRepresentative: landlord.legalRepresentative,
+            legalStructure: landlord.legalStructure,
+            capital: landlord.capital
+          };
+        }
         await mutateCreateOrganization.mutateAsync(createdOrgpanization);
         router.push(
           `/${router.query.organization}/dashboard`,
