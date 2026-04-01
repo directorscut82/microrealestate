@@ -106,7 +106,7 @@ describe('Multi-Property Tenant & Expenses', () => {
 
   it('Tenant detail shows contract overview', () => {
     cy.get('[data-cy=tenantPage]').should('be.visible');
-    cy.contains('Multi-Property Tenant').should('be.visible');
+    cy.get('input[name="name"]').should('have.value', 'Multi-Property Tenant');
   });
 
   it('Tenant rent overview shows combined rent', () => {
