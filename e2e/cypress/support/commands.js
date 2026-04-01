@@ -117,7 +117,7 @@ Cypress.Commands.add(
 Cypress.Commands.add(
   'addPropertyFromStepper',
   ({ name, type, description, surface, phone, digiCode, address, rent }) => {
-    cy.get('[data-cy=shortcutAddProperty]').should('be.visible').click({ force: true });
+    cy.get('[data-cy=shortcutAddProperty]', { timeout: 30000 }).should('be.visible').click({ force: true });
     cy.get('input[name=name]').type(name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
@@ -151,6 +151,44 @@ Cypress.Commands.add(
   }
 );
 
+Cypress.Commands.add(
+  'addPropertyFromPage',
+  ({ name, type, description, surface, phone, digiCode, address, rent }) => {
+    cy.navAppMenu('properties');
+    cy.get('[data-cy=propertiesPage]').should('exist');
+    cy.contains('button', i18n.getFixedT('fr-FR')('Add a property')).click();
+    cy.get('input[name=name]').type(name);
+    cy.get('[data-cy=submitProperty]').click();
+    cy.contains(i18n.getFixedT('fr-FR')('Property information'));
+    cy.selectByLabel(
+      i18n.getFixedT('fr-FR')('Property Type'),
+      i18n.getFixedT('fr-FR')(type.replace(/^./, type[0].toUpperCase()))
+    );
+    cy.get('input[name=rent]').type(rent);
+    cy.get('input[name=description]').type(description);
+    if (surface) {
+      cy.get('body').then(($body) => {
+        if ($body.find('input[name=surface]').length) {
+          cy.get('input[name=surface]').type(surface);
+          if (phone) cy.get('input[name=phone]').type(phone);
+          if (digiCode) cy.get('input[name=digicode]').type(digiCode);
+        }
+      });
+    }
+    if (address) {
+      const { street1, street2, zipCode, city, state, country } = address;
+      cy.get('input[name="address.street1"]').type(street1);
+      if (street2) {
+        cy.get('input[name="address.street2"]').type(street2);
+      }
+      cy.get('input[name="address.zipCode"]').type(zipCode);
+      cy.get('input[name="address.city"]').type(city);
+      cy.get('input[name="address.state"]').type(state);
+      cy.get('input[name="address.country"]').type(country);
+    }
+    cy.get('[data-cy=submit]').first().click();
+  }
+);
 Cypress.Commands.add(
   'addTenantFromStepper',
   ({ name, isCompany, address, contacts, lease, billing, documents }) => {

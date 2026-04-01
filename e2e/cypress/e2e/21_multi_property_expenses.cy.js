@@ -20,11 +20,11 @@ describe('Multi-Property Tenant & Expenses', () => {
     cy.registerLandlord(userWithCompanyAccount);
     cy.createContractFromStepper(contract369);
     cy.navAppMenu('dashboard');
-    // Create 3 properties
-    [properties[0], properties[1], properties[2]].forEach((prop) => {
-      cy.addPropertyFromStepper(prop);
-      cy.navAppMenu('dashboard');
-    });
+    // Create first property via dashboard shortcut (first-connection mode)
+    cy.addPropertyFromStepper(properties[0]);
+    // Create remaining properties via properties page (dashboard is still in first-connection mode)
+    cy.addPropertyFromPage(properties[1]);
+    cy.addPropertyFromPage(properties[2]);
   });
 
   // --- Create tenant with 2 properties ---
