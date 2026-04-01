@@ -218,9 +218,9 @@ Cypress.Commands.add(
       const { isVat, percentageVatRatio } = billing;
       if (isVat) {
         cy.get('#isVat').click();
+        cy.get('input[name=vatRatio]').clear();
+        cy.get('input[name=vatRatio]').type(percentageVatRatio);
       }
-      cy.get('input[name=vatRatio]').clear();
-      cy.get('input[name=vatRatio]').type(percentageVatRatio);
     }
     cy.get('[data-cy=submit]').first().click();
 
