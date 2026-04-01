@@ -66,16 +66,16 @@ describe('Settings Deep Tests', () => {
   });
 
   it('Bank name field exists', () => {
-    cy.get('input[name="bank.name"]').should('exist');
+    cy.get('input[name="bankName"]').should('exist');
   });
 
   it('IBAN field exists', () => {
-    cy.get('input[name="bank.iban"]').should('exist');
+    cy.get('input[name="iban"]').should('exist');
   });
 
   it('Fill bank details and save', () => {
-    cy.get('input[name="bank.name"]').clear().type('BNP Paribas');
-    cy.get('input[name="bank.iban"]').clear().type('FR7630004000031234567890143');
+    cy.get('input[name="bankName"]').clear().type('BNP Paribas');
+    cy.get('input[name="iban"]').clear().type('FR7630004000031234567890143');
     cy.get('[data-cy=submit]').first().click();
   });
 
@@ -83,8 +83,8 @@ describe('Settings Deep Tests', () => {
     cy.navAppMenu('dashboard');
     cy.navAppMenu('settings');
     cy.contains(t('Billing')).click();
-    cy.get('input[name="bank.name"]').should('have.value', 'BNP Paribas');
-    cy.get('input[name="bank.iban"]').should('have.value', 'FR7630004000031234567890143');
+    cy.get('input[name="bankName"]').should('have.value', 'BNP Paribas');
+    cy.get('input[name="iban"]').should('have.value', 'FR7630004000031234567890143');
   });
 
   // --- Access settings ---
