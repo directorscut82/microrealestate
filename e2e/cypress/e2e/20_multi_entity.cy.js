@@ -68,11 +68,11 @@ describe('Multi-Entity Management', () => {
   it('Toggle first contract inactive', () => {
     cy.navOrgMenu('contracts');
     cy.get('[data-cy=contractsPage]').should('exist');
-    cy.contains(contract369.name).parents('[class*="border"]').find('[role=switch]').click();
+    cy.contains(contract369.name).parent().parent().find('[role=switch]').click();
   });
 
   it('Toggle first contract active again', () => {
-    cy.contains(contract369.name).parents('[class*="border"]').find('[role=switch]').click();
+    cy.contains(contract369.name).parent().parent().find('[role=switch]').click();
   });
 
   // --- Multiple properties ---
