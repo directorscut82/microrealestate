@@ -47,10 +47,12 @@ timeout 180 npx cypress run \
 
 When debugging a suite with sequential tests (testIsolation: false):
 
-1. Add `.only` to the first test, run the suite — verify before hook + test 1
-2. Move `.only` to test 2 (tests 1+2 run due to sequential dependency) — verify
-3. Continue until you find the failing test
-4. Remove all `.only` when done
+**Important:** `.only` on test N runs ONLY test N, skipping all others. With sequential tests this breaks dependencies. Instead:
+
+1. Temporarily add `it.skip()` to all tests AFTER the first one — run just before hook + test 1
+2. Remove `skip` from test 2 (now tests 1+2 run in order) — verify
+3. Continue removing `skip` one test at a time until you find the failure
+4. Remove all `skip` when done
 
 ### Batch run (verified suites only)
 
