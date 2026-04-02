@@ -109,6 +109,15 @@ routes.post(
 
       // Create tenants with lease assignments
       const createdTenants: any[] = [];
+      const toDate = (d: string) => {
+        if (!d) return undefined;
+        if (d.includes('/')) {
+          const [day, month, year] = d.split('/');
+          return new Date(`${year}-${month}-${day}`);
+        }
+        return new Date(d);
+      };
+
       for (const tenant of tenants) {
         const lease = tenant.leaseName ? createdLeases[tenant.leaseName] : null;
         const tenantProperties = (tenant.properties || []).map((tp: any) => {
@@ -118,8 +127,8 @@ routes.post(
             property: prop,
             rent: prop?.price || 0,
             expenses: tp.expenses || [{ title: 'charges', amount: 0 }],
-            entryDate: tp.entryDate || tenant.beginDate,
-            exitDate: tp.exitDate || tenant.endDate
+            entryDate: toDate(tp.entryDate || tenant.beginDate),
+            exitDate: toDate(tp.exitDate || tenant.endDate)
           };
         });
 
@@ -133,8 +142,8 @@ routes.post(
           address: tenant.address || {},
           leaseId: lease?._id,
           lease,
-          beginDate: tenant.beginDate,
-          endDate: tenant.endDate,
+          beginDate: toDate(tenant.beginDate),
+          endDate: toDate(tenant.endDate),
           properties: tenantProperties,
           isVat: tenant.isVat || false,
           vatRatio: tenant.vatRatio || 0,
