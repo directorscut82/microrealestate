@@ -75,8 +75,8 @@ describe('Multi-Landlord Organization Isolation', () => {
 
   it('Landlord B dashboard is empty (first connection)', () => {
     cy.get('[data-cy=dashboardPage]').should('be.visible');
-    // Should show first-connection wizard, not Alice's data
-    cy.contains(t('Create a reusable contract model')).should('be.visible');
+    // Should show first-connection wizard
+    cy.contains(t('Create a reusable contract model that includes the terms and conditions for renting your properties.')).should('be.visible');
   });
 
   it('Landlord B cannot see Alice properties', () => {

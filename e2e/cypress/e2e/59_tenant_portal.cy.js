@@ -43,7 +43,7 @@ describe('Tenant Portal Access', () => {
   });
 
   it('Tenant signin page loads', () => {
-    cy.visit('/tenant');
+    cy.visit('http://localhost:8080/tenant');
     cy.url().should('include', '/tenant');
   });
 
@@ -86,8 +86,7 @@ describe('Tenant Portal Access', () => {
   });
 
   it('Tenant portal shows tenant data', () => {
-    cy.visit('/tenant');
-    // The tenant portal should show the tenant's lease info
+    cy.visit('http://localhost:8080/tenant');
     cy.url().should('include', '/tenant');
   });
 
