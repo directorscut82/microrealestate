@@ -104,8 +104,6 @@ describe('VAT Computation Verification', () => {
   });
 
   after(() => {
-    cy.wait(1000);
-    cy.get('body').type('{esc}');
-    cy.signOut();
+    cy.resetAppData();
   });
 });
