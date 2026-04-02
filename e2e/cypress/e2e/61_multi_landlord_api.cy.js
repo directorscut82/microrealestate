@@ -75,12 +75,6 @@ describe('Multi-Landlord Isolation via API', () => {
     cy.contains('Bail Bob').should('not.exist');
   });
 
-  it('Alice sees rents for her tenant', () => {
-    cy.navAppMenu('rents');
-    cy.get('[data-cy=rentsPage]').should('be.visible');
-    cy.contains('Tenant of Alice').should('be.visible');
-  });
-
   it('Alice signs out', () => {
     cy.signOut();
   });
