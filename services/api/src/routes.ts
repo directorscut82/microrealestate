@@ -107,7 +107,9 @@ export default function routes(): express.Router {
     const { type, id } = req.params;
     const redis = Service.getInstance().redisClient;
     const key = `presence:${req.realm._id}:${type}:${id}:${req.user.email}`;
-    const value = JSON.stringify({ name: `${req.user.firstname} ${req.user.lastname}`, email: req.user.email });
+    const member = req.realm.members?.find((m: any) => m.email === req.user.email);
+    const name = member?.name || req.user.email;
+    const value = JSON.stringify({ name, email: req.user.email });
     await redis!.set(key, value, { EX: 60 });
     // Get all viewers
     const pattern = `presence:${req.realm._id}:${type}:${id}:*`;
