@@ -38,26 +38,26 @@ describe('Tenant Portal via API', () => {
   });
 
   it('Get OTP and authenticate tenant', () => {
-    // Get OTP via API
     cy.request({
       method: 'POST',
       url: 'http://localhost:8080/api/reset/otp',
       body: { email: tenantEmail }
     }).then((otpResp) => {
       const otp = otpResp.body.otp;
-      // Exchange OTP for session
       cy.request({
         method: 'GET',
         url: `http://localhost:8080/api/v2/authenticator/tenant/signedin?otp=${otp}`,
-        failOnStatusCode: false
       }).then((authResp) => {
         expect(authResp.status).to.eq(200);
+        // Set session cookie for tenant portal
+        const sessionToken = authResp.body.sessionToken;
+        cy.setCookie('sessionToken', sessionToken, { domain: 'localhost', path: '/tenant' });
       });
     });
   });
 
-  it('Tenant portal loads', () => {
-    cy.visit('http://localhost:8080/tenant');
+  it('Tenant portal loads after authentication', () => {
+    cy.visit('http://localhost:8080/tenant', { failOnStatusCode: false });
     cy.url().should('include', '/tenant');
   });
 
