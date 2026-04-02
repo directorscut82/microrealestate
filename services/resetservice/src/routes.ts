@@ -43,7 +43,7 @@ routes.delete(
 
 // New: seed test data — create user + org + entities in one call
 routes.post(
-  '/seed',
+  '/reset/seed',
   Middlewares.asyncWrapper(
     async (req: Express.Request, res: Express.Response) => {
       const { user, org, leases = [], properties = [], tenants = [] } = req.body;
@@ -162,7 +162,7 @@ routes.post(
 
 // New: create OTP for tenant email and return it directly
 routes.post(
-  '/otp',
+  '/reset/otp',
   Middlewares.asyncWrapper(
     async (req: Express.Request, res: Express.Response) => {
       const { email } = req.body;
