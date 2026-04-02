@@ -51,6 +51,7 @@ describe('Payment Edge Cases', () => {
     cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('150');
     cy.get('[role="dialog"]').find('input[name="payments.0.date"]').type('2026-04-15');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
+    cy.wait(1000);
   });
 
   it('Settlement shows 150,00', () => {
@@ -79,6 +80,7 @@ describe('Payment Edge Cases', () => {
     cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('70');
     cy.get('[role="dialog"]').find('input[name="payments.0.date"]').type('2026-04-15');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
+    cy.wait(1000);
   });
 
   it('Month after shows clean 110 (no carryover)', () => {
