@@ -20,6 +20,8 @@ import Map from '../../../components/Map';
 import moment from 'moment';
 import NumberFormat from '../../../components/NumberFormat';
 import Page from '../../../components/Page';
+import PresenceBanner from '../../../components/PresenceBanner';
+import usePresence from '../../../hooks/usePresence';
 import PropertyForm from '../../../components/properties/PropertyForm';
 import ShortcutButton from '../../../components/ShortcutButton';
 import { toast } from 'sonner';
@@ -87,6 +89,7 @@ function Property() {
     useState(false);
 
   const propertyId = router.query.id;
+  const viewers = usePresence('property', propertyId);
 
   const { data: property, isLoading } = useQuery({
     queryKey: [QueryKeys.PROPERTIES, propertyId],
@@ -186,6 +189,7 @@ function Property() {
       }
       dataCy="propertyPage"
     >
+      <PresenceBanner viewers={viewers} />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Tabs defaultValue="property" className="md:col-span-2">
           <TabsList className="flex justify-start overflow-x-auto overflow-y-hidden">

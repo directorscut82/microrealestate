@@ -14,6 +14,8 @@ import ConfirmDialog from '../../../../components/ConfirmDialog';
 import LeaseStepper from '../../../../components/organization/lease/LeaseStepper';
 import LeaseTabs from '../../../../components/organization/lease/LeaseTabs';
 import Page from '../../../../components/Page';
+import PresenceBanner from '../../../../components/PresenceBanner';
+import usePresence from '../../../../hooks/usePresence';
 import ShortcutButton from '../../../../components/ShortcutButton';
 import { StoreContext } from '../../../../store';
 import { toast } from 'sonner';
@@ -31,6 +33,7 @@ function Contract() {
     useState(false);
 
   const leaseId = router.query.id;
+  const viewers = usePresence('contract', leaseId);
 
   const { data: lease, isLoading: leaseLoading } = useQuery({
     queryKey: [QueryKeys.LEASES, leaseId],
@@ -129,6 +132,7 @@ function Contract() {
       }
       dataCy="contractPage"
     >
+      <PresenceBanner viewers={viewers} />
       {lease?.stepperMode ? (
         <Card>
           <LeaseStepper

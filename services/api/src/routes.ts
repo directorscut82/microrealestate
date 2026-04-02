@@ -102,6 +102,37 @@ export default function routes(): express.Router {
   emailRouter.post('/', Middlewares.asyncWrapper(emailManager.send as any));
   router.use('/emails', emailRouter);
 
+  // Presence awareness — shows who else is viewing the same record
+  router.post('/presence/:type/:id', Middlewares.asyncWrapper(async (req: any, res: any) => {
+    const { type, id } = req.params;
+    const redis = Service.getInstance().redisClient;
+    const key = `presence:${req.realm._id}:${type}:${id}:${req.user.email}`;
+    const value = JSON.stringify({ name: `${req.user.firstname} ${req.user.lastname}`, email: req.user.email });
+    await redis!.set(key, value, { EX: 60 });
+    // Get all viewers
+    const pattern = `presence:${req.realm._id}:${type}:${id}:*`;
+    const keys = await redis!.keys(pattern);
+    const viewers = [];
+    for (const k of keys) {
+      const v = await redis!.get(k);
+      if (v) viewers.push(JSON.parse(v));
+    }
+    res.json(viewers.filter((v: any) => v.email !== req.user.email));
+  }));
+
+  router.get('/presence/:type/:id', Middlewares.asyncWrapper(async (req: any, res: any) => {
+    const { type, id } = req.params;
+    const redis = Service.getInstance().redisClient;
+    const pattern = `presence:${req.realm._id}:${type}:${id}:*`;
+    const keys = await redis!.keys(pattern);
+    const viewers = [];
+    for (const k of keys) {
+      const v = await redis!.get(k);
+      if (v) viewers.push(JSON.parse(v));
+    }
+    res.json(viewers.filter((v: any) => v.email !== req.user.email));
+  }));
+
   const apiRouter = express.Router();
   apiRouter.use('/api/v2', router);
 
