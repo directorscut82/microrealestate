@@ -70,7 +70,8 @@ routes.post(
             email: user.email,
             role: 'administrator',
             registered: true
-          }
+          },
+          ...(org.members || [])
         ]
       }).save();
 
