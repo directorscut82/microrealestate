@@ -48,7 +48,7 @@ describe('Tenant Portal via API', () => {
       // Exchange OTP for session
       cy.request({
         method: 'GET',
-        url: `http://localhost:8080/tenantapi/signedin?otp=${otp}`,
+        url: `http://localhost:8080/api/v2/authenticator/tenant/signedin?otp=${otp}`,
         failOnStatusCode: false
       }).then((authResp) => {
         expect(authResp.status).to.eq(200);
