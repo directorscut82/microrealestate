@@ -76,6 +76,7 @@ describe('VAT Computation Verification', () => {
     cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('580');
     cy.get('[role="dialog"]').find('input[name="payments.0.date"]').type('2026-04-15');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
+    cy.wait(1000);
   });
 
   it('Next month balance shows 46 (unpaid VAT)', () => {
@@ -99,6 +100,7 @@ describe('VAT Computation Verification', () => {
     cy.get('[role="dialog"]').find('input[name="payments.0.amount"]').clear().type('812');
     cy.get('[role="dialog"]').find('input[name="payments.0.date"]').type('2026-04-15');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
+    cy.wait(1000);
   });
 
   after(() => {
