@@ -367,3 +367,29 @@ Cypress.Commands.add('removeResource', () => {
     .contains(i18n.getFixedT('fr-FR')('Continue'))
     .click();
 });
+
+// Seed test data via API (bypasses UI, fast and reliable)
+Cypress.Commands.add('seedTestData', (data) => {
+  cy.request({
+    method: 'POST',
+    url: 'http://localhost:8080/api/reset/seed',
+    body: data,
+    failOnStatusCode: true
+  }).then((resp) => {
+    expect(resp.status).to.eq(200);
+    return resp.body;
+  });
+});
+
+// Get OTP for tenant email (bypasses email delivery)
+Cypress.Commands.add('getTenantOTP', (email) => {
+  cy.request({
+    method: 'POST',
+    url: 'http://localhost:8080/api/reset/otp',
+    body: { email },
+    failOnStatusCode: true
+  }).then((resp) => {
+    expect(resp.status).to.eq(200);
+    return resp.body.otp;
+  });
+});
