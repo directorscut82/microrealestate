@@ -1,199 +1,136 @@
-import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
+// Real presence awareness test:
+// Alice and Bob are both members of the same org.
+// Bob views a tenant page (via API heartbeat).
+// Alice navigates to the same tenant page in the browser.
+// Alice sees "Bob Bernard consulte aussi cette page" banner.
 
-// Test presence awareness: when two users view the same page,
-// each sees the other's name in a banner
+describe('Presence Awareness — Real Two-User Flow', () => {
+  const userA = { firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com', password: 'test1234' };
+  const userB = { firstName: 'Bob', lastName: 'Bernard', email: 'bob@test.com', password: 'test1234' };
 
-describe('Presence Awareness', () => {
-  const userA = {
-    firstName: 'Alice', lastName: 'Martin',
-    email: 'alice@test.com', password: 'test1234'
-  };
-  const userB = {
-    firstName: 'Bob', lastName: 'Bernard',
-    email: 'bob@test.com', password: 'test1234'
-  };
-
-  let realmId, tenantId, propertyId, leaseId;
+  let realmId, tenantId, propertyId, leaseId, bobToken;
 
   before(() => {
     cy.resetAppData();
-    // Seed org with two members, a tenant, a property, and a contract
+    // Create Bob's account first (seed creates an account)
+    cy.seedTestData({
+      user: userB,
+      org: { name: 'Bob Dummy' },
+      leases: [], properties: [], tenants: []
+    });
+    // Create Alice's org with Bob as a member
     cy.seedTestData({
       user: userA,
       org: {
-        name: 'Presence Test Org',
+        name: 'Shared Org',
         locale: 'fr-FR',
-        currency: 'EUR'
+        currency: 'EUR',
+        members: [{ name: 'Bob Bernard', email: 'bob@test.com', role: 'renter', registered: true }]
       },
-      leases: [{ name: 'Bail Test', description: 'Test', numberOfTerms: 12, timeRange: 'months' }],
-      properties: [{ name: 'Apt Test', type: 'apartment', rent: 100 }],
+      leases: [{ name: 'Bail', description: 'Test', numberOfTerms: 12, timeRange: 'months' }],
+      properties: [{ name: 'Apt Shared', type: 'apartment', rent: 500 }],
       tenants: [{
-        name: 'Test Tenant',
+        name: 'Shared Tenant',
         beginDate: '01/04/2026', endDate: '31/03/2027',
-        leaseName: 'Bail Test',
-        contacts: [{ name: 'Contact', email: 'tenant@test.com', phone1: '0100000000', phone2: '0100000001' }],
-        address: { street1: '1 rue Test', zipCode: '75001', city: 'Paris', country: 'France' },
-        properties: [{ name: 'Apt Test', entryDate: '01/04/2026', exitDate: '31/03/2027', expenses: [{ title: 'charges', amount: 10 }] }]
+        leaseName: 'Bail',
+        contacts: [{ name: 'C', email: 'c@t.com', phone1: '01', phone2: '02' }],
+        address: { street1: '1 rue', zipCode: '75', city: 'Paris', country: 'France' },
+        properties: [{ name: 'Apt Shared', entryDate: '01/04/2026', exitDate: '31/03/2027', expenses: [{ title: 'charges', amount: 50 }] }]
       }]
     }).then((data) => {
       realmId = data.realmId;
       tenantId = data.tenants[0].id;
-      propertyId = data.properties['Apt Test'];
-      leaseId = data.leases['Bail Test'];
+      propertyId = data.properties['Apt Shared'];
+      leaseId = data.leases['Bail'];
+    });
+    // Get Bob's auth token
+    cy.request({
+      method: 'POST',
+      url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
+      body: { email: userB.email, password: userB.password }
+    }).then((resp) => {
+      bobToken = resp.body.accessToken;
     });
   });
 
-  // --- Test 1: Presence API works ---
+  // --- Tenant page presence ---
 
-  it('Alice signs in and views tenant page', () => {
-    cy.signIn(userA);
-    cy.checkPage('dashboard');
-    cy.navAppMenu('tenants');
-    cy.contains('Test Tenant').click();
-    cy.get('[data-cy=tenantPage]').should('be.visible');
-  });
-
-  it('No presence banner when alone', () => {
-    // Alice is the only viewer — no banner should show
-    cy.get('[data-cy=tenantPage]').should('be.visible');
-    cy.contains('consulte aussi cette page').should('not.exist');
-  });
-
-  it('Simulate Bob viewing same tenant via API', () => {
-    // Bob's presence is simulated by directly calling the presence API
-    // In real usage, Bob would be in a separate browser
+  it('Bob starts viewing tenant page (via API)', () => {
     cy.request({
       method: 'POST',
       url: `http://localhost:8080/api/v2/presence/tenant/${tenantId}`,
-      headers: {
-        'Authorization': `Bearer ${Cypress.env('ALICE_TOKEN') || ''}`,
-        'organizationId': realmId
-      },
-      failOnStatusCode: false
-    });
-  });
-
-  it('Presence API returns viewers for tenant', () => {
-    // Call presence API as Alice to check who else is viewing
-    cy.signIn(userA).then(() => {
-      cy.request({
-        method: 'POST',
-        url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
-        body: { email: userA.email, password: userA.password }
-      }).then((resp) => {
-        const token = resp.body.accessToken;
-        cy.request({
-          method: 'GET',
-          url: `http://localhost:8080/api/v2/presence/tenant/${tenantId}`,
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'organizationId': realmId
-          }
-        }).then((presResp) => {
-          expect(presResp.status).to.eq(200);
-          expect(presResp.body).to.be.an('array');
-          // Response is array of other viewers (excludes self)
-        });
-      });
-    });
-  });
-
-  it('Presence API works for property', () => {
-    cy.request({
-      method: 'POST',
-      url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
-      body: { email: userA.email, password: userA.password }
+      headers: { 'Authorization': `Bearer ${bobToken}`, 'organizationId': realmId }
     }).then((resp) => {
-      const token = resp.body.accessToken;
-      // Heartbeat on property
-      cy.request({
-        method: 'POST',
-        url: `http://localhost:8080/api/v2/presence/property/${propertyId}`,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'organizationId': realmId
-        }
-      }).then((presResp) => {
-        expect(presResp.status).to.eq(200);
-        expect(presResp.body).to.be.an('array');
-      });
+      expect(resp.status).to.eq(200);
     });
   });
 
-  it('Presence API works for contract', () => {
-    cy.request({
-      method: 'POST',
-      url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
-      body: { email: userA.email, password: userA.password }
-    }).then((resp) => {
-      const token = resp.body.accessToken;
-      cy.request({
-        method: 'POST',
-        url: `http://localhost:8080/api/v2/presence/contract/${leaseId}`,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'organizationId': realmId
-        }
-      }).then((presResp) => {
-        expect(presResp.status).to.eq(200);
-        expect(presResp.body).to.be.an('array');
-      });
-    });
-  });
-
-  it('Presence data expires after TTL', () => {
-    // The Redis key has 60s TTL — we can't wait 60s in a test
-    // but we can verify the key exists and has a TTL
-    cy.request({
-      method: 'POST',
-      url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
-      body: { email: userA.email, password: userA.password }
-    }).then((resp) => {
-      const token = resp.body.accessToken;
-      // Heartbeat
-      cy.request({
-        method: 'POST',
-        url: `http://localhost:8080/api/v2/presence/tenant/${tenantId}`,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'organizationId': realmId
-        }
-      }).then((presResp) => {
-        expect(presResp.status).to.eq(200);
-      });
-      // Immediately GET — should return empty (self is excluded)
-      cy.request({
-        method: 'GET',
-        url: `http://localhost:8080/api/v2/presence/tenant/${tenantId}`,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'organizationId': realmId
-        }
-      }).then((presResp) => {
-        expect(presResp.status).to.eq(200);
-        // Only self is viewing, so filtered list is empty
-        expect(presResp.body).to.have.length(0);
-      });
-    });
-  });
-
-  it('PresenceBanner component renders on tenant page', () => {
+  it('Alice signs in and navigates to same tenant', () => {
+    cy.signIn(userA);
+    cy.checkPage('dashboard');
     cy.navAppMenu('tenants');
-    cy.contains('Test Tenant').click();
+    cy.contains('Shared Tenant').click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
-    // The banner component should exist in the DOM (even if hidden when no viewers)
   });
 
-  it('PresenceBanner component renders on property page', () => {
+  it('Alice sees Bob in the presence banner', () => {
+    // The usePresence hook fires a heartbeat which returns Bob as a viewer
+    // The PresenceBanner should show "Bob Bernard consulte aussi cette page"
+    cy.contains('Bob Bernard', { timeout: 35000 }).should('be.visible');
+    cy.contains('consulte aussi cette page').should('be.visible');
+  });
+
+  // --- Property page presence ---
+
+  it('Bob starts viewing property page (via API)', () => {
+    cy.request({
+      method: 'POST',
+      url: `http://localhost:8080/api/v2/presence/property/${propertyId}`,
+      headers: { 'Authorization': `Bearer ${bobToken}`, 'organizationId': realmId }
+    }).then((resp) => {
+      expect(resp.status).to.eq(200);
+    });
+  });
+
+  it('Alice navigates to same property', () => {
     cy.navAppMenu('properties');
-    cy.contains('Apt Test').click();
-    cy.get('input[name=name]').should('have.value', 'Apt Test');
+    cy.contains('Apt Shared').click();
+    cy.get('input[name=name]').should('have.value', 'Apt Shared');
   });
 
-  it('PresenceBanner component renders on contract page', () => {
+  it('Alice sees Bob on property page', () => {
+    cy.contains('Bob Bernard', { timeout: 35000 }).should('be.visible');
+  });
+
+  // --- Contract page presence ---
+
+  it('Bob starts viewing contract page (via API)', () => {
+    cy.request({
+      method: 'POST',
+      url: `http://localhost:8080/api/v2/presence/contract/${leaseId}`,
+      headers: { 'Authorization': `Bearer ${bobToken}`, 'organizationId': realmId }
+    }).then((resp) => {
+      expect(resp.status).to.eq(200);
+    });
+  });
+
+  it('Alice navigates to same contract', () => {
     cy.navOrgMenu('contracts');
-    cy.contains('Bail Test').click();
+    cy.contains('Bail').click();
     cy.get('[data-cy=contractPage]').should('be.visible');
+  });
+
+  it('Alice sees Bob on contract page', () => {
+    cy.contains('Bob Bernard', { timeout: 35000 }).should('be.visible');
+  });
+
+  // --- No presence when alone ---
+
+  it('Alice navigates to a page Bob is NOT viewing', () => {
+    cy.navAppMenu('dashboard');
+    cy.get('[data-cy=dashboardPage]').should('be.visible');
+    // No presence banner on dashboard (Bob isn't viewing it)
+    cy.contains('Bob Bernard').should('not.exist');
   });
 
   after(() => {
