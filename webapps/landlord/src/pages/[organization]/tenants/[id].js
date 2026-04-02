@@ -21,6 +21,8 @@ import ConfirmDialog from '../../../components/ConfirmDialog';
 import ContractOverviewCard from '../../../components/tenants/ContractOverviewCard';
 import moment from 'moment';
 import Page from '../../../components/Page';
+import PresenceBanner from '../../../components/PresenceBanner';
+import usePresence from '../../../hooks/usePresence';
 import RentHistoryDialog from '../../../components/rents/RentHistoryDialog';
 import RentOverviewCard from '../../../components/tenants/RentOverviewCard';
 import ShortcutButton from '../../../components/ShortcutButton';
@@ -39,6 +41,7 @@ function Tenant() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const tenantId = router.query.id;
+  const viewers = usePresence('tenant', tenantId);
 
   const { data: tenant, isLoading: tenantLoading } = useQuery({
     queryKey: [QueryKeys.TENANTS, tenantId],
@@ -244,6 +247,7 @@ function Tenant() {
       }
       dataCy="tenantPage"
     >
+      <PresenceBanner viewers={viewers} />
       {selected.stepperMode ? (
         <Card>
           <TenantStepper tenant={selected} leases={leases} properties={properties} organization={store.organization.selected} onSubmit={onSubmit} />

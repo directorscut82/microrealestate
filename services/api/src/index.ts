@@ -48,6 +48,7 @@ async function Main() {
     await service.init({
       name: 'api',
       useMongo: true,
+      useRedis: true,
       useAxios: true,
       onStartUp
     });

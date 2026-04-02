@@ -155,6 +155,8 @@ services:
       - LOGGER_LEVEL
       - MONGO_URL
       - DEMO_MODE
+      - REDIS_URL
+      - REDIS_PASSWORD
       - EMAILER_URL
       - PDFGENERATOR_URL
       - RESTORE_DB
@@ -167,6 +169,7 @@ services:
       - net
     depends_on:
       - mongo
+      - redis
       - emailer
       - pdfgenerator
   ###############################################################################
