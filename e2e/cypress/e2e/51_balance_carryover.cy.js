@@ -53,7 +53,7 @@ describe('Balance Carryover Between Months', () => {
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.contains(tenants[0].name).should('be.visible');
     // Balance 70 (110-40) + rent 110 = 180 total due
-    cy.contains('180').should('exist');
+    cy.contains('180,00').should('exist');
   });
 
   it('Record full payment clearing balance', () => {
