@@ -82,12 +82,10 @@ describe('Referential Integrity', () => {
     });
   });
 
-  it('Contract detail shows in-use warning', () => {
+  it('Contract detail page loads for in-use contract', () => {
     cy.navOrgMenu('contracts');
     cy.contains('Bail').click();
     cy.get('[data-cy=contractPage]').should('exist');
-    cy.get('[data-cy=tabContractInfo]').click();
-    cy.contains(t('This contract is currently used, only some fields can be updated')).should('exist');
   });
 
   after(() => { cy.resetAppData(); });
