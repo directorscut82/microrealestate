@@ -36,7 +36,7 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.get('input[name="contacts.0.email"]').type('c@t.com');
     cy.get('input[name="contacts.0.phone1"]').type('0100000000');
     cy.get('input[name="contacts.0.phone2"]').type('0100000001');
-    cy.get('[data-cy=submit]').first().click();
+    cy.get('[data-cy=submit]').filter(':visible').first().click();
     // Lease step
     cy.selectByLabel(t('Lease'), 'Bail');
     cy.get('input[name=beginDate]').clear().type('2026-04-01');
@@ -48,14 +48,14 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.contains('button', t('Add a expense')).click();
     cy.get('input[name="properties.0.expenses.1.title"]').type('Eau');
     cy.get('input[name="properties.0.expenses.1.amount"]').clear().type('20');
-    cy.get('[data-cy=submit]').first().click();
+    cy.get('[data-cy=submit]').filter(':visible').first().click();
     // Billing step — enable VAT
     cy.get('#isVat', { timeout: 15000 }).should('exist');
     cy.get('#isVat').click();
     cy.get('input[name=vatRatio]').clear().type('20');
-    cy.get('[data-cy=submit]').first().click();
+    cy.get('[data-cy=submit]').filter(':visible').first().click();
     // Documents step
-    cy.get('[data-cy=submit]').first().click();
+    cy.get('[data-cy=submit]').filter(':visible').first().click();
   });
 
   it('Navigate to rents', () => {
