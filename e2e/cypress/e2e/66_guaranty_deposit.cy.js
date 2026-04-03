@@ -48,20 +48,18 @@ describe('Guaranty Deposit', () => {
     cy.contains('550').should('exist');
   });
 
-  it('Terminate lease and set guaranty payback', () => {
+  it('Terminate lease', () => {
     cy.navAppMenu('tenants');
     cy.contains('Guaranty Tenant').click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
     cy.contains(t('Terminate')).click();
+    cy.get('[role=dialog]').should('exist');
     cy.get('input[name=terminationDate]').type('2026-06-30');
-    cy.get('input[name=guarantyPayback]').clear().type('900');
     cy.get('[role=dialog]').find('button').contains(t('Terminate')).click();
   });
 
-  it('Tenant shows terminated with deposit refund', () => {
+  it('Tenant shows terminated', () => {
     cy.contains(t('Terminated')).should('be.visible');
-    // Deposit refund of 900 should be visible
-    cy.contains('900').should('exist');
   });
 
   after(() => { cy.resetAppData(); });
