@@ -50,6 +50,7 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.get('input[name="properties.0.expenses.1.amount"]').clear().type('20');
     cy.get('[data-cy=submit]').first().click();
     // Billing step — enable VAT
+    cy.get('#isVat', { timeout: 15000 }).should('exist');
     cy.get('#isVat').click();
     cy.get('input[name=vatRatio]').clear().type('20');
     cy.get('[data-cy=submit]').first().click();
