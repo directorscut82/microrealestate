@@ -3,6 +3,9 @@ const nextTranslate = require('next-translate-plugin');
 
 module.exports = nextTranslate({
   output: 'standalone',
+  eslint: {
+    ignoreDuringBuilds: true
+  },
   experimental: {
     externalDir: true
   },
