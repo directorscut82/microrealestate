@@ -9,30 +9,25 @@ describe('Payment Edge Cases', () => {
 
   before(() => {
     cy.resetAppData();
-    cy.signUp(userWithCompanyAccount);
-    cy.signIn(userWithCompanyAccount);
-    cy.registerLandlord(userWithCompanyAccount);
-    cy.createContractFromStepper(contract369);
-    cy.navAppMenu('dashboard');
-    cy.addPropertyFromStepper(properties[0]);
-    cy.navAppMenu('dashboard');
-    cy.addTenantFromStepper({
-      ...tenants[0],
-      lease: {
-        contract: contract369.name,
-        beginDate: '01/04/2026',
-        properties: [{
-          name: properties[0].name,
-          expense: { title: 'charges', amount: 10 },
-          entryDate: '01/04/2026',
-          exitDate: '31/03/2035'
-        }]
-      },
-      billing: { isVat: false, percentageVatRatio: 0 }
+    cy.seedAndComputeRents({
+      user: userWithCompanyAccount,
+      org: { name: 'Test Org', locale: 'fr-FR', currency: 'EUR' },
+      leases: [{ name: 'Bail', description: 'Test', numberOfTerms: 108, timeRange: 'months' }],
+      properties: [{ name: 'Apt', type: 'apartment', rent: 100 }],
+      tenants: [{
+        name: tenants[0].name,
+        beginDate: '01/04/2026', endDate: '31/03/2035',
+        leaseName: 'Bail',
+        contacts: tenants[0].contacts,
+        address: tenants[0].address,
+        properties: [{ name: 'Apt', entryDate: '01/04/2026', exitDate: '31/03/2035', expenses: [{ title: 'charges', amount: 10 }] }]
+      }]
     });
   });
 
   it('Rent due is 110', () => {
+    cy.signIn(userWithCompanyAccount);
+    cy.checkPage('dashboard');
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.contains(tenants[0].name).should('be.visible');
@@ -40,11 +35,7 @@ describe('Payment Edge Cases', () => {
   });
 
   it('Record overpayment of 150', () => {
-    cy.contains(tenants[0].name).parents('[class*="border"]').find('button').first().click();
-    cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('150');
-    cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.wait(1000);
+    cy.recordPayment(tenants[0].name, 150);
   });
 
   it('Next month shows reduced rent due (credit applied)', () => {
@@ -68,7 +59,5 @@ describe('Payment Edge Cases', () => {
     cy.contains(t('Revenues')).should('be.visible');
   });
 
-  after(() => {
-    cy.resetAppData();
-  });
+  after(() => { cy.resetAppData(); });
 });
