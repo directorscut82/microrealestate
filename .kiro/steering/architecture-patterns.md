@@ -99,6 +99,18 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 - **Dashboard has two modes**: First-connection (wizard with steps) and normal (shortcut bar). `shortcutAddProperty`/`shortcutAddTenant`/`shortcutCreateContract` exist in BOTH modes. `isFirstConnection` is true when any of: no leases, no properties, no tenants.
 - **Presence awareness**: API routes `POST/GET /api/v2/presence/:type/:id` store viewer info in Redis with 60s TTL. Frontend `usePresence` hook polls every 30s. `PresenceBanner` component shows on tenant/property/contract detail pages.
 
+#### Referential Integrity (verified working)
+- **Property deletion**: API returns 422 when property is occupied by a tenant. UI shows toast error.
+- **Contract deletion**: API returns 422 when contract is used by tenants. UI shows toast error.
+- **Tenant deletion**: API returns 422 when tenant has recorded payments. UI disables delete button via `hasPayments` flag.
+- **Duplicate names**: API allows duplicate property and lease names (no unique constraint).
+
+#### Test Infrastructure (resetservice extensions)
+- `POST /api/reset/seed` — creates user + org + leases + properties + tenants in one API call. Bypasses rent pipeline — use `seedAndComputeRents` Cypress command to trigger rent computation via PATCH.
+- `POST /api/reset/otp` — generates OTP for tenant email, returns it directly (bypasses email delivery).
+- **Limitation**: Seeded tenants don't have `usedByTenants` flag computed (frontdata manager not triggered). Seeded data may skip stepper steps if billing/lease data is pre-populated.
+- **Limitation**: Payment form requires a date field — without it, the form validates but doesn't submit to the API.
+
 ### Tenant App (App Router)
 
 - Uses Next.js App Router with `src/app/[lang]/` for locale-based routing
