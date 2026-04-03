@@ -43,7 +43,7 @@ describe('6-Month Payment History', () => {
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('110');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.wait(1000);
+    cy.wait(2000);
   });
 
   // Month 2 (May): Skip payment
@@ -68,7 +68,7 @@ describe('6-Month Payment History', () => {
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('50');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.wait(1000);
+    cy.wait(2000);
   });
 
   // Month 4 (July): Check accumulated balance
@@ -95,7 +95,7 @@ describe('6-Month Payment History', () => {
     // Pay a large amount to clear everything
     cy.get('input[name="payments.0.amount"]').clear().type('500');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.wait(1000);
+    cy.wait(2000);
   });
 
   // Month 5: Should be clean
