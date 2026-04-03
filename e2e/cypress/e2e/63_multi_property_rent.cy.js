@@ -1,16 +1,15 @@
 import i18n from '../support/i18n';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
-// Tenant with 2 properties — verify combined rent
-// Property A: rent 100 + charges 10 = 110
-// Property B: rent 200 + charges 30 = 230
-// Combined: 340/month
+// Multi-property tenant — verify combined rent
+// Uses seed for setup + API call to trigger rent computation
 
 describe('Multi-Property Tenant Rent', () => {
   const t = i18n.getFixedT('fr-FR');
 
   before(() => {
     cy.resetAppData();
+    // Seed infrastructure
     cy.seedTestData({
       user: userWithCompanyAccount,
       org: { name: 'Test Org', locale: 'fr-FR', currency: 'EUR' },
@@ -30,10 +29,33 @@ describe('Multi-Property Tenant Rent', () => {
           { name: 'Apt B', entryDate: '01/04/2026', exitDate: '31/03/2035', expenses: [{ title: 'charges', amount: 30 }] }
         ]
       }]
+    }).then((data) => {
+      // Trigger rent computation by updating tenant via API
+      cy.request({
+        method: 'POST',
+        url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
+        body: { email: userWithCompanyAccount.email, password: userWithCompanyAccount.password }
+      }).then((authResp) => {
+        const token = authResp.body.accessToken;
+        const tenantId = data.tenants[0].id;
+        // GET then PATCH to trigger rent computation
+        cy.request({
+          method: 'GET',
+          url: `http://localhost:8080/api/v2/tenants/${tenantId}`,
+          headers: { 'Authorization': `Bearer ${token}`, 'organizationId': data.realmId }
+        }).then((tenantResp) => {
+          cy.request({
+            method: 'PATCH',
+            url: `http://localhost:8080/api/v2/tenants/${tenantId}`,
+            headers: { 'Authorization': `Bearer ${token}`, 'organizationId': data.realmId },
+            body: tenantResp.body
+          });
+        });
+      });
     });
   });
 
-  it('Sign in and navigate to rents', () => {
+  it('Navigate to rents', () => {
     cy.signIn(userWithCompanyAccount);
     cy.checkPage('dashboard');
     cy.navAppMenu('rents');
@@ -42,7 +64,6 @@ describe('Multi-Property Tenant Rent', () => {
 
   it('Tenant shows combined rent of 340', () => {
     cy.contains('Multi Prop Tenant').should('be.visible');
-    // 100 + 10 + 200 + 30 = 340
     cy.contains('340').should('exist');
   });
 
@@ -54,7 +75,7 @@ describe('Multi-Property Tenant Rent', () => {
     cy.wait(1000);
   });
 
-  it('Next month shows clean 340 (no balance)', () => {
+  it('Next month shows clean 340', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
@@ -63,7 +84,7 @@ describe('Multi-Property Tenant Rent', () => {
     cy.contains('340').should('exist');
   });
 
-  it('Tenant detail shows both properties', () => {
+  it('Tenant detail shows combined rent', () => {
     cy.navAppMenu('tenants');
     cy.contains('Multi Prop Tenant').click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
