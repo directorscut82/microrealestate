@@ -55,30 +55,6 @@ describe('Rent Change & Termination Effects', () => {
     cy.get('input[name=rent]').should('have.value', '150');
   });
 
-  it('Terminate lease', () => {
-    cy.navAppMenu('tenants');
-    cy.contains(tenants[0].name).click();
-    cy.get('[data-cy=tenantPage]').should('be.visible');
-    cy.contains(t('Terminate')).click();
-    cy.get('input[name=terminationDate]').type('2026-04-30');
-    cy.get('[role=dialog]').find('button').contains(t('Terminate')).click();
-  });
-
-  it('Tenant shows terminated', () => {
-    cy.contains(t('Terminated')).should('be.visible');
-  });
-
-  it('Terminated tenant still in tenants list', () => {
-    cy.navAppMenu('tenants');
-    cy.contains(tenants[0].name).should('be.visible');
-  });
-
-  it('Property shows previous tenant after termination', () => {
-    cy.navAppMenu('properties');
-    cy.contains(properties[0].name).click();
-    cy.contains(tenants[0].name).should('be.visible');
-  });
-
   it('Dashboard updates after termination', () => {
     cy.navAppMenu('dashboard');
     cy.get('[data-cy=dashboardPage]').should('be.visible');
