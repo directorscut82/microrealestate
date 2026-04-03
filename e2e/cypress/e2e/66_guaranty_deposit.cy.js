@@ -9,7 +9,7 @@ describe('Guaranty Deposit', () => {
 
   before(() => {
     cy.resetAppData();
-    cy.seedTestData({
+    cy.seedAndComputeRents({
       user: userWithCompanyAccount,
       org: { name: 'Test Org', locale: 'fr-FR', currency: 'EUR' },
       leases: [{ name: 'Bail', description: 'Test', numberOfTerms: 108, timeRange: 'months' }],

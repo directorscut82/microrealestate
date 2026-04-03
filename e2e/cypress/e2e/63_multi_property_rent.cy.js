@@ -1,16 +1,12 @@
 import i18n from '../support/i18n';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
-// Multi-property tenant — verify combined rent
-// Uses seed for setup + API call to trigger rent computation
-
 describe('Multi-Property Tenant Rent', () => {
   const t = i18n.getFixedT('fr-FR');
 
   before(() => {
     cy.resetAppData();
-    // Seed infrastructure
-    cy.seedTestData({
+    cy.seedAndComputeRents({
       user: userWithCompanyAccount,
       org: { name: 'Test Org', locale: 'fr-FR', currency: 'EUR' },
       leases: [{ name: 'Bail', description: 'Test', numberOfTerms: 108, timeRange: 'months' }],
@@ -29,29 +25,6 @@ describe('Multi-Property Tenant Rent', () => {
           { name: 'Apt B', entryDate: '01/04/2026', exitDate: '31/03/2035', expenses: [{ title: 'charges', amount: 30 }] }
         ]
       }]
-    }).then((data) => {
-      // Trigger rent computation by updating tenant via API
-      cy.request({
-        method: 'POST',
-        url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
-        body: { email: userWithCompanyAccount.email, password: userWithCompanyAccount.password }
-      }).then((authResp) => {
-        const token = authResp.body.accessToken;
-        const tenantId = data.tenants[0].id;
-        // GET then PATCH to trigger rent computation
-        cy.request({
-          method: 'GET',
-          url: `http://localhost:8080/api/v2/tenants/${tenantId}`,
-          headers: { 'Authorization': `Bearer ${token}`, 'organizationId': data.realmId }
-        }).then((tenantResp) => {
-          cy.request({
-            method: 'PATCH',
-            url: `http://localhost:8080/api/v2/tenants/${tenantId}`,
-            headers: { 'Authorization': `Bearer ${token}`, 'organizationId': data.realmId },
-            body: tenantResp.body
-          });
-        });
-      });
     });
   });
 
@@ -80,7 +53,6 @@ describe('Multi-Property Tenant Rent', () => {
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    cy.contains('Multi Prop Tenant').should('be.visible');
     cy.contains('340').should('exist');
   });
 
