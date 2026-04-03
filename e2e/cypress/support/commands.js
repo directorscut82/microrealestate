@@ -314,7 +314,11 @@ Cypress.Commands.add('selectByLabel', (labelText, optionText) => {
     .find('button[role="combobox"]')
     .first()
     .click({ force: true });
+  // Wait for dropdown to open
+  cy.get('[role="listbox"]', { timeout: 10000 }).should('be.visible');
   cy.get('[role="option"]').contains(optionText).click({ force: true });
+  // Wait for dropdown to close
+  cy.get('[role="listbox"]').should('not.exist');
 });
 
 Cypress.Commands.add('muiSelect', (name, value) => {
