@@ -49,6 +49,8 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.get('input[name="properties.0.expenses.1.title"]').type('Eau');
     cy.get('input[name="properties.0.expenses.1.amount"]').clear().type('20');
     cy.get('[data-cy=submit]').filter(':visible').first().click();
+    // Wait for lease step to save and stepper to advance
+    cy.wait(2000);
     // Billing step — enable VAT
     cy.get('#isVat', { timeout: 15000 }).should('exist');
     cy.get('#isVat').click();
