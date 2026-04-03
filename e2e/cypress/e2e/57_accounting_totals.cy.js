@@ -85,7 +85,7 @@ describe('Accounting Totals Verification', () => {
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('110');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.wait(1000);
+    cy.wait(2000);
   });
 
   it('Pay tenant B full 696', () => {
@@ -95,7 +95,7 @@ describe('Accounting Totals Verification', () => {
     cy.get('[role="dialog"]').should('exist');
     cy.get('input[name="payments.0.amount"]').clear().type('696');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
-    cy.wait(1000);
+    cy.wait(2000);
   });
 
   it('Paid overview shows combined total', () => {

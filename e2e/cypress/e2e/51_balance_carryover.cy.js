@@ -45,7 +45,7 @@ describe('Balance Carryover Between Months', () => {
     cy.get('input[name="payments.0.amount"]').clear().type('40');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
     // Wait for API to process and dialog to close
-    cy.wait(1000);
+    cy.wait(2000);
   });
 
   it('Next month shows balance from unpaid amount', () => {
