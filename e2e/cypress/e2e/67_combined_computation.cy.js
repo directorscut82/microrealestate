@@ -24,7 +24,7 @@ describe('Combined: VAT + Multiple Expenses', () => {
     cy.addTenantFromStepper({
       name: 'Complex Tenant',
       isCompany: false,
-      address: { street1: '1 rue', zipCode: '75001', city: 'Paris', state: '', country: 'France' },
+      address: { street1: '1 rue', zipCode: '75001', city: 'Paris', state: 'IDF', country: 'France' },
       contacts: [{ name: 'Contact', email: 'c@t.com', phone1: '0100000000', phone2: '0100000001' }],
       lease: {
         contract: 'Bail',
