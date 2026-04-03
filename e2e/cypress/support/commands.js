@@ -393,3 +393,32 @@ Cypress.Commands.add('getTenantOTP', (email) => {
     return resp.body.otp;
   });
 });
+
+// Seed test data and trigger rent computation for all tenants
+Cypress.Commands.add('seedAndComputeRents', (seedData) => {
+  cy.seedTestData(seedData).then((data) => {
+    if (!data.tenants?.length) return data;
+    cy.request({
+      method: 'POST',
+      url: 'http://localhost:8080/api/v2/authenticator/landlord/signin',
+      body: { email: seedData.user.email, password: seedData.user.password }
+    }).then((authResp) => {
+      const token = authResp.body.accessToken;
+      data.tenants.forEach((tenant) => {
+        cy.request({
+          method: 'GET',
+          url: `http://localhost:8080/api/v2/tenants/${tenant.id}`,
+          headers: { 'Authorization': `Bearer ${token}`, 'organizationId': data.realmId }
+        }).then((tenantResp) => {
+          cy.request({
+            method: 'PATCH',
+            url: `http://localhost:8080/api/v2/tenants/${tenant.id}`,
+            headers: { 'Authorization': `Bearer ${token}`, 'organizationId': data.realmId },
+            body: tenantResp.body
+          });
+        });
+      });
+    });
+    return cy.wrap(data);
+  });
+});
