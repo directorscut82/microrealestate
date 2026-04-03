@@ -86,6 +86,7 @@ services:
       - ./services/common/tsconfig.json:/usr/app/services/common/tsconfig.json
       - ./services/authenticator/src:/usr/app/services/authenticator/src
       - ./services/authenticator/package.json:/usr/app/services/authenticator/package.json
+      - ./services/authenticator/tsconfig.json:/usr/app/services/authenticator/tsconfig.json
     ports:
       - '$AUTHENTICATOR_DEBUG_PORT:9226'
   ###############################################################################
@@ -109,6 +110,7 @@ services:
       - ./services/pdfgenerator/src:/usr/app/services/pdfgenerator/src
       - ./services/pdfgenerator/templates:/usr/app/services/pdfgenerator/templates
       - ./services/pdfgenerator/package.json:/usr/app/services/pdfgenerator/package.json
+      - ./services/pdfgenerator/tsconfig.json:/usr/app/services/pdfgenerator/tsconfig.json
     ports:
       - '$PDFGENERATOR_DEBUG_PORT:9227'
   ###############################################################################
@@ -130,6 +132,7 @@ services:
       - ./services/common/tsconfig.json:/usr/app/services/common/tsconfig.json
       - ./services/emailer/src:/usr/app/services/emailer/src
       - ./services/emailer/package.json:/usr/app/services/emailer/package.json
+      - ./services/emailer/tsconfig.json:/usr/app/services/emailer/tsconfig.json
     ports:
       - '$EMAILER_DEBUG_PORT:9228'
   ###############################################################################
