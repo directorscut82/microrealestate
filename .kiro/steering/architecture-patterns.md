@@ -88,6 +88,17 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 - All forms use react-hook-form + zod (Formik+Yup fully removed, MUI fully removed)
 - Data flows as props from pages to child components (no global observable state)
 
+#### Hidden Details / Gotchas
+- **Store reactivity**: Store class has `subscribe(listener)` and `notify()`. Every mutation method in Organization, User, AppHistory calls `notify()`. `InjectStoreContext` uses `useSyncExternalStore` to re-render on changes. Context value is `{ user, organization, appHistory }` — a new object each version so `useContext` consumers re-render.
+- **`withAuthentication` reads from singleton**: Uses `getStoreInstance()` directly, NOT `useContext(StoreContext)`. This avoids a race condition where the context value hasn't propagated yet after page reload.
+- **`useFillStore` also reads from singleton**: Same reason as above.
+- **`index.js` uses `getServerSideProps` redirects**: NOT client-side `router.push()`. The `InjectStoreContext` renders children during SSR, so `router.push()` would crash on the server.
+- **Dialog navigation must pass locale**: `NewPropertyDialog`, `NewTenantDialog`, `NewLeaseDialog` all pass `{ locale: store.organization.selected?.locale }` to `router.push()`. Without this, the page renders in English instead of the org's locale.
+- **`LandlordForm` firstAccess mode**: Must structure company data as `companyInfo: { name, ein, ... }` for the API. The form fields are flat (`company`, `ein`, etc.) but the API expects nested `companyInfo`.
+- **Stepper renders ALL non-done steps' children**: The `Stepper` component renders children for the active step AND all future steps. This means `[data-cy=submit]` finds multiple buttons. Use `.filter(':visible').first()` or scope to the active step.
+- **Dashboard has two modes**: First-connection (wizard with steps) and normal (shortcut bar). `shortcutAddProperty`/`shortcutAddTenant`/`shortcutCreateContract` exist in BOTH modes. `isFirstConnection` is true when any of: no leases, no properties, no tenants.
+- **Presence awareness**: API routes `POST/GET /api/v2/presence/:type/:id` store viewer info in Redis with 60s TTL. Frontend `usePresence` hook polls every 30s. `PresenceBanner` component shows on tenant/property/contract detail pages.
+
 ### Tenant App (App Router)
 
 - Uses Next.js App Router with `src/app/[lang]/` for locale-based routing

@@ -94,10 +94,71 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
 | `ol.toaster > li` not found | Toast didn't appear or wrong selector | Check if the API actually returns an error |
 | `[data-cy=orgMenu]` not found after reload | Store reactivity issue | Verify InjectStoreContext uses useSyncExternalStore |
 | Page redirects to firstaccess after reload | Auth flow race condition | Verify Authentication.js uses getStoreInstance() |
-| Next.js serves stale code | Dev server cache | Restart landlord-frontend container |
+| Next.js serves stale code | Dev server compilation cache | Restart landlord-frontend container |
 | Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
 | Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
 | `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
+| Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
+
+## How to Run Tests (without getting stuck)
+
+### Prerequisites — MUST verify before running E2E
+1. **Container runtime is `finch`** (not docker). All commands use `finch compose`.
+2. **`.env` must contain `API_URL=http://api:8200/api/v2`** — docker compose does NOT read `base.env` for variable substitution. If `API_URL` is missing, the gateway crashes silently with `Missing "target" option`.
+3. **Dev mode required for code changes** — GHCR images don't pick up local changes. Always start with dev compose overlay.
+
+### Start services (dev mode)
+```bash
+cd /Users/epitrogi/Development/microrealestate
+finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml up -d
+```
+
+### Verify before running tests
+```bash
+# All 11 containers must be "Up" (not "Exited")
+finch ps -a --format '{{.Names}} {{.Status}}'
+
+# Gateway must NOT have errors in logs
+finch logs microrealestate-gateway-1 2>&1 | tail -5
+# Should end with: "Gateway ready and listening on port 8080"
+
+# Quick smoke test
+curl -s http://localhost:8080/landlord/signin | head -1   # Should return HTML
+curl -s -X DELETE http://localhost:8080/api/reset          # Should return "success"
+```
+
+### Run unit tests (no Docker needed)
+```bash
+cd services/api && npx jest --no-coverage
+# Expects: 3 suites, 48 tests, all passing
+```
+
+### Run E2E tests
+```bash
+cd e2e && npx cypress run
+# Expects: 9 suites, 100 tests (suites 01-09)
+# Runtime: ~5 minutes in dev mode
+```
+
+### Run single E2E suite (for debugging)
+```bash
+cd e2e && npx cypress run --spec cypress/e2e/04_contracts.cy.js
+```
+
+### Common failures and fixes
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
+| Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
+| `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
+| Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
+
+### Stop everything
+```bash
+finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
+```
+
+---
 
 ## Running Unit Tests (no Docker needed)
 
@@ -133,6 +194,7 @@ finch restart microrealestate-landlord-frontend-1
 | 01-09 | 100 | ✅ Verified passing |
 | 10-17 | 57 | ✅ Verified passing |
 | 20-28 | 158 | ✅ Verified passing |
+| 30-67 | business logic, presence, multi-landlord, tenant portal | ✅ Mostly passing (some flaky due to selectByLabel timing) |
 
 ## Before Running Suites 20-28
 

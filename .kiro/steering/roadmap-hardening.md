@@ -66,6 +66,15 @@ Changes are grouped into phases. Each phase should be completed before the next.
 - Material UI v4 fully removed
 - 100 E2E tests passing, 48 unit tests passing
 
+### Additional fixes during migration
+- `.trim()` null safety on all auth validation
+- Property name validation added
+- VAT computed on tenant creation (was missing vatRate in Contract.create)
+- Email whitespace trimmed before login
+- Tenant middleware locale crash fixed (try/catch)
+- Locale cookie for sign-in page language persistence
+- Finch CLI support added
+
 ---
 
 ## Phase 4 — Architecture Extensions (enables new features)
