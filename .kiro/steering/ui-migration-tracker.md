@@ -13,7 +13,7 @@ Remove all legacy Material UI v4, Formik+Yup, and MobX patterns from the landlor
 - **Form migration:** ✅ COMPLETE — all 22 forms migrated from Formik+Yup to react-hook-form+zod
 - **Dependency cleanup:** ✅ COMPLETE — formik, yup, @material-ui/*, @date-io/*, material-ui-formik-components removed
 - **formfields/ directory:** ✅ DELETED — 10 legacy Formik wrapper files removed
-- **E2E tests:** Suites 01-09 (100 tests) verified passing. Suites 10-17 (57 tests) verified passing. Suites 20-28: 158 tests, all passing. Suites 30-67: business logic, presence, multi-landlord, tenant portal. Total: 601 tests across 57 suites.
+- **E2E tests:** Suites 01-09 (100 tests) verified passing. Suites 10-17 (57 tests) verified passing. Suites 20-28: 158 tests, all passing. Suites 30-67: business logic, presence, multi-landlord, tenant portal. Total: 606 tests across 58 suites.
 - **MobX→React Query:** ✅ COMPLETE — all 12 stores resolved, MobX fully removed
 - **Store reactivity:** ✅ FIXED — subscribe/notify pattern with useSyncExternalStore (replaced counter hack)
 
