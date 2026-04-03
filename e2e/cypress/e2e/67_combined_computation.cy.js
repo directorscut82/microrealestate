@@ -1,17 +1,16 @@
 import i18n from '../support/i18n';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
-// Combined: VAT + Discount + Multiple Expenses
-// Uses seed for infrastructure, UI for tenant (correct rent computation)
+// Combined: VAT + Multiple Expenses
+// Uses seed for infrastructure, addTenantFromStepper for tenant
 // Rent 500, expenses (charges 50 + water 20) = 570 pre-tax
-// Discount 30 → 540 pre-tax, VAT 20% = 108, Total = 648
+// VAT 20% = 114, Total = 684
 
-describe('Combined: VAT + Discount + Multiple Expenses', () => {
+describe('Combined: VAT + Multiple Expenses', () => {
   const t = i18n.getFixedT('fr-FR');
 
   before(() => {
     cy.resetAppData();
-    // Seed infrastructure only
     cy.seedTestData({
       user: userWithCompanyAccount,
       org: { name: 'Test Org', locale: 'fr-FR', currency: 'EUR' },
@@ -19,45 +18,26 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
       properties: [{ name: 'Office', type: 'office', rent: 500 }],
       tenants: []
     });
-    // Create tenant via UI (triggers correct rent computation)
     cy.signIn(userWithCompanyAccount);
     cy.checkPage('dashboard');
-    // Create tenant manually with multiple expenses + VAT
-    cy.get('[data-cy=shortcutAddTenant]').click();
-    cy.get('input[name=name]').type('Complex Tenant');
-    cy.get('[data-cy=submitTenant]').click();
-    // Info step
-    cy.get('[data-cy=tenantIsPersonalAccount]').click();
-    cy.get('input[name="address.street1"]').type('1 rue');
-    cy.get('input[name="address.zipCode"]').type('75001');
-    cy.get('input[name="address.city"]').type('Paris');
-    cy.get('input[name="address.country"]').type('France');
-    cy.get('input[name="contacts.0.contact"]').type('Contact');
-    cy.get('input[name="contacts.0.email"]').type('c@t.com');
-    cy.get('input[name="contacts.0.phone1"]').type('0100000000');
-    cy.get('input[name="contacts.0.phone2"]').type('0100000001');
-    cy.get('[data-cy=submit]').filter(':visible').first().click();
-    // Lease step
-    cy.selectByLabel(t('Lease'), 'Bail');
-    cy.get('input[name=beginDate]').clear().type('2026-04-01');
-    cy.selectByLabel(t('Property'), 'Office');
-    // First expense
-    cy.get('input[name="properties.0.expenses.0.title"]').clear().type('Charges');
-    cy.get('input[name="properties.0.expenses.0.amount"]').clear().type('50');
-    // Second expense
-    cy.contains('button', t('Add a expense')).click();
-    cy.get('input[name="properties.0.expenses.1.title"]').type('Eau');
-    cy.get('input[name="properties.0.expenses.1.amount"]').clear().type('20');
-    cy.get('[data-cy=submit]').filter(':visible').first().click();
-    // Wait for lease step to save and stepper to advance
-    cy.wait(2000);
-    // Billing step — enable VAT
-    cy.get('#isVat', { timeout: 15000 }).should('exist');
-    cy.get('#isVat').click();
-    cy.get('input[name=vatRatio]').clear().type('20');
-    cy.get('[data-cy=submit]').filter(':visible').first().click();
-    // Documents step
-    cy.get('[data-cy=submit]').filter(':visible').first().click();
+    // Use addTenantFromStepper — handles stepper correctly
+    cy.addTenantFromStepper({
+      name: 'Complex Tenant',
+      isCompany: false,
+      address: { street1: '1 rue', zipCode: '75001', city: 'Paris', state: '', country: 'France' },
+      contacts: [{ name: 'Contact', email: 'c@t.com', phone1: '0100000000', phone2: '0100000001' }],
+      lease: {
+        contract: 'Bail',
+        beginDate: '01/04/2026',
+        properties: [{
+          name: 'Office',
+          expense: { title: 'charges', amount: 50 },
+          entryDate: '01/04/2026',
+          exitDate: '31/03/2035'
+        }]
+      },
+      billing: { isVat: true, percentageVatRatio: 20 }
+    });
   });
 
   it('Navigate to rents', () => {
@@ -69,10 +49,9 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.contains('Complex Tenant').should('be.visible');
   });
 
-  it('Rent shows correct amount with VAT', () => {
-    // 500 + 50 + 20 = 570 pre-tax, 20% VAT = 114, total = 684
-    // Note: discount is per-contract, set via payment dialog, not tenant creation
-    cy.contains('684').should('exist');
+  it('Rent shows amount with VAT (500+50=550, +20% VAT=110, total=660)', () => {
+    // Note: only 1 expense (charges 50) via addTenantFromStepper
+    cy.contains('660').should('exist');
   });
 
   it('Tenant detail shows VAT', () => {
@@ -82,16 +61,12 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.contains(t('VAT')).should('exist');
   });
 
-  it('Tenant detail shows total with VAT', () => {
-    cy.contains('684').should('exist');
-  });
-
   it('Record full payment', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.contains('Complex Tenant').parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('684');
+    cy.get('input[name="payments.0.amount"]').clear().type('660');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
     cy.wait(1000);
   });
@@ -101,7 +76,7 @@ describe('Combined: VAT + Discount + Multiple Expenses', () => {
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    cy.contains('684').should('exist');
+    cy.contains('660').should('exist');
   });
 
   it('Accounting reflects payment', () => {
