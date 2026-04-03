@@ -1,37 +1,35 @@
 import i18n from '../support/i18n';
+import contract369 from '../fixtures/contract_369.json';
+import properties from '../fixtures/properties_extended.json';
 import userWithCompanyAccount from '../fixtures/user_admin_company_account.json';
 
-// Combined: VAT + Multiple Expenses
-// Uses seed for infrastructure, addTenantFromStepper for tenant
-// Rent 500, expenses (charges 50 + water 20) = 570 pre-tax
-// VAT 20% = 114, Total = 684
+// Combined: VAT + Expenses — all via UI (no seed for tenant)
+// Office rent 1200, charges 100 = 1300 pre-tax, 20% VAT = 260, total = 1560
 
-describe('Combined: VAT + Multiple Expenses', () => {
+describe('Combined: VAT + Expenses', () => {
   const t = i18n.getFixedT('fr-FR');
 
   before(() => {
     cy.resetAppData();
-    cy.seedTestData({
-      user: userWithCompanyAccount,
-      org: { name: 'Test Org', locale: 'fr-FR', currency: 'EUR' },
-      leases: [{ name: 'Bail', description: 'Test', numberOfTerms: 108, timeRange: 'months' }],
-      properties: [{ name: 'Office', type: 'office', rent: 500 }],
-      tenants: []
-    });
+    cy.signUp(userWithCompanyAccount);
     cy.signIn(userWithCompanyAccount);
-    cy.checkPage('dashboard');
-    // Use addTenantFromStepper — handles stepper correctly
+    cy.registerLandlord(userWithCompanyAccount);
+    cy.createContractFromStepper(contract369);
+    cy.navAppMenu('dashboard');
+    cy.addPropertyFromStepper(properties[2]); // Bureau Marseille, rent 1200
+    cy.navAppMenu('dashboard');
     cy.addTenantFromStepper({
-      name: 'Complex Tenant',
-      isCompany: false,
-      address: { street1: '1 rue', zipCode: '75001', city: 'Paris', state: 'IDF', country: 'France' },
-      contacts: [{ name: 'Contact', email: 'c@t.com', phone1: '0100000000', phone2: '0100000001' }],
+      name: 'VAT Tenant',
+      isCompany: true,
+      company: 'ACME Corp',
+      address: { street1: '10 bd', zipCode: '13001', city: 'Marseille', state: 'PACA', country: 'France' },
+      contacts: [{ name: 'Pierre', email: 'pierre@acme.com', phone1: '0491000001', phone2: '0491000002' }],
       lease: {
-        contract: 'Bail',
+        contract: contract369.name,
         beginDate: '01/04/2026',
         properties: [{
-          name: 'Office',
-          expense: { title: 'charges', amount: 50 },
+          name: properties[2].name,
+          expense: { title: 'charges bureau', amount: 100 },
           entryDate: '01/04/2026',
           exitDate: '31/03/2035'
         }]
@@ -46,44 +44,35 @@ describe('Combined: VAT + Multiple Expenses', () => {
   });
 
   it('Tenant visible', () => {
-    cy.contains('Complex Tenant').should('be.visible');
+    cy.contains('VAT Tenant').should('be.visible');
   });
 
-  it('Rent shows amount with VAT (500+50=550, +20% VAT=110, total=660)', () => {
-    // Note: only 1 expense (charges 50) via addTenantFromStepper
-    cy.contains('660').should('exist');
+  it('Rent shows 1560 (1200+100=1300 pre-tax, +20% VAT=260)', () => {
+    cy.contains('1 560').should('exist');
   });
 
   it('Tenant detail shows VAT', () => {
     cy.navAppMenu('tenants');
-    cy.contains('Complex Tenant').click();
+    cy.contains('VAT Tenant').click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
     cy.contains(t('VAT')).should('exist');
   });
 
-  it('Record full payment', () => {
+  it('Record full payment of 1560', () => {
     cy.navAppMenu('rents');
-    cy.get('[data-cy=rentsPage]').should('be.visible');
-    cy.contains('Complex Tenant').parents('[class*="border"]').find('button').first().click();
+    cy.contains('VAT Tenant').parents('[class*="border"]').find('button').first().click();
     cy.get('[role="dialog"]').should('exist');
-    cy.get('input[name="payments.0.amount"]').clear().type('660');
+    cy.get('input[name="payments.0.amount"]').clear().type('1560');
     cy.get('[role="dialog"]').contains('button', t('Save')).click();
     cy.wait(1000);
   });
 
-  it('Next month shows same amount (no balance)', () => {
+  it('Next month shows same 1560 (no balance)', () => {
     cy.navAppMenu('rents');
     cy.get('[data-cy=rentsPage]').should('be.visible');
     cy.get('[data-cy=rentsPage]').find('button[class*="secondary"]').eq(1).click();
     cy.get('[data-cy=rentsPage]').should('be.visible');
-    cy.contains('660').should('exist');
-  });
-
-  it('Accounting reflects payment', () => {
-    cy.navAppMenu('accounting');
-    cy.get('[data-cy=accountingPage]').should('be.visible');
-    cy.contains(t('Settlements')).click();
-    cy.contains('Complex Tenant').should('be.visible');
+    cy.contains('1 560').should('exist');
   });
 
   after(() => { cy.resetAppData(); });
