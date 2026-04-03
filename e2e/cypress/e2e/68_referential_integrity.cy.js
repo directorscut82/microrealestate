@@ -56,8 +56,8 @@ describe('Referential Integrity', () => {
     cy.contains('Occupied Apt').click();
     cy.intercept('DELETE', '**/properties/**').as('deleteProperty');
     cy.get('[data-cy=removeResourceButton]').click();
-    // Confirm dialog — click Continue (last button)
-    cy.get('[role=dialog]').find('button').last().click();
+    // Confirm dialog — click Continue
+    cy.get('[role=dialog]').contains('button', t('Continue')).click();
     cy.wait('@deleteProperty').its('response.statusCode').should('eq', 422);
     // Toast should appear
     cy.get('ol.toaster > li', { timeout: 5000 }).should('exist');
