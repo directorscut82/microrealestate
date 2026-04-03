@@ -426,3 +426,14 @@ Cypress.Commands.add('seedAndComputeRents', (seedData) => {
     return cy.wrap(data);
   });
 });
+
+// Record a payment — opens dialog, fills amount, saves, waits for API
+Cypress.Commands.add('recordPayment', (tenantName, amount) => {
+  const t = i18n.getFixedT('fr-FR');
+  cy.intercept('PATCH', '/api/v2/rents/payment/**').as('savePayment');
+  cy.contains(tenantName).parents('[class*="border"]').find('button').first().click();
+  cy.get('[role="dialog"]').should('exist');
+  cy.get('input[name="payments.0.amount"]').clear().type(String(amount));
+  cy.get('[role="dialog"]').contains('button', t('Save')).click();
+  cy.wait('@savePayment');
+});
