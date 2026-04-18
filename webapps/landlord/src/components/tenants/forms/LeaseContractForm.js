@@ -8,6 +8,7 @@ import { useFieldArray, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '../../ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../../ui/collapsible';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Separator } from '../../ui/separator';
@@ -18,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '../../ui/select';
-import { LuPlus, LuTrash2 } from 'react-icons/lu';
+import { LuChevronDown, LuChevronRight, LuPlus, LuTrash2 } from 'react-icons/lu';
 import moment from 'moment';
 import { nanoid } from 'nanoid';
 import useTranslation from 'next-translate/useTranslation';
@@ -117,6 +118,69 @@ function Section({ label, visible = true, children }) {
   );
 }
 
+function hasCustomDates(property, beginDate, endDate) {
+  if (property.entryDate && property.entryDate !== beginDate) return true;
+  if (property.exitDate && property.exitDate !== endDate) return true;
+  for (const exp of property.expenses || []) {
+    if (exp.beginDate && exp.beginDate !== beginDate) return true;
+    if (exp.endDate && exp.endDate !== endDate) return true;
+  }
+  return false;
+}
+
+function PropertyDates({ index, property, beginDate, endDate, readOnly, register, setValue, t }) {
+  const custom = hasCustomDates(property, beginDate, endDate);
+  const [open, setOpen] = useState(custom);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground mt-2 mb-1">
+          {open ? <LuChevronDown className="size-3 mr-1" /> : <LuChevronRight className="size-3 mr-1" />}
+          {t('Customize dates')}
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {/* Expenses */}
+        {property.expenses?.map((expense, ei) => (
+          <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
+            <div className="flex justify-between items-center mb-1">
+              <div className="text-sm font-medium">{t('Expense #{{count}}', { count: ei + 1 })}</div>
+              {!readOnly && property.expenses.length > 1 && (
+                <Button type="button" variant="ghost" size="icon" onClick={() => {
+                  const exps = [...property.expenses];
+                  exps.splice(ei, 1);
+                  setValue(`properties.${index}.expenses`, exps);
+                }}><LuTrash2 className="size-3" /></Button>
+              )}
+            </div>
+            <div className="sm:flex sm:gap-2">
+              <div className="space-y-1 flex-1">
+                <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('Start date')}</Label>
+                <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
+              </div>
+              <div className="space-y-1 flex-1">
+                <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('End date')}</Label>
+                <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
+              </div>
+            </div>
+          </div>
+        ))}
+        <div className="sm:flex sm:gap-2 mt-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor={`properties.${index}.entryDate`}>{t('Entry date')}</Label>
+            <Input id={`properties.${index}.entryDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.entryDate`)} />
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor={`properties.${index}.exitDate`}>{t('Exit date')}</Label>
+            <Input id={`properties.${index}.exitDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.exitDate`)} />
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function LeaseContractForm({ tenant, leases = [], properties: propertyItems = [], readOnly, onSubmit }) {
   const { t } = useTranslation('common');
   const [contractDuration, setContractDuration] = useState();
@@ -198,6 +262,8 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
         beginDate,
         endDate
       }]);
+      setValue(`properties.${index}.entryDate`, beginDate);
+      setValue(`properties.${index}.exitDate`, endDate);
     }
   }, [propertyItems, setValue, beginDate, endDate, t]);
 
@@ -244,14 +310,20 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
       <Section label={t('Lease')} visible={!tenant?.stepperMode}>
         <div className="space-y-2 mb-2">
           <Label>{t('Lease')}</Label>
-          <Select value={leaseId} onValueChange={onLeaseChange} disabled={readOnly}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {availableLeases.map((l) => (
-                <SelectItem key={l.id} value={l.value} disabled={l.disabled}>{l.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {availableLeases.length === 0 ? (
+            <p className="text-sm text-muted-foreground p-2 border rounded-md bg-muted">
+              {t('No contracts found. Go to Settings > Contracts to create one.')}
+            </p>
+          ) : (
+            <Select value={leaseId} onValueChange={onLeaseChange} disabled={readOnly}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {availableLeases.map((l) => (
+                  <SelectItem key={l.id} value={l.value} disabled={l.disabled}>{l.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {errors.leaseId && <p className="text-sm text-destructive">{errors.leaseId.message}</p>}
         </div>
         <div className="sm:flex sm:gap-2 mb-2">
@@ -302,7 +374,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
               </div>
             </div>
 
-            {/* Expenses */}
+            {/* Expenses - title and amount always visible */}
             {properties?.[index]?.expenses?.map((expense, ei) => (
               <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
                 <div className="flex justify-between items-center mb-1">
@@ -324,14 +396,6 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
                     <Label htmlFor={`properties.${index}.expenses.${ei}.amount`}>{t('Amount')}</Label>
                     <Input id={`properties.${index}.expenses.${ei}.amount`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.amount`)} />
                   </div>
-                  <div className="space-y-1 flex-1">
-                    <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('Start date')}</Label>
-                    <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
-                  </div>
-                  <div className="space-y-1 flex-1">
-                    <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('End date')}</Label>
-                    <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
-                  </div>
                 </div>
               </div>
             ))}
@@ -344,16 +408,16 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
               </Button>
             )}
 
-            <div className="sm:flex sm:gap-2 mt-2">
-              <div className="space-y-2 flex-1">
-                <Label htmlFor={`properties.${index}.entryDate`}>{t('Entry date')}</Label>
-                <Input id={`properties.${index}.entryDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.entryDate`)} />
-              </div>
-              <div className="space-y-2 flex-1">
-                <Label htmlFor={`properties.${index}.exitDate`}>{t('Exit date')}</Label>
-                <Input id={`properties.${index}.exitDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.exitDate`)} />
-              </div>
-            </div>
+            <PropertyDates
+              index={index}
+              property={properties?.[index] || {}}
+              beginDate={beginDate}
+              endDate={endDate}
+              readOnly={readOnly}
+              register={register}
+              setValue={setValue}
+              t={t}
+            />
           </div>
         ))}
         {!readOnly && (

@@ -98,6 +98,7 @@
   "Created credentials": "Δημιουργημένα διαπιστευτήρια",
   "Credit balance": "Πιστωτικό υπόλοιπο",
   "Currency": "Νόμισμα",
+  "Customize dates": "Προσαρμογή ημερομηνιών",
   "current_date": "Τρέχουσα ημερομηνία",
   "current_day": "Τρέχουσα ημέρα",
   "current_month": "Τρέχων μήνας",
@@ -242,6 +243,7 @@
   "New password": "Νέος κωδικός",
   "New to {{APP_NAME}}?": "Νέος στο {{APP_NAME}};",
   "No associated contract": "Κανένα συσχετισμένο συμβόλαιο",
+  "No contracts found. Go to Settings > Contracts to create one.": "Δεν βρέθηκαν συμβόλαια. Μεταβείτε στις Ρυθμίσεις > Συμβόλαια για να δημιουργήσετε ένα.",
   "No data found": "Δεν βρέθηκαν δεδομένα",
   "No emails available for this tenant": "Δεν υπάρχουν διαθέσιμα email για αυτόν τον ενοικιαστή",
   "No properties found": "Δεν βρέθηκαν ακίνητα",
@@ -455,5 +457,7 @@
   "Your organizations": "Οι οργανισμοί σας",
   "Zip code": "Ταχυδρομικός κώδικας",
   "is also viewing this page": "βλέπει επίσης αυτή τη σελίδα",
-  "are also viewing this page": "βλέπουν επίσης αυτή τη σελίδα"
+  "are also viewing this page": "βλέπουν επίσης αυτή τη σελίδα",
+  "Tax ID": "ΑΦΜ",
+  "e.g. ΑΦΜ": "π.χ. ΑΦΜ"
 }

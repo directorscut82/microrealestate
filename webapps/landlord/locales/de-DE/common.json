@@ -97,6 +97,7 @@
   "Created credentials": "Erstellte Anmeldeinformationen",
   "Credit balance": "Kontostand",
   "Currency": "Währung",
+  "Customize dates": "Daten anpassen",
   "current_date": "Aktuelles Datum",
   "current_day": "Aktueller Tag",
   "current_month": "Aktueller Monat",
@@ -240,6 +241,7 @@
   "New password": "Neues Passwort",
   "New to {{APP_NAME}}?": "Neu bei {{APP_NAME}}?",
   "No associated contract": "Kein verbundener Vertrag",
+  "No contracts found. Go to Settings > Contracts to create one.": "Keine Verträge gefunden. Gehen Sie zu Einstellungen > Verträge, um einen zu erstellen.",
   "No data found": "Keine Daten gefunden",
   "No emails available for this tenant": "Keine E-Mail-Adressen für diesen Mandanten verfügbar",
   "No properties found": "Keine Grundstücke gefunden",
@@ -453,5 +455,7 @@
   "Your organizations": "Ihre Organisationen",
   "Zip code": "Postleitzahl",
   "is also viewing this page": "is also viewing this page",
-  "are also viewing this page": "are also viewing this page"
+  "are also viewing this page": "are also viewing this page",
+  "Tax ID": "Steuer-ID",
+  "e.g. ΑΦΜ": "z.B. Steuer-ID"
 }

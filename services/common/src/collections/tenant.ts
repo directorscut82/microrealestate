@@ -10,6 +10,9 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
 
   // individual details
   name: String,
+  firstName: String,
+  lastName: String,
+  taxId: String,
 
   // company details
   isCompany: Boolean,

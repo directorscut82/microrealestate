@@ -98,6 +98,7 @@
   "Created credentials": "Credenciales creadas",
   "Credit balance": "Saldo a favor",
   "Currency": "Moneda",
+  "Customize dates": "Personalizar fechas",
   "current_date": "Fecha actual",
   "current_day": "Día actual",
   "current_month": "Mes actual",
@@ -242,6 +243,7 @@
   "New password": "Nueva contraseña",
   "New to {{APP_NAME}}?": "¿Nuevo en {{APP_NAME}}?",
   "No associated contract": "No hay contrato asociado",
+  "No contracts found. Go to Settings > Contracts to create one.": "No se encontraron contratos. Vaya a Configuración > Contratos para crear uno.",
   "No data found": "No se encontraron datos",
   "No emails available for this tenant": "No hay correos disponibles para este inquilino",
   "No properties found": "No se encontraron propiedades",
@@ -455,5 +457,7 @@
   "Your organizations": "Tus organizaciones",
   "Zip code": "Código postal",
   "is also viewing this page": "is also viewing this page",
-  "are also viewing this page": "are also viewing this page"
+  "are also viewing this page": "are also viewing this page",
+  "Tax ID": "NIT/Cédula",
+  "e.g. ΑΦΜ": "ej. NIT"
 }

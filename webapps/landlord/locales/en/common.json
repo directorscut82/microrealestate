@@ -98,6 +98,7 @@
   "Created credentials": "Created credentials",
   "Credit balance": "Credit balance",
   "Currency": "Currency",
+  "Customize dates": "Customize dates",
   "current_date": "Current date",
   "current_day": "Current day",
   "current_month": "Current month",
@@ -242,6 +243,7 @@
   "New password": "New password",
   "New to {{APP_NAME}}?": "New to {{APP_NAME}}?",
   "No associated contract": "No associated contract",
+  "No contracts found. Go to Settings > Contracts to create one.": "No contracts found. Go to Settings > Contracts to create one.",
   "No data found": "No data found",
   "No emails available for this tenant": "No emails available for this tenant",
   "No properties found": "No properties found",
@@ -455,5 +457,7 @@
   "Your organizations": "Your organizations",
   "Zip code": "Zip code",
   "is also viewing this page": "is also viewing this page",
-  "are also viewing this page": "are also viewing this page"
+  "are also viewing this page": "are also viewing this page",
+  "Tax ID": "Tax ID",
+  "e.g. ΑΦΜ": "e.g. TIN"
 }
