@@ -17,7 +17,9 @@ const contactSchema = z.object({
 });
 
 const schema = z.object({
-  name: z.string().min(1),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  taxId: z.string().optional(),
   isCompany: z.string().min(1),
   legalRepresentative: z.string().optional(),
   legalStructure: z.string().optional(),
@@ -26,42 +28,55 @@ const schema = z.object({
   capital: z.string().optional(),
   contacts: z.array(contactSchema),
   address: z.object({
-    street1: z.string().min(1),
+    street1: z.string().optional(),
     street2: z.string().optional(),
-    city: z.string().min(1),
-    zipCode: z.string().min(1),
+    city: z.string().optional(),
+    zipCode: z.string().optional(),
     state: z.string().optional(),
-    country: z.string().min(1)
+    country: z.string().optional()
   })
 });
 
 const emptyContact = { contact: '', email: '', phone1: '', phone2: '' };
 
-const initValues = (tenant) => ({
-  name: tenant?.name || '',
-  isCompany: tenant?.isCompany ? 'true' : 'false',
-  legalRepresentative: tenant?.manager || '',
-  legalStructure: tenant?.legalForm || '',
-  ein: tenant?.siret || '',
-  dos: tenant?.rcs || '',
-  capital: tenant?.capital || '',
-  contacts: tenant?.contacts?.length
-    ? tenant.contacts.map(({ contact, email, phone, phone1, phone2 }) => ({
-        contact,
-        email,
-        phone1: phone1 || phone || '',
-        phone2: phone2 || ''
-      }))
-    : [emptyContact],
-  address: {
-    street1: tenant?.street1 || '',
-    street2: tenant?.street2 || '',
-    city: tenant?.city || '',
-    zipCode: tenant?.zipCode || '',
-    state: tenant?.state || '',
-    country: tenant?.country || ''
+const initValues = (tenant) => {
+  // Parse existing 'name' into firstName/lastName for backward compat
+  let firstName = tenant?.firstName || '';
+  let lastName = tenant?.lastName || '';
+  if (!firstName && !lastName && tenant?.name) {
+    const parts = tenant.name.trim().split(/\s+/);
+    firstName = parts[0] || '';
+    lastName = parts.slice(1).join(' ') || '';
   }
-});
+
+  return {
+    firstName,
+    lastName,
+    taxId: tenant?.taxId || '',
+    isCompany: tenant?.isCompany ? 'true' : 'false',
+    legalRepresentative: tenant?.manager || '',
+    legalStructure: tenant?.legalForm || '',
+    ein: tenant?.siret || '',
+    dos: tenant?.rcs || '',
+    capital: tenant?.capital || '',
+    contacts: tenant?.contacts?.length
+      ? tenant.contacts.map(({ contact, email, phone, phone1, phone2 }) => ({
+          contact,
+          email,
+          phone1: phone1 || phone || '',
+          phone2: phone2 || ''
+        }))
+      : [emptyContact],
+    address: {
+      street1: tenant?.street1 || '',
+      street2: tenant?.street2 || '',
+      city: tenant?.city || '',
+      zipCode: tenant?.zipCode || '',
+      state: tenant?.state || '',
+      country: tenant?.country || ''
+    }
+  };
+};
 
 export const validate = (tenant) => schema.parseAsync(initValues(tenant));
 
@@ -94,23 +109,27 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
   const isCompany = watch('isCompany');
   const stepperMode = tenant?.stepperMode;
 
-  const _onSubmit = async (tenant) => {
+  const _onSubmit = async (data) => {
+    const fullName = `${data.firstName} ${data.lastName}`.trim();
     await onSubmit({
-      name: tenant.name,
-      isCompany: tenant.isCompany === 'true',
-      company: tenant.isCompany === 'true' ? tenant.name : '',
-      manager: tenant.isCompany === 'true' ? tenant.legalRepresentative : tenant.name,
-      legalForm: tenant.isCompany === 'true' ? tenant.legalStructure : '',
-      siret: tenant.isCompany === 'true' ? tenant.ein : '',
-      rcs: tenant.isCompany === 'true' ? tenant.dos : '',
-      capital: tenant.isCompany === 'true' ? tenant.capital : '',
-      street1: tenant.address.street1,
-      street2: tenant.address.street2 || '',
-      zipCode: tenant.address.zipCode,
-      city: tenant.address.city,
-      state: tenant.address.state,
-      country: tenant.address.country,
-      contacts: tenant.contacts
+      name: fullName,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      taxId: data.taxId || '',
+      isCompany: data.isCompany === 'true',
+      company: data.isCompany === 'true' ? fullName : '',
+      manager: data.isCompany === 'true' ? data.legalRepresentative : fullName,
+      legalForm: data.isCompany === 'true' ? data.legalStructure : '',
+      siret: data.isCompany === 'true' ? data.ein : '',
+      rcs: data.isCompany === 'true' ? data.dos : '',
+      capital: data.isCompany === 'true' ? data.capital : '',
+      street1: data.address.street1 || '',
+      street2: data.address.street2 || '',
+      zipCode: data.address.zipCode || '',
+      city: data.address.city || '',
+      state: data.address.state || '',
+      country: data.address.country || '',
+      contacts: data.contacts
         .filter(({ contact }) => !!contact)
         .map(({ contact, email, phone1, phone2 }) => ({ contact, email, phone1, phone2 }))
     });
@@ -125,10 +144,21 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
         </div>
       )}
       <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">{t('Name')}</Label>
-          <Input id="name" disabled={readOnly} {...register('name')} />
-          {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+        <div className="sm:flex sm:gap-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="firstName">{t('First name')}</Label>
+            <Input id="firstName" disabled={readOnly} {...register('firstName')} />
+            {errors.firstName && <p className="text-sm text-destructive">{errors.firstName.message}</p>}
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="lastName">{t('Last name')}</Label>
+            <Input id="lastName" disabled={readOnly} {...register('lastName')} />
+            {errors.lastName && <p className="text-sm text-destructive">{errors.lastName.message}</p>}
+          </div>
+        </div>
+        <div className="space-y-2 sm:w-1/2">
+          <Label htmlFor="taxId">{t('Tax ID')}</Label>
+          <Input id="taxId" disabled={readOnly} {...register('taxId')} placeholder={t('e.g. ΑΦΜ')} />
         </div>
         <div className="space-y-2">
           <Label>{t('The tenant belongs to')}</Label>
@@ -156,16 +186,17 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
 
       <div className="pb-10 mt-6">
         <div className="text-xl">{t('Address')}</div>
+        <p className="text-sm text-muted-foreground mb-1">{t('Optional')}</p>
         <Separator className="mt-1 mb-2" />
-        <div className="space-y-2 mb-2"><Label htmlFor="address.street1">{t('Street 1')}</Label><Input id="address.street1" disabled={readOnly} {...register('address.street1')} />{errors.address?.street1 && <p className="text-sm text-destructive">{errors.address.street1.message}</p>}</div>
+        <div className="space-y-2 mb-2"><Label htmlFor="address.street1">{t('Street 1')}</Label><Input id="address.street1" disabled={readOnly} {...register('address.street1')} /></div>
         <div className="space-y-2 mb-2"><Label htmlFor="address.street2">{t('Street 2')}</Label><Input id="address.street2" disabled={readOnly} {...register('address.street2')} /></div>
         <div className="sm:flex sm:gap-2 mb-2">
-          <div className="space-y-2 flex-1"><Label htmlFor="address.zipCode">{t('Zip code')}</Label><Input id="address.zipCode" disabled={readOnly} {...register('address.zipCode')} />{errors.address?.zipCode && <p className="text-sm text-destructive">{errors.address.zipCode.message}</p>}</div>
-          <div className="space-y-2 flex-1"><Label htmlFor="address.city">{t('City')}</Label><Input id="address.city" disabled={readOnly} {...register('address.city')} />{errors.address?.city && <p className="text-sm text-destructive">{errors.address.city.message}</p>}</div>
+          <div className="space-y-2 flex-1"><Label htmlFor="address.zipCode">{t('Zip code')}</Label><Input id="address.zipCode" disabled={readOnly} {...register('address.zipCode')} /></div>
+          <div className="space-y-2 flex-1"><Label htmlFor="address.city">{t('City')}</Label><Input id="address.city" disabled={readOnly} {...register('address.city')} /></div>
         </div>
         <div className="sm:flex sm:gap-2">
           <div className="space-y-2 flex-1"><Label htmlFor="address.state">{t('State')}</Label><Input id="address.state" disabled={readOnly} {...register('address.state')} /></div>
-          <div className="space-y-2 flex-1"><Label htmlFor="address.country">{t('Country')}</Label><Input id="address.country" disabled={readOnly} {...register('address.country')} />{errors.address?.country && <p className="text-sm text-destructive">{errors.address.country.message}</p>}</div>
+          <div className="space-y-2 flex-1"><Label htmlFor="address.country">{t('Country')}</Label><Input id="address.country" disabled={readOnly} {...register('address.country')} /></div>
         </div>
       </div>
 
