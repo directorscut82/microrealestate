@@ -9,6 +9,7 @@ inclusion: always
 2. **Read the test file before running it.** Identify obvious issues first.
 3. **Fix root causes before running.** If multiple suites share a broken command, fix the command first.
 4. **Lower timeouts for debugging.** Don't wait 60s for something that should appear in 5s.
+5. **NEVER use `DELETE /api/reset` as a smoke test.** It wipes the entire database. Use `curl http://localhost:8080/landlord/signin | head -1` instead.
 
 ## Environment Setup
 
@@ -24,7 +25,6 @@ finch logs microrealestate-gateway-1 2>&1 | tail -3
 
 # Smoke test
 curl -s http://localhost:8080/landlord/signin | head -c 50
-curl -s -X DELETE http://localhost:8080/api/reset
 ```
 
 ## Running Tests
@@ -105,7 +105,8 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
 ### Prerequisites — MUST verify before running E2E
 1. **Container runtime is `finch`** (not docker). All commands use `finch compose`.
 2. **`.env` must contain `API_URL=http://api:8200/api/v2`** — docker compose does NOT read `base.env` for variable substitution. If `API_URL` is missing, the gateway crashes silently with `Missing "target" option`.
-3. **Dev mode required for code changes** — GHCR images don't pick up local changes. Always start with dev compose overlay.
+3. **`.env` must have `MONGO_URL=mongodb://mongo/mredb`** — base.env defaults to `demodb` which is wrong. All real data is in `mredb`.
+4. **Dev mode required for code changes** — GHCR images don't pick up local changes. Always start with dev compose overlay.
 
 ### Start services (dev mode)
 ```bash
@@ -122,9 +123,8 @@ finch ps -a --format '{{.Names}} {{.Status}}'
 finch logs microrealestate-gateway-1 2>&1 | tail -5
 # Should end with: "Gateway ready and listening on port 8080"
 
-# Quick smoke test
+# Quick smoke test — SAFE, does NOT modify data
 curl -s http://localhost:8080/landlord/signin | head -1   # Should return HTML
-curl -s -X DELETE http://localhost:8080/api/reset          # Should return "success"
 ```
 
 ### Run unit tests (no Docker needed)
@@ -149,6 +149,7 @@ cd e2e && npx cypress run --spec cypress/e2e/04_contracts.cy.js
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
+| App shows signup page but user exists | `MONGO_URL` pointing to wrong database | Verify `.env` has `MONGO_URL=mongodb://mongo/mredb` |
 | Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
 | `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
 | Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |

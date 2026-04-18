@@ -39,9 +39,8 @@ finch ps -a --format '{{.Names}} {{.Status}}'
 finch logs microrealestate-gateway-1 2>&1 | tail -5
 # Should end with: "Gateway ready and listening on port 8080"
 
-# Quick smoke test
+# Quick smoke test — SAFE, does NOT modify data
 curl -s http://localhost:8080/landlord/signin | head -1   # Should return HTML
-curl -s -X DELETE http://localhost:8080/api/reset          # Should return "success"
 ```
 
 ### Run unit tests (no Docker needed)

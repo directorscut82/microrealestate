@@ -36,6 +36,7 @@ inclusion: always
 - health.js moved from pages/ to pages/api/ (prevents prerender failure)
 - eslint.ignoreDuringBuilds added to next.config.js (import sorting from migration)
 - API service now connects to Redis (env vars + compose dependency added)
+- **MONGO_URL mismatch** — `.env` had `mongodb://mongo/demodb` but all data was in `mredb` (created by standalone prod compose). Dev mode connected to empty database, appearing as data loss on every restart. Fixed: `.env` now uses `mongodb://mongo/mredb`.
 
 ## Known Limitations
 - **Seed API bypasses rent pipeline** — use seedAndComputeRents command (PATCHes tenant to trigger computation)
@@ -47,7 +48,7 @@ inclusion: always
 - **next-translate-plugin** — shows "Debug Failure. Unhandled SyntaxKind" warning during build (non-fatal)
 
 ## Pending Issue
-User reported empty lease dropdown when creating tenant in production. Likely needs to create a contract first or contract's active switch is off. Screenshot at ~/Documents/Screenshot 2026-04-04 at 11.22.18.png — couldn't view due to context limit.
+~~User reported empty lease dropdown when creating tenant in production.~~ **RESOLVED** — Root cause: the user's organization ("me" realm) had zero leases in the database. All 6 leases belonged to the "TestOrg" realm (from E2E tests). The code was correct — the dropdown shows all leases for the current realm, but there were none. Fix: added a helpful message in LeaseContractForm when no leases exist, guiding the user to Settings > Contracts to create one. Translations added for all 6 locales.
 
 ## Key Architecture Decisions
 - Store uses subscribe/notify + useSyncExternalStore (not MobX, not counter hack)
