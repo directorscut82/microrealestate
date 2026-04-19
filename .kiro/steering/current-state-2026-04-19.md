@@ -1,7 +1,7 @@
 ---
 inclusion: always
 ---
-# MRE — Current State (2026-04-04)
+# MRE — Current State (2026-04-19)
 
 ## Production Status
 - Production images built and running at `http://localhost:8080/landlord`
@@ -21,6 +21,15 @@ inclusion: always
 - **Resetservice seed API** — POST /api/reset/seed creates user+org+leases+properties+tenants in one call
 - **Resetservice OTP API** — POST /api/reset/otp generates tenant OTP directly (bypasses email)
 - **Cypress commands** — seedTestData, seedAndComputeRents, getTenantOTP, recordPayment, addPropertyFromPage, selectByLabel (improved with listbox wait)
+- **Greek lease PDF import** — Upload AADE Taxisnet lease PDFs, parse all fields (tenants, landlords, properties, lease dates, energy certificates), auto-create/update tenants and properties. Parser at `services/api/src/managers/greekleaseparser.ts`, API route `POST /api/v2/tenants/import-pdf`, frontend dialog `ImportTenantDialog.js`. 13 unit tests.
+- **SMS Gateway integration** — Send SMS notifications to tenants via Android SMS Gateway app (sms-gate.app cloud API). Config in Settings → Third Parties. Sends to ALL contacts' phone numbers alongside email when sending rent notices. SMS module at `services/emailer/src/sms.ts`.
+- **Extended property fields** — ATAK number, DEH number, energy certificate (number, class, issue date, inspector), land surface. Displayed in PropertyForm.
+- **Extended tenant fields** — Co-tenants display (name + ΑΦΜ from PDF import), declaration number, amendment tracking, original lease start date, lease notes. Personal phone and email fields on tenant form.
+- **Delete tenant safety checks** — Block deletion if lease is still active or unpaid balance exists (in addition to existing paid rents check).
+- **Delete tenant options dialog** — When deleting, shows warnings (active lease, payments) and options: "Terminate lease and delete", "Delete anyway", or "Cancel".
+- **Separate SMS button on Rents page** — "Send SMS" button independent from email. Sends Greek rent notice SMS to all tenant phone numbers via SMS Gateway.
+- **Gmail port fix** — Changed from port 587 (STARTTLS, blocked in Docker) to port 465 (SSL).
+- **Emailer dev mode fix** — Dynamic imports in emailer used `.js` extension but dev mode runs `.ts` via tsx. Fixed to resolve both extensions.
 
 ## Test Coverage: 606 tests across 58 suites
 - **01-09** (100): Basic UI flows — auth, first access, navigation, CRUD, cleanup

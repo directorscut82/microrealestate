@@ -13,8 +13,9 @@ All routes prefixed `/api/v2/`. Requires `Authorization: Bearer {accessToken}` h
 | GET | /tenants | List all tenants for realm |
 | GET | /tenants/:id | Get tenant by ID |
 | POST | /tenants | Create tenant |
+| POST | /tenants/import-pdf | Import tenant from Greek AADE lease PDF (multipart/form-data) |
 | PATCH | /tenants/:id | Update tenant (triggers rent recomputation) |
-| DELETE | /tenants/:id | Delete tenant (422 if has payments) |
+| DELETE | /tenants/:id | Delete tenant (422 if has payments, active lease, or unpaid balance) |
 
 ### Properties
 
@@ -126,7 +127,7 @@ Uses Redis with 60-second TTL.
 
 Services communicate via HTTP over the Docker bridge network:
 
-- **API** → emailer — sends tenant/landlord emails
+- **API** → emailer — sends tenant/landlord emails and SMS notifications
 - **API** → pdfgenerator — generates documents and templates
 - **Authenticator** → emailer — sends password reset emails
 

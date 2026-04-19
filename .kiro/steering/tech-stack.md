@@ -35,7 +35,8 @@ inclusion: always
 - EJS + Handlebars — email and PDF templating
 - nodemailer — email sending (Gmail, SMTP)
 - nodemailer-mailgun-transport — Mailgun integration
-- multer — file upload handling (pdfgenerator)
+- multer — file upload handling (pdfgenerator, api PDF import)
+- pdfjs-dist 4.0 — PDF text extraction for lease import (api service)
 - express-mongo-sanitize — NoSQL injection prevention
 - i18n — server-side internationalization
 - moment.js — date handling (backend)
