@@ -1,8 +1,9 @@
 import { fetchTenants, QueryKeys } from '../../../utils/restcalls';
 import React, { useCallback, useContext, useState } from 'react';
 import { Button } from '../../../components/ui/button';
+import ImportTenantDialog from '../../../components/tenants/ImportTenantDialog';
 import { List } from '../../../components/ResourceList';
-import { LuPlusCircle } from 'react-icons/lu';
+import { LuFileUp, LuPlusCircle } from 'react-icons/lu';
 import NewTenantDialog from '../../../components/tenants/NewTenantDialog';
 import Page from '../../../components/Page';
 import { StoreContext } from '../../../store';
@@ -83,10 +84,15 @@ function Tenants() {
     queryFn: () => fetchTenants()
   });
   const [openNewTenantDialog, setOpenNewTenantDialog] = useState(false);
+  const [openImportDialog, setOpenImportDialog] = useState(false);
 
   const onNewTenant = useCallback(() => {
     setOpenNewTenantDialog(true);
   }, [setOpenNewTenantDialog]);
+
+  const onImportTenant = useCallback(() => {
+    setOpenImportDialog(true);
+  }, [setOpenImportDialog]);
 
   if (isError) {
     toast.error(t('Error fetching tenants'));
@@ -102,20 +108,34 @@ function Tenants() {
         ]}
         filterFn={_filterData}
         renderActions={() => (
-          <Button
-            variant="secondary"
-            className="w-full gap-2"
-            onClick={onNewTenant}
-          >
-            <LuPlusCircle className="size-4" />
-            {t('Add a tenant')}
-          </Button>
+          <div className="flex gap-2 w-full">
+            <Button
+              variant="secondary"
+              className="flex-1 gap-2"
+              onClick={onNewTenant}
+            >
+              <LuPlusCircle className="size-4" />
+              {t('Add a tenant')}
+            </Button>
+            <Button
+              variant="secondary"
+              className="flex-1 gap-2"
+              onClick={onImportTenant}
+            >
+              <LuFileUp className="size-4" />
+              {t('Import PDF')}
+            </Button>
+          </div>
         )}
         renderList={({ data }) => <TenantList tenants={data} />}
       />
       <NewTenantDialog
         open={openNewTenantDialog}
         setOpen={setOpenNewTenantDialog}
+      />
+      <ImportTenantDialog
+        open={openImportDialog}
+        setOpen={setOpenImportDialog}
       />
     </Page>
   );

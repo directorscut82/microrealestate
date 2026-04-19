@@ -8,6 +8,8 @@ import * as realmManager from './managers/realmmanager.js';
 import * as rentManager from './managers/rentmanager.js';
 import { Middlewares, Service } from '@microrealestate/common';
 import express from 'express';
+import multer from 'multer';
+import { parseImportedPdf } from './managers/pdfimportmanager.js';
 
 export default function routes(): express.Router {
   const { ACCESS_TOKEN_SECRET } = Service.getInstance().envConfig.getValues();
@@ -38,6 +40,12 @@ export default function routes(): express.Router {
   router.use('/leases', leasesRouter);
 
   const occupantsRouter = express.Router();
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+  occupantsRouter.post(
+    '/import-pdf',
+    upload.single('pdf'),
+    Middlewares.asyncWrapper(parseImportedPdf as any)
+  );
   occupantsRouter.get('/', Middlewares.asyncWrapper(occupantManager.all as any));
   occupantsRouter.get('/:id', Middlewares.asyncWrapper(occupantManager.one as any));
   occupantsRouter.post('/', Middlewares.asyncWrapper(occupantManager.add as any));
@@ -100,6 +108,7 @@ export default function routes(): express.Router {
 
   const emailRouter = express.Router();
   emailRouter.post('/', Middlewares.asyncWrapper(emailManager.send as any));
+  emailRouter.post('/sms', Middlewares.asyncWrapper(emailManager.sendSmsOnly as any));
   router.use('/emails', emailRouter);
 
   // Presence awareness — shows who else is viewing the same record
