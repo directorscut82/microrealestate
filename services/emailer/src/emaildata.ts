@@ -10,7 +10,10 @@ export async function build(
   recordId: string,
   params: Record<string, any>
 ): Promise<any> {
-  const dataPackagePath = path.join(_dataDir, templateName, 'index.js');
+  let dataPackagePath = path.join(_dataDir, templateName, 'index.js');
+  if (!fs.existsSync(dataPackagePath)) {
+    dataPackagePath = path.join(_dataDir, templateName, 'index.ts');
+  }
 
   if (!fs.existsSync(dataPackagePath)) {
     return {};

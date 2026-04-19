@@ -11,13 +11,22 @@ export async function build(
   params: Record<string, any>,
   data: any
 ): Promise<any[]> {
-  const recipientsPackagePath = path.join(
+  let recipientsPackagePath = path.join(
     __dirname,
     'emailparts',
     'recipients',
     templateName,
     'index.js'
   );
+  if (!fs.existsSync(recipientsPackagePath)) {
+    recipientsPackagePath = path.join(
+      __dirname,
+      'emailparts',
+      'recipients',
+      templateName,
+      'index.ts'
+    );
+  }
   if (!fs.existsSync(recipientsPackagePath)) {
     return [];
   }

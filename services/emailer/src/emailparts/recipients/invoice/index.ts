@@ -1,7 +1,7 @@
-import { Service } from '@microrealestate/common';
+import { logger, Service } from '@microrealestate/common';
 
 export function get(recordId: string, params: any, data: any) {
-  if (!data.tenant && !data.tenant.contacts) {
+  if (!data.tenant || !data.tenant.contacts) {
     throw new Error('tenant has not any contact emails');
   }
 
@@ -21,6 +21,8 @@ export function get(recordId: string, params: any, data: any) {
   if (!emailDeliveryServiceConfig) {
     throw new Error('landlord has not configured an email delivery service');
   }
+
+  logger.debug(`email config fromEmail: ${emailDeliveryServiceConfig.fromEmail}, contacts: ${JSON.stringify(data.tenant.contacts.map((c: any) => c.email))}`);
 
   const { PRODUCTION } = Service.getInstance().envConfig.getValues();
   const fromEmail = emailDeliveryServiceConfig.fromEmail;
