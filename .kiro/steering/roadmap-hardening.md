@@ -163,13 +163,25 @@ Changes are grouped into phases. Each phase should be completed before the next.
   confirms → rent marked as paid
 - **Rent pipeline:** Step 6 (payments) reads from both settlements AND Payment collection
 
-### 4.5 Document ingestion / OCR
-- **Purpose:** Import lease documents from third parties (PDF → OCR → structured data)
-- **Flow:** Upload PDF → send to OCR service (external) → receive webhook with
-  extracted data → create/update lease record
-- **Depends on:** Webhook system (4.3)
-- **New API routes:** Document upload endpoint, OCR status tracking
-- **UI:** Upload interface with progress, review/confirm extracted data before saving
+### 4.5 Document ingestion / OCR — ✅ PARTIALLY COMPLETE
+- **Purpose:** Import lease documents from third parties (PDF → structured data)
+- **Completed:** Greek AADE Taxisnet lease PDF import — regex-based parser extracts all fields
+  (tenants, landlords, properties, lease dates, energy certificates, ATAK, DEH).
+  API route `POST /api/v2/tenants/import-pdf`, frontend review dialog with auto-match/create.
+  13 unit tests. No external OCR service needed — text extraction via pdfjs-dist.
+- **Remaining:** Support for other document types, multi-page property handling,
+  batch import of multiple PDFs
+
+### 4.6 SMS Gateway integration ✅ COMPLETE
+- **Purpose:** Send SMS notifications to tenants alongside email
+- **Implementation:** Uses Android SMS Gateway app (sms-gate.app) as bridge —
+  MRE calls cloud API, phone sends SMS from user's own number. Free.
+- **Config:** Realm.thirdParties.smsGateway (url, username, password — encrypted)
+- **UI:** Settings → Third Parties → SMS Gateway section
+- **Behavior:** When sending rent notices, SMS sent to ALL contacts' phone numbers
+  alongside email. SMS text is Greek rent notice template.
+- **Files:** `services/emailer/src/sms.ts`, emailer route `/emailer/sms`,
+  API `emailmanager.ts` `_sendSms()`
 
 ---
 

@@ -25,7 +25,7 @@ microrealestate/
 │   ├── authenticator/   # JWT auth, bcrypt, password reset, OTP (:8000)
 │   ├── api/             # Landlord REST API (:8200)
 │   │   ├── src/businesslogic/  # Rent computation pipeline (7 steps)
-│   │   ├── src/managers/       # Data access layer
+│   │   ├── src/managers/       # Data access layer (includes greekleaseparser, pdfimportmanager)
 │   │   └── src/routes.ts       # All API route definitions
 │   ├── tenantapi/       # Tenant read-only API (:8250)
 │   ├── emailer/         # Email via Gmail/Mailgun/SMTP (:8400)

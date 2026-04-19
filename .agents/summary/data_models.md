@@ -94,13 +94,13 @@ User accounts for authentication. Fields: `_id`, `firstname`, `lastname`, `email
 
 ### Realm (Organization)
 
-Organizations that group all resources. Fields: `_id`, `name`, `isCompany`, `locale`, `currency`, `members[]` (name, email, role, registered), `addresses`, `bankInfo`, `thirdParties`.
+Organizations that group all resources. Fields: `_id`, `name`, `isCompany`, `locale`, `currency`, `members[]` (name, email, role, registered), `addresses`, `bankInfo`, `thirdParties` (gmail, smtp, mailgun, b2, smsGateway).
 
 ### Tenant (Mongoose model: `Occupant`)
 
 > **Important:** The Mongoose model is registered as `'Occupant'` but TypeScript types and API routes use `Tenant`.
 
-Fields: `_id`, `realmId`, `name`, `leaseId`, `beginDate`, `endDate`, `isCompany`, `contacts[]`, `properties[]` (propertyId), `rents[]`.
+Fields: `_id`, `realmId`, `name`, `firstName`, `lastName`, `taxId`, `leaseId`, `beginDate`, `endDate`, `isCompany`, `contacts[]`, `properties[]` (propertyId), `rents[]`, `coTenants[]` (name, taxId, acceptanceDate), `declarationNumber`, `amendsDeclaration`, `originalLeaseStartDate`, `leaseNotes`.
 
 #### Rent entry structure
 
@@ -108,7 +108,7 @@ Each element in `rents[]`: `term` (YYYYMMDDHH format), `grandTotal`, `payment`, 
 
 ### Property
 
-Rental properties. Fields: `_id`, `realmId`, `type`, `name`, `description`, `surface`, `phone`, `building`, `level`, `location` (lat/lng), `price`, `expense` (title, amount), `tax`.
+Rental properties. Fields: `_id`, `realmId`, `type`, `name`, `description`, `surface`, `landSurface`, `phone`, `building`, `level`, `location` (lat/lng), `price`, `expense` (title, amount), `tax`, `atakNumber`, `dehNumber`, `energyCertificate` (number, issueDate, energyClass, inspectorNumber).
 
 ### Lease
 
