@@ -380,6 +380,9 @@ export async function remove(req: Req, res: Res) {
     );
   }
 
+  // Note: active lease and unpaid balance are warned in the frontend,
+  // not blocked here. Only paid rents are a hard block.
+
   const session = await Collections.startSession();
   session.startTransaction();
   try {
