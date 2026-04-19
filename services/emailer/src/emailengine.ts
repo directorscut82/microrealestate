@@ -96,8 +96,8 @@ export function sendEmail(email: EmailMessage, data: any): Promise<EmailResult> 
       emailDeliveryServiceConfig = {
         name: 'gmail',
         server: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
+        port: 465,
+        secure: true,
         authentication: true,
         username: (GMAIL as any).email,
         password: (GMAIL as any).appPassword
@@ -120,8 +120,8 @@ export function sendEmail(email: EmailMessage, data: any): Promise<EmailResult> 
       emailDeliveryServiceConfig = {
         name: 'gmail',
         server: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
+        port: 465,
+        secure: true,
         authentication: true,
         username: data.landlord.thirdParties.gmail.email,
         password: Crypto.decrypt(data.landlord.thirdParties.gmail.appPassword)
