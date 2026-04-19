@@ -30,12 +30,18 @@ if (config.NODE_ENV === 'development') {
 const roboto = Roboto({
   weight: ['300', '400', '500', '700'],
   display: 'swap',
-  subsets: ['latin', 'latin-ext']
+  subsets: ['latin', 'latin-ext'],
+  variable: '--font-roboto'
 });
 
 function MyApp(props) {
   const { Component, pageProps } = props;
   moment.locale(pageProps?.__lang ?? 'en');
+
+  // Apply font CSS variable to <html> so Radix portals inherit it
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.add(roboto.variable);
+  }
 
   return (
     <>
@@ -48,7 +54,7 @@ function MyApp(props) {
         />
         <link rel="shortcut icon" href={`${config.BASE_PATH}/favicon.svg`} />
       </Head>
-      <main className={roboto.className}>
+      <main className={`${roboto.variable} font-sans`}>
         <QueryClientProvider client={queryClient}>
           <InjectStoreContext initialData={pageProps.initialState?.store}>
             <Application {...pageProps}>

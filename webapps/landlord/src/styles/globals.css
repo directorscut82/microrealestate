@@ -79,6 +79,7 @@
   }
   body {
     @apply bg-body text-foreground;
+    font-family: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
     font-feature-settings:
       'rlig' 1,
       'calt' 1;
