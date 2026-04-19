@@ -85,6 +85,12 @@ const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
       applicationKey: String,
       endpoint: String,
       bucket: String
+    },
+    smsGateway: {
+      selected: Boolean,
+      url: String,
+      username: String,
+      password: String
     }
   },
   locale: String,

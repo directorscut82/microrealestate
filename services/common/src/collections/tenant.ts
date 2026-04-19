@@ -13,6 +13,8 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   firstName: String,
   lastName: String,
   taxId: String,
+  phone: String,
+  email: String,
 
   // company details
   isCompany: Boolean,
@@ -35,6 +37,8 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
     {
       contact: String,
       phone: String,
+      phone1: String,
+      phone2: String,
       email: String
     }
   ],
@@ -129,6 +133,20 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   discount: Number,
   guaranty: Number,
   guarantyPayback: Number,
+
+  // Greek lease import fields
+  declarationNumber: String,
+  amendsDeclaration: String,
+  originalLeaseStartDate: Date,
+  leaseNotes: String,
+  coTenants: [
+    {
+      _id: false,
+      name: String,
+      taxId: String,
+      acceptanceDate: Date
+    }
+  ],
 
   // ui state
   stepperMode: { type: Boolean, default: false }

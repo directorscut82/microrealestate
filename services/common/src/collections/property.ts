@@ -9,6 +9,7 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
   name: String,
   description: String,
   surface: Number,
+  landSurface: Number,
   phone: String,
   digicode: String,
   address: {
@@ -21,7 +22,16 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
     country: String
   },
 
-  price: Number
+  price: Number,
+  atakNumber: String,
+  dehNumber: String,
+  energyCertificate: {
+    _id: false,
+    number: String,
+    issueDate: Date,
+    energyClass: String,
+    inspectorNumber: String
+  }
 });
 
 PropertySchema.index({ realmId: 1 });
