@@ -22,8 +22,13 @@ const schema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   surface: z.union([z.string(), z.number()]).optional(),
+  landSurface: z.union([z.string(), z.number()]).optional(),
   phone: z.string().optional(),
   digicode: z.string().optional(),
+  atakNumber: z.string().optional(),
+  dehNumber: z.string().optional(),
+  energyClass: z.string().optional(),
+  energyCertNumber: z.string().optional(),
   address: z.object({
     street1: z.string().optional(),
     street2: z.string().optional(),
@@ -54,8 +59,13 @@ const PropertyForm = ({ property, onSubmit }) => {
       name: property?.name || '',
       description: property?.description || '',
       surface: property?.surface || '',
+      landSurface: property?.landSurface || '',
       phone: property?.phone || '',
       digicode: property?.digicode || '',
+      atakNumber: property?.atakNumber || '',
+      dehNumber: property?.dehNumber || '',
+      energyClass: property?.energyCertificate?.energyClass || '',
+      energyCertNumber: property?.energyCertificate?.number || '',
       address: property?.address || {
         street1: '',
         street2: '',
@@ -95,7 +105,21 @@ const PropertyForm = ({ property, onSubmit }) => {
   );
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+    <form onSubmit={handleSubmit((data) => {
+      const { energyClass, energyCertNumber, atakNumber, dehNumber, ...rest } = data;
+      onSubmit({
+        ...rest,
+        atakNumber,
+        dehNumber,
+        energyCertificate: energyClass || energyCertNumber
+          ? {
+              ...(property?.energyCertificate || {}),
+              energyClass: energyClass || '',
+              number: energyCertNumber || ''
+            }
+          : undefined
+      });
+    })} autoComplete="off">
       <Section label={t('Property information')}>
         <div className="sm:flex sm:gap-2">
           <div className="space-y-2 flex-1">
@@ -143,6 +167,10 @@ const PropertyForm = ({ property, onSubmit }) => {
               <Input id="surface" type="number" {...register('surface')} />
             </div>
             <div className="space-y-2 flex-1">
+              <Label htmlFor="landSurface">{t('Land Surface')}</Label>
+              <Input id="landSurface" type="number" {...register('landSurface')} />
+            </div>
+            <div className="space-y-2 flex-1">
               <Label htmlFor="phone">{t('Phone')}</Label>
               <Input id="phone" {...register('phone')} />
             </div>
@@ -152,6 +180,26 @@ const PropertyForm = ({ property, onSubmit }) => {
             </div>
           </div>
         )}
+        <div className="sm:flex sm:gap-2 mt-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="atakNumber">{t('ATAK Number')}</Label>
+            <Input id="atakNumber" {...register('atakNumber')} />
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="dehNumber">{t('DEH Number')}</Label>
+            <Input id="dehNumber" {...register('dehNumber')} />
+          </div>
+        </div>
+        <div className="sm:flex sm:gap-2 mt-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="energyClass">{t('Energy Class')}</Label>
+            <Input id="energyClass" {...register('energyClass')} />
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="energyCertNumber">{t('Energy Certificate')}</Label>
+            <Input id="energyCertNumber" {...register('energyCertNumber')} />
+          </div>
+        </div>
       </Section>
       <Section label={t('Address')}>
         <div className="space-y-2">

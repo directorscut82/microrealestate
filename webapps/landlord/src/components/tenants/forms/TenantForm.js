@@ -20,6 +20,8 @@ const schema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   taxId: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().optional(),
   isCompany: z.string().min(1),
   legalRepresentative: z.string().optional(),
   legalStructure: z.string().optional(),
@@ -53,6 +55,8 @@ const initValues = (tenant) => {
     firstName,
     lastName,
     taxId: tenant?.taxId || '',
+    phone: tenant?.phone || '',
+    email: tenant?.email || '',
     isCompany: tenant?.isCompany ? 'true' : 'false',
     legalRepresentative: tenant?.manager || '',
     legalStructure: tenant?.legalForm || '',
@@ -116,6 +120,8 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
       firstName: data.firstName,
       lastName: data.lastName,
       taxId: data.taxId || '',
+      phone: data.phone || '',
+      email: data.email || '',
       isCompany: data.isCompany === 'true',
       company: data.isCompany === 'true' ? fullName : '',
       manager: data.isCompany === 'true' ? data.legalRepresentative : fullName,
@@ -159,6 +165,29 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
         <div className="space-y-2 sm:w-1/2">
           <Label htmlFor="taxId">{t('Tax ID')}</Label>
           <Input id="taxId" disabled={readOnly} {...register('taxId')} placeholder={t('e.g. ΑΦΜ')} />
+        </div>
+        {tenant?.coTenants?.length > 0 && (
+          <div className="space-y-2">
+            <Label>{t('Co-tenants')}</Label>
+            <div className="border rounded-md p-3 space-y-2">
+              {tenant.coTenants.map((ct, i) => (
+                <div key={i} className="text-sm flex justify-between">
+                  <span>{ct.name}</span>
+                  <span className="text-muted-foreground">ΑΦΜ: {ct.taxId}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="sm:flex sm:gap-2">
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="phone">{t('Phone')}</Label>
+            <Input id="phone" disabled={readOnly} {...register('phone')} />
+          </div>
+          <div className="space-y-2 flex-1">
+            <Label htmlFor="email">{t('Email')}</Label>
+            <Input id="email" disabled={readOnly} {...register('email')} />
+          </div>
         </div>
         <div className="space-y-2">
           <Label>{t('The tenant belongs to')}</Label>

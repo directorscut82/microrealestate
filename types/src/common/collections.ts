@@ -85,6 +85,12 @@ export namespace CollectionTypes {
         endpoint: string;
         bucket: string;
       };
+      smsGateway: {
+        selected: boolean;
+        url: string;
+        username: string;
+        password: string;
+      };
     };
     locale: Locale;
     currency: string;
@@ -138,10 +144,19 @@ export namespace CollectionTypes {
     name: string;
     description: string;
     surface: number;
+    landSurface?: number;
     phone: string;
     digicode: string;
     address: CollectionTypes.PartAddress;
     price: number;
+    atakNumber?: string;
+    dehNumber?: string;
+    energyCertificate?: {
+      number: string;
+      issueDate: Date;
+      energyClass: string;
+      inspectorNumber: string;
+    };
 
     // TODO to remove, replaced by address
     building: string;
@@ -223,6 +238,11 @@ export namespace CollectionTypes {
     _id: string;
     realmId: string | Realm;
     name: string;
+    firstName?: string;
+    lastName?: string;
+    taxId?: string;
+    phone?: string;
+    email?: string;
     isCompany: boolean;
     company: string;
     manager: string;
@@ -238,6 +258,8 @@ export namespace CollectionTypes {
     contacts: {
       contact: string;
       phone: string;
+      phone1: string;
+      phone2: string;
       email: string;
     }[];
     reference: string;
@@ -264,6 +286,17 @@ export namespace CollectionTypes {
     discount: number;
     guaranty: number;
     guarantyPayback: number;
+
+    // Greek lease import fields
+    declarationNumber?: string;
+    amendsDeclaration?: string;
+    originalLeaseStartDate?: Date;
+    leaseNotes?: string;
+    coTenants?: {
+      name: string;
+      taxId: string;
+      acceptanceDate?: Date;
+    }[];
 
     stepperMode: boolean;
   };
