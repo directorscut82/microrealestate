@@ -1,5 +1,5 @@
-import { fetchRents, QueryKeys, sendRentEmails } from '../../../../utils/restcalls';
-import { LuAlertTriangle, LuChevronDown, LuSend } from 'react-icons/lu';
+import { fetchRents, QueryKeys, sendRentEmails, sendRentSms } from '../../../../utils/restcalls';
+import { LuAlertTriangle, LuChevronDown, LuMessageSquare, LuSend } from 'react-icons/lu';
 import {
   Popover,
   PopoverContent,
@@ -100,6 +100,15 @@ function Actions({ values, yearMonth, onDone }) {
     }
   });
 
+  const smsMutation = useMutation({
+    mutationFn: sendRentSms,
+    onSuccess: () => {
+      toast.success(t('SMS sent'));
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, yearMonth] });
+      onDone?.();
+    }
+  });
+
   const handleAction = useCallback(
     (docName) => async () => {
       setSelectedDocumentName(docName);
@@ -173,6 +182,24 @@ function Actions({ values, yearMonth, onDone }) {
               </div>
             </PopoverContent>
           </Popover>
+          <Button
+            variant="secondary"
+            disabled={disabled || smsMutation.isPending}
+            onClick={async () => {
+              try {
+                await smsMutation.mutateAsync({
+                  document: 'rentcall',
+                  tenantIds: values.map((r) => r._id),
+                  terms: values.map((r) => r.term)
+                });
+              } catch {
+                toast.error(t('SMS sending failed'));
+              }
+            }}
+          >
+            <LuMessageSquare className="mr-2" />
+            {smsMutation.isPending ? t('Sending...') : t('Send SMS')}
+          </Button>
         </div>
       )}
 

@@ -34,7 +34,11 @@ const schema = z.object({
   keyId: z.string().optional(),
   applicationKey: z.string().optional(),
   endpoint: z.string().optional(),
-  bucket: z.string().optional()
+  bucket: z.string().optional(),
+  smsActive: z.boolean(),
+  smsUrl: z.string().optional(),
+  smsUsername: z.string().optional(),
+  smsPassword: z.string().optional()
 });
 
 function SectionWithSwitch({ label, description, switchChecked, onSwitchChange, children }) {
@@ -104,7 +108,11 @@ export default function ThirdPartiesForm({ organization }) {
       keyId: organization.thirdParties?.b2?.keyId || '',
       applicationKey: organization.thirdParties?.b2?.applicationKey || '',
       endpoint: organization.thirdParties?.b2?.endpoint || '',
-      bucket: organization.thirdParties?.b2?.bucket || ''
+      bucket: organization.thirdParties?.b2?.bucket || '',
+      smsActive: !!organization.thirdParties?.smsGateway?.selected,
+      smsUrl: organization.thirdParties?.smsGateway?.url || 'https://api.sms-gate.app',
+      smsUsername: organization.thirdParties?.smsGateway?.username || 'LAGOWP',
+      smsPassword: organization.thirdParties?.smsGateway?.password || 'covwi9wr81hxvt'
     };
   }, [organization]);
 
@@ -118,6 +126,7 @@ export default function ThirdPartiesForm({ organization }) {
   const emailService = watch('emailDeliveryServiceName');
   const smtpAuth = watch('smtp_authentication');
   const b2Active = watch('b2Active');
+  const smsActive = watch('smsActive');
 
   const onSubmit = useCallback(
     async (values) => {
@@ -167,6 +176,17 @@ export default function ThirdPartiesForm({ organization }) {
         };
       } else {
         formData.thirdParties.b2 = null;
+      }
+      if (values.smsActive) {
+        formData.thirdParties.smsGateway = {
+          selected: true,
+          url: values.smsUrl,
+          username: values.smsUsername,
+          password: values.smsPassword,
+          passwordUpdated: values.smsPassword !== initialValues.smsPassword
+        };
+      } else {
+        formData.thirdParties.smsGateway = null;
       }
       await mutateAsync(mergeOrganization(organization, formData));
     },
@@ -249,6 +269,20 @@ export default function ThirdPartiesForm({ organization }) {
             <div className="space-y-2 mt-2"><Label htmlFor="applicationKey">ApplicationKey</Label><Input id="applicationKey" type="password" {...register('applicationKey')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="bucket">{t('Bucket')}</Label><Input id="bucket" {...register('bucket')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="endpoint">{t('Bucket endpoint')}</Label><Input id="endpoint" {...register('endpoint')} /></div>
+          </>
+        ) : null}
+      </SectionWithSwitch>
+      <SectionWithSwitch
+        label={t('SMS Gateway')}
+        description={t('Configuration required for sending SMS notifications to tenants')}
+        switchChecked={smsActive}
+        onSwitchChange={(v) => setValue('smsActive', v)}
+      >
+        {smsActive ? (
+          <>
+            <div className="space-y-2 mt-2"><Label htmlFor="smsUrl">{t('Server URL')}</Label><Input id="smsUrl" {...register('smsUrl')} /></div>
+            <div className="space-y-2 mt-2"><Label htmlFor="smsUsername">{t('Username')}</Label><Input id="smsUsername" {...register('smsUsername')} /></div>
+            <div className="space-y-2 mt-2"><Label htmlFor="smsPassword">{t('Password')}</Label><Input id="smsPassword" type="password" {...register('smsPassword')} /></div>
           </>
         ) : null}
       </SectionWithSwitch>
