@@ -57,6 +57,9 @@ function _escapeSecrets(realm: AnyRecord): AnyRecord {
   if (realm.thirdParties?.b2?.applicationKey) {
     realm.thirdParties.b2.applicationKey = SECRET_PLACEHOLDER;
   }
+  if (realm.thirdParties?.smsGateway?.password) {
+    realm.thirdParties.smsGateway.password = SECRET_PLACEHOLDER;
+  }
   for (const app of realm.applications) {
     app.clientSecret = SECRET_PLACEHOLDER;
   }
@@ -96,6 +99,12 @@ export async function add(req: Req, res: Res) {
   if (newRealm.thirdParties?.b2?.keyId) {
     newRealm.thirdParties.b2.keyId = Crypto.encrypt(
       newRealm.thirdParties.b2.keyId
+    );
+  }
+
+  if (newRealm.thirdParties?.smsGateway?.password) {
+    newRealm.thirdParties.smsGateway.password = Crypto.encrypt(
+      newRealm.thirdParties.smsGateway.password
     );
   }
 
@@ -190,6 +199,18 @@ export async function update(req: Req, res: Res) {
     } else {
       updatedRealm.thirdParties.b2.applicationKey =
         previousRealm.thirdParties.b2.applicationKey;
+    }
+  }
+
+  if (req.body.thirdParties?.smsGateway) {
+    const smsPasswordUpdated = !!req.body.thirdParties.smsGateway.passwordUpdated;
+    const previousSmsPassword = previousRealm.thirdParties?.smsGateway?.password;
+    if (smsPasswordUpdated || !previousSmsPassword) {
+      updatedRealm.thirdParties.smsGateway.password = Crypto.encrypt(
+        req.body.thirdParties.smsGateway.password
+      );
+    } else {
+      updatedRealm.thirdParties.smsGateway.password = previousSmsPassword;
     }
   }
 

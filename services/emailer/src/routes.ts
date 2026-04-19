@@ -1,4 +1,5 @@
 import * as Emailer from './emailer.js';
+import { sendSms } from './sms.js';
 import {
   logger,
   Middlewares,
@@ -79,6 +80,19 @@ export default function routes(): express.Router {
   );
 
   apiRouter.post('/emailer', Middlewares.asyncWrapper(_send));
+
+  apiRouter.post(
+    '/emailer/sms',
+    Middlewares.asyncWrapper(async (req: Request, res: Response) => {
+      const { phoneNumber, text } = req.body;
+      if (!phoneNumber || !text) {
+        throw new ServiceError('phoneNumber and text are required', 422);
+      }
+      const realmId = String((req as any).realm?._id || req.headers.organizationid);
+      const result = await sendSms(realmId, phoneNumber, text);
+      res.json(result || { message: 'SMS not configured' });
+    })
+  );
 
   return apiRouter;
 }
