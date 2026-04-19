@@ -83,6 +83,13 @@ export async function fetchTenant(id) {
   return response.data;
 }
 
+export async function importTenantPdf(file) {
+  const formData = new FormData();
+  formData.append('pdf', file);
+  const response = await apiFetcher().post('/tenants/import-pdf', formData);
+  return response.data;
+}
+
 export async function createTenant(tenant) {
   const response = await apiFetcher().post('/tenants', tenant);
   return response.data;
@@ -140,6 +147,11 @@ export async function deleteLease(ids) {
 
 export async function sendRentEmails(payload) {
   await apiFetcher().post('/emails', payload);
+}
+
+export async function sendRentSms(payload) {
+  const response = await apiFetcher().post('/emails/sms', payload);
+  return response.data;
 }
 
 export async function payRent({ term, payment }) {
