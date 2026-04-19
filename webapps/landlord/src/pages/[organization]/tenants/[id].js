@@ -17,7 +17,15 @@ import {
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '../../../components/ui/card';
+import { Button } from '../../../components/ui/button';
 import ConfirmDialog from '../../../components/ConfirmDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '../../../components/ui/dialog';
 import ContractOverviewCard from '../../../components/tenants/ContractOverviewCard';
 import moment from 'moment';
 import Page from '../../../components/Page';
@@ -296,27 +304,59 @@ function Tenant() {
         setOpen={setOpenRentHistoryDialog}
         data={selectedRentHistory}
       />
-      <ConfirmDialog
-        title={
-          selected.hasPayments
-            ? t('This tenant cannot be deleted')
-            : t('Deletion of the tenant?')
-        }
-        subTitle={
-          selected.hasPayments
-            ? t(
-                'Deleting {{tenant}} is not allowed because some rent settlements have been recorded',
-                { tenant: selected.name }
-              )
-            : t('Do you confirm the permanent deletion of {{tenant}}?', {
-                tenant: selected.name
-              })
-        }
-        open={openConfirmDeleteTenant}
-        setOpen={setOpenConfirmDeleteTenant}
-        justOkButton={selected.hasPayments}
-        onConfirm={!selected.hasPayments ? onDeleteTenant : null}
-      />
+      <Dialog open={openConfirmDeleteTenant} onOpenChange={setOpenConfirmDeleteTenant}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('Delete tenant')}: {selected.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {selected.hasPayments && (
+              <p className="text-sm text-destructive">{t('Warning: This tenant has recorded payments.')}</p>
+            )}
+            {selected.endDate && new Date(selected.terminationDate || selected.endDate) > new Date() && (
+              <p className="text-sm text-warning">{t('Warning: The lease is still active.')}</p>
+            )}
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            {!selected.hasPayments && selected.endDate && new Date(selected.terminationDate || selected.endDate) > new Date() && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={async () => {
+                  try {
+                    await saveMutation.mutateAsync({ _id: selected._id, terminationDate: new Date().toISOString() });
+                    await removeMutation.mutateAsync([selected._id]);
+                    setOpenConfirmDeleteTenant(false);
+                    router.back();
+                  } catch {
+                    toast.error(t('Something went wrong'));
+                  }
+                }}
+              >
+                {t('Terminate lease and delete')}
+              </Button>
+            )}
+            {!selected.hasPayments && (
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={async () => {
+                  await onDeleteTenant();
+                  setOpenConfirmDeleteTenant(false);
+                }}
+              >
+                {t('Delete anyway')}
+              </Button>
+            )}
+            {selected.hasPayments && (
+              <p className="text-sm text-muted-foreground">{t('Tenant cannot be deleted because some rents have been paid')}</p>
+            )}
+            <Button variant="ghost" className="w-full" onClick={() => setOpenConfirmDeleteTenant(false)}>
+              {t('Cancel')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Page>
   );
 }
