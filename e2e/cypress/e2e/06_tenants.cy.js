@@ -109,6 +109,7 @@ describe('Tenant Management', () => {
   it('Set property entry/exit dates', () => {
     if (tenants[0].lease?.properties?.length) {
       const prop = tenants[0].lease.properties[0];
+      cy.contains(t('Customize dates')).first().click();
       cy.get('input[name="properties.0.entryDate"]').clear().type(toISODate(prop.entryDate));
       cy.get('input[name="properties.0.exitDate"]').clear().type(toISODate(prop.exitDate));
     }

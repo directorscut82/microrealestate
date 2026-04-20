@@ -369,7 +369,7 @@ export async function remove(req: Req, res: Res) {
       (rent: AnyRecord) =>
         (rent.payments &&
           rent.payments.some((payment: AnyRecord) => payment.amount > 0)) ||
-        rent.discounts.some((discount: AnyRecord) => discount.origin === 'settlement')
+        (rent.discounts || []).some((discount: AnyRecord) => discount.origin === 'settlement')
     );
   });
 

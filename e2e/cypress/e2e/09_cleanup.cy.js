@@ -22,10 +22,10 @@ describe('Resource Cleanup & Empty States', () => {
   // Test 91
   it('Delete tenant', () => {
     cy.navAppMenu('tenants');
-    cy.searchResource(tenants[0].name);
     cy.openResource(tenants[0].name);
     cy.removeResource();
-    cy.contains(t('No tenants found'));
+    cy.get('[data-cy=tenantsPage]', { timeout: 10000 }).should('be.visible');
+    cy.contains(tenants[0].name).should('not.exist');
   });
 
   // Test 92
@@ -36,10 +36,10 @@ describe('Resource Cleanup & Empty States', () => {
   // Test 93
   it('Delete property', () => {
     cy.navAppMenu('properties');
-    cy.searchResource(properties[0].name);
     cy.openResource(properties[0].name);
     cy.removeResource();
-    cy.contains(t('No properties found'));
+    cy.get('[data-cy=propertiesPage]', { timeout: 10000 }).should('be.visible');
+    cy.contains(properties[0].name).should('not.exist');
   });
 
   // Test 94

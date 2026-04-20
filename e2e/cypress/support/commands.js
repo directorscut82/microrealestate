@@ -244,10 +244,13 @@ Cypress.Commands.add(
         cy.get(`input[name="properties.${index}.expenses.0.amount"]`).type(
           expense.amount
         );
-        cy.get(`input[name="properties.${index}.entryDate"]`).clear();
-        cy.get(`input[name="properties.${index}.entryDate"]`).type(toISODate(entryDate));
-        cy.get(`input[name="properties.${index}.exitDate"]`).clear();
-        cy.get(`input[name="properties.${index}.exitDate"]`).type(toISODate(exitDate));
+        if (entryDate || exitDate) {
+          cy.contains(i18n.getFixedT('fr-FR')('Customize dates')).first().click();
+          cy.get(`input[name="properties.${index}.entryDate"]`).clear();
+          cy.get(`input[name="properties.${index}.entryDate"]`).type(toISODate(entryDate));
+          cy.get(`input[name="properties.${index}.exitDate"]`).clear();
+          cy.get(`input[name="properties.${index}.exitDate"]`).type(toISODate(exitDate));
+        }
       });
     }
     cy.get('[data-cy=submit]').first().click();
@@ -366,10 +369,14 @@ Cypress.Commands.add('openResource', (resourceName) => {
 
 Cypress.Commands.add('removeResource', () => {
   cy.get('button[data-cy=removeResourceButton]').click();
-  cy.get('[role=dialog]')
-    .find('button')
-    .contains(i18n.getFixedT('fr-FR')('Continue'))
-    .click();
+  cy.get('[role=dialog]').then(($dialog) => {
+    const text = $dialog.text();
+    if (text.includes(i18n.getFixedT('fr-FR')('Delete anyway'))) {
+      cy.wrap($dialog).find('button').contains(i18n.getFixedT('fr-FR')('Delete anyway')).click();
+    } else {
+      cy.wrap($dialog).find('button').contains(i18n.getFixedT('fr-FR')('Continue')).click();
+    }
+  });
 });
 
 // Seed test data via API (bypasses UI, fast and reliable)
