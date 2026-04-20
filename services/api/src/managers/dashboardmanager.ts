@@ -49,10 +49,10 @@ export async function all(req: Req, res: Res) {
   let totalYearRevenues = 0;
 
   if (allTenants.length > 0) {
-    totalYearRevenues = allTenants.reduce((total: number, { rents }: AnyRecord) => {
+    totalYearRevenues = allTenants.reduce((total: number, { rents = [] }: AnyRecord) => {
       let sumPayments = 0;
       rents.forEach((rent: AnyRecord) => {
-        rent.payments.forEach((payment: AnyRecord) => {
+        (rent.payments || []).forEach((payment: AnyRecord) => {
           if (!payment.date || payment.amount === 0) {
             return;
           }
@@ -84,7 +84,7 @@ export async function all(req: Req, res: Res) {
     tenantCount || propertyCount
       ? activeTenants
           .reduce((acc: AnyRecord[], tenant: AnyRecord) => {
-            const currentRent = tenant.rents.find((rent: AnyRecord) => {
+            const currentRent = (tenant.rents || []).find((rent: AnyRecord) => {
               const termMoment = rent.term && moment(rent.term, 'YYYYMMDDHH');
               return (
                 termMoment &&
@@ -100,7 +100,7 @@ export async function all(req: Req, res: Res) {
               acc.push({
                 tenant: tenant.toObject ? tenant.toObject() : tenant,
                 balance:
-                  currentRent.total.payment - currentRent.total.grandTotal,
+                  (currentRent.total?.payment || 0) - (currentRent.total?.grandTotal || 0),
                 rent: currentRent
               });
             }
@@ -123,7 +123,7 @@ export async function all(req: Req, res: Res) {
     return acc;
   }, {});
   const revenues = Object.entries(
-    allTenants.reduce((acc: AnyRecord, { rents }: AnyRecord) => {
+    allTenants.reduce((acc: AnyRecord, { rents = [] }: AnyRecord) => {
       rents.forEach((rent: AnyRecord) => {
         const termMoment = moment(rent.term, 'YYYYMMDDHH');
         if (!termMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')) {
@@ -132,10 +132,10 @@ export async function all(req: Req, res: Res) {
         const key = termMoment.format('MMYYYY');
         const revenue = {
           month: key,
-          paid: rent.total.payment,
+          paid: rent.total?.payment || 0,
           notPaid:
-            rent.total.payment - rent.total.grandTotal < 0
-              ? rent.total.payment - rent.total.grandTotal
+            (rent.total?.payment || 0) - (rent.total?.grandTotal || 0) < 0
+              ? (rent.total?.payment || 0) - (rent.total?.grandTotal || 0)
               : 0
         };
         if (acc[key]) {
