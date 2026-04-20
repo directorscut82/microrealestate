@@ -77,7 +77,6 @@ export async function send(
   if (ALLOW_SENDING_EMAILS) {
     try {
       logger.debug('get email recipients');
-      logger.info(`data keys: ${JSON.stringify(Object.keys(data || {}))}, tenant contacts: ${JSON.stringify(data.tenant?.contacts?.map((c: any) => c.email))}, gmail selected: ${data.landlord?.thirdParties?.gmail?.selected}`);
       recipientsList = await EmailRecipients.build(
         locale,
         templateName,
@@ -90,7 +89,6 @@ export async function send(
       throw new ServiceError(`missing recipients for ${templateName}: ${(error as Error).message}`, 422);
     }
 
-    logger.info(`recipientsList length: ${recipientsList?.length}, data: ${JSON.stringify(recipientsList)}`);
 
     if (!recipientsList?.length) {
       throw new ServiceError(`missing recipient list for ${templateName}`, 422);

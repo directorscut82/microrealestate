@@ -1,4 +1,4 @@
-import { Collections, logger, Service } from '@microrealestate/common';
+import { Collections, logger, Service, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import axios from 'axios';
 import moment from 'moment';
@@ -103,6 +103,9 @@ async function _sendSms(
 export async function sendSmsOnly(req: Req, res: Res) {
   const realm = req.realm;
   const { tenantIds, terms, year, month, document } = req.body;
+  if (!tenantIds?.length) {
+    throw new ServiceError('tenantIds required', 422);
+  }
   const defaultTerm = moment(`${year}/${month}/01`, 'YYYY/MM/DD').format(
     'YYYYMMDDHH'
   );
@@ -125,7 +128,7 @@ export async function sendSmsOnly(req: Req, res: Res) {
     })
   );
 
-  if (statusList.some((s) => s.error)) {
+  if (statusList.some((s) => s.error || s.smsResults?.some((r: AnyRecord) => r.error))) {
     res.status(207).json(statusList);
   } else {
     res.json(statusList);

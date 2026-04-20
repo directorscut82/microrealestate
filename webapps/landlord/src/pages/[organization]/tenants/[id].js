@@ -190,7 +190,7 @@ function Tenant() {
     } catch {
       toast.error(t('Something went wrong'));
     }
-  }, [selected, queryClient, router, t]);
+  }, [selected._id, selected.archived, queryClient, router, t]);
 
   const showTerminateLeaseButton = useMemo(
     () =>
@@ -339,12 +339,12 @@ function Tenant() {
             {selected.hasPayments && (
               <p className="text-sm text-destructive">{t('Warning: This tenant has recorded payments.')}</p>
             )}
-            {selected.endDate && new Date(selected.terminationDate || selected.endDate) > new Date() && (
+            {selected.endDate && moment(selected.terminationDate || selected.endDate, 'DD/MM/YYYY').isAfter(moment()) && (
               <p className="text-sm text-warning">{t('Warning: The lease is still active.')}</p>
             )}
           </div>
           <DialogFooter className="flex-col gap-2 sm:flex-col">
-            {!selected.hasPayments && selected.endDate && new Date(selected.terminationDate || selected.endDate) > new Date() && (
+            {!selected.hasPayments && selected.endDate && moment(selected.terminationDate || selected.endDate, 'DD/MM/YYYY').isAfter(moment()) && (
               <Button
                 variant="outline"
                 className="w-full"
