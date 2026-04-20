@@ -57,6 +57,9 @@ export default function TenantListItem({ tenant }) {
             >
               {tenant.name}
             </Button>
+            {tenant.archived && (
+              <Badge variant="secondary" className="ml-1 text-xs">{t('Archived')}</Badge>
+            )}
             <div className="text-xs font-normal text-muted-foreground">
               {tenant.isCompany
                 ? _.startCase(_.capitalize(tenant.manager))

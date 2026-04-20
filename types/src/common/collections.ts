@@ -299,5 +299,6 @@ export namespace CollectionTypes {
     }[];
 
     stepperMode: boolean;
+    archived?: boolean;
   };
 }

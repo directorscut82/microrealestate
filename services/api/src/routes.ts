@@ -47,6 +47,8 @@ export default function routes(): express.Router {
     Middlewares.asyncWrapper(parseImportedPdf as any)
   );
   occupantsRouter.get('/', Middlewares.asyncWrapper(occupantManager.all as any));
+  occupantsRouter.put('/:id/archive', Middlewares.asyncWrapper(occupantManager.archive as any));
+  occupantsRouter.put('/:id/unarchive', Middlewares.asyncWrapper(occupantManager.unarchive as any));
   occupantsRouter.get('/:id', Middlewares.asyncWrapper(occupantManager.one as any));
   occupantsRouter.post('/', Middlewares.asyncWrapper(occupantManager.add as any));
   occupantsRouter.patch(

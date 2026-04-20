@@ -27,6 +27,7 @@ inclusion: always
 - **Extended tenant fields** — Co-tenants display (name + ΑΦΜ from PDF import), declaration number, amendment tracking, original lease start date, lease notes. Personal phone and email fields on tenant form.
 - **Delete tenant safety checks** — Block deletion if lease is still active or unpaid balance exists (in addition to existing paid rents check).
 - **Delete tenant options dialog** — When deleting, shows warnings (active lease, payments) and options: "Terminate lease and delete", "Delete anyway", or "Cancel".
+- **Tenant archive** — Archive instead of delete: archived tenants hidden from main list, visible via toggle. Payments can still be recorded on archived tenants. Unpaid balances visible in dashboard. E2E tested (6 tests).
 - **Separate SMS button on Rents page** — "Send SMS" button independent from email. Sends Greek rent notice SMS to all tenant phone numbers via SMS Gateway.
 - **Gmail port fix** — Changed from port 587 (STARTTLS, blocked in Docker) to port 465 (SSL).
 - **Emailer dev mode fix** — Dynamic imports in emailer used `.js` extension but dev mode runs `.ts` via tsx. Fixed to resolve both extensions.

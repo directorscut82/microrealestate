@@ -149,7 +149,8 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   ],
 
   // ui state
-  stepperMode: { type: Boolean, default: false }
+  stepperMode: { type: Boolean, default: false },
+  archived: { type: Boolean, default: false }
 });
 
 TenantSchema.index({ realmId: 1 });

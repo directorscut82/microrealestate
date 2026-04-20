@@ -430,7 +430,37 @@ export async function remove(req: Req, res: Res) {
 
 export async function all(req: Req, res: Res) {
   const tenants = await _fetchTenants(req.realm!._id);
-  res.json(tenants.map((tenant) => FD.toOccupantData(tenant)));
+  const includeArchived = req.query?.includeArchived === 'true';
+  const filtered = includeArchived
+    ? tenants
+    : tenants.filter((t) => !t.archived);
+  res.json(filtered.map((tenant) => FD.toOccupantData(tenant)));
+}
+
+export async function archive(req: Req, res: Res) {
+  const tenantId = req.params.id;
+  const tenant = await Collections.Tenant.findOneAndUpdate(
+    { _id: tenantId, realmId: req.realm!._id },
+    { $set: { archived: true } },
+    { new: true }
+  );
+  if (!tenant) {
+    throw new ServiceError('tenant not found', 404);
+  }
+  res.json({ status: 'archived' });
+}
+
+export async function unarchive(req: Req, res: Res) {
+  const tenantId = req.params.id;
+  const tenant = await Collections.Tenant.findOneAndUpdate(
+    { _id: tenantId, realmId: req.realm!._id },
+    { $set: { archived: false } },
+    { new: true }
+  );
+  if (!tenant) {
+    throw new ServiceError('tenant not found', 404);
+  }
+  res.json({ status: 'unarchived' });
 }
 
 export async function one(req: Req, res: Res) {
