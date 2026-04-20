@@ -73,13 +73,24 @@ export async function deleteProperty(ids) {
   await apiFetcher().delete(`/properties/${ids.join(',')}`);
 }
 
-export async function fetchTenants() {
-  const response = await apiFetcher().get('/tenants');
+export async function fetchTenants(includeArchived = false) {
+  const params = includeArchived ? '?includeArchived=true' : '';
+  const response = await apiFetcher().get(`/tenants${params}`);
   return response.data;
 }
 
 export async function fetchTenant(id) {
   const response = await apiFetcher().get(`/tenants/${id}`);
+  return response.data;
+}
+
+export async function archiveTenant(id) {
+  const response = await apiFetcher().put(`/tenants/${id}/archive`);
+  return response.data;
+}
+
+export async function unarchiveTenant(id) {
+  const response = await apiFetcher().put(`/tenants/${id}/unarchive`);
   return response.data;
 }
 

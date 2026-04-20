@@ -1,12 +1,14 @@
-import { fetchTenants, QueryKeys } from '../../../utils/restcalls';
+import { archiveTenant, fetchTenants, QueryKeys, unarchiveTenant } from '../../../utils/restcalls';
 import React, { useCallback, useContext, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import ImportTenantDialog from '../../../components/tenants/ImportTenantDialog';
 import { List } from '../../../components/ResourceList';
-import { LuFileUp, LuPlusCircle } from 'react-icons/lu';
+import { LuArchive, LuFileUp, LuPlusCircle } from 'react-icons/lu';
 import NewTenantDialog from '../../../components/tenants/NewTenantDialog';
 import Page from '../../../components/Page';
 import { StoreContext } from '../../../store';
+import { Switch } from '../../../components/ui/switch';
+import { Label } from '../../../components/ui/label';
 import TenantList from '../../../components/tenants/TenantList';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -79,12 +81,13 @@ function Tenants() {
   const { t } = useTranslation('common');
   const router = useRouter();
   const store = useContext(StoreContext);
-  const { isError, data, isLoading } = useQuery({
-    queryKey: [QueryKeys.TENANTS],
-    queryFn: () => fetchTenants()
-  });
   const [openNewTenantDialog, setOpenNewTenantDialog] = useState(false);
   const [openImportDialog, setOpenImportDialog] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const { isError, data, isLoading } = useQuery({
+    queryKey: [QueryKeys.TENANTS, showArchived],
+    queryFn: () => fetchTenants(showArchived)
+  });
 
   const onNewTenant = useCallback(() => {
     setOpenNewTenantDialog(true);
@@ -108,23 +111,37 @@ function Tenants() {
         ]}
         filterFn={_filterData}
         renderActions={() => (
-          <div className="flex gap-2 w-full">
-            <Button
-              variant="secondary"
-              className="flex-1 gap-2"
-              onClick={onNewTenant}
-            >
-              <LuPlusCircle className="size-4" />
-              {t('Add a tenant')}
-            </Button>
-            <Button
-              variant="secondary"
-              className="flex-1 gap-2"
-              onClick={onImportTenant}
-            >
-              <LuFileUp className="size-4" />
-              {t('Import PDF')}
-            </Button>
+          <div className="flex flex-col gap-2 w-full">
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                className="flex-1 gap-2"
+                onClick={onNewTenant}
+              >
+                <LuPlusCircle className="size-4" />
+                {t('Add a tenant')}
+              </Button>
+              <Button
+                variant="secondary"
+                className="flex-1 gap-2"
+                onClick={onImportTenant}
+              >
+                <LuFileUp className="size-4" />
+                {t('Import PDF')}
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="showArchived"
+                checked={showArchived}
+                onCheckedChange={setShowArchived}
+                data-cy="showArchivedToggle"
+              />
+              <Label htmlFor="showArchived" className="text-sm text-muted-foreground">
+                <LuArchive className="inline size-3 mr-1" />
+                {t('Show archived')}
+              </Label>
+            </div>
           </div>
         )}
         renderList={({ data }) => <TenantList tenants={data} />}

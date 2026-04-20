@@ -1,13 +1,17 @@
 import {
+  archiveTenant,
   createTenant,
   deleteTenant,
   fetchLeases,
   fetchProperties,
   fetchTenant,
   QueryKeys,
+  unarchiveTenant,
   updateTenant
 } from '../../../utils/restcalls';
 import {
+  LuArchive,
+  LuArchiveRestore,
   LuArrowLeft,
   LuHistory,
   LuPencil,
@@ -172,6 +176,22 @@ function Tenant() {
 
   const selected = tenant || {};
 
+  const onArchiveTenant = useCallback(async () => {
+    try {
+      if (selected.archived) {
+        await unarchiveTenant(selected._id);
+        toast.success(t('Tenant unarchived'));
+      } else {
+        await archiveTenant(selected._id);
+        toast.success(t('Tenant archived'));
+      }
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      router.back();
+    } catch {
+      toast.error(t('Something went wrong'));
+    }
+  }, [selected, queryClient, router, t]);
+
   const showTerminateLeaseButton = useMemo(
     () =>
       !!(
@@ -217,11 +237,17 @@ function Tenant() {
     <Page
       loading={tenantLoading}
       ActionBar={
-        <div className="grid grid-cols-5 gap-1.5 md:gap-4">
+        <div className="grid grid-cols-6 gap-1.5 md:gap-4">
           <ShortcutButton
             label={t('Back')}
             Icon={LuArrowLeft}
             onClick={handleBack}
+          />
+          <ShortcutButton
+            label={selected.archived ? t('Unarchive') : t('Archive')}
+            Icon={selected.archived ? LuArchiveRestore : LuArchive}
+            onClick={onArchiveTenant}
+            dataCy="archiveResourceButton"
           />
           <ShortcutButton
             label={t('Delete')}
