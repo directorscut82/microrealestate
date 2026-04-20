@@ -21,7 +21,7 @@ const schema = z.object({
   lastName: z.string().min(1),
   taxId: z.string().optional(),
   phone: z.string().optional(),
-  email: z.string().optional(),
+  email: z.string().email().or(z.literal('')).optional(),
   isCompany: z.string().min(1),
   legalRepresentative: z.string().optional(),
   legalStructure: z.string().optional(),

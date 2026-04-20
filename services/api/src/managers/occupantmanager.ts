@@ -365,7 +365,7 @@ export async function remove(req: Req, res: Res) {
   }
 
   const occupantsWithPaidRents = occupants.filter((occupant: AnyRecord) => {
-    return occupant.rents.some(
+    return (occupant.rents || []).some(
       (rent: AnyRecord) =>
         (rent.payments &&
           rent.payments.some((payment: AnyRecord) => payment.amount > 0)) ||
