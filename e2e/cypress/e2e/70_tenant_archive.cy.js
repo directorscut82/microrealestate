@@ -23,6 +23,7 @@ describe('Tenant Archive', { testIsolation: false }, () => {
       }]
     });
     cy.signIn(user);
+    cy.get('[data-cy=dashboardPage]', { timeout: 15000 }).should('be.visible');
   });
 
   it('Tenant visible in list', () => {

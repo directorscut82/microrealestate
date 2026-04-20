@@ -319,7 +319,8 @@ Cypress.Commands.add('selectByLabel', (labelText, optionText) => {
     .click({ force: true });
   // Wait for dropdown to open
   cy.get('[role="listbox"]', { timeout: 10000 }).should('be.visible');
-  cy.get('[role="option"]').contains(optionText).click({ force: true });
+  // Use contains on the listbox — retries the whole chain to pick up late-rendered options
+  cy.contains('[role="option"]', optionText, { timeout: 10000 }).click({ force: true });
   // Wait for dropdown to close
   cy.get('[role="listbox"]').should('not.exist');
 });
