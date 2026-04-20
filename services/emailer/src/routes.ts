@@ -90,7 +90,10 @@ export default function routes(): express.Router {
       }
       const realmId = String((req as any).realm?._id || req.headers.organizationid);
       const result = await sendSms(realmId, phoneNumber, text);
-      res.json(result || { message: 'SMS not configured' });
+      if (!result) {
+        throw new ServiceError('SMS gateway not configured', 503);
+      }
+      res.json(result);
     })
   );
 
