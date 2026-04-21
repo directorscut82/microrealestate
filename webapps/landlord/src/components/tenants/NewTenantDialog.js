@@ -171,7 +171,7 @@ export default function NewTenantDialog({ open, setOpen }) {
           <div className="pt-6 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">{t('Name')}</Label>
-              <Input id="name" {...register('name')} />
+              <Input id="name" value={watch('name')} onChange={(e) => setValue('name', e.target.value)} name="name" />
               {errors.name && (
                 <p className="text-sm text-destructive">{errors.name.message}</p>
               )}
