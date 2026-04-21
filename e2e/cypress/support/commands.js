@@ -119,8 +119,18 @@ Cypress.Commands.add(
   ({ name, type, description, surface, phone, digiCode, address, rent }) => {
     cy.get('[data-cy=shortcutAddProperty]', { timeout: 30000 }).should('be.visible').click({ force: true });
     cy.get('input[name=name]').should('be.visible');
-    cy.wait(500);
-    cy.get('input[name=name]').clear().type(name);
+    cy.wait(1000);
+    // Type and verify — retry if re-render cleared input
+    function typeName(attempt) {
+      cy.get('input[name=name]').clear().type(name);
+      cy.get('input[name=name]').invoke('val').then((val) => {
+        if (val !== name && attempt < 3) {
+          cy.wait(500);
+          typeName(attempt + 1);
+        }
+      });
+    }
+    typeName(0);
     cy.get('input[name=name]').should('have.value', name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
@@ -161,8 +171,14 @@ Cypress.Commands.add(
     cy.get('[data-cy=propertiesPage]').should('exist');
     cy.contains('button', i18n.getFixedT('fr-FR')('Add a property')).click();
     cy.get('input[name=name]').should('be.visible');
-    cy.wait(500);
-    cy.get('input[name=name]').clear().type(name);
+    cy.wait(1000);
+    function typePropertyName(attempt) {
+      cy.get('input[name=name]').clear().type(name);
+      cy.get('input[name=name]').invoke('val').then((val) => {
+        if (val !== name && attempt < 3) { cy.wait(500); typePropertyName(attempt + 1); }
+      });
+    }
+    typePropertyName(0);
     cy.get('input[name=name]').should('have.value', name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
@@ -205,8 +221,14 @@ Cypress.Commands.add(
     };
     cy.get('[data-cy=shortcutAddTenant]').click();
     cy.get('input[name=name]').should('be.visible');
-    cy.wait(500);
-    cy.get('input[name=name]').clear().type(name);
+    cy.wait(1000);
+    function typeTenantName(attempt) {
+      cy.get('input[name=name]').clear().type(name);
+      cy.get('input[name=name]').invoke('val').then((val) => {
+        if (val !== name && attempt < 3) { cy.wait(500); typeTenantName(attempt + 1); }
+      });
+    }
+    typeTenantName(0);
     cy.get('input[name=name]').should('have.value', name);
     cy.get('[data-cy=submitTenant]').click();
     if (isCompany) {
