@@ -122,8 +122,9 @@ export default function NewTenantDialog({ open, setOpen }) {
       try {
         const data = await mutation.mutateAsync(tenant);
         handleClose();
+        const orgName = store.organization.selected?.name || router.query.organization;
         await router.push(
-          `/${router.query.organization}/tenants/${data._id}`,
+          `/${orgName}/tenants/${data._id}`,
           undefined,
           { locale: store.organization.selected?.locale }
         );
@@ -175,9 +176,8 @@ export default function NewTenantDialog({ open, setOpen }) {
                 <p className="text-sm text-destructive">{errors.name.message}</p>
               )}
             </div>
-            {tenants?.length ? (
-              <>
-                <div className="flex items-center gap-2">
+            <div className={tenants?.length ? '' : 'hidden'}>
+              <div className="flex items-center gap-2">
                   <Switch
                     id="isCopyFrom"
                     checked={isCopyFrom}
@@ -189,7 +189,7 @@ export default function NewTenantDialog({ open, setOpen }) {
                     {t('Copy from an existing tenant')}
                   </Label>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 mt-4">
                   <Label>{t('Tenant')}</Label>
                   <Select
                     disabled={!isCopyFrom}
@@ -212,8 +212,7 @@ export default function NewTenantDialog({ open, setOpen }) {
                     </p>
                   )}
                 </div>
-              </>
-            ) : null}
+            </div>
           </div>
         </form>
       )}

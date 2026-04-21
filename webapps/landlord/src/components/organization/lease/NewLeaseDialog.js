@@ -53,8 +53,9 @@ export default function NewLeaseDialog({ open, setOpen }) {
           stepperMode: true
         });
         handleClose();
+        const orgName = store.organization.selected?.name || router.query.organization;
         await router.push(
-          `/${router.query.organization}/settings/contracts/${data._id}`,
+          `/${orgName}/settings/contracts/${data._id}`,
           undefined,
           { locale: store.organization.selected?.locale }
         );
