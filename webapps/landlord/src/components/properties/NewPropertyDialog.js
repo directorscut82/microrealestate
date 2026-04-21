@@ -84,8 +84,9 @@ export default function NewPropertyDialog({ open, setOpen }) {
 
         const data = await createMutation.mutateAsync(property);
         handleClose();
+        const orgName = store.organization.selected?.name || router.query.organization;
         await router.push(
-          `/${router.query.organization}/properties/${data._id}`,
+          `/${orgName}/properties/${data._id}`,
           undefined,
           { locale: store.organization.selected?.locale }
         );
@@ -135,10 +136,9 @@ export default function NewPropertyDialog({ open, setOpen }) {
                 <p className="text-sm text-destructive">{errors.name.message}</p>
               )}
             </div>
-            {properties?.length ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <Switch
+            <div className={properties?.length ? '' : 'hidden'}>
+              <div className="flex items-center gap-2">
+                <Switch
                     id="isCopyFrom"
                     checked={isCopyFrom}
                     onCheckedChange={(checked) =>
@@ -149,7 +149,7 @@ export default function NewPropertyDialog({ open, setOpen }) {
                     {t('Copy from an existing property')}
                   </Label>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 mt-4">
                   <Label>{t('Property')}</Label>
                   <Select
                     disabled={!isCopyFrom}
@@ -175,8 +175,7 @@ export default function NewPropertyDialog({ open, setOpen }) {
                     </p>
                   )}
                 </div>
-              </>
-            ) : null}
+            </div>
           </div>
         </form>
       )}
