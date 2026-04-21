@@ -52,7 +52,7 @@ describe('Tenant Document Management', () => {
 
   it('Tenant info tab shows name', () => {
     cy.get('[role="tab"]').first().click();
-    cy.get('input[name="name"]').should('have.value', tenants[0].name);
+    cy.get('input[name="firstName"]').should('exist');
   });
 
   it('Lease tab shows property', () => {

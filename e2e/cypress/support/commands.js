@@ -118,7 +118,10 @@ Cypress.Commands.add(
   'addPropertyFromStepper',
   ({ name, type, description, surface, phone, digiCode, address, rent }) => {
     cy.get('[data-cy=shortcutAddProperty]', { timeout: 30000 }).should('be.visible').click({ force: true });
-    cy.get('input[name=name]').type(name);
+    cy.get('input[name=name]').should('be.visible');
+    cy.wait(500);
+    cy.get('input[name=name]').clear().type(name);
+    cy.get('input[name=name]').should('have.value', name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
     cy.selectByLabel(
@@ -157,7 +160,10 @@ Cypress.Commands.add(
     cy.navAppMenu('properties');
     cy.get('[data-cy=propertiesPage]').should('exist');
     cy.contains('button', i18n.getFixedT('fr-FR')('Add a property')).click();
-    cy.get('input[name=name]').type(name);
+    cy.get('input[name=name]').should('be.visible');
+    cy.wait(500);
+    cy.get('input[name=name]').clear().type(name);
+    cy.get('input[name=name]').should('have.value', name);
     cy.get('[data-cy=submitProperty]').click();
     cy.contains(i18n.getFixedT('fr-FR')('Property information'));
     cy.selectByLabel(
@@ -198,7 +204,10 @@ Cypress.Commands.add(
       return `${year}-${month}-${day}`;
     };
     cy.get('[data-cy=shortcutAddTenant]').click();
-    cy.get('input[name=name]').type(name);
+    cy.get('input[name=name]').should('be.visible');
+    cy.wait(500);
+    cy.get('input[name=name]').clear().type(name);
+    cy.get('input[name=name]').should('have.value', name);
     cy.get('[data-cy=submitTenant]').click();
     if (isCompany) {
       cy.get('[data-cy=tenantIsBusinessAccount]').click();
@@ -245,7 +254,7 @@ Cypress.Commands.add(
           expense.amount
         );
         if (entryDate || exitDate) {
-          cy.contains(i18n.getFixedT('fr-FR')('Customize dates')).first().click();
+          cy.contains(i18n.getFixedT('fr-FR')('Customize dates')).last().click();
           cy.get(`input[name="properties.${index}.entryDate"]`).clear();
           cy.get(`input[name="properties.${index}.entryDate"]`).type(toISODate(entryDate));
           cy.get(`input[name="properties.${index}.exitDate"]`).clear();
@@ -312,17 +321,34 @@ Cypress.Commands.add('selectByName', (name, value) => {
 });
 
 Cypress.Commands.add('selectByLabel', (labelText, optionText) => {
-  cy.contains('label', labelText)
-    .parent()
-    .find('button[role="combobox"]')
-    .first()
-    .click({ force: true });
-  // Wait for dropdown to open
-  cy.get('[role="listbox"]', { timeout: 10000 }).should('be.visible');
-  // Use contains on the listbox — retries the whole chain to pick up late-rendered options
-  cy.contains('[role="option"]', optionText, { timeout: 10000 }).click({ force: true });
-  // Wait for dropdown to close
-  cy.get('[role="listbox"]').should('not.exist');
+  function trySelect(attempt) {
+    cy.contains('label', labelText)
+      .parent()
+      .find('button[role="combobox"]')
+      .first()
+      .scrollIntoView()
+      .click({ force: true });
+    cy.get('[role="listbox"]', { timeout: 10000 }).should('exist');
+    cy.get('body').then(($body) => {
+      const hasOption = $body.find('[role="option"]').filter((_, el) => el.textContent.includes(optionText)).length > 0;
+      if (!hasOption && attempt < 5) {
+        const optTexts = [];
+        $body.find('[role="option"]').each((_, el) => optTexts.push(el.textContent));
+        cy.log(`selectByLabel attempt ${attempt}: looking for "${optionText}", found: [${optTexts.join(' | ')}]`);
+        cy.get('body').type('{esc}');
+        cy.wait(2000);
+        trySelect(attempt + 1);
+      } else if (!hasOption) {
+        const optTexts = [];
+        $body.find('[role="option"]').each((_, el) => optTexts.push(el.textContent));
+        throw new Error(`selectByLabel: "${optionText}" not found after ${attempt} retries. Available options: [${optTexts.join(' | ')}]`);
+      } else {
+        cy.contains('[role="option"]', optionText, { timeout: 10000 }).click({ force: true });
+        cy.get('[role="listbox"]').should('not.exist');
+      }
+    });
+  }
+  trySelect(0);
 });
 
 Cypress.Commands.add('muiSelect', (name, value) => {

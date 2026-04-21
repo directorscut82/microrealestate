@@ -81,6 +81,7 @@ describe('Multi-Property Tenant & Expenses', () => {
       .first()
       .click({ force: true });
     cy.get('[role="option"]').contains(properties[1].name).click({ force: true });
+    cy.contains(i18n.getFixedT('fr-FR')('Customize dates')).last().click();
     cy.get('input[name="properties.1.entryDate"]').clear().type('2023-01-01');
     cy.get('input[name="properties.1.exitDate"]').clear().type('2031-12-31');
   });

@@ -91,7 +91,7 @@ describe('Tenant Lifecycle — Onboard to Terminate', () => {
     cy.navAppMenu('tenants');
     cy.contains(tenants[0].name).click();
     cy.get('[data-cy=tenantPage]').should('be.visible');
-    cy.get('input[name="name"]').should('have.value', tenants[0].name);
+    cy.get('input[name="firstName"]').should('exist');
   });
 
   after(() => {

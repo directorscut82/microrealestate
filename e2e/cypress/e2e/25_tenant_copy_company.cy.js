@@ -60,7 +60,8 @@ describe('Tenant Copy & Company Flows', () => {
   });
 
   it('Set new tenant name', () => {
-    cy.get('input[name=name]').type('Copie de ' + tenants[0].name);
+    cy.get('input[name=name]').clear().type('Copie de ' + tenants[0].name);
+    cy.get('input[name=name]').should('have.value', 'Copie de ' + tenants[0].name);
     cy.get('[data-cy=submitTenant]').click();
   });
 
