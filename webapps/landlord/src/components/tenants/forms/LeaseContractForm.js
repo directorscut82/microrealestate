@@ -135,7 +135,7 @@ function PropertyDates({ index, property, beginDate, endDate, readOnly, register
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground mt-2 mb-1">
+        <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground mt-2 mb-1" data-cy={`customizeDates-${index}`}>
           {open ? <LuChevronDown className="size-3 mr-1" /> : <LuChevronRight className="size-3 mr-1" />}
           {t('Customize dates')}
         </Button>
