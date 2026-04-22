@@ -194,8 +194,23 @@ finch restart microrealestate-landlord-frontend-1
 |-------|-------|--------|
 | 01-09 | 100 | ✅ Verified passing |
 | 10-17 | 57 | ✅ Verified passing |
-| 20-28 | 158 | ✅ Verified passing |
-| 30-67 | business logic, presence, multi-landlord, tenant portal. Total: 606 tests, all passing. Suites 10-17 (57 tests) verified passing. Suites 20-28: 158 tests, all passing. Suites 30-67: business logic, presence, multi-landlord, tenant portal. |
+| 20 | 22 | ✅ Passes, occasionally fails (selectByLabel timing) |
+| 21 | 19 | ✅ Verified passing (fixed: data-cy for Customize dates) |
+| 22-23 | 31 | ✅ Passes, 22 occasionally fails (selectByLabel timing) |
+| 24 | 7 | ✅ Verified passing (fixed: firstName field) |
+| 25 | 22 | ⚠️ 20/22 — "Copie de" name check fails when before hook has selectByLabel timing issue |
+| 26-27 | 42 | ✅ Verified passing |
+| 28 | 15 | ⚠️ Occasionally fails in before hook (selectByLabel timing) |
+| 30-42 | 129 | ✅ Verified passing |
+| 50-57 | 61 | ✅ Verified passing |
+| 58 | 14 | ✅ Verified passing |
+| 59 | 5 | ❌ 2/5 — pre-existing React hydration error #418 (not related to feature branch) |
+| 60-62 | 26 | ✅ Verified passing |
+| 63-68 | 30 | ✅ Verified passing |
+| 70 | 6 | ✅ Verified passing (archive feature) |
+
+### Non-deterministic selectByLabel failures
+Some suites (20, 22, 25, 27, 28) occasionally fail because the Radix Select dropdown opens before React Query data loads. The `selectByLabel` command retries up to 5 times (close/reopen), which helps but doesn't eliminate the issue. These suites pass on re-run.
 
 ## Before Running Suites 20-28
 
