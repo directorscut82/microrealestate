@@ -1,20 +1,29 @@
 ---
 inclusion: always
 ---
-# MRE — Current State (2026-04-19)
+# MRE — Current State (2026-04-22)
 
 ## Production Status
 - Production images built and running at `http://localhost:8080/landlord`
 - `.env` has `NODE_ENV=development` — change to `production` for prod compose
 - All 11 containers healthy in dev mode, 10 in prod (no resetservice)
 
-## App Code Bugs Fixed (6)
+## App Code Bugs Fixed (15)
 1. **Store reactivity** — useSyncExternalStore + subscribe/notify replacing counter hack
 2. **SSR crash in index.js** — getServerSideProps redirects instead of client-side router.push
 3. **Auth flow race condition** — withAuthentication reads from getStoreInstance() singleton
 4. **Locale lost on dialog navigation** — NewPropertyDialog, NewTenantDialog, NewLeaseDialog pass locale
 5. **First-access company data lost** — LandlordForm structures companyInfo for API
 6. **Presence API name "undefined"** — lookup name from realm members instead of JWT
+7. **Delete dialog date comparison** — `new Date('DD/MM/YYYY')` → `Invalid Date`. Fixed with `moment()`
+8. **SMS sendSmsOnly missing validation** — no `tenantIds` check could query all tenants. Added 422 error
+9. **SMS 207 status check** — didn't detect individual failures inside `smsResults`. Fixed
+10. **SMS route false success** — returned 200 OK when gateway not configured. Now returns 503
+11. **Dashboard null safety** — `rents`, `payments`, `total`, `discounts` could be undefined on seeded data
+12. **Dialog re-render character loss** — NewPropertyDialog/NewTenantDialog `useQuery` resolves during typing, causing JSX tree change that loses input characters. Fixed: hidden class instead of conditional render + controlled name input
+13. **Undefined org in dialog navigation** — `router.query.organization` can be undefined during client-side nav. Fixed: use `store.organization.selected?.name` as primary source
+14. **Tenant email validation** — accepted any string. Added `z.string().email().or(z.literal(''))`
+15. **occupant.rents null safety** — crash when `rents` is undefined in delete check
 
 ## New Features Built
 - **Presence awareness** — POST/GET /api/v2/presence/:type/:id, Redis 60s TTL, usePresence hook, PresenceBanner component
@@ -32,14 +41,25 @@ inclusion: always
 - **Gmail port fix** — Changed from port 587 (STARTTLS, blocked in Docker) to port 465 (SSL).
 - **Emailer dev mode fix** — Dynamic imports in emailer used `.js` extension but dev mode runs `.ts` via tsx. Fixed to resolve both extensions.
 
-## Test Coverage: 606 tests across 58 suites
-- **01-09** (100): Basic UI flows — auth, first access, navigation, CRUD, cleanup
-- **10-17** (57): Edit flows, lease toggle, payments, termination, delete integrity, validation, lifecycle, navigation freshness
-- **20-28** (158): Multi-entity, multi-property expenses, payment flows, termination flows, tenant documents, tenant copy, settings, edge cases, complete workflow
-- **30-42** (129): Rent lifecycle, multi-month payments, tenant lifecycle, property management, contract templates, landlord settings, billing, access control, dashboard accuracy, multi-org, rent computation, search/filter, navigation persistence
-- **50-57** (61): Business logic with actual numbers — rent amounts, balance carryover, overpayment credit, VAT computation, multiple expenses, payment history, rent change/termination, accounting totals
-- **58-62** (43): Multi-landlord isolation, tenant portal (old), tenant portal via OTP API, multi-landlord via seed API, presence awareness
-- **63-68** (30): Multi-property rent, multiple payment types, discount, guaranty deposit, combined VAT+expenses, referential integrity
+## Test Coverage: 583 tests across 59 suites
+- **Unit tests**: 61 passing (4 suites: contract, greekleaseparser, rent, computeRent)
+- **01-09** (100): Basic UI flows — auth, first access, navigation, CRUD, cleanup ✅
+- **10-17** (57): Edit flows, lease toggle, payments, termination, delete integrity, validation, lifecycle, navigation freshness ✅
+- **20-28** (158): Multi-entity, multi-property expenses, payment flows, termination flows, tenant documents, tenant copy, settings, edge cases, complete workflow — **mostly passing, 2-5 non-deterministic failures per run**
+- **30-42** (129): Rent lifecycle, multi-month payments, tenant lifecycle, property management, contract templates, landlord settings, billing, access control, dashboard accuracy, multi-org, rent computation, search/filter, navigation persistence ✅
+- **50-57** (61): Business logic with actual numbers — rent amounts, balance carryover, overpayment credit, VAT computation, multiple expenses, payment history, rent change/termination, accounting totals ✅
+- **58-62** (43): Multi-landlord isolation, tenant portal (old), tenant portal via OTP API, multi-landlord via seed API, presence awareness — **59 has pre-existing React hydration error**
+- **63-68** (30): Multi-property rent, multiple payment types, discount, guaranty deposit, combined VAT+expenses, referential integrity ✅
+- **70** (6): Tenant archive — archive, unarchive, toggle, badge ✅
+
+### Full run results (3 consecutive runs): 523, 540, 551 out of 583
+
+### Known non-deterministic failures
+The `selectByLabel` Cypress command occasionally fails when a Radix Select dropdown opens before React Query data has loaded. The retry logic (close/reopen up to 5 times) mitigates but doesn't eliminate this. Affected suites: 20, 22, 25, 27, 28. These pass on re-run.
+
+### Consistent failures
+- **Suite 59** (3/5 failing): React hydration error #418 in tenant portal. Pre-existing, not related to feature branch.
+- **Suite 25** (2/22 failing): "Copie de" tenant name not found in list — cascades from non-deterministic selectByLabel failure in before hook.
 
 ## Production Build Fixes
 - Missing tsconfig.json volume mounts for authenticator, emailer, pdfgenerator in dev compose
