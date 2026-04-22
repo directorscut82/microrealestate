@@ -276,8 +276,8 @@ Cypress.Commands.add(
           expense.amount
         );
         if (entryDate || exitDate) {
-          cy.contains(i18n.getFixedT('fr-FR')('Customize dates')).last().scrollIntoView().click({ force: true });
-          cy.get(`input[name="properties.${index}.entryDate"]`).should('be.visible').clear();
+          cy.get(`[data-cy=customizeDates-${index}]`).scrollIntoView().click();
+          cy.get(`input[name="properties.${index}.entryDate"]`, { timeout: 5000 }).should('exist').clear();
           cy.get(`input[name="properties.${index}.entryDate"]`).type(toISODate(entryDate));
           cy.get(`input[name="properties.${index}.exitDate"]`).clear();
           cy.get(`input[name="properties.${index}.exitDate"]`).type(toISODate(exitDate));
