@@ -1,4 +1,17 @@
-import { LeaseTimeRange, Locale, PaymentMethod, UserRole } from './index.js';
+import {
+  AllocationMethod,
+  ContractorSpecialty,
+  ExpenseType,
+  HeatingType,
+  LeaseTimeRange,
+  Locale,
+  PaymentMethod,
+  RepairCategory,
+  RepairStatus,
+  RepairUrgency,
+  UnitOwnerType,
+  UserRole
+} from './index.js';
 
 export type MongooseDocument<T> = {
   __v: number;
@@ -151,6 +164,8 @@ export namespace CollectionTypes {
     price: number;
     atakNumber?: string;
     dehNumber?: string;
+    buildingId?: string | Building;
+    electricitySupplyNumber?: string;
     energyCertificate?: {
       number: string;
       issueDate: Date;
@@ -300,5 +315,123 @@ export namespace CollectionTypes {
 
     stepperMode: boolean;
     archived?: boolean;
+  };
+
+  export type UnitOwner = {
+    type: UnitOwnerType;
+    percentage: number;
+    memberId?: string;
+    name?: string;
+    taxId?: string;
+    iban?: string;
+    phone?: string;
+    email?: string;
+  };
+
+  export type MonthlyCharge = {
+    _id: string;
+    term: number;
+    amount: number;
+    description: string;
+  };
+
+  export type BuildingUnit = {
+    _id: string;
+    atakNumber: string;
+    floor?: number;
+    unitLabel?: string;
+    surface?: number;
+    yearBuilt?: number;
+    electricitySupplyNumber?: string;
+    generalThousandths?: number;
+    heatingThousandths?: number;
+    elevatorThousandths?: number;
+    owners: UnitOwner[] | [];
+    propertyId?: string | Property;
+    isManaged: boolean;
+    monthlyCharges: MonthlyCharge[] | [];
+  };
+
+  export type CustomAllocation = {
+    propertyId: string;
+    value: number;
+  };
+
+  export type BuildingExpense = {
+    _id: string;
+    name: string;
+    type: ExpenseType;
+    amount: number;
+    allocationMethod: AllocationMethod;
+    customAllocations: CustomAllocation[] | [];
+    isRecurring: boolean;
+    startTerm?: number;
+    endTerm?: number;
+    notes?: string;
+  };
+
+  export type Contractor = {
+    _id: string;
+    name: string;
+    company?: string;
+    specialty: ContractorSpecialty;
+    phone?: string;
+    email?: string;
+    taxId?: string;
+    notes?: string;
+  };
+
+  export type Repair = {
+    _id: string;
+    title: string;
+    description?: string;
+    category: RepairCategory;
+    status: RepairStatus;
+    urgency: RepairUrgency;
+    reportedDate?: Date;
+    startDate?: Date;
+    completionDate?: Date;
+    estimatedCost?: number;
+    actualCost?: number;
+    isPaidFromRepairsFund: boolean;
+    contractorId?: string;
+    affectedUnitIds: string[] | [];
+    affectedArea?: string;
+    invoiceReference?: string;
+    notes?: string;
+  };
+
+  export type Building = {
+    _id: string;
+    realmId: string | Realm;
+    name: string;
+    description?: string;
+    address: PartAddress;
+    blockNumber?: string;
+    blockStreets: string[] | [];
+    atakPrefix: string;
+    yearBuilt?: number;
+    totalFloors?: number;
+    hasElevator: boolean;
+    hasCentralHeating: boolean;
+    heatingType?: HeatingType;
+    manager?: {
+      name: string;
+      phone?: string;
+      email?: string;
+      taxId?: string;
+      company?: string;
+    };
+    bankInfo?: {
+      name: string;
+      iban: string;
+    };
+    units: BuildingUnit[] | [];
+    expenses: BuildingExpense[] | [];
+    contractors: Contractor[] | [];
+    repairs: Repair[] | [];
+    notes?: string;
+    createdDate?: Date;
+    updatedDate?: Date;
   };
 }
