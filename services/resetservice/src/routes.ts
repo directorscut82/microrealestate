@@ -18,6 +18,7 @@ routes.delete(
         [
           'accounts',
           'contracts',
+          'buildings',
           'documents',
           'emails',
           'landloards',
@@ -46,7 +47,7 @@ routes.post(
   '/reset/seed',
   Middlewares.asyncWrapper(
     async (req: Express.Request, res: Express.Response) => {
-      const { user, org, leases = [], properties = [], tenants = [] } = req.body;
+      const { user, org, leases = [], properties = [], buildings = [], tenants = [] } = req.body;
 
       // Create account
       const account = await new Collections.Account({
@@ -98,6 +99,8 @@ routes.post(
           realmId,
           name: prop.name,
           type: prop.type || 'apartment',
+          atakNumber: prop.atakNumber || '',
+          electricitySupplyNumber: prop.electricitySupplyNumber || '',
           description: prop.description || '',
           surface: prop.surface || 0,
           phone: prop.phone || '',
@@ -106,6 +109,58 @@ routes.post(
           address: prop.address || {}
         }).save();
         createdProperties[prop.name] = created;
+      }
+
+      // Create buildings with units and expenses
+      const createdBuildings: Record<string, any> = {};
+      for (const bldg of buildings) {
+        const units = (bldg.units || []).map((unit: any) => {
+          const linkedProp = unit.propertyName
+            ? createdProperties[unit.propertyName]
+            : null;
+          return {
+            atakNumber: unit.atakNumber,
+            floor: unit.floor,
+            surface: unit.surface || 0,
+            yearBuilt: unit.yearBuilt,
+            generalThousandths: unit.generalThousandths || 0,
+            heatingThousandths: unit.heatingThousandths || 0,
+            elevatorThousandths: unit.elevatorThousandths || 0,
+            propertyId: linkedProp?._id || unit.propertyId || null,
+            isManaged: unit.isManaged !== false,
+            monthlyCharges: unit.monthlyCharges || []
+          };
+        });
+
+        const created = await new Collections.Building({
+          realmId,
+          name: bldg.name,
+          atakPrefix: bldg.atakPrefix,
+          address: bldg.address || {},
+          yearBuilt: bldg.yearBuilt,
+          totalFloors: bldg.totalFloors,
+          hasElevator: bldg.hasElevator || false,
+          hasCentralHeating: bldg.hasCentralHeating || false,
+          heatingType: bldg.heatingType,
+          units,
+          expenses: bldg.expenses || [],
+          contractors: bldg.contractors || [],
+          repairs: bldg.repairs || [],
+          createdDate: new Date(),
+          updatedDate: new Date()
+        }).save();
+
+        // Link properties back to building
+        for (const unit of units) {
+          if (unit.propertyId) {
+            await Collections.Property.findOneAndUpdate(
+              { _id: unit.propertyId, realmId },
+              { buildingId: String(created._id) }
+            );
+          }
+        }
+
+        createdBuildings[bldg.name] = created;
       }
 
       // Create tenants with lease assignments
@@ -163,6 +218,9 @@ routes.post(
         ),
         properties: Object.fromEntries(
           Object.entries(createdProperties).map(([k, v]) => [k, v._id])
+        ),
+        buildings: Object.fromEntries(
+          Object.entries(createdBuildings).map(([k, v]) => [k, v._id])
         ),
         tenants: createdTenants.map((t) => ({ id: t._id, name: t.name }))
       });

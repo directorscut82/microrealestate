@@ -85,6 +85,34 @@ function cleanCity(city: string): string {
     .trim();
 }
 
+// Determine if a parsed unit is a real building unit (not land)
+// Land plots have: no floor, no electricity, and are typically in ΠΙΝΑΚΑΣ 2.
+// Units that leaked from ΠΙΝΑΚΑΣ 2 or are land parcels in ΠΙΝΑΚΑΣ 1:
+//   - Have no floor number (null)
+//   - Have no electricity supply
+//   - Have zero building surface but may have land surface
+function isRealBuildingUnit(unit: {
+  floor: number | null;
+  isElectrified: boolean;
+  electricitySupplyNumber: string;
+  surface: number;
+}): boolean {
+  // A real building unit must have at least ONE of:
+  // - A floor number (even 0 = ground floor / ισόγειο)
+  // - Electricity supply (ΝΑΙ in the PDF)
+  // - An electricity supply number
+  const hasFloor = unit.floor !== null;
+  const hasElectricity = unit.isElectrified || !!unit.electricitySupplyNumber;
+
+  // If it has neither floor nor electricity, it's almost certainly land
+  if (!hasFloor && !hasElectricity) {
+    return false;
+  }
+
+  // Must have building surface > 0
+  return unit.surface > 0;
+}
+
 export function parseE9(text: string): ParsedE9Result {
   if (!text || !text.trim()) {
     return { owner: { taxId: '', lastName: '', firstName: '', fatherName: '' }, buildings: [], skippedLandPlots: 0 };
@@ -139,12 +167,15 @@ export function parseE9(text: string): ParsedE9Result {
     return { owner, buildings: [], skippedLandPlots: 0 };
   }
 
+  // Strictly bound ΠΙΝΑΚΑΣ 1 to end at ΠΙΝΑΚΑΣ 2 if it exists and comes after
   const table1Text = table2Start > table1Start
     ? t.substring(table1Start, table2Start)
     : t.substring(table1Start);
 
   // Parse property rows - look for ATAK patterns (6-digit + 5-digit number pairs)
   const units: ParsedE9Unit[] = [];
+  let skippedAsLand = 0;
+
   // Find all ATAK pairs first, then process each row between them
   const atakMatches: { index: number; prefix: string; suffix: string }[] = [];
   const atakRe = /\b(\d{6})\s+(\d{5})\b/g;
@@ -201,8 +232,8 @@ export function parseE9(text: string): ParsedE9Result {
     const blockMatch = rowText.match(/\b(\d{2,4})\b/);
     const blockNumber = blockMatch ? blockMatch[1] : '';
 
-    // Floor - single digit after block, before surface
-    const floorMatch = rowText.match(/\b(\d)\s+(\d)\s+([\d,]+)/);
+    // Floor - 1-2 digit number after block, before surface
+    const floorMatch = rowText.match(/\b(\d{1,2})\s+(\d)\s+([\d,]+)/);
     const floor = floorMatch ? parseInt(floorMatch[1], 10) : null;
 
     // Surface - Greek decimal like "72,00"
@@ -224,27 +255,32 @@ export function parseE9(text: string): ParsedE9Result {
     const isElectrified = /ΝΑΙ/i.test(rowText);
     const electricitySupplyNumber = electricityMatch ? electricityMatch[1] : '';
 
-    // Only include if has building data (surface > 0)
-    if (surface > 0) {
-      units.push({
-        atakNumber,
-        state,
-        municipality,
-        district,
-        street,
-        streetNumber,
-        zipCode,
-        blockNumber,
-        blockStreets: blockStreetsRaw,
-        floor,
-        surface,
-        auxSurface: 0, // Not clearly parsed from this format
-        landSurface: 0, // Separate field, skip for now
-        yearBuilt,
-        ownershipPercentage,
-        electricitySupplyNumber,
-        isElectrified
-      });
+    const parsedUnit = {
+      atakNumber,
+      state,
+      municipality,
+      district,
+      street,
+      streetNumber,
+      zipCode,
+      blockNumber,
+      blockStreets: blockStreetsRaw,
+      floor,
+      surface,
+      auxSurface: 0,
+      landSurface: 0,
+      yearBuilt,
+      ownershipPercentage,
+      electricitySupplyNumber,
+      isElectrified
+    };
+
+    // Filter: only include real building units, not land plots
+    if (isRealBuildingUnit(parsedUnit)) {
+      units.push(parsedUnit);
+    } else if (surface > 0) {
+      // Has surface but failed building check → likely land
+      skippedAsLand++;
     }
   }
 
@@ -288,7 +324,7 @@ export function parseE9(text: string): ParsedE9Result {
     });
   }
 
-  // Count skipped land plots (rough estimate - ΠΙΝΑΚΑΣ 2 entries)
+  // Count skipped land plots from ΠΙΝΑΚΑΣ 2 plus any filtered from ΠΙΝΑΚΑΣ 1
   const table2Entries = table2Start > 0
     ? (t.substring(table2Start).match(/\d{6}\s+\d{5}/g) || []).length
     : 0;
@@ -296,6 +332,6 @@ export function parseE9(text: string): ParsedE9Result {
   return {
     owner,
     buildings,
-    skippedLandPlots: table2Entries
+    skippedLandPlots: table2Entries + skippedAsLand
   };
 }

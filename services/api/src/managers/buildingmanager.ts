@@ -1,6 +1,7 @@
 import { Collections, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
+import type { ParsedE9Unit } from './e9parser.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -50,6 +51,27 @@ function _findBuilding(building: any, id: string) {
     throw new ServiceError('Building does not exist', 404);
   }
   return building;
+}
+
+// Infer property type from E9 parsed unit data
+function _inferPropertyType(unit: ParsedE9Unit): string {
+  // Ground floor (0) in Greece is often commercial
+  // But we default to apartment since E9 doesn't carry explicit type
+  if (unit.floor === 0) return 'store';
+  if (unit.floor !== null && unit.floor < 0) return 'parking';
+  return 'apartment';
+}
+
+// Find the realm member ID for a given email
+function _findMemberIdByEmail(
+  realm: any,
+  email: string
+): string | undefined {
+  if (!realm?.members) return undefined;
+  const member = (realm.members as any[]).find(
+    (m: any) => m.email === email
+  );
+  return member ? String(member._id) : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +312,10 @@ export async function importFromE9(req: Req, res: Res) {
   if (req.query.confirmed === 'true') {
     const createdBuildings = [];
 
+    // Resolve member ID from user email for ownership
+    const userEmail = (req as any).user?.email;
+    const memberId = _findMemberIdByEmail(realm, userEmail);
+
     for (const buildingData of parsed.buildings) {
       // Check if building exists
       let building = await Collections.Building.findOne({
@@ -317,6 +343,30 @@ export async function importFromE9(req: Req, res: Res) {
           updatedDate: new Date()
         });
         await building.save();
+      } else {
+        // Consolidate: merge incoming data into existing building
+        let updated = false;
+        const b = building as any;
+        if (buildingData.address?.street1 && !b.address?.street1) {
+          b.address = buildingData.address;
+          updated = true;
+        }
+        if (buildingData.yearBuilt && !b.yearBuilt) {
+          b.yearBuilt = buildingData.yearBuilt;
+          updated = true;
+        }
+        if (buildingData.blockNumber && !b.blockNumber) {
+          b.blockNumber = buildingData.blockNumber;
+          updated = true;
+        }
+        if (buildingData.blockStreets?.length && !b.blockStreets?.length) {
+          b.blockStreets = buildingData.blockStreets;
+          updated = true;
+        }
+        if (updated) {
+          b.updatedDate = new Date();
+          await building.save();
+        }
       }
 
       // Add units and create/link properties
@@ -337,7 +387,7 @@ export async function importFromE9(req: Req, res: Res) {
           property = await Collections.Property.create({
             realmId: realm!._id,
             name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${parsedUnit.floor != null ? 'Όροφος ' + parsedUnit.floor : 'Ισόγειο'}`,
-            type: 'apartment',
+            type: _inferPropertyType(parsedUnit),
             surface: parsedUnit.surface,
             atakNumber: parsedUnit.atakNumber,
             electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
@@ -359,7 +409,7 @@ export async function importFromE9(req: Req, res: Res) {
           owners: [{
             type: 'member',
             percentage: parsedUnit.ownershipPercentage,
-            memberId: (req as any).user?.email
+            memberId: memberId || userEmail
           }],
           propertyId: String(property._id),
           isManaged: true
