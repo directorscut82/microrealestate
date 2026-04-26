@@ -1,538 +1,347 @@
-import { computeRent } from '../businesslogic/index.js';
+import * as BL from '../businesslogic/index.js';
 
-// Factory functions for test data
-function makeContract(overrides = {}) {
-  return {
-    begin: new Date('2026-01-01'),
-    end: new Date('2026-12-31'),
-    frequency: 'months',
-    properties: [],
-    buildings: [],
-    vatRate: 0,
-    discount: 0,
-    rents: [],
-    ...overrides
-  };
-}
+describe('Building Charges Integration', () => {
+  const makeProperty = (propertyId, rent = 500) => ({
+    propertyId,
+    rent,
+    expenses: [],
+    entryDate: new Date('2024-01-01'),
+    exitDate: new Date('2024-12-31')
+  });
 
-function makeBuilding(overrides = {}) {
-  return {
+  const makeBuilding = (atakPrefix, units = [], expenses = []) => ({
     _id: 'building1',
-    realmId: 'realm1',
-    name: 'Building Test',
-    atakPrefix: '011172',
-    address: {
-      street1: 'Test St 1',
-      zipCode: '12345',
-      city: 'Test City',
-      state: 'Test State',
-      country: 'GR'
-    },
-    blockNumber: '58',
+    name: `Building ${atakPrefix}`,
+    atakPrefix,
+    units,
+    expenses,
+    address: {},
     blockStreets: [],
-    yearBuilt: 1985,
     hasElevator: false,
     hasCentralHeating: false,
-    units: [],
-    expenses: [],
     contractors: [],
-    repairs: [],
-    ...overrides
-  };
-}
+    repairs: []
+  });
 
-function makeUnit(overrides = {}) {
-  return {
+  const makeUnit = (propertyId, thousandths = {}) => ({
     _id: 'unit1',
-    atakNumber: '01117260169',
-    floor: 1,
-    surface: 72,
-    generalThousandths: 300,
-    heatingThousandths: 300,
-    elevatorThousandths: 0,
-    owners: [{ type: 'member', percentage: 100 }],
-    propertyId: 'prop1',
+    propertyId,
+    atakNumber: '01234567890',
     isManaged: true,
-    monthlyCharges: [],
-    ...overrides
-  };
-}
+    surface: 80,
+    generalThousandths: thousandths.general || 0,
+    heatingThousandths: thousandths.heating || 0,
+    elevatorThousandths: thousandths.elevator || 0,
+    owners: [],
+    monthlyCharges: []
+  });
 
-function makeProperty(overrides = {}) {
-  return {
-    propertyId: 'prop1',
-    rent: 500,
-    entryDate: new Date('2026-01-01'),
-    exitDate: new Date('2026-12-31'),
-    expenses: [],
-    property: {
-      _id: 'prop1',
-      name: 'Property 1',
-      price: 500
-    },
-    ...overrides
-  };
-}
-
-function makeExpense(overrides = {}) {
-  return {
-    _id: 'expense1',
-    name: 'Heating',
+  const makeExpense = (name, amount, method, overrides = {}) => ({
+    _id: 'exp1',
+    name,
     type: 'heating',
-    amount: 600,
-    allocationMethod: 'heating_thousandths',
-    customAllocations: [],
+    amount,
+    allocationMethod: method,
     isRecurring: true,
+    customAllocations: [],
     ...overrides
-  };
-}
+  });
 
-describe('Building charge computation', () => {
-  describe('thousandths allocation', () => {
-    it('should allocate heating expense by heating thousandths', () => {
-      const unit1 = makeUnit({
-        propertyId: 'prop1',
-        heatingThousandths: 300
-      });
-      const unit2 = makeUnit({
-        _id: 'unit2',
-        propertyId: 'prop2',
-        heatingThousandths: 700
-      });
+  const makeContract = (properties, buildings = []) => ({
+    begin: new Date('2024-01-01'),
+    end: new Date('2024-12-31'),
+    frequency: 'months',
+    properties,
+    buildings,
+    rents: []
+  });
 
-      const building = makeBuilding({
-        units: [unit1, unit2],
-        expenses: [
-          makeExpense({
-            name: 'Heating',
-            type: 'heating',
-            amount: 1000,
-            allocationMethod: 'heating_thousandths'
-          })
-        ]
-      });
+  describe('Allocation Methods', () => {
+    it('should compute general_thousandths correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { general: 300 });
+      const unit2 = { ...makeUnit('prop2', { general: 700 }), _id: 'unit2' };
 
-      const contract = makeContract({
-        properties: [
-          makeProperty({ propertyId: 'prop1' }),
-          makeProperty({ propertyId: 'prop2' })
-        ],
-        buildings: [building]
-      });
+      const expense = makeExpense('Cleaning', 1000, 'general_thousandths');
+      const building = makeBuilding('011172', [unit1, unit2], [expense]);
 
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
 
-      expect(rent.buildingCharges).toBeDefined();
-      expect(rent.buildingCharges?.length).toBe(2);
-
-      // Unit 1: 1000 * 300/1000 = 300
-      const charge1 = rent.buildingCharges?.find(
-        (c) => c.description === 'Heating'
-      );
-      expect(charge1).toBeDefined();
-
-      // Total charges should be 300 + 700 = 1000
-      const totalBuildingCharges = rent.buildingCharges.reduce(
-        (sum, c) => sum + c.amount,
-        0
-      );
-      expect(totalBuildingCharges).toBe(1000);
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(300); // 1000 * 300/1000
+      expect(rent.buildingCharges[0].description).toBe('Cleaning');
     });
 
-    it('should handle zero total thousandths gracefully', () => {
-      const unit1 = makeUnit({
-        propertyId: 'prop1',
-        heatingThousandths: 0
-      });
+    it('should compute heating_thousandths correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { heating: 400 });
+      const unit2 = { ...makeUnit('prop2', { heating: 600 }), _id: 'unit2' };
 
-      const building = makeBuilding({
-        units: [unit1],
-        expenses: [
-          makeExpense({
-            amount: 600,
-            allocationMethod: 'heating_thousandths'
-          })
-        ]
-      });
+      const expense = makeExpense('Heating', 600, 'heating_thousandths');
+      const building = makeBuilding('011172', [unit1, unit2], [expense]);
 
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
-      });
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
 
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      // Should not crash, charge should be 0
-      expect(rent.buildingCharges).toBeDefined();
-      expect(rent.buildingCharges?.length).toBe(0);
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(240); // 600 * 400/1000
     });
 
-    it('should allocate general expense by general thousandths', () => {
-      const unit1 = makeUnit({
-        propertyId: 'prop1',
-        generalThousandths: 500
-      });
+    it('should compute elevator_thousandths correctly (ground floor excluded)', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { elevator: 0 }); // Ground floor
+      const unit2 = { ...makeUnit('prop2', { elevator: 500 }), _id: 'unit2' };
+      const unit3 = { ...makeUnit('prop3', { elevator: 500 }), _id: 'unit3' };
 
-      const building = makeBuilding({
-        units: [unit1],
-        expenses: [
-          makeExpense({
-            name: 'Cleaning',
-            type: 'cleaning',
-            amount: 200,
-            allocationMethod: 'general_thousandths'
-          })
+      const expense = makeExpense('Elevator', 150, 'elevator_thousandths');
+      const building = makeBuilding('011172', [unit1, unit2, unit3], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(0); // Ground floor excluded (0 thousandths filtered out)
+    });
+
+    it('should compute equal allocation correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1');
+      const unit2 = { ...makeUnit('prop2'), _id: 'unit2' };
+      const unit3 = { ...makeUnit('prop3'), _id: 'unit3' };
+
+      const expense = makeExpense('Pest Control', 120, 'equal');
+      const building = makeBuilding('011172', [unit1, unit2, unit3], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(40); // 120 / 3
+    });
+
+    it('should compute by_surface allocation correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = { ...makeUnit('prop1'), surface: 80 };
+      const unit2 = { ...makeUnit('prop2'), _id: 'unit2', surface: 120 };
+
+      const expense = makeExpense('Insurance', 200, 'by_surface');
+      const building = makeBuilding('011172', [unit1, unit2], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(80); // 200 * 80/200
+    });
+
+    it('should compute fixed allocation correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1');
+
+      const expense = makeExpense('Special Assessment', 0, 'fixed', {
+        customAllocations: [{ propertyId: 'prop1', value: 250 }]
+      });
+      const building = makeBuilding('011172', [unit1], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(250);
+    });
+
+    it('should compute custom_ratio allocation correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1');
+      const unit2 = { ...makeUnit('prop2'), _id: 'unit2' };
+
+      const expense = makeExpense('Custom Expense', 600, 'custom_ratio', {
+        customAllocations: [
+          { propertyId: 'prop1', value: 2 },
+          { propertyId: 'prop2', value: 3 }
         ]
       });
+      const building = makeBuilding('011172', [unit1, unit2], [expense]);
 
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(240); // 600 * 2/5
+    });
+
+    it('should compute custom_percentage allocation correctly', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1');
+
+      const expense = makeExpense('Custom %', 1000, 'custom_percentage', {
+        customAllocations: [{ propertyId: 'prop1', value: 35 }]
       });
+      const building = makeBuilding('011172', [unit1], [expense]);
 
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
 
-      const cleaning = rent.buildingCharges?.find((c) => c.description === 'Cleaning');
-      expect(cleaning).toBeDefined();
-      // 200 * 500/500 = 200 (only one unit)
-      expect(cleaning?.amount).toBe(200);
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(350); // 1000 * 35/100
     });
   });
 
-  describe('equal allocation', () => {
-    it('should split expense equally among managed units', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1', isManaged: true });
-      const unit2 = makeUnit({
-        _id: 'unit2',
-        propertyId: 'prop2',
-        isManaged: true
-      });
-      const unit3 = makeUnit({
-        _id: 'unit3',
-        propertyId: 'prop3',
-        isManaged: false
-      });
+  describe('Term Filtering', () => {
+    it('should include recurring expense active for term', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { general: 1000 });
 
-      const building = makeBuilding({
-        units: [unit1, unit2, unit3],
-        expenses: [
-          makeExpense({
-            name: 'Pest Control',
-            type: 'pest_control',
-            amount: 100,
-            allocationMethod: 'equal'
-          })
-        ]
+      const expense = makeExpense('Heating', 600, 'general_thousandths', {
+        isRecurring: true,
+        startTerm: 2024010100,
+        endTerm: 2024120100
       });
+      const building = makeBuilding('011172', [unit1], [expense]);
 
-      const contract = makeContract({
-        properties: [
-          makeProperty({ propertyId: 'prop1' }),
-          makeProperty({ propertyId: 'prop2' })
-        ],
-        buildings: [building]
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/03/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(600);
+    });
+
+    it('should exclude expense before startTerm', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { general: 1000 });
+
+      const expense = makeExpense('Future Expense', 600, 'general_thousandths', {
+        startTerm: 2024060100
       });
+      const building = makeBuilding('011172', [unit1], [expense]);
 
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/03/2024 00:00', null);
 
-      // Should be split only between managed units (2), not unmanaged (1)
-      const charges = rent.buildingCharges.filter(
-        (c) => c.description === 'Pest Control'
-      );
-      expect(charges.length).toBe(2);
-      charges.forEach((c) => {
-        expect(c.amount).toBe(50); // 100 / 2 managed units
+      expect(rent.buildingCharges).toHaveLength(0);
+    });
+
+    it('should exclude expense after endTerm', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { general: 1000 });
+
+      const expense = makeExpense('Past Expense', 600, 'general_thousandths', {
+        endTerm: 2024020100
       });
+      const building = makeBuilding('011172', [unit1], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/03/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(0);
     });
   });
 
-  describe('by surface allocation', () => {
-    it('should allocate by surface area', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1', surface: 72 });
-      const unit2 = makeUnit({
-        _id: 'unit2',
-        propertyId: 'prop2',
-        surface: 48
-      });
-
-      const building = makeBuilding({
-        units: [unit1, unit2],
-        expenses: [
-          makeExpense({
-            name: 'Insurance',
-            type: 'insurance',
-            amount: 1200,
-            allocationMethod: 'by_surface'
-          })
-        ]
-      });
-
-      const contract = makeContract({
-        properties: [
-          makeProperty({ propertyId: 'prop1' }),
-          makeProperty({ propertyId: 'prop2' })
-        ],
-        buildings: [building]
-      });
-
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      const totalSurface = 72 + 48; // 120
-      const expected1 = (1200 * 72) / 120; // 720
-      const expected2 = (1200 * 48) / 120; // 480
-
-      const charges = rent.buildingCharges;
-      expect(charges.length).toBe(2);
-      expect(charges.reduce((sum, c) => sum + c.amount, 0)).toBe(1200);
-    });
-  });
-
-  describe('custom allocation', () => {
-    it('should use custom ratio allocation', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1' });
-      const unit2 = makeUnit({ _id: 'unit2', propertyId: 'prop2' });
-
-      const building = makeBuilding({
-        units: [unit1, unit2],
-        expenses: [
-          makeExpense({
-            name: 'Special Assessment',
-            type: 'other',
-            amount: 1000,
-            allocationMethod: 'custom_ratio',
-            customAllocations: [
-              { propertyId: 'prop1', value: 2 },
-              { propertyId: 'prop2', value: 3 }
-            ]
-          })
-        ]
-      });
-
-      const contract = makeContract({
-        properties: [
-          makeProperty({ propertyId: 'prop1' }),
-          makeProperty({ propertyId: 'prop2' })
-        ],
-        buildings: [building]
-      });
-
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      // Ratio 2:3 means unit1 gets 2/(2+3) = 40%, unit2 gets 3/(2+3) = 60%
-      const charges = rent.buildingCharges;
-      expect(charges.length).toBe(2);
-      expect(charges.reduce((sum, c) => sum + c.amount, 0)).toBe(1000);
-    });
-
-    it('should use custom percentage allocation', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1' });
-      const unit2 = makeUnit({ _id: 'unit2', propertyId: 'prop2' });
-
-      const building = makeBuilding({
-        units: [unit1, unit2],
-        expenses: [
-          makeExpense({
-            name: 'Custom Charge',
-            type: 'other',
-            amount: 500,
-            allocationMethod: 'custom_percentage',
-            customAllocations: [
-              { propertyId: 'prop1', value: 30 },
-              { propertyId: 'prop2', value: 70 }
-            ]
-          })
-        ]
-      });
-
-      const contract = makeContract({
-        properties: [
-          makeProperty({ propertyId: 'prop1' }),
-          makeProperty({ propertyId: 'prop2' })
-        ],
-        buildings: [building]
-      });
-
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      const charges = rent.buildingCharges;
-      expect(charges.length).toBe(2);
-      // Should be exactly 30% and 70%
-      expect(charges.reduce((sum, c) => sum + c.amount, 0)).toBe(500);
-    });
-  });
-
-  describe('monthly charges', () => {
-    it('should add monthly charges for specific term', () => {
-      const unit1 = makeUnit({
-        propertyId: 'prop1',
+  describe('Monthly Charges', () => {
+    it('should include monthly charge for matching term', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = {
+        ...makeUnit('prop1'),
         monthlyCharges: [
-          {
-            _id: 'charge1',
-            term: 2026010100, // January 2026
-            amount: 80,
-            description: 'Extra charge'
-          }
+          { _id: 'charge1', term: 2024030100, amount: 80, description: 'Κοινόχρηστα Μαρτίου' }
         ]
-      });
+      };
 
-      const building = makeBuilding({ units: [unit1] });
+      const building = makeBuilding('011172', [unit1], []);
 
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
-      });
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/03/2024 00:00', null);
 
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      const monthlyCharge = rent.buildingCharges?.find(
-        (c) => c.description === 'Extra charge'
-      );
-      expect(monthlyCharge).toBeDefined();
-      expect(monthlyCharge?.amount).toBe(80);
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(80);
+      expect(rent.buildingCharges[0].description).toBe('Κοινόχρηστα Μαρτίου');
     });
 
-    it('should not add monthly charges for different term', () => {
-      const unit1 = makeUnit({
-        propertyId: 'prop1',
+    it('should not include monthly charge for different term', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = {
+        ...makeUnit('prop1'),
         monthlyCharges: [
-          {
-            _id: 'charge1',
-            term: 2026020100, // February 2026
-            amount: 80,
-            description: 'February charge'
-          }
+          { _id: 'charge1', term: 2024040100, amount: 80, description: 'Απριλίου' }
         ]
-      });
+      };
 
-      const building = makeBuilding({ units: [unit1] });
+      const building = makeBuilding('011172', [unit1], []);
 
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
-      });
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/03/2024 00:00', null);
 
-      // Compute rent for January
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      const monthlyCharge = rent.buildingCharges?.find(
-        (c) => c.description === 'February charge'
-      );
-      expect(monthlyCharge).toBeUndefined();
+      expect(rent.buildingCharges).toHaveLength(0);
     });
   });
 
-  describe('expense term filtering', () => {
-    it('should include recurring expenses without start/end terms', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1' });
-      const building = makeBuilding({
-        units: [unit1],
-        expenses: [
-          makeExpense({
-            isRecurring: true,
-            startTerm: undefined,
-            endTerm: undefined
-          })
-        ]
-      });
+  describe('Total Integration', () => {
+    it('should add building charges to total charges', () => {
+      const prop1 = makeProperty('prop1', 500);
+      prop1.property = { name: 'Property 1' };
+      prop1.expenses = [{ title: 'Property Expense', amount: 50, beginDate: '01/01/2024', endDate: '31/12/2024' }];
 
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
-      });
+      const unit1 = makeUnit('prop1', { general: 1000 });
+      const expense = makeExpense('Building Expense', 100, 'general_thousandths');
+      const building = makeBuilding('011172', [unit1], [expense]);
 
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      expect(rent.buildingCharges?.length).toBeGreaterThan(0);
-    });
-
-    it('should exclude expenses before start term', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1' });
-      const building = makeBuilding({
-        units: [unit1],
-        expenses: [
-          makeExpense({
-            isRecurring: true,
-            startTerm: 2026020100 // Starts February
-          })
-        ]
-      });
-
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
-      });
-
-      // Compute rent for January - should not include expense
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      expect(rent.buildingCharges?.length).toBe(0);
-    });
-
-    it('should exclude expenses after end term', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1' });
-      const building = makeBuilding({
-        units: [unit1],
-        expenses: [
-          makeExpense({
-            isRecurring: true,
-            endTerm: 2025123100 // Ended December 2025
-          })
-        ]
-      });
-
-      const contract = makeContract({
-        properties: [makeProperty({ propertyId: 'prop1' })],
-        buildings: [building]
-      });
-
-      // Compute rent for January 2026 - should not include expense
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      expect(rent.buildingCharges?.length).toBe(0);
-    });
-  });
-
-  describe('total computation', () => {
-    it('should include building charges in total charges', () => {
-      const unit1 = makeUnit({ propertyId: 'prop1', generalThousandths: 1000 });
-      const building = makeBuilding({
-        units: [unit1],
-        expenses: [
-          makeExpense({
-            name: 'Cleaning',
-            amount: 100,
-            allocationMethod: 'general_thousandths'
-          })
-        ]
-      });
-
-      const contract = makeContract({
-        properties: [
-          makeProperty({
-            propertyId: 'prop1',
-            rent: 500,
-            expenses: [
-              {
-                title: 'Property Expense',
-                amount: 50,
-                beginDate: new Date('2026-01-01'),
-                endDate: new Date('2026-12-31')
-              }
-            ]
-          })
-        ],
-        buildings: [building]
-      });
-
-      const rent = computeRent(contract, '01/01/2026 00:00', null);
-
-      // Verify building charges exist
-      expect(rent.buildingCharges?.length).toBeGreaterThan(0);
-
-      // Property-level charges: 50
-      // Building charges: 100
-      // Total charges: 150
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+      // Total charges = property expense (50) + building charge (100)
       expect(rent.total.charges).toBe(150);
+      expect(rent.total.grandTotal).toBe(650); // rent (500) + charges (150)
+    });
+
+    it('should combine multiple building expenses', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { general: 500, heating: 500 });
+      const unit2 = { ...makeUnit('prop2', { general: 500, heating: 500 }), _id: 'unit2' };
+
+      const expense1 = makeExpense('Cleaning', 200, 'general_thousandths');
+      const expense2 = { ...makeExpense('Heating', 600, 'heating_thousandths'), _id: 'exp2' };
+      const building = makeBuilding('011172', [unit1, unit2], [expense1, expense2]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(2);
+      // prop1 gets: 200 * 500/1000 (cleaning) + 600 * 500/1000 (heating) = 100 + 300 = 400
+      expect(rent.total.charges).toBe(400);
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle property not linked to building', () => {
+      const prop1 = makeProperty('prop1', 500);
+
+      const contract = makeContract([prop1], []); // No buildings
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toBeUndefined();
+      expect(rent.total.charges).toBe(0);
+    });
+
+    it('should handle zero thousandths (unallocated unit)', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1', { general: 0 });
+
+      const expense = makeExpense('Cleaning', 1000, 'general_thousandths');
+      const building = makeBuilding('011172', [unit1], [expense]);
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(0); // Zero amounts are filtered out
+    });
+
+    it('should handle building with no expenses', () => {
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = makeUnit('prop1');
+      const building = makeBuilding('011172', [unit1], []); // No expenses
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toEqual([]);
     });
   });
 });
