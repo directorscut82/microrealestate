@@ -104,13 +104,32 @@ export function parseE9(text: string): ParsedE9Result {
     fatherName: ''
   };
 
-  // Extract owner info - appears in table header
-  const afmMatch = t.match(/ΑΦΜ\s+ΕΠΩΝΥΜΟ\s+ή\s+ΕΠΩΝΥΜΙΑ\s+ΟΝΟΜΑ\s+ΠΑΤΡΩΝΥΜΟ\s+(\d+)\s+([Α-ΖΑ-Ωα-ωA-Z]+)\s+([Α-ΖΑ-Ωα-ωA-Z]+)\s+([Α-ΖΑ-Ωα-ωA-Z]+)/i);
-  if (afmMatch) {
-    owner.taxId = afmMatch[1];
-    owner.lastName = afmMatch[2];
-    owner.firstName = afmMatch[3];
-    owner.fatherName = afmMatch[4];
+  // Extract owner info from the ΣΤΟΙΧΕΙΑ ΤΟΥ ΥΠΟΧΡΕΟΥ section.
+  // AADE E9 PDFs vary in text extraction order. Two known formats:
+  //   Format A: ...ΕΠΩΝΥΜΙΑ <father> <first> <last> <taxId>...
+  //   Format B: ...ΠΑΤΡΩΝΥΜΟ <taxId> <last> <first> <father>...
+  const GK = '[Α-ΩΆ-Ώα-ωά-ώA-Z]+';
+  const ownerA = t.match(
+    new RegExp(`ΕΠΩΝΥΜΟ\\s+ή\\s+ΕΠΩΝΥΜΙΑ\\s+(${GK})\\s+(${GK})\\s+(${GK})\\s+(\\d{9})`)
+  );
+  const ownerB = t.match(
+    new RegExp(`ΑΦΜ\\s+ΕΠΩΝΥΜΟ\\s+ή\\s+ΕΠΩΝΥΜΙΑ\\s+ΟΝΟΜΑ\\s+ΠΑΤΡΩΝΥΜΟ\\s+(\\d{9})\\s+(${GK})\\s+(${GK})\\s+(${GK})`)
+  );
+  if (ownerA) {
+    owner.fatherName = ownerA[1];
+    owner.firstName = ownerA[2];
+    owner.lastName = ownerA[3];
+    owner.taxId = ownerA[4];
+  } else if (ownerB) {
+    owner.taxId = ownerB[1];
+    owner.lastName = ownerB[2];
+    owner.firstName = ownerB[3];
+    owner.fatherName = ownerB[4];
+  }
+  // Fallback: grab tax ID from page-2 header if still missing
+  if (!owner.taxId) {
+    const afmAlt = t.match(/ΑΦΜ\s+υπόχρεου\s*:\s*(\d+)/);
+    if (afmAlt) owner.taxId = afmAlt[1];
   }
 
   // Extract ΠΙΝΑΚΑΣ 1 section (properties with buildings)
@@ -128,7 +147,7 @@ export function parseE9(text: string): ParsedE9Result {
   const units: ParsedE9Unit[] = [];
   // Find all ATAK pairs first, then process each row between them
   const atakMatches: { index: number; prefix: string; suffix: string }[] = [];
-  const atakRe = /(\d{6})\s+(\d{5})/g;
+  const atakRe = /\b(\d{6})\s+(\d{5})\b/g;
   let m;
   while ((m = atakRe.exec(table1Text)) !== null) {
     atakMatches.push({ index: m.index, prefix: m[1], suffix: m[2] });
