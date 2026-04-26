@@ -1,5 +1,6 @@
 import { Collections, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import { parseE9 } from './e9parser.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -191,11 +192,124 @@ export async function remove(req: Req, res: Res) {
 // E9 PDF Import (stub — full parser in Task 6)
 // ---------------------------------------------------------------------------
 
+async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const data = new Uint8Array(buffer);
+  const doc = await getDocument({ data }).promise;
+  let fullText = '';
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    fullText +=
+      content.items.map((item: any) => item.str).join(' ') +
+      '\n--- PAGE BREAK ---\n';
+  }
+  return fullText;
+}
+
 export async function importFromE9(req: Req, res: Res) {
-  throw new ServiceError(
-    'E9 PDF import is not yet implemented',
-    501
-  );
+  const realm = req.realm;
+  const file = (req as any).file;
+
+  if (!file) {
+    throw new ServiceError('PDF file is required', 422);
+  }
+
+  // Extract and parse PDF
+  const text = await extractTextFromPdf(file.buffer);
+  const parsed = parseE9(text);
+
+  if (!parsed.owner.taxId) {
+    throw new ServiceError('Could not parse owner information from E9 PDF', 422);
+  }
+
+  if (parsed.buildings.length === 0) {
+    throw new ServiceError('No buildings found in E9 PDF', 422);
+  }
+
+  // Build preview response
+  const preview = {
+    owner: parsed.owner,
+    buildings: await Promise.all(
+      parsed.buildings.map(async (building) => {
+        // Check if building already exists
+        const existing = await Collections.Building.findOne({
+          realmId: realm!._id,
+          atakPrefix: building.atakPrefix
+        }).lean();
+
+        // Check which units can be matched to existing properties
+        const unitPreviews = await Promise.all(
+          building.units.map(async (unit) => {
+            const existingProperty = await Collections.Property.findOne({
+              realmId: realm!._id,
+              atakNumber: unit.atakNumber
+            }).lean();
+
+            return {
+              ...unit,
+              existingPropertyId: existingProperty?._id || null,
+              existingPropertyName: existingProperty?.name || null
+            };
+          })
+        );
+
+        return {
+          ...building,
+          existingBuildingId: existing?._id || null,
+          existingBuildingName: existing?.name || null,
+          units: unitPreviews
+        };
+      })
+    ),
+    skippedLandPlots: parsed.skippedLandPlots
+  };
+
+  // If confirmed=true query param, actually create/update
+  if (req.query.confirmed === 'true') {
+    const createdBuildings = [];
+
+    for (const buildingData of parsed.buildings) {
+      // Check if building exists
+      let building = await Collections.Building.findOne({
+        realmId: realm!._id,
+        atakPrefix: buildingData.atakPrefix
+      });
+
+      if (!building) {
+        // Create new building
+        building = new Collections.Building({
+          realmId: realm!._id,
+          name: buildingData.address.street1,
+          atakPrefix: buildingData.atakPrefix,
+          address: buildingData.address,
+          blockNumber: buildingData.blockNumber,
+          blockStreets: buildingData.blockStreets,
+          yearBuilt: buildingData.yearBuilt,
+          hasElevator: false,
+          hasCentralHeating: false,
+          units: [],
+          expenses: [],
+          contractors: [],
+          repairs: [],
+          createdDate: new Date(),
+          updatedDate: new Date()
+        });
+        await building.save();
+      }
+
+      // TODO: Add units to building, create/link properties
+      // This requires more complex logic for merging member ownership
+
+      createdBuildings.push(building.toObject());
+    }
+
+    const result = await _toBuildingData(realm!._id, createdBuildings);
+    return res.json({ created: true, buildings: result });
+  }
+
+  // Return preview
+  return res.json({ preview: true, ...preview });
 }
 
 // ---------------------------------------------------------------------------
