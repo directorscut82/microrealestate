@@ -306,9 +306,14 @@ export async function update(req: Req, res: Res) {
     try {
       const termFrequency = newOccupant.frequency || 'months';
 
+      // Fetch buildings for both old and new properties to cover property changes
+      const allPropertyIds = [...new Set([
+        ...originalOccupant.properties.map((p: AnyRecord) => p.propertyId),
+        ...newOccupant.properties.map((p: AnyRecord) => p.propertyId)
+      ])];
       const buildings = await _fetchBuildingsForProperties(
         realm!._id,
-        originalOccupant.properties
+        allPropertyIds.map((id: string) => ({ propertyId: id }))
       );
 
       const contract = {

@@ -298,8 +298,55 @@ export async function importFromE9(req: Req, res: Res) {
         await building.save();
       }
 
-      // TODO: Add units to building, create/link properties
-      // This requires more complex logic for merging member ownership
+      // Add units and create/link properties
+      for (const parsedUnit of buildingData.units) {
+        // Check if unit already exists in building (by ATAK)
+        const existingUnit = (building as any).units.find(
+          (u: any) => u.atakNumber === parsedUnit.atakNumber
+        );
+        if (existingUnit) continue;
+
+        // Find or create the Property record
+        let property = await Collections.Property.findOne({
+          realmId: realm!._id,
+          atakNumber: parsedUnit.atakNumber
+        });
+
+        if (!property) {
+          property = await Collections.Property.create({
+            realmId: realm!._id,
+            name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${parsedUnit.floor != null ? 'Όροφος ' + parsedUnit.floor : 'Ισόγειο'}`,
+            type: 'apartment',
+            surface: parsedUnit.surface,
+            atakNumber: parsedUnit.atakNumber,
+            electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
+            buildingId: String(building!._id),
+            address: buildingData.address
+          });
+        } else {
+          property.buildingId = String(building!._id) as any;
+          property.electricitySupplyNumber = parsedUnit.electricitySupplyNumber as any;
+          await property.save();
+        }
+
+        (building as any).units.push({
+          atakNumber: parsedUnit.atakNumber,
+          floor: parsedUnit.floor,
+          surface: parsedUnit.surface,
+          yearBuilt: parsedUnit.yearBuilt,
+          electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
+          owners: [{
+            type: 'member',
+            percentage: parsedUnit.ownershipPercentage,
+            memberId: (req as any).user?.email
+          }],
+          propertyId: String(property._id),
+          isManaged: true
+        });
+      }
+
+      (building as any).updatedDate = new Date();
+      await building!.save();
 
       createdBuildings.push(building.toObject());
     }

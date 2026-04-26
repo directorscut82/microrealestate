@@ -317,7 +317,7 @@ describe('Building Charges Integration', () => {
       const contract = makeContract([prop1], []); // No buildings
       const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
 
-      expect(rent.buildingCharges).toBeUndefined();
+      expect(rent.buildingCharges).toEqual([]);
       expect(rent.total.charges).toBe(0);
     });
 
@@ -337,6 +337,127 @@ describe('Building Charges Integration', () => {
       const prop1 = makeProperty('prop1', 500);
       const unit1 = makeUnit('prop1');
       const building = makeBuilding('011172', [unit1], []); // No expenses
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toEqual([]);
+    });
+  });
+
+  describe('Multi-property and multi-building scenarios', () => {
+    it('should compute charges for two properties in the same building', () => {
+      const prop1 = makeProperty('propA', 500);
+      const prop2 = makeProperty('propB', 400);
+      const unit1 = makeUnit('propA', { general: 600 });
+      const unit2 = { ...makeUnit('propB', { general: 400 }), _id: 'unit2' };
+      const expense = makeExpense('Cleaning', 200, 'general_thousandths');
+      const building = makeBuilding('012345', [unit1, unit2], [expense]);
+
+      const contract = makeContract([prop1, prop2], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(2);
+      expect(rent.buildingCharges[0].amount).toBe(120); // 200 * 600/1000
+      expect(rent.buildingCharges[1].amount).toBe(80);  // 200 * 400/1000
+    });
+
+    it('should compute charges for properties across different buildings', () => {
+      const prop1 = makeProperty('propA', 500);
+      const prop2 = makeProperty('propB', 400);
+      const unit1 = makeUnit('propA', { general: 500 });
+      const unit2 = { ...makeUnit('propB', { general: 300 }), _id: 'unit2' };
+      const expense1 = makeExpense('Heating', 600, 'general_thousandths');
+      const expense2 = makeExpense('Elevator', 300, 'general_thousandths');
+      const building1 = makeBuilding('012345', [unit1], [expense1]);
+      const building2 = { ...makeBuilding('067890', [unit2], [expense2]), _id: 'building2' };
+
+      const contract = makeContract([prop1, prop2], [building1, building2]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(2);
+      // Building1: 600 * 500/500 = 600 (only unit)
+      expect(rent.buildingCharges[0].amount).toBe(600);
+      expect(rent.buildingCharges[0].buildingName).toBe('Building 012345');
+      // Building2: 300 * 300/300 = 300 (only unit)
+      expect(rent.buildingCharges[1].amount).toBe(300);
+      expect(rent.buildingCharges[1].buildingName).toBe('Building 067890');
+    });
+  });
+
+  describe('Term boundary conditions', () => {
+    it('should include expense exactly on startTerm', () => {
+      const prop1 = makeProperty('propA');
+      const unit1 = makeUnit('propA', { general: 1000 });
+      const expense = makeExpense('Insurance', 1200, 'general_thousandths');
+      expense.startTerm = 2024010100; // exact match
+      const building = makeBuilding('012345', [unit1], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(1200);
+    });
+
+    it('should include expense exactly on endTerm', () => {
+      const prop1 = makeProperty('propA');
+      const unit1 = makeUnit('propA', { general: 1000 });
+      const expense = makeExpense('Insurance', 1200, 'general_thousandths');
+      expense.endTerm = 2024010100; // exact match
+      const building = makeBuilding('012345', [unit1], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(1200);
+    });
+  });
+
+  describe('Multiple monthly charges per unit', () => {
+    it('should include all monthly charges for the same term', () => {
+      const prop1 = makeProperty('propA');
+      const unit1 = makeUnit('propA');
+      unit1.monthlyCharges = [
+        { term: 2024010100, amount: 80, description: 'Κοινόχρηστα' },
+        { term: 2024010100, amount: 30, description: 'Extra cleaning' }
+      ];
+      const building = makeBuilding('012345', [unit1], []);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      expect(rent.buildingCharges).toHaveLength(2);
+      expect(rent.buildingCharges[0].amount).toBe(80);
+      expect(rent.buildingCharges[1].amount).toBe(30);
+    });
+  });
+
+  describe('Equal allocation with unmanaged units', () => {
+    it('should only split among managed units', () => {
+      const prop1 = makeProperty('propA');
+      const unit1 = makeUnit('propA');
+      const unit2 = { ...makeUnit('propB'), _id: 'unit2', isManaged: true };
+      const unit3 = { ...makeUnit('propC'), _id: 'unit3', isManaged: false };
+      const expense = makeExpense('Pest control', 90, 'equal');
+      const building = makeBuilding('012345', [unit1, unit2, unit3], [expense]);
+
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      // 90 / 2 managed units = 45
+      expect(rent.buildingCharges).toHaveLength(1);
+      expect(rent.buildingCharges[0].amount).toBe(45);
+    });
+  });
+
+  describe('by_surface with zero total surface', () => {
+    it('should return 0 without crashing', () => {
+      const prop1 = makeProperty('propA');
+      const unit1 = { ...makeUnit('propA'), surface: 0 };
+      const expense = makeExpense('Surface fee', 500, 'by_surface');
+      const building = makeBuilding('012345', [unit1], [expense]);
 
       const contract = makeContract([prop1], [building]);
       const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
