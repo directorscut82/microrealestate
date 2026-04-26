@@ -14,6 +14,9 @@ export default function taskTotal(
   const charges = rent.charges.reduce(
     (total, charges) => total + charges.amount,
     0
+  ) + (rent.buildingCharges || []).reduce(
+    (total, charge) => total + charge.amount,
+    0
   );
   const debts = rent.debts.reduce((total, debt) => total + debt.amount, 0);
   const discount = rent.discounts.reduce(
