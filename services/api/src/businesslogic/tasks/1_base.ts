@@ -127,13 +127,6 @@ function computeBuildingChargeForProperty(
 
 // Check if expense is active for the given term
 function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: number): boolean {
-  if (!expense.isRecurring) {
-    // One-time expense - check if term is within range
-    if (expense.startTerm && term < expense.startTerm) return false;
-    if (expense.endTerm && term > expense.endTerm) return false;
-    return true;
-  }
-  // Recurring - check start/end bounds
   if (expense.startTerm && term < expense.startTerm) return false;
   if (expense.endTerm && term > expense.endTerm) return false;
   return true;
@@ -214,10 +207,10 @@ export default function taskBase(
       }
     });
 
-  // Add building charges if buildings are provided
-  if (contract.buildings && contract.buildings.length > 0) {
-    rent.buildingCharges = [];
+  // Always initialize buildingCharges
+  rent.buildingCharges = [];
 
+  if (contract.buildings && contract.buildings.length > 0) {
     contract.properties
       .filter((property) => {
         const entryMoment = moment(property.entryDate).startOf('day');

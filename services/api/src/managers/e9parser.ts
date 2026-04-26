@@ -86,6 +86,10 @@ function cleanCity(city: string): string {
 }
 
 export function parseE9(text: string): ParsedE9Result {
+  if (!text || !text.trim()) {
+    return { owner: { taxId: '', lastName: '', firstName: '', fatherName: '' }, buildings: [], skippedLandPlots: 0 };
+  }
+
   // Normalize whitespace
   const t = text
     .replace(/---\s*PAGE BREAK\s*---/g, '\n')
@@ -121,26 +125,22 @@ export function parseE9(text: string): ParsedE9Result {
     : t.substring(table1Start);
 
   // Parse property rows - look for ATAK patterns (6-digit + 5-digit number pairs)
-  // Pattern: ATAK appears as two numbers like "011172" followed by "60169"
   const units: ParsedE9Unit[] = [];
-  const atakPattern = /(\d{6})\s+(\d{5})/g;
-  let match;
+  // Find all ATAK pairs first, then process each row between them
+  const atakMatches: { index: number; prefix: string; suffix: string }[] = [];
+  const atakRe = /(\d{6})\s+(\d{5})/g;
+  let m;
+  while ((m = atakRe.exec(table1Text)) !== null) {
+    atakMatches.push({ index: m.index, prefix: m[1], suffix: m[2] });
+  }
 
-  while ((match = atakPattern.exec(table1Text)) !== null) {
-    const atakPrefix = match[1];
-    const atakSuffix = match[2];
+  for (let i = 0; i < atakMatches.length; i++) {
+    const { prefix: atakPrefix, suffix: atakSuffix } = atakMatches[i];
     const atakNumber = atakPrefix + atakSuffix;
 
-    // Extract the text following this ATAK until the next ATAK or end
-    const startPos = match.index + match[0].length;
-    const nextMatch = atakPattern.exec(table1Text);
-    const endPos = nextMatch ? nextMatch.index : table1Text.length;
-    // Reset regex for next iteration
-    if (nextMatch) {
-      atakPattern.lastIndex = nextMatch.index;
-    }
-
-    const rowText = table1Text.substring(match.index, endPos);
+    const startPos = atakMatches[i].index;
+    const endPos = i + 1 < atakMatches.length ? atakMatches[i + 1].index : table1Text.length;
+    const rowText = table1Text.substring(startPos, endPos);
 
     // Parse row fields - this is tricky because columns run together
     // Try to extract fields in order they appear
@@ -158,9 +158,10 @@ export function parseE9(text: string): ParsedE9Result {
     const street = streetMatch ? streetMatch[1].trim() : '';
     const streetNumber = streetMatch ? streetMatch[2] : '';
 
-    // Zip code - 5 digits after street
-    const zipMatch = rowText.match(/\b(\d{5})\b/);
-    const zipCode = zipMatch ? zipMatch[1] : '';
+    // Zip code - 5 digits that is NOT the ATAK suffix
+    const allFiveDigit = [...rowText.matchAll(/\b(\d{5})\b/g)];
+    const zipCandidate = allFiveDigit.find((zm) => zm[1] !== atakSuffix);
+    const zipCode = zipCandidate ? zipCandidate[1] : '';
 
     // District - between street and zip, or after municipality
     let district = '';
