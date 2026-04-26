@@ -1,3 +1,4 @@
+import type { CollectionTypes } from '@microrealestate/types';
 import * as Contract from './contract.js';
 import * as FD from './frontdata.js';
 import {
@@ -66,6 +67,24 @@ async function _buildPropertyMap(realm: Req['realm']): Promise<AnyRecord> {
     acc[property._id] = property;
     return acc;
   }, {});
+}
+
+async function _fetchBuildingsForProperties(
+  realmId: string,
+  properties: AnyRecord[]
+): Promise<CollectionTypes.Building[]> {
+  const propertyIds = properties
+    .map((p) => p.propertyId)
+    .filter(Boolean);
+
+  if (propertyIds.length === 0) return [];
+
+  const buildings = await Collections.Building.find({
+    realmId,
+    'units.propertyId': { $in: propertyIds }
+  }).lean();
+
+  return buildings as CollectionTypes.Building[];
 }
 
 async function _fetchTenants(realmId: string, tenantId?: string): Promise<AnyRecord[]> {
@@ -210,11 +229,17 @@ export async function add(req: Req, res: Res) {
       occupant.endDate &&
       _propertiesHaveRentData(occupant.properties)
     ) {
+      const buildings = await _fetchBuildingsForProperties(
+        realm!._id,
+        occupant.properties
+      );
+
       const contract = Contract.create({
         begin: occupant.beginDate,
         end: occupant.endDate,
         frequency: occupant.frequency || 'months',
         properties: occupant.properties,
+        buildings,
         vatRate: occupant.vatRatio,
         discount: occupant.discount || 0,
         rents: []
@@ -281,6 +306,11 @@ export async function update(req: Req, res: Res) {
     try {
       const termFrequency = newOccupant.frequency || 'months';
 
+      const buildings = await _fetchBuildingsForProperties(
+        realm!._id,
+        originalOccupant.properties
+      );
+
       const contract = {
         begin: originalOccupant.beginDate,
         end: originalOccupant.endDate,
@@ -293,6 +323,7 @@ export async function update(req: Req, res: Res) {
           )
         ),
         properties: originalOccupant.properties,
+        buildings,
         vatRate: originalOccupant.vatRatio,
         discount: originalOccupant.discount,
         rents: originalOccupant.rents
