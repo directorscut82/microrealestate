@@ -123,6 +123,20 @@ export async function add(req: Req, res: Res) {
 export async function update(req: Req, res: Res) {
   const realm = req.realm;
 
+  if (req.body.atakPrefix) {
+    const existing = await Collections.Building.findOne({
+      _id: req.params.id,
+      realmId: realm!._id
+    }).lean();
+    if (existing && (existing as any).atakPrefix !== req.body.atakPrefix) {
+      const dup = await Collections.Building.findOne({
+        realmId: realm!._id,
+        atakPrefix: req.body.atakPrefix,
+        _id: { $ne: req.params.id }
+      }).lean();
+      if (dup) throw new ServiceError('ATAK prefix already in use', 422);
+    }
+  }
   const dbBuilding = await Collections.Building.findOneAndUpdate(
     {
       _id: req.params.id,
@@ -193,16 +207,23 @@ export async function remove(req: Req, res: Res) {
 // ---------------------------------------------------------------------------
 
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const data = new Uint8Array(buffer);
-  const doc = await getDocument({ data }).promise;
   let fullText = '';
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    fullText +=
-      content.items.map((item: any) => item.str).join(' ') +
-      '\n--- PAGE BREAK ---\n';
+  try {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const data = new Uint8Array(buffer);
+    const doc = await getDocument({ data }).promise;
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      fullText +=
+        content.items.map((item: any) => item.str).join(' ') +
+        '\n--- PAGE BREAK ---\n';
+    }
+  } catch (error) {
+    throw new ServiceError(
+      'Failed to parse PDF file: ' + String(error),
+      422
+    );
   }
   return fullText;
 }
@@ -378,6 +399,15 @@ export async function addUnit(req: Req, res: Res) {
 
   _findBuilding(building, id);
 
+  const existingUnit = (building as any).units.find(
+    (u: any) => u.atakNumber === req.body.atakNumber
+  );
+  if (existingUnit) {
+    throw new ServiceError(
+      'Unit with this ATAK number already exists in building',
+      422
+    );
+  }
   (building as any).units.push(req.body);
   (building as any).updatedDate = new Date();
   await building!.save();
