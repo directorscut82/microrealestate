@@ -217,6 +217,21 @@ export namespace CollectionTypes {
           description: string;
         }[]
       | [];
+    buildingCharges:
+      | {
+          description: string;
+          amount: number;
+          buildingName?: string;
+        }[]
+      | [];
+    paymentInstructions:
+      | {
+          ownerName: string;
+          iban: string;
+          amount: number;
+          percentage: number;
+        }[]
+      | [];
     debts:
       | {
           amount: number;
