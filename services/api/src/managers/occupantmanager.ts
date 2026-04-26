@@ -87,6 +87,39 @@ async function _fetchBuildingsForProperties(
   return buildings as CollectionTypes.Building[];
 }
 
+// Auto-link properties to buildings by matching ATAK prefix.
+// When a tenant is assigned a property with an ATAK number,
+// the property gets linked to the correct building automatically.
+async function _autoLinkPropertiesToBuildings(
+  realmId: string,
+  propertyIds: string[]
+): Promise<void> {
+  if (!propertyIds.length) return;
+
+  const properties: any[] = await Collections.Property.find({
+    realmId,
+    _id: { $in: propertyIds },
+    atakNumber: { $exists: true, $ne: '' }
+  }).lean();
+
+  for (const property of properties) {
+    if (property.buildingId) continue;
+
+    const atakPrefix = property.atakNumber.substring(0, 6);
+    const building = await Collections.Building.findOne({
+      realmId,
+      atakPrefix
+    }).lean();
+
+    if (building) {
+      await Collections.Property.findOneAndUpdate(
+        { _id: property._id, realmId },
+        { buildingId: String(building._id) }
+      );
+    }
+  }
+}
+
 async function _fetchTenants(realmId: string, tenantId?: string): Promise<AnyRecord[]> {
   const $match: AnyRecord = {
     realmId
@@ -229,6 +262,12 @@ export async function add(req: Req, res: Res) {
       occupant.endDate &&
       _propertiesHaveRentData(occupant.properties)
     ) {
+      // Auto-link properties to buildings by ATAK prefix
+      const propIds = occupant.properties
+        .map((p: AnyRecord) => p.propertyId)
+        .filter(Boolean);
+      await _autoLinkPropertiesToBuildings(realm!._id, propIds);
+
       const buildings = await _fetchBuildingsForProperties(
         realm!._id,
         occupant.properties
@@ -305,6 +344,12 @@ export async function update(req: Req, res: Res) {
   ) {
     try {
       const termFrequency = newOccupant.frequency || 'months';
+
+      // Auto-link new properties to buildings by ATAK prefix
+      const newPropIds = newOccupant.properties
+        .map((p: AnyRecord) => p.propertyId)
+        .filter(Boolean);
+      await _autoLinkPropertiesToBuildings(realm!._id, newPropIds);
 
       // Fetch buildings for both old and new properties to cover property changes
       const allPropertyIds = [...new Set([
