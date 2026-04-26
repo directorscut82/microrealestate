@@ -11,6 +11,7 @@ describe('Building Expense Management', () => {
     cy.signUp(userWithCompanyAccount);
     cy.signIn(userWithCompanyAccount);
     cy.registerLandlord(userWithCompanyAccount);
+    cy.checkPage('dashboard');
   });
 
   after(() => {
