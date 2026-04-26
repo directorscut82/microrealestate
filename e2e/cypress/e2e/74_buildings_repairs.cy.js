@@ -11,6 +11,7 @@ describe('Building Repairs & Contractors', () => {
     cy.signUp(userWithCompanyAccount);
     cy.signIn(userWithCompanyAccount);
     cy.registerLandlord(userWithCompanyAccount);
+    cy.checkPage('dashboard');
   });
 
   after(() => {

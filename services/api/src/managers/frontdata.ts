@@ -380,6 +380,7 @@ export function toProperty(
     address: inputProperty.address,
     price: inputProperty.price,
     atakNumber: inputProperty.atakNumber,
+    buildingId: inputProperty.buildingId || null,
     dehNumber: inputProperty.dehNumber,
     energyCertificate: inputProperty.energyCertificate,
     beginDate: '',

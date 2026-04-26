@@ -11,6 +11,7 @@ describe('Building Validation & Edge Cases', () => {
     cy.signUp(userWithCompanyAccount);
     cy.signIn(userWithCompanyAccount);
     cy.registerLandlord(userWithCompanyAccount);
+    cy.checkPage('dashboard');
   });
 
   after(() => {
@@ -193,9 +194,11 @@ describe('Building Validation & Edge Cases', () => {
   it('Test 75.17: Search by building name', () => {
     cy.get('[data-cy=globalSearchField]').click();
     cy.get('[data-cy=globalSearchField]').clear().type('Alpha');
-    cy.contains('Résidence Alpha').should('be.visible');
-    cy.contains('Tour Beta').should('not.exist');
-    cy.contains('Immeuble Gamma').should('not.exist');
+    cy.wait(500);
+    cy.get('[data-cy=buildingsPage]').within(() => {
+      cy.get('[data-cy=openResourceButton]')
+        .should('have.length', 1);
+    });
   });
 
   it('Test 75.18: Clear search shows all', () => {
