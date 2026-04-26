@@ -394,6 +394,7 @@ Cypress.Commands.add('checkPage', (pageName) => {
     properties: '/properties',
     accounting: '/accounting/',
     settings: '/settings',
+    buildings: '/buildings',
     landlord: '/settings/landlord',
     billing: '/settings/billing',
     contracts: '/settings/contracts',

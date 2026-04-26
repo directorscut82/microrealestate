@@ -80,7 +80,7 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingExpense(buildingId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
     }
   });
 
@@ -88,7 +88,7 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
     mutationFn: (data) =>
       updateBuildingExpense(buildingId, { ...data, _id: expense._id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
     }
   });
 
@@ -102,13 +102,19 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
   } = useForm({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
-      name: expense?.name || '',
-      type: expense?.type || '',
-      amount: expense?.amount || '',
-      allocationMethod: expense?.allocationMethod || '',
-      isRecurring: expense?.isRecurring ?? true,
-      notes: expense?.notes || ''
-    }
+      name: '',
+      type: '',
+      amount: '',
+      allocationMethod: '',
+      isRecurring: true,
+      notes: ''
+    },
+    values: expense
+      ? {
+          ...expense,
+          isRecurring: expense.isRecurring ?? true
+        }
+      : undefined
   });
 
   const expenseType = watch('type');
@@ -299,6 +305,7 @@ export default function ExpenseList({ building }) {
           variant="secondary"
           className="w-full gap-2 sm:w-fit"
           onClick={handleAddExpense}
+          data-cy="addExpense"
         >
           <LuPlusCircle className="size-4" />
           {t('Add Expense')}

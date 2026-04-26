@@ -48,7 +48,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingUnit(buildingId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
     }
   });
 
@@ -56,7 +56,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
     mutationFn: (data) =>
       updateBuildingUnit(buildingId, { ...data, _id: unit._id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
     }
   });
 
@@ -70,16 +70,22 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   } = useForm({
     resolver: zodResolver(unitSchema),
     defaultValues: {
-      atakNumber: unit?.atakNumber || '',
-      floor: unit?.floor || '',
-      unitLabel: unit?.unitLabel || '',
-      surface: unit?.surface || '',
-      generalThousandths: unit?.generalThousandths || '',
-      heatingThousandths: unit?.heatingThousandths || '',
-      elevatorThousandths: unit?.elevatorThousandths || '',
-      isManaged: unit?.isManaged ?? true,
-      propertyId: unit?.propertyId || ''
-    }
+      atakNumber: '',
+      floor: '',
+      unitLabel: '',
+      surface: '',
+      generalThousandths: '',
+      heatingThousandths: '',
+      elevatorThousandths: '',
+      isManaged: true,
+      propertyId: ''
+    },
+    values: unit
+      ? {
+          ...unit,
+          isManaged: unit.isManaged ?? true
+        }
+      : undefined
   });
 
   const isManaged = watch('isManaged');
@@ -255,6 +261,7 @@ export default function UnitList({ building }) {
           variant="secondary"
           className="w-full gap-2 sm:w-fit"
           onClick={handleAddUnit}
+          data-cy="addUnit"
         >
           <LuPlusCircle className="size-4" />
           {t('Add Unit')}

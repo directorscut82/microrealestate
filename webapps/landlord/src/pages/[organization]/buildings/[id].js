@@ -87,6 +87,7 @@ function Building() {
 
   const onSubmit = useCallback(
     async (buildingPart) => {
+      if (!building) return;
       const data = {
         ...building,
         ...buildingPart
@@ -134,16 +135,16 @@ function Building() {
       <PresenceBanner viewers={viewers} />
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="flex justify-start overflow-x-auto overflow-y-hidden">
-          <TabsTrigger value="overview" className="w-1/4">
+          <TabsTrigger value="overview" className="w-1/4" data-cy="overviewTab">
             {t('Overview')}
           </TabsTrigger>
-          <TabsTrigger value="units" className="w-1/4">
+          <TabsTrigger value="units" className="w-1/4" data-cy="unitsTab">
             {t('Units')}
           </TabsTrigger>
-          <TabsTrigger value="expenses" className="w-1/4">
+          <TabsTrigger value="expenses" className="w-1/4" data-cy="expensesTab">
             {t('Expenses')}
           </TabsTrigger>
-          <TabsTrigger value="repairs" className="w-1/4">
+          <TabsTrigger value="repairs" className="w-1/4" data-cy="repairsTab">
             {t('Repairs & Contractors')}
           </TabsTrigger>
         </TabsList>

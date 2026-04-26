@@ -1,0 +1,48 @@
+[
+  {
+    "name": "Résidence Athéna",
+    "atakPrefix": "011172",
+    "description": "Immeuble principal à Galatsi",
+    "yearBuilt": 1985,
+    "totalFloors": 5,
+    "hasElevator": true,
+    "hasCentralHeating": true,
+    "heatingType": "central_oil",
+    "address": {
+      "street1": "15 Rue de la Paix",
+      "street2": "",
+      "city": "Galatsi",
+      "zipCode": "11147",
+      "state": "Attique",
+      "country": "GR"
+    },
+    "manager": {
+      "name": "Nikos Papadopoulos",
+      "phone": "2101234567",
+      "email": "nikos@manager.gr",
+      "taxId": "123456789",
+      "company": "GreenBuilding SA"
+    },
+    "bankInfo": {
+      "name": "Banque Nationale",
+      "iban": "GR1601101250000000012300695"
+    },
+    "notes": "Rénové en 2020"
+  },
+  {
+    "name": "Tour Olympe",
+    "atakPrefix": "022345",
+    "description": "Petit immeuble à Athènes",
+    "yearBuilt": 1995,
+    "totalFloors": 3,
+    "hasElevator": false,
+    "hasCentralHeating": false,
+    "address": {
+      "street1": "42 Avenue Poseidon",
+      "city": "Athènes",
+      "zipCode": "10558",
+      "state": "Attique",
+      "country": "GR"
+    }
+  }
+]
