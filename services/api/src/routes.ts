@@ -1,4 +1,5 @@
 import * as accountingManager from './managers/accountingmanager.js';
+import * as buildingManager from './managers/buildingmanager.js';
 import * as dashboardManager from './managers/dashboardmanager.js';
 import * as emailManager from './managers/emailmanager.js';
 import * as leaseManager from './managers/leasemanager.js';
@@ -90,6 +91,39 @@ export default function routes(): express.Router {
     Middlewares.asyncWrapper(propertyManager.remove as any)
   );
   router.use('/properties', propertiesRouter);
+
+  const buildingsRouter = express.Router();
+  buildingsRouter.post(
+    '/import-pdf',
+    upload.single('pdf'),
+    Middlewares.asyncWrapper(buildingManager.importFromE9 as any)
+  );
+  buildingsRouter.get('/', Middlewares.asyncWrapper(buildingManager.all as any));
+  buildingsRouter.get('/:id', Middlewares.asyncWrapper(buildingManager.one as any));
+  buildingsRouter.post('/', Middlewares.asyncWrapper(buildingManager.add as any));
+  buildingsRouter.patch('/:id', Middlewares.asyncWrapper(buildingManager.update as any));
+  buildingsRouter.delete('/:ids', Middlewares.asyncWrapper(buildingManager.remove as any));
+  // Units
+  buildingsRouter.post('/:id/units', Middlewares.asyncWrapper(buildingManager.addUnit as any));
+  buildingsRouter.patch('/:id/units/:unitId', Middlewares.asyncWrapper(buildingManager.updateUnit as any));
+  buildingsRouter.delete('/:id/units/:unitId', Middlewares.asyncWrapper(buildingManager.removeUnit as any));
+  // Monthly charges
+  buildingsRouter.post('/:id/units/:unitId/charges', Middlewares.asyncWrapper(buildingManager.addMonthlyCharge as any));
+  buildingsRouter.patch('/:id/units/:unitId/charges/:chargeId', Middlewares.asyncWrapper(buildingManager.updateMonthlyCharge as any));
+  buildingsRouter.delete('/:id/units/:unitId/charges/:chargeId', Middlewares.asyncWrapper(buildingManager.removeMonthlyCharge as any));
+  // Expenses
+  buildingsRouter.post('/:id/expenses', Middlewares.asyncWrapper(buildingManager.addExpense as any));
+  buildingsRouter.patch('/:id/expenses/:expenseId', Middlewares.asyncWrapper(buildingManager.updateExpense as any));
+  buildingsRouter.delete('/:id/expenses/:expenseId', Middlewares.asyncWrapper(buildingManager.removeExpense as any));
+  // Contractors
+  buildingsRouter.post('/:id/contractors', Middlewares.asyncWrapper(buildingManager.addContractor as any));
+  buildingsRouter.patch('/:id/contractors/:contractorId', Middlewares.asyncWrapper(buildingManager.updateContractor as any));
+  buildingsRouter.delete('/:id/contractors/:contractorId', Middlewares.asyncWrapper(buildingManager.removeContractor as any));
+  // Repairs
+  buildingsRouter.post('/:id/repairs', Middlewares.asyncWrapper(buildingManager.addRepair as any));
+  buildingsRouter.patch('/:id/repairs/:repairId', Middlewares.asyncWrapper(buildingManager.updateRepair as any));
+  buildingsRouter.delete('/:id/repairs/:repairId', Middlewares.asyncWrapper(buildingManager.removeRepair as any));
+  router.use('/buildings', buildingsRouter);
 
   router.get(
     '/accounting/:year',
