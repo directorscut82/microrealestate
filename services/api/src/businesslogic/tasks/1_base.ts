@@ -56,7 +56,7 @@ export type RentTask = (
 ) => Rent;
 
 // Helper to compute building charge share for a property
-function computeBuildingChargeForProperty(
+export function computeBuildingChargeForProperty(
   building: CollectionTypes.Building,
   propertyId: string,
   expense: CollectionTypes.BuildingExpense
@@ -87,9 +87,9 @@ function computeBuildingChargeForProperty(
     }
 
     case 'equal': {
-      const managedUnits = building.units.filter((u) => u.isManaged);
-      if (managedUnits.length === 0) return 0;
-      return amount / managedUnits.length;
+      const totalUnits = building.units.length;
+      if (totalUnits === 0) return 0;
+      return amount / totalUnits;
     }
 
     case 'by_surface': {

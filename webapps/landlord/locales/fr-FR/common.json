@@ -72,6 +72,7 @@
   "Building": "Bâtiment",
   "Building Manager": "Gestionnaire de l'immeuble",
   "Building cannot be deleted because units have active tenants": "Le bâtiment ne peut pas être supprimé car des lots ont des locataires actifs",
+  "Building charges": "Charges d'immeuble",
   "Building does not exist": "Le bâtiment n'existe pas",
   "Building information": "Informations du bâtiment",
   "Building name is missing": "Le nom du bâtiment est manquant",

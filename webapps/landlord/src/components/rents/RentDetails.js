@@ -22,7 +22,10 @@ export function getRentAmounts(rent) {
         type,
         reference
       })) || [],
-    totalAmount: rent.totalAmount
+    totalAmount: rent.totalAmount,
+    preTaxAmounts: rent.preTaxAmounts || [],
+    charges: rent.charges || [],
+    buildingCharges: rent.buildingCharges || []
   };
 }
 
@@ -52,6 +55,9 @@ export default function RentDetails({ rent }) {
   const { t } = useTranslation('common');
 
   const rentAmounts = getRentAmounts(rent);
+  const hasBuildingCharges = rentAmounts.buildingCharges.length > 0;
+  const hasMultipleProperties = rentAmounts.preTaxAmounts.length > 1;
+  const hasCharges = rentAmounts.charges.length > 0;
 
   return (
     <div className="flex flex-col gap-2">
@@ -67,14 +73,55 @@ export default function RentDetails({ rent }) {
           creditColor={!rentAmounts.isDebitBalance}
         />
       </div>
-      <div className="flex justify-between">
-        {t('Rent')}
-        <NumberFormat value={rentAmounts.rent} />
-      </div>
-      <div className="flex justify-between">
-        {t('Additional costs')}
-        <NumberFormat value={rentAmounts.additionalCosts} />
-      </div>
+      {hasMultipleProperties ? (
+        rentAmounts.preTaxAmounts.map((item, i) => (
+          <div key={i} className="flex justify-between text-sm">
+            <span className="text-muted-foreground">{item.description}</span>
+            <NumberFormat value={item.amount} />
+          </div>
+        ))
+      ) : (
+        <div className="flex justify-between">
+          {t('Rent')}
+          <NumberFormat value={rentAmounts.rent} />
+        </div>
+      )}
+      {hasCharges && (
+        <>
+          {rentAmounts.charges.map((charge, i) => (
+            <div key={`c-${i}`} className="flex justify-between text-sm">
+              <span className="text-muted-foreground">
+                {charge.description}
+              </span>
+              <NumberFormat value={charge.amount} />
+            </div>
+          ))}
+        </>
+      )}
+      {hasBuildingCharges && (
+        <>
+          <Separator />
+          <div className="text-xs font-medium text-muted-foreground uppercase">
+            {t('Building charges')}
+          </div>
+          {rentAmounts.buildingCharges.map((charge, i) => (
+            <div key={`bc-${i}`} className="flex justify-between text-sm">
+              <span className="text-muted-foreground">
+                {charge.buildingName
+                  ? `${charge.buildingName} - ${charge.description}`
+                  : charge.description}
+              </span>
+              <NumberFormat value={charge.amount} />
+            </div>
+          ))}
+        </>
+      )}
+      {!hasMultipleProperties && !hasBuildingCharges && (
+        <div className="flex justify-between">
+          {t('Additional costs')}
+          <NumberFormat value={rentAmounts.additionalCosts} />
+        </div>
+      )}
       <div className="flex justify-between">
         {t('Discount')}
         <NumberFormat value={rentAmounts.discount} />

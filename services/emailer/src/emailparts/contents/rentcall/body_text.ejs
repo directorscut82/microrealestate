@@ -1,19 +1,21 @@
 <%- include('../__content_parts/text/header.ejs') %>
-
-
-
 <%- include('../__content_parts/text/greetings.ejs') %>
-
 <%- _.t('Please find in attachment the rent notice of {{term}}.', { term: _.formatTerm(period, tenant.contract.lease.timeRange) }) %>
-
 <%- _.t('The amount of your rent is {{amount}}.', { amount: _.formatNumber(tenant.rents[0].total.grandTotal, 'currency') }) %>
-
+<% var rent = tenant.rents[0]; %>
+<% if ((rent.buildingCharges && rent.buildingCharges.length) || (rent.preTaxAmounts && rent.preTaxAmounts.length > 1) || (rent.charges && rent.charges.length)) { %>
+<% rent.preTaxAmounts.forEach(function(item) { %>
+- <%- item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
+<% }); %>
+<% (rent.charges || []).forEach(function(item) { %>
+- <%- item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
+<% }); %>
+<% (rent.buildingCharges || []).forEach(function(item) { %>
+- <%- item.buildingName ? item.buildingName + ' - ' : '' %><%- item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
+<% }); %>
+<% } %>
 <%- _.t('Please send us your payment before {{date}}.', { date: _.formatDate(dueDate, 'LL') }) %>
-
 <%- include('../__content_parts/text/paymentmethods.ejs') %>
-
 <%- _.t('We are at your service for any further information you may need.') %>
-
 <%- include('../__content_parts/text/signature.ejs') %>
-
 <%- include('../__content_parts/text/landlordcontact.ejs') %>

@@ -27,7 +27,12 @@ export function toRentData(
     totalToPay: rent.total.grandTotal,
     description: rent.description,
     countMonthNotPaid: 0,
-    paymentStatus: [] as AnyRecord[]
+    paymentStatus: [] as AnyRecord[],
+    preTaxAmounts: rent.preTaxAmounts || [],
+    charges: rent.charges || [],
+    buildingCharges: rent.buildingCharges || [],
+    discounts: rent.discounts || [],
+    debts: rent.debts || []
   };
 
   Object.assign(

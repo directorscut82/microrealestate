@@ -154,7 +154,25 @@ const RepairSchema = new mongoose.Schema({
   affectedUnitIds: [String],
   affectedArea: String,
   invoiceReference: String,
-  notes: String
+  notes: String,
+  // Distribution to tenants
+  chargeableTo: {
+    type: String,
+    enum: ['tenants', 'owners', 'split'],
+    default: 'owners'
+  },
+  tenantSharePercentage: {
+    type: Number,
+    min: 0,
+    max: 100,
+    default: 0
+  },
+  allocationMethod: {
+    type: String,
+    enum: ['general_thousandths', 'heating_thousandths', 'elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+    default: 'general_thousandths'
+  },
+  chargeTerm: Number
 });
 
 const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({

@@ -1,7 +1,11 @@
-import { Collections, ServiceError } from '@microrealestate/common';
+import { Collections, logger, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import type { CollectionTypes } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
 import type { ParsedE9Unit } from './e9parser.js';
+import * as Contract from './contract.js';
+import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
+import moment from 'moment';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -72,6 +76,84 @@ function _findMemberIdByEmail(
     (m: any) => m.email === email
   );
   return member ? String(member._id) : undefined;
+}
+
+// Recompute rents for all tenants that use a specific property
+async function _recomputeTenantsForProperty(
+  realmId: string,
+  propertyId: string
+): Promise<void> {
+  const tenants = await Collections.Tenant.find({
+    realmId,
+    'properties.propertyId': propertyId
+  });
+
+  if (!tenants.length) return;
+
+  for (const tenant of tenants) {
+    const tenantObj: any = tenant.toObject();
+    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
+    if (!tenantObj.properties?.length) continue;
+
+    // Fetch property details for the tenant
+    const propertyIds = tenantObj.properties
+      .map((p: any) => p.propertyId)
+      .filter(Boolean);
+    const properties = await Collections.Property.find({
+      _id: { $in: propertyIds }
+    }).lean();
+    const propMap = properties.reduce((acc: any, p: any) => {
+      acc[String(p._id)] = p;
+      return acc;
+    }, {});
+
+    tenantObj.properties.forEach((p: any) => {
+      p.property = propMap[String(p.propertyId)] || p.property;
+    });
+
+    // Fetch buildings for rent computation
+    const buildings: CollectionTypes.Building[] = await Collections.Building.find({
+      realmId,
+      'units.propertyId': { $in: propertyIds }
+    }).lean() as CollectionTypes.Building[];
+
+    try {
+      const termFrequency = tenantObj.frequency || 'months';
+      const contract = {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        frequency: termFrequency,
+        terms: Math.ceil(
+          moment(tenantObj.endDate).diff(
+            moment(tenantObj.beginDate),
+            termFrequency as moment.unitOfTime.Diff,
+            true
+          )
+        ),
+        properties: tenantObj.properties,
+        buildings,
+        vatRate: tenantObj.vatRatio,
+        discount: tenantObj.discount,
+        rents: tenantObj.rents || []
+      };
+
+      const updated = Contract.update(contract, {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        termination: tenantObj.terminationDate,
+        properties: tenantObj.properties,
+        frequency: termFrequency
+      });
+
+      await Collections.Tenant.updateOne(
+        { _id: tenant._id },
+        { rents: updated.rents }
+      );
+      logger.info(`Recomputed rents for tenant ${tenantObj.name} (property ${propertyId})`);
+    } catch (error) {
+      logger.error(`Failed to recompute rents for tenant ${tenantObj.name}: ${error}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -497,6 +579,7 @@ export async function addUnit(req: Req, res: Res) {
       { _id: req.body.propertyId, realmId: realm!._id },
       { buildingId: id }
     );
+    await _recomputeTenantsForProperty(realm!._id, req.body.propertyId);
   }
 
   const result = await _toBuildingData(realm!._id, [
@@ -538,6 +621,14 @@ export async function updateUnit(req: Req, res: Res) {
       { _id: req.body.propertyId, realmId: realm!._id },
       { buildingId: id }
     );
+  }
+
+  // Recompute rents for affected tenants
+  if (req.body.propertyId) {
+    await _recomputeTenantsForProperty(realm!._id, req.body.propertyId);
+  }
+  if (oldPropertyId && String(oldPropertyId) !== String(req.body.propertyId)) {
+    await _recomputeTenantsForProperty(realm!._id, String(oldPropertyId));
   }
 
   const result = await _toBuildingData(realm!._id, [
@@ -619,6 +710,10 @@ export async function addMonthlyCharge(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
+  if (unit.propertyId) {
+    await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
+  }
+
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
   ]);
@@ -649,6 +744,10 @@ export async function updateMonthlyCharge(req: Req, res: Res) {
   charge.set(req.body);
   (building as any).updatedDate = new Date();
   await building!.save();
+
+  if (unit.propertyId) {
+    await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
+  }
 
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
@@ -681,6 +780,93 @@ export async function removeMonthlyCharge(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
+  if (unit.propertyId) {
+    await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
+  }
+
+  const result = await _toBuildingData(realm!._id, [
+    building!.toObject()
+  ]);
+  return res.json(result[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Monthly Statement (batch distribution of expenses to units for a given month)
+// ---------------------------------------------------------------------------
+
+export async function saveMonthlyStatement(req: Req, res: Res) {
+  const realm = req.realm;
+  const { id } = req.params;
+  const { term, expenses: expenseEntries } = req.body;
+
+  if (!term) {
+    throw new ServiceError('Term (YYYYMMDDHH) is required', 422);
+  }
+  if (!expenseEntries || !Array.isArray(expenseEntries) || expenseEntries.length === 0) {
+    throw new ServiceError('Expenses array is required', 422);
+  }
+
+  const building = await Collections.Building.findOne({
+    _id: id,
+    realmId: realm!._id
+  });
+
+  _findBuilding(building, id);
+
+  const units = (building as any).units;
+  if (!units.length) {
+    throw new ServiceError('Building has no units', 422);
+  }
+
+  // For each unit, remove existing monthly charges for this term, then add new ones
+  for (const unit of units) {
+    if (!unit.propertyId) continue;
+
+    // Remove existing charges for this term
+    const existingCharges = unit.monthlyCharges.filter(
+      (c: any) => c.term === Number(term)
+    );
+    for (const charge of existingCharges) {
+      charge.deleteOne();
+    }
+
+    // Compute and add new charges for each expense
+    for (const entry of expenseEntries) {
+      if (!entry.amount || entry.amount <= 0) continue;
+
+      // Find the building expense to get its allocation method
+      const buildingExpense = (building as any).expenses.id(entry.expenseId);
+      const allocationMethod = entry.allocationMethod || buildingExpense?.allocationMethod || 'equal';
+      const description = entry.description || buildingExpense?.name || 'Building charge';
+
+      // Compute share for this unit
+      const share = computeBuildingChargeForProperty(
+        (building as any).toObject(),
+        String(unit.propertyId),
+        { ...buildingExpense?.toObject?.() || {}, amount: entry.amount, allocationMethod }
+      );
+
+      if (share > 0) {
+        unit.monthlyCharges.push({
+          term: Number(term),
+          amount: Math.round(share * 100) / 100,
+          description
+        });
+      }
+    }
+  }
+
+  (building as any).updatedDate = new Date();
+  await building!.save();
+
+  // Recompute rents for all tenants linked to this building
+  const propertyIds = units
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  for (const propId of propertyIds) {
+    await _recomputeTenantsForProperty(realm!._id, propId);
+  }
+
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
   ]);
@@ -710,6 +896,14 @@ export async function addExpense(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
+  // Recompute rents for all tenants linked to this building
+  const propertyIds = (building as any).units
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  for (const propId of propertyIds) {
+    await _recomputeTenantsForProperty(realm!._id, propId);
+  }
+
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
   ]);
@@ -736,6 +930,14 @@ export async function updateExpense(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
+  // Recompute rents for all tenants linked to this building
+  const propertyIds = (building as any).units
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  for (const propId of propertyIds) {
+    await _recomputeTenantsForProperty(realm!._id, propId);
+  }
+
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
   ]);
@@ -761,6 +963,14 @@ export async function removeExpense(req: Req, res: Res) {
   expense.deleteOne();
   (building as any).updatedDate = new Date();
   await building!.save();
+
+  // Recompute rents for all tenants linked to this building
+  const propertyIds = (building as any).units
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  for (const propId of propertyIds) {
+    await _recomputeTenantsForProperty(realm!._id, propId);
+  }
 
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
@@ -864,6 +1074,66 @@ export async function removeContractor(req: Req, res: Res) {
 // Repairs
 // ---------------------------------------------------------------------------
 
+async function _distributeRepairCharge(
+  building: any,
+  repair: any,
+  realmId: string
+): Promise<void> {
+  if (!repair.chargeableTo || repair.chargeableTo === 'owners') return;
+  if (!repair.chargeTerm) return;
+
+  const cost = repair.actualCost || repair.estimatedCost || 0;
+  if (cost <= 0) return;
+
+  const sharePercentage = repair.chargeableTo === 'tenants'
+    ? 100
+    : (repair.tenantSharePercentage || 0);
+  if (sharePercentage <= 0) return;
+
+  const effectiveAmount = cost * (sharePercentage / 100);
+  const allocationMethod = repair.allocationMethod || 'general_thousandths';
+  const term = Number(repair.chargeTerm);
+
+  const buildingObj = building.toObject ? building.toObject() : building;
+
+  for (const unit of building.units) {
+    if (!unit.propertyId) continue;
+
+    const share = computeBuildingChargeForProperty(
+      buildingObj,
+      String(unit.propertyId),
+      { amount: effectiveAmount, allocationMethod, name: repair.title } as any
+    );
+
+    if (share > 0) {
+      // Remove any existing charge for this repair+term combo
+      const existingIdx = unit.monthlyCharges.findIndex(
+        (c: any) => c.term === term && c.description === `Repair: ${repair.title}`
+      );
+      if (existingIdx >= 0) {
+        unit.monthlyCharges[existingIdx].deleteOne();
+      }
+
+      unit.monthlyCharges.push({
+        term,
+        amount: Math.round(share * 100) / 100,
+        description: `Repair: ${repair.title}`
+      });
+    }
+  }
+
+  building.updatedDate = new Date();
+  await building.save();
+
+  // Recompute rents
+  const propertyIds = building.units
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  for (const propId of propertyIds) {
+    await _recomputeTenantsForProperty(realmId, propId);
+  }
+}
+
 export async function addRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
@@ -882,6 +1152,10 @@ export async function addRepair(req: Req, res: Res) {
   (building as any).repairs.push(req.body);
   (building as any).updatedDate = new Date();
   await building!.save();
+
+  // Distribute repair cost to tenants if chargeable
+  const newRepair = (building as any).repairs[(building as any).repairs.length - 1];
+  await _distributeRepairCharge(building as any, newRepair, realm!._id);
 
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()
@@ -908,6 +1182,9 @@ export async function updateRepair(req: Req, res: Res) {
   repair.set(req.body);
   (building as any).updatedDate = new Date();
   await building!.save();
+
+  // Re-distribute repair cost
+  await _distributeRepairCharge(building as any, repair, realm!._id);
 
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()

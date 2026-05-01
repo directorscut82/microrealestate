@@ -414,6 +414,10 @@ export namespace CollectionTypes {
     affectedArea?: string;
     invoiceReference?: string;
     notes?: string;
+    chargeableTo?: 'tenants' | 'owners' | 'split';
+    tenantSharePercentage?: number;
+    allocationMethod?: string;
+    chargeTerm?: number;
   };
 
   export type Building = {
