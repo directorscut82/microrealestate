@@ -1,5 +1,6 @@
 import {
   addBuildingExpense,
+  fetchTenants,
   QueryKeys,
   removeBuildingExpense,
   updateBuildingExpense
@@ -20,8 +21,8 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import ConfirmDialog from '../ConfirmDialog';
@@ -44,7 +45,16 @@ const expenseSchema = z.object({
   amount: z.coerce.number().min(0).optional().default(0),
   allocationMethod: z.string().min(1),
   isRecurring: z.boolean(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  customAllocations: z
+    .array(
+      z.object({
+        propertyId: z.string(),
+        value: z.coerce.number().min(0).default(0)
+      })
+    )
+    .optional()
+    .default([])
 });
 
 const expenseTypes = [
@@ -72,16 +82,100 @@ const allocationMethods = [
   { id: 'custom_percentage', labelId: 'Custom Percentage' }
 ];
 
-function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
+const METHODS_NEEDING_ALLOCATIONS = [
+  'custom_percentage',
+  'custom_ratio',
+  'fixed'
+];
+
+function UnitAllocationRow({ unit, occupant, index, register, method, t }) {
+  const propertyName =
+    unit.property?.name || `${t('Unit')} ${unit.unitLabel || unit.floor || ''}`;
+  const floorLabel = unit.floor != null ? `${t('Floor')} ${unit.floor}` : '';
+
+  return (
+    <div className="flex items-center gap-3 py-2 border-b last:border-b-0">
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium truncate">{propertyName}</div>
+        <div className="text-xs text-muted-foreground flex items-center gap-2">
+          {floorLabel && <span>{floorLabel}</span>}
+          {unit.surface > 0 && <span>{unit.surface} m²</span>}
+        </div>
+        <div className="text-xs mt-0.5">
+          {occupant ? (
+            <span className="text-green-600">
+              ● {occupant.name}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">○ {t('Vacant')}</span>
+          )}
+        </div>
+      </div>
+      <div className="w-24">
+        <Input
+          type="number"
+          step="0.01"
+          min="0"
+          className="h-8 text-sm"
+          placeholder={
+            method === 'custom_percentage'
+              ? '%'
+              : method === 'fixed'
+                ? '€'
+                : ''
+          }
+          {...register(`customAllocations.${index}.value`, {
+            valueAsNumber: true
+          })}
+        />
+        <input
+          type="hidden"
+          {...register(`customAllocations.${index}.propertyId`)}
+        />
+      </div>
+      <div className="w-8 text-xs text-muted-foreground">
+        {method === 'custom_percentage' ? '%' : method === 'fixed' ? '€' : ''}
+      </div>
+    </div>
+  );
+}
+
+function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
 
+  const buildingId = building?._id;
+  const units = building?.units || [];
+
+  const { data: tenants } = useQuery({
+    queryKey: [QueryKeys.TENANTS],
+    queryFn: () => fetchTenants(),
+    enabled: open
+  });
+
+  const occupantsByPropertyId = useMemo(() => {
+    if (!tenants) return {};
+    const map = {};
+    tenants.forEach((tenant) => {
+      if (tenant.properties) {
+        tenant.properties.forEach((p) => {
+          if (p.propertyId) {
+            map[p.propertyId] = tenant;
+          }
+        });
+      }
+    });
+    return map;
+  }, [tenants]);
+
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingExpense(buildingId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
+      queryClient.invalidateQueries({
+        queryKey: [QueryKeys.BUILDINGS, buildingId]
+      });
     }
   });
 
@@ -89,9 +183,28 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
     mutationFn: (data) =>
       updateBuildingExpense(buildingId, { ...data, _id: expense._id }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
+      queryClient.invalidateQueries({
+        queryKey: [QueryKeys.BUILDINGS, buildingId]
+      });
     }
   });
+
+  const buildDefaultAllocations = useCallback(
+    (existingAllocations) => {
+      return units
+        .filter((u) => u.propertyId)
+        .map((u) => {
+          const existing = existingAllocations?.find(
+            (a) => String(a.propertyId) === String(u.propertyId)
+          );
+          return {
+            propertyId: String(u.propertyId),
+            value: existing?.value || 0
+          };
+        });
+    },
+    [units]
+  );
 
   const {
     register,
@@ -108,12 +221,16 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
       amount: 0,
       allocationMethod: '',
       isRecurring: true,
-      notes: ''
+      notes: '',
+      customAllocations: buildDefaultAllocations([])
     },
     values: expense
       ? {
           ...expense,
-          isRecurring: expense.isRecurring ?? true
+          isRecurring: expense.isRecurring ?? true,
+          customAllocations: buildDefaultAllocations(
+            expense.customAllocations
+          )
         }
       : undefined
   });
@@ -121,6 +238,10 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
   const expenseType = watch('type');
   const allocationMethod = watch('allocationMethod');
   const isRecurring = watch('isRecurring');
+
+  const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
+    allocationMethod
+  );
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -131,10 +252,18 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
     async (data) => {
       try {
         setIsLoading(true);
-        if (expense?._id) {
-          await updateMutation.mutateAsync(data);
+        const payload = { ...data };
+        if (!METHODS_NEEDING_ALLOCATIONS.includes(payload.allocationMethod)) {
+          payload.customAllocations = [];
         } else {
-          await addMutation.mutateAsync(data);
+          payload.customAllocations = payload.customAllocations.filter(
+            (a) => a.value > 0
+          );
+        }
+        if (expense?._id) {
+          await updateMutation.mutateAsync(payload);
+        } else {
+          await addMutation.mutateAsync(payload);
         }
         handleClose();
       } catch (error) {
@@ -146,12 +275,16 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
     [expense, addMutation, updateMutation, handleClose, t]
   );
 
+  const unitsWithProperty = units.filter((u) => u.propertyId);
+
   return (
     <ResponsiveDialog
       open={open}
       setOpen={setOpen}
       isLoading={isLoading}
-      renderHeader={() => (expense?._id ? t('Edit Expense') : t('Add Expense'))}
+      renderHeader={() =>
+        expense?._id ? t('Edit Expense') : t('Add Expense')
+      }
       renderContent={() => (
         <form
           ref={formRef}
@@ -228,6 +361,43 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
                 </p>
               )}
             </div>
+
+            {needsAllocations && unitsWithProperty.length > 0 && (
+              <div className="space-y-2">
+                <Label>
+                  {t('Allocations per Unit')}
+                  {allocationMethod === 'custom_percentage' && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({t('percentage of total')})
+                    </span>
+                  )}
+                  {allocationMethod === 'fixed' && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({t('fixed amount per unit')})
+                    </span>
+                  )}
+                  {allocationMethod === 'custom_ratio' && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({t('ratio shares')})
+                    </span>
+                  )}
+                </Label>
+                <div className="border rounded-md p-3 max-h-64 overflow-y-auto">
+                  {unitsWithProperty.map((unit, index) => (
+                    <UnitAllocationRow
+                      key={unit._id}
+                      unit={unit}
+                      occupant={occupantsByPropertyId[unit.propertyId]}
+                      index={index}
+                      register={register}
+                      method={allocationMethod}
+                      t={t}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Switch
                 id="isRecurring"
@@ -328,13 +498,20 @@ export default function ExpenseList({ building }) {
               <TableRow key={expense._id}>
                 <TableCell>{expense.name}</TableCell>
                 <TableCell>
-                  {t(expenseTypes.find((et) => et.id === expense.type)?.labelId || expense.type)}
+                  {t(
+                    expenseTypes.find((et) => et.id === expense.type)
+                      ?.labelId || expense.type
+                  )}
                 </TableCell>
                 <TableCell className="text-right">
                   <NumberFormat value={expense.amount} />
                 </TableCell>
                 <TableCell>
-                  {t(allocationMethods.find((am) => am.id === expense.allocationMethod)?.labelId || expense.allocationMethod)}
+                  {t(
+                    allocationMethods.find(
+                      (am) => am.id === expense.allocationMethod
+                    )?.labelId || expense.allocationMethod
+                  )}
                 </TableCell>
                 <TableCell>
                   {expense.isRecurring ? (
@@ -375,7 +552,7 @@ export default function ExpenseList({ building }) {
         open={openExpenseDialog}
         setOpen={setOpenExpenseDialog}
         expense={selectedExpense}
-        buildingId={building?._id}
+        building={building}
       />
 
       <ConfirmDialog
