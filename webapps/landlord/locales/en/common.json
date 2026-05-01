@@ -35,6 +35,7 @@
   "Agree & Join": "Agree & Join",
   "Allocation": "Allocation",
   "Allocation Method": "Allocation Method",
+  "Allocations per Unit": "Allocations per Unit",
   "Already on {{APP_NAME}}?": "Already on {{APP_NAME}}?",
   "Amount": "Amount",
   "Amount of the deposit refund": "Amount of the deposit refund",
@@ -639,5 +640,8 @@
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} to {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
   "{{name}} - {{status}}": "{{name}} - {{status}}",
-  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}"
+  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
+  "fixed amount per unit": "fixed amount per unit",
+  "percentage of total": "percentage of total",
+  "ratio shares": "ratio shares"
 }

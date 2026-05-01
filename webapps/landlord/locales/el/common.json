@@ -35,6 +35,7 @@
   "Agree & Join": "Αποδοχή & Συμμετοχή",
   "Allocation": "Κατανομή",
   "Allocation Method": "Μέθοδος Κατανομής",
+  "Allocations per Unit": "Κατανομές ανά Μονάδα",
   "Already on {{APP_NAME}}?": "Είστε ήδη στο {{APP_NAME}};",
   "Amount": "Ποσό",
   "Amount of the deposit refund": "Ποσό επιστροφής εγγύησης",
@@ -639,5 +640,8 @@
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} έως {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
   "{{name}} - {{status}}": "{{name}} - {{status}}",
-  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}"
+  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
+  "fixed amount per unit": "σταθερό ποσό ανά μονάδα",
+  "percentage of total": "ποσοστό επί του συνόλου",
+  "ratio shares": "μερίδια αναλογίας"
 }
