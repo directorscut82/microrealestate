@@ -531,6 +531,16 @@ export async function importFromE9(req: Req, res: Res) {
       await building!.save();
 
       createdBuildings.push(building.toObject());
+
+      // Recompute rents for existing tenants whose share may have changed
+      // (e.g. equal allocation denominator increased with new units)
+      const managedPropertyIds = (building as any).units
+        .filter((u: any) => u.isManaged && u.propertyId)
+        .map((u: any) => String(u.propertyId));
+
+      for (const propId of managedPropertyIds) {
+        await _recomputeTenantsForProperty(realm!._id, propId);
+      }
     }
 
     const result = await _toBuildingData(realm!._id, createdBuildings);
