@@ -630,5 +630,14 @@
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} até {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
   "{{name}} - {{status}}": "{{name}} - {{status}}",
-  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}"
+  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
+  "Actual Amount": "Valor Real",
+  "Budget": "Orçamento",
+  "Enter actual expense amounts for a specific month. Amounts will be distributed to units based on allocation method.": "Insira os valores reais das despesas para um mês específico. Os valores serão distribuídos entre as unidades com base no método de alocação.",
+  "Monthly Statement": "Extrato Mensal",
+  "Monthly statement saved": "Extrato mensal salvo",
+  "Please enter at least one amount": "Insira pelo menos um valor",
+  "Please select a month": "Selecione um mês",
+  "Save Statement": "Salvar Extrato",
+  "Select month": "Selecionar mês"
 }

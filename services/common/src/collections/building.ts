@@ -69,7 +69,7 @@ const BuildingExpenseSchema = new mongoose.Schema({
     ],
     required: true
   },
-  amount: { type: Number, required: true },
+  amount: { type: Number, default: 0 },
   allocationMethod: {
     type: String,
     enum: [
@@ -199,7 +199,7 @@ const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
   hasCentralHeating: { type: Boolean, default: false },
   heatingType: {
     type: String,
-    enum: ['central_oil', 'central_gas', 'autonomous', 'none']
+    enum: ['central_oil', 'central_gas', 'autonomous', 'none', '']
   },
 
   manager: {

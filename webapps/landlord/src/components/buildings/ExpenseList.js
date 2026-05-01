@@ -41,7 +41,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 const expenseSchema = z.object({
   name: z.string().min(1),
   type: z.string().min(1),
-  amount: z.coerce.number().min(0),
+  amount: z.coerce.number().min(0).optional().default(0),
   allocationMethod: z.string().min(1),
   isRecurring: z.boolean(),
   notes: z.string().optional()
@@ -105,7 +105,7 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
     defaultValues: {
       name: '',
       type: '',
-      amount: '',
+      amount: 0,
       allocationMethod: '',
       isRecurring: true,
       notes: ''
