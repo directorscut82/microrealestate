@@ -628,5 +628,14 @@
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} à {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
   "{{name}} - {{status}}": "{{name}} - {{status}}",
-  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}"
+  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
+  "Actual Amount": "Montant réel",
+  "Budget": "Budget",
+  "Enter actual expense amounts for a specific month. Amounts will be distributed to units based on allocation method.": "Saisissez les montants réels des charges pour un mois donné. Les montants seront répartis entre les unités selon la méthode d'allocation.",
+  "Monthly Statement": "Relevé mensuel",
+  "Monthly statement saved": "Relevé mensuel enregistré",
+  "Please enter at least one amount": "Veuillez saisir au moins un montant",
+  "Please select a month": "Veuillez sélectionner un mois",
+  "Save Statement": "Enregistrer le relevé",
+  "Select month": "Sélectionner le mois"
 }

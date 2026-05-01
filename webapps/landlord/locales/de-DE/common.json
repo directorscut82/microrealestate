@@ -628,5 +628,14 @@
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} bis {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
   "{{name}} - {{status}}": "{{name}} - {{status}}",
-  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}"
+  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
+  "Actual Amount": "Tatsächlicher Betrag",
+  "Budget": "Budget",
+  "Enter actual expense amounts for a specific month. Amounts will be distributed to units based on allocation method.": "Geben Sie die tatsächlichen Ausgabenbeträge für einen bestimmten Monat ein. Die Beträge werden nach der Verteilungsmethode auf die Einheiten verteilt.",
+  "Monthly Statement": "Monatsabrechnung",
+  "Monthly statement saved": "Monatsabrechnung gespeichert",
+  "Please enter at least one amount": "Bitte geben Sie mindestens einen Betrag ein",
+  "Please select a month": "Bitte wählen Sie einen Monat",
+  "Save Statement": "Abrechnung speichern",
+  "Select month": "Monat auswählen"
 }

@@ -630,5 +630,14 @@
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} al {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
   "{{name}} - {{status}}": "{{name}} - {{status}}",
-  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}"
+  "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
+  "Actual Amount": "Monto Real",
+  "Budget": "Presupuesto",
+  "Enter actual expense amounts for a specific month. Amounts will be distributed to units based on allocation method.": "Ingrese los montos reales de gastos para un mes específico. Los montos se distribuirán entre las unidades según el método de asignación.",
+  "Monthly Statement": "Estado Mensual",
+  "Monthly statement saved": "Estado mensual guardado",
+  "Please enter at least one amount": "Ingrese al menos un monto",
+  "Please select a month": "Seleccione un mês",
+  "Save Statement": "Guardar Estado",
+  "Select month": "Seleccionar mes"
 }

@@ -29,7 +29,7 @@ import moment from 'moment';
 function generateTermOptions() {
   const options = [];
   const now = moment();
-  for (let i = -3; i <= 3; i++) {
+  for (let i = -24; i <= 6; i++) {
     const m = moment(now).add(i, 'months').startOf('month');
     options.push({
       value: m.format('YYYYMMDDHH'),
@@ -58,20 +58,10 @@ export default function MonthlyStatement({ building }) {
     }
   });
 
-  const handleTermChange = useCallback(
-    (term) => {
-      setSelectedTerm(term);
-      // Pre-fill with budgeted amounts from recurring expenses
-      const prefilled = {};
-      expenses.forEach((expense) => {
-        if (expense.isRecurring) {
-          prefilled[expense._id] = expense.amount;
-        }
-      });
-      setAmounts(prefilled);
-    },
-    [expenses]
-  );
+  const handleTermChange = useCallback((term) => {
+    setSelectedTerm(term);
+    setAmounts({});
+  }, []);
 
   const handleAmountChange = useCallback((expenseId, value) => {
     setAmounts((prev) => ({
@@ -153,11 +143,9 @@ export default function MonthlyStatement({ building }) {
             <TableHeader>
               <TableRow>
                 <TableHead>{t('Expense')}</TableHead>
+                <TableHead>{t('Allocation')}</TableHead>
                 <TableHead className="text-right">
-                  {t('Budget')}
-                </TableHead>
-                <TableHead className="text-right">
-                  {t('Actual Amount')}
+                  {t('Amount')}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -165,13 +153,25 @@ export default function MonthlyStatement({ building }) {
               {expenses.map((expense) => (
                 <TableRow key={expense._id}>
                   <TableCell>{expense.name}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {expense.isRecurring ? `€${expense.amount}` : '-'}
+                  <TableCell className="text-muted-foreground text-sm">
+                    {t(expense.allocationMethod === 'equal'
+                      ? 'Equal'
+                      : expense.allocationMethod === 'by_surface'
+                        ? 'By Surface'
+                        : expense.allocationMethod === 'general_thousandths'
+                          ? 'General ‰'
+                          : expense.allocationMethod === 'heating_thousandths'
+                            ? 'Heating ‰'
+                            : expense.allocationMethod === 'elevator_thousandths'
+                              ? 'Elevator ‰'
+                              : expense.allocationMethod || 'Equal'
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <Input
                       type="number"
                       step="0.01"
+                      min="0"
                       className="w-32 ml-auto text-right"
                       value={amounts[expense._id] ?? ''}
                       onChange={(e) =>
