@@ -128,8 +128,19 @@ export async function add(req: Req, res: Res) {
   }
 
   const now = new Date();
+  const {
+    name, description, address, blockNumber, blockStreets,
+    atakPrefix, yearBuilt, totalFloors, hasElevator,
+    hasCentralHeating, heatingType, manager, bankInfo,
+    units, expenses, contractors, repairs, notes
+  } = req.body;
   const building = new Collections.Building({
-    ...req.body,
+    name, description, address, blockNumber, blockStreets,
+    atakPrefix, yearBuilt, totalFloors, hasElevator,
+    hasCentralHeating, heatingType, manager, bankInfo,
+    units: units || [], expenses: expenses || [],
+    contractors: contractors || [], repairs: repairs || [],
+    notes,
     realmId: realm!._id,
     createdDate: now,
     updatedDate: now
@@ -164,7 +175,25 @@ export async function update(req: Req, res: Res) {
       _id: req.params.id,
       realmId: realm!._id
     },
-    { ...req.body, updatedDate: new Date() },
+    {
+      $set: {
+        ...(req.body.name !== undefined && { name: req.body.name }),
+        ...(req.body.description !== undefined && { description: req.body.description }),
+        ...(req.body.address !== undefined && { address: req.body.address }),
+        ...(req.body.blockNumber !== undefined && { blockNumber: req.body.blockNumber }),
+        ...(req.body.blockStreets !== undefined && { blockStreets: req.body.blockStreets }),
+        ...(req.body.atakPrefix !== undefined && { atakPrefix: req.body.atakPrefix }),
+        ...(req.body.yearBuilt !== undefined && { yearBuilt: req.body.yearBuilt }),
+        ...(req.body.totalFloors !== undefined && { totalFloors: req.body.totalFloors }),
+        ...(req.body.hasElevator !== undefined && { hasElevator: req.body.hasElevator }),
+        ...(req.body.hasCentralHeating !== undefined && { hasCentralHeating: req.body.hasCentralHeating }),
+        ...(req.body.heatingType !== undefined && { heatingType: req.body.heatingType }),
+        ...(req.body.manager !== undefined && { manager: req.body.manager }),
+        ...(req.body.bankInfo !== undefined && { bankInfo: req.body.bankInfo }),
+        ...(req.body.notes !== undefined && { notes: req.body.notes }),
+        updatedDate: new Date()
+      }
+    },
     { new: true }
   ).lean();
 

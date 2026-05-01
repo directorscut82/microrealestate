@@ -259,7 +259,7 @@ export default function taskBase(
             .filter((charge) => charge.term === rent.term)
             .forEach((charge) => {
               rent.buildingCharges!.push({
-                description: charge.description || 'Κοινόχρηστα',
+                description: charge.description || 'Building charges',
                 amount: charge.amount,
                 buildingName: building.name
               });

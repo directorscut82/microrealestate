@@ -6,7 +6,7 @@ process.on('SIGINT', async () => {
   try {
     await MongoClient.getInstance()?.disconnect();
   } catch (error) {
-    console.error(error);
+    logger.error(String(error));
   }
 });
 

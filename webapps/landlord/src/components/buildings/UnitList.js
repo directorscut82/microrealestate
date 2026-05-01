@@ -106,7 +106,6 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
         }
         handleClose();
       } catch (error) {
-        console.error(error);
         toast.error(t('Something went wrong'));
       } finally {
         setIsLoading(false);
@@ -247,7 +246,6 @@ export default function UnitList({ building }) {
     try {
       await removeMutation.mutateAsync(unitToDelete._id);
     } catch (error) {
-      console.error(error);
       toast.error(t('Something went wrong'));
     }
   }, [unitToDelete, removeMutation, t]);

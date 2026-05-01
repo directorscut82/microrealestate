@@ -21,7 +21,7 @@ process.on('SIGINT', async () => {
   try {
     await Service.getInstance()?.shutDown(0);
   } catch (error) {
-    console.error(error);
+    Logger.default.error(String(error));
   }
 });
 
@@ -101,8 +101,8 @@ export default class Service {
         mongoSanitize({
           allowDots: true,
           replaceWith: '_',
-          onSanitize: ({ req, key }: { req: Express.Request; key: string }) => {
-            console.warn(`request[${key}] has been sanitized`, req);
+          onSanitize: ({ key }: { req: Express.Request; key: string }) => {
+            Logger.default.warn(`request[${key}] has been sanitized`);
           }
         });
       }
