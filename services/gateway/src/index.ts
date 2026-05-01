@@ -146,7 +146,7 @@ function exposeServices(application: Express.Application) {
   );
 
   // Do not expose reset api on Prod
-  if (!config.PRODUCTION) {
+  if (!config.PRODUCTION && config.RESETSERVICE_URL) {
     application.use(
       '/api/reset',
       createProxyMiddleware({
@@ -171,7 +171,7 @@ function exposeHealthCheck(application: Express.Application) {
         config.EMAILER_URL
       ];
 
-      if (!config.PRODUCTION) {
+      if (!config.PRODUCTION && config.RESETSERVICE_URL) {
         serviceEndpoints.push(config.RESETSERVICE_URL);
       }
 
