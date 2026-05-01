@@ -28,6 +28,8 @@ services:
   ###############################################################################
   gateway:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
@@ -40,6 +42,8 @@ services:
   ###############################################################################
   authenticator:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: services/authenticator/Dockerfile
@@ -59,6 +63,8 @@ services:
   ###############################################################################
   pdfgenerator:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: services/pdfgenerator/Dockerfile
@@ -78,6 +84,8 @@ services:
   ###############################################################################
   emailer:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: services/emailer/Dockerfile
@@ -97,6 +105,8 @@ services:
   ###############################################################################
   api:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: services/api/Dockerfile
@@ -116,6 +126,8 @@ services:
   ###############################################################################
   tenantapi:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: services/tenantapi/Dockerfile
@@ -135,6 +147,8 @@ services:
   ###############################################################################
   landlord-frontend:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: webapps/landlord/Dockerfile
@@ -154,6 +168,8 @@ services:
   ###############################################################################
   tenant-frontend:
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
     build:
       context: .
       dockerfile: webapps/tenant/Dockerfile
