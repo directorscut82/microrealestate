@@ -127,6 +127,8 @@ export default function routes(): express.Router {
   buildingsRouter.delete('/:id/expenses/:expenseId', Middlewares.asyncWrapper(buildingManager.removeExpense as any));
   // Contractors
   buildingsRouter.post('/:id/contractors', Middlewares.asyncWrapper(buildingManager.addContractor as any));
+  // Monthly statement (batch distribution of expenses to units for a given month)
+  buildingsRouter.post('/:id/monthly-statement', Middlewares.asyncWrapper(buildingManager.saveMonthlyStatement as any));
   buildingsRouter.patch('/:id/contractors/:contractorId', Middlewares.asyncWrapper(buildingManager.updateContractor as any));
   buildingsRouter.delete('/:id/contractors/:contractorId', Middlewares.asyncWrapper(buildingManager.removeContractor as any));
   // Repairs

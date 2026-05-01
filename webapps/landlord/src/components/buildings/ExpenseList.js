@@ -28,6 +28,7 @@ import ConfirmDialog from '../ConfirmDialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
+import MonthlyStatement from './MonthlyStatement';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
@@ -384,6 +385,8 @@ export default function ExpenseList({ building }) {
         setOpen={setOpenConfirmDelete}
         onConfirm={handleConfirmDelete}
       />
+
+      <MonthlyStatement building={building} />
     </div>
   );
 }

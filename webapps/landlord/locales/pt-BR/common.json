@@ -73,6 +73,7 @@
   "Building": "Casa",
   "Building Manager": "Administrador do edifício",
   "Building cannot be deleted because units have active tenants": "O edifício não pode ser excluído porque as unidades têm inquilinos ativos",
+  "Building charges": "Encargos do edifício",
   "Building does not exist": "O edifício não existe",
   "Building information": "Informações do edifício",
   "Building name is missing": "O nome do edifício está faltando",

@@ -343,3 +343,11 @@ export async function removeMonthlyCharge(buildingId, unitId, chargeId) {
     `/buildings/${buildingId}/units/${unitId}/charges/${chargeId}`
   );
 }
+
+export async function saveMonthlyStatement(buildingId, data) {
+  const response = await apiFetcher().post(
+    `/buildings/${buildingId}/monthly-statement`,
+    data
+  );
+  return response.data;
+}

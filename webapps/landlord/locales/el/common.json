@@ -73,6 +73,7 @@
   "Building": "Κτίριο",
   "Building Manager": "Διαχειριστής Κτιρίου",
   "Building cannot be deleted because units have active tenants": "Το κτίριο δεν μπορεί να διαγραφεί επειδή μονάδες έχουν ενεργούς ενοικιαστές",
+  "Building charges": "Κοινόχρηστα",
   "Building does not exist": "Το κτίριο δεν υπάρχει",
   "Building information": "Πληροφορίες κτιρίου",
   "Building name is missing": "Λείπει το όνομα κτιρίου",

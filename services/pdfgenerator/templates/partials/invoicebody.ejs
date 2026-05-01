@@ -27,6 +27,17 @@
 		</tr>
 <% }); %>
 
+<% (rent.buildingCharges || []).forEach(function(charge) { %>
+		<tr class="item-row">
+		  <td class="description">
+		  	<%= charge.buildingName ? charge.buildingName + ' - ' : '' %><%= charge.description %>
+		  </td>
+			<td class="txtAlignRight">1</td>
+			<td class="txtAlignRight"><%= _.formatNumber(charge.amount) %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(charge.amount) %></td>
+		</tr>
+<% }); %>
+
 <% rent.discounts.forEach(function(discount) { %>
 	<tr class="item-row">
 	  <td class="description">
@@ -50,7 +61,7 @@
 <% }); %>
 
 <%
-	var emptyRowCount = 9 - rent.preTaxAmounts.length - rent.charges.length - rent.discounts.length - rent.debts.length;
+	var emptyRowCount = 9 - rent.preTaxAmounts.length - rent.charges.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length;
 	for (var idx=0; idx<emptyRowCount; idx++) {
 %>
 	<tr class="item-row">

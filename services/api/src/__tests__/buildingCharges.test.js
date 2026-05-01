@@ -435,7 +435,7 @@ describe('Building Charges Integration', () => {
   });
 
   describe('Equal allocation with unmanaged units', () => {
-    it('should only split among managed units', () => {
+    it('should split among ALL units regardless of managed status', () => {
       const prop1 = makeProperty('propA');
       const unit1 = makeUnit('propA');
       const unit2 = { ...makeUnit('propB'), _id: 'unit2', isManaged: true };
@@ -446,9 +446,9 @@ describe('Building Charges Integration', () => {
       const contract = makeContract([prop1], [building]);
       const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
 
-      // 90 / 2 managed units = 45
+      // 90 / 3 total units = 30 (each unit pays same share regardless of managed status)
       expect(rent.buildingCharges).toHaveLength(1);
-      expect(rent.buildingCharges[0].amount).toBe(45);
+      expect(rent.buildingCharges[0].amount).toBe(30);
     });
   });
 

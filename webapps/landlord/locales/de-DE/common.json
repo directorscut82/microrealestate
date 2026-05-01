@@ -72,6 +72,7 @@
   "Building": "Gebäude",
   "Building Manager": "Hausverwalter",
   "Building cannot be deleted because units have active tenants": "Das Gebäude kann nicht gelöscht werden, da Einheiten aktive Mieter haben",
+  "Building charges": "Gebäudekosten",
   "Building does not exist": "Das Gebäude existiert nicht",
   "Building information": "Gebäudeinformationen",
   "Building name is missing": "Der Gebäudename fehlt",
