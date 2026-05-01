@@ -1,6 +1,7 @@
 import * as bcrypt from 'bcrypt';
 import mongoose, { CallbackError } from 'mongoose';
 import { CollectionTypes } from '@microrealestate/types';
+import logger from '../utils/logger.js';
 import RealmModel from './realm.js';
 
 const AccountSchema = new mongoose.Schema<CollectionTypes.Account>({
@@ -54,7 +55,7 @@ AccountSchema.post('save', function (account) {
     },
     (error: CallbackError) => {
       if (error) {
-        console.error(error);
+        logger.error(String(error));
       }
     }
   );

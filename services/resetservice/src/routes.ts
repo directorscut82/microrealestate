@@ -1,6 +1,7 @@
 import * as Express from 'express';
 import * as crypto from 'crypto';
 import {
+  logger,
   Collections,
   Middlewares,
   Service
@@ -17,18 +18,18 @@ routes.delete(
       await Promise.all(
         [
           'accounts',
-          'contracts',
           'buildings',
           'documents',
           'emails',
-          'landloards',
           'leases',
           'occupants',
           'properties',
           'realms',
           'templates'
         ].map((collection) =>
-          mongoClient?.dropCollection(collection).catch(console.error)
+          mongoClient?.dropCollection(collection).catch((e) =>
+            logger.error(String(e))
+          )
         )
       );
 

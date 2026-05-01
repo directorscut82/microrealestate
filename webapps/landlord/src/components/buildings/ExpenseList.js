@@ -137,7 +137,6 @@ function ExpenseFormDialog({ open, setOpen, expense, buildingId }) {
         }
         handleClose();
       } catch (error) {
-        console.error(error);
         toast.error(t('Something went wrong'));
       } finally {
         setIsLoading(false);
@@ -291,7 +290,6 @@ export default function ExpenseList({ building }) {
     try {
       await removeMutation.mutateAsync(expenseToDelete._id);
     } catch (error) {
-      console.error(error);
       toast.error(t('Something went wrong'));
     }
   }, [expenseToDelete, removeMutation, t]);
@@ -328,11 +326,15 @@ export default function ExpenseList({ building }) {
             {expenses.map((expense) => (
               <TableRow key={expense._id}>
                 <TableCell>{expense.name}</TableCell>
-                <TableCell>{t(expense.type)}</TableCell>
+                <TableCell>
+                  {t(expenseTypes.find((et) => et.id === expense.type)?.labelId || expense.type)}
+                </TableCell>
                 <TableCell className="text-right">
                   <NumberFormat value={expense.amount} />
                 </TableCell>
-                <TableCell>{t(expense.allocationMethod)}</TableCell>
+                <TableCell>
+                  {t(allocationMethods.find((am) => am.id === expense.allocationMethod)?.labelId || expense.allocationMethod)}
+                </TableCell>
                 <TableCell>
                   {expense.isRecurring ? (
                     <Badge variant="default">{t('Yes')}</Badge>

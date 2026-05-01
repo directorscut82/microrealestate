@@ -80,7 +80,7 @@ export async function update(req: Req, res: Res) {
 
 export async function remove(req: Req, res: Res) {
   const realm = req.realm;
-  const leaseIds = req.params.ids.split(',') || [];
+  const leaseIds = req.params.ids.split(',');
 
   if (!leaseIds.length) {
     logger.error('missing lease ids');
@@ -136,7 +136,7 @@ export async function remove(req: Req, res: Res) {
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
-    throw new ServiceError(error as string, 500);
+    throw new ServiceError(String(error), 500);
   } finally {
     session.endSession();
   }

@@ -40,7 +40,6 @@ export default function ImportE9Dialog({ open, setOpen }) {
         setPreview(result);
         setState('preview');
       } catch (error) {
-        console.error(error);
         toast.error(t('Failed to parse E9 PDF'));
         setState('idle');
         selectedFileRef.current = null;
@@ -63,7 +62,6 @@ export default function ImportE9Dialog({ open, setOpen }) {
       toast.success(t('Buildings imported successfully'));
       handleClose();
     } catch (error) {
-      console.error(error);
       toast.error(t('Failed to import buildings'));
       setState('preview');
     }

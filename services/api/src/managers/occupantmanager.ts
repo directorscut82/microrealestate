@@ -105,6 +105,8 @@ async function _autoLinkPropertiesToBuildings(
   for (const property of properties) {
     if (property.buildingId) continue;
 
+    if (!property.atakNumber || property.atakNumber.length < 6) continue;
+
     const atakPrefix = property.atakNumber.substring(0, 6);
     const building = await Collections.Building.findOne({
       realmId,
@@ -287,7 +289,7 @@ export async function add(req: Req, res: Res) {
       occupant.rents = contract.rents;
     }
   } catch (error) {
-    throw new ServiceError(error as string, 409);
+    throw new ServiceError(String(error), 409);
   }
 
   const newOccupant: any = await Collections.Tenant.create({
@@ -396,18 +398,19 @@ export async function update(req: Req, res: Res) {
       const newContract = Contract.update(contract, modification);
       newOccupant.rents = newContract.rents;
     } catch (e) {
-      throw new ServiceError(e as string, 409);
+      throw new ServiceError(String(e), 409);
     }
   } else {
-    const paidRents =
-      newOccupant.rents?.some(
-        (rent: AnyRecord) =>
-          (rent.payments &&
-            rent.payments.some((payment: AnyRecord) => payment.amount > 0)) ||
-          rent.discounts.some((discount: AnyRecord) => discount.origin === 'settlement')
-      ) || [];
+    const hasPaidRents = (newOccupant.rents || []).some(
+      (rent: AnyRecord) =>
+        (rent.payments &&
+          rent.payments.some((payment: AnyRecord) => payment.amount > 0)) ||
+        (rent.discounts || []).some(
+          (discount: AnyRecord) => discount.origin === 'settlement'
+        )
+    );
 
-    if ((paidRents as any[]).length) {
+    if (hasPaidRents) {
       throw new ServiceError(
         'impossible to update tenant some rents have been paid',
         409
@@ -430,7 +433,7 @@ export async function update(req: Req, res: Res) {
 
 export async function remove(req: Req, res: Res) {
   const realm = req.realm;
-  const occupantIds = req.params?.ids.split(',') || [];
+  const occupantIds = req.params?.ids.split(',') ?? [];
 
   if (!occupantIds.length) {
     throw new ServiceError('tenant not found', 404);
@@ -478,10 +481,12 @@ export async function remove(req: Req, res: Res) {
     );
 
     const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
-    const documentsEndPoint = `${PDFGENERATOR_URL}/documents/${documents
-      .map(({ _id }: any) => _id)
-      .join(',')}`;
-    try {
+    const documentIds = documents.map(({ _id }: any) => _id).join(',');
+    if (!documentIds) {
+      logger.debug('no documents to delete for tenant');
+    } else {
+      const documentsEndPoint = `${PDFGENERATOR_URL}/documents/${documentIds}`;
+      try {
       await axios.delete(documentsEndPoint, {
         headers: {
           authorization: req.headers.authorization,
@@ -489,10 +494,11 @@ export async function remove(req: Req, res: Res) {
           'Accept-Language': req.headers['accept-language']
         }
       });
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || error.message;
-      logger.error('DELETE documents failed');
-      logger.error(errorMessage);
+      } catch (error: any) {
+        const errorMessage = error.response?.data?.message || error.message;
+        logger.error('DELETE documents failed');
+        logger.error(errorMessage);
+      }
     }
 
     await Collections.Tenant.deleteMany({
@@ -502,7 +508,7 @@ export async function remove(req: Req, res: Res) {
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
-    throw new ServiceError(error as string, 500);
+    throw new ServiceError(String(error), 500);
   } finally {
     session.endSession();
   }

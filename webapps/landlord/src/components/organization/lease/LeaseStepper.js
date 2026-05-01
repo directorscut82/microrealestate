@@ -16,7 +16,6 @@ export default function LeaseStepper({ lease, leases, onSubmit }) {
           await LeaseFormValidate(lease, leases);
           isFormsValid = activeStep >= 1;
         } catch (error) {
-          console.log(error);
           isFormsValid = false;
         }
         await onSubmit({ ...leasePart, stepperMode: !isFormsValid });

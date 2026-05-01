@@ -7,7 +7,7 @@ process.on('SIGINT', async () => {
   try {
     await RedisClient.getInstance()?.disconnect();
   } catch (error) {
-    console.error(error);
+    logger.error(String(error));
   }
 });
 

@@ -24,7 +24,6 @@ export default function TenantStepper({ tenant, leases, properties, organization
           await BillingFormValidate(tenant);
           isFormsValid = activeStep >= 3;
         } catch (error) {
-          console.log(error);
           isFormsValid = false;
         }
         await onSubmit({ ...tenantPart, stepperMode: !isFormsValid });

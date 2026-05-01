@@ -124,7 +124,7 @@ async function _getRentsDataByTerm(
       realm,
       startTerm,
       endTerm
-    ).catch(logger.error)
+    ).catch((e) => logger.error(String(e)))
   ]);
 
   const rents = (dbOccupants as AnyRecord[]).reduce(
@@ -278,7 +278,7 @@ async function _updateByTerm(
       locale,
       realm,
       Number(term)
-    ).catch(logger.error)) || {};
+    ).catch((e) => logger.error(String(e)))) || {};
 
   const savedOccupant: AnyRecord = (await Collections.Tenant.findOneAndUpdate(
     {
@@ -349,9 +349,9 @@ async function _rentOfOccupant(
   term: string
 ): Promise<AnyRecord> {
   const [dbOccupants = [], emailStatus = {}] = await Promise.all([
-    _findOccupants(realm, tenantId, Number(term)).catch(logger.error),
+    _findOccupants(realm, tenantId, Number(term)).catch((e) => logger.error(String(e))),
     _getEmailStatus(authorizationHeader, locale, realm, Number(term)).catch(
-      logger.error
+      (e) => logger.error(String(e))
     )
   ]);
 

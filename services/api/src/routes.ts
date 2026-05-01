@@ -7,7 +7,7 @@ import * as occupantManager from './managers/occupantmanager.js';
 import * as propertyManager from './managers/propertymanager.js';
 import * as realmManager from './managers/realmmanager.js';
 import * as rentManager from './managers/rentmanager.js';
-import { Middlewares, Service } from '@microrealestate/common';
+import { Middlewares, Service, ServiceError } from '@microrealestate/common';
 import express from 'express';
 import multer from 'multer';
 import { parseImportedPdf } from './managers/pdfimportmanager.js';
@@ -41,7 +41,17 @@ export default function routes(): express.Router {
   router.use('/leases', leasesRouter);
 
   const occupantsRouter = express.Router();
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype === 'application/pdf') {
+        cb(null, true);
+      } else {
+        cb(new ServiceError('Only PDF files are allowed', 422));
+      }
+    }
+  });
   occupantsRouter.post(
     '/import-pdf',
     upload.single('pdf'),
