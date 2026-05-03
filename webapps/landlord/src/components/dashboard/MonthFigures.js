@@ -117,7 +117,7 @@ export default function MonthFigures({ className, dashboardData }) {
     const paidRatio = totalDue > 0 ? currentRevenues.paid / totalDue : 0;
 
     return (
-      <div className="bg-background border rounded-lg shadow-lg p-3 text-sm max-w-80">
+      <div className="bg-background/90 backdrop-blur-sm border rounded-lg shadow-lg p-3 text-sm max-w-80">
         <div className="font-semibold mb-1">{entry.name}</div>
         <div className="font-medium mb-2">{formatNumber(entry.value)}</div>
         {tenants.length > 0 && (

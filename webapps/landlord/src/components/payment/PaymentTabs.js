@@ -100,10 +100,6 @@ function PaymentTabs({ rent, onSubmit }, ref) {
     setValues(rent) { reset(initialFormValues(rent)); }
   }), [isDirty, reset]);
 
-  const momentTerm = moment(rent.term, 'YYYYMMDDHH');
-  const minDate = moment(momentTerm).startOf('month').format('YYYY-MM-DD');
-  const maxDate = moment(momentTerm).endOf('month').format('YYYY-MM-DD');
-
   const _handleSubmit = useCallback(
     async (values) => {
       const clonedValues = _.cloneDeep(values);
@@ -157,7 +153,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
                 <div className="grid gap-2 items-end grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-1">
                     <Label htmlFor={`payments.${index}.date`}>{t('Date')}</Label>
-                    <Input id={`payments.${index}.date`} type="date" min={minDate} max={maxDate} {...register(`payments.${index}.date`)} />
+                    <Input id={`payments.${index}.date`} type="date" {...register(`payments.${index}.date`)} />
                   </div>
                   <div className="space-y-1">
                     <Label>{t('Type')}</Label>

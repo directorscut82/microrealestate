@@ -52,7 +52,7 @@ export default function YearFigures({ className, dashboardData }) {
     if (!data) return null;
     const tenants = data.tenants || [];
     return (
-      <div className="bg-background border rounded-lg shadow-lg p-3 text-sm max-w-72">
+      <div className="bg-background/90 backdrop-blur-sm border rounded-lg shadow-lg p-3 text-sm max-w-72">
         <div className="font-semibold mb-2">
           {moment(data.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
