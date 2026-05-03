@@ -28,6 +28,7 @@ const MonthlyChargeSchema = new mongoose.Schema({
 
 const BuildingUnitSchema = new mongoose.Schema({
   atakNumber: { type: String, required: true },
+  altAtakNumbers: [String],
   floor: Number,
   unitLabel: String,
   surface: Number,

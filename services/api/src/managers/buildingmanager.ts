@@ -552,6 +552,20 @@ export async function importFromE9(req: Req, res: Res) {
               memberId: memberId || userEmail
             });
           }
+          // Store co-owner's ATAK in altAtakNumbers (on building unit and property)
+          if (existingByDeh.atakNumber !== parsedUnit.atakNumber) {
+            if (!existingByDeh.altAtakNumbers) existingByDeh.altAtakNumbers = [];
+            if (!existingByDeh.altAtakNumbers.includes(parsedUnit.atakNumber)) {
+              existingByDeh.altAtakNumbers.push(parsedUnit.atakNumber);
+            }
+            // Also update the linked Property record
+            if (existingByDeh.propertyId) {
+              await Collections.Property.updateOne(
+                { _id: existingByDeh.propertyId },
+                { $addToSet: { altAtakNumbers: parsedUnit.atakNumber } }
+              );
+            }
+          }
           continue;
         }
 
