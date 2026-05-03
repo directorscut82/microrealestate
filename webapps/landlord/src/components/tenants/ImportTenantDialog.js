@@ -12,6 +12,9 @@ import {
   QueryKeys
 } from '../../utils/restcalls';
 import {
+  apiFetcher
+} from '../../utils/fetch';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -20,8 +23,10 @@ import {
 } from '../ui/select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
+import { Checkbox } from '../ui/checkbox';
 import FileDropZone from '../ui/file-drop-zone';
 import { Label } from '../ui/label';
+import { LuCalendarClock } from 'react-icons/lu';
 import { LuAlertTriangle, LuBan, LuCheck, LuUser } from 'react-icons/lu';
 import moment from 'moment';
 import ResponsiveDialog from '../ResponsiveDialog';
@@ -46,6 +51,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
   const [files, setFiles] = useState([]);
   const [parsedResults, setParsedResults] = useState([]);
   const [selectedLeaseIds, setSelectedLeaseIds] = useState({});
+  const [markPaidFlags, setMarkPaidFlags] = useState({});
 
   const { data: leases = [] } = useQuery({
     queryKey: [QueryKeys.LEASES],
@@ -86,6 +92,13 @@ export default function ImportTenantDialog({ open, setOpen }) {
   const matchInfos = useMemo(() => {
     return parsedResults.map((parsed) => {
       const months = computeMonths(parsed.validityStart, parsed.validityEnd);
+      // Compute past months (ongoing lease)
+      const startDate = moment(parsed.validityStart, 'DD/MM/YYYY');
+      const now = moment();
+      let pastMonths = 0;
+      if (startDate.isValid() && startDate.isBefore(now)) {
+        pastMonths = Math.floor(now.diff(startDate, 'months', true));
+      }
       const prop = parsed.properties[0];
       let matchedProperty = null;
       if (prop?.atakNumber) {
@@ -134,7 +147,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
         );
       }
 
-      return { months, matchedProperty, matchedTenant, occupiedBy };
+      return { months, pastMonths, matchedProperty, matchedTenant, occupiedBy };
     });
   }, [parsedResults, existingProperties, existingTenants]);
 
@@ -307,6 +320,28 @@ export default function ImportTenantDialog({ open, setOpen }) {
         } else {
           tenant = await createTenant(tenantData);
         }
+
+        // Mark past months as paid if flag is set
+        if (markPaidFlags[idx] !== false && matchInfo?.pastMonths > 0) {
+          const startDate = moment(parsed.validityStart, 'DD/MM/YYYY');
+          const now = moment();
+          const rent = prop.monthlyRent || parsed.totalMonthlyRent || 0;
+          let termDate = startDate.clone();
+          while (termDate.isBefore(now, 'month')) {
+            const term = termDate.format('YYYYMM') + '0100';
+            try {
+              await apiFetcher().patch(
+                `/rents/payment/${tenant._id}/${term}`,
+                {
+                  _id: tenant._id,
+                  payments: [{ amount: rent, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
+                }
+              );
+            } catch { /* skip if term doesn't exist */ }
+            termDate.add(1, 'month');
+          }
+        }
+
         created.push(tenant);
       }
 
@@ -477,6 +512,25 @@ export default function ImportTenantDialog({ open, setOpen }) {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {info?.pastMonths > 0 && !info?.occupiedBy && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <Checkbox
+                          id={`markPaid-${idx}`}
+                          checked={markPaidFlags[idx] !== false}
+                          onCheckedChange={(checked) =>
+                            setMarkPaidFlags((prev) => ({
+                              ...prev,
+                              [idx]: checked
+                            }))
+                          }
+                        />
+                        <label htmlFor={`markPaid-${idx}`} className="text-xs flex items-center gap-1 cursor-pointer">
+                          <LuCalendarClock className="size-3" />
+                          {t('Mark {{count}} past months as paid', { count: info.pastMonths })}
+                        </label>
+                      </div>
+                    )}
                   </div>
                 );
               })}
