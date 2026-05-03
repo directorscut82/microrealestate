@@ -236,9 +236,29 @@ export default function taskBase(
 
         if (!building) return;
 
-        // Process building expenses
+        // Process monthly charges for this unit (overrides recurring expenses)
+        const unit = building.units.find((u) => String(u.propertyId) === String(property.propertyId));
+        const monthlyChargeExpenseIds = new Set<string>();
+        if (unit) {
+          unit.monthlyCharges
+            .filter((charge) => charge.term === rent.term)
+            .forEach((charge) => {
+              if (charge.expenseId) monthlyChargeExpenseIds.add(String(charge.expenseId));
+              rent.buildingCharges!.push({
+                description: charge.description || 'Building charges',
+                amount: charge.amount,
+                buildingName: building.name,
+                type: 'monthly_charge'
+              });
+            });
+        }
+
+        // Process recurring building expenses (skip those overridden by monthly charges)
         building.expenses
-          .filter((expense) => isExpenseActiveForTerm(expense, rent.term))
+          .filter((expense) =>
+            isExpenseActiveForTerm(expense, rent.term) &&
+            !monthlyChargeExpenseIds.has(String(expense._id))
+          )
           .forEach((expense) => {
             const share = computeBuildingChargeForProperty(
               building,
@@ -255,21 +275,6 @@ export default function taskBase(
               });
             }
           });
-
-        // Process monthly charges for this unit
-        const unit = building.units.find((u) => String(u.propertyId) === String(property.propertyId));
-        if (unit) {
-          unit.monthlyCharges
-            .filter((charge) => charge.term === rent.term)
-            .forEach((charge) => {
-              rent.buildingCharges!.push({
-                description: charge.description || 'Building charges',
-                amount: charge.amount,
-                buildingName: building.name,
-                type: 'monthly_charge'
-              });
-            });
-        }
 
         // Process repairs charged to tenants
         if (building.repairs && building.repairs.length > 0) {

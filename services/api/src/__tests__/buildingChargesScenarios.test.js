@@ -553,10 +553,10 @@ describe('Building Charges — Real-World Scenarios', () => {
 
       const rent = BL.computeRent(contract, '01/03/2024 00:00', null);
 
-      // Both: recurring (50) + monthly charge (25)
+      // Both: monthly charge (25, no expenseId = independent) + recurring (50)
       expect(rent.buildingCharges).toHaveLength(2);
-      expect(rent.buildingCharges[0].amount).toBe(50); // recurring expense
-      expect(rent.buildingCharges[1].amount).toBe(25); // monthly statement
+      expect(rent.buildingCharges[0].amount).toBe(25); // monthly statement (processed first)
+      expect(rent.buildingCharges[1].amount).toBe(50); // recurring expense
       expect(rent.total.charges).toBe(0); // building charges not in total.charges
     });
 
@@ -575,6 +575,30 @@ describe('Building Charges — Real-World Scenarios', () => {
       // The code pushes regardless of amount — verify behavior
       expect(rent.buildingCharges).toHaveLength(1);
       expect(rent.buildingCharges[0].amount).toBe(0);
+    });
+
+    it('monthly charge with expenseId overrides recurring expense for that term', () => {
+      const prop1 = makeProperty('p1');
+      const unit1 = makeUnit('p1', {
+        generalThousandths: 1000,
+        monthlyCharges: [
+          { term: 2024030100, amount: 75, description: 'Heating Mar', expenseId: 'exp_Heating' }
+        ]
+      });
+      // Recurring expense with amount=100 and same _id as expenseId
+      const expense = makeExpense('Heating', 100, 'general_thousandths');
+      const building = makeBuilding('Bldg', [unit1], [expense]);
+      const contract = makeContract([prop1], [building]);
+
+      // March — monthly charge overrides the recurring expense
+      const rentMar = BL.computeRent(contract, '01/03/2024 00:00', null);
+      expect(rentMar.buildingCharges).toHaveLength(1);
+      expect(rentMar.buildingCharges[0].amount).toBe(75); // monthly override, not 100
+
+      // April — no monthly charge, recurring expense applies
+      const rentApr = BL.computeRent(contract, '01/04/2024 00:00', null);
+      expect(rentApr.buildingCharges).toHaveLength(1);
+      expect(rentApr.buildingCharges[0].amount).toBe(100); // recurring
     });
   });
 
