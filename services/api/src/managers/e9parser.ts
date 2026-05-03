@@ -126,17 +126,28 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   // Pattern: MUNICIPALITY STREET NUMBER [X BLOCK_STREETS ...]
   // After that: numeric data (block, floor, surface, year, ownership, zip, DEH)
 
-  // Find the street+number pattern: one or more Greek words followed by a number
-  // The municipality comes before the street
-  // Also handle compound municipality names with dashes: "ΕΞΩΜΒΟΥΡΓΟΥ - ΚΑΛΛΟΝΗΣ"
-  const municipalityAndStreet = rest.match(
-    /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+(\d+)\s/
+  // Strategy: find street+number from the END of the address section.
+  // Known compound street prefixes: ΑΓ./ΑΓΙΩΝ/ΑΓΙΟΥ/ΕΘΝ./ΒΑΣΙΛ./ΛΕΩΦ.
+  // These indicate the street name is 2+ words.
+  // Pattern: [MUNICIPALITY...] [STREET_PREFIX? STREET_NAME] NUMBER
+
+  // Rural format FIRST (must be checked before simple street to avoid false matches)
+  // "MUNICIPALITY - AREA SETTLEMENT_TYPE SETTLEMENT_NAME X ..."
+  const ruralMatch = rest.match(
+    /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+(ΟΙΚΙΣΜΟΣ|ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ|ΘΕΣΗ|ΠΕΡΙΟΧΗ)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+X\b/
   );
-  // Rural format: "MUNICIPALITY - AREA SETTLEMENT_TYPE SETTLEMENT_NAME X ..."
-  const ruralMatch = !municipalityAndStreet
+
+  const compoundStreetMatch = rest.match(
+    /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+((?:ΑΓ\.?\s+|ΑΓΙΩΝ\s+|ΑΓΙΟΥ\s+|ΕΘΝ\.?\s+|ΒΑΣΙΛ\.?\s+|ΛΕΩΦ\.?\s+|ΗΡΩΩΝ\s+|ΣΤΡΑΤ\.?\s+)[\u0391-\u03A9\u0386-\u038F]+)\s+(\d+)\s/
+  );
+  // Simple street (single word before number)
+  const simpleStreetMatch = !compoundStreetMatch && !ruralMatch
     ? rest.match(
-        /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+(ΟΙΚΙΣΜΟΣ|ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ|ΘΕΣΗ|ΠΕΡΙΟΧΗ)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+X\b/
+        /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+)\s+([\u0391-\u03A9\u0386-\u038F]{3,})\s+(\d+)\s/
       )
+    : null;
+  const municipalityAndStreet = !ruralMatch
+    ? (compoundStreetMatch || simpleStreetMatch)
     : null;
 
   let municipality = '';
@@ -149,7 +160,9 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
     streetNumber = municipalityAndStreet[3];
     rest = rest.substring(municipalityAndStreet[0].length - 1);
   } else if (ruralMatch) {
-    municipality = ruralMatch[1].trim();
+    // For rural areas, use settlement name as city (better for Google Maps)
+    // Municipality chain like "ΕΞΩΜΒΟΥΡΓΟΥ - ΚΑΛΛΟΝΗΣ" is too specific
+    municipality = ruralMatch[3].trim(); // settlement name as city
     street = ruralMatch[3].trim(); // settlement name
     streetNumber = '0'; // no number for rural
     rest = rest.substring(ruralMatch[0].length);
@@ -470,7 +483,7 @@ export function parseE9(text: string): ParsedE9Result {
       continue;
     }
     // Skip structures on agricultural land (ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ = not rentable)
-    if (/ΕΠΙ\s+ΑΓΡΟΤΕΜΑΧ/i.test(unit.street)) {
+    if (/ΑΓΡΟΤΕΜΑΧ/i.test(unit.street)) {
       skippedAsLand++;
       continue;
     }
