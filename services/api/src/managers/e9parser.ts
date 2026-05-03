@@ -50,24 +50,12 @@ export type ParsedE9Result = {
 };
 
 function parseGreekDecimal(value: string): number {
-  const cleaned = value.replace(/[€\s]/g, '').replace(',', '.');
+  const cleaned = value.replace(/[€\s]/g, '').replace('.', '').replace(',', '.');
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
 }
 
-function between(text: string, startLabel: string, endLabel: string): string {
-  const escStart = startLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const endParts = endLabel
-    .split('|')
-    .map((p) => p.replace(/[.*+?^${}()[\]\\]/g, '\\$&'));
-  const escEnd = endParts.join('|');
-  const re = new RegExp(escStart + '\\s*(.+?)\\s*(?:' + escEnd + ')', 's');
-  const m = text.match(re);
-  return m ? m[1].trim() : '';
-}
-
 function cleanState(state: string): string {
-  // ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ) → ΑΘΗΝΑ
   return state
     .replace(/\(ΝΟΜΑΡΧΙΑ\)/gi, '')
     .replace(/ΩΝ$/, 'Α')
@@ -76,7 +64,6 @@ function cleanState(state: string): string {
 }
 
 function cleanCity(city: string): string {
-  // ΓΑΛΑΤΣΙΟΥ → ΓΑΛΑΤΣΙ
   return city
     .replace(/ΟΥ$/, '')
     .replace(/ου$/, '')
@@ -86,45 +73,258 @@ function cleanCity(city: string): string {
 }
 
 // Determine if a parsed unit is a real building unit (not land)
-// Land plots have: no floor, no electricity, and are typically in ΠΙΝΑΚΑΣ 2.
-// Units that leaked from ΠΙΝΑΚΑΣ 2 or are land parcels in ΠΙΝΑΚΑΣ 1:
-//   - Have no floor number (null)
-//   - Have no electricity supply
-//   - Have zero building surface but may have land surface
 function isRealBuildingUnit(unit: {
   floor: number | null;
   isElectrified: boolean;
   electricitySupplyNumber: string;
   surface: number;
 }): boolean {
-  // A real building unit must have at least ONE of:
-  // - A floor number (even 0 = ground floor / ισόγειο)
-  // - Electricity supply (ΝΑΙ in the PDF)
-  // - An electricity supply number
   const hasFloor = unit.floor !== null;
   const hasElectricity = unit.isElectrified || !!unit.electricitySupplyNumber;
-
-  // If it has neither floor nor electricity, it's almost certainly land
   if (!hasFloor && !hasElectricity) {
     return false;
   }
-
-  // Must have building surface > 0
   return unit.surface > 0;
+}
+
+// Parse a single E9 row (text between two ATAK entries)
+// E9 row structure (from actual PDFs):
+// PREFIX SUFFIX STATE(ΝΟΜΑΡΧΙΑ) MUNICIPALITY STREET NUM [X BLOCK_STREETS]
+//   BLOCK_NUM ? FLOOR SURFACE [AUX_SURFACE] ? YEAR OWN_INT, OWN_FRAC ?
+//   ELEC(ΝΑΙ/ΟΧΙ) ? ZIP CITY [DEH_NUMBER]
+function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): ParsedE9Unit | null {
+  // Remove the ATAK prefix/suffix from start
+  const afterAtak = rowText.substring(12).trim(); // "005578 02430 " = 12 chars
+
+  // Extract state — pattern: "ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)" or "ΑΝΑΤ. ΑΤΤΙΚΗΣ (ΝΟΜΑΡΧΙΑ)"
+  const stateMatch = afterAtak.match(/^([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s*\((?:ΝΟΜΑΡΧ[ΙΑ]*|ΝΟΜΑΡΧΙΑ)\)\s*/);
+  let state = '';
+  let rest = afterAtak;
+  if (stateMatch) {
+    state = stateMatch[1].trim();
+    rest = afterAtak.substring(stateMatch[0].length);
+  }
+
+  // Extract municipality — first Greek word(s) before the street name
+  // Municipality is in genitive (ΓΑΛΑΤΣΙΟΥ, ΑΘΗΝΑΙΩΝ, ΝΕΑΣ ΧΑΛΚΗΔΟΝΟΣ)
+  // Street follows and has a number
+  // Pattern: MUNICIPALITY STREET NUMBER [X BLOCK_STREETS ...]
+  // After that: numeric data (block, floor, surface, year, ownership, zip, DEH)
+
+  // Find the street+number pattern: one or more Greek words followed by a number
+  // The municipality comes before the street
+  const municipalityAndStreet = rest.match(
+    /^([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+(\d+)\s/
+  );
+
+  let municipality = '';
+  let street = '';
+  let streetNumber = '';
+
+  if (municipalityAndStreet) {
+    municipality = municipalityAndStreet[1].trim();
+    street = municipalityAndStreet[2].trim();
+    streetNumber = municipalityAndStreet[3];
+    rest = rest.substring(municipalityAndStreet[0].length - 1);
+  }
+
+  // Look for X marker (indicates inhabited building with block streets)
+  const hasX = /\bX\b/.test(rest);
+
+  // Extract block streets (Greek words between X and block number)
+  const blockStreets: string[] = [];
+  if (hasX) {
+    const xPos = rest.indexOf(' X ');
+    if (xPos >= 0) {
+      const afterX = rest.substring(xPos + 3);
+      // Block streets are Greek words until we hit a 2-4 digit number (block number)
+      const streetsMatch = afterX.match(
+        /^([\u0391-\u03A9\u0386-\u038F\.\s\(\)]+?)\s+(\d{1,4})\s/
+      );
+      if (streetsMatch) {
+        const streetsStr = streetsMatch[1].trim();
+        // Split on known separators (spaces between multi-word street names)
+        streetsStr.split(/\s+/).forEach((s) => {
+          if (s.length > 2 && s !== 'ΑΓ.' && s !== 'ΑΓ') {
+            blockStreets.push(s);
+          }
+        });
+      }
+    }
+  }
+
+  // Now extract the numeric tail: block floor surface year ownership zip DEH
+  // Pattern of numeric data after the address/streets section:
+  // BLOCK_NUM [1-4 digits] SEPARATOR[1] FLOOR SURFACE [AUX] SEPARATOR[1] YEAR
+  // OWN_INT, OWN_FRAC SEPARATOR[0] ELEC SEPARATOR[1] ZIP CITY DEH
+  //
+  // The key insight: ownership is formatted as "100, 0000" or "50,0 0000"
+  // and is always followed by a single digit 0, then ΝΑΙ/ΟΧΙ
+
+  // Extract zip code (5 digits, not the ATAK suffix)
+  const allFiveDigit = [...rowText.matchAll(/\b(\d{5})\b/g)];
+  const zipCandidate = allFiveDigit.find(
+    (zm) => zm[1] !== atakSuffix && !zm[1].startsWith('0000')
+  );
+  const zipCode = zipCandidate ? zipCandidate[1] : '';
+
+  // Extract ownership: look for patterns "100, 0000" or "50,0 0000" or "100,0000"
+  let ownershipPercentage = 100;
+  const ownMatch = rowText.match(/\b(\d{1,3}),\s*0{4}\b/);
+  const ownMatch2 = rowText.match(/\b(\d{1,3}),(\d)\s+0{4}\b/);
+  if (ownMatch2) {
+    ownershipPercentage = parseFloat(`${ownMatch2[1]}.${ownMatch2[2]}`);
+  } else if (ownMatch) {
+    ownershipPercentage = parseInt(ownMatch[1], 10);
+  }
+
+  // Extract year built: 4-digit year 19xx or 20xx
+  let yearBuilt: number | null = null;
+  const yearMatch = rowText.match(/\b(19\d{2}|20[0-2]\d)\b/);
+  if (yearMatch) {
+    yearBuilt = parseInt(yearMatch[1], 10);
+  }
+
+  // Electrified: ΝΑΙ or ΟΧΙ
+  const isElectrified = /\bΝΑΙ\b/.test(rowText);
+
+  // DEH number: long number (6-12 digits) near end, after zip+city
+  let electricitySupplyNumber = '';
+  if (zipCode) {
+    const afterZip = rowText.substring(rowText.lastIndexOf(zipCode) + 5);
+    const dehMatch = afterZip.match(/\b(\d{6,12})\b/);
+    if (dehMatch) {
+      electricitySupplyNumber = dehMatch[1];
+    }
+  }
+
+  // Extract surface and floor from the numeric section
+  // Find all numbers that look like surface (contain comma + 2 decimals)
+  const surfaceMatches = [...rowText.matchAll(/\b(\d{1,3}),(\d{2})\b/g)];
+  // Filter out ownership (already matched) and year
+  const surfaceCandidates = surfaceMatches.filter((sm) => {
+    const full = sm[1] + ',' + sm[2];
+    // Not the ownership match
+    if (ownMatch && rowText.indexOf(full) === rowText.indexOf(ownMatch[0])) {
+      return false;
+    }
+    return true;
+  });
+
+  let surface = 0;
+  let auxSurface = 0;
+  if (surfaceCandidates.length >= 1) {
+    surface = parseGreekDecimal(
+      surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2]
+    );
+  }
+  if (surfaceCandidates.length >= 2) {
+    auxSurface = parseGreekDecimal(
+      surfaceCandidates[1][1] + ',' + surfaceCandidates[1][2]
+    );
+  }
+
+  // For large surfaces with dot separators (e.g. "2.478,00" or "1.032,00")
+  if (surface === 0) {
+    const largeSurfMatch = rowText.match(/\b(\d{1,2}\.\d{3}),(\d{2})\b/);
+    if (largeSurfMatch) {
+      surface = parseGreekDecimal(largeSurfMatch[1] + ',' + largeSurfMatch[2]);
+    }
+  }
+
+  // Extract floor: after block streets section, look for the digit pattern
+  // In the numeric tail, the sequence is: BLOCK_NUM [1] FLOOR SURFACE
+  // Floor can be 0-9 (single digit for most buildings)
+  // Special: Υ = underground (basement), Ι = ισόγειο (not always present)
+  let floor: number | null = null;
+
+  // Strategy: find the surface value position and look for floor just before it
+  if (surface > 0 && surfaceCandidates.length >= 1) {
+    const surfacePos = rowText.indexOf(
+      surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2]
+    );
+    // Look at the few characters before surface for floor digit
+    const beforeSurface = rowText.substring(
+      Math.max(0, surfacePos - 10),
+      surfacePos
+    ).trim();
+    // Floor is the last single digit before the surface
+    const floorDigits = beforeSurface.match(/(\d+)\s*$/);
+    if (floorDigits) {
+      floor = parseInt(floorDigits[1], 10);
+    }
+    // Check for Υ (underground)
+    if (floor === null && /Υ\s*$/.test(beforeSurface)) {
+      floor = -1;
+    }
+  }
+
+  // Block number: first 2-4 digit number that appears after X section
+  let blockNumber = '';
+  if (hasX) {
+    const xPos = rowText.indexOf(' X ');
+    const afterXSection = rowText.substring(xPos + 3);
+    const blockMatch = afterXSection.match(
+      /[\u0391-\u03A9\.\s]+?\s+(\d{1,4})\s+\d/
+    );
+    if (blockMatch) {
+      blockNumber = blockMatch[1];
+    }
+  }
+
+  // City name from row - look after zip code
+  let city = municipality;
+  if (zipCode) {
+    const afterZipForCity = rowText.substring(
+      rowText.lastIndexOf(zipCode) + 6
+    );
+    const cityMatch = afterZipForCity.match(
+      /^([\u0391-\u03A9\u0386-\u038F\.\s]+)/
+    );
+    if (cityMatch) {
+      city = cleanCity(cityMatch[1].trim());
+    }
+  }
+
+  return {
+    atakNumber: atakPrefix + atakSuffix,
+    state: cleanState(state),
+    municipality: city || cleanCity(municipality),
+    district: '',
+    street,
+    streetNumber,
+    zipCode,
+    blockNumber,
+    blockStreets,
+    floor,
+    surface,
+    auxSurface,
+    landSurface: 0,
+    yearBuilt,
+    ownershipPercentage,
+    electricitySupplyNumber,
+    isElectrified
+  };
 }
 
 export function parseE9(text: string): ParsedE9Result {
   if (!text || !text.trim()) {
-    return { owner: { taxId: '', lastName: '', firstName: '', fatherName: '' }, buildings: [], skippedLandPlots: 0 };
+    return {
+      owner: { taxId: '', lastName: '', firstName: '', fatherName: '' },
+      buildings: [],
+      skippedLandPlots: 0
+    };
   }
 
-  // Normalize whitespace
   const t = text
     .replace(/---\s*PAGE BREAK\s*---/g, '\n')
+    .replace(/Ημερομηνία εκτύπωσης:.+?(?=\d{6}\s+\d{5}|$)/g, ' ')
+    .replace(/Σελίδα \d+\s+από\s+\d+/g, ' ')
+    .replace(/ΑΦΜ υπόχρεου\s*:\s*\d+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Parse owner from page 1
+  // Parse owner
   const owner: ParsedE9Owner = {
     taxId: '',
     lastName: '',
@@ -132,16 +332,16 @@ export function parseE9(text: string): ParsedE9Result {
     fatherName: ''
   };
 
-  // Extract owner info from the ΣΤΟΙΧΕΙΑ ΤΟΥ ΥΠΟΧΡΕΟΥ section.
-  // AADE E9 PDFs vary in text extraction order. Two known formats:
-  //   Format A: ...ΕΠΩΝΥΜΙΑ <father> <first> <last> <taxId>...
-  //   Format B: ...ΠΑΤΡΩΝΥΜΟ <taxId> <last> <first> <father>...
   const GK = '[Α-ΩΆ-Ώα-ωά-ώA-Z]+';
   const ownerA = t.match(
-    new RegExp(`ΕΠΩΝΥΜΟ\\s+ή\\s+ΕΠΩΝΥΜΙΑ\\s+(${GK})\\s+(${GK})\\s+(${GK})\\s+(\\d{9})`)
+    new RegExp(
+      `ΕΠΩΝΥΜΟ\\s+ή\\s+ΕΠΩΝΥΜΙΑ\\s+(${GK})\\s+(${GK})\\s+(${GK})\\s+(\\d{9})`
+    )
   );
   const ownerB = t.match(
-    new RegExp(`ΑΦΜ\\s+ΕΠΩΝΥΜΟ\\s+ή\\s+ΕΠΩΝΥΜΙΑ\\s+ΟΝΟΜΑ\\s+ΠΑΤΡΩΝΥΜΟ\\s+(\\d{9})\\s+(${GK})\\s+(${GK})\\s+(${GK})`)
+    new RegExp(
+      `ΑΦΜ\\s+ΕΠΩΝΥΜΟ\\s+ή\\s+ΕΠΩΝΥΜΙΑ\\s+ΟΝΟΜΑ\\s+ΠΑΤΡΩΝΥΜΟ\\s+(\\d{9})\\s+(${GK})\\s+(${GK})\\s+(${GK})`
+    )
   );
   if (ownerA) {
     owner.fatherName = ownerA[1];
@@ -154,29 +354,24 @@ export function parseE9(text: string): ParsedE9Result {
     owner.firstName = ownerB[3];
     owner.fatherName = ownerB[4];
   }
-  // Fallback: grab tax ID from page-2 header if still missing
   if (!owner.taxId) {
-    const afmAlt = t.match(/ΑΦΜ\s+υπόχρεου\s*:\s*(\d+)/);
+    const afmAlt = text.match(/ΑΦΜ\s+υπόχρεου\s*:\s*(\d+)/);
     if (afmAlt) owner.taxId = afmAlt[1];
   }
 
-  // Extract ΠΙΝΑΚΑΣ 1 section (properties with buildings)
+  // Extract ΠΙΝΑΚΑΣ 1 section
   const table1Start = t.indexOf('ΠΙΝΑΚΑΣ 1');
   const table2Start = t.indexOf('ΠΙΝΑΚΑΣ 2');
   if (table1Start === -1) {
     return { owner, buildings: [], skippedLandPlots: 0 };
   }
 
-  // Strictly bound ΠΙΝΑΚΑΣ 1 to end at ΠΙΝΑΚΑΣ 2 if it exists and comes after
-  const table1Text = table2Start > table1Start
-    ? t.substring(table1Start, table2Start)
-    : t.substring(table1Start);
+  const table1Text =
+    table2Start > table1Start
+      ? t.substring(table1Start, table2Start)
+      : t.substring(table1Start);
 
-  // Parse property rows - look for ATAK patterns (6-digit + 5-digit number pairs)
-  const units: ParsedE9Unit[] = [];
-  let skippedAsLand = 0;
-
-  // Find all ATAK pairs first, then process each row between them
+  // Find all ATAK entries
   const atakMatches: { index: number; prefix: string; suffix: string }[] = [];
   const atakRe = /\b(\d{6})\s+(\d{5})\b/g;
   let m;
@@ -184,134 +379,74 @@ export function parseE9(text: string): ParsedE9Result {
     atakMatches.push({ index: m.index, prefix: m[1], suffix: m[2] });
   }
 
-  for (let i = 0; i < atakMatches.length; i++) {
-    const { prefix: atakPrefix, suffix: atakSuffix } = atakMatches[i];
-    const atakNumber = atakPrefix + atakSuffix;
+  const units: ParsedE9Unit[] = [];
+  let skippedAsLand = 0;
 
+  for (let i = 0; i < atakMatches.length; i++) {
+    const { prefix, suffix } = atakMatches[i];
     const startPos = atakMatches[i].index;
-    const endPos = i + 1 < atakMatches.length ? atakMatches[i + 1].index : table1Text.length;
+    const endPos =
+      i + 1 < atakMatches.length
+        ? atakMatches[i + 1].index
+        : table1Text.length;
     const rowText = table1Text.substring(startPos, endPos);
 
-    // Parse row fields - this is tricky because columns run together
-    // Try to extract fields in order they appear
+    const unit = parseE9Row(rowText, prefix, suffix);
+    if (!unit) continue;
 
-    // State (ΝΟΜΟΣ) - usually contains (ΝΟΜΑΡΧΙΑ) or (ΝΟΜΑΡΧ)
-    const stateMatch = rowText.match(/([Α-ΖΑ-Ω\.]+(?:\s+\([Α-ΖΝΟΜΑΡΧΙΑ]+\))?)/);
-    const state = stateMatch ? cleanState(stateMatch[1]) : '';
-
-    // Municipality (ΔΗΜΟΣ) - follows state
-    const municipalityMatch = rowText.match(/\([Α-ΖΝΟΜΑΡΧΙΑ]+\)\s+([Α-ΖΑ-Ω]+)/);
-    const municipality = municipalityMatch ? cleanCity(municipalityMatch[1]) : '';
-
-    // Street and number - pattern: STREET_NAME NUMBER
-    const streetMatch = rowText.match(/([Α-ΖΑ-Ω\.]+(?:\s+[Α-ΖΑ-Ω\.]+)*)\s+(\d+)/);
-    const street = streetMatch ? streetMatch[1].trim() : '';
-    const streetNumber = streetMatch ? streetMatch[2] : '';
-
-    // Zip code - 5 digits that is NOT the ATAK suffix
-    const allFiveDigit = [...rowText.matchAll(/\b(\d{5})\b/g)];
-    const zipCandidate = allFiveDigit.find((zm) => zm[1] !== atakSuffix);
-    const zipCode = zipCandidate ? zipCandidate[1] : '';
-
-    // District - between street and zip, or after municipality
-    let district = '';
-    if (municipality && zipCode) {
-      const districtMatch = rowText.match(new RegExp(`${municipality}\\s+([Α-ΖΑ-Ω\\s]+?)\\s+${zipCode}`));
-      if (districtMatch) district = districtMatch[1].trim();
-    }
-
-    // Block streets - marked with X, multiple streets separated
-    const blockStreetsRaw: string[] = [];
-    const xPattern = /X\s+([Α-ΖΑ-Ω]+)/g;
-    let xMatch;
-    while ((xMatch = xPattern.exec(rowText)) !== null) {
-      blockStreetsRaw.push(xMatch[1]);
-    }
-
-    // Block number - 2-4 digit number after streets
-    const blockMatch = rowText.match(/\b(\d{2,4})\b/);
-    const blockNumber = blockMatch ? blockMatch[1] : '';
-
-    // Floor - 1-2 digit number after block, before surface
-    const floorMatch = rowText.match(/\b(\d{1,2})\s+(\d)\s+([\d,]+)/);
-    const floor = floorMatch ? parseInt(floorMatch[1], 10) : null;
-
-    // Surface - Greek decimal like "72,00"
-    const surfaceMatch = rowText.match(/([\d]+,\d{2})\s*(\d{4})?/);
-    const surface = surfaceMatch ? parseGreekDecimal(surfaceMatch[1]) : 0;
-
-    // Year built - 4 digits
-    const yearMatch = rowText.match(/\b(19\d{2}|20\d{2})\b/);
-    const yearBuilt = yearMatch ? parseInt(yearMatch[1], 10) : null;
-
-    // Ownership percentage - format "100, 0000" or "100,0000" (100%)
-    const ownershipMatch = rowText.match(/([\d]+),?\s*(\d{4})/);
-    const ownershipPercentage = ownershipMatch
-      ? parseFloat(ownershipMatch[1] + '.' + ownershipMatch[2].substring(0, 2))
-      : 100;
-
-    // Electricity supply - "ΝΑΙ" followed by number
-    const electricityMatch = rowText.match(/ΝΑΙ\s+(\d+)/i);
-    const isElectrified = /ΝΑΙ/i.test(rowText);
-    const electricitySupplyNumber = electricityMatch ? electricityMatch[1] : '';
-
-    const parsedUnit = {
-      atakNumber,
-      state,
-      municipality,
-      district,
-      street,
-      streetNumber,
-      zipCode,
-      blockNumber,
-      blockStreets: blockStreetsRaw,
-      floor,
-      surface,
-      auxSurface: 0,
-      landSurface: 0,
-      yearBuilt,
-      ownershipPercentage,
-      electricitySupplyNumber,
-      isElectrified
-    };
-
-    // Filter: only include real building units, not land plots
-    if (isRealBuildingUnit(parsedUnit)) {
-      units.push(parsedUnit);
-    } else if (surface > 0) {
-      // Has surface but failed building check → likely land
+    if (isRealBuildingUnit(unit)) {
+      units.push(unit);
+    } else if (unit.surface > 0) {
       skippedAsLand++;
     }
   }
 
-  // Group units by ATAK prefix into buildings
+  // GROUP BY ADDRESS (street + streetNumber + zipCode), NOT by ATAK prefix
+  const buildingKey = (u: ParsedE9Unit) => {
+    const key = `${u.street}|${u.streetNumber}|${u.zipCode}`.toUpperCase();
+    return key;
+  };
+
   const buildingMap = new Map<string, ParsedE9Unit[]>();
   for (const unit of units) {
-    const prefix = unit.atakNumber.substring(0, 6);
-    if (!buildingMap.has(prefix)) {
-      buildingMap.set(prefix, []);
+    const key = buildingKey(unit);
+    if (!buildingMap.has(key)) {
+      buildingMap.set(key, []);
     }
-    buildingMap.get(prefix)!.push(unit);
+    buildingMap.get(key)!.push(unit);
   }
 
   const buildings: ParsedE9Building[] = [];
-  for (const [prefix, buildingUnits] of buildingMap.entries()) {
-    // Use first unit's data for building-level fields
+  for (const [, buildingUnits] of buildingMap.entries()) {
     const firstUnit = buildingUnits[0];
 
-    // Aggregate block streets from all units
-    const allBlockStreets = new Set<string>();
-    for (const unit of buildingUnits) {
-      unit.blockStreets.forEach(s => allBlockStreets.add(s));
+    // Use the most common ATAK prefix among units in this building
+    const prefixCounts = new Map<string, number>();
+    for (const u of buildingUnits) {
+      const p = u.atakNumber.substring(0, 6);
+      prefixCounts.set(p, (prefixCounts.get(p) || 0) + 1);
+    }
+    let dominantPrefix = firstUnit.atakNumber.substring(0, 6);
+    let maxCount = 0;
+    for (const [p, count] of prefixCounts.entries()) {
+      if (count > maxCount) {
+        dominantPrefix = p;
+        maxCount = count;
+      }
     }
 
-    // Determine common year built (use first non-null)
-    const yearBuilt = buildingUnits.find(u => u.yearBuilt)?.yearBuilt || null;
+    const allBlockStreets = new Set<string>();
+    for (const unit of buildingUnits) {
+      unit.blockStreets.forEach((s) => allBlockStreets.add(s));
+    }
+
+    const yearBuilt =
+      buildingUnits.find((u) => u.yearBuilt)?.yearBuilt || null;
 
     buildings.push({
-      atakPrefix: prefix,
+      atakPrefix: dominantPrefix,
       address: {
-        street1: `${firstUnit.street} ${firstUnit.streetNumber}`,
+        street1: `${firstUnit.street} ${firstUnit.streetNumber}`.trim(),
         zipCode: firstUnit.zipCode,
         city: firstUnit.municipality,
         state: firstUnit.state,
@@ -324,10 +459,11 @@ export function parseE9(text: string): ParsedE9Result {
     });
   }
 
-  // Count skipped land plots from ΠΙΝΑΚΑΣ 2 plus any filtered from ΠΙΝΑΚΑΣ 1
-  const table2Entries = table2Start > 0
-    ? (t.substring(table2Start).match(/\d{6}\s+\d{5}/g) || []).length
-    : 0;
+  // Count land plots from ΠΙΝΑΚΑΣ 2
+  const table2Entries =
+    table2Start > 0
+      ? (t.substring(table2Start).match(/\d{6}\s+\d{5}/g) || []).length
+      : 0;
 
   return {
     owner,
