@@ -431,6 +431,8 @@ export async function importFromE9(req: Req, res: Res) {
   if (req.query.confirmed === 'true') {
     const createdBuildings = [];
 
+    const ownerFullName = `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
+
     // Resolve member ID from user email for ownership
     const userEmail = (req as any).user?.email;
     const memberId = _findMemberIdByEmail(realm, userEmail);
@@ -535,6 +537,7 @@ export async function importFromE9(req: Req, res: Res) {
           electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
           owners: [{
             type: 'member',
+            name: ownerFullName,
             percentage: parsedUnit.ownershipPercentage,
             memberId: memberId || userEmail
           }],

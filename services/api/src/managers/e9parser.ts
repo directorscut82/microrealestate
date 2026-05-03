@@ -78,10 +78,15 @@ function cleanCity(city: string): string {
 function isRealBuildingUnit(unit: {
   floor: number | null;
   surface: number;
-  street: string;
+  isElectrified: boolean;
+  electricitySupplyNumber: string;
 }): boolean {
-  // A unit with a parsed street address and positive surface is a building unit
-  return !!unit.street && unit.surface > 0;
+  if (unit.surface <= 0) return false;
+  // Primary: has a floor number (apartments always have one)
+  if (unit.floor !== null) return true;
+  // Secondary: has electricity (building unit where floor parsing failed)
+  if (unit.isElectrified || !!unit.electricitySupplyNumber) return true;
+  return false;
 }
 
 // Parse a single E9 row (text between two ATAK entries)
