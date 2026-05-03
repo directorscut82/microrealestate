@@ -24,10 +24,6 @@ export default function PropertyListItem({ property, accent }) {
     );
   }, [router, property]);
 
-  const atakLabel = property.atakNumber
-    ? ` (${[property.atakNumber, ...(property.altAtakNumbers || [])].join(', ')})`
-    : '';
-
   return (
     <Card
       className={cn('cursor-pointer', accent && `border-l-4 ${accent}`)}
@@ -43,11 +39,6 @@ export default function PropertyListItem({ property, accent }) {
               data-cy="openResourceButton"
             >
               {property.name}
-              {atakLabel && (
-                <span className="text-xs font-normal text-muted-foreground ml-1">
-                  {atakLabel}
-                </span>
-              )}
             </Button>
             {property.description && (
               <div className="text-xs font-normal text-muted-foreground truncate">
