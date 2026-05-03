@@ -77,16 +77,11 @@ function cleanCity(city: string): string {
 // Determine if a parsed unit is a real building unit (not land)
 function isRealBuildingUnit(unit: {
   floor: number | null;
-  isElectrified: boolean;
-  electricitySupplyNumber: string;
   surface: number;
+  street: string;
 }): boolean {
-  const hasFloor = unit.floor !== null;
-  const hasElectricity = unit.isElectrified || !!unit.electricitySupplyNumber;
-  if (!hasFloor && !hasElectricity) {
-    return false;
-  }
-  return unit.surface > 0;
+  // A unit with a parsed street address and positive surface is a building unit
+  return !!unit.street && unit.surface > 0;
 }
 
 // Parse a single E9 row (text between two ATAK entries)
@@ -211,7 +206,8 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   }
 
   // Electrified: ΝΑΙ or ΟΧΙ
-  const isElectrified = /\bΝΑΙ\b/.test(rowText);
+  // \b doesn't work with Greek chars, use lookaround with unicode flag
+  const isElectrified = /(?<![Α-ΩΆ-Ώ])ΝΑΙ(?![Α-ΩΆ-Ώ])/u.test(rowText);
 
   // DEH number: long number (6-12 digits) near end, after zip+city
   let electricitySupplyNumber = '';

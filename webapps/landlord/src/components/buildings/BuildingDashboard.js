@@ -13,7 +13,7 @@ import {
 } from '../ui/table';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
-import { cn } from '../../utils/cn';
+import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
