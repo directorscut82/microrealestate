@@ -89,9 +89,10 @@ export default function ImportTenantDialog({ open, setOpen }) {
       const prop = parsed.properties[0];
       let matchedProperty = null;
       if (prop?.atakNumber) {
-        // Primary: exact ATAK match
+        // Primary: exact ATAK match (check both atakNumber and altAtakNumbers)
         matchedProperty = existingProperties.find(
-          (p) => p.atakNumber === prop.atakNumber
+          (p) => p.atakNumber === prop.atakNumber ||
+            p.altAtakNumbers?.includes(prop.atakNumber)
         );
         // Fallback: match by street + floor (co-owned properties have different ATAKs)
         if (!matchedProperty && prop.address?.street1) {

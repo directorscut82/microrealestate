@@ -164,6 +164,7 @@ export namespace CollectionTypes {
     address: CollectionTypes.PartAddress;
     price: number;
     atakNumber?: string;
+    altAtakNumbers?: string[];
     dehNumber?: string;
     buildingId?: string | Building;
     electricitySupplyNumber?: string;
@@ -354,6 +355,7 @@ export namespace CollectionTypes {
   export type BuildingUnit = {
     _id: string;
     atakNumber: string;
+    altAtakNumbers?: string[];
     floor?: number;
     unitLabel?: string;
     surface?: number;

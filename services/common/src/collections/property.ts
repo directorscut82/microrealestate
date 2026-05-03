@@ -24,6 +24,7 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
 
   price: Number,
   atakNumber: String,
+  altAtakNumbers: [String],
   dehNumber: String,
   buildingId: String,
   electricitySupplyNumber: String,
