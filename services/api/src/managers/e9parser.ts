@@ -65,6 +65,8 @@ function cleanState(state: string): string {
 
 function cleanCity(city: string): string {
   return city
+    .replace(/\s+[Α-Ω]\s*$/, '') // trailing single Greek letter
+    .replace(/\s+\d+\s*$/, '') // trailing digits
     .replace(/ΟΥ$/, '')
     .replace(/ου$/, '')
     .replace(/ΑΣ$/, 'Α')
@@ -97,12 +99,23 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   const afterAtak = rowText.substring(12).trim(); // "005578 02430 " = 12 chars
 
   // Extract state — pattern: "ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)" or "ΑΝΑΤ. ΑΤΤΙΚΗΣ (ΝΟΜΑΡΧΙΑ)"
-  const stateMatch = afterAtak.match(/^([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s*\((?:ΝΟΜΑΡΧ[ΙΑ]*|ΝΟΜΑΡΧΙΑ)\)\s*/);
+  // Also handle non-ΝΟΜΑΡΧΙΑ states like "ΚΥΚΛΑΔΩΝ"
+  const stateMatch = afterAtak.match(
+    /^([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s*\((?:ΝΟΜΑΡΧ[ΙΑ]*|ΝΟΜΑΡΧΙΑ)\)\s*/
+  );
+  const stateMatchAlt = !stateMatch
+    ? afterAtak.match(
+        /^([\u0391-\u03A9\u0386-\u038F]{3,})\s+/
+      )
+    : null;
   let state = '';
   let rest = afterAtak;
   if (stateMatch) {
     state = stateMatch[1].trim();
     rest = afterAtak.substring(stateMatch[0].length);
+  } else if (stateMatchAlt) {
+    state = stateMatchAlt[1].trim();
+    rest = afterAtak.substring(stateMatchAlt[0].length);
   }
 
   // Extract municipality — first Greek word(s) before the street name
@@ -113,9 +126,16 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
 
   // Find the street+number pattern: one or more Greek words followed by a number
   // The municipality comes before the street
+  // Also handle compound municipality names with dashes: "ΕΞΩΜΒΟΥΡΓΟΥ - ΚΑΛΛΟΝΗΣ"
   const municipalityAndStreet = rest.match(
-    /^([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+(\d+)\s/
+    /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+(\d+)\s/
   );
+  // Rural format: "MUNICIPALITY - AREA SETTLEMENT_TYPE SETTLEMENT_NAME X ..."
+  const ruralMatch = !municipalityAndStreet
+    ? rest.match(
+        /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+(ΟΙΚΙΣΜΟΣ|ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ|ΘΕΣΗ|ΠΕΡΙΟΧΗ)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+X\b/
+      )
+    : null;
 
   let municipality = '';
   let street = '';
@@ -126,6 +146,11 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
     street = municipalityAndStreet[2].trim();
     streetNumber = municipalityAndStreet[3];
     rest = rest.substring(municipalityAndStreet[0].length - 1);
+  } else if (ruralMatch) {
+    municipality = ruralMatch[1].trim();
+    street = ruralMatch[3].trim(); // settlement name
+    streetNumber = '0'; // no number for rural
+    rest = rest.substring(ruralMatch[0].length);
   }
 
   // Look for X marker (indicates inhabited building with block streets)
@@ -190,9 +215,17 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
 
   // DEH number: long number (6-12 digits) near end, after zip+city
   let electricitySupplyNumber = '';
-  if (zipCode) {
+  if (zipCode && rowText.lastIndexOf(zipCode) > rowText.length / 2) {
     const afterZip = rowText.substring(rowText.lastIndexOf(zipCode) + 5);
     const dehMatch = afterZip.match(/\b(\d{6,12})\b/);
+    if (dehMatch) {
+      electricitySupplyNumber = dehMatch[1];
+    }
+  } else {
+    // No zip: look for a 9-12 digit number near the end of the row
+    // (DEH numbers are typically 9 digits)
+    const tailSection = rowText.substring(Math.max(0, rowText.length - 60));
+    const dehMatch = tailSection.match(/\b(\d{9,12})\b/);
     if (dehMatch) {
       electricitySupplyNumber = dehMatch[1];
     }
@@ -402,13 +435,19 @@ export function parseE9(text: string): ParsedE9Result {
   }
 
   // GROUP BY ADDRESS (street + streetNumber + zipCode), NOT by ATAK prefix
+  // When zip is missing, group by street+number only (merge with any existing)
   const buildingKey = (u: ParsedE9Unit) => {
-    const key = `${u.street}|${u.streetNumber}|${u.zipCode}`.toUpperCase();
+    const key = `${u.street}|${u.streetNumber}`.toUpperCase();
     return key;
   };
 
   const buildingMap = new Map<string, ParsedE9Unit[]>();
   for (const unit of units) {
+    // Skip units with no address (failed to parse)
+    if (!unit.street && !unit.streetNumber) {
+      skippedAsLand++;
+      continue;
+    }
     const key = buildingKey(unit);
     if (!buildingMap.has(key)) {
       buildingMap.set(key, []);
@@ -443,11 +482,14 @@ export function parseE9(text: string): ParsedE9Result {
     const yearBuilt =
       buildingUnits.find((u) => u.yearBuilt)?.yearBuilt || null;
 
+    // Use the most complete zipCode available from any unit in the building
+    const zipCode = buildingUnits.find((u) => u.zipCode)?.zipCode || '';
+
     buildings.push({
       atakPrefix: dominantPrefix,
       address: {
         street1: `${firstUnit.street} ${firstUnit.streetNumber}`.trim(),
-        zipCode: firstUnit.zipCode,
+        zipCode,
         city: firstUnit.municipality,
         state: firstUnit.state,
         country: 'GR'
