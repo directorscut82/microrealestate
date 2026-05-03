@@ -30,7 +30,11 @@ export default function MonthFigures({ className, dashboardData }) {
     return [
       {
         notPaid: currentRevenues.notPaid,
-        paid: currentRevenues.paid,
+        paid: currentRevenues.paid -
+          (currentRevenues.charges || 0) -
+          (currentRevenues.buildingCharges || 0),
+        charges: currentRevenues.charges || 0,
+        buildingCharges: currentRevenues.buildingCharges || 0,
         yearMonth
       }
     ];
@@ -104,8 +108,10 @@ export default function MonthFigures({ className, dashboardData }) {
         renderContent={() => (
           <ChartContainer
             config={{
+              notPaid: { color: 'hsl(var(--chart-1))' },
               paid: { color: 'hsl(var(--chart-2))' },
-              notPaid: { color: 'hsl(var(--chart-1))' }
+              charges: { color: 'hsl(var(--chart-4))' },
+              buildingCharges: { color: 'hsl(var(--chart-5))' }
             }}
             className="h-[220px] w-full"
           >
@@ -120,14 +126,18 @@ export default function MonthFigures({ className, dashboardData }) {
                 verticalAlign="top"
                 content={() => (
                   <div className="flex justify-center gap-4 text-sm">
-                    <div className="flex items-center gap-2 text-warning">
-                      <div className="size-2 bg-[hsl(var(--chart-1))]" />
-                      <span>{t('Not paid')}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-success">
-                      <div className="size-2 bg-[hsl(var(--chart-2))]" />
-                      <span>{t('Paid')}</span>
-                    </div>
+                  <div className="flex items-center gap-2 text-warning">
+                    <div className="size-2 bg-[hsl(var(--chart-1))]" />
+                    <span>{t('Not paid')}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-success">
+                    <div className="size-2 bg-[hsl(var(--chart-2))]" />
+                    <span>{t('Rent')}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="size-2 bg-[hsl(var(--chart-4))]" />
+                    <span>{t('Extra charges')}</span>
+                  </div>
                   </div>
                 )}
               />
@@ -146,6 +156,21 @@ export default function MonthFigures({ className, dashboardData }) {
                 cursor="pointer"
                 onClick={handleClick}
               />
+            <RadialBar
+              dataKey="charges"
+              stackId="rents"
+              cornerRadius={4}
+              fill="var(--color-charges)"
+              stroke="hsl(var(--chart-4))"
+              label={{
+                fill: 'hsl(var(--chart-4))',
+                position: 'outside',
+                formatter: (value) => (value ? formatNumber(value) : ''),
+                className: 'text-[9px] md:text-sm'
+              }}
+              cursor="pointer"
+              onClick={handleClick}
+            />
               <RadialBar
                 dataKey="notPaid"
                 stackId="rents"
