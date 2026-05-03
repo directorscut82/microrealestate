@@ -118,54 +118,72 @@ export async function all(req: Req, res: Res) {
     acc[key] = {
       month: key,
       paid: 0,
-      notPaid: 0
+      notPaid: 0,
+      baseRent: 0,
+      charges: 0,
+      buildingCharges: 0,
+      tenants: []
     };
     return acc;
   }, {});
+
   const revenues = Object.entries(
-    allTenants.reduce((acc: AnyRecord, { rents = [] }: AnyRecord) => {
-      rents.forEach((rent: AnyRecord) => {
+    allTenants.reduce((acc: AnyRecord, tenant: AnyRecord) => {
+      const tenantName = tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
+      (tenant.rents || []).forEach((rent: AnyRecord) => {
         const termMoment = moment(rent.term, 'YYYYMMDDHH');
         if (!termMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')) {
           return;
         }
         const key = termMoment.format('MMYYYY');
-        const revenue = {
-          month: key,
-          paid: rent.total?.payment || 0,
-          notPaid:
-            (rent.total?.payment || 0) - (rent.total?.grandTotal || 0) < 0
-              ? (rent.total?.payment || 0) - (rent.total?.grandTotal || 0)
-              : 0,
-          baseRent: rent.total?.preTaxAmount || 0,
-          charges: (rent.charges || []).reduce(
-            (sum: number, c: AnyRecord) => sum + (c.amount || 0), 0
-          ),
-          buildingCharges: (rent.buildingCharges || []).reduce(
-            (sum: number, c: AnyRecord) => sum + (c.amount || 0),
-            0
-          )
-        };
-        if (acc[key]) {
-          acc[key].paid += revenue.paid;
-          acc[key].notPaid += revenue.notPaid;
-          acc[key].baseRent += revenue.baseRent;
-          acc[key].charges += revenue.charges;
-          acc[key].buildingCharges += revenue.buildingCharges;
-        } else {
-          acc[key] = revenue;
+
+        const tenantBaseRent = rent.total?.preTaxAmount || 0;
+        const tenantCharges = (rent.charges || []).reduce(
+          (sum: number, c: AnyRecord) => sum + (c.amount || 0), 0
+        );
+        const tenantBuildingCharges = (rent.buildingCharges || []).reduce(
+          (sum: number, c: AnyRecord) => sum + (c.amount || 0), 0
+        );
+        const tenantDue = rent.total?.grandTotal || 0;
+        const tenantPaid = rent.total?.payment || 0;
+
+        if (!acc[key]) {
+          acc[key] = {
+            month: key,
+            paid: 0,
+            notPaid: 0,
+            baseRent: 0,
+            charges: 0,
+            buildingCharges: 0,
+            tenants: []
+          };
         }
+
+        acc[key].paid += tenantPaid;
+        acc[key].notPaid += tenantPaid - tenantDue < 0 ? tenantPaid - tenantDue : 0;
+        acc[key].baseRent += tenantBaseRent;
+        acc[key].charges += tenantCharges;
+        acc[key].buildingCharges += tenantBuildingCharges;
+        acc[key].tenants.push({
+          name: tenantName,
+          paid: tenantPaid,
+          due: tenantDue,
+          baseRent: tenantBaseRent,
+          charges: tenantCharges,
+          buildingCharges: tenantBuildingCharges
+        });
       });
       return acc;
     }, emptyRevenues)
   )
     .map(([, value]) => ({
       ...(value as AnyRecord),
-      paid: (value as AnyRecord).paid > 0 ? Math.round((value as AnyRecord).paid * 100) / 100 : (value as AnyRecord).paid,
-      notPaid:
-        (value as AnyRecord).notPaid < 0
-          ? Math.round((value as AnyRecord).notPaid * 100) / 100
-          : (value as AnyRecord).notPaid
+      paid: (value as AnyRecord).paid > 0
+        ? Math.round((value as AnyRecord).paid * 100) / 100
+        : (value as AnyRecord).paid,
+      notPaid: (value as AnyRecord).notPaid < 0
+        ? Math.round((value as AnyRecord).notPaid * 100) / 100
+        : (value as AnyRecord).notPaid
     }))
     .sort((r1: AnyRecord, r2: AnyRecord) =>
       moment(r1.month, 'MMYYYY').isBefore(moment(r2.month, 'MMYYYY')) ? -1 : 1
