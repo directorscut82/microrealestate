@@ -84,8 +84,6 @@ function isRealBuildingUnit(unit: {
   category: number | null;
 }): boolean {
   if (unit.surface <= 0) return false;
-  // Category filter: 1=apartment, 2=store. Skip 51=storage and other non-residential
-  if (unit.category !== null && unit.category !== 1 && unit.category !== 2) return false;
   // Primary: has a floor number (apartments always have one)
   if (unit.floor !== null) return true;
   // Secondary: has electricity (building unit where floor parsing failed)
