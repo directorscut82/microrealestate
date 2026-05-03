@@ -439,12 +439,22 @@ export async function importFromE9(req: Req, res: Res) {
 
     for (const buildingData of parsed.buildings) {
       // Check if building exists
+      // 1. Exact address match (street1 + zipCode)
       let building = await Collections.Building.findOne({
         realmId: realm!._id,
         'address.street1': buildingData.address.street1,
         'address.zipCode': buildingData.address.zipCode
       });
 
+      // 2. Street-only match (handles empty/different zips between owners)
+      if (!building && buildingData.address.street1) {
+        building = await Collections.Building.findOne({
+          realmId: realm!._id,
+          'address.street1': buildingData.address.street1
+        });
+      }
+
+      // 3. ATAK prefix match
       if (!building) {
         building = await Collections.Building.findOne({
           realmId: realm!._id,
@@ -500,11 +510,48 @@ export async function importFromE9(req: Req, res: Res) {
 
       // Add units and create/link properties
       for (const parsedUnit of buildingData.units) {
-        // Check if unit already exists in building (by ATAK)
+        // Check if unit already exists in building
+        // 1. By ATAK number (same owner re-importing)
         const existingUnit = (building as any).units.find(
           (u: any) => u.atakNumber === parsedUnit.atakNumber
         );
-        if (existingUnit) continue;
+        if (existingUnit) {
+          // Add this owner if not already listed
+          const hasOwner = existingUnit.owners?.some(
+            (o: any) => o.name === ownerFullName
+          );
+          if (!hasOwner && existingUnit.owners) {
+            existingUnit.owners.push({
+              type: 'member',
+              name: ownerFullName,
+              percentage: parsedUnit.ownershipPercentage,
+              memberId: memberId || userEmail
+            });
+          }
+          continue;
+        }
+
+        // 2. By DEH number (same apartment, different owner's ATAK)
+        const existingByDeh = parsedUnit.electricitySupplyNumber
+          ? (building as any).units.find(
+              (u: any) => u.electricitySupplyNumber === parsedUnit.electricitySupplyNumber
+            )
+          : null;
+        if (existingByDeh) {
+          // Same apartment, add co-owner
+          const hasOwner = existingByDeh.owners?.some(
+            (o: any) => o.name === ownerFullName
+          );
+          if (!hasOwner && existingByDeh.owners) {
+            existingByDeh.owners.push({
+              type: 'member',
+              name: ownerFullName,
+              percentage: parsedUnit.ownershipPercentage,
+              memberId: memberId || userEmail
+            });
+          }
+          continue;
+        }
 
         // Find or create the Property record
         let property = await Collections.Property.findOne({
