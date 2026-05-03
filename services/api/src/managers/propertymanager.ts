@@ -7,6 +7,17 @@ type Req = ServiceRequest<any, any, any>;
 type Res = ServiceResponse;
 
 async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
+  // Fetch building names for properties that have buildingId
+  const buildingIds = [...new Set(
+    inputProperties
+      .filter((p: any) => p.buildingId)
+      .map((p: any) => String(p.buildingId))
+  )];
+  const buildings = buildingIds.length
+    ? await Collections.Building.find({ _id: { $in: buildingIds } }, { name: 1 }).lean()
+    : [];
+  const buildingMap = new Map((buildings as any[]).map((b: any) => [String(b._id), b.name]));
+
   const allTenants = await Collections.Tenant.find({
     realmId: realm!._id,
     'properties.propertyId': {
@@ -15,6 +26,9 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
   }).lean();
 
   return inputProperties.map((property: any) => {
+    const buildingName = property.buildingId
+      ? buildingMap.get(String(property.buildingId)) || null
+      : null;
     const tenants = (allTenants as any[])
       .filter(({ properties }: any) =>
         properties
@@ -26,7 +40,7 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
         const t2EndDate = t2.terminationDate || t2.endDate;
         return t2EndDate - t1EndDate;
       });
-    return FD.toProperty(property, tenants?.[0], tenants);
+    return { ...FD.toProperty(property, tenants?.[0], tenants), buildingName };
   });
 }
 
