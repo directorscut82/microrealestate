@@ -965,7 +965,8 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
         unit.monthlyCharges.push({
           term: Number(term),
           amount: Math.round(share * 100) / 100,
-          description
+          description,
+          expenseId: entry.expenseId
         });
       }
     }
