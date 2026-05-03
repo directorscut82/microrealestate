@@ -4,6 +4,7 @@ import {
   createProperty,
   createTenant,
   fetchLeases,
+  fetchBuildings,
   fetchProperties,
   fetchTenants,
   importTenantPdf,
@@ -110,15 +111,19 @@ export default function ImportTenantDialog({ open, setOpen }) {
         // Fallback: match by street + floor (co-owned properties have different ATAKs)
         if (!matchedProperty && prop.address?.street1) {
           const floorMatch = prop.rawAddress?.match(/Όροφος\s+(\d+)/);
-          const floor = floorMatch ? parseInt(floorMatch[1], 10) : null;
+          const isIsogeio = !floorMatch && /Ισόγειο/i.test(prop.rawAddress || '');
+          const floor = floorMatch ? parseInt(floorMatch[1], 10) : (isIsogeio ? 0 : null);
+          const floorLabel = floor === 0 ? 'Ισόγειο'
+            : floor != null ? `Όροφος ${floor}`
+            : null;
           // street1 may include appended floor (e.g. "ΚΑΛΑΜΩΝ 24, Όροφος 1")
           // Extract just the street+number part before the comma
           const streetOnly = prop.address.street1.split(',')[0].trim();
-          if (floor !== null) {
+          if (floor !== null && floorLabel) {
             matchedProperty = existingProperties.find(
               (p) => {
                 if (!p.name?.includes(streetOnly)) return false;
-                if (!p.name?.includes(`Όροφος ${floor}`)) return false;
+                if (!p.name?.includes(floorLabel)) return false;
                 // If surface available, prefer exact surface match
                 if (prop.surface && p.surface && Math.abs(p.surface - prop.surface) > 1) return false;
                 return true;
@@ -223,11 +228,15 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
         // 2. Resolve property
         const prop = parsed.properties[0];
-        // Compute a proper name from address (e.g. "ΚΑΛΑΜΩΝ 24 - Όροφος 1")
+        // Compute a proper name from address (e.g. "ΚΑΛΑΜΩΝ 24 - Ισόγειο")
         const streetPart = (prop.address?.street1 || '').split(',')[0].trim();
-        const floorPart = (prop.address?.street1 || '').match(/Όροφος\s*-?\d+/)?.[0];
-        const propertyName = streetPart && floorPart
-          ? `${streetPart} - ${floorPart}`
+        const floorRaw = (prop.address?.street1 || '').match(/Όροφος\s*(\d+)/);
+        const floorNum = floorRaw ? parseInt(floorRaw[1], 10) : null;
+        const floorLabel = floorNum === 0 ? 'Ισόγειο'
+          : floorNum != null ? `Όροφος ${floorNum}`
+          : (prop.address?.street1 || '').match(/Ισόγειο/i) ? 'Ισόγειο' : null;
+        const propertyName = streetPart && floorLabel
+          ? `${streetPart} - ${floorLabel}`
           : streetPart || prop.rawAddress || prop.atakNumber || 'Imported property';
         const propertyData = {
           name: propertyName,
@@ -268,6 +277,50 @@ export default function ImportTenantDialog({ open, setOpen }) {
           });
         } else {
           property = await createProperty(propertyData);
+        }
+
+        // Ensure a building exists for this property
+        if (!property.buildingId && streetPart) {
+          const buildings = await fetchBuildings();
+          const existingBuilding = buildings.find(
+            (b) => b.name === streetPart || b.address?.street1 === streetPart
+          );
+          if (existingBuilding) {
+            // Add unit to existing building if not already there
+            const hasUnit = existingBuilding.units?.some(
+              (u) => u.propertyId === property._id
+            );
+            if (!hasUnit) {
+              await apiFetcher().post(
+                `/buildings/${existingBuilding._id}/units`,
+                {
+                  atakNumber: prop.atakNumber || '',
+                  floor: floorNum ?? 0,
+                  surface: prop.surface || 0,
+                  electricitySupplyNumber: prop.dehNumber || '',
+                  propertyId: property._id,
+                  isManaged: true,
+                  owners: []
+                }
+              );
+            }
+          } else {
+            // Create a new building with one unit
+            await apiFetcher().post('/buildings', {
+              name: streetPart,
+              atakPrefix: (prop.atakNumber || '').slice(0, 5),
+              address: propertyData.address,
+              units: [{
+                atakNumber: prop.atakNumber || '',
+                floor: floorNum ?? 0,
+                surface: prop.surface || 0,
+                electricitySupplyNumber: prop.dehNumber || '',
+                propertyId: property._id,
+                isManaged: true,
+                owners: []
+              }]
+            });
+          }
         }
 
         // 3. Resolve tenant

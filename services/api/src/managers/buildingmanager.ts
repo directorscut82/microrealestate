@@ -578,7 +578,7 @@ export async function importFromE9(req: Req, res: Res) {
         if (!property) {
           property = await Collections.Property.create({
             realmId: realm!._id,
-            name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${parsedUnit.floor != null ? 'Όροφος ' + parsedUnit.floor : 'Ισόγειο'}`,
+            name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${parsedUnit.floor != null && parsedUnit.floor !== 0 ? 'Όροφος ' + parsedUnit.floor : 'Ισόγειο'}`,
             type: _inferPropertyType(parsedUnit),
             surface: parsedUnit.surface,
             atakNumber: parsedUnit.atakNumber,
@@ -591,7 +591,7 @@ export async function importFromE9(req: Req, res: Res) {
           property.electricitySupplyNumber = parsedUnit.electricitySupplyNumber as any;
           // Fix name if it's still just an ATAK number (from lease import)
           if (/^\d{11}$/.test(property.name)) {
-            const floorLabel = parsedUnit.floor != null ? `Όροφος ${parsedUnit.floor}` : 'Ισόγειο';
+            const floorLabel = parsedUnit.floor != null && parsedUnit.floor !== 0 ? `Όροφος ${parsedUnit.floor}` : 'Ισόγειο';
             property.name = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
           }
           if (parsedUnit.surface && !property.surface) {
