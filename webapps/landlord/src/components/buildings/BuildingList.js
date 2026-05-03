@@ -6,9 +6,13 @@ export default function BuildingList({ data }) {
   const { t } = useTranslation('common');
 
   return data.length > 0 ? (
-    <div className="grid gap-8 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-      {data.map((building) => (
-        <BuildingListItem key={building._id} building={building} />
+    <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+      {data.map((building, index) => (
+        <BuildingListItem
+          key={building._id}
+          building={building}
+          index={index}
+        />
       ))}
     </div>
   ) : (
