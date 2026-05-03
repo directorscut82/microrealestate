@@ -22,6 +22,7 @@ export type ParsedE9Unit = {
   surface: number;
   auxSurface: number;
   landSurface: number;
+  category: number | null;
   yearBuilt: number | null;
   ownershipPercentage: number;
   electricitySupplyNumber: string;
@@ -80,8 +81,11 @@ function isRealBuildingUnit(unit: {
   surface: number;
   isElectrified: boolean;
   electricitySupplyNumber: string;
+  category: number | null;
 }): boolean {
   if (unit.surface <= 0) return false;
+  // Category filter: 1=apartment, 2=store. Skip 51=storage and other non-residential
+  if (unit.category !== null && unit.category !== 1 && unit.category !== 2) return false;
   // Primary: has a floor number (apartments always have one)
   if (unit.floor !== null) return true;
   // Secondary: has electricity (building unit where floor parsing failed)
@@ -267,10 +271,12 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   }
 
   // Extract floor: after block streets section, look for the digit pattern
-  // In the numeric tail, the sequence is: BLOCK_NUM [1] FLOOR SURFACE
+  // In the numeric tail, the sequence is: BLOCK_NUM RIGHT CATEGORY [TOTAL_FLOORS] FLOOR SURFACE
   // Floor can be 0-9 (single digit for most buildings)
   // Special: Υ = underground (basement), Ι = ισόγειο (not always present)
+  // Category: 1=apartment, 2=store, 51=storage, etc.
   let floor: number | null = null;
+  let category: number | null = null;
 
   // Strategy: find the surface value position and look for floor just before it
   if (surface > 0 && surfaceCandidates.length >= 1) {
@@ -286,10 +292,25 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
     const floorDigits = beforeSurface.match(/(\d+)\s*$/);
     if (floorDigits) {
       floor = parseInt(floorDigits[1], 10);
+      // Extract category: look for numbers before the floor digit
+      const beforeFloor = beforeSurface.substring(
+        0, beforeSurface.lastIndexOf(floorDigits[1])
+      ).trim();
+      // Category is the last number before floor (could be 1 or 2 digits like 51)
+      const catMatch = beforeFloor.match(/(\d+)\s*$/);
+      if (catMatch) {
+        category = parseInt(catMatch[1], 10);
+      }
     }
     // Check for Υ (underground)
     if (floor === null && /Υ\s*$/.test(beforeSurface)) {
       floor = -1;
+      // For basement with Υ, category is the last number before Υ
+      const beforeU = beforeSurface.replace(/Υ\s*$/, '').trim();
+      const catMatch = beforeU.match(/(\d+)\s*$/);
+      if (catMatch) {
+        category = parseInt(catMatch[1], 10);
+      }
     }
   }
 
@@ -334,6 +355,7 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
     surface,
     auxSurface,
     landSurface: 0,
+    category,
     yearBuilt,
     ownershipPercentage,
     electricitySupplyNumber,
