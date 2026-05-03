@@ -4,6 +4,7 @@ import {
   ExpenseType,
   HeatingType,
   LeaseTimeRange,
+  OccupancyType,
   Locale,
   PaymentMethod,
   RepairCategory,
@@ -364,6 +365,8 @@ export namespace CollectionTypes {
     owners: UnitOwner[] | [];
     propertyId?: string | Property;
     isManaged: boolean;
+    occupancyType?: OccupancyType;
+    parkingAssignedTo?: string[];
     monthlyCharges: MonthlyCharge[] | [];
   };
 

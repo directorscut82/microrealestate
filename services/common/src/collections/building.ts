@@ -39,6 +39,15 @@ const BuildingUnitSchema = new mongoose.Schema({
   owners: [UnitOwnerSchema],
   propertyId: String,
   isManaged: { type: Boolean, default: false },
+  occupancyType: {
+    type: String,
+    enum: ['rented', 'owner_occupied', 'vacant', 'parking'],
+    default: 'vacant'
+  },
+  parkingAssignedTo: {
+    type: [String],
+    default: []
+  },
   monthlyCharges: [MonthlyChargeSchema]
 });
 
