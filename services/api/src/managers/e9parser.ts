@@ -449,6 +449,11 @@ export function parseE9(text: string): ParsedE9Result {
       skippedAsLand++;
       continue;
     }
+    // Skip structures on agricultural land (ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ = not rentable)
+    if (/ΕΠΙ\s+ΑΓΡΟΤΕΜΑΧ/i.test(unit.street)) {
+      skippedAsLand++;
+      continue;
+    }
     const key = buildingKey(unit);
     if (!buildingMap.has(key)) {
       buildingMap.set(key, []);
