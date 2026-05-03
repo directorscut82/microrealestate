@@ -386,11 +386,19 @@ export async function importFromE9(req: Req, res: Res) {
     owner: parsed.owner,
     buildings: await Promise.all(
       parsed.buildings.map(async (building) => {
-        // Check if building already exists
-        const existing = await Collections.Building.findOne({
+        // Check if building already exists by address first, then atakPrefix
+        let existing = await Collections.Building.findOne({
+          realmId: realm!._id,
+          'address.street1': building.address.street1,
+          'address.zipCode': building.address.zipCode
+        }).lean();
+
+        if (!existing) {
+          existing = await Collections.Building.findOne({
           realmId: realm!._id,
           atakPrefix: building.atakPrefix
         }).lean();
+        }
 
         // Check which units can be matched to existing properties
         const unitPreviews = await Promise.all(
@@ -431,8 +439,16 @@ export async function importFromE9(req: Req, res: Res) {
       // Check if building exists
       let building = await Collections.Building.findOne({
         realmId: realm!._id,
-        atakPrefix: buildingData.atakPrefix
+        'address.street1': buildingData.address.street1,
+        'address.zipCode': buildingData.address.zipCode
       });
+
+      if (!building) {
+        building = await Collections.Building.findOne({
+          realmId: realm!._id,
+          atakPrefix: buildingData.atakPrefix
+        });
+      }
 
       if (!building) {
         // Create new building
