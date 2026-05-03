@@ -589,6 +589,14 @@ export async function importFromE9(req: Req, res: Res) {
         } else {
           property.buildingId = String(building!._id) as any;
           property.electricitySupplyNumber = parsedUnit.electricitySupplyNumber as any;
+          // Fix name if it's still just an ATAK number (from lease import)
+          if (/^\d{11}$/.test(property.name)) {
+            const floorLabel = parsedUnit.floor != null ? `Όροφος ${parsedUnit.floor}` : 'Ισόγειο';
+            property.name = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
+          }
+          if (parsedUnit.surface && !property.surface) {
+            property.surface = parsedUnit.surface as any;
+          }
           await property.save();
         }
 
