@@ -13,9 +13,9 @@ import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
 const CATEGORY_COLORS = {
-  rent: { bold: 'hsl(142, 71%, 45%)', faded: 'hsl(142, 30%, 82%)' },
+  rent: { bold: 'hsl(210, 70%, 50%)', faded: 'hsl(210, 30%, 82%)' },
   charges: { bold: 'hsl(262, 60%, 55%)', faded: 'hsl(262, 25%, 82%)' },
-  heating: { bold: 'hsl(0, 75%, 55%)', faded: 'hsl(0, 30%, 82%)' },
+  heating: { bold: 'hsl(15, 85%, 50%)', faded: 'hsl(15, 40%, 82%)' },
   elevator: { bold: 'hsl(200, 70%, 50%)', faded: 'hsl(200, 30%, 82%)' },
   cleaning: { bold: 'hsl(170, 60%, 45%)', faded: 'hsl(170, 25%, 82%)' },
   water_common: { bold: 'hsl(220, 70%, 55%)', faded: 'hsl(220, 30%, 82%)' },
@@ -25,7 +25,7 @@ const CATEGORY_COLORS = {
   garden: { bold: 'hsl(100, 60%, 40%)', faded: 'hsl(100, 25%, 80%)' },
   repairs_fund: { bold: 'hsl(30, 70%, 50%)', faded: 'hsl(30, 30%, 82%)' },
   pest_control: { bold: 'hsl(60, 50%, 40%)', faded: 'hsl(60, 25%, 80%)' },
-  repair: { bold: 'hsl(350, 70%, 50%)', faded: 'hsl(350, 30%, 82%)' },
+  repair: { bold: 'hsl(340, 65%, 50%)', faded: 'hsl(340, 30%, 82%)' },
   monthly_charge: { bold: 'hsl(25, 85%, 55%)', faded: 'hsl(25, 40%, 82%)' },
   other: { bold: 'hsl(0, 0%, 50%)', faded: 'hsl(0, 0%, 82%)' }
 };
