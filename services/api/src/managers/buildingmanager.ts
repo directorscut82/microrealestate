@@ -59,10 +59,14 @@ function _findBuilding(building: any, id: string) {
 
 // Infer property type from E9 parsed unit data
 function _inferPropertyType(unit: ParsedE9Unit): string {
-  // Ground floor (0) in Greece is often commercial
-  // But we default to apartment since E9 doesn't carry explicit type
-  if (unit.floor === 0) return 'store';
-  if (unit.floor !== null && unit.floor < 0) return 'parking';
+  // Category from E9: 1=apartment, 2=store, 51=parking/storage
+  if (unit.category !== null) {
+    if (unit.category === 2) return 'store';
+    if (unit.category >= 50) return 'parking';
+  }
+  // Fallback heuristics when category not available
+  if (unit.floor === 0 && unit.category === null) return 'store';
+  if (unit.floor !== null && unit.floor < 0 && unit.category === null) return 'parking';
   return 'apartment';
 }
 
