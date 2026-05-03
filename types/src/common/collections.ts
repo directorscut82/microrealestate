@@ -350,6 +350,7 @@ export namespace CollectionTypes {
     term: number;
     amount: number;
     description: string;
+    expenseId?: string;
   };
 
   export type BuildingUnit = {
