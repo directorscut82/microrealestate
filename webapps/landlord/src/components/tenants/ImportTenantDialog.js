@@ -223,8 +223,14 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
         // 2. Resolve property
         const prop = parsed.properties[0];
+        // Compute a proper name from address (e.g. "ΚΑΛΑΜΩΝ 24 - Όροφος 1")
+        const streetPart = (prop.address?.street1 || '').split(',')[0].trim();
+        const floorPart = (prop.address?.street1 || '').match(/Όροφος\s*-?\d+/)?.[0];
+        const propertyName = streetPart && floorPart
+          ? `${streetPart} - ${floorPart}`
+          : streetPart || prop.rawAddress || prop.atakNumber || 'Imported property';
         const propertyData = {
-          name: prop.atakNumber || prop.rawAddress || 'Imported property',
+          name: propertyName,
           type: prop.type || 'apartment',
           surface: prop.surface || 0,
           price: prop.monthlyRent || 0,
