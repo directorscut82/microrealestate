@@ -282,12 +282,8 @@ export default function UnitList({ building }) {
             {units.map((unit) => (
               <TableRow key={unit._id}>
                 <TableCell>
-                  <div>{unit.atakNumber}</div>
-                  {unit.altAtakNumbers?.length > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      {unit.altAtakNumbers.join(', ')}
-                    </div>
-                  )}
+                  {[unit.atakNumber, ...(unit.altAtakNumbers || [])]
+                    .join(', ')}
                 </TableCell>
                 <TableCell>{unit.floor ?? '-'}</TableCell>
                 <TableCell>{unit.surface || '-'}</TableCell>
