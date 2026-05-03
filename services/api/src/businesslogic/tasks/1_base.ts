@@ -20,7 +20,7 @@ export interface Rent {
   year: number;
   preTaxAmounts: { description: string; amount: number }[];
   charges: { description: string; amount: number }[];
-  buildingCharges?: { description: string; amount: number; buildingName?: string }[];
+  buildingCharges?: { description: string; amount: number; buildingName?: string; type?: string }[];
   discounts: { origin: string; description: string; amount: number }[];
   debts: { description: string; amount: number }[];
   vats: { origin: string; description: string; rate: number; amount: number }[];
@@ -248,7 +248,8 @@ export default function taskBase(
               rent.buildingCharges!.push({
                 description: expense.name,
                 amount: share,
-                buildingName: building.name
+                buildingName: building.name,
+                type: expense.type
               });
             }
           });
@@ -262,8 +263,41 @@ export default function taskBase(
               rent.buildingCharges!.push({
                 description: charge.description || 'Building charges',
                 amount: charge.amount,
-                buildingName: building.name
+                buildingName: building.name,
+                type: 'monthly_charge'
               });
+            });
+        }
+
+        // Process repairs charged to tenants
+        if (building.repairs && building.repairs.length > 0) {
+          building.repairs
+            .filter((repair) => {
+              if (repair.status === 'cancelled') return false;
+              if (!repair.chargeTerm) return false;
+              if (repair.chargeTerm !== rent.term) return false;
+              return repair.chargeableTo === 'tenants' || repair.chargeableTo === 'split';
+            })
+            .forEach((repair) => {
+              const cost = repair.actualCost || repair.estimatedCost || 0;
+              const tenantShare = repair.chargeableTo === 'tenants'
+                ? cost
+                : Math.round(cost * (repair.tenantSharePercentage || 0)) / 100;
+
+              const share = computeBuildingChargeForProperty(
+                building,
+                String(property.propertyId),
+                { ...repair, amount: tenantShare, allocationMethod: repair.allocationMethod || 'general_thousandths', customAllocations: [] } as any
+              );
+
+              if (share > 0) {
+                rent.buildingCharges!.push({
+                  description: `${repair.title}`,
+                  amount: share,
+                  buildingName: building.name,
+                  type: 'repair'
+                });
+              }
             });
         }
       });

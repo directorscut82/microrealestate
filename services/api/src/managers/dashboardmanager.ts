@@ -122,6 +122,7 @@ export async function all(req: Req, res: Res) {
       baseRent: 0,
       charges: 0,
       buildingCharges: 0,
+      buildingChargesByType: {},
       tenants: []
     };
     return acc;
@@ -144,6 +145,11 @@ export async function all(req: Req, res: Res) {
         const tenantBuildingCharges = (rent.buildingCharges || []).reduce(
           (sum: number, c: AnyRecord) => sum + (c.amount || 0), 0
         );
+        const tenantBuildingByType: AnyRecord = {};
+        (rent.buildingCharges || []).forEach((c: AnyRecord) => {
+          const t = c.type || 'other';
+          tenantBuildingByType[t] = (tenantBuildingByType[t] || 0) + (c.amount || 0);
+        });
         const tenantDue = rent.total?.grandTotal || 0;
         const tenantPaid = rent.total?.payment || 0;
 
@@ -155,6 +161,7 @@ export async function all(req: Req, res: Res) {
             baseRent: 0,
             charges: 0,
             buildingCharges: 0,
+            buildingChargesByType: {},
             tenants: []
           };
         }
@@ -164,13 +171,17 @@ export async function all(req: Req, res: Res) {
         acc[key].baseRent += tenantBaseRent;
         acc[key].charges += tenantCharges;
         acc[key].buildingCharges += tenantBuildingCharges;
+        Object.entries(tenantBuildingByType).forEach(([type, amount]) => {
+          acc[key].buildingChargesByType[type] = (acc[key].buildingChargesByType[type] || 0) + (amount as number);
+        });
         acc[key].tenants.push({
           name: tenantName,
           paid: tenantPaid,
           due: tenantDue,
           baseRent: tenantBaseRent,
           charges: tenantCharges,
-          buildingCharges: tenantBuildingCharges
+          buildingCharges: tenantBuildingCharges,
+          buildingChargesByType: tenantBuildingByType
         });
       });
       return acc;
