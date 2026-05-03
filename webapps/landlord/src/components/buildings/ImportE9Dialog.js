@@ -1,9 +1,8 @@
 import { importBuildingPdf, QueryKeys } from '../../utils/restcalls';
 import { LuAlertTriangle, LuBuilding2, LuCheckCircle } from 'react-icons/lu';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
+import FileDropZone from '../ui/file-drop-zone';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,51 +12,63 @@ export default function ImportE9Dialog({ open, setOpen }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [state, setState] = useState('idle');
+  const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState(null);
-  const fileInputRef = useRef();
-  const selectedFileRef = useRef(null);
 
   const handleClose = useCallback(() => {
     setOpen(false);
     setState('idle');
+    setFiles([]);
     setPreview(null);
-    selectedFileRef.current = null;
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
   }, [setOpen]);
 
-  const handleFileSelect = useCallback(
-    async (event) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
+  const handleParse = useCallback(async () => {
+    if (files.length === 0) return;
 
-      selectedFileRef.current = file;
-      setState('loading');
+    setState('loading');
 
-      try {
+    try {
+      const allBuildings = [];
+      let totalSkipped = 0;
+      const owners = [];
+
+      for (const file of files) {
         const result = await importBuildingPdf(file, false);
-        setPreview(result);
-        setState('preview');
-      } catch (error) {
-        toast.error(t('Failed to parse E9 PDF'));
-        setState('idle');
-        selectedFileRef.current = null;
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
+        if (result.owner) {
+          const existing = owners.find(
+            (o) => o.taxId === result.owner.taxId
+          );
+          if (!existing) {
+            owners.push(result.owner);
+          }
         }
+        if (result.buildings) {
+          allBuildings.push(...result.buildings);
+        }
+        totalSkipped += result.skippedLandPlots || 0;
       }
-    },
-    [t]
-  );
+
+      setPreview({
+        owners,
+        buildings: allBuildings,
+        skippedLandPlots: totalSkipped
+      });
+      setState('preview');
+    } catch (error) {
+      toast.error(t('Failed to parse E9 PDF'));
+      setState('idle');
+    }
+  }, [files, t]);
 
   const handleConfirm = useCallback(async () => {
-    if (!selectedFileRef.current) return;
+    if (files.length === 0) return;
 
     setState('confirming');
 
     try {
-      await importBuildingPdf(selectedFileRef.current, true);
+      for (const file of files) {
+        await importBuildingPdf(file, true);
+      }
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
       toast.success(t('Buildings imported successfully'));
       handleClose();
@@ -65,7 +76,7 @@ export default function ImportE9Dialog({ open, setOpen }) {
       toast.error(t('Failed to import buildings'));
       setState('preview');
     }
-  }, [handleClose, queryClient, t]);
+  }, [files, handleClose, queryClient, t]);
 
   const isLoading = state === 'loading' || state === 'confirming';
 
@@ -76,33 +87,42 @@ export default function ImportE9Dialog({ open, setOpen }) {
       isLoading={isLoading}
       renderHeader={() => t('Import from E9 PDF')}
       renderContent={() => (
-        <div className="pt-6 space-y-4">
-          {state === 'idle' && (
-            <div className="space-y-2">
-              <Label htmlFor="e9file">{t('E9 PDF File')}</Label>
-              <Input
-                id="e9file"
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                onChange={handleFileSelect}
-              />
-            </div>
+        <div className="pt-4 space-y-4">
+          {(state === 'idle' || state === 'loading') && (
+            <FileDropZone
+              multiple
+              files={files}
+              onFilesChange={setFiles}
+              disabled={isLoading}
+              description={t(
+                'Upload one or more E9 PDF files to import buildings and units'
+              )}
+            />
           )}
 
           {state === 'preview' && preview && (
-            <div className="space-y-4">
-              <div className="border rounded-md p-4 space-y-2">
-                <div className="font-medium">{t('Owner')}</div>
-                <div className="text-sm">
-                  {preview.owner?.name}{' '}
-                  {preview.owner?.taxId && `(ΑΦΜ: ${preview.owner.taxId})`}
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {preview.owners.length > 0 && (
+                <div className="border rounded-md p-4 space-y-2">
+                  <div className="font-medium">
+                    {preview.owners.length === 1
+                      ? t('Owner')
+                      : t('Owners')}
+                  </div>
+                  {preview.owners.map((owner, idx) => (
+                    <div key={idx} className="text-sm">
+                      {owner.name}{' '}
+                      {owner.taxId && `(ΑΦΜ: ${owner.taxId})`}
+                    </div>
+                  ))}
                 </div>
-              </div>
+              )}
 
               <div className="space-y-2">
-                <div className="font-medium">{t('Buildings')}</div>
-                {preview.buildings?.map((building, idx) => (
+                <div className="font-medium">
+                  {t('Buildings')} ({preview.buildings.length})
+                </div>
+                {preview.buildings.map((building, idx) => (
                   <div key={idx} className="border rounded-md p-4 space-y-2">
                     <div className="flex items-start gap-2">
                       <LuBuilding2 className="size-5 mt-0.5" />
@@ -149,6 +169,11 @@ export default function ImportE9Dialog({ open, setOpen }) {
           <Button variant="outline" onClick={handleClose}>
             {t('Cancel')}
           </Button>
+          {state === 'idle' && files.length > 0 && (
+            <Button onClick={handleParse} data-cy="parseE9">
+              {t('Continue')}
+            </Button>
+          )}
           {state === 'preview' && (
             <Button onClick={handleConfirm} data-cy="confirmImport">
               {t('Confirm Import')}
