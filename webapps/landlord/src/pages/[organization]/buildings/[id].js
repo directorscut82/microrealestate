@@ -191,7 +191,11 @@ function Building() {
       </Tabs>
       <ConfirmDialog
         title={t('Are you sure to definitely remove this building?')}
-        subTitle={building?.name}
+        subTitle={
+          building?.units?.length
+            ? t('This will also remove {{count}} units. Occupied units will block deletion.', { count: building.units.length })
+            : building?.name
+        }
         open={openConfirmDeleteBuilding}
         setOpen={setOpenConfirmDeleteBuilding}
         onConfirm={onDeleteBuilding}

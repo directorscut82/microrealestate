@@ -657,5 +657,6 @@
   "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
   "fixed amount per unit": "fixed amount per unit",
   "percentage of total": "percentage of total",
-  "ratio shares": "ratio shares"
+  "ratio shares": "ratio shares",
+  "This will also remove {{count}} units. Occupied units will block deletion.": "This will also remove {{count}} units. Occupied units will block deletion."
 }
