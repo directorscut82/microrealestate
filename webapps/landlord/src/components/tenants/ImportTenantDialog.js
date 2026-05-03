@@ -87,9 +87,29 @@ export default function ImportTenantDialog({ open, setOpen }) {
     return parsedResults.map((parsed) => {
       const months = computeMonths(parsed.validityStart, parsed.validityEnd);
       const prop = parsed.properties[0];
-      const matchedProperty = prop?.atakNumber
-        ? existingProperties.find((p) => p.atakNumber === prop.atakNumber)
-        : null;
+      let matchedProperty = null;
+      if (prop?.atakNumber) {
+        // Primary: exact ATAK match
+        matchedProperty = existingProperties.find(
+          (p) => p.atakNumber === prop.atakNumber
+        );
+        // Fallback: match by street + floor (co-owned properties have different ATAKs)
+        if (!matchedProperty && prop.address?.street1) {
+          const floorMatch = prop.rawAddress?.match(/Όροφος\s+(\d+)/);
+          const floor = floorMatch ? parseInt(floorMatch[1], 10) : null;
+          if (floor !== null) {
+            matchedProperty = existingProperties.find(
+              (p) => {
+                if (!p.name?.includes(prop.address.street1)) return false;
+                if (!p.name?.includes(`Όροφος ${floor}`)) return false;
+                // If surface available, prefer exact surface match
+                if (prop.surface && p.surface && Math.abs(p.surface - prop.surface) > 1) return false;
+                return true;
+              }
+            );
+          }
+        }
+      }
       const firstTaxId = parsed.tenants[0]?.taxId;
       const matchedTenant = firstTaxId
         ? existingTenants.find(
@@ -120,7 +140,24 @@ export default function ImportTenantDialog({ open, setOpen }) {
         const result = await importTenantPdf(file);
         results.push({ ...result, _fileName: file.name });
       }
-      setParsedResults(results);
+      // Deduplicate: skip files with same declaration number or same tenant+property
+      const seen = new Set();
+      const unique = results.filter((r) => {
+        const key = r.declarationNumber
+          || `${r.tenants?.[0]?.taxId}_${r.properties?.[0]?.atakNumber}`;
+        if (!key || key === 'undefined_undefined') return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (unique.length < results.length) {
+        toast.info(
+          t('{{count}} duplicate files skipped', {
+            count: results.length - unique.length
+          })
+        );
+      }
+      setParsedResults(unique);
       setState('preview');
     } catch {
       toast.error(t('Error parsing PDF'));
