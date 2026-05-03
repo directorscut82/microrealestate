@@ -106,9 +106,11 @@ export function computeBuildingChargeForProperty(
 
     case 'custom_ratio': {
       // Custom ratio - normalize to sum
+      const unitsWithProperty = building.units.filter((u) => u.propertyId);
       const totalRatio = customAllocations?.reduce((sum, a) => sum + (a.value || 0), 0) || 0;
-      if (totalRatio === 0) return 0;
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
+      // Single-unit fallback: if no ratios set and only 1 unit, give full amount
+      if (totalRatio === 0) return unitsWithProperty.length === 1 ? amount : 0;
       if (!allocation) return 0;
       return (amount * allocation.value) / totalRatio;
     }

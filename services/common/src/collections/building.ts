@@ -23,7 +23,8 @@ const UnitOwnerSchema = new mongoose.Schema(
 const MonthlyChargeSchema = new mongoose.Schema({
   term: { type: Number, required: true },
   amount: { type: Number, required: true },
-  description: String
+  description: String,
+  expenseId: String
 });
 
 const BuildingUnitSchema = new mongoose.Schema({

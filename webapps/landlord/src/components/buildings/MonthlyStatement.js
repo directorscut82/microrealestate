@@ -26,6 +26,17 @@ import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
 
+const ALLOCATION_LABELS = {
+  equal: 'Equal',
+  by_surface: 'By Surface',
+  general_thousandths: 'General ‰',
+  heating_thousandths: 'Heating ‰',
+  elevator_thousandths: 'Elevator ‰',
+  fixed: 'Fixed',
+  custom_ratio: 'Custom Ratio',
+  custom_percentage: 'Custom Percentage'
+};
+
 function generateTermOptions() {
   const options = [];
   const now = moment();
@@ -37,6 +48,32 @@ function generateTermOptions() {
     });
   }
   return options;
+}
+
+function getExistingAmounts(building, term) {
+  const amounts = {};
+  const units = building?.units || [];
+  const expenses = building?.expenses || [];
+
+  for (const expense of expenses) {
+    let total = 0;
+    for (const unit of units) {
+      if (!unit.monthlyCharges) continue;
+      const charges = unit.monthlyCharges.filter(
+        (c) =>
+          c.term === Number(term) &&
+          (c.description === expense.name ||
+            c.expenseId === expense._id)
+      );
+      for (const c of charges) {
+        total += c.amount || 0;
+      }
+    }
+    if (total > 0) {
+      amounts[expense._id] = total;
+    }
+  }
+  return amounts;
 }
 
 export default function MonthlyStatement({ building }) {
@@ -58,10 +95,14 @@ export default function MonthlyStatement({ building }) {
     }
   });
 
-  const handleTermChange = useCallback((term) => {
-    setSelectedTerm(term);
-    setAmounts({});
-  }, []);
+  const handleTermChange = useCallback(
+    (term) => {
+      setSelectedTerm(term);
+      const existing = getExistingAmounts(building, term);
+      setAmounts(existing);
+    },
+    [building]
+  );
 
   const handleAmountChange = useCallback((expenseId, value) => {
     setAmounts((prev) => ({
@@ -154,17 +195,9 @@ export default function MonthlyStatement({ building }) {
                 <TableRow key={expense._id}>
                   <TableCell>{expense.name}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {t(expense.allocationMethod === 'equal'
-                      ? 'Equal'
-                      : expense.allocationMethod === 'by_surface'
-                        ? 'By Surface'
-                        : expense.allocationMethod === 'general_thousandths'
-                          ? 'General ‰'
-                          : expense.allocationMethod === 'heating_thousandths'
-                            ? 'Heating ‰'
-                            : expense.allocationMethod === 'elevator_thousandths'
-                              ? 'Elevator ‰'
-                              : expense.allocationMethod || 'Equal'
+                    {t(
+                      ALLOCATION_LABELS[expense.allocationMethod] ||
+                        expense.allocationMethod
                     )}
                   </TableCell>
                   <TableCell className="text-right">
