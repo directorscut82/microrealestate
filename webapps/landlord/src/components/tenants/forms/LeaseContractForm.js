@@ -371,7 +371,14 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
             {properties?.[index]?.expenses?.map((expense, ei) => (
               <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
                 <div className="flex justify-between items-center mb-1">
-                  <div className="text-sm font-medium">{t('Recurring expense')} #{ei + 1}</div>
+                  <div className="text-sm font-medium">
+                    {t('Recurring expense')} #{ei + 1}
+                    {expense.beginDate === expense.endDate && expense.beginDate ? (
+                      <span className="ml-2 text-xs text-muted-foreground bg-muted px-1 rounded">{t('One-time')}</span>
+                    ) : (
+                      <span className="ml-2 text-xs text-muted-foreground bg-muted px-1 rounded">{t('Monthly')}</span>
+                    )}
+                  </div>
                   {!readOnly && (
                     <Button type="button" variant="ghost" size="icon" onClick={() => {
                       const exps = [...properties[index].expenses];
@@ -388,6 +395,14 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
                   <div className="space-y-1 md:w-1/6">
                     <Label htmlFor={`properties.${index}.expenses.${ei}.amount`}>{t('Amount')}</Label>
                     <Input id={`properties.${index}.expenses.${ei}.amount`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.amount`)} />
+                  </div>
+                  <div className="space-y-1 md:w-1/6">
+                    <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('From')}</Label>
+                    <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
+                  </div>
+                  <div className="space-y-1 md:w-1/6">
+                    <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('To')}</Label>
+                    <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
                   </div>
                 </div>
               </div>
