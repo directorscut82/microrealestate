@@ -233,6 +233,17 @@ export async function add(req: Req, res: Res) {
   });
   await building.save();
 
+  // Link properties to the building
+  const unitPropertyIds = (units || [])
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => u.propertyId);
+  if (unitPropertyIds.length) {
+    await Collections.Property.updateMany(
+      { _id: { $in: unitPropertyIds }, realmId: realm!._id },
+      { buildingId: String(building._id) }
+    );
+  }
+
   const buildings = await _toBuildingData(realm!._id, [
     building.toObject()
   ]);
@@ -578,7 +589,9 @@ export async function importFromE9(req: Req, res: Res) {
         if (!property) {
           property = await Collections.Property.create({
             realmId: realm!._id,
-            name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${parsedUnit.floor != null && parsedUnit.floor !== 0 ? 'Όροφος ' + parsedUnit.floor : 'Ισόγειο'}`,
+            name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${
+              parsedUnit.floor == null || parsedUnit.floor === 0 ? 'Ισόγειο'
+              : parsedUnit.floor < 0 ? 'Υπόγειο' : 'Όροφος ' + parsedUnit.floor}`,
             type: _inferPropertyType(parsedUnit),
             surface: parsedUnit.surface,
             atakNumber: parsedUnit.atakNumber,
@@ -591,7 +604,9 @@ export async function importFromE9(req: Req, res: Res) {
           property.electricitySupplyNumber = parsedUnit.electricitySupplyNumber as any;
           // Fix name if it's still just an ATAK number (from lease import)
           if (/^\d{11}$/.test(property.name)) {
-            const floorLabel = parsedUnit.floor != null && parsedUnit.floor !== 0 ? `Όροφος ${parsedUnit.floor}` : 'Ισόγειο';
+            const floorLabel = parsedUnit.floor == null || parsedUnit.floor === 0
+              ? 'Ισόγειο'
+              : parsedUnit.floor < 0 ? 'Υπόγειο' : `Όροφος ${parsedUnit.floor}`;
             property.name = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
           }
           if (parsedUnit.surface && !property.surface) {

@@ -14,7 +14,8 @@ export default function taskTotal(
   const charges = rent.charges.reduce(
     (total, charges) => total + charges.amount,
     0
-  ) + (rent.buildingCharges || []).reduce(
+  );
+  const buildingChargesTotal = (rent.buildingCharges || []).reduce(
     (total, charge) => total + charge.amount,
     0
   );
@@ -38,7 +39,7 @@ export default function taskTotal(
   rent.total.vat = vat;
   rent.total.grandTotal =
     Math.round(
-      (preTaxAmount + charges + debts - discount + vat + rent.total.balance) *
+      (preTaxAmount + charges + buildingChargesTotal + debts - discount + vat + rent.total.balance) *
         100
     ) / 100;
   rent.total.payment = payment;

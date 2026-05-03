@@ -112,7 +112,7 @@ export async function all(req: Req, res: Res) {
       : [];
 
   const emptyRevenues = moment.months().reduce((acc: AnyRecord, _month: string, index: number) => {
-    const key = moment(`${index + 1}/${now.year()}`, 'MM/YYYYY').format(
+    const key = moment(`${index + 1}/${now.year()}`, 'MM/YYYY').format(
       'MMYYYY'
     );
     acc[key] = {
@@ -138,7 +138,9 @@ export async function all(req: Req, res: Res) {
               ? (rent.total?.payment || 0) - (rent.total?.grandTotal || 0)
               : 0,
           baseRent: rent.total?.preTaxAmount || 0,
-          charges: rent.total?.charges || 0,
+          charges: (rent.charges || []).reduce(
+            (sum: number, c: AnyRecord) => sum + (c.amount || 0), 0
+          ),
           buildingCharges: (rent.buildingCharges || []).reduce(
             (sum: number, c: AnyRecord) => sum + (c.amount || 0),
             0

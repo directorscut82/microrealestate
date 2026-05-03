@@ -8,7 +8,7 @@ const nominatimBaseURL = 'https://nominatim.openstreetmap.org';
 
 function cleanStreetForGeocoding(street) {
   if (!street) return '';
-  return street.replace(/,\s*Όροφος\s*-?\d+/i, '').trim();
+  return street.replace(/,\s*(Όροφος\s*-?\d+|Ισόγειο|Υπόγειο)/i, '').trim();
 }
 
 export default function Map({ address }) {

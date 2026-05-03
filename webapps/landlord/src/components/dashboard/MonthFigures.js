@@ -30,11 +30,9 @@ export default function MonthFigures({ className, dashboardData }) {
     return [
       {
         notPaid: currentRevenues.notPaid,
-        paid: currentRevenues.paid -
-          (currentRevenues.charges || 0) -
+        paid: currentRevenues.baseRent || 0,
+        charges: (currentRevenues.charges || 0) +
           (currentRevenues.buildingCharges || 0),
-        charges: currentRevenues.charges || 0,
-        buildingCharges: currentRevenues.buildingCharges || 0,
         yearMonth
       }
     ];
@@ -110,8 +108,7 @@ export default function MonthFigures({ className, dashboardData }) {
             config={{
               notPaid: { color: 'hsl(var(--chart-1))' },
               paid: { color: 'hsl(var(--chart-2))' },
-              charges: { color: 'hsl(var(--chart-4))' },
-              buildingCharges: { color: 'hsl(var(--chart-5))' }
+              charges: { color: 'hsl(var(--chart-4))' }
             }}
             className="h-[220px] w-full"
           >
@@ -156,21 +153,21 @@ export default function MonthFigures({ className, dashboardData }) {
                 cursor="pointer"
                 onClick={handleClick}
               />
-            <RadialBar
-              dataKey="charges"
-              stackId="rents"
-              cornerRadius={4}
-              fill="var(--color-charges)"
-              stroke="hsl(var(--chart-4))"
-              label={{
-                fill: 'hsl(var(--chart-4))',
-                position: 'outside',
-                formatter: (value) => (value ? formatNumber(value) : ''),
-                className: 'text-[9px] md:text-sm'
-              }}
-              cursor="pointer"
-              onClick={handleClick}
-            />
+              <RadialBar
+                dataKey="charges"
+                stackId="rents"
+                cornerRadius={4}
+                fill="var(--color-charges)"
+                stroke="hsl(var(--chart-4))"
+                label={{
+                  fill: 'hsl(var(--chart-4))',
+                  position: 'outside',
+                  formatter: (value) => (value ? formatNumber(value) : ''),
+                  className: 'text-[9px] md:text-sm'
+                }}
+                cursor="pointer"
+                onClick={handleClick}
+              />
               <RadialBar
                 dataKey="notPaid"
                 stackId="rents"
