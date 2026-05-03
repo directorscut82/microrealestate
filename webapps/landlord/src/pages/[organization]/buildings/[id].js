@@ -14,6 +14,7 @@ import {
 import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import BuildingForm from '../../../components/buildings/BuildingForm';
+import BuildingDashboard from '../../../components/buildings/BuildingDashboard';
 import { Card } from '../../../components/ui/card';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import ContractorList from '../../../components/buildings/ContractorList';
@@ -135,22 +136,25 @@ function Building() {
       <PresenceBanner viewers={viewers} />
       <Tabs defaultValue="overview" className="w-full">
         <TabsList className="flex justify-start overflow-x-auto overflow-y-hidden">
-          <TabsTrigger value="overview" className="w-1/4" data-cy="overviewTab">
+          <TabsTrigger value="overview" className="w-1/5" data-cy="overviewTab">
             {t('Overview')}
           </TabsTrigger>
-          <TabsTrigger value="units" className="w-1/4" data-cy="unitsTab">
+          <TabsTrigger value="units" className="w-1/5" data-cy="unitsTab">
             {t('Units')}
           </TabsTrigger>
-          <TabsTrigger value="expenses" className="w-1/4" data-cy="expensesTab">
+          <TabsTrigger value="expenses" className="w-1/5" data-cy="expensesTab">
             {t('Expenses')}
           </TabsTrigger>
-          <TabsTrigger value="repairs" className="w-1/4" data-cy="repairsTab">
+          <TabsTrigger value="repairs" className="w-1/5" data-cy="repairsTab">
             {t('Repairs & Contractors')}
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="w-1/5" data-cy="settingsTab">
+            {t('Settings')}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <Card className="p-6">
-            <BuildingForm building={building} onSubmit={onSubmit} />
+            <BuildingDashboard building={building} />
           </Card>
         </TabsContent>
         <TabsContent value="units">
@@ -177,6 +181,11 @@ function Building() {
                 <ContractorList building={building} />
               </div>
             </div>
+          </Card>
+        </TabsContent>
+        <TabsContent value="settings">
+          <Card className="p-6">
+            <BuildingForm building={building} onSubmit={onSubmit} />
           </Card>
         </TabsContent>
       </Tabs>

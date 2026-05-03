@@ -44,6 +44,8 @@ export type HeatingType =
 
 export type UnitOwnerType = 'member' | 'external';
 
+export type OccupancyType = 'rented' | 'owner_occupied' | 'vacant' | 'parking';
+
 export type ContractorSpecialty =
   | 'plumber'
   | 'electrician'
