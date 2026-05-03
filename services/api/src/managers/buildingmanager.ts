@@ -394,11 +394,11 @@ export async function importFromE9(req: Req, res: Res) {
         }).lean();
 
         if (!existing) {
-          existing = await Collections.Building.findOne({
-          realmId: realm!._id,
-          atakPrefix: building.atakPrefix
-        }).lean();
-        }
+            existing = await Collections.Building.findOne({
+              realmId: realm!._id,
+              'address.street1': building.address.street1
+            }).lean();
+          }
 
         // Check which units can be matched to existing properties
         const unitPreviews = await Promise.all(
@@ -454,13 +454,8 @@ export async function importFromE9(req: Req, res: Res) {
         });
       }
 
-      // 3. ATAK prefix match
-      if (!building) {
-        building = await Collections.Building.findOne({
-          realmId: realm!._id,
-          atakPrefix: buildingData.atakPrefix
-        });
-      }
+      // NOTE: Do NOT match by ATAK prefix — it's a cadastral area code, not building ID
+      // Multiple buildings can share the same prefix (e.g. ΑΧΑΡΝΩΝ 167 and ΚΑΛΑΜΩΝ 24)
 
       if (!building) {
         // Create new building
