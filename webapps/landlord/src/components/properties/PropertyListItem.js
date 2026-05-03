@@ -25,7 +25,7 @@ export default function PropertyListItem({ property, accent }) {
   }, [router, property]);
 
   const atakLabel = property.atakNumber
-    ? ` (${property.atakNumber})`
+    ? ` (${[property.atakNumber, ...(property.altAtakNumbers || [])].join(', ')})`
     : '';
 
   return (

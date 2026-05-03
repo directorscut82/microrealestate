@@ -281,7 +281,14 @@ export default function UnitList({ building }) {
           <TableBody>
             {units.map((unit) => (
               <TableRow key={unit._id}>
-                <TableCell>{unit.atakNumber}</TableCell>
+                <TableCell>
+                  <div>{unit.atakNumber}</div>
+                  {unit.altAtakNumbers?.length > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      {unit.altAtakNumbers.join(', ')}
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell>{unit.floor ?? '-'}</TableCell>
                 <TableCell>{unit.surface || '-'}</TableCell>
                 <TableCell>{unit.generalThousandths || 0}</TableCell>
