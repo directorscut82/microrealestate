@@ -372,7 +372,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
               <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
                 <div className="flex justify-between items-center mb-1">
                   <div className="text-sm font-medium">{t('Recurring expense')} #{ei + 1}</div>
-                  {!readOnly && properties[index].expenses.length > 1 && (
+                  {!readOnly && (
                     <Button type="button" variant="ghost" size="icon" onClick={() => {
                       const exps = [...properties[index].expenses];
                       exps.splice(ei, 1);
@@ -397,7 +397,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
                 const exps = [...(properties?.[index]?.expenses || []), { ...emptyExpense(), beginDate, endDate }];
                 setValue(`properties.${index}.expenses`, exps);
               }}>
-                <LuPlus className="size-3 mr-1" />{t('Add a expense')}
+              <LuPlus className="size-3 mr-1" />{t('Add monthly expense')}
               </Button>
             )}
 

@@ -12,13 +12,19 @@ import useFormatNumber from '../../hooks/useFormatNumber';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-const COLORS = {
-  rent: 'hsl(142, 71%, 45%)',
-  rentFaded: 'hsl(142, 30%, 80%)',
-  charges: 'hsl(262, 60%, 55%)',
-  chargesFaded: 'hsl(262, 25%, 82%)',
-  building: 'hsl(25, 85%, 55%)',
-  buildingFaded: 'hsl(25, 40%, 82%)'
+const CATEGORIES = {
+  rent: {
+    bold: 'hsl(210, 70%, 50%)',
+    faded: 'hsl(210, 25%, 82%)'
+  },
+  charges: {
+    bold: 'hsl(262, 60%, 55%)',
+    faded: 'hsl(262, 25%, 82%)'
+  },
+  building: {
+    bold: 'hsl(25, 85%, 55%)',
+    faded: 'hsl(25, 40%, 82%)'
+  }
 };
 
 export default function MonthFigures({ className, dashboardData }) {
@@ -45,42 +51,53 @@ export default function MonthFigures({ className, dashboardData }) {
     if (baseRent > 0) {
       const rentPaid = Math.round(baseRent * paidRatio);
       const rentUnpaid = baseRent - rentPaid;
-      if (rentPaid > 0) segments.push({ name: t('Rent') + ' (' + t('paid') + ')', value: rentPaid, color: COLORS.rent, category: 'rent', status: 'paid' });
-      if (rentUnpaid > 0) segments.push({ name: t('Rent') + ' (' + t('unpaid') + ')', value: rentUnpaid, color: COLORS.rentFaded, category: 'rent', status: 'unpaid' });
+      if (rentPaid > 0) segments.push({ name: t('Rent') + ' (' + t('paid') + ')', value: rentPaid, color: CATEGORIES.rent.bold, category: 'rent', status: 'paid' });
+      if (rentUnpaid > 0) segments.push({ name: t('Rent') + ' (' + t('unpaid') + ')', value: rentUnpaid, color: CATEGORIES.rent.faded, category: 'rent', status: 'unpaid' });
     }
     if (charges > 0) {
       const chargesPaid = Math.round(charges * paidRatio);
       const chargesUnpaid = charges - chargesPaid;
-      if (chargesPaid > 0) segments.push({ name: t('Extra charges') + ' (' + t('paid') + ')', value: chargesPaid, color: COLORS.charges, category: 'charges', status: 'paid' });
-      if (chargesUnpaid > 0) segments.push({ name: t('Extra charges') + ' (' + t('unpaid') + ')', value: chargesUnpaid, color: COLORS.chargesFaded, category: 'charges', status: 'unpaid' });
+      if (chargesPaid > 0) segments.push({ name: t('Extra charges') + ' (' + t('paid') + ')', value: chargesPaid, color: CATEGORIES.charges.bold, category: 'charges', status: 'paid' });
+      if (chargesUnpaid > 0) segments.push({ name: t('Extra charges') + ' (' + t('unpaid') + ')', value: chargesUnpaid, color: CATEGORIES.charges.faded, category: 'charges', status: 'unpaid' });
     }
     if (buildingCharges > 0) {
       const buildingPaid = Math.round(buildingCharges * paidRatio);
       const buildingUnpaid = buildingCharges - buildingPaid;
-      if (buildingPaid > 0) segments.push({ name: t('Building charges') + ' (' + t('paid') + ')', value: buildingPaid, color: COLORS.building, category: 'building', status: 'paid' });
-      if (buildingUnpaid > 0) segments.push({ name: t('Building charges') + ' (' + t('unpaid') + ')', value: buildingUnpaid, color: COLORS.buildingFaded, category: 'building', status: 'unpaid' });
+      if (buildingPaid > 0) segments.push({ name: t('Building charges') + ' (' + t('paid') + ')', value: buildingPaid, color: CATEGORIES.building.bold, category: 'building', status: 'paid' });
+      if (buildingUnpaid > 0) segments.push({ name: t('Building charges') + ' (' + t('unpaid') + ')', value: buildingUnpaid, color: CATEGORIES.building.faded, category: 'building', status: 'unpaid' });
     }
     return segments;
   }, [currentRevenues, t]);
 
   const CustomTooltip = ({ active, payload }) => {
     if (!active || !payload?.length) return null;
-    const { name, value } = payload[0];
+    const entry = payload[0].payload;
     const tenants = currentRevenues.tenants || [];
+    const paidRatio = currentRevenues.paid / (currentRevenues.baseRent + currentRevenues.charges + currentRevenues.buildingCharges) || 0;
+
     return (
-      <div className="bg-background border rounded-lg shadow-lg p-3 text-sm max-w-64">
-        <div className="font-semibold mb-1">{name}</div>
-        <div className="font-medium">{formatNumber(value)}</div>
+      <div className="bg-background border rounded-lg shadow-lg p-3 text-sm max-w-80">
+        <div className="font-semibold mb-1">{entry.name}</div>
+        <div className="font-medium mb-2">{formatNumber(entry.value)}</div>
         {tenants.length > 0 && (
-          <div className="mt-2 border-t pt-2 space-y-1">
-            {tenants.map((tenant, i) => (
-              <div key={i} className="flex justify-between gap-4">
-                <span className="text-muted-foreground truncate">{tenant.name}</span>
-                <span className="whitespace-nowrap">
-                  {formatNumber(tenant.paid)} / {formatNumber(tenant.due)}
-                </span>
-              </div>
-            ))}
+          <div className="border-t pt-2 space-y-2">
+            {tenants.map((tenant, i) => {
+              const catAmount = entry.category === 'rent' ? tenant.baseRent
+                : entry.category === 'charges' ? tenant.charges
+                : tenant.buildingCharges;
+              const catPaid = Math.round(catAmount * Math.min(paidRatio, 1));
+              return (
+                <div key={i}>
+                  <div className="font-medium truncate">{tenant.name}</div>
+                  <div className="flex gap-4 text-xs text-muted-foreground">
+                    <span>{t('Due')}: {formatNumber(catAmount)}</span>
+                    <span className={catPaid >= catAmount ? 'text-success' : 'text-warning'}>
+                      {t('Paid')}: {formatNumber(catPaid)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -146,23 +163,23 @@ export default function MonthFigures({ className, dashboardData }) {
           <div>
             {pieData.length > 0 ? (
               <>
-                <div className="flex flex-wrap justify-center gap-4 text-xs mb-2">
+                <div className="flex flex-wrap justify-center gap-3 text-xs mb-2">
                   <div className="flex items-center gap-1">
-                    <div className="size-3 rounded-sm" style={{ background: COLORS.rent }} />
+                    <div className="size-3 rounded-sm" style={{ background: CATEGORIES.rent.bold }} />
                     <span>{t('Rent')}</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="size-3 rounded-sm" style={{ background: COLORS.charges }} />
+                    <div className="size-3 rounded-sm" style={{ background: CATEGORIES.charges.bold }} />
                     <span>{t('Extra charges')}</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="size-3 rounded-sm" style={{ background: COLORS.building }} />
+                    <div className="size-3 rounded-sm" style={{ background: CATEGORIES.building.bold }} />
                     <span>{t('Building charges')}</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <div className="size-3 rounded-sm opacity-40" style={{ background: '#888' }} />
-                    <span className="text-muted-foreground">{t('= unpaid')}</span>
-                  </div>
+                </div>
+                <div className="flex justify-center gap-4 text-[10px] text-muted-foreground mb-1">
+                  <span>■ {t('bold')} = {t('paid')}</span>
+                  <span>□ {t('faded')} = {t('unpaid')}</span>
                 </div>
                 <ChartContainer
                   config={{}}
