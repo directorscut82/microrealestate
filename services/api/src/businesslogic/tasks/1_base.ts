@@ -176,7 +176,6 @@ export default function taskBase(
         const name = property.property.name || '';
         const preTaxAmount = property.rent || 0;
         const expenses = property.expenses || [];
-        const extraCharge = property.extraCharge || 0;
 
         rent.preTaxAmounts.push({
           description: name,
@@ -206,12 +205,6 @@ export default function taskBase(
           );
         }
 
-        if (extraCharge > 0) {
-          rent.charges.push({
-            description: `${name} - extra`,
-            amount: extraCharge
-          });
-        }
       }
     });
 
