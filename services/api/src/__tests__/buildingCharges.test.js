@@ -287,8 +287,8 @@ describe('Building Charges Integration', () => {
 
       const contract = makeContract([prop1], [building]);
       const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
-      // Total charges = property expense (50) + building charge (100)
-      expect(rent.total.charges).toBe(150);
+      // total.charges = property expense only; building charges are separate
+      expect(rent.total.charges).toBe(50);
       expect(rent.total.grandTotal).toBe(650); // rent (500) + charges (150)
     });
 
@@ -306,7 +306,7 @@ describe('Building Charges Integration', () => {
 
       expect(rent.buildingCharges).toHaveLength(2);
       // prop1 gets: 200 * 500/1000 (cleaning) + 600 * 500/1000 (heating) = 100 + 300 = 400
-      expect(rent.total.charges).toBe(400);
+      expect(rent.total.charges).toBe(0); // no property expenses, only building charges
     });
   });
 

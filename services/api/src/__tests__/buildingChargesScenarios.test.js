@@ -557,7 +557,7 @@ describe('Building Charges — Real-World Scenarios', () => {
       expect(rent.buildingCharges).toHaveLength(2);
       expect(rent.buildingCharges[0].amount).toBe(50); // recurring expense
       expect(rent.buildingCharges[1].amount).toBe(25); // monthly statement
-      expect(rent.total.charges).toBe(75);
+      expect(rent.total.charges).toBe(0); // building charges not in total.charges
     });
 
     it('monthly charge with zero amount produces no building charge', () => {
@@ -598,7 +598,7 @@ describe('Building Charges — Real-World Scenarios', () => {
 
       // rent=600, property expense=30, building charge=100/2=50
       expect(rent.total.preTaxAmount).toBe(600);
-      expect(rent.total.charges).toBe(80); // 30 + 50
+      expect(rent.total.charges).toBe(30); // only property expense, building charges separate
       expect(rent.total.grandTotal).toBe(680);
     });
 
