@@ -255,17 +255,10 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
     setValue(`properties.${index}._id`, val);
     if (property) {
       setValue(`properties.${index}.rent`, property.price || 0);
-      setValue(`properties.${index}.expenses`, [{
-        key: nanoid(),
-        title: t('General expenses'),
-        amount: Math.round((property.price || 0) * 100 * 0.1) / 100,
-        beginDate,
-        endDate
-      }]);
       setValue(`properties.${index}.entryDate`, beginDate);
       setValue(`properties.${index}.exitDate`, endDate);
     }
-  }, [propertyItems, setValue, beginDate, endDate, t]);
+  }, [propertyItems, setValue, beginDate, endDate]);
 
   const _onSubmit = useCallback(async (lease) => {
     await onSubmit({
