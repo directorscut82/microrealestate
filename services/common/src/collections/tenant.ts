@@ -56,7 +56,6 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
       propertyId: { type: String, ref: Property },
       property: Property.schema,
       rent: Number,
-      extraCharge: Number,
       expenses: [
         {
           _id: false,

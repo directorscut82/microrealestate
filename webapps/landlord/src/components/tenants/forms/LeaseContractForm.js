@@ -36,7 +36,6 @@ const propertySchema = z.object({
   key: z.string().optional(),
   _id: z.string().min(1),
   rent: z.coerce.number().min(0),
-  extraCharge: z.coerce.number().min(0).optional(),
   expenses: z.array(expenseSchema),
   entryDate: z.string().min(1),
   exitDate: z.string().min(1)
@@ -65,7 +64,7 @@ const emptyProperty = () => ({
   key: nanoid(),
   _id: '',
   rent: 0,
-  expenses: [emptyExpense()],
+  expenses: [],
   entryDate: '',
   exitDate: ''
 });
@@ -91,17 +90,16 @@ const initValues = (tenant) => {
           key: property.property._id,
           _id: property.property._id,
           rent: property.rent || 0,
-          extraCharge: property.extraCharge || 0,
-          expenses: property.expenses?.map((expense) => ({
+          expenses: (property.expenses || []).map((expense) => ({
             ...expense,
             key: nanoid(),
             beginDate: toDateStr(expense.beginDate),
             endDate: toDateStr(expense.endDate)
-          })) || [{ ...emptyExpense(), beginDate, endDate }],
+          })),
           entryDate: toDateStr(property.entryDate) || beginDate,
           exitDate: toDateStr(property.exitDate) || endDate
         }))
-      : [{ ...emptyProperty(), expenses: [{ ...emptyExpense(), beginDate, endDate }], entryDate: beginDate, exitDate: endDate }],
+      : [{ ...emptyProperty(), expenses: [], entryDate: beginDate, exitDate: endDate }],
     guaranty: tenant?.guaranty || 0,
     guarantyPayback: tenant?.guarantyPayback || 0
   };
@@ -283,7 +281,6 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
         .map((p) => ({
           propertyId: p._id,
           rent: p.rent,
-          extraCharge: p.extraCharge || 0,
           expenses: p.expenses?.map((e) => ({
             ...e,
             beginDate: e.beginDate ? moment(e.beginDate).format('DD/MM/YYYY') : '',
@@ -375,17 +372,13 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
                 <Label htmlFor={`properties.${index}.rent`}>{t('Rent')}</Label>
                 <Input id={`properties.${index}.rent`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.rent`)} />
               </div>
-              <div className="space-y-2 md:w-1/6">
-                <Label htmlFor={`properties.${index}.extraCharge`}>{t('Extra charge')}</Label>
-                <Input id={`properties.${index}.extraCharge`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.extraCharge`)} />
-              </div>
             </div>
 
             {/* Expenses - title and amount always visible */}
             {properties?.[index]?.expenses?.map((expense, ei) => (
               <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
                 <div className="flex justify-between items-center mb-1">
-                  <div className="text-sm font-medium">{t('Expense #{{count}}', { count: ei + 1 })}</div>
+                  <div className="text-sm font-medium">{t('Recurring expense')} #{ei + 1}</div>
                   {!readOnly && properties[index].expenses.length > 1 && (
                     <Button type="button" variant="ghost" size="icon" onClick={() => {
                       const exps = [...properties[index].expenses];
@@ -428,7 +421,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
           </div>
         ))}
         {!readOnly && (
-          <Button type="button" variant="outline" onClick={() => appendProperty({ ...emptyProperty(), expenses: [{ ...emptyExpense(), beginDate, endDate }], entryDate: beginDate, exitDate: endDate })} data-cy="addPropertiesItem">
+          <Button type="button" variant="outline" onClick={() => appendProperty({ ...emptyProperty(), expenses: [], entryDate: beginDate, exitDate: endDate })} data-cy="addPropertiesItem">
             <LuPlus className="size-4 mr-1" />{t('Add a property')}
           </Button>
         )}
