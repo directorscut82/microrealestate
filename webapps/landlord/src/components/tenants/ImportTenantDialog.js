@@ -380,20 +380,31 @@ export default function ImportTenantDialog({ open, setOpen }) {
           tenant = await createTenant(tenantData);
         }
 
-        // Mark past months as paid if flag is set
+        // Settle past months if flag is set (pays full grandTotal including charges)
         if (markPaidFlags[idx] !== false && matchInfo?.pastMonths > 0) {
-          const startDate = moment(parsed.validityStart, 'DD/MM/YYYY');
+          // Fetch computed rents to get actual grandTotal per term
+          const year = moment().format('YYYY');
+          let rentsData;
+          try {
+            rentsData = await apiFetcher().get(`/rents/${year}`);
+          } catch { rentsData = null; }
+          const tenantRents = rentsData?.rents?.filter(
+            (r) => r.occupant?._id === tenant._id
+          ) || [];
+
+          const startDate = moment(parsed.validityStart || parsed.originalStartDate, 'DD/MM/YYYY');
           const now = moment();
-          const rent = prop.monthlyRent || parsed.totalMonthlyRent || 0;
           let termDate = startDate.clone();
           while (termDate.isBefore(now, 'month')) {
             const term = termDate.format('YYYYMM') + '0100';
+            const rentForTerm = tenantRents.find((r) => String(r.term) === term);
+            const amount = rentForTerm?.total?.grandTotal || prop.monthlyRent || parsed.totalMonthlyRent || 0;
             try {
               await apiFetcher().patch(
                 `/rents/payment/${tenant._id}/${term}`,
                 {
                   _id: tenant._id,
-                  payments: [{ amount: rent, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
+                  payments: [{ amount, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
                 }
               );
             } catch { /* skip if term doesn't exist */ }
@@ -572,8 +583,8 @@ export default function ImportTenantDialog({ open, setOpen }) {
                       </Select>
                     </div>
 
-                    {info?.pastMonths > 0 && !info?.occupiedBy && (
-                      <div className="flex items-center gap-2 pt-1">
+                    {info?.pastMonths > 0 && (
+                      <div className="flex items-center gap-2 pt-2 p-2 bg-muted/50 rounded-md">
                         <Checkbox
                           id={`markPaid-${idx}`}
                           checked={markPaidFlags[idx] !== false}
@@ -584,8 +595,8 @@ export default function ImportTenantDialog({ open, setOpen }) {
                             }))
                           }
                         />
-                        <label htmlFor={`markPaid-${idx}`} className="text-xs flex items-center gap-1 cursor-pointer">
-                          <LuCalendarClock className="size-3" />
+                        <label htmlFor={`markPaid-${idx}`} className="text-sm flex items-center gap-1.5 cursor-pointer">
+                          <LuCalendarClock className="size-4" />
                           {t('Mark {{count}} past months as paid', { count: info.pastMonths })}
                         </label>
                       </div>

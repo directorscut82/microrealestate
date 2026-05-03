@@ -52,26 +52,26 @@ export default function YearFigures({ className, dashboardData }) {
     if (!data) return null;
     const tenants = data.tenants || [];
     return (
-      <div className="bg-background/90 backdrop-blur-sm border rounded-lg shadow-lg p-3 text-sm max-w-72">
-        <div className="font-semibold mb-2">
+      <div className="bg-popover/75 backdrop-blur-md border border-border/50 rounded-lg shadow-md px-3 py-2 text-xs max-w-64">
+        <div className="font-medium text-sm mb-1">
           {moment(data.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
-        <div className="flex justify-between gap-4 mb-1">
+        <div className="flex justify-between gap-3 mb-0.5">
           <span className="text-success">{t('Paid')}</span>
           <span className="font-medium">{formatNumber(data.paid)}</span>
         </div>
         {data.notPaid < 0 && (
-          <div className="flex justify-between gap-4 mb-1">
+          <div className="flex justify-between gap-3 mb-0.5">
             <span className="text-warning">{t('Not paid')}</span>
             <span className="font-medium">{formatNumber(data.notPaid)}</span>
           </div>
         )}
         {tenants.length > 0 && (
-          <div className="mt-2 border-t pt-2 space-y-1">
+          <div className="mt-1.5 border-t border-border/40 pt-1.5 space-y-0.5">
             {tenants.map((tenant, i) => {
               const balance = tenant.paid - tenant.due;
               return (
-                <div key={i} className="flex justify-between gap-3">
+                <div key={i} className="flex justify-between gap-2">
                   <span className="text-muted-foreground truncate">{tenant.name}</span>
                   <span className={cn('whitespace-nowrap', balance < 0 ? 'text-warning' : 'text-success')}>
                     {formatNumber(tenant.paid)} / {formatNumber(tenant.due)}

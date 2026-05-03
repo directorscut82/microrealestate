@@ -117,11 +117,11 @@ export default function MonthFigures({ className, dashboardData }) {
     const paidRatio = totalDue > 0 ? currentRevenues.paid / totalDue : 0;
 
     return (
-      <div className="bg-background/90 backdrop-blur-sm border rounded-lg shadow-lg p-3 text-sm max-w-80">
-        <div className="font-semibold mb-1">{entry.name}</div>
-        <div className="font-medium mb-2">{formatNumber(entry.value)}</div>
+      <div className="bg-popover/75 backdrop-blur-md border border-border/50 rounded-lg shadow-md px-3 py-2 text-xs max-w-72">
+        <div className="font-medium text-sm mb-0.5">{entry.name}</div>
+        <div className="mb-1.5">{formatNumber(entry.value)}</div>
         {tenants.length > 0 && (
-          <div className="border-t pt-2 space-y-2">
+          <div className="border-t border-border/40 pt-1.5 space-y-1">
             {tenants.map((tenant, i) => {
               const catAmount = entry.type === 'rent' ? tenant.baseRent
                 : entry.type === 'charges' ? tenant.charges
@@ -130,8 +130,8 @@ export default function MonthFigures({ className, dashboardData }) {
               const catPaid = Math.round(catAmount * Math.min(paidRatio, 1));
               return (
                 <div key={i}>
-                  <div className="font-medium truncate">{tenant.name}</div>
-                  <div className="flex gap-4 text-xs text-muted-foreground">
+                  <div className="truncate">{tenant.name}</div>
+                  <div className="flex gap-3 text-muted-foreground">
                     <span>{t('Due')}: {formatNumber(catAmount)}</span>
                     <span className={catPaid >= catAmount ? 'text-success' : 'text-warning'}>
                       {t('Paid')}: {formatNumber(catPaid)}
