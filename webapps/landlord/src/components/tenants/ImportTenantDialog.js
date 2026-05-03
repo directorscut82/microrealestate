@@ -22,7 +22,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import FileDropZone from '../ui/file-drop-zone';
 import { Label } from '../ui/label';
-import { LuAlertTriangle, LuCheck, LuUser } from 'react-icons/lu';
+import { LuAlertTriangle, LuBan, LuCheck, LuUser } from 'react-icons/lu';
 import moment from 'moment';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { StoreContext } from '../../store';
@@ -97,10 +97,13 @@ export default function ImportTenantDialog({ open, setOpen }) {
         if (!matchedProperty && prop.address?.street1) {
           const floorMatch = prop.rawAddress?.match(/Όροφος\s+(\d+)/);
           const floor = floorMatch ? parseInt(floorMatch[1], 10) : null;
+          // street1 may include appended floor (e.g. "ΚΑΛΑΜΩΝ 24, Όροφος 1")
+          // Extract just the street+number part before the comma
+          const streetOnly = prop.address.street1.split(',')[0].trim();
           if (floor !== null) {
             matchedProperty = existingProperties.find(
               (p) => {
-                if (!p.name?.includes(prop.address.street1)) return false;
+                if (!p.name?.includes(streetOnly)) return false;
                 if (!p.name?.includes(`Όροφος ${floor}`)) return false;
                 // If surface available, prefer exact surface match
                 if (prop.surface && p.surface && Math.abs(p.surface - prop.surface) > 1) return false;
@@ -118,7 +121,19 @@ export default function ImportTenantDialog({ open, setOpen }) {
               t.coTenants?.some((ct) => ct.taxId === firstTaxId)
           )
         : null;
-      return { months, matchedProperty, matchedTenant };
+
+      // Check if property is occupied by a different tenant
+      let occupiedBy = null;
+      if (matchedProperty && !matchedTenant) {
+        occupiedBy = existingTenants.find(
+          (t) =>
+            t.properties?.some(
+              (tp) => tp.propertyId === matchedProperty._id
+            )
+        );
+      }
+
+      return { months, matchedProperty, matchedTenant, occupiedBy };
     });
   }, [parsedResults, existingProperties, existingTenants]);
 
@@ -172,6 +187,10 @@ export default function ImportTenantDialog({ open, setOpen }) {
       for (let idx = 0; idx < parsedResults.length; idx++) {
         const parsed = parsedResults[idx];
         const matchInfo = matchInfos[idx];
+
+        // Skip entries where property is occupied by another tenant
+        if (matchInfo?.occupiedBy) continue;
+
         const months =
           matchInfo?.months ||
           computeMonths(parsed.validityStart, parsed.validityEnd);
@@ -348,7 +367,12 @@ export default function ImportTenantDialog({ open, setOpen }) {
               {parsedResults.map((parsed, idx) => {
                 const info = matchInfos[idx];
                 return (
-                  <div key={idx} className="border rounded-md p-4 space-y-3">
+                  <div
+                    key={idx}
+                    className={`border rounded-md p-4 space-y-3${
+                      info?.occupiedBy ? ' opacity-50' : ''
+                    }`}
+                  >
                     <div className="flex items-start gap-2">
                       <LuUser className="size-5 mt-0.5" />
                       <div className="flex-1">
@@ -362,6 +386,11 @@ export default function ImportTenantDialog({ open, setOpen }) {
                       {info?.matchedTenant && (
                         <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
                           {t('Update')}
+                        </span>
+                      )}
+                      {info?.occupiedBy && (
+                        <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">
+                          {t('Skipped')}
                         </span>
                       )}
                     </div>
@@ -378,6 +407,15 @@ export default function ImportTenantDialog({ open, setOpen }) {
                         <LuAlertTriangle className="size-3" />
                         {t('Existing property found')}:{' '}
                         {info.matchedProperty.name}
+                      </div>
+                    )}
+
+                    {info?.occupiedBy && (
+                      <div className="flex items-center gap-1 text-xs text-red-700">
+                        <LuBan className="size-3" />
+                        {t('Property occupied by {{name}} — remove them first', {
+                          name: info.occupiedBy.name
+                        })}
                       </div>
                     )}
 
