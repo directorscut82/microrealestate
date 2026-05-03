@@ -1,4 +1,4 @@
-import { Bar, BarChart, Legend, ReferenceLine, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, Legend, ReferenceLine, Tooltip, XAxis, YAxis } from 'recharts';
 import { useMemo } from 'react';
 import { ChartContainer } from '../ui/chart';
 import { cn } from '../../utils';
@@ -28,7 +28,7 @@ export default function YearFigures({ className, dashboardData }) {
       if (revenuesMoment.isSameOrBefore(now)) {
         acc.push(graphData);
       } else {
-        acc.push({ ...graphData, notPaid: 0 });
+        acc.push({ ...graphData, notPaid: 0, paid: 0 });
       }
       return acc;
     }, []) || [];
@@ -38,15 +38,50 @@ export default function YearFigures({ className, dashboardData }) {
     return data.some((r) => r.notPaid !== 0 || r.paid !== 0);
   }, [data]);
 
-  const hasCharges = useMemo(() => {
-    return data.some((r) => (r.charges || 0) > 0 || (r.buildingCharges || 0) > 0);
-  }, [data]);
-
   const handleClick = (dataKey) => (data) => {
     const { yearMonth } = data;
     const status = dataKey.toLowerCase();
     router.push(
       `/${router.query.organization}/rents/${yearMonth}?statuses=${status}`
+    );
+  };
+
+  const CustomBarTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const data = payload[0]?.payload;
+    if (!data) return null;
+    const tenants = data.tenants || [];
+    return (
+      <div className="bg-background border rounded-lg shadow-lg p-3 text-sm max-w-72">
+        <div className="font-semibold mb-2">
+          {moment(data.month, 'MMYYYY').format('MMMM YYYY')}
+        </div>
+        <div className="flex justify-between gap-4 mb-1">
+          <span className="text-success">{t('Paid')}</span>
+          <span className="font-medium">{formatNumber(data.paid)}</span>
+        </div>
+        {data.notPaid < 0 && (
+          <div className="flex justify-between gap-4 mb-1">
+            <span className="text-warning">{t('Not paid')}</span>
+            <span className="font-medium">{formatNumber(data.notPaid)}</span>
+          </div>
+        )}
+        {tenants.length > 0 && (
+          <div className="mt-2 border-t pt-2 space-y-1">
+            {tenants.map((tenant, i) => {
+              const balance = tenant.paid - tenant.due;
+              return (
+                <div key={i} className="flex justify-between gap-3">
+                  <span className="text-muted-foreground truncate">{tenant.name}</span>
+                  <span className={cn('whitespace-nowrap', balance < 0 ? 'text-warning' : 'text-success')}>
+                    {formatNumber(tenant.paid)} / {formatNumber(tenant.due)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -59,9 +94,7 @@ export default function YearFigures({ className, dashboardData }) {
         <ChartContainer
           config={{
             paid: { color: 'hsl(var(--chart-2))' },
-            notPaid: { color: 'hsl(var(--chart-1))' },
-            charges: { color: 'hsl(var(--chart-4))' },
-            buildingCharges: { color: 'hsl(var(--chart-5))' }
+            notPaid: { color: 'hsl(var(--chart-1))' }
           }}
           className="h-[450px] w-full"
         >
@@ -106,21 +139,10 @@ export default function YearFigures({ className, dashboardData }) {
                     <div className="size-2 bg-[hsl(var(--chart-2))]" />
                     <span>{t('Paid')}</span>
                   </div>
-                  {hasCharges && (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <div className="size-2 bg-[hsl(var(--chart-4))]" />
-                        <span>{t('Extra charges')}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="size-2 bg-[hsl(var(--chart-5))]" />
-                        <span>{t('Building charges')}</span>
-                      </div>
-                    </>
-                  )}
                 </div>
               )}
             />
+            <Tooltip content={<CustomBarTooltip />} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }} />
             <Bar
               dataKey="notPaid"
               fill="hsl(var(--chart-1))"
@@ -138,50 +160,21 @@ export default function YearFigures({ className, dashboardData }) {
               onClick={handleClick('notPaid')}
             />
             <Bar
-              dataKey="baseRent"
+              dataKey="paid"
               fill="hsl(var(--chart-2))"
-              stackId="paid-detail"
+              stackId="stack"
               cursor="pointer"
               label={{
                 position: 'right',
                 fill: 'hsl(var(--success))',
-                formatter: (value, entry, index) => {
-                  const item = data[index];
-                  if (!item) return '';
-                  const total = (item.baseRent || 0) + (item.charges || 0) + (item.buildingCharges || 0);
-                  return total > 0 ? formatNumber(total) : '';
-                },
+                formatter: (value) => (value > 0 ? formatNumber(value) : ''),
                 className: 'tracking-tight text-[9px] md:text-sm'
               }}
               stroke="hsl(var(--chart-2-border))"
-              radius={[0, 0, 0, 0]}
-              barSize={30}
+              radius={[0, 4, 4, 0]}
+              barSize={20}
               onClick={handleClick('paid')}
             />
-            {hasCharges && (
-              <Bar
-                dataKey="charges"
-                fill="hsl(var(--chart-4))"
-                stackId="paid-detail"
-                cursor="pointer"
-                stroke="hsl(var(--chart-4))"
-                radius={[0, 0, 0, 0]}
-                barSize={30}
-                onClick={handleClick('paid')}
-              />
-            )}
-            {hasCharges && (
-              <Bar
-                dataKey="buildingCharges"
-                fill="hsl(var(--chart-5))"
-                stackId="paid-detail"
-                cursor="pointer"
-                stroke="hsl(var(--chart-5))"
-                radius={[0, 4, 4, 0]}
-                barSize={30}
-                onClick={handleClick('paid')}
-              />
-            )}
             <ReferenceLine x={0} stroke="hsl(var(--border))" />
           </BarChart>
         </ChartContainer>

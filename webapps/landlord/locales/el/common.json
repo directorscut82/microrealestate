@@ -668,5 +668,10 @@
   "Your account information": "Τα στοιχεία του λογαριασμού σας",
   "Your organizations": "Οι οργανισμοί σας",
   "Zip code": "Ταχυδρομικός κώδικας",
-  "This will also remove {{count}} units. Occupied units will block deletion.": "Θα αφαιρεθούν επίσης {{count}} μονάδες. Κατειλημμένες μονάδες θα μπλοκάρουν τη διαγραφή."
+  "This will also remove {{count}} units. Occupied units will block deletion.": "Θα αφαιρεθούν επίσης {{count}} μονάδες. Κατειλημμένες μονάδες θα μπλοκάρουν τη διαγραφή.",
+  "paid": "πληρωμένο",
+  "unpaid": "απλήρωτο",
+  "Due": "Οφειλόμενο",
+  "No data": "Χωρίς δεδομένα",
+  "= unpaid": "= απλήρωτο"
 }
