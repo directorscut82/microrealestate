@@ -526,10 +526,13 @@ export async function importFromE9(req: Req, res: Res) {
           continue;
         }
 
-        // 2. By DEH number (same apartment, different owner's ATAK)
+        // 2. By DEH number + floor + surface (same apartment, different owner's ATAK)
+        // Must match floor+surface too: different floors sharing one meter are separate units
         const existingByDeh = parsedUnit.electricitySupplyNumber
           ? (building as any).units.find(
               (u: any) => u.electricitySupplyNumber === parsedUnit.electricitySupplyNumber
+                && u.floor === parsedUnit.floor
+                && u.surface === parsedUnit.surface
             )
           : null;
         if (existingByDeh) {
