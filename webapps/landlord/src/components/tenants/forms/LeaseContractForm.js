@@ -36,6 +36,7 @@ const propertySchema = z.object({
   key: z.string().optional(),
   _id: z.string().min(1),
   rent: z.coerce.number().min(0),
+  extraCharge: z.coerce.number().min(0).optional(),
   expenses: z.array(expenseSchema),
   entryDate: z.string().min(1),
   exitDate: z.string().min(1)
@@ -90,6 +91,7 @@ const initValues = (tenant) => {
           key: property.property._id,
           _id: property.property._id,
           rent: property.rent || 0,
+          extraCharge: property.extraCharge || 0,
           expenses: property.expenses?.map((expense) => ({
             ...expense,
             key: nanoid(),
@@ -281,6 +283,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
         .map((p) => ({
           propertyId: p._id,
           rent: p.rent,
+          extraCharge: p.extraCharge || 0,
           expenses: p.expenses?.map((e) => ({
             ...e,
             beginDate: e.beginDate ? moment(e.beginDate).format('DD/MM/YYYY') : '',
@@ -368,9 +371,13 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
                 </Select>
                 {errors.properties?.[index]?._id && <p className="text-sm text-destructive">{errors.properties[index]._id.message}</p>}
               </div>
-              <div className="space-y-2 md:w-1/4">
+              <div className="space-y-2 md:w-1/6">
                 <Label htmlFor={`properties.${index}.rent`}>{t('Rent')}</Label>
                 <Input id={`properties.${index}.rent`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.rent`)} />
+              </div>
+              <div className="space-y-2 md:w-1/6">
+                <Label htmlFor={`properties.${index}.extraCharge`}>{t('Extra charge')}</Label>
+                <Input id={`properties.${index}.extraCharge`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.extraCharge`)} />
               </div>
             </div>
 

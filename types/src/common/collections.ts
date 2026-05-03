@@ -305,6 +305,7 @@ export namespace CollectionTypes {
           propertyId: string;
           property: CollectionTypes.Property;
           rent: number;
+          extraCharge: number;
           expenses: [
             { title: string; amount: number; beginDate: Date; endDate: Date }
           ];

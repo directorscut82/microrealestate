@@ -38,6 +38,10 @@ export default function YearFigures({ className, dashboardData }) {
     return data.some((r) => r.notPaid !== 0 || r.paid !== 0);
   }, [data]);
 
+  const hasCharges = useMemo(() => {
+    return data.some((r) => (r.charges || 0) > 0 || (r.buildingCharges || 0) > 0);
+  }, [data]);
+
   const handleClick = (dataKey) => (data) => {
     const { yearMonth } = data;
     const status = dataKey.toLowerCase();
@@ -55,7 +59,9 @@ export default function YearFigures({ className, dashboardData }) {
         <ChartContainer
           config={{
             paid: { color: 'hsl(var(--chart-2))' },
-            notPaid: { color: 'hsl(var(--chart-1))' }
+            notPaid: { color: 'hsl(var(--chart-1))' },
+            charges: { color: 'hsl(var(--chart-4))' },
+            buildingCharges: { color: 'hsl(var(--chart-5))' }
           }}
           className="h-[450px] w-full"
         >
@@ -91,7 +97,7 @@ export default function YearFigures({ className, dashboardData }) {
             <Legend
               verticalAlign="top"
               content={() => (
-                <div className="flex justify-center gap-4 text-sm mb-6">
+                <div className="flex flex-wrap justify-center gap-4 text-sm mb-6">
                   <div className="flex items-center gap-2 text-warning">
                     <div className="size-2 bg-[hsl(var(--chart-1))]" />
                     <span>{t('Not paid')}</span>
@@ -100,6 +106,18 @@ export default function YearFigures({ className, dashboardData }) {
                     <div className="size-2 bg-[hsl(var(--chart-2))]" />
                     <span>{t('Paid')}</span>
                   </div>
+                  {hasCharges && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <div className="size-2 bg-[hsl(var(--chart-4))]" />
+                        <span>{t('Extra charges')}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="size-2 bg-[hsl(var(--chart-5))]" />
+                        <span>{t('Building charges')}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             />
@@ -120,21 +138,50 @@ export default function YearFigures({ className, dashboardData }) {
               onClick={handleClick('notPaid')}
             />
             <Bar
-              dataKey="paid"
+              dataKey="baseRent"
               fill="hsl(var(--chart-2))"
-              stackId="stack"
+              stackId="paid-detail"
               cursor="pointer"
               label={{
                 position: 'right',
                 fill: 'hsl(var(--success))',
-                formatter: (value) => (value > 0 ? formatNumber(value) : ''),
+                formatter: (value, entry, index) => {
+                  const item = data[index];
+                  if (!item) return '';
+                  const total = (item.baseRent || 0) + (item.charges || 0) + (item.buildingCharges || 0);
+                  return total > 0 ? formatNumber(total) : '';
+                },
                 className: 'tracking-tight text-[9px] md:text-sm'
               }}
               stroke="hsl(var(--chart-2-border))"
-              radius={[0, 4, 4, 0]}
+              radius={[0, 0, 0, 0]}
               barSize={30}
               onClick={handleClick('paid')}
             />
+            {hasCharges && (
+              <Bar
+                dataKey="charges"
+                fill="hsl(var(--chart-4))"
+                stackId="paid-detail"
+                cursor="pointer"
+                stroke="hsl(var(--chart-4))"
+                radius={[0, 0, 0, 0]}
+                barSize={30}
+                onClick={handleClick('paid')}
+              />
+            )}
+            {hasCharges && (
+              <Bar
+                dataKey="buildingCharges"
+                fill="hsl(var(--chart-5))"
+                stackId="paid-detail"
+                cursor="pointer"
+                stroke="hsl(var(--chart-5))"
+                radius={[0, 4, 4, 0]}
+                barSize={30}
+                onClick={handleClick('paid')}
+              />
+            )}
             <ReferenceLine x={0} stroke="hsl(var(--border))" />
           </BarChart>
         </ChartContainer>

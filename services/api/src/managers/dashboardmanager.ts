@@ -136,11 +136,20 @@ export async function all(req: Req, res: Res) {
           notPaid:
             (rent.total?.payment || 0) - (rent.total?.grandTotal || 0) < 0
               ? (rent.total?.payment || 0) - (rent.total?.grandTotal || 0)
-              : 0
+              : 0,
+          baseRent: rent.total?.preTaxAmount || 0,
+          charges: rent.total?.charges || 0,
+          buildingCharges: (rent.buildingCharges || []).reduce(
+            (sum: number, c: AnyRecord) => sum + (c.amount || 0),
+            0
+          )
         };
         if (acc[key]) {
           acc[key].paid += revenue.paid;
           acc[key].notPaid += revenue.notPaid;
+          acc[key].baseRent += revenue.baseRent;
+          acc[key].charges += revenue.charges;
+          acc[key].buildingCharges += revenue.buildingCharges;
         } else {
           acc[key] = revenue;
         }
