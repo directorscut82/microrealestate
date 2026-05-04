@@ -31,7 +31,12 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import ConfirmDialog from '../ConfirmDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle
+} from '../ui/dialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
@@ -488,9 +493,11 @@ export default function ExpenseList({ building }) {
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [openConfirmDelete, setOpenConfirmDelete] = useState(false);
   const [expenseToDelete, setExpenseToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const removeMutation = useMutation({
-    mutationFn: (expenseId) => removeBuildingExpense(building._id, expenseId),
+    mutationFn: ({ expenseId, mode }) =>
+      removeBuildingExpense(building._id, expenseId, mode),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
     }
@@ -511,11 +518,29 @@ export default function ExpenseList({ building }) {
     setOpenConfirmDelete(true);
   }, []);
 
-  const handleConfirmDelete = useCallback(async () => {
+  const deleteImpact = useMemo(() => {
+    if (!expenseToDelete || !building) return { months: 0 };
+    const units = building.units || [];
+    const expId = String(expenseToDelete._id);
+    const terms = new Set();
+    for (const unit of units) {
+      for (const c of unit.monthlyCharges || []) {
+        if (String(c.expenseId) === expId) terms.add(c.term);
+      }
+    }
+    return { months: terms.size };
+  }, [expenseToDelete, building]);
+
+  const handleDelete = useCallback(async (mode) => {
     try {
-      await removeMutation.mutateAsync(expenseToDelete._id);
+      setIsDeleting(true);
+      await removeMutation.mutateAsync({ expenseId: expenseToDelete._id, mode });
+      setOpenConfirmDelete(false);
+      setExpenseToDelete(null);
     } catch (error) {
       toast.error(t('Something went wrong'));
+    } finally {
+      setIsDeleting(false);
     }
   }, [expenseToDelete, removeMutation, t]);
 
@@ -639,13 +664,60 @@ export default function ExpenseList({ building }) {
         building={building}
       />
 
-      <ConfirmDialog
-        title={t('Are you sure to remove this expense?')}
-        subTitle={expenseToDelete?.name}
-        open={openConfirmDelete}
-        setOpen={setOpenConfirmDelete}
-        onConfirm={handleConfirmDelete}
-      />
+      <Dialog open={openConfirmDelete} onOpenChange={setOpenConfirmDelete}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{t('Delete expense')}: {expenseToDelete?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {deleteImpact.months > 0 && (
+              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm">
+                <p className="font-medium text-destructive mb-1">
+                  {t('This expense has {{count}} months of recorded charges.', { count: deleteImpact.months })}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  {t('Permanent deletion will remove all historical charges and recalculate tenant balances retroactively.')}
+                </p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                disabled={isDeleting}
+                onClick={() => handleDelete('soft')}
+              >
+                <span className="text-left">
+                  <span className="font-medium">{t('End from current month')}</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    {t('Keeps historical charges intact. Stops applying from this month.')}
+                  </span>
+                </span>
+              </Button>
+              <Button
+                variant="destructive"
+                className="w-full justify-start"
+                disabled={isDeleting}
+                onClick={() => handleDelete('hard')}
+              >
+                <span className="text-left">
+                  <span className="font-medium">{t('Delete permanently')}</span>
+                  <span className="block text-xs text-destructive-foreground/80 mt-0.5">
+                    {t('Removes all charges from all months. Tenant balances will change.')}
+                  </span>
+                </span>
+              </Button>
+            </div>
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => setOpenConfirmDelete(false)}
+            >
+              {t('Cancel')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {expenses.length > 0 && (
         <>
