@@ -6,7 +6,7 @@ import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 
-function getHistoryData(building) {
+function getHistoryData(building, t) {
   const units = building?.units || [];
   const expenses = building?.expenses || [];
   const termMap = {};
@@ -45,6 +45,23 @@ function getHistoryData(building) {
     }
   }
 
+  // Include owner monthly expenses
+  const ownerExpenses = building?.ownerMonthlyExpenses || [];
+  for (const entry of ownerExpenses) {
+    const term = String(entry.term);
+    if (!termMap[term]) {
+      termMap[term] = {};
+    }
+    const key = `owner_${entry.expenseId}`;
+    const exp = expenses.find((e) => String(e._id) === String(entry.expenseId));
+    termMap[term][key] = {
+      expenseId: entry.expenseId,
+      description: `${exp?.name || entry.description || ''} (${t('owner')})`,
+      total: entry.amount,
+      isOwner: true
+    };
+  }
+
   return termMap;
 }
 
@@ -71,7 +88,7 @@ export default function ExpenseHistory({ building }) {
     () => moment().format('YYYY')
   );
 
-  const historyData = useMemo(() => getHistoryData(building), [building]);
+  const historyData = useMemo(() => getHistoryData(building, t), [building, t]);
 
   const availableTerms = useMemo(
     () =>
@@ -193,7 +210,11 @@ export default function ExpenseHistory({ building }) {
       {selectedData.length > 0 && (
         <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
           {selectedData.map(({ term, label, entries }) => {
-            const total = entries.reduce((sum, e) => sum + e.total, 0);
+            const tenantEntries = entries.filter((e) => !e.isOwner);
+            const ownerEntries = entries.filter((e) => e.isOwner);
+            const tenantTotal = tenantEntries.reduce((sum, e) => sum + e.total, 0);
+            const ownerTotal = ownerEntries.reduce((sum, e) => sum + e.total, 0);
+            const total = tenantTotal + ownerTotal;
             return (
               <div
                 key={term}
@@ -207,7 +228,7 @@ export default function ExpenseHistory({ building }) {
                 </div>
                 <Separator className="mb-2" />
                 <div className="space-y-1">
-                  {entries.map((entry, idx) => (
+                  {tenantEntries.map((entry, idx) => (
                     <div
                       key={idx}
                       className="flex items-center justify-between text-xs"
@@ -220,6 +241,24 @@ export default function ExpenseHistory({ building }) {
                       </span>
                     </div>
                   ))}
+                  {ownerEntries.length > 0 && (
+                    <>
+                      <Separator className="my-1" />
+                      {ownerEntries.map((entry, idx) => (
+                        <div
+                          key={`o${idx}`}
+                          className="flex items-center justify-between text-xs"
+                        >
+                          <span className="text-muted-foreground/70 truncate mr-2 italic">
+                            {entry.description}
+                          </span>
+                          <span className="tabular-nums font-medium whitespace-nowrap text-muted-foreground">
+                            <NumberFormat value={entry.total} />
+                          </span>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               </div>
             );

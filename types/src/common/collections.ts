@@ -389,6 +389,16 @@ export namespace CollectionTypes {
     startTerm?: number;
     endTerm?: number;
     notes?: string;
+    trackOwnerExpense?: boolean;
+    ownerAmount?: number;
+  };
+
+  export type OwnerMonthlyExpense = {
+    _id: string;
+    expenseId: string;
+    term: number;
+    amount: number;
+    description?: string;
   };
 
   export type Contractor = {
@@ -455,6 +465,7 @@ export namespace CollectionTypes {
     expenses: BuildingExpense[] | [];
     contractors: Contractor[] | [];
     repairs: Repair[] | [];
+    ownerMonthlyExpenses: OwnerMonthlyExpense[] | [];
     notes?: string;
     createdDate?: Date;
     updatedDate?: Date;
