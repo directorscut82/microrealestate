@@ -21,7 +21,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import { Separator } from '../ui/separator';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
@@ -150,8 +149,7 @@ export default function MonthlyStatement({ building }) {
   }
 
   return (
-    <div className="mt-8">
-      <Separator className="mb-6" />
+    <div>
       <h3 className="text-lg font-medium mb-4">
         {t('Monthly Statement')}
       </h3>
