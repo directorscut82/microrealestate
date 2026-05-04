@@ -219,7 +219,7 @@ export default function MonthFigures({ className, dashboardData }) {
                 </div>
                 <ChartContainer
                   config={{}}
-                  className="h-[180px] w-full"
+                  className="h-[320px] w-full overflow-hidden"
                 >
                   <PieChart>
                     <Pie
@@ -229,8 +229,8 @@ export default function MonthFigures({ className, dashboardData }) {
                       endAngle={0}
                       cx="50%"
                       cy="85%"
-                      innerRadius="60%"
-                      outerRadius="100%"
+                      innerRadius="102%"
+                      outerRadius="170%"
                       paddingAngle={1}
                       stroke="none"
                     >
@@ -253,7 +253,7 @@ export default function MonthFigures({ className, dashboardData }) {
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-[180px] text-muted-foreground">
+              <div className="flex items-center justify-center h-[320px] text-muted-foreground">
                 {t('No data')}
               </div>
             )}
