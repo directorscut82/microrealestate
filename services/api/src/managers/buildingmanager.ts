@@ -938,11 +938,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     if (!unit.propertyId) continue;
 
     // Remove existing charges for this term
-    const existingCharges = unit.monthlyCharges.filter(
+    const idsToRemove = unit.monthlyCharges.filter(
       (c: any) => c.term === Number(term)
-    );
-    for (const charge of existingCharges) {
-      charge.deleteOne();
+    ).map((c: any) => c._id);
+    for (const chargeId of idsToRemove) {
+      unit.monthlyCharges.pull(chargeId);
     }
 
     // Compute and add new charges for each expense
@@ -1227,7 +1227,7 @@ async function _distributeRepairCharge(
         (c: any) => c.term === term && c.description === `Repair: ${repair.title}`
       );
       if (existingIdx >= 0) {
-        unit.monthlyCharges[existingIdx].deleteOne();
+        unit.monthlyCharges.pull(unit.monthlyCharges[existingIdx]._id);
       }
 
       unit.monthlyCharges.push({
