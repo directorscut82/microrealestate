@@ -138,12 +138,12 @@ function PaymentTabs({ rent, onSubmit }, ref) {
     <form ref={formRef} onSubmit={handleSubmit(_handleSubmit)} autoComplete="off">
       <div className="space-y-4">
         <Card>
-          <CardHeader className="text-lg px-6 pt-3 pb-0">{t('Settlement')}</CardHeader>
+          <CardHeader className="text-lg px-6 pt-3 pb-0">{t('Payment')}</CardHeader>
           <CardContent>
             {fields.map((field, index) => (
               <div key={field.id} className="mb-4 p-3 border rounded-md">
                 <div className="flex justify-between items-center mb-2">
-                  <div className="font-medium">{t('Settlement #{{count}}', { count: index + 1 })}</div>
+                  <div className="font-medium">{t('Payment #{{count}}', { count: index + 1 })}</div>
                   {fields.length > 1 && (
                     <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
                       <LuTrash2 className="size-4" />
@@ -180,7 +180,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
               </div>
             ))}
             <Button type="button" variant="outline" onClick={() => append(emptyPayment)}>
-              <LuPlus className="size-4 mr-1" />{t('Add a settlement')}
+              <LuPlus className="size-4 mr-1" />{t('Add a payment')}
             </Button>
           </CardContent>
         </Card>

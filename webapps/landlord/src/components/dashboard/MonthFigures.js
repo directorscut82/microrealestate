@@ -198,7 +198,7 @@ export default function MonthFigures({ className, dashboardData }) {
       />
       <DashboardCard
         Icon={LuBanknote}
-        title={t('Settlements')}
+        title={t('Payments')}
         description={t('Rents of {{monthYear}}', {
           monthYear: moment().format('MMMM YYYY')
         })}

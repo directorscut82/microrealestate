@@ -8,12 +8,19 @@ import { cn } from '../../utils';
 import { downloadDocument } from '../../utils/fetch';
 import { EmptyIllustration } from '../Illustrations';
 import moment from 'moment';
+import NumberFormat from '../NumberFormat';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
 import RentHistoryDialog from './RentHistoryDialog';
 import { Separator } from '../ui/separator';
 import { StoreContext } from '../../store';
 import { TbCashRegister } from 'react-icons/tb';
 import Tooltip from '../Tooltip';
+import {
+  Tooltip as SCNTooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '../ui/tooltip';
 import useTranslation from 'next-translate/useTranslation';
 
 function Reminder({ rent, className }) {
@@ -85,10 +92,61 @@ function Reminder({ rent, className }) {
   ) : null;
 }
 
+function MonthlyBreakdown({ rentAmounts }) {
+  const { t } = useTranslation('common');
+  const hasMultiple = rentAmounts.preTaxAmounts.length > 1;
+  const hasCharges = rentAmounts.charges.length > 0;
+  const hasBuildingCharges = rentAmounts.buildingCharges.length > 0;
+
+  if (!hasMultiple && !hasCharges && !hasBuildingCharges) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-1 text-xs min-w-36">
+      {rentAmounts.preTaxAmounts.map((item, i) => (
+        <div key={`r-${i}`} className="flex justify-between gap-4">
+          <span className="text-muted-foreground truncate">
+            {hasMultiple ? item.description : t('Rent')}
+          </span>
+          <NumberFormat value={item.amount} className="whitespace-nowrap" />
+        </div>
+      ))}
+      {hasCharges && rentAmounts.charges.map((charge, i) => (
+        <div key={`c-${i}`} className="flex justify-between gap-4">
+          <span className="text-muted-foreground truncate">
+            {charge.description || t('Extra charges')}
+          </span>
+          <NumberFormat value={charge.amount} className="whitespace-nowrap" />
+        </div>
+      ))}
+      {hasBuildingCharges && rentAmounts.buildingCharges.map((charge, i) => (
+        <div key={`b-${i}`} className="flex justify-between gap-4">
+          <span className="text-muted-foreground truncate">
+            {charge.buildingName
+              ? `${charge.buildingName} - ${charge.description}`
+              : charge.description}
+          </span>
+          <NumberFormat value={charge.amount} className="whitespace-nowrap" />
+        </div>
+      ))}
+      <Separator className="my-0.5" />
+      <div className="flex justify-between gap-4 font-medium">
+        <span>{t('Total')}</span>
+        <NumberFormat value={rentAmounts.rent} className="whitespace-nowrap" />
+      </div>
+    </div>
+  );
+}
+
 function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
   const rentAmounts = getRentAmounts(rent);
+  const hasBreakdown =
+    rentAmounts.preTaxAmounts.length > 1 ||
+    rentAmounts.charges.length > 0 ||
+    rentAmounts.buildingCharges.length > 0;
 
   return (
     <>
@@ -125,20 +183,40 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
           <Reminder rent={rent} className="hidden md:inline-flex ml-8" />
         </div>
         <div className="flex pl-8 md:pl-0 md:grid md:grid-cols-3 lg:grid-cols-5 gap-4 w-full md:w-4/6">
+          {hasBreakdown ? (
+            <TooltipProvider delayDuration={200}>
+              <SCNTooltip>
+                <TooltipTrigger asChild>
+                  <div className="hidden lg:block cursor-default">
+                    <RentAmount
+                      label={t('Monthly amount')}
+                      amount={rentAmounts.rent}
+                      withColor={false}
+                      className="text-muted-foreground underline decoration-dotted underline-offset-2"
+                    />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="bg-popover/80 backdrop-blur-md border-border/50 shadow-lg p-3">
+                  <MonthlyBreakdown rentAmounts={rentAmounts} />
+                </TooltipContent>
+              </SCNTooltip>
+            </TooltipProvider>
+          ) : (
+            <RentAmount
+              label={t('Monthly amount')}
+              amount={rentAmounts.rent}
+              withColor={false}
+              className="hidden lg:block text-muted-foreground"
+            />
+          )}
           <RentAmount
-            label={t('Rent')}
-            amount={rentAmounts.rent}
-            withColor={false}
-            className="hidden lg:block text-muted-foreground"
-          />
-          <RentAmount
-            label={t('Balance')}
+            label={t('Previous balance')}
             amount={rentAmounts.balance}
             withColor={false}
             className="hidden lg:block text-muted-foreground"
           />
           <RentAmount
-            label={t('Rent due')}
+            label={t('Total due')}
             amount={rentAmounts.totalAmount}
             withColor={false}
             debitColor={rentAmounts.totalAmount > 0}
@@ -147,7 +225,7 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
           />
           <div className="grow">
             <RentAmount
-              label={t('Settlement')}
+              label={t('Payment')}
               amount={rent.payment}
               className={rentAmounts.payment > 0 ? 'font-bold' : ''}
             />
