@@ -1380,9 +1380,28 @@ export async function removeRepair(req: Req, res: Res) {
     throw new ServiceError('Repair does not exist', 404);
   }
 
+  // Clean up monthlyCharges created by _distributeRepairCharge
+  const chargeDescription = `Repair: ${repair.title}`;
+  for (const unit of (building as any).units) {
+    const toRemove = unit.monthlyCharges.filter(
+      (c: any) => c.description === chargeDescription
+    );
+    for (const charge of toRemove) {
+      unit.monthlyCharges.pull(charge._id);
+    }
+  }
+
   (building as any).repairs.pull(repair._id);
   (building as any).updatedDate = new Date();
   await building!.save();
+
+  // Recompute rents for affected tenants
+  const propertyIds = (building as any).units
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  for (const propId of propertyIds) {
+    await _recomputeTenantsForProperty(realm!._id, propId);
+  }
 
   const result = await _toBuildingData(realm!._id, [
     building!.toObject()

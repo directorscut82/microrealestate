@@ -276,37 +276,6 @@ export default function taskBase(
             }
           });
 
-        // Process repairs charged to tenants
-        if (building.repairs && building.repairs.length > 0) {
-          building.repairs
-            .filter((repair) => {
-              if (repair.status === 'cancelled') return false;
-              if (!repair.chargeTerm) return false;
-              if (repair.chargeTerm !== rent.term) return false;
-              return repair.chargeableTo === 'tenants' || repair.chargeableTo === 'split';
-            })
-            .forEach((repair) => {
-              const cost = repair.actualCost || repair.estimatedCost || 0;
-              const tenantShare = repair.chargeableTo === 'tenants'
-                ? cost
-                : Math.round(cost * (repair.tenantSharePercentage || 0)) / 100;
-
-              const share = computeBuildingChargeForProperty(
-                building,
-                String(property.propertyId),
-                { ...repair, amount: tenantShare, allocationMethod: repair.allocationMethod || 'general_thousandths', customAllocations: [] } as any
-              );
-
-              if (share > 0) {
-                rent.buildingCharges!.push({
-                  description: `${repair.title}`,
-                  amount: share,
-                  buildingName: building.name,
-                  type: 'repair'
-                });
-              }
-            });
-        }
       });
   }
 

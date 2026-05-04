@@ -126,6 +126,25 @@ const ALLOCATION_DESCRIPTIONS = {
   custom_percentage: 'Each unit pays a custom percentage of the total'
 };
 
+const ALLOCATION_METHODS_BY_TYPE = {
+  heating: ['heating_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  elevator: ['elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  cleaning: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  water_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  electricity_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  insurance: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  management_fee: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  garden: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  repairs_fund: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+  pest_control: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage']
+};
+
+function getAllocationMethodsForType(expenseType) {
+  const allowed = ALLOCATION_METHODS_BY_TYPE[expenseType];
+  if (!allowed) return allocationMethods;
+  return allocationMethods.filter((m) => allowed.includes(m.id));
+}
+
 const METHODS_NEEDING_ALLOCATIONS = [
   'custom_percentage',
   'custom_ratio',
@@ -292,6 +311,20 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const trackOwnerExpense = watch('trackOwnerExpense');
   const ownerAmount = watch('ownerAmount');
 
+  const filteredMethods = useMemo(
+    () => getAllocationMethodsForType(expenseType),
+    [expenseType]
+  );
+
+  useEffect(() => {
+    if (expenseType && allocationMethod) {
+      const valid = getAllocationMethodsForType(expenseType);
+      if (!valid.find((m) => m.id === allocationMethod)) {
+        setValue('allocationMethod', valid[0]?.id || '');
+      }
+    }
+  }, [expenseType, allocationMethod, setValue]);
+
   const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
     allocationMethod
   );
@@ -421,7 +454,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                   <SelectValue placeholder={t('Select allocation method')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {allocationMethods.map((am) => (
+                  {filteredMethods.map((am) => (
                     <SelectItem key={am.id} value={am.id}>
                       {t(am.labelId)}
                     </SelectItem>
