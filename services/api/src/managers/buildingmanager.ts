@@ -787,7 +787,7 @@ export async function removeUnit(req: Req, res: Res) {
     );
   }
 
-  unit.deleteOne();
+  (building as any).units.pull(unit._id);
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -891,7 +891,7 @@ export async function removeMonthlyCharge(req: Req, res: Res) {
     throw new ServiceError('Monthly charge does not exist', 404);
   }
 
-  charge.deleteOne();
+  unit.monthlyCharges.pull(charge._id);
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -1076,7 +1076,7 @@ export async function removeExpense(req: Req, res: Res) {
     throw new ServiceError('Expense does not exist', 404);
   }
 
-  expense.deleteOne();
+  (building as any).expenses.pull(expense._id);
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -1176,7 +1176,7 @@ export async function removeContractor(req: Req, res: Res) {
     throw new ServiceError('Contractor does not exist', 404);
   }
 
-  contractor.deleteOne();
+  (building as any).contractors.pull(contractor._id);
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -1324,7 +1324,7 @@ export async function removeRepair(req: Req, res: Res) {
     throw new ServiceError('Repair does not exist', 404);
   }
 
-  repair.deleteOne();
+  (building as any).repairs.pull(repair._id);
   (building as any).updatedDate = new Date();
   await building!.save();
 
