@@ -100,7 +100,12 @@ export default function MonthlyStatement({ building }) {
   const [isLoading, setIsLoading] = useState(false);
 
   const termOptions = useMemo(() => generateTermOptions(), []);
-  const expenses = building?.expenses || [];
+
+  // Only show variable recurring expenses (isRecurring + no fixed amount)
+  const expenses = useMemo(
+    () => (building?.expenses || []).filter((e) => e.isRecurring && !e.amount),
+    [building?.expenses]
+  );
 
   const mutation = useMutation({
     mutationFn: (data) => saveMonthlyStatement(building._id, data),
