@@ -148,10 +148,8 @@ export default function MonthlyStatement({ building }) {
   const handleTermChange = useCallback(
     (term) => {
       setSelectedTerm(term);
-      setAmounts(getExistingAmounts(building, term));
-      setOwnerAmounts(getExistingOwnerAmounts(building, term));
     },
-    [building]
+    []
   );
 
   // Load existing amounts for current month on mount
@@ -188,18 +186,19 @@ export default function MonthlyStatement({ building }) {
         amount: Number(amounts[expense._id]) || 0,
         description: expense.name,
         allocationMethod: expense.allocationMethod
-      }))
-      .filter((e) => e.amount > 0);
+      }));
 
     const ownerEntries = ownerExpenses
       .map((expense) => ({
         expenseId: expense._id,
         amount: Number(ownerAmounts[expense._id]) || 0,
         description: expense.name
-      }))
-      .filter((e) => e.amount > 0);
+      }));
 
-    if (expenseEntries.length === 0 && ownerEntries.length === 0) {
+    const hasAnyAmount =
+      expenseEntries.some((e) => e.amount > 0) ||
+      ownerEntries.some((e) => e.amount > 0);
+    if (!hasAnyAmount) {
       toast.error(t('Please enter at least one amount'));
       return;
     }

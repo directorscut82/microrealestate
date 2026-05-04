@@ -917,10 +917,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   if (!term) {
     throw new ServiceError('Term (YYYYMMDDHH) is required', 422);
   }
-  const hasExpenses = expenseEntries && Array.isArray(expenseEntries) && expenseEntries.length > 0;
-  const hasOwnerExpenses = ownerExpenses && Array.isArray(ownerExpenses) && ownerExpenses.length > 0;
+  // Array present = user intends to set state for this section (even if empty = clear)
+  const expensesProvided = Array.isArray(expenseEntries);
+  const ownerExpensesProvided = Array.isArray(ownerExpenses);
 
-  if (!hasExpenses && !hasOwnerExpenses) {
+  if (!expensesProvided && !ownerExpensesProvided) {
     throw new ServiceError('At least one expense entry is required', 422);
   }
 
@@ -940,7 +941,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   for (const unit of units) {
     if (!unit.propertyId) continue;
 
-    if (hasExpenses) {
+    if (expensesProvided) {
       // Remove existing charges for this term
       const idsToRemove = unit.monthlyCharges.filter(
         (c: any) => c.term === Number(term)
@@ -978,7 +979,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   }
 
   // Handle owner expenses
-  if (hasOwnerExpenses) {
+  if (ownerExpensesProvided) {
     // Remove existing owner expenses for this term
     const idsToRemove = (building as any).ownerMonthlyExpenses
       .filter((e: any) => e.term === Number(term))

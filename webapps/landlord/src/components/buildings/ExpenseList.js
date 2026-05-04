@@ -34,7 +34,7 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -296,6 +296,14 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
     allocationMethod
   );
 
+  // Reset form when dialog opens in "add" mode (no expense)
+  // Handles case where dialog was closed via X button without calling reset()
+  useEffect(() => {
+    if (open && !expense) {
+      reset();
+    }
+  }, [open, expense, reset]);
+
   const handleClose = useCallback(() => {
     setOpen(false);
     reset();
@@ -306,8 +314,6 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       try {
         setIsLoading(true);
         const payload = { ...data };
-        delete payload.trackOwnerExpense;
-        delete payload.ownerAmount;
         delete payload.startFromCurrentMonth;
         if (!METHODS_NEEDING_ALLOCATIONS.includes(payload.allocationMethod)) {
           payload.customAllocations = [];
@@ -323,8 +329,9 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
           payload.startTerm = Number(term);
         }
         // Owner expense tracking
-        payload.trackOwnerExpense = data.trackOwnerExpense;
-        payload.ownerAmount = data.trackOwnerExpense ? (data.ownerAmount || 0) : 0;
+        if (!payload.trackOwnerExpense) {
+          payload.ownerAmount = 0;
+        }
 
         if (expense?._id) {
           await updateMutation.mutateAsync(payload);
@@ -501,7 +508,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               </Label>
             </div>
 
-            {trackOwnerExpense && isRecurring && (
+            {trackOwnerExpense && (
               <div className="ml-6 space-y-2">
                 <Label htmlFor="ownerAmount" className="text-sm text-muted-foreground">
                   {t('Owner monthly amount')}
@@ -513,9 +520,11 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                   className="w-40"
                   {...register('ownerAmount')}
                 />
+                {isRecurring && (
                 <p className="text-xs text-muted-foreground">
                   {t('Set to 0 for variable — enter actual amounts monthly.')}
                 </p>
+                )}
               </div>
             )}
 
@@ -581,6 +590,10 @@ export default function ExpenseList({ building }) {
       for (const c of unit.monthlyCharges || []) {
         if (String(c.expenseId) === expId) terms.add(c.term);
       }
+    }
+    // Also count owner monthly expenses
+    for (const e of building.ownerMonthlyExpenses || []) {
+      if (String(e.expenseId) === expId) terms.add(e.term);
     }
     return { months: terms.size };
   }, [expenseToDelete, building]);
