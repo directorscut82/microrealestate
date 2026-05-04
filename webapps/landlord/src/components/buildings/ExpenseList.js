@@ -548,15 +548,23 @@ export default function ExpenseList({ building }) {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="cursor-help">
-                          {expense.isRecurring ? (
+                          {expense.isRecurring && expense.amount > 0 ? (
                             <Badge variant="default">{t('Yes')}</Badge>
+                          ) : expense.isRecurring && !expense.amount ? (
+                            <Badge variant="default">
+                              {t('Yes')} ({t('variable')})
+                            </Badge>
                           ) : (
                             <Badge variant="secondary">{t('No')}</Badge>
                           )}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" className="max-w-[260px] text-xs">
-                        {t('Recurring expenses are automatically included in rent calculations every month. Non-recurring are one-time charges.')}
+                        {expense.isRecurring && expense.amount > 0
+                          ? t('Fixed amount charged automatically every month.')
+                          : expense.isRecurring
+                            ? t('Variable expense — enter actual amounts each month via Monthly Statement.')
+                            : t('One-time charge, not included in monthly rent calculations.')}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
