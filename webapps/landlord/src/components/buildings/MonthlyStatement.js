@@ -21,6 +21,12 @@ import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '../ui/tooltip';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
@@ -34,6 +40,17 @@ const ALLOCATION_LABELS = {
   fixed: 'Fixed',
   custom_ratio: 'Custom Ratio',
   custom_percentage: 'Custom Percentage'
+};
+
+const ALLOCATION_DESCRIPTIONS = {
+  equal: 'Split equally among all units',
+  by_surface: 'Split proportionally by unit surface area (m²)',
+  general_thousandths: 'Split by general thousandths (‰) from E9',
+  heating_thousandths: 'Split by heating thousandths (‰) from E9',
+  elevator_thousandths: 'Split by elevator thousandths (‰) — ground floor excluded',
+  fixed: 'Each unit pays a fixed predefined amount',
+  custom_ratio: 'Split by custom ratio shares you defined per unit',
+  custom_percentage: 'Each unit pays a custom percentage of the total'
 };
 
 function generateTermOptions() {
@@ -192,11 +209,22 @@ export default function MonthlyStatement({ building }) {
               {expenses.map((expense) => (
                 <TableRow key={expense._id}>
                   <TableCell>{expense.name}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {t(
-                      ALLOCATION_LABELS[expense.allocationMethod] ||
-                        expense.allocationMethod
-                    )}
+                  <TableCell className="text-sm">
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="text-muted-foreground border-b border-dotted border-muted-foreground/50 cursor-help">
+                            {t(
+                              ALLOCATION_LABELS[expense.allocationMethod] ||
+                                expense.allocationMethod
+                            )}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-[240px] text-xs">
+                          {t(ALLOCATION_DESCRIPTIONS[expense.allocationMethod] || '')}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </TableCell>
                   <TableCell className="text-right">
                     <Input
