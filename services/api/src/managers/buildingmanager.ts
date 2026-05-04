@@ -912,7 +912,7 @@ export async function removeMonthlyCharge(req: Req, res: Res) {
 export async function saveMonthlyStatement(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
-  const { term, expenses: expenseEntries } = req.body;
+  const { term, expenses: expenseEntries, ownerExpenses } = req.body;
 
   if (!term) {
     throw new ServiceError('Term (YYYYMMDDHH) is required', 422);
@@ -969,6 +969,27 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
           expenseId: entry.expenseId
         });
       }
+    }
+  }
+
+  // Handle owner expenses
+  if (ownerExpenses && Array.isArray(ownerExpenses)) {
+    // Remove existing owner expenses for this term
+    const idsToRemove = (building as any).ownerMonthlyExpenses
+      .filter((e: any) => e.term === Number(term))
+      .map((e: any) => e._id);
+    for (const eid of idsToRemove) {
+      (building as any).ownerMonthlyExpenses.pull(eid);
+    }
+    // Add new owner expenses
+    for (const entry of ownerExpenses) {
+      if (!entry.amount || entry.amount <= 0) continue;
+      (building as any).ownerMonthlyExpenses.push({
+        expenseId: entry.expenseId,
+        term: Number(term),
+        amount: entry.amount,
+        description: entry.description || ''
+      });
     }
   }
 
@@ -1095,6 +1116,13 @@ export async function removeExpense(req: Req, res: Res) {
       for (const chargeId of orphaned) {
         unit.monthlyCharges.pull(chargeId);
       }
+    }
+    // Remove orphaned owner monthly expenses
+    const ownerOrphaned = ((building as any).ownerMonthlyExpenses || [])
+      .filter((e: any) => String(e.expenseId) === expId)
+      .map((e: any) => e._id);
+    for (const eid of ownerOrphaned) {
+      (building as any).ownerMonthlyExpenses.pull(eid);
     }
     (building as any).expenses.pull(expense._id);
   }

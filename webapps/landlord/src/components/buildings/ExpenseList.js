@@ -67,6 +67,8 @@ const expenseSchema = z.object({
   amount: z.coerce.number().min(0).optional().default(0),
   allocationMethod: z.string().min(1),
   isRecurring: z.boolean(),
+  trackOwnerExpense: z.boolean().optional().default(false),
+  ownerAmount: z.coerce.number().min(0).optional().default(0),
   startFromCurrentMonth: z.boolean().optional().default(true),
   notes: z.string().optional(),
   customAllocations: z
@@ -263,6 +265,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       amount: 0,
       allocationMethod: '',
       isRecurring: true,
+      trackOwnerExpense: false,
+      ownerAmount: 0,
       startFromCurrentMonth: true,
       notes: '',
       customAllocations: buildDefaultAllocations([])
@@ -270,6 +274,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
     values: expense
       ? {
           ...expense,
+          trackOwnerExpense: expense.trackOwnerExpense ?? false,
+          ownerAmount: expense.ownerAmount ?? 0,
           isRecurring: expense.isRecurring ?? true,
           startFromCurrentMonth: !expense.startTerm,
           customAllocations: buildDefaultAllocations(
@@ -283,6 +289,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const allocationMethod = watch('allocationMethod');
   const isRecurring = watch('isRecurring');
   const amount = watch('amount');
+  const trackOwnerExpense = watch('trackOwnerExpense');
+  const ownerAmount = watch('ownerAmount');
 
   const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
     allocationMethod
@@ -298,6 +306,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       try {
         setIsLoading(true);
         const payload = { ...data };
+        delete payload.trackOwnerExpense;
+        delete payload.ownerAmount;
         delete payload.startFromCurrentMonth;
         if (!METHODS_NEEDING_ALLOCATIONS.includes(payload.allocationMethod)) {
           payload.customAllocations = [];
@@ -312,6 +322,10 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
           const term = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0100`;
           payload.startTerm = Number(term);
         }
+        // Owner expense tracking
+        payload.trackOwnerExpense = data.trackOwnerExpense;
+        payload.ownerAmount = data.trackOwnerExpense ? (data.ownerAmount || 0) : 0;
+
         if (expense?._id) {
           await updateMutation.mutateAsync(payload);
         } else {
@@ -471,6 +485,37 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                 <Label htmlFor="startFromCurrentMonth" className="text-sm text-muted-foreground">
                   {t('Start billing from current month only')}
                 </Label>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <Switch
+                id="trackOwnerExpense"
+                checked={trackOwnerExpense}
+                onCheckedChange={(checked) =>
+                  setValue('trackOwnerExpense', checked)
+                }
+              />
+              <Label htmlFor="trackOwnerExpense">
+                {t('Track owner expense')}
+              </Label>
+            </div>
+
+            {trackOwnerExpense && isRecurring && (
+              <div className="ml-6 space-y-2">
+                <Label htmlFor="ownerAmount" className="text-sm text-muted-foreground">
+                  {t('Owner monthly amount')}
+                </Label>
+                <Input
+                  id="ownerAmount"
+                  type="number"
+                  step="0.01"
+                  className="w-40"
+                  {...register('ownerAmount')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('Set to 0 for variable — enter actual amounts monthly.')}
+                </p>
               </div>
             )}
 
@@ -637,6 +682,14 @@ export default function ExpenseList({ building }) {
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
+                  {expense.trackOwnerExpense && (
+                    <Badge
+                      variant="outline"
+                      className="ml-1.5 text-[10px] px-1.5"
+                    >
+                      {t('owner')}
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex gap-2 justify-end">

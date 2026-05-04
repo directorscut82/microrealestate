@@ -99,6 +99,8 @@ const BuildingExpenseSchema = new mongoose.Schema({
   isRecurring: { type: Boolean, default: true },
   startTerm: Number,
   endTerm: Number,
+  trackOwnerExpense: { type: Boolean, default: false },
+  ownerAmount: { type: Number, default: 0 },
   notes: String
 });
 
@@ -186,6 +188,13 @@ const RepairSchema = new mongoose.Schema({
   chargeTerm: Number
 });
 
+const OwnerMonthlyExpenseSchema = new mongoose.Schema({
+  expenseId: { type: String, required: true },
+  term: { type: Number, required: true },
+  amount: { type: Number, required: true },
+  description: String
+});
+
 const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
   realmId: { type: String, ref: Realm },
 
@@ -231,6 +240,7 @@ const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
   expenses: [BuildingExpenseSchema],
   contractors: [ContractorSchema],
   repairs: [RepairSchema],
+  ownerMonthlyExpenses: [OwnerMonthlyExpenseSchema],
 
   notes: String,
   createdDate: Date,
