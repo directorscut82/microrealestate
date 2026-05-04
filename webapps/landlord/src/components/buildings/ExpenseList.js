@@ -29,8 +29,10 @@ import ConfirmDialog from '../ConfirmDialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
+import ExpenseHistory from './ExpenseHistory';
 import MonthlyStatement from './MonthlyStatement';
 import ResponsiveDialog from '../ResponsiveDialog';
+import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
@@ -563,7 +565,19 @@ export default function ExpenseList({ building }) {
         onConfirm={handleConfirmDelete}
       />
 
-      <MonthlyStatement building={building} />
+      {expenses.length > 0 && (
+        <>
+        <Separator className="mt-8 mb-8" />
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div>
+            <MonthlyStatement building={building} />
+          </div>
+          <div>
+            <ExpenseHistory building={building} />
+          </div>
+        </div>
+        </>
+      )}
     </div>
   );
 }
