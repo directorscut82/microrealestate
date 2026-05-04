@@ -917,8 +917,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   if (!term) {
     throw new ServiceError('Term (YYYYMMDDHH) is required', 422);
   }
-  if (!expenseEntries || !Array.isArray(expenseEntries) || expenseEntries.length === 0) {
-    throw new ServiceError('Expenses array is required', 422);
+  const hasExpenses = expenseEntries && Array.isArray(expenseEntries) && expenseEntries.length > 0;
+  const hasOwnerExpenses = ownerExpenses && Array.isArray(ownerExpenses) && ownerExpenses.length > 0;
+
+  if (!hasExpenses && !hasOwnerExpenses) {
+    throw new ServiceError('At least one expense entry is required', 422);
   }
 
   const building = await Collections.Building.findOne({
@@ -937,43 +940,45 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   for (const unit of units) {
     if (!unit.propertyId) continue;
 
-    // Remove existing charges for this term
-    const idsToRemove = unit.monthlyCharges.filter(
-      (c: any) => c.term === Number(term)
-    ).map((c: any) => c._id);
-    for (const chargeId of idsToRemove) {
-      unit.monthlyCharges.pull(chargeId);
-    }
+    if (hasExpenses) {
+      // Remove existing charges for this term
+      const idsToRemove = unit.monthlyCharges.filter(
+        (c: any) => c.term === Number(term)
+      ).map((c: any) => c._id);
+      for (const chargeId of idsToRemove) {
+        unit.monthlyCharges.pull(chargeId);
+      }
 
-    // Compute and add new charges for each expense
-    for (const entry of expenseEntries) {
-      if (!entry.amount || entry.amount <= 0) continue;
+      // Compute and add new charges for each expense
+      for (const entry of expenseEntries) {
+        if (!entry.amount || entry.amount <= 0) continue;
 
-      // Find the building expense to get its allocation method
-      const buildingExpense = (building as any).expenses.id(entry.expenseId);
-      const allocationMethod = entry.allocationMethod || buildingExpense?.allocationMethod || 'equal';
-      const description = entry.description || buildingExpense?.name || 'Building charge';
+        // Find the building expense to get its allocation method
+        const buildingExpense = (building as any).expenses.id(entry.expenseId);
+        const allocationMethod = entry.allocationMethod || buildingExpense?.allocationMethod || 'equal';
+        const description = entry.description || buildingExpense?.name || 'Building charge';
 
-      // Compute share for this unit
-      const share = computeBuildingChargeForProperty(
-        (building as any).toObject(),
-        String(unit.propertyId),
-        { ...buildingExpense?.toObject?.() || {}, amount: entry.amount, allocationMethod }
-      );
+        // Compute share for this unit
+        const share = computeBuildingChargeForProperty(
+          (building as any).toObject(),
+          String(unit.propertyId),
+          { ...buildingExpense?.toObject?.() || {}, amount: entry.amount, allocationMethod }
+        );
 
-      if (share > 0) {
-        unit.monthlyCharges.push({
-          term: Number(term),
-          amount: Math.round(share * 100) / 100,
-          description,
-          expenseId: entry.expenseId
-        });
+        if (share > 0) {
+          unit.monthlyCharges.push({
+            term: Number(term),
+            amount: Math.round(share * 100) / 100,
+            description,
+            expenseId: entry.expenseId
+          });
+        }
       }
     }
   }
 
   // Handle owner expenses
-  if (ownerExpenses && Array.isArray(ownerExpenses)) {
+  if (hasOwnerExpenses) {
     // Remove existing owner expenses for this term
     const idsToRemove = (building as any).ownerMonthlyExpenses
       .filter((e: any) => e.term === Number(term))
