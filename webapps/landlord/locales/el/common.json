@@ -564,6 +564,8 @@
   "Something went wrong": "Κάτι πήγε στραβά",
   "Specialty": "Ειδικότητα",
   "Start date": "Ημερομηνία έναρξης",
+  "Start billing from current month only": "Χρέωση μόνο από τον τρέχοντα μήνα",
+  "Amount is required for non-recurring expenses": "Το ποσό είναι υποχρεωτικό για μη-επαναλαμβανόμενες δαπάνες",
   "State": "Περιφέρεια",
   "Status": "Κατάσταση",
   "Store": "Κατάστημα",

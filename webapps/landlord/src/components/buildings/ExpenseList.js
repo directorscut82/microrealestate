@@ -53,6 +53,7 @@ const expenseSchema = z.object({
   amount: z.coerce.number().min(0).optional().default(0),
   allocationMethod: z.string().min(1),
   isRecurring: z.boolean(),
+  startFromCurrentMonth: z.boolean().optional().default(true),
   notes: z.string().optional(),
   customAllocations: z
     .array(
@@ -63,6 +64,14 @@ const expenseSchema = z.object({
     )
     .optional()
     .default([])
+}).superRefine((data, ctx) => {
+  if (!data.isRecurring && (!data.amount || data.amount <= 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Amount is required for non-recurring expenses',
+      path: ['amount']
+    });
+  }
 });
 
 const expenseTypes = [
@@ -240,6 +249,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       amount: 0,
       allocationMethod: '',
       isRecurring: true,
+      startFromCurrentMonth: true,
       notes: '',
       customAllocations: buildDefaultAllocations([])
     },
@@ -247,6 +257,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       ? {
           ...expense,
           isRecurring: expense.isRecurring ?? true,
+          startFromCurrentMonth: !expense.startTerm,
           customAllocations: buildDefaultAllocations(
             expense.customAllocations
           )
@@ -257,6 +268,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const expenseType = watch('type');
   const allocationMethod = watch('allocationMethod');
   const isRecurring = watch('isRecurring');
+  const amount = watch('amount');
 
   const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
     allocationMethod
@@ -272,12 +284,19 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       try {
         setIsLoading(true);
         const payload = { ...data };
+        delete payload.startFromCurrentMonth;
         if (!METHODS_NEEDING_ALLOCATIONS.includes(payload.allocationMethod)) {
           payload.customAllocations = [];
         } else {
           payload.customAllocations = payload.customAllocations.filter(
             (a) => a.value > 0
           );
+        }
+        // Set startTerm for recurring with fixed amount
+        if (payload.isRecurring && payload.amount > 0 && data.startFromCurrentMonth) {
+          const now = new Date();
+          const term = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0100`;
+          payload.startTerm = Number(term);
         }
         if (expense?._id) {
           await updateMutation.mutateAsync(payload);
@@ -425,6 +444,22 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               />
               <Label htmlFor="isRecurring">{t('Recurring Expense')}</Label>
             </div>
+
+            {isRecurring && amount > 0 && (
+              <div className="flex items-center gap-2 ml-6">
+                <Switch
+                  id="startFromCurrentMonth"
+                  checked={watch('startFromCurrentMonth')}
+                  onCheckedChange={(checked) =>
+                    setValue('startFromCurrentMonth', checked)
+                  }
+                />
+                <Label htmlFor="startFromCurrentMonth" className="text-sm text-muted-foreground">
+                  {t('Start billing from current month only')}
+                </Label>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="notes">{t('Notes')}</Label>
               <Textarea id="notes" rows={3} {...register('notes')} />
