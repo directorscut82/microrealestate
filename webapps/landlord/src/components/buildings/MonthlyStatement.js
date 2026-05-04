@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -95,11 +95,17 @@ function getExistingAmounts(building, term) {
 export default function MonthlyStatement({ building }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
-  const [selectedTerm, setSelectedTerm] = useState('');
   const [amounts, setAmounts] = useState({});
   const [isLoading, setIsLoading] = useState(false);
 
   const termOptions = useMemo(() => generateTermOptions(), []);
+
+  // Auto-select current month
+  const currentTerm = useMemo(
+    () => moment().startOf('month').format('YYYYMMDDHH'),
+    []
+  );
+  const [selectedTerm, setSelectedTerm] = useState(currentTerm);
 
   // Only show variable recurring expenses (isRecurring + no fixed amount)
   const expenses = useMemo(
@@ -124,6 +130,13 @@ export default function MonthlyStatement({ building }) {
     },
     [building]
   );
+
+  // Load existing amounts for current month on mount
+  useEffect(() => {
+    if (selectedTerm && building) {
+      setAmounts(getExistingAmounts(building, selectedTerm));
+    }
+  }, [building, selectedTerm]);
 
   const handleAmountChange = useCallback((expenseId, value) => {
     setAmounts((prev) => ({

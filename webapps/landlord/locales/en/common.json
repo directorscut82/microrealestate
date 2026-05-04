@@ -459,6 +459,8 @@
   "Something went wrong": "Something went wrong",
   "Specialty": "Specialty",
   "Start date": "Start date",
+  "Start billing from current month only": "Start billing from current month only",
+  "Amount is required for non-recurring expenses": "Amount is required for non-recurring expenses",
   "State": "State",
   "Status": "Status",
   "Store": "Store",
