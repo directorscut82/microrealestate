@@ -276,8 +276,8 @@ export async function updateBuildingExpense(buildingId, expense) {
   return response.data;
 }
 
-export async function removeBuildingExpense(buildingId, expenseId) {
-  await apiFetcher().delete(`/buildings/${buildingId}/expenses/${expenseId}`);
+export async function removeBuildingExpense(buildingId, expenseId, mode = 'hard') {
+  await apiFetcher().delete(`/buildings/${buildingId}/expenses/${expenseId}?mode=${mode}`);
 }
 
 export async function addBuildingContractor(buildingId, contractor) {

@@ -1063,6 +1063,7 @@ export async function updateExpense(req: Req, res: Res) {
 export async function removeExpense(req: Req, res: Res) {
   const realm = req.realm;
   const { id, expenseId } = req.params;
+  const mode = (req.query.mode as string) || 'hard';
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1076,7 +1077,28 @@ export async function removeExpense(req: Req, res: Res) {
     throw new ServiceError('Expense does not exist', 404);
   }
 
-  (building as any).expenses.pull(expense._id);
+  if (mode === 'soft') {
+    // Set endTerm to previous month so it stops applying from current month
+    const now = new Date();
+    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endTerm = Number(
+      `${prevMonth.getFullYear()}${String(prevMonth.getMonth() + 1).padStart(2, '0')}0100`
+    );
+    expense.set({ endTerm });
+  } else {
+    // Hard delete: remove expense and clean up orphaned monthly charges
+    const expId = String(expense._id);
+    for (const unit of (building as any).units) {
+      const orphaned = unit.monthlyCharges
+        .filter((c: any) => String(c.expenseId) === expId)
+        .map((c: any) => c._id);
+      for (const chargeId of orphaned) {
+        unit.monthlyCharges.pull(chargeId);
+      }
+    }
+    (building as any).expenses.pull(expense._id);
+  }
+
   (building as any).updatedDate = new Date();
   await building!.save();
 
