@@ -7,6 +7,12 @@ import {
 } from '../../utils/restcalls';
 import { LuPencil, LuPlusCircle, LuTrash } from 'react-icons/lu';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '../ui/tooltip';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -83,6 +89,17 @@ const allocationMethods = [
   { id: 'custom_ratio', labelId: 'Custom Ratio' },
   { id: 'custom_percentage', labelId: 'Custom Percentage' }
 ];
+
+const ALLOCATION_DESCRIPTIONS = {
+  equal: 'Split equally among all units',
+  by_surface: 'Split proportionally by unit surface area (m²)',
+  general_thousandths: 'Split by general thousandths (‰) from E9',
+  heating_thousandths: 'Split by heating thousandths (‰) from E9',
+  elevator_thousandths: 'Split by elevator thousandths (‰) — ground floor excluded',
+  fixed: 'Each unit pays a fixed predefined amount',
+  custom_ratio: 'Split by custom ratio shares you defined per unit',
+  custom_percentage: 'Each unit pays a custom percentage of the total'
+};
 
 const METHODS_NEEDING_ALLOCATIONS = [
   'custom_percentage',
@@ -509,18 +526,40 @@ export default function ExpenseList({ building }) {
                   <NumberFormat value={expense.amount} />
                 </TableCell>
                 <TableCell>
-                  {t(
-                    allocationMethods.find(
-                      (am) => am.id === expense.allocationMethod
-                    )?.labelId || expense.allocationMethod
-                  )}
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="border-b border-dotted border-muted-foreground/50 cursor-help">
+                          {t(
+                            allocationMethods.find(
+                              (am) => am.id === expense.allocationMethod
+                            )?.labelId || expense.allocationMethod
+                          )}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                        {t(ALLOCATION_DESCRIPTIONS[expense.allocationMethod] || '')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </TableCell>
                 <TableCell>
-                  {expense.isRecurring ? (
-                    <Badge variant="default">{t('Yes')}</Badge>
-                  ) : (
-                    <Badge variant="secondary">{t('No')}</Badge>
-                  )}
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="cursor-help">
+                          {expense.isRecurring ? (
+                            <Badge variant="default">{t('Yes')}</Badge>
+                          ) : (
+                            <Badge variant="secondary">{t('No')}</Badge>
+                          )}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                        {t('Recurring expenses are automatically included in rent calculations every month. Non-recurring are one-time charges.')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex gap-2 justify-end">
@@ -568,10 +607,11 @@ export default function ExpenseList({ building }) {
       {expenses.length > 0 && (
         <>
         <Separator className="mt-8 mb-8" />
-        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1px_1fr] gap-8">
           <div>
             <MonthlyStatement building={building} />
           </div>
+          <Separator orientation="vertical" className="hidden lg:block h-full" />
           <div>
             <ExpenseHistory building={building} />
           </div>
