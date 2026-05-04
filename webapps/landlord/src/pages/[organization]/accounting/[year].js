@@ -87,7 +87,7 @@ function Accounting() {
       e.stopPropagation();
       downloadDocument({
         endpoint: `/csv/settlements/${year}`,
-        documentName: t('Settlements - {{year}}.csv', { year })
+        documentName: t('Payments - {{year}}.csv', { year })
       });
     },
     [t, year]
@@ -145,7 +145,7 @@ function Accounting() {
           <TabsTrigger
             value="settlements"
             className="min-w-48 sm:w-full"
-          >{`${t('Settlements')} (${
+          >{`${t('Payments')} (${
             filteredData.settlements?.length || 0
           })`}</TabsTrigger>
         </TabsList>

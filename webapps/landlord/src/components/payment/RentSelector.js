@@ -28,7 +28,7 @@ function SelectRentItem({ rent, onClick }) {
             />
             <div className="grow">
               <RentAmount
-                label={t('Settlement')}
+                label={t('Payment')}
                 amount={rentAmounts.payment !== 0 ? rentAmounts.payment : null}
                 withColor={true}
               />

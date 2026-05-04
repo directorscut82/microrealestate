@@ -132,7 +132,7 @@ export default function RentDetails({ rent }) {
         <NumberFormat value={rentAmounts.totalAmount} />
       </div>
       <div className="flex justify-between">
-        {t('Settlements')}
+        {t('Payments')}
         <NumberFormat value={rentAmounts.payment} withColor />
       </div>
       <Separator />

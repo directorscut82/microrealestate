@@ -57,7 +57,7 @@ export default function TenantSettlements({
     <Card>
       <CardHeader>
         <CardTitle className="flex justify-between items-center text-lg md:text-xl">
-          {t('Settlements')}
+          {t('Payments')}
           <Button variant="ghost" size="icon" onClick={onCSVClick}>
             <GrDocumentCsv className="size-6" />
           </Button>
