@@ -5,7 +5,14 @@ import {
   removeBuildingExpense,
   updateBuildingExpense
 } from '../../utils/restcalls';
-import { LuPencil, LuPlusCircle, LuTrash } from 'react-icons/lu';
+import {
+  LuAlertTriangle,
+  LuCalendarX2,
+  LuPencil,
+  LuPlusCircle,
+  LuTrash,
+  LuTrash2
+} from 'react-icons/lu';
 import {
   Tooltip,
   TooltipContent,
@@ -34,7 +41,9 @@ import { Button } from '../ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
+  DialogDescription,
   DialogTitle
 } from '../ui/dialog';
 import { Input } from '../ui/input';
@@ -667,55 +676,78 @@ export default function ExpenseList({ building }) {
       <Dialog open={openConfirmDelete} onOpenChange={setOpenConfirmDelete}>
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>
-            <DialogTitle>{t('Delete expense')}: {expenseToDelete?.name}</DialogTitle>
+            <DialogTitle>
+              {t('Delete expense')}: {expenseToDelete?.name}
+            </DialogTitle>
+            <DialogDescription>
+              {t('Choose how to handle this expense.')}
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4">
             {deleteImpact.months > 0 && (
-              <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm">
-                <p className="font-medium text-destructive mb-1">
+              <div className="flex gap-3 rounded-md bg-amber-50 border border-amber-200 p-3 text-sm dark:bg-amber-950/30 dark:border-amber-800">
+                <LuAlertTriangle className="size-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                <p className="font-medium text-amber-800 dark:text-amber-200">
                   {t('This expense has {{count}} months of recorded charges.', { count: deleteImpact.months })}
                 </p>
-                <p className="text-muted-foreground text-xs">
-                  {t('Permanent deletion will remove all historical charges and recalculate tenant balances retroactively.')}
+                <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
+                  {t('Permanent deletion will remove historical charges and may create tenant credit balances.')}
                 </p>
+                </div>
               </div>
             )}
-            <div className="space-y-2">
-              <Button
-                variant="outline"
-                className="w-full justify-start"
+            <div className="space-y-3">
+              <button
+                type="button"
+                className="w-full rounded-lg border border-border p-4 text-left hover:bg-muted/50 transition-colors disabled:opacity-50"
                 disabled={isDeleting}
                 onClick={() => handleDelete('soft')}
               >
-                <span className="text-left">
-                  <span className="font-medium">{t('End from current month')}</span>
-                  <span className="block text-xs text-muted-foreground mt-0.5">
+                <div className="flex gap-3 items-start">
+                  <div className="rounded-full bg-muted p-2 shrink-0">
+                    <LuCalendarX2 className="size-4 text-muted-foreground" />
+                  </div>
+                  <div>
+                    <span className="font-medium text-sm">
+                      {t('End from current month')}
+                    </span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
                     {t('Keeps historical charges intact. Stops applying from this month.')}
-                  </span>
-                </span>
-              </Button>
-              <Button
-                variant="destructive"
-                className="w-full justify-start"
+                    </span>
+                  </div>
+                </div>
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-destructive/30 p-4 text-left hover:bg-destructive/5 transition-colors disabled:opacity-50"
                 disabled={isDeleting}
                 onClick={() => handleDelete('hard')}
               >
-                <span className="text-left">
-                  <span className="font-medium">{t('Delete permanently')}</span>
-                  <span className="block text-xs text-destructive-foreground/80 mt-0.5">
-                    {t('Removes all charges from all months. Tenant balances will change.')}
-                  </span>
-                </span>
-              </Button>
+                <div className="flex gap-3 items-start">
+                  <div className="rounded-full bg-destructive/10 p-2 shrink-0">
+                    <LuTrash2 className="size-4 text-destructive" />
+                  </div>
+                  <div>
+                    <span className="font-medium text-sm text-destructive">
+                      {t('Delete permanently')}
+                    </span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      {t('Removes charges from all months. Tenant balances will change.')}
+                    </span>
+                  </div>
+                </div>
+              </button>
             </div>
+          </div>
+          <DialogFooter className="sm:justify-center">
             <Button
               variant="ghost"
-              className="w-full"
               onClick={() => setOpenConfirmDelete(false)}
             >
               {t('Cancel')}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
