@@ -47,10 +47,14 @@ export function setPaginationHeaders(
   res: Response,
   meta: PaginationMeta
 ): void {
+  const paginationHeaders = 'X-Total-Count,X-Page,X-Limit,X-Total-Pages';
   res.set('X-Total-Count', String(meta.total));
   res.set('X-Page', String(meta.page));
   res.set('X-Limit', String(meta.limit));
   res.set('X-Total-Pages', String(meta.totalPages));
+  // Must be set here (not gateway) because http-proxy-middleware
+  // overwrites headers set by earlier middleware
+  res.set('Access-Control-Expose-Headers', paginationHeaders);
 }
 
 export function buildPaginationMeta(
