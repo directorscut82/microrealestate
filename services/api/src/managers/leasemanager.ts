@@ -4,13 +4,10 @@ import {
   Pagination,
   ServiceError
 } from '@microrealestate/common';
-import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import type { ReqNoParams, ReqWithId, ReqWithIds, Res } from '../types/requests.js';
+import type { CollectionTypes } from '@microrealestate/types';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Req = ServiceRequest<any, any, any>;
-type Res = ServiceResponse;
-
-async function _leaseUsedByTenant(realm: Req['realm']): Promise<Set<string>> {
+async function _leaseUsedByTenant(realm: CollectionTypes.Realm | null | undefined): Promise<Set<string>> {
   const tenants = await Collections.Tenant.find(
     { realmId: realm!._id },
     { realmId: 1, leaseId: 1 }
@@ -21,7 +18,7 @@ async function _leaseUsedByTenant(realm: Req['realm']): Promise<Set<string>> {
   }, new Set<string>());
 }
 
-export async function add(req: Req, res: Res) {
+export async function add(req: ReqNoParams, res: Res) {
   const lease = req.body;
   if (!lease.name) {
     logger.error('missing lease name');
@@ -40,7 +37,7 @@ export async function add(req: Req, res: Res) {
   res.json(savedLease);
 }
 
-export async function update(req: Req, res: Res) {
+export async function update(req: ReqWithId, res: Res) {
   const realm = req.realm;
   const lease = req.body;
 
@@ -83,7 +80,7 @@ export async function update(req: Req, res: Res) {
   res.json(dbLease);
 }
 
-export async function remove(req: Req, res: Res) {
+export async function remove(req: ReqWithIds, res: Res) {
   const realm = req.realm;
   const leaseIds = req.params.ids.split(',');
 
@@ -150,7 +147,7 @@ export async function remove(req: Req, res: Res) {
 }
 
 
-export async function all(req: Req, res: Res) {
+export async function all(req: ReqNoParams, res: Res) {
   const realm = req.realm;
   const { page, limit, skip, isPaginated } = Pagination.parsePagination(req as any);
   const filter = { realmId: realm!._id };
@@ -182,7 +179,7 @@ export async function all(req: Req, res: Res) {
   }
 }
 
-export async function one(req: Req, res: Res) {
+export async function one(req: ReqWithId, res: Res) {
   const realm = req.realm;
   const leaseId = req.params.id;
 

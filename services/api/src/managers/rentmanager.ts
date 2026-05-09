@@ -6,22 +6,20 @@ import {
   Service,
   ServiceError
 } from '@microrealestate/common';
-import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import type { ReqNoParams, ReqWithId, ReqWithIdTerm, ReqWithYearMonth, Res } from '../types/requests.js';
 import axios from 'axios';
 import moment from 'moment';
+import type { CollectionTypes } from '@microrealestate/types';
 import {
   validateObjectId,
   validateFiniteNumber,
   validateArrayMaxLength
 } from '../validators.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Req = ServiceRequest<any, any, any>;
-type Res = ServiceResponse;
 type AnyRecord = Record<string, any>;
 
 async function _findOccupants(
-  realm: Req['realm'],
+  realm: CollectionTypes.Realm | null | undefined,
   tenantId?: string | null,
   startTerm?: number,
   endTerm?: number
@@ -65,7 +63,7 @@ async function _findOccupants(
 async function _getEmailStatus(
   authorizationHeader: string | undefined,
   locale: string | undefined,
-  realm: Req['realm'],
+  realm: CollectionTypes.Realm | null | undefined,
   startTerm: number,
   endTerm?: number
 ): Promise<AnyRecord> {
@@ -117,7 +115,7 @@ async function _getEmailStatus(
 async function _getRentsDataByTerm(
   authorizationHeader: string | undefined,
   locale: string | undefined,
-  realm: Req['realm'],
+  realm: CollectionTypes.Realm | null | undefined,
   currentDate: moment.Moment,
   frequency: moment.unitOfTime.StartOf
 ): Promise<AnyRecord> {
@@ -178,7 +176,7 @@ async function _getRentsDataByTerm(
   return { overview, rents };
 }
 
-export async function update(req: Req, res: Res) {
+export async function update(req: ReqNoParams, res: Res) {
   const realm = req.realm;
   const authorizationHeader = req.headers.authorization;
   const locale = req.headers['accept-language'] as string | undefined;
@@ -198,7 +196,7 @@ export async function update(req: Req, res: Res) {
   );
 }
 
-export async function updateByTerm(req: Req, res: Res) {
+export async function updateByTerm(req: ReqWithIdTerm, res: Res) {
   const realm = req.realm;
   const term = req.params.term;
   const authorizationHeader = req.headers.authorization;
@@ -221,7 +219,7 @@ export async function updateByTerm(req: Req, res: Res) {
 async function _updateByTerm(
   authorizationHeader: string | undefined,
   locale: string | undefined,
-  realm: Req['realm'],
+  realm: CollectionTypes.Realm | null | undefined,
   term: string,
   paymentData: AnyRecord
 ): Promise<AnyRecord> {
@@ -339,7 +337,7 @@ async function _updateByTerm(
   );
 }
 
-export async function rentsOfOccupant(req: Req, res: Res) {
+export async function rentsOfOccupant(req: ReqWithId, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
   const term = Number(moment.utc().format('YYYYMMDDHH'));
@@ -365,7 +363,7 @@ export async function rentsOfOccupant(req: Req, res: Res) {
   });
 }
 
-export async function rentOfOccupantByTerm(req: Req, res: Res) {
+export async function rentOfOccupantByTerm(req: ReqWithIdTerm, res: Res) {
   const realm = req.realm;
   const { id, term } = req.params;
 
@@ -383,7 +381,7 @@ export async function rentOfOccupantByTerm(req: Req, res: Res) {
 async function _rentOfOccupant(
   authorizationHeader: string | undefined,
   locale: string | undefined,
-  realm: Req['realm'],
+  realm: CollectionTypes.Realm | null | undefined,
   tenantId: string,
   term: string
 ): Promise<AnyRecord> {
@@ -419,7 +417,7 @@ async function _rentOfOccupant(
   return rent;
 }
 
-export async function all(req: Req, res: Res) {
+export async function all(req: ReqWithYearMonth, res: Res) {
   const realm = req.realm;
 
   let currentDate = moment.utc().startOf('month');
