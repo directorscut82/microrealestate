@@ -5,6 +5,7 @@ import {
   ServiceError
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import { validateEnum, validateArrayMaxLength, LOCALES } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -114,6 +115,9 @@ export async function add(req: Req, res: Res) {
 export async function update(req: Req, res: Res) {
   const gmailAppPasswordUpdated =
     !!req.body.thirdParties?.gmail?.appPasswordUpdated;
+  validateEnum(req.body.locale, LOCALES, 'locale');
+  validateArrayMaxLength(req.body.members, 50, 'members');
+
   const smtpPasswordUpdated = !!req.body.thirdParties?.smtp?.passwordUpdated;
   const mailgunApiKeyUpdated = !!req.body.thirdParties?.mailgun?.apiKeyUpdated;
   const b2KeyIdUpdated = !!req.body.thirdParties?.b2?.keyIdUpdated;

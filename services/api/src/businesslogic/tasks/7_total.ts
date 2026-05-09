@@ -7,28 +7,35 @@ export default function taskTotal(
   settlements: Settlements | undefined,
   rent: Rent
 ): Rent {
-  const preTaxAmount = rent.preTaxAmounts.reduce(
-    (total, preTaxAmount) => total + preTaxAmount.amount,
+  const preTaxAmount = (rent.preTaxAmounts || []).reduce(
+    (total, preTaxAmount) => total + (Number(preTaxAmount.amount) || 0),
     0
   );
-  const charges = rent.charges.reduce(
-    (total, charges) => total + charges.amount,
+  const charges = (rent.charges || []).reduce(
+    (total, charges) => total + (Number(charges.amount) || 0),
     0
   );
   const buildingChargesTotal = (rent.buildingCharges || []).reduce(
-    (total, charge) => total + charge.amount,
+    (total, charge) => total + (Number(charge.amount) || 0),
     0
   );
-  const debts = rent.debts.reduce((total, debt) => total + debt.amount, 0);
-  const discount = rent.discounts.reduce(
-    (total, discount) => total + discount.amount,
+  const debts = (rent.debts || []).reduce(
+    (total, debt) => total + (Number(debt.amount) || 0),
+    0
+  );
+  const discount = (rent.discounts || []).reduce(
+    (total, discount) => total + (Number(discount.amount) || 0),
     0
   );
   const vat =
-    Math.round(rent.vats.reduce((total, vat) => total + vat.amount, 0) * 100) /
-    100;
-  const payment = rent.payments.reduce(
-    (total, payment) => total + payment.amount,
+    Math.round(
+      (rent.vats || []).reduce(
+        (total, vat) => total + (Number(vat.amount) || 0),
+        0
+      ) * 100
+    ) / 100;
+  const payment = (rent.payments || []).reduce(
+    (total, payment) => total + (Number(payment.amount) || 0),
     0
   );
 
@@ -37,11 +44,11 @@ export default function taskTotal(
   rent.total.debts = Math.round(debts * 100) / 100;
   rent.total.discount = Math.round(discount * 100) / 100;
   rent.total.vat = vat;
-  rent.total.grandTotal =
-    Math.round(
-      (preTaxAmount + charges + buildingChargesTotal + debts - discount + vat + rent.total.balance) *
-        100
-    ) / 100;
+  const grandTotal = Math.round(
+    (preTaxAmount + charges + buildingChargesTotal + debts - discount + vat + (rent.total.balance || 0)) *
+      100
+  ) / 100;
+  rent.total.grandTotal = Number.isFinite(grandTotal) ? grandTotal : 0;
   rent.total.payment = Math.round(payment * 100) / 100;
 
   return rent;

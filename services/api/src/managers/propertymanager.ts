@@ -1,6 +1,11 @@
 import * as FD from './frontdata.js';
 import { Collections, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import {
+  validateObjectId,
+  validateFiniteNumber,
+  sanitizeMongoObject
+} from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -49,6 +54,8 @@ export async function add(req: Req, res: Res) {
   if (!req.body.name?.trim()) {
     throw new ServiceError('Property name is missing', 422);
   }
+  validateFiniteNumber(req.body.price, 'price', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
   const property = new Collections.Property({
     ...req.body,
     realmId: realm!._id
@@ -62,12 +69,17 @@ export async function update(req: Req, res: Res) {
   const realm = req.realm;
   const property = req.body;
 
+  validateObjectId(property._id, 'property id');
+  validateFiniteNumber(property.price, 'price', { min: 0, max: 10000000 });
+  validateFiniteNumber(property.surface, 'surface', { min: 0, max: 100000 });
+  const sanitized = sanitizeMongoObject(property);
+
   const dbProperty = await Collections.Property.findOneAndUpdate(
     {
       realmId: realm!._id,
-      _id: property._id
+      _id: sanitized._id
     },
-    property,
+    sanitized,
     { new: true }
   ).lean();
 

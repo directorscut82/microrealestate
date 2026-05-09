@@ -9,6 +9,11 @@ import {
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import axios from 'axios';
 import moment from 'moment';
+import {
+  validateObjectId,
+  validateFiniteNumber,
+  validateArrayMaxLength
+} from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -175,6 +180,14 @@ export async function update(req: Req, res: Res) {
   const authorizationHeader = req.headers.authorization;
   const locale = req.headers['accept-language'] as string | undefined;
   const paymentData = req.body;
+
+  validateObjectId(paymentData._id, 'tenant id');
+  validateFiniteNumber(paymentData.year, 'year', { required: true, min: 2020, max: 2099 });
+  validateFiniteNumber(paymentData.month, 'month', { required: true, min: 1, max: 12 });
+  validateFiniteNumber(paymentData.promo, 'promo', { min: 0, max: 10000000 });
+  validateFiniteNumber(paymentData.extracharge, 'extracharge', { min: 0, max: 10000000 });
+  validateArrayMaxLength(paymentData.payments, 20, 'payments');
+
   const term = `${paymentData.year}${paymentData.month}0100`;
 
   res.json(
@@ -188,6 +201,14 @@ export async function updateByTerm(req: Req, res: Res) {
   const authorizationHeader = req.headers.authorization;
   const locale = req.headers['accept-language'] as string | undefined;
   const paymentData = req.body;
+
+  validateObjectId(paymentData._id, 'tenant id');
+  if (!/^\d{10}$/.test(term)) {
+    throw new ServiceError('Invalid term format', 422);
+  }
+  validateFiniteNumber(paymentData.promo, 'promo', { min: 0, max: 10000000 });
+  validateFiniteNumber(paymentData.extracharge, 'extracharge', { min: 0, max: 10000000 });
+  validateArrayMaxLength(paymentData.payments, 20, 'payments');
 
   res.json(
     await _updateByTerm(authorizationHeader, locale, realm, term, paymentData)

@@ -65,15 +65,15 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
 const expenseSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(200),
   type: z.string().min(1),
-  amount: z.coerce.number().min(0).optional().default(0),
+  amount: z.coerce.number().min(0).max(10000000).optional().default(0),
   allocationMethod: z.string().min(1),
   isRecurring: z.boolean(),
   trackOwnerExpense: z.boolean().optional().default(false),
-  ownerAmount: z.coerce.number().min(0).optional().default(0),
+  ownerAmount: z.coerce.number().min(0).max(10000000).optional().default(0),
   startFromCurrentMonth: z.boolean().optional().default(true),
-  notes: z.string().optional(),
+  notes: z.string().max(5000).optional(),
   billingId: z.string().optional(),
   customAllocations: z
     .array(
@@ -91,6 +91,38 @@ const expenseSchema = z.object({
       message: 'Amount is required for non-recurring expenses',
       path: ['amount']
     });
+  }
+  if (
+    data.allocationMethod === 'custom_percentage' &&
+    data.customAllocations?.length
+  ) {
+    const sum = data.customAllocations.reduce(
+      (s, a) => s + (a.value || 0),
+      0
+    );
+    if (Math.abs(sum - 100) > 0.01) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Percentages must sum to 100% (currently ${sum.toFixed(1)}%)`,
+        path: ['customAllocations']
+      });
+    }
+  }
+  if (
+    data.allocationMethod === 'custom_ratio' &&
+    data.customAllocations?.length
+  ) {
+    const total = data.customAllocations.reduce(
+      (s, a) => s + (a.value || 0),
+      0
+    );
+    if (total <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one unit must have a non-zero ratio',
+        path: ['customAllocations']
+      });
+    }
   }
 });
 

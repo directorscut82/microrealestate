@@ -13,6 +13,9 @@ import jwt from 'jsonwebtoken';
 import locale from 'locale';
 import { Request, Response } from 'express';
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 8;
+
 const _generateTokens = async (dbAccount: Record<string, any>): Promise<{ refreshToken: string; accessToken: string }> => {
   const { REFRESH_TOKEN_SECRET, ACCESS_TOKEN_SECRET, PRODUCTION } =
     Service.getInstance().envConfig.getValues();
@@ -153,6 +156,9 @@ const _userSignIn = Middlewares.asyncWrapper(async (req: Request, res: Response)
     throw new ServiceError('missing fields', 422);
   }
   const email = rawEmail.trim();
+  if (!EMAIL_RE.test(email)) {
+    throw new ServiceError('invalid email format', 422);
+  }
 
   // Always perform bcrypt compare to prevent timing-based enumeration
   const account = await Collections.Account.findOne({
@@ -201,17 +207,27 @@ export default function (): Router {
         ) {
           throw new ServiceError('missing fields', 422);
         }
+        if (!EMAIL_RE.test(email.trim())) {
+          throw new ServiceError('invalid email format', 422);
+        }
+        if (String(password).length < MIN_PASSWORD_LENGTH) {
+          throw new ServiceError(
+            `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+            422
+          );
+        }
         const existingAccount = await Collections.Account.findOne({
           email: email.toLowerCase()
         });
         if (existingAccount) {
           return res.sendStatus(201);
         }
+        const hashedPassword = await bcrypt.hash(password, 10);
         await Collections.Account.create({
-          firstname,
-          lastname,
-          email,
-          password
+          firstname: firstname.trim(),
+          lastname: lastname.trim(),
+          email: email.trim().toLowerCase(),
+          password: hashedPassword
         });
         res.sendStatus(201);
       })
@@ -357,6 +373,12 @@ export default function (): Router {
         [resetToken, password].some((el) => !el || !String(el).trim())
       ) {
         throw new ServiceError('missing fields', 422);
+      }
+      if (String(password).length < MIN_PASSWORD_LENGTH) {
+        throw new ServiceError(
+          `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+          422
+        );
       }
 
       // Verify JWT BEFORE deleting from Redis to prevent race condition
