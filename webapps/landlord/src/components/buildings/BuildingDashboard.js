@@ -89,7 +89,7 @@ export default function BuildingDashboard({ building }) {
 
   const { data: tenants } = useQuery({
     queryKey: [QueryKeys.TENANTS],
-    queryFn: () => fetchTenants(false)
+    queryFn: () => fetchTenants()
   });
 
   // Build lookup maps

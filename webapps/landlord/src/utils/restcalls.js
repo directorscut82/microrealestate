@@ -51,9 +51,21 @@ export async function createAppCredentials({ organization, expiryDate }) {
   return response.data;
 }
 
-export async function fetchProperties() {
-  const response = await apiFetcher().get('/properties');
+export async function fetchProperties({ page, limit } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (limit) params.set('limit', String(limit));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await apiFetcher().get(`/properties${query}`);
   return response.data;
+}
+
+export async function fetchPropertiesPage({ page = 1, limit = 100 } = {}) {
+  const response = await apiFetcher().get(
+    `/properties?page=${page}&limit=${limit}`
+  );
+  const total = Number(response.headers?.['x-total-count'] || 0);
+  return { items: response.data, total, page, limit };
 }
 
 export async function fetchProperty(id) {
@@ -75,10 +87,24 @@ export async function deleteProperty(ids) {
   await apiFetcher().delete(`/properties/${ids.join(',')}`);
 }
 
-export async function fetchTenants(includeArchived = false) {
-  const params = includeArchived ? '?includeArchived=true' : '';
-  const response = await apiFetcher().get(`/tenants${params}`);
+export async function fetchTenants({ includeArchived = false, page, limit } = {}) {
+  const params = new URLSearchParams();
+  if (includeArchived) params.set('includeArchived', 'true');
+  if (page) params.set('page', String(page));
+  if (limit) params.set('limit', String(limit));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await apiFetcher().get(`/tenants${query}`);
   return response.data;
+}
+
+export async function fetchTenantsPage({ includeArchived = false, page = 1, limit = 100 } = {}) {
+  const params = new URLSearchParams();
+  if (includeArchived) params.set('includeArchived', 'true');
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  const response = await apiFetcher().get(`/tenants?${params.toString()}`);
+  const total = Number(response.headers?.['x-total-count'] || 0);
+  return { items: response.data, total, page, limit };
 }
 
 export async function fetchTenant(id) {
