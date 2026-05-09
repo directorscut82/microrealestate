@@ -8,7 +8,7 @@ export type ParsedBill = {
   issueDate?: Date;
   dueDate?: Date;
   rfCode?: string;
-  irisCodeImage?: Buffer;
+  paymentCode?: string;
 };
 
 export type BillParseResult = {

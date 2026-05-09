@@ -121,6 +121,11 @@ describe('DEH Bill Parser', () => {
       expect(result.bill?.rfCode).toBe('RF36907738000300008959050');
     });
 
+    it('should extract payment code', () => {
+      const result = parseDehBill(DEH_BILL_TEXT);
+      expect(result.bill?.paymentCode).toBe('000000186213');
+    });
+
     it('should set provider to deh', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
       expect(result.bill?.provider).toBe('deh');

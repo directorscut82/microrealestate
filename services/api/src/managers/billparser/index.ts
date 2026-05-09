@@ -31,14 +31,9 @@ function detectProvider(text: string): Provider | null {
 }
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { getDocument } = pdfjs;
-  // Disable worker for Node.js environment
-  if (pdfjs.GlobalWorkerOptions) {
-    pdfjs.GlobalWorkerOptions.workerSrc = '';
-  }
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
-  const doc = await getDocument({ data, useWorkerFetch: false }).promise;
+  const doc = await getDocument({ data }).promise;
   let fullText = '';
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
@@ -50,60 +45,26 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   return fullText;
 }
 
-export async function extractQrImageFromPdf(
-  buffer: Buffer
+/**
+ * Generate IRIS QR code PNG from RF code + payment code.
+ * QR content = RF code + payment amount code (verified against real DEH bill).
+ * Returns null if either component is missing.
+ */
+export async function generateIrisQr(
+  rfCode: string | undefined,
+  paymentCode: string | undefined
 ): Promise<Buffer | null> {
-  // Extract the first roughly-square small image from page 1.
-  // QR/IRIS codes are typically 100-400px squares.
-  // Uses sharp (prebuilt, no native deps to install) to encode raw pixels to PNG.
-  const sharp = (await import('sharp')).default;
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { getDocument, OPS } = pdfjs;
-
-  if (pdfjs.GlobalWorkerOptions) {
-    pdfjs.GlobalWorkerOptions.workerSrc = '';
+  if (!rfCode || !paymentCode) {
+    return null;
   }
-
-  const data = new Uint8Array(buffer);
-  const doc = await getDocument({ data, useWorkerFetch: false }).promise;
-  const page = await doc.getPage(1);
-  const ops = await page.getOperatorList();
-
-  for (let i = 0; i < ops.fnArray.length; i++) {
-    if (
-      ops.fnArray[i] === OPS.paintImageXObject ||
-      ops.fnArray[i] === OPS.paintJpegXObject
-    ) {
-      const imgName = ops.argsArray[i][0];
-      // In pdfjs v4, objs.get() returns synchronously if loaded
-      const imgData = page.objs.has(imgName)
-        ? page.objs.get(imgName)
-        : null;
-
-      if (
-        imgData &&
-        imgData.width &&
-        imgData.height &&
-        Math.abs(imgData.width - imgData.height) < 20 &&
-        imgData.width >= 50 &&
-        imgData.width <= 500
-      ) {
-        const { width, height } = imgData;
-        const src: Uint8Array | Uint8ClampedArray = imgData.data;
-        const channels = src.length === width * height * 3 ? 3 : 4;
-
-        const pngBuffer = await sharp(Buffer.from(src), {
-          raw: { width, height, channels }
-        })
-          .png()
-          .toBuffer();
-
-        return pngBuffer;
-      }
-    }
-  }
-
-  return null;
+  const qrContent = rfCode + paymentCode;
+  const QRCode = (await import('qrcode')).default;
+  return QRCode.toBuffer(qrContent, {
+    type: 'png',
+    width: 200,
+    margin: 1,
+    errorCorrectionLevel: 'M'
+  });
 }
 
 export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {

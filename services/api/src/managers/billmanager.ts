@@ -2,7 +2,7 @@ import { Collections, logger, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
   parseBillPdf,
-  extractQrImageFromPdf,
+  generateIrisQr,
   normalizeBillingId
 } from './billparser/index.js';
 
@@ -99,16 +99,16 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       bill.billingIdNormalized
     );
 
-    // Extract QR/IRIS image only if we have a match (skip for unmatched)
+    // Generate IRIS QR from RF code + payment code (verified approach)
     let irisCodeBase64: string | undefined;
     if (match) {
       try {
-        const qrBuffer = await extractQrImageFromPdf(file.buffer);
+        const qrBuffer = await generateIrisQr(bill.rfCode, bill.paymentCode);
         if (qrBuffer) {
           irisCodeBase64 = qrBuffer.toString('base64');
         }
       } catch (e) {
-        logger.debug(`QR extraction failed for ${file.originalname}: ${e}`);
+        logger.debug(`QR generation failed for ${file.originalname}: ${e}`);
       }
     }
 
@@ -275,18 +275,14 @@ export async function parsePaymentReceipts(
     throw new ServiceError('Δεν βρέθηκαν αρχεία PDF', 422);
   }
 
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { getDocument } = pdfjs;
-  if (pdfjs.GlobalWorkerOptions) {
-    pdfjs.GlobalWorkerOptions.workerSrc = '';
-  }
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
 
   const results = [];
 
   for (const file of files) {
     // Extract text from receipt
     const data = new Uint8Array(file.buffer);
-    const doc = await getDocument({ data, useWorkerFetch: false }).promise;
+    const doc = await getDocument({ data }).promise;
     let text = '';
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
