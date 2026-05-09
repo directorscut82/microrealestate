@@ -123,11 +123,11 @@ export async function remove(req: Req, res: Res) {
       Collections.Lease.deleteMany({
         _id: { $in: leaseIds },
         realmId: realm!._id
-      }),
+      }).session(session),
       Collections.Template.deleteMany({
         _id: { $in: templateIdsToRemove },
         realmId: realm!._id
-      }),
+      }).session(session),
       Collections.Template.updateMany(
         {
           realmId: realm!._id,
@@ -135,7 +135,8 @@ export async function remove(req: Req, res: Res) {
         },
         {
           $pull: { linkedResourceIds: { $in: leaseIds } }
-        }
+        },
+        { session }
       )
     ]);
     await session.commitTransaction();

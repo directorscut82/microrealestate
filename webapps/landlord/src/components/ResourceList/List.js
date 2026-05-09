@@ -78,7 +78,6 @@ export default function List({
       <div className="flex flex-col items-center gap-4">
         <Pagination
           chunks={chunks}
-          data={filteredData}
           onChange={handlePageChange}
         />
 

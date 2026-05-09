@@ -107,6 +107,11 @@ describe('Pagination utility', () => {
       const meta = buildPaginationMeta(1, 1, 50);
       expect(meta.totalPages).toBe(1);
     });
+
+    it('should return 0 totalPages when limit is 0', () => {
+      const meta = buildPaginationMeta(100, 1, 0);
+      expect(meta.totalPages).toBe(0);
+    });
   });
 
   describe('setPaginationHeaders', () => {
