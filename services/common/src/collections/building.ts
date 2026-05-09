@@ -101,7 +101,8 @@ const BuildingExpenseSchema = new mongoose.Schema({
   endTerm: Number,
   trackOwnerExpense: { type: Boolean, default: false },
   ownerAmount: { type: Number, default: 0 },
-  notes: String
+  notes: String,
+  billingId: String
 });
 
 const ContractorSchema = new mongoose.Schema({

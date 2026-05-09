@@ -391,6 +391,7 @@ export namespace CollectionTypes {
     notes?: string;
     trackOwnerExpense?: boolean;
     ownerAmount?: number;
+    billingId?: string;
   };
 
   export type OwnerMonthlyExpense = {
@@ -467,6 +468,32 @@ export namespace CollectionTypes {
     repairs: Repair[] | [];
     ownerMonthlyExpenses: OwnerMonthlyExpense[] | [];
     notes?: string;
+    createdDate?: Date;
+    updatedDate?: Date;
+  };
+
+  export type BillProvider = 'deh' | 'eydap' | 'epa' | 'other';
+  export type BillStatus = 'pending' | 'paid';
+
+  export type Bill = {
+    _id: string;
+    realmId: string | Realm;
+    buildingId: string | Building;
+    expenseId: string;
+    provider: BillProvider;
+    billingId: string;
+    totalAmount: number;
+    periodStart: Date;
+    periodEnd: Date;
+    issueDate?: Date;
+    dueDate?: Date;
+    term: number;
+    rfCode?: string;
+    irisCodeUrl?: string;
+    pdfUrl: string;
+    status: BillStatus;
+    paymentProofUrl?: string;
+    paymentDate?: Date;
     createdDate?: Date;
     updatedDate?: Date;
   };
