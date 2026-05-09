@@ -205,6 +205,11 @@ export function checkOrganization() {
       logger.warn('organizationId not passed in request');
       return res.sendStatus(404);
     }
+    // Validate organizationId format (must be a valid MongoDB ObjectId)
+    if (typeof organizationId !== 'string' || !/^[a-f0-9]{24}$/i.test(organizationId)) {
+      logger.warn('invalid organizationId format in request');
+      return res.sendStatus(404);
+    }
 
     // add organization in request object
     req.realm = (
