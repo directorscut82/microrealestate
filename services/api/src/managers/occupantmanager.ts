@@ -24,7 +24,7 @@ type AnyRecord = Record<string, any>;
 const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 12);
 
 function _stringToDate(dateString?: string): Date | undefined {
-  return dateString ? moment(dateString, 'DD/MM/YYYY').toDate() : undefined;
+  return dateString ? moment.utc(dateString, 'DD/MM/YYYY').toDate() : undefined;
 }
 
 function _formatTenant(tenant: AnyRecord): AnyRecord {

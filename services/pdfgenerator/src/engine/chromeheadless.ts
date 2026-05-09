@@ -111,32 +111,34 @@ export async function generate(documentId: string, html: string, fileName: strin
   }
 
   const page = await BROWSER.INSTANCE.newPage();
-  page.on('error', (error) => {
-    logger.error('chromium page error', error);
-  });
+  try {
+    page.on('error', (error) => {
+      logger.error('chromium page error', error);
+    });
 
-  const { TEMPORARY_DIRECTORY, PDF_DIRECTORY } =
-    Service.getInstance().envConfig.getValues();
-  const html_file = path.join(TEMPORARY_DIRECTORY as string, `${fileName}.html`);
-  const pdf_file = path.join(PDF_DIRECTORY as string, `${fileName}.pdf`);
+    const { TEMPORARY_DIRECTORY, PDF_DIRECTORY } =
+      Service.getInstance().envConfig.getValues();
+    const html_file = path.join(TEMPORARY_DIRECTORY as string, `${fileName}.html`);
+    const pdf_file = path.join(PDF_DIRECTORY as string, `${fileName}.pdf`);
 
-  logger.debug(`writing ${html_file} on disk`);
-  fs.writeFileSync(html_file, html, 'utf8');
-  logger.debug('write html done');
+    logger.debug(`writing ${html_file} on disk`);
+    fs.writeFileSync(html_file, html, 'utf8');
+    logger.debug('write html done');
 
-  const pageUrl = fileUrl(html_file);
-  logger.debug(`chromium navigating to ${pageUrl}`);
-  await page.goto(pageUrl);
+    const pageUrl = fileUrl(html_file);
+    logger.debug(`chromium navigating to ${pageUrl}`);
+    await page.goto(pageUrl);
 
-  logger.debug(`chromium started generating pdf for ${pageUrl}`);
-  const buffer = await page.pdf({
-    format: 'A4',
-    printBackground: true
-  });
-  fs.writeFileSync(pdf_file, buffer);
-  logger.debug(`done ${pdf_file}`);
+    logger.debug(`chromium started generating pdf for ${pageUrl}`);
+    const buffer = await page.pdf({
+      format: 'A4',
+      printBackground: true
+    });
+    fs.writeFileSync(pdf_file, buffer);
+    logger.debug(`done ${pdf_file}`);
 
-  await page.close();
-
-  return pdf_file;
+    return pdf_file;
+  } finally {
+    await page.close();
+  }
 }
