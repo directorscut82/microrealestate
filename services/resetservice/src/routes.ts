@@ -9,12 +9,30 @@ import {
 
 const routes = Express.Router();
 
+// Safety guard: REFUSE to operate on the production database
+const PROTECTED_DB = 'mredb';
+function assertTestDatabase(req: Express.Request, res: Express.Response): boolean {
+  const db = Service.getInstance().mongoClient?.connection?.db;
+  const dbName = db?.databaseName;
+  if (dbName === PROTECTED_DB) {
+    logger.error(
+      `BLOCKED: resetservice attempted to operate on protected database "${PROTECTED_DB}". ` +
+      `Set MONGO_URL to a test database (e.g. mongodb://mongo/mredb_test).`
+    );
+    res.status(403).send(`Refused: cannot reset protected database "${PROTECTED_DB}"`);
+    return false;
+  }
+  return true;
+}
+
 // Existing: wipe all data
 routes.delete(
   '/reset',
   Middlewares.asyncWrapper(
     async (req: Express.Request, res: Express.Response<string>) => {
       const db = Service.getInstance().mongoClient?.connection?.db;
+      if (!assertTestDatabase(req, res)) return;
+
       await Promise.all(
         [
           'accounts',
@@ -52,6 +70,8 @@ routes.post(
   '/reset/seed',
   Middlewares.asyncWrapper(
     async (req: Express.Request, res: Express.Response) => {
+      if (!assertTestDatabase(req, res)) return;
+
       const { user, org, leases = [], properties = [], buildings = [], tenants = [] } = req.body;
 
       // Create account
