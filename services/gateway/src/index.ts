@@ -210,7 +210,7 @@ function exposeHealthCheck(application: Express.Application) {
       const results = await Promise.all(
         endpoints.map(async (endpoint) => {
           try {
-            const response = await axios.get(endpoint);
+            const response = await axios.get(endpoint, { timeout: 5000 });
             return { status: response.status };
           } catch (error) {
             return { status: 500, error };

@@ -35,7 +35,7 @@ export async function getOneTenant(
     throw new ServiceError('tenant not found', 404);
   }
 
-  const now = moment();
+  const now = moment.utc();
   const lastTerm = Number(now.format('YYYYMMDDHH'));
 
   res.json({
@@ -66,7 +66,7 @@ export async function getAllTenants(
   }>(['realmId', 'leaseId']);
 
   // the last term considering the current date
-  const lastTerm = Number(moment().format('YYYYMMDDHH'));
+  const lastTerm = Number(moment.utc().format('YYYYMMDDHH'));
 
   res.json({
     results: dbTenants.map((tenant) => _toTenantResponse(tenant, lastTerm))
@@ -77,7 +77,7 @@ function _toTenantResponse(
   tenant: CollectionTypes.Tenant,
   lastTerm: number
 ): TenantAPI.TenantDataType {
-  const now = moment();
+  const now = moment.utc();
   const firstRent = tenant.rents?.[0];
   const totalPreTaxAmount = firstRent?.total.preTaxAmount || 0;
   const totalChargesAmount = firstRent?.total.charges || 0;
@@ -211,14 +211,19 @@ function _computeRemainingIterations(
 }
 
 function _computeBalance(rents: CollectionTypes.PartRent[], lastTerm: number) {
+  if (!rents || rents.length === 0) {
+    return 0;
+  }
   // find the rent closest to the last term
-  const rent = rents.reduce((prev, curr) => {
+  const rent = rents.reduce<CollectionTypes.PartRent | null>((prev, curr) => {
     if (curr.term <= lastTerm) {
       return curr;
     }
-
     return prev;
-  });
+  }, null);
 
+  if (!rent) {
+    return 0;
+  }
   return -rent.total.grandTotal + rent.total.payment;
 }

@@ -322,7 +322,7 @@ export default function (): Router {
     '/signout',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const refreshToken = req.cookies.refreshToken;
-      logger.debug(`remove the refresh token: ${refreshToken}`);
+      logger.debug('refresh token removal requested');
       if (!refreshToken) {
         return res.sendStatus(202);
       }
