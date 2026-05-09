@@ -1,4 +1,9 @@
-import { archiveTenant, fetchTenants, QueryKeys, unarchiveTenant } from '../../../utils/restcalls';
+import {
+  archiveTenant,
+  fetchTenantsPage,
+  QueryKeys,
+  unarchiveTenant
+} from '../../../utils/restcalls';
 import React, { useCallback, useContext, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import ImportTenantDialog from '../../../components/tenants/ImportTenantDialog';
@@ -11,10 +16,12 @@ import { Switch } from '../../../components/ui/switch';
 import { Label } from '../../../components/ui/label';
 import TenantList from '../../../components/tenants/TenantList';
 import { toast } from 'sonner';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
+
+const PAGE_LIMIT = 100;
 
 function _filterData(data, filters) {
   let filteredItems =
@@ -84,10 +91,31 @@ function Tenants() {
   const [openNewTenantDialog, setOpenNewTenantDialog] = useState(false);
   const [openImportDialog, setOpenImportDialog] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const { isError, data, isLoading } = useQuery({
+
+  const {
+    data,
+    isError,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useInfiniteQuery({
     queryKey: [QueryKeys.TENANTS, showArchived],
-    queryFn: () => fetchTenants(showArchived)
+    queryFn: ({ pageParam = 1 }) =>
+      fetchTenantsPage({
+        includeArchived: showArchived,
+        page: pageParam,
+        limit: PAGE_LIMIT
+      }),
+    getNextPageParam: (lastPage) => {
+      const nextPage = lastPage.page + 1;
+      const totalPages = Math.ceil(lastPage.total / lastPage.limit);
+      return nextPage <= totalPages ? nextPage : undefined;
+    },
+    initialPageParam: 1
   });
+
+  const allTenants = data?.pages?.flatMap((page) => page.items) ?? [];
 
   const onNewTenant = useCallback(() => {
     setOpenNewTenantDialog(true);
@@ -104,12 +132,15 @@ function Tenants() {
   return (
     <Page loading={isLoading} dataCy="tenantsPage">
       <List
-        data={data}
+        data={allTenants}
         filters={[
           { id: 'inprogress', label: t('Lease running') },
           { id: 'stopped', label: t('Lease ended') }
         ]}
         filterFn={_filterData}
+        onLoadMore={hasNextPage ? fetchNextPage : undefined}
+        hasMore={hasNextPage}
+        isLoadingMore={isFetchingNextPage}
         renderActions={() => (
           <div className="flex flex-col gap-2 w-full">
             <div className="flex gap-2">

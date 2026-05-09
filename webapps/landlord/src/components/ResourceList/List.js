@@ -1,6 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
+import { Button } from '../ui/button';
 import Header from './Header';
 import Pagination from './Pagination';
+import { LuLoader2 } from 'react-icons/lu';
+import useTranslation from 'next-translate/useTranslation';
 
 function _computeChunks(chunkSize, data = []) {
   const chunks = [];
@@ -23,8 +26,12 @@ export default function List({
   filters,
   filterFn,
   renderActions,
-  renderList
+  renderList,
+  onLoadMore,
+  hasMore,
+  isLoadingMore
 }) {
+  const { t } = useTranslation('common');
   const pageSize = 21;
   const [pageIndex, setPageIndex] = useState(1);
   const [filteredData, setFilteredData] = useState([]);
@@ -58,11 +65,32 @@ export default function List({
 
       {renderList?.({ data: chunks[pageIndex - 1] })}
 
-      <Pagination
-        chunks={chunks}
-        data={filteredData}
-        onChange={handlePageChange}
-      />
+      <div className="flex flex-col items-center gap-4">
+        <Pagination
+          chunks={chunks}
+          data={filteredData}
+          onChange={handlePageChange}
+        />
+
+        {hasMore && onLoadMore && (
+          <Button
+            variant="outline"
+            onClick={onLoadMore}
+            disabled={isLoadingMore}
+            className="w-full max-w-xs"
+            data-cy="loadMoreBtn"
+          >
+            {isLoadingMore ? (
+              <>
+                <LuLoader2 className="size-4 mr-2 animate-spin" />
+                {t('Loading...')}
+              </>
+            ) : (
+              t('Load more')
+            )}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { fetchProperties, QueryKeys } from '../../../utils/restcalls';
+import { fetchPropertiesPage, QueryKeys } from '../../../utils/restcalls';
 import { useCallback, useContext, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { List } from '../../../components/ResourceList';
@@ -9,10 +9,12 @@ import PropertyList from '../../../components/properties/PropertyList';
 import { StoreContext } from '../../../store';
 import { toast } from 'sonner';
 import types from '../../../components/properties/types';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
+
+const PAGE_LIMIT = 100;
 
 function _filterData(data = [], filters) {
   let filteredItems = data;
@@ -54,10 +56,27 @@ function Properties() {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
   const router = useRouter();
-  const { data, isError, isLoading } = useQuery({
+
+  const {
+    data,
+    isError,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useInfiniteQuery({
     queryKey: [QueryKeys.PROPERTIES],
-    queryFn: () => fetchProperties()
+    queryFn: ({ pageParam = 1 }) =>
+      fetchPropertiesPage({ page: pageParam, limit: PAGE_LIMIT }),
+    getNextPageParam: (lastPage) => {
+      const nextPage = lastPage.page + 1;
+      const totalPages = Math.ceil(lastPage.total / lastPage.limit);
+      return nextPage <= totalPages ? nextPage : undefined;
+    },
+    initialPageParam: 1
   });
+
+  const allProperties = data?.pages?.flatMap((page) => page.items) ?? [];
 
   const [openNewPropertyDialog, setOpenNewPropertyDialog] = useState(false);
 
@@ -72,7 +91,7 @@ function Properties() {
   return (
     <Page title={t('Properties')} loading={isLoading} dataCy="propertiesPage">
       <List
-        data={data}
+        data={allProperties}
         filters={[
           { id: 'vacant', label: t('Vacant') },
           { id: 'occupied', label: t('Rented') },
@@ -83,6 +102,9 @@ function Properties() {
         ]}
         actions={[{ id: 'addProperty', label: t('Add a property') }]}
         filterFn={_filterData}
+        onLoadMore={hasNextPage ? fetchNextPage : undefined}
+        hasMore={hasNextPage}
+        isLoadingMore={isFetchingNextPage}
         renderActions={() => (
           <Button
             variant="secondary"
