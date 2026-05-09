@@ -1,5 +1,9 @@
 import * as FD from './frontdata.js';
-import { Collections, ServiceError } from '@microrealestate/common';
+import {
+  Collections,
+  Pagination,
+  ServiceError
+} from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
   validateObjectId,
@@ -117,14 +121,20 @@ export async function remove(req: Req, res: Res) {
 
 export async function all(req: Req, res: Res) {
   const realm = req.realm;
+  const { page, limit, skip } = Pagination.parsePagination(req as any);
+  const filter = { realmId: realm!._id };
 
-  const dbProperties = await Collections.Property.find({
-    realmId: realm!._id
-  })
-    .sort({
-      name: 1
-    })
-    .lean();
+  const [dbProperties, total] = await Promise.all([
+    Collections.Property.find(filter)
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Collections.Property.countDocuments(filter)
+  ]);
+
+  const meta = Pagination.buildPaginationMeta(total, page, limit);
+  Pagination.setPaginationHeaders(res as any, meta);
 
   const properties = await _toPropertiesData(realm, dbProperties as any[]);
   return res.json(properties);

@@ -1,4 +1,9 @@
-import { Collections, logger, ServiceError } from '@microrealestate/common';
+import {
+  Collections,
+  logger,
+  Pagination,
+  ServiceError
+} from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,19 +150,26 @@ export async function remove(req: Req, res: Res) {
 
 export async function all(req: Req, res: Res) {
   const realm = req.realm;
-  const setOfUsedLeases = await _leaseUsedByTenant(realm);
-  const dbLeases: any[] = await Collections.Lease.find({ realmId: realm!._id })
-    .sort({
-      name: 1
-    })
-    .lean();
+  const { page, limit, skip } = Pagination.parsePagination(req as any);
+  const filter = { realmId: realm!._id };
 
-  res.json(
-    dbLeases.map((dbLease: any) => ({
-      ...dbLease,
-      usedByTenants: setOfUsedLeases.has(String(dbLease._id))
-    }))
-  );
+  const setOfUsedLeases = await _leaseUsedByTenant(realm);
+  const [dbLeases, total] = await Promise.all([
+    Collections.Lease.find(filter)
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Collections.Lease.countDocuments(filter)
+  ]);
+
+  const meta = Pagination.buildPaginationMeta(total, page, limit);
+  Pagination.setPaginationHeaders(res as any, meta);
+
+  res.json((dbLeases as any[]).map((dbLease: any) => ({
+    ...dbLease,
+    usedByTenants: setOfUsedLeases.has(String(dbLease._id))
+  })));
 }
 
 export async function one(req: Req, res: Res) {
