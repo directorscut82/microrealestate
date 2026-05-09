@@ -235,14 +235,17 @@ async function _updateByTerm(
     paymentData.noteextracharge = null;
   }
 
-  const occupant: AnyRecord = (await Collections.Tenant.findOne({
+  const occupantDoc: AnyRecord = (await Collections.Tenant.findOne({
     _id: paymentData._id,
     realmId: realm!._id
   }).lean()) as AnyRecord;
 
-  if (!occupant) {
+  if (!occupantDoc) {
     throw new ServiceError('Tenant not found', 404);
   }
+
+  const occupant = occupantDoc;
+  const documentVersion = occupant.__v;
 
   const contract: AnyRecord = {
     frequency: occupant.frequency || 'months',
@@ -308,17 +311,21 @@ async function _updateByTerm(
       Number(term)
     ).catch((e) => logger.error(String(e)))) || {};
 
-  const savedOccupant: AnyRecord = (await Collections.Tenant.findOneAndUpdate(
+  const savedOccupant: AnyRecord = await Collections.Tenant.findOneAndUpdate(
     {
       _id: occupant._id,
-      realmId: realm!._id
+      realmId: realm!._id,
+      __v: documentVersion
     },
-    occupant,
+    { $set: { rents: occupant.rents }, $inc: { __v: 1 } },
     { new: true }
-  ).lean()) as AnyRecord;
+  ).lean();
 
   if (!savedOccupant) {
-    throw new ServiceError('Failed to save payment, please retry', 409);
+    throw new ServiceError(
+      'Payment conflict: another update was made simultaneously. Please retry.',
+      409
+    );
   }
 
   const rent = savedOccupant.rents.filter(
@@ -335,7 +342,7 @@ async function _updateByTerm(
 export async function rentsOfOccupant(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
-  const term = Number(moment().format('YYYYMMDDHH'));
+  const term = Number(moment.utc().format('YYYYMMDDHH'));
 
   const dbOccupants = await _findOccupants(realm, id);
   if (!dbOccupants.length) {
@@ -404,7 +411,7 @@ async function _rentOfOccupant(
     dbOccupant,
     (emailStatus as AnyRecord)?.[dbOccupant._id]
   );
-  if (rent.term === Number(moment().format('YYYYMMDDHH'))) {
+  if (rent.term === Number(moment.utc().format('YYYYMMDDHH'))) {
     rent.active = 'active';
   }
   rent.vatRatio = dbOccupant.vatRatio;
@@ -415,9 +422,9 @@ async function _rentOfOccupant(
 export async function all(req: Req, res: Res) {
   const realm = req.realm;
 
-  let currentDate = moment().startOf('month');
+  let currentDate = moment.utc().startOf('month');
   if (req.params.year && req.params.month) {
-    currentDate = moment(`${req.params.month}/${req.params.year}`, 'MM/YYYY');
+    currentDate = moment.utc(`${req.params.month}/${req.params.year}`, 'MM/YYYY');
   }
 
   res.json(

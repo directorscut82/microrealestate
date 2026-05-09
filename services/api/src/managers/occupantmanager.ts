@@ -248,7 +248,7 @@ async function _fetchTenants(realmId: string, tenantId?: string): Promise<AnyRec
     }
   ]);
 
-  const now = moment();
+  const now = moment.utc();
   tenants.forEach((tenant) =>
     tenant.filesToUpload?.forEach((fileToUpload: AnyRecord) => {
       const { required, requiredOnceContractTerminated, documents } =
@@ -386,14 +386,16 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('End date must be after begin date', 422);
   }
 
-  const originalOccupant: any = await Collections.Tenant.findOne({
+  const originalOccupantDoc: any = await Collections.Tenant.findOne({
     _id: occupantId,
     realmId: realm!._id
   }).lean();
 
-  if (!originalOccupant) {
+  if (!originalOccupantDoc) {
     throw new ServiceError('tenant not found', 404);
   }
+  const originalOccupant = originalOccupantDoc;
+  const documentVersion = originalOccupant.__v;
 
   if (originalOccupant.documents) {
     newOccupant.documents = originalOccupant.documents;
@@ -494,13 +496,20 @@ export async function update(req: Req, res: Res) {
     newOccupant.rents = [];
   }
 
-  await Collections.Tenant.findOneAndUpdate(
+  const updated = await Collections.Tenant.findOneAndUpdate(
     {
       realmId: realm!._id,
-      _id: occupantId
+      _id: occupantId,
+      __v: documentVersion
     },
-    { $set: newOccupant }
+    { $set: newOccupant, $inc: { __v: 1 } }
   );
+  if (!updated) {
+    throw new ServiceError(
+      'Update conflict: tenant was modified simultaneously. Please retry.',
+      409
+    );
+  }
 
   // Sync building occupancy for added/removed properties
   const oldPropIds = (originalOccupant.properties || [])
@@ -657,7 +666,7 @@ export async function one(req: Req, res: Res) {
 
 export async function overview(req: Req, res: Res) {
   const realm = req.realm;
-  const currentDate = moment();
+  const currentDate = moment.utc();
 
   const occupants: any[] = await Collections.Tenant.find({
     realmId: realm!._id
