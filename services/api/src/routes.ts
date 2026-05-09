@@ -55,7 +55,7 @@ export default function routes(): express.Router {
   });
   occupantsRouter.post(
     '/import-pdf',
-    upload.single('pdf'),
+    upload.single('pdf') as any,
     Middlewares.asyncWrapper(parseImportedPdf as any)
   );
   occupantsRouter.get('/', Middlewares.asyncWrapper(occupantManager.all as any));
@@ -106,7 +106,7 @@ export default function routes(): express.Router {
   const buildingsRouter = express.Router();
   buildingsRouter.post(
     '/import-pdf',
-    upload.single('pdf'),
+    upload.single('pdf') as any,
     Middlewares.asyncWrapper(buildingManager.importFromE9 as any)
   );
   buildingsRouter.get('/', Middlewares.asyncWrapper(buildingManager.all as any));
@@ -142,9 +142,9 @@ export default function routes(): express.Router {
   const billsRouter = express.Router();
   billsRouter.get('/', Middlewares.asyncWrapper(billManager.list as any));
   billsRouter.get('/:id', Middlewares.asyncWrapper(billManager.one as any));
-  billsRouter.post('/parse', upload.array('bills', 20), Middlewares.asyncWrapper(billManager.parseBills as any));
+  billsRouter.post('/parse', upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parseBills as any));
   billsRouter.post('/confirm', Middlewares.asyncWrapper(billManager.confirmBills as any));
-  billsRouter.post('/payment-receipt', upload.array('bills', 20), Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
+  billsRouter.post('/payment-receipt', upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
   billsRouter.post('/confirm-payment', Middlewares.asyncWrapper(billManager.confirmPayment as any));
   router.use('/bills', billsRouter);
 
