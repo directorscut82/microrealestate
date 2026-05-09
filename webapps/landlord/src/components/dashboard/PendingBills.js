@@ -17,6 +17,7 @@ import { LuAlertTriangle, LuReceipt } from 'react-icons/lu';
 import { Badge } from '../ui/badge';
 import { cn } from '../../utils';
 import moment from 'moment';
+import { useMemo } from 'react';
 import NumberFormat from '../NumberFormat';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -26,17 +27,16 @@ export default function PendingBills({ className, dashboardData }) {
 
   if (!pendingBills.length) return null;
 
-  const totalPending = pendingBills.reduce(
+  const totalPending = useMemo(() => pendingBills.reduce(
     (sum, group) =>
       sum + group.bills.reduce((s, b) => s + (b.totalAmount || 0), 0),
     0
-  );
+  ), [pendingBills]);
 
-  const overdueBills = pendingBills.flatMap((group) =>
-    group.bills.filter(
-      (b) => b.dueDate && moment(b.dueDate).isBefore(moment(), 'day')
-    )
-  );
+  const now = useMemo(() => moment(), []);
+  const overdueBills = useMemo(() => pendingBills.flatMap((group) =>
+    group.bills.filter((b) => b.dueDate && moment(b.dueDate).isBefore(now, 'day'))
+  ), [pendingBills, now]);
 
   return (
     <Card className={cn('', className)}>
@@ -85,7 +85,7 @@ export default function PendingBills({ className, dashboardData }) {
                   {group.bills.map((bill) => {
                     const isOverdue =
                       bill.dueDate &&
-                      moment(bill.dueDate).isBefore(moment(), 'day');
+                      moment(bill.dueDate).isBefore(now, 'day');
                     return (
                       <TableRow
                         key={bill._id}

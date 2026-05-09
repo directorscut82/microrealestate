@@ -42,10 +42,14 @@ function uploadRateLimit(req: any, res: any, next: any) {
 
 // Verify uploaded file starts with PDF magic bytes
 function verifyPdfContent(req: any, res: any, next: any) {
-  const file = req.file || (req.files && req.files[0]);
-  if (file && file.buffer) {
-    if (file.buffer.length < 4 || file.buffer.slice(0, 4).toString() !== '%PDF') {
-      return res.status(422).json({ message: 'Invalid PDF file content' });
+  const files = req.file ? [req.file] : (req.files || []);
+  for (const file of files) {
+    if (file && file.buffer) {
+      if (file.buffer.length < 4 || file.buffer.slice(0, 4).toString() !== '%PDF') {
+        return res.status(422).json({
+          message: `Invalid PDF file content: ${file.originalname || 'unknown'}`
+        });
+      }
     }
   }
   return next();
