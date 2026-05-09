@@ -3,6 +3,7 @@ import moment from 'moment';
 
 export const QueryKeys = {
   ACCOUNTING: 'accounting',
+  BILLS: 'bills',
   BUILDINGS: 'buildings',
   DASHBOARD: 'dashboard',
   DOCUMENTS: 'documents',
