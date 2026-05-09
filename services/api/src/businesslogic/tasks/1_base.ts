@@ -159,23 +159,23 @@ export default function taskBase(
   settlements: Settlements | undefined,
   rent: Rent
 ): Rent {
-  const currentMoment = moment(rentDate, 'DD/MM/YYYY HH:mm');
+  const currentMoment = moment.utc(rentDate, 'DD/MM/YYYY HH:mm');
   if (!currentMoment.isValid()) return rent;
 
   rent.term = Number(currentMoment.format('YYYYMMDDHH'));
   if (contract.frequency === 'months') {
     rent.term = Number(
-      moment(currentMoment).startOf('month').format('YYYYMMDDHH')
+      moment.utc(currentMoment).startOf('month').format('YYYYMMDDHH')
     );
   }
   if (contract.frequency === 'days') {
     rent.term = Number(
-      moment(currentMoment).startOf('day').format('YYYYMMDDHH')
+      moment.utc(currentMoment).startOf('day').format('YYYYMMDDHH')
     );
   }
   if (contract.frequency === 'hours') {
     rent.term = Number(
-      moment(currentMoment).startOf('hour').format('YYYYMMDDHH')
+      moment.utc(currentMoment).startOf('hour').format('YYYYMMDDHH')
     );
   }
   rent.month = currentMoment.month() + 1;
@@ -185,8 +185,8 @@ export default function taskBase(
 
   properties
     .filter((property) => {
-      const entryMoment = moment(property.entryDate).startOf('day');
-      const exitMoment = moment(property.exitDate).endOf('day');
+      const entryMoment = moment.utc(property.entryDate).startOf('day');
+      const exitMoment = moment.utc(property.exitDate).endOf('day');
 
       return currentMoment.isBetween(
         entryMoment,
@@ -210,10 +210,10 @@ export default function taskBase(
           rent.charges.push(
             ...expenses
               .filter(({ beginDate, endDate }) => {
-                const expenseBegin = moment(beginDate, 'DD/MM/YYYY').startOf(
+                const expenseBegin = moment.utc(beginDate, 'DD/MM/YYYY').startOf(
                   'day'
                 );
-                const expenseEnd = moment(endDate, 'DD/MM/YYYY').endOf('day');
+                const expenseEnd = moment.utc(endDate, 'DD/MM/YYYY').endOf('day');
 
                 return currentMoment.isBetween(
                   expenseBegin,
@@ -238,8 +238,8 @@ export default function taskBase(
   if (contract.buildings && contract.buildings.length > 0) {
     properties
       .filter((property) => {
-        const entryMoment = moment(property.entryDate).startOf('day');
-        const exitMoment = moment(property.exitDate).endOf('day');
+        const entryMoment = moment.utc(property.entryDate).startOf('day');
+        const exitMoment = moment.utc(property.exitDate).endOf('day');
 
         return currentMoment.isBetween(
           entryMoment,

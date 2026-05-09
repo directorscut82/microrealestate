@@ -23,11 +23,11 @@ export function create(contract: Contract): Contract {
     throw Error('properties not defined or empty');
   }
 
-  const momentBegin = moment(contract.begin);
-  const momentEnd = moment(contract.end);
+  const momentBegin = moment.utc(contract.begin);
+  const momentEnd = moment.utc(contract.end);
   let momentTermination: moment.Moment | undefined;
   if (contract.termination) {
-    momentTermination = moment(contract.termination);
+    momentTermination = moment.utc(contract.termination);
     if (!momentTermination.isBetween(momentBegin, momentEnd, 'minutes', '[]')) {
       throw Error('termination date is out of the contract time frame');
     }
@@ -75,11 +75,11 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
     ...modification
   };
 
-  const momentBegin = moment(modifiedContract.begin);
-  const momentEnd = moment(modifiedContract.end);
+  const momentBegin = moment.utc(modifiedContract.begin);
+  const momentEnd = moment.utc(modifiedContract.end);
   let momentTermination: moment.Moment | undefined;
   if (modifiedContract.termination) {
-    momentTermination = moment(modifiedContract.termination);
+    momentTermination = moment.utc(modifiedContract.termination);
   }
 
   _checkLostPayments(
@@ -112,8 +112,8 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
 }
 
 export function renew(contract: Contract): Contract {
-  const momentEnd = moment(contract.end);
-  const momentNewEnd = moment(momentEnd).add(
+  const momentEnd = moment.utc(contract.end);
+  const momentNewEnd = moment.utc(momentEnd).add(
     contract.terms,
     contract.frequency as moment.unitOfTime.DurationConstructor
   );
@@ -136,9 +136,9 @@ export function payTerm(
   if (!contract.rents || !contract.rents.length) {
     throw Error('cannot pay term, the rents were not generated');
   }
-  const current = moment(term, 'YYYYMMDDHH');
-  const momentBegin = moment(contract.begin);
-  const momentEnd = moment(contract.termination || contract.end);
+  const current = moment.utc(term, 'YYYYMMDDHH');
+  const momentBegin = moment.utc(contract.begin);
+  const momentEnd = moment.utc(contract.termination || contract.end);
 
   if (
     !current.isBetween(
@@ -151,7 +151,7 @@ export function payTerm(
     throw Error('payment term is out of the contract time frame');
   }
 
-  const previousTerm = moment(current).subtract(
+  const previousTerm = moment.utc(current).subtract(
     1,
     contract.frequency as moment.unitOfTime.DurationConstructor
   );
@@ -211,7 +211,7 @@ const _checkLostPayments = (
   const lostPayments = contract.rents
     .filter(
       (rent) =>
-        !moment(rent.term, 'YYYYMMDDHH').isBetween(
+        !moment.utc(rent.term, 'YYYYMMDDHH').isBetween(
           momentBegin,
           momentEnd,
           contract.frequency as moment.unitOfTime.StartOf,

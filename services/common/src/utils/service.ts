@@ -51,6 +51,7 @@ export default class Service {
 
   mongoClient?: MongoClient;
   redisClient?: RedisClient;
+  private httpServer?: ReturnType<Express.Application['listen']>;
 
   envConfig: EnvironmentConfig;
   expressServer: Express.Application;
@@ -122,7 +123,7 @@ export default class Service {
 
   private async startService() {
     return new Promise<void>((resolve, reject) => {
-      this.expressServer
+      this.httpServer = this.expressServer
         .listen(this.port, () => {
           Logger.default.info(
             `${this.name} ready and listening on port ${this.port}`
@@ -175,6 +176,17 @@ export default class Service {
   }
 
   async shutDown(errCode: number) {
+    if (this.httpServer) {
+      try {
+        await new Promise<void>((resolve) => {
+          this.httpServer!.close(() => resolve());
+          setTimeout(resolve, 5000);
+        });
+        Logger.default.info('HTTP server closed');
+      } catch (error) {
+        Logger.default.error(`Error closing HTTP server: ${error}`);
+      }
+    }
     if (this.mongoClient) {
       try {
         await this.mongoClient.disconnect();

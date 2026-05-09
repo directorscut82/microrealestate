@@ -101,12 +101,15 @@ async function _getEmailStatus(
       return acc;
     }, {});
   } catch (error: any) {
-    logger.error(error);
+    logger.error(`Failed to get email status: ${error.message || error}`);
     if (DEMO_MODE) {
       logger.info('email status fallback workflow activated in demo mode');
       return {};
     } else {
-      throw error.data;
+      throw new ServiceError(
+        error.response?.data?.message || 'Failed to fetch email status',
+        error.response?.status || 500
+      );
     }
   }
 }
@@ -235,7 +238,11 @@ async function _updateByTerm(
   const occupant: AnyRecord = (await Collections.Tenant.findOne({
     _id: paymentData._id,
     realmId: realm!._id
-  }).lean())!;
+  }).lean()) as AnyRecord;
+
+  if (!occupant) {
+    throw new ServiceError('Tenant not found', 404);
+  }
 
   const contract: AnyRecord = {
     frequency: occupant.frequency || 'months',
@@ -308,7 +315,11 @@ async function _updateByTerm(
     },
     occupant,
     { new: true }
-  ).lean())!;
+  ).lean()) as AnyRecord;
+
+  if (!savedOccupant) {
+    throw new ServiceError('Failed to save payment, please retry', 409);
+  }
 
   const rent = savedOccupant.rents.filter(
     (rent: AnyRecord) => rent.term === Number(term)
@@ -370,10 +381,14 @@ async function _rentOfOccupant(
   term: string
 ): Promise<AnyRecord> {
   const [dbOccupants = [], emailStatus = {}] = await Promise.all([
-    _findOccupants(realm, tenantId, Number(term)).catch((e) => logger.error(String(e))),
-    _getEmailStatus(authorizationHeader, locale, realm, Number(term)).catch(
-      (e) => logger.error(String(e))
-    )
+    _findOccupants(realm, tenantId, Number(term)).catch((e) => {
+      logger.error(`Failed to find occupants: ${e}`);
+      return [];
+    }),
+    _getEmailStatus(authorizationHeader, locale, realm, Number(term)).catch((e) => {
+      logger.error(`Failed to get email status: ${e}`);
+      return {};
+    })
   ]);
 
   if (!(dbOccupants as AnyRecord[]).length) {
