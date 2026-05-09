@@ -65,7 +65,7 @@ function Properties() {
     hasNextPage,
     isFetchingNextPage
   } = useInfiniteQuery({
-    queryKey: [QueryKeys.PROPERTIES],
+    queryKey: [QueryKeys.PROPERTIES, 'list'],
     queryFn: ({ pageParam = 1 }) =>
       fetchPropertiesPage({ page: pageParam, limit: PAGE_LIMIT }),
     getNextPageParam: (lastPage) => {
