@@ -14,11 +14,12 @@ routes.delete(
   '/reset',
   Middlewares.asyncWrapper(
     async (req: Express.Request, res: Express.Response<string>) => {
-      const mongoClient = Service.getInstance().mongoClient;
+      const db = Service.getInstance().mongoClient?.connection?.db;
       await Promise.all(
         [
           'accounts',
           'buildings',
+          'bills',
           'documents',
           'emails',
           'leases',
@@ -26,10 +27,13 @@ routes.delete(
           'properties',
           'realms',
           'templates'
-        ].map((collection) =>
-          mongoClient?.dropCollection(collection).catch((e) =>
-            logger.error(String(e))
-          )
+        ].map(async (collection) => {
+          try {
+            await db?.collection(collection).deleteMany({});
+          } catch (e) {
+            logger.error(String(e));
+          }
+        }
         )
       );
 

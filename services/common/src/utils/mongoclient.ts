@@ -38,8 +38,21 @@ export default class MongoClient {
       logger.debug(`connecting to ${obfuscatedConfig.MONGO_URL}...`);
       mongoose.set('strictQuery', true);
       this._connection = await mongoose.connect(config.MONGO_URL);
-      logger.debug('db ready');
+      logger.debug('db connected');
+      await this._syncIndexes();
+      logger.debug('db indexes synced, ready');
     }
+  }
+
+  private async _syncIndexes() {
+    const modelNames = mongoose.modelNames();
+    for (const name of modelNames) {
+      await mongoose.model(name).syncIndexes();
+    }
+  }
+
+  get connection() {
+    return this._connection?.connection ?? null;
   }
 
   async disconnect() {
