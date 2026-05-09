@@ -8,3 +8,4 @@ export * as URLUtils from './utils/url.js';
 export * as Collections from './collections/index.js';
 export { default as logger } from './utils/logger.js';
 export { default as ServiceError } from './utils/serviceerror.js';
+export * as Pagination from './utils/pagination.js';

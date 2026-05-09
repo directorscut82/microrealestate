@@ -4,6 +4,7 @@ import * as FD from './frontdata.js';
 import {
   Collections,
   logger,
+  Pagination,
   Service,
   ServiceError
 } from '@microrealestate/common';
@@ -161,11 +162,13 @@ async function _autoLinkPropertiesToBuildings(
   }
 }
 
-async function _fetchTenants(realmId: string, tenantId?: string): Promise<AnyRecord[]> {
+async function _fetchTenants(realmId: string, tenantId?: string | string[]): Promise<AnyRecord[]> {
   const $match: AnyRecord = {
     realmId
   };
-  if (tenantId) {
+  if (Array.isArray(tenantId)) {
+    $match._id = { $in: tenantId.map((id) => new Collections.ObjectId(id)) };
+  } else if (tenantId) {
     $match._id = new Collections.ObjectId(tenantId);
   }
 
@@ -621,12 +624,34 @@ export async function remove(req: Req, res: Res) {
 }
 
 export async function all(req: Req, res: Res) {
-  const tenants = await _fetchTenants(req.realm!._id);
   const includeArchived = req.query?.includeArchived === 'true';
-  const filtered = includeArchived
-    ? tenants
-    : tenants.filter((t) => !t.archived);
-  res.json(filtered.map((tenant) => FD.toOccupantData(tenant)));
+  const { page, limit, skip } = Pagination.parsePagination(req as any);
+
+  const countFilter: AnyRecord = { realmId: req.realm!._id };
+  if (!includeArchived) {
+    countFilter.$or = [{ archived: { $exists: false } }, { archived: false }];
+  }
+  const total = await Collections.Tenant.countDocuments(countFilter);
+
+  const tenants: AnyRecord[] = await Collections.Tenant.aggregate([
+    { $match: countFilter },
+    { $sort: { name: 1 } },
+    { $skip: skip },
+    { $limit: limit }
+  ]);
+
+  const meta = Pagination.buildPaginationMeta(total, page, limit);
+  Pagination.setPaginationHeaders(res as any, meta);
+
+  // Fetch full data (with $lookup) only for the paginated subset
+  const tenantIds = tenants.map((t) => String(t._id));
+  const fullTenants = tenantIds.length
+    ? await _fetchTenants(req.realm!._id, tenantIds)
+    : [];
+  const sorted = tenantIds.map((id) =>
+    fullTenants.find((t) => String(t._id) === id)
+  ).filter(Boolean) as AnyRecord[];
+  res.json(sorted.map((tenant) => FD.toOccupantData(tenant)));
 }
 
 export async function archive(req: Req, res: Res) {
