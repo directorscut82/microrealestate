@@ -371,7 +371,11 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   try {
     const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
     const data = new Uint8Array(buffer);
-    const doc = await getDocument({ data }).promise;
+    const pdfPromise = getDocument({ data }).promise;
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('PDF parsing timed out after 30s')), 30000)
+    );
+    const doc = await Promise.race([pdfPromise, timeout]);
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
