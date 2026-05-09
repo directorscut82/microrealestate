@@ -15,3 +15,24 @@
 
 import './commands';
 import './i18n';
+
+// SAFETY: Verify resetservice is connected to a test database before ANY test runs.
+// This prevents catastrophic data loss if resetservice is misconfigured.
+before(() => {
+  const apiBaseUrl = Cypress.env('GATEWAY_BASEURL');
+  cy.request({
+    method: 'GET',
+    url: `${apiBaseUrl}/api/reset/health`,
+    failOnStatusCode: false
+  }).then((resp) => {
+    if (resp.status === 200 && resp.body?.database) {
+      const db = resp.body.database;
+      if (db === 'mredb') {
+        throw new Error(
+          'FATAL: resetservice is connected to production database "mredb". ' +
+            'Tests REFUSED to run. Fix MONGO_URL for resetservice to use mredb_test.'
+        );
+      }
+    }
+  });
+});

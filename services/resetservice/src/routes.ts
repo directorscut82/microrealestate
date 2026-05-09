@@ -280,4 +280,17 @@ routes.post(
   )
 );
 
+// Health check that reports which database the resetservice is connected to.
+// Used by E2E test suite to ABORT if misconfigured against production.
+routes.get(
+  '/reset/health',
+  Middlewares.asyncWrapper(
+    async (req: Express.Request, res: Express.Response) => {
+      const db = Service.getInstance().mongoClient?.connection?.db;
+      const dbName = db?.databaseName || 'unknown';
+      return res.json({ status: 'ok', database: dbName, protected: dbName === PROTECTED_DB });
+    }
+  )
+);
+
 export default routes;
