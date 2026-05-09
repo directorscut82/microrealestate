@@ -7,7 +7,6 @@ import {
 } from '../ui/drawer';
 import React, {
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState
@@ -28,6 +27,7 @@ export default function NewPaymentDialog({
   const { t } = useTranslation('common');
   const [selectedRent, setSelectedRent] = useState();
   const [rents, setRents] = useState();
+  const [saving, setSaving] = useState(false);
   const formRef = useRef();
 
   useEffect(() => {
@@ -61,10 +61,17 @@ export default function NewPaymentDialog({
   }, [setOpen]);
 
   const handleSave = useCallback(() => {
+    if (saving) return;
+    setSaving(true);
     formRef.current.submit();
+  }, [saving]);
+
+  const handleError = useCallback(() => {
+    setSaving(false);
   }, []);
 
   const handleSubmit = useCallback(() => {
+    setSaving(false);
     onClose?.(selectedRent);
     handleClose();
   }, [handleClose, onClose, selectedRent]);
@@ -89,6 +96,7 @@ export default function NewPaymentDialog({
               ref={formRef}
               rent={selectedRent}
               onSubmit={handleSubmit}
+              onError={handleError}
             />
           ) : null}
         </div>
@@ -100,9 +108,9 @@ export default function NewPaymentDialog({
             </Button>
             <Button
               onClick={handleSave}
-              disabled={!!selectedRent?.occupant === false}
+              disabled={!selectedRent?.occupant || saving}
             >
-              {t('Save')}
+              {saving ? t('Saving') : t('Save')}
             </Button>
           </div>
         </DrawerFooter>

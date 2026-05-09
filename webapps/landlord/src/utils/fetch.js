@@ -157,6 +157,12 @@ Please restart the server with APP_DOMAIN=${webAppUrl.hostname}${
               apiFetch.defaults.headers.common['Authorization'];
 
             return apiFetch(originalRequest);
+          } catch (refreshError) {
+            // reject all queued requests so they don't hang forever
+            requestQueue.forEach((request) => {
+              request.reject(refreshError);
+            });
+            return Promise.reject(refreshError);
           } finally {
             isRefreshingToken = false;
             requestQueue = [];
@@ -208,6 +214,8 @@ export const authApiFetcher = (cookie) => {
 };
 
 export const buildFetchError = (error) => {
+  const { Authorization, authorization, ...safeHeaders } =
+    error.response?.config?.headers || {};
   return {
     error: {
       status: error.response?.status,
@@ -216,7 +224,7 @@ export const buildFetchError = (error) => {
       request: {
         url: error.response?.config?.url,
         method: error.response?.config?.method,
-        headers: error.response?.config?.headers,
+        headers: safeHeaders,
         baseURL: error.response?.config?.baseURL,
         withCredentials: error.response?.config?.withCredentials
       }

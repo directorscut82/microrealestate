@@ -68,7 +68,7 @@ function initialFormValues(rent) {
   };
 }
 
-function PaymentTabs({ rent, onSubmit }, ref) {
+function PaymentTabs({ rent, onSubmit, onError }, ref) {
   const queryClient = useQueryClient();
   const store = useContext(StoreContext);
   const { t } = useTranslation('common');
@@ -86,7 +86,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
     watch,
     setValue,
     reset,
-    formState: { errors, isDirty }
+    formState: { errors, isDirty, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: initVals
@@ -96,6 +96,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
 
   useImperativeHandle(ref, () => ({
     isDirty: () => isDirty,
+    isSubmitting: () => isSubmitting,
     async submit() { formRef.current?.requestSubmit(); },
     setValues(rent) { reset(initialFormValues(rent)); }
   }), [isDirty, reset]);
@@ -127,6 +128,7 @@ function PaymentTabs({ rent, onSubmit }, ref) {
       } catch (error) {
         console.error(error);
         toast.error(t('Something went wrong'));
+        onError?.();
       }
     },
     [onSubmit, queryClient, rent._id, rent.month, rent.term, rent.year, t]
