@@ -2,7 +2,7 @@ import { EmptyIllustration } from '../Illustrations';
 import TenantListItem from './TenantListItem';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function TenantList({ tenants }) {
+export default function TenantList({ tenants = [] }) {
   const { t } = useTranslation('common');
 
   return tenants.length > 0 ? (
