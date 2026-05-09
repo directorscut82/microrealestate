@@ -48,12 +48,14 @@ export type ParsedE9Result = {
   owner: ParsedE9Owner;
   buildings: ParsedE9Building[];
   skippedLandPlots: number;
+  failedRows: number;
 };
 
-function parseGreekDecimal(value: string): number {
+// Returns null on parse failure (instead of 0) to distinguish from actual zero
+function parseGreekDecimal(value: string): number | null {
   const cleaned = value.replace(/[€\s]/g, '').replace('.', '').replace(',', '.');
   const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
+  return isNaN(num) ? null : num;
 }
 
 function cleanState(state: string): string {
@@ -265,19 +267,19 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   if (surfaceCandidates.length >= 1) {
     surface = parseGreekDecimal(
       surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2]
-    );
+    ) ?? 0;
   }
   if (surfaceCandidates.length >= 2) {
     auxSurface = parseGreekDecimal(
       surfaceCandidates[1][1] + ',' + surfaceCandidates[1][2]
-    );
+    ) ?? 0;
   }
 
   // For large surfaces with dot separators (e.g. "2.478,00" or "1.032,00")
   if (surface === 0) {
     const largeSurfMatch = rowText.match(/\b(\d{1,2}\.\d{3}),(\d{2})\b/);
     if (largeSurfMatch) {
-      surface = parseGreekDecimal(largeSurfMatch[1] + ',' + largeSurfMatch[2]);
+      surface = parseGreekDecimal(largeSurfMatch[1] + ',' + largeSurfMatch[2]) ?? 0;
     }
   }
 
@@ -379,7 +381,8 @@ export function parseE9(text: string): ParsedE9Result {
     return {
       owner: { taxId: '', lastName: '', firstName: '', fatherName: '' },
       buildings: [],
-      skippedLandPlots: 0
+      skippedLandPlots: 0,
+      failedRows: 0
     };
   }
 
@@ -430,7 +433,7 @@ export function parseE9(text: string): ParsedE9Result {
   const table1Start = t.indexOf('ΠΙΝΑΚΑΣ 1');
   const table2Start = t.indexOf('ΠΙΝΑΚΑΣ 2');
   if (table1Start === -1) {
-    return { owner, buildings: [], skippedLandPlots: 0 };
+    return { owner, buildings: [], skippedLandPlots: 0, failedRows: 0 };
   }
 
   const table1Text =
@@ -448,6 +451,7 @@ export function parseE9(text: string): ParsedE9Result {
 
   const units: ParsedE9Unit[] = [];
   let skippedAsLand = 0;
+  let failedRows = 0;
 
   for (let i = 0; i < atakMatches.length; i++) {
     const { prefix, suffix } = atakMatches[i];
@@ -459,7 +463,10 @@ export function parseE9(text: string): ParsedE9Result {
     const rowText = table1Text.substring(startPos, endPos);
 
     const unit = parseE9Row(rowText, prefix, suffix);
-    if (!unit) continue;
+    if (!unit) {
+      failedRows++;
+      continue;
+    }
 
     if (isRealBuildingUnit(unit)) {
       units.push(unit);
@@ -471,7 +478,8 @@ export function parseE9(text: string): ParsedE9Result {
   // GROUP BY ADDRESS (street + streetNumber + zipCode), NOT by ATAK prefix
   // When zip is missing, group by street+number only (merge with any existing)
   const buildingKey = (u: ParsedE9Unit) => {
-    const key = `${u.street}|${u.streetNumber}`.toUpperCase();
+    // Include zip to prevent merging different buildings at same street+number in different areas
+    const key = `${u.street}|${u.streetNumber}|${u.zipCode}`.toUpperCase();
     return key;
   };
 
@@ -549,6 +557,7 @@ export function parseE9(text: string): ParsedE9Result {
   return {
     owner,
     buildings,
-    skippedLandPlots: table2Entries + skippedAsLand
+    skippedLandPlots: table2Entries + skippedAsLand,
+    failedRows
   };
 }
