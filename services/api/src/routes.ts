@@ -215,6 +215,23 @@ export default function routes(): express.Router {
   // Presence awareness — shows who else is viewing the same record
   const PRESENCE_TTL = 60;
 
+  // Lua script for atomic presence update (prevents read-modify-write race)
+  const PRESENCE_LUA = `
+    local key = KEYS[1]
+    local email = ARGV[1]
+    local name = ARGV[2]
+    local now = tonumber(ARGV[3])
+    local ttl = tonumber(ARGV[4])
+    local raw = redis.call('GET', key)
+    local viewers = raw and cjson.decode(raw) or {}
+    viewers[email] = { name = name, email = email, ts = now }
+    for e, v in pairs(viewers) do
+      if now - v.ts > (ttl * 1000) then viewers[e] = nil end
+    end
+    redis.call('SETEX', key, ttl, cjson.encode(viewers))
+    return cjson.encode(viewers)
+  `;
+
   router.post('/presence/:type/:id', Middlewares.asyncWrapper(async (req: any, res: any) => {
     const { type, id } = req.params;
     const redis = Service.getInstance().redisClient;
@@ -226,19 +243,15 @@ export default function routes(): express.Router {
       const setKey = `presence:${req.realm._id}:${type}:${id}`;
       const member = req.realm.members?.find((m: any) => m.email === req.user.email);
       const name = member?.name || req.user.email;
-      const raw = await redis.get(setKey);
       const now = Date.now();
-      const viewers: Record<string, any> = raw ? JSON.parse(raw) : {};
-      viewers[req.user.email] = { name, email: req.user.email, ts: now };
-      for (const email of Object.keys(viewers)) {
-        if (now - viewers[email].ts > PRESENCE_TTL * 1000) {
-          delete viewers[email];
-        }
-      }
-      await redis.set(setKey, JSON.stringify(viewers), { EX: PRESENCE_TTL });
+      const rawResult = await (redis as any).eval(PRESENCE_LUA, {
+        keys: [setKey],
+        arguments: [req.user.email, name, String(now), String(PRESENCE_TTL)]
+      }) as string;
+      const viewers: Record<string, any> = rawResult ? JSON.parse(rawResult) : {};
       const result = Object.values(viewers)
         .filter((v: any) => v.email !== req.user.email)
-        .map(({ name: n, email: e }: any) => ({ name: n, email: e }));
+        .map(({ name: n }: any) => ({ name: n }));
       res.json(result);
     } catch (error) {
       logger.error(`Presence POST error: ${error}`);
@@ -261,7 +274,7 @@ export default function routes(): express.Router {
       const now = Date.now();
       const result = Object.values(viewers)
         .filter((v: any) => v.email !== req.user.email && (now - v.ts) < PRESENCE_TTL * 1000)
-        .map(({ name: n, email: e }: any) => ({ name: n, email: e }));
+        .map(({ name: n }: any) => ({ name: n }));
       res.json(result);
     } catch (error) {
       logger.error(`Presence GET error: ${error}`);

@@ -8,20 +8,26 @@ export default function taskDiscounts(
   rent: Rent
 ): Rent {
   if (contract.discount) {
-    rent.discounts.push({
-      origin: 'contract',
-      description: 'Remise exceptionnelle',
-      amount: contract.discount
-    });
+    const amount = Math.round((Number(contract.discount) || 0) * 100) / 100;
+    if (Number.isFinite(amount) && amount > 0) {
+      rent.discounts.push({
+        origin: 'contract',
+        description: 'Remise exceptionnelle',
+        amount
+      });
+    }
   }
 
   if (settlements && settlements.discounts) {
     settlements.discounts.forEach((discount) => {
-      rent.discounts.push({
-        origin: 'settlement',
-        description: discount.description,
-        amount: discount.amount
-      });
+      const amount = Math.round((Number(discount.amount) || 0) * 100) / 100;
+      if (Number.isFinite(amount) && amount > 0) {
+        rent.discounts.push({
+          origin: discount.origin || 'settlement',
+          description: discount.description || '',
+          amount
+        });
+      }
     });
   }
   return rent;

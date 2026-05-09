@@ -25,7 +25,7 @@ export async function getOneTenant(
     MongooseDocument<CollectionTypes.Tenant>
   >({
     _id: tenantId,
-    'contacts.email': { $regex: new RegExp(email, 'i') }
+    'contacts.email': { $eq: email.toLowerCase() }
   }).populate<{
     realmId: CollectionTypes.Realm;
     leaseId: CollectionTypes.Lease;
@@ -59,7 +59,7 @@ export async function getAllTenants(
   const dbTenants = await Collections.Tenant.find<
     MongooseDocument<CollectionTypes.Tenant>
   >({
-    'contacts.email': { $regex: new RegExp(email, 'i') }
+    'contacts.email': { $eq: email.toLowerCase() }
   }).populate<{
     realmId: CollectionTypes.Realm;
     leaseId: CollectionTypes.Lease;

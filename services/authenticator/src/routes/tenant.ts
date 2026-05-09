@@ -40,7 +40,7 @@ export default function (): Router {
       }
 
       const tenants = await Collections.Tenant.find({
-        'contacts.email': email
+        'contacts.email': { $eq: email }
       });
       if (!tenants.length) {
         logger.info(`login failed for ${email} tenant not found`);
@@ -57,9 +57,7 @@ export default function (): Router {
         { EX: 300 }
       );
 
-      logger.debug(
-        `create a new OTP ${otp} for email ${email} and domain ${req.hostname}`
-      );
+      logger.debug(`OTP created for email ${email} on domain ${req.hostname}`);
 
       await axios.post(
         `${EMAILER_URL}/otp`,
@@ -85,7 +83,7 @@ export default function (): Router {
     '/signout',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const sessionToken = req.cookies.sessionToken;
-      logger.debug(`remove the session token: ${sessionToken}`);
+      logger.debug('session token removal requested');
       if (!sessionToken) {
         return res.sendStatus(204);
       }
@@ -106,8 +104,7 @@ export default function (): Router {
 
       const rawPayload = await Service.getInstance().redisClient!.get(otp as string);
       if (!rawPayload) {
-        throw new ServiceError(
-          `email not found for otp ${otp}. Code already used`,
+        throw new ServiceError('invalid or expired OTP',
           401
         );
       }
@@ -150,12 +147,12 @@ export default function (): Router {
 
       const email = await Service.getInstance().redisClient!.get(sessionToken);
       if (!email) {
-        logger.error(`email not found for token ${sessionToken}`);
+        logger.error('session token not found in store');
         throw new ServiceError('invalid token', 401);
       }
 
       try {
-        jwt.verify(sessionToken, ACCESS_TOKEN_SECRET!);
+        jwt.verify(sessionToken, ACCESS_TOKEN_SECRET!, { algorithms: ['HS256'] });
       } catch (error) {
         throw new ServiceError(error as string, 401);
       }

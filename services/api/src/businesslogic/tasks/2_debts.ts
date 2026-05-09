@@ -9,10 +9,13 @@ export default function taskDebts(
 ): Rent {
   if (settlements && settlements.debts) {
     settlements.debts.forEach((debt) => {
-      rent.debts.push({
-        description: debt.description,
-        amount: debt.amount
-      });
+      const amount = Math.round((Number(debt.amount) || 0) * 100) / 100;
+      if (Number.isFinite(amount) && amount > 0) {
+        rent.debts.push({
+          description: debt.description || '',
+          amount
+        });
+      }
     });
   }
   return rent;

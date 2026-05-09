@@ -9,8 +9,10 @@ export default function taskBalance(
 ): Rent {
   rent.balance = 0;
   if (previousRent) {
-    rent.total.balance =
-      previousRent.total.grandTotal - previousRent.total.payment;
+    const balance =
+      (Number(previousRent.total.grandTotal) || 0) -
+      (Number(previousRent.total.payment) || 0);
+    rent.total.balance = Math.round(balance * 100) / 100;
   }
   return rent;
 }
