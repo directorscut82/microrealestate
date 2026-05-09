@@ -5,6 +5,18 @@ import routes from './routes/index.js';
 Main();
 
 async function onStartUp(express: Express.Application): Promise<void> {
+  // Validate critical secrets at startup (fail fast instead of runtime errors)
+  const config = Service.getInstance().envConfig.getValues();
+  const requiredSecrets = ['ACCESS_TOKEN_SECRET', 'REFRESH_TOKEN_SECRET', 'RESET_TOKEN_SECRET'] as const;
+  for (const key of requiredSecrets) {
+    const value = config[key];
+    if (!value || String(value).length < 16) {
+      throw new Error(
+        `${key} is missing or too short (min 16 chars). Set it in your environment.`
+      );
+    }
+  }
+
   express.use(routes());
 }
 
