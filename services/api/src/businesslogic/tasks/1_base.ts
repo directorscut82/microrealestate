@@ -198,7 +198,7 @@ export default function taskBase(
     .forEach(function (property) {
       if (property.property) {
         const name = property.property.name || '';
-        const preTaxAmount = Number(property.rent) || 0;
+        const preTaxAmount = Math.round((Number(property.rent) || 0) * 100) / 100;
         const expenses = property.expenses || [];
 
         rent.preTaxAmounts.push({
@@ -224,7 +224,7 @@ export default function taskBase(
               })
               .map(({ title, amount }) => ({
                 description: title,
-                amount
+                amount: Math.round((Number(amount) || 0) * 100) / 100
               }))
           );
         }

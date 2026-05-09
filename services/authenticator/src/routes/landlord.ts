@@ -15,6 +15,7 @@ import { Request, Response } from 'express';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 8;
+const MAX_PASSWORD_LENGTH = 128;
 
 const _generateTokens = async (dbAccount: Record<string, any>): Promise<{ refreshToken: string; accessToken: string }> => {
   const { REFRESH_TOKEN_SECRET, ACCESS_TOKEN_SECRET, PRODUCTION } =
@@ -45,7 +46,7 @@ const _refreshTokens = async (oldRefreshToken: string): Promise<{ refreshToken?:
 
   let account: Record<string, any> | undefined;
   try {
-    const payload = jwt.verify(oldRefreshToken, REFRESH_TOKEN_SECRET!) as jwt.JwtPayload;
+    const payload = jwt.verify(oldRefreshToken, REFRESH_TOKEN_SECRET!, { algorithms: ['HS256'] }) as jwt.JwtPayload;
     if (payload?.account) {
       account = payload.account;
     }
@@ -80,7 +81,7 @@ const _applicationSignIn = Middlewares.asyncWrapper(async (req: Request, res: Re
   let keyId: string | undefined;
   let payload: jwt.JwtPayload;
   try {
-    payload = jwt.verify(clientSecret, APPCREDZ_TOKEN_SECRET!) as jwt.JwtPayload;
+    payload = jwt.verify(clientSecret, APPCREDZ_TOKEN_SECRET!, { algorithms: ['HS256'] }) as jwt.JwtPayload;
   } catch (exc) {
     if (exc instanceof jwt.TokenExpiredError) {
       logger.info(
@@ -159,6 +160,9 @@ const _userSignIn = Middlewares.asyncWrapper(async (req: Request, res: Response)
   if (!EMAIL_RE.test(email)) {
     throw new ServiceError('invalid email format', 422);
   }
+  if (String(password).length > MAX_PASSWORD_LENGTH) {
+    throw new ServiceError('password too long', 422);
+  }
 
   // Always perform bcrypt compare to prevent timing-based enumeration
   const account = await Collections.Account.findOne({
@@ -215,6 +219,9 @@ export default function (): Router {
             `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
             422
           );
+        }
+        if (String(password).length > MAX_PASSWORD_LENGTH) {
+          throw new ServiceError('password too long', 422);
         }
         const existingAccount = await Collections.Account.findOne({
           email: email.toLowerCase()
@@ -293,7 +300,7 @@ export default function (): Router {
     '/refreshtoken',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const oldRefreshToken = req.cookies.refreshToken;
-      logger.debug(`give a new refresh token for ${oldRefreshToken}`);
+      logger.debug('refresh token request received');
       if (!oldRefreshToken) {
         logger.debug('missing refresh token');
         throw new ServiceError('invalid credentials', 403);
@@ -380,10 +387,13 @@ export default function (): Router {
           422
         );
       }
+      if (String(password).length > MAX_PASSWORD_LENGTH) {
+        throw new ServiceError('password too long', 422);
+      }
 
       // Verify JWT BEFORE deleting from Redis to prevent race condition
       try {
-        jwt.verify(resetToken, RESET_TOKEN_SECRET!);
+        jwt.verify(resetToken, RESET_TOKEN_SECRET!, { algorithms: ['HS256'] });
       } catch (error) {
         throw new ServiceError('invalid or expired reset token', 403);
       }

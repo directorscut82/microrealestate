@@ -10,12 +10,14 @@ export default function taskVATs(
   if (contract.vatRate) {
     let rate = Number(contract.vatRate) || 0;
 
+    // Guard: must be finite
+    if (!Number.isFinite(rate)) rate = 0;
     // Guard: rate should be 0-1 (ratio). If > 1, likely a percentage (e.g., 20 instead of 0.20)
     if (rate > 1) {
-      // VAT rate > 1 likely a percentage (e.g., 20 instead of 0.20) — auto-convert
       rate = rate / 100;
     }
     if (rate < 0) rate = 0;
+    if (rate > 1) rate = 1; // Cap at 100% after conversion
 
     rent.preTaxAmounts.forEach((preTaxAmount) => {
       const amount = Number(preTaxAmount.amount) || 0;

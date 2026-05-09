@@ -90,7 +90,8 @@ export function needAccessToken(
     try {
       const decoded = JWT.verify(
         accessToken,
-        accessTokenSecret
+        accessTokenSecret,
+        { algorithms: ['HS256'] }
       ) as JWT.JwtPayload;
       if (decoded.account) {
         const user: UserServicePrincipal = {

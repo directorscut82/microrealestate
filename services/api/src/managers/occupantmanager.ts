@@ -284,6 +284,13 @@ export async function add(req: Req, res: Res) {
   }
   if (occupant.leaseId) {
     validateObjectId(occupant.leaseId, 'leaseId');
+    const leaseExists = await Collections.Lease.exists({
+      _id: occupant.leaseId,
+      realmId: realm!._id
+    });
+    if (!leaseExists) {
+      throw new ServiceError('Lease not found', 404);
+    }
   }
   validateFiniteNumber(occupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
   validateFiniteNumber(occupant.discount, 'discount', { min: 0, max: 10000000 });
@@ -365,6 +372,13 @@ export async function update(req: Req, res: Res) {
   }
   if (newOccupant.leaseId) {
     validateObjectId(newOccupant.leaseId, 'leaseId');
+    const leaseExists = await Collections.Lease.exists({
+      _id: newOccupant.leaseId,
+      realmId: realm!._id
+    });
+    if (!leaseExists) {
+      throw new ServiceError('Lease not found', 404);
+    }
   }
   validateFiniteNumber(newOccupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
   validateFiniteNumber(newOccupant.discount, 'discount', { min: 0, max: 10000000 });

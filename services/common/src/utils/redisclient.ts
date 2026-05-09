@@ -30,6 +30,7 @@ export default class RedisClient {
   set: RedisClientTypes.SetFunction = () => Promise.resolve(null);
   del: RedisClientTypes.DelFunction = () => Promise.resolve(-1);
   keys: RedisClientTypes.KeysFunction = () => Promise.resolve([]);
+  eval: RedisClientTypes.EvalFunction = () => Promise.resolve(null);
   // monitor: RedisClientTypes.MonitorFunction = () => Promise.resolve();
 
   private constructor(envConfig: EnvironmentConfig) {
@@ -64,6 +65,7 @@ export default class RedisClient {
     this.set = this.client.set.bind(this.client);
     this.del = this.client.del.bind(this.client);
     this.keys = this.client.keys.bind(this.client);
+    this.eval = (this.client as any).eval.bind(this.client);
     // this.monitor = this.client.monitor.bind(this.client);
 
     await this.client.connect();

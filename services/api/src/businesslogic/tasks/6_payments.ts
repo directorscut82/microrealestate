@@ -9,7 +9,13 @@ export default function taskPayments(
 ): Rent {
   if (settlements && settlements.payments) {
     settlements.payments.forEach((payment) => {
-      rent.payments.push(payment);
+      const amount = Math.round((Number(payment.amount) || 0) * 100) / 100;
+      if (Number.isFinite(amount) && amount > 0) {
+        rent.payments.push({
+          ...payment,
+          amount
+        });
+      }
     });
   }
   return rent;

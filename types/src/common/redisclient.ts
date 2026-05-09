@@ -8,5 +8,9 @@ export namespace RedisClientTypes {
   ) => Promise<string | null>;
   export type DelFunction = (key: string) => Promise<number>;
   export type KeysFunction = (pattern: string) => Promise<string[]>;
+  export type EvalFunction = (
+    script: string,
+    options: { keys?: string[]; arguments?: string[] }
+  ) => Promise<unknown>;
   export type MonitorFunction = () => Promise<void>;
 }
