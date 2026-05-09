@@ -61,7 +61,7 @@ function _escapeSecrets(realm: AnyRecord): AnyRecord {
   if (realm.thirdParties?.smsGateway?.password) {
     realm.thirdParties.smsGateway.password = SECRET_PLACEHOLDER;
   }
-  for (const app of realm.applications) {
+  for (const app of (realm.applications || [])) {
     app.clientSecret = SECRET_PLACEHOLDER;
   }
   return realm;
@@ -141,6 +141,11 @@ export async function update(req: Req, res: Res) {
   const previousRealm: any = await Collections.Realm.findOne({
     _id: req.body._id
   });
+
+  if (!previousRealm) {
+    throw new ServiceError('organization not found', 404);
+  }
+
   const updatedRealm: AnyRecord = { ...previousRealm.toObject(), ...req.body };
 
   _hasRequiredFields(updatedRealm);
@@ -218,8 +223,12 @@ export async function update(req: Req, res: Res) {
     }
   }
 
-  const dbAccounts: AnyRecord[] = await Collections.Account.find().lean();
-  const usernameMap = dbAccounts.reduce(
+  // Only fetch accounts that match realm member emails (not ALL accounts)
+  const memberEmails = updatedRealm.members.map((m: AnyRecord) => m.email).filter(Boolean);
+  const dbAccounts: AnyRecord[] = await Collections.Account.find({
+    email: { $in: memberEmails }
+  }, { email: 1, firstname: 1, lastname: 1 }).lean();
+  const usernameMap = (dbAccounts as AnyRecord[]).reduce(
     (acc: AnyRecord, { email, firstname, lastname }: AnyRecord) => {
       acc[email] = `${firstname} ${lastname}`;
       return acc;

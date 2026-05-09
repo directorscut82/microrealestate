@@ -8,11 +8,11 @@ type Res = ServiceResponse;
 type AnyRecord = Record<string, any>;
 
 export async function all(req: Req, res: Res) {
-  const now = moment();
-  const beginOfTheMonth = moment(now).startOf('month');
-  const endOfTheMonth = moment(now).endOf('month');
-  const beginOfTheYear = moment(now).startOf('year');
-  const endOfTheYear = moment(now).endOf('year');
+  const now = moment.utc();
+  const beginOfTheMonth = moment.utc(now).startOf('month');
+  const endOfTheMonth = moment.utc(now).endOf('month');
+  const beginOfTheYear = moment.utc(now).startOf('year');
+  const endOfTheYear = moment.utc(now).endOf('year');
 
   const realmId = req.realm!._id;
   const allTenants: AnyRecord[] = await Collections.Tenant.find(
@@ -20,8 +20,8 @@ export async function all(req: Req, res: Res) {
   ).lean();
   const activeTenants = allTenants.reduce((acc: AnyRecord[], tenant: AnyRecord) => {
     const terminationMoment = tenant.terminationDate
-      ? moment(tenant.terminationDate)
-      : moment(tenant.endDate);
+      ? moment.utc(tenant.terminationDate)
+      : moment.utc(tenant.endDate);
 
     if (terminationMoment.isSameOrAfter(now, 'day')) {
       acc.push(tenant);
@@ -86,7 +86,7 @@ export async function all(req: Req, res: Res) {
             return;
           }
 
-          const paymentMoment = moment(payment.date, 'DD/MM/YYYY');
+          const paymentMoment = moment.utc(payment.date, 'DD/MM/YYYY');
           if (
             paymentMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')
           ) {
@@ -114,7 +114,7 @@ export async function all(req: Req, res: Res) {
       ? activeTenants
           .reduce((acc: AnyRecord[], tenant: AnyRecord) => {
             const currentRent = (tenant.rents || []).find((rent: AnyRecord) => {
-              const termMoment = rent.term && moment(rent.term, 'YYYYMMDDHH');
+              const termMoment = rent.term && moment.utc(rent.term, 'YYYYMMDDHH');
               return (
                 termMoment &&
                 termMoment.isBetween(
@@ -140,8 +140,7 @@ export async function all(req: Req, res: Res) {
           .slice(0, 5)
       : [];
 
-  const emptyRevenues = moment.months().reduce((acc: AnyRecord, _month: string, index: number) => {
-    const key = moment(`${index + 1}/${now.year()}`, 'MM/YYYY').format(
+  const emptyRevenues = moment.months().reduce((acc: AnyRecord, _month: string, index: number) => {    const key = moment.utc(`${index + 1}/${now.year()}`, 'MM/YYYY').format(
       'MMYYYY'
     );
     acc[key] = {
@@ -161,7 +160,7 @@ export async function all(req: Req, res: Res) {
     allTenants.reduce((acc: AnyRecord, tenant: AnyRecord) => {
       const tenantName = tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
       (tenant.rents || []).forEach((rent: AnyRecord) => {
-        const termMoment = moment(rent.term, 'YYYYMMDDHH');
+        const termMoment = moment.utc(rent.term, 'YYYYMMDDHH');
         if (!termMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')) {
           return;
         }
@@ -226,7 +225,7 @@ export async function all(req: Req, res: Res) {
         : (value as AnyRecord).notPaid
     }))
     .sort((r1: AnyRecord, r2: AnyRecord) =>
-      moment(r1.month, 'MMYYYY').isBefore(moment(r2.month, 'MMYYYY')) ? -1 : 1
+      moment.utc(r1.month, 'MMYYYY').isBefore(moment.utc(r2.month, 'MMYYYY')) ? -1 : 1
     );
 
   // Pending bills grouped by building
