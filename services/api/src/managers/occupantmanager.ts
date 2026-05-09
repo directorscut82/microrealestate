@@ -640,12 +640,14 @@ export async function all(req: Req, res: Res) {
     res.json(filtered.map((tenant) => FD.toOccupantData(tenant)));
   } else {
     // Explicit pagination: apply skip/limit
-    const total = await Collections.Tenant.countDocuments(countFilter);
-    const tenants: AnyRecord[] = await Collections.Tenant.aggregate([
-      { $match: countFilter },
-      { $sort: { name: 1 } },
-      { $skip: skip },
-      { $limit: limit }
+    const [tenants, total] = await Promise.all([
+      Collections.Tenant.aggregate<AnyRecord>([
+        { $match: countFilter },
+        { $sort: { name: 1 } },
+        { $skip: skip },
+        { $limit: limit }
+      ]),
+      Collections.Tenant.countDocuments(countFilter)
     ]);
 
     const meta = Pagination.buildPaginationMeta(total, page, limit);
