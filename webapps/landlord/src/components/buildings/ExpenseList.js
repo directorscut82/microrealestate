@@ -8,6 +8,7 @@ import {
 import {
   LuAlertTriangle,
   LuCalendarX2,
+  LuFileUp,
   LuPencil,
   LuPlusCircle,
   LuTrash,
@@ -71,6 +72,7 @@ const expenseSchema = z.object({
   ownerAmount: z.coerce.number().min(0).optional().default(0),
   startFromCurrentMonth: z.boolean().optional().default(true),
   notes: z.string().optional(),
+  billingId: z.string().optional(),
   customAllocations: z
     .array(
       z.object({
@@ -565,6 +567,19 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               <Label htmlFor="notes">{t('Notes')}</Label>
               <Textarea id="notes" rows={3} {...register('notes')} />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="billingId">
+                {t('Billing ID')}
+                <span className="text-xs text-muted-foreground ml-2">
+                  ({t('e.g. supply number')})
+                </span>
+              </Label>
+              <Input
+                id="billingId"
+                {...register('billingId')}
+                placeholder={t('e.g. supply number placeholder')}
+              />
+            </div>
           </div>
         </form>
       )}
@@ -649,15 +664,33 @@ export default function ExpenseList({ building }) {
   return (
     <div>
       <div className="mb-4">
-        <Button
-          variant="secondary"
-          className="w-full gap-2 sm:w-fit"
-          onClick={handleAddExpense}
-          data-cy="addExpense"
-        >
-          <LuPlusCircle className="size-4" />
-          {t('Add Expense')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            className="gap-2"
+            onClick={handleAddExpense}
+            data-cy="addExpense"
+          >
+            <LuPlusCircle className="size-4" />
+            {t('Add Expense')}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            data-cy="importBill"
+          >
+            <LuFileUp className="size-4" />
+            {t('Import Bill')}
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            data-cy="paymentReceipt"
+          >
+            <LuFileUp className="size-4" />
+            {t('Payment Receipts')}
+          </Button>
+        </div>
       </div>
 
       {expenses.length > 0 ? (
