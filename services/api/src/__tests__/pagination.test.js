@@ -124,6 +124,7 @@ describe('Pagination utility', () => {
         totalPages: 8
       });
       expect(headers).toEqual({
+        'Access-Control-Expose-Headers': 'X-Total-Count,X-Page,X-Limit,X-Total-Pages',
         'X-Total-Count': '200',
         'X-Page': '3',
         'X-Limit': '25',
