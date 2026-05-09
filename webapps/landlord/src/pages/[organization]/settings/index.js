@@ -84,6 +84,11 @@ function Settings() {
                 description={t(
                   'Connect third-parties to extend the functionality of your organization'
                 )}
+            />
+            <SettingLink
+              href="/settings/database"
+              title={t('Database')}
+              description={t('Save and restore your application data')}
               />
             </>
           ) : null}
