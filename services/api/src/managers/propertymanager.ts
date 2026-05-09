@@ -83,7 +83,10 @@ export async function update(req: Req, res: Res) {
     { new: true }
   ).lean();
 
-  const properties = await _toPropertiesData(realm, [dbProperty]);
+  if (!dbProperty) {
+    throw new ServiceError('Property not found', 404);
+  }
+  const properties = await _toPropertiesData(realm, [dbProperty as any]);
   return res.json(properties[0]);
 }
 

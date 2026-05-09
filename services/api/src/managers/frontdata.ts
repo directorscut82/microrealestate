@@ -10,7 +10,7 @@ export function toRentData(
   emailStatus?: AnyRecord
 ): AnyRecord {
   const rent: AnyRecord = JSON.parse(JSON.stringify(inputRent));
-  const rentMoment = moment(String(rent.term), 'YYYYMMDDHH');
+  const rentMoment = moment.utc(String(rent.term), 'YYYYMMDDHH');
 
   const rentToReturn: AnyRecord = {
     month: rent.month,

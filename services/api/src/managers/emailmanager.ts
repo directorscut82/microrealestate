@@ -65,7 +65,7 @@ async function _sendSms(
     return null;
   }
 
-  const termDate = moment(String(term), 'YYYYMMDDHH');
+  const termDate = moment.utc(String(term), 'YYYYMMDDHH');
   const monthYear = termDate.format('MM/YYYY');
   const textMap: Record<string, string> = {
     rentcall: `Υπενθύμιση ενοικίου ${monthYear} - ${tenant.name}`,
@@ -106,7 +106,7 @@ export async function sendSmsOnly(req: Req, res: Res) {
   if (!tenantIds?.length) {
     throw new ServiceError('tenantIds required', 422);
   }
-  const defaultTerm = moment(`${year}/${month}/01`, 'YYYY/MM/DD').format(
+  const defaultTerm = moment.utc(`${year}/${month}/01`, 'YYYY/MM/DD').format(
     'YYYYMMDDHH'
   );
 
@@ -138,7 +138,7 @@ export async function sendSmsOnly(req: Req, res: Res) {
 export async function send(req: Req, res: Res) {
   const realm = req.realm;
   const { document, tenantIds, terms, year, month } = req.body;
-  const defaultTerm = moment(`${year}/${month}/01`, 'YYYY/MM/DD').format(
+  const defaultTerm = moment.utc(`${year}/${month}/01`, 'YYYY/MM/DD').format(
     'YYYYMMDDHH'
   );
 

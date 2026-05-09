@@ -11,7 +11,7 @@ async function _leaseUsedByTenant(realm: Req['realm']): Promise<Set<string>> {
     { realmId: 1, leaseId: 1 }
   ).lean();
   return (tenants as any[]).reduce((acc: Set<string>, { leaseId }: any) => {
-    acc.add(leaseId);
+    acc.add(String(leaseId));
     return acc;
   }, new Set<string>());
 }
@@ -31,7 +31,7 @@ export async function add(req: Req, res: Res) {
   });
   const savedLease: any = await dbLease.save();
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
-  savedLease.usedByTenants = setOfUsedLeases.has(savedLease._id);
+  savedLease.usedByTenants = setOfUsedLeases.has(String(savedLease._id));
   res.json(savedLease);
 }
 
@@ -50,7 +50,7 @@ export async function update(req: Req, res: Res) {
 
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
 
-  const existingLease: any = setOfUsedLeases.has(lease._id)
+  const existingLease: any = setOfUsedLeases.has(String(lease._id))
     ? await Collections.Lease.findOne({ realmId: realm!._id, _id: lease._id }).lean()
     : null;
 
@@ -59,7 +59,7 @@ export async function update(req: Req, res: Res) {
       realmId: realm!._id,
       _id: lease._id
     },
-    setOfUsedLeases.has(lease._id)
+    setOfUsedLeases.has(String(lease._id))
       ? {
           name: lease.name || existingLease?.name,
           description: lease.description ?? existingLease?.description,
@@ -74,7 +74,7 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('lease not found', 404);
   }
 
-  dbLease.usedByTenants = setOfUsedLeases.has(dbLease._id);
+  dbLease.usedByTenants = setOfUsedLeases.has(String(dbLease._id));
   res.json(dbLease);
 }
 
@@ -155,7 +155,7 @@ export async function all(req: Req, res: Res) {
   res.json(
     dbLeases.map((dbLease: any) => ({
       ...dbLease,
-      usedByTenants: setOfUsedLeases.has(dbLease._id)
+      usedByTenants: setOfUsedLeases.has(String(dbLease._id))
     }))
   );
 }
@@ -174,6 +174,6 @@ export async function one(req: Req, res: Res) {
   }
 
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
-  dbLease.usedByTenants = setOfUsedLeases.has(dbLease._id);
+  dbLease.usedByTenants = setOfUsedLeases.has(String(dbLease._id));
   res.json(dbLease);
 }
