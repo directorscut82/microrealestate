@@ -1,5 +1,6 @@
 import * as accountingManager from './managers/accountingmanager.js';
 import * as billManager from './managers/billmanager.js';
+import databaseManager from './managers/databasemanager.js';
 import * as buildingManager from './managers/buildingmanager.js';
 import * as dashboardManager from './managers/dashboardmanager.js';
 import * as emailManager from './managers/emailmanager.js';
@@ -190,6 +191,17 @@ export default function routes(): express.Router {
   billsRouter.post('/payment-receipt', uploadRateLimit, upload.array('bills', 5) as any, verifyPdfContent, Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
   billsRouter.post('/confirm-payment', Middlewares.asyncWrapper(billManager.confirmPayment as any));
   router.use('/bills', billsRouter);
+
+  // Database backup/restore (admin only)
+  const databaseRouter = express.Router();
+  databaseRouter.use(databaseManager.requireAdmin);
+  databaseRouter.get('/backup', databaseManager.backup);
+  databaseRouter.post(
+    '/restore',
+    express.json({ limit: '100mb' }),
+    databaseManager.restore
+  );
+  router.use('/database', databaseRouter);
 
   router.get(
     '/accounting/:year',

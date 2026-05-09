@@ -420,3 +420,16 @@ export async function fetchBills({ buildingId, status } = {}) {
   const response = await apiFetcher().get(`/bills?${params.toString()}`);
   return response.data;
 }
+
+export async function downloadDatabaseBackup() {
+  const response = await apiFetcher().get('/database/backup');
+  return response;
+}
+
+export async function restoreDatabase(backupData) {
+  const response = await apiFetcher().post('/database/restore', backupData, {
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity
+  });
+  return response.data;
+}
