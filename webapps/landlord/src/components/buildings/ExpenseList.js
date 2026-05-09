@@ -52,6 +52,8 @@ import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
 import ExpenseHistory from './ExpenseHistory';
 import MonthlyStatement from './MonthlyStatement';
+import BillImportDialog from './BillImportDialog';
+import PaymentReceiptDialog from './PaymentReceiptDialog';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
@@ -604,6 +606,8 @@ export default function ExpenseList({ building }) {
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [openConfirmDelete, setOpenConfirmDelete] = useState(false);
   const [expenseToDelete, setExpenseToDelete] = useState(null);
+  const [openBillImport, setOpenBillImport] = useState(false);
+  const [openPaymentReceipt, setOpenPaymentReceipt] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const removeMutation = useMutation({
@@ -677,6 +681,7 @@ export default function ExpenseList({ building }) {
           <Button
             variant="outline"
             className="gap-2"
+            onClick={() => setOpenBillImport(true)}
             data-cy="importBill"
           >
             <LuFileUp className="size-4" />
@@ -685,6 +690,7 @@ export default function ExpenseList({ building }) {
           <Button
             variant="outline"
             className="gap-2"
+            onClick={() => setOpenPaymentReceipt(true)}
             data-cy="paymentReceipt"
           >
             <LuFileUp className="size-4" />
@@ -897,6 +903,16 @@ export default function ExpenseList({ building }) {
         </div>
         </>
       )}
+
+      <BillImportDialog
+        open={openBillImport}
+        setOpen={setOpenBillImport}
+        building={building}
+      />
+      <PaymentReceiptDialog
+        open={openPaymentReceipt}
+        setOpen={setOpenPaymentReceipt}
+      />
     </div>
   );
 }
