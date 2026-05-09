@@ -82,7 +82,6 @@ function _findMemberIdByEmail(
   return member ? String(member._id) : undefined;
 }
 
-// Recompute rents for all tenants that use a specific property
 async function _recomputeTenantsForProperty(
   realmId: string,
   propertyId: string
@@ -91,15 +90,12 @@ async function _recomputeTenantsForProperty(
     realmId,
     'properties.propertyId': propertyId
   });
-
   if (!tenants.length) return;
 
-  for (const tenant of tenants) {
+  const recomputeOne = async (tenant: any) => {
     const tenantObj: any = tenant.toObject();
-    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
-    if (!tenantObj.properties?.length) continue;
-
-    // Fetch property details for the tenant
+    if (!tenantObj.beginDate || !tenantObj.endDate) return;
+    if (!tenantObj.properties?.length) return;
     const propertyIds = tenantObj.properties
       .map((p: any) => p.propertyId)
       .filter(Boolean);
@@ -110,17 +106,13 @@ async function _recomputeTenantsForProperty(
       acc[String(p._id)] = p;
       return acc;
     }, {});
-
     tenantObj.properties.forEach((p: any) => {
       p.property = propMap[String(p.propertyId)] || p.property;
     });
-
-    // Fetch buildings for rent computation
     const buildings: CollectionTypes.Building[] = await Collections.Building.find({
       realmId,
       'units.propertyId': { $in: propertyIds }
     }).lean() as CollectionTypes.Building[];
-
     try {
       const termFrequency = tenantObj.frequency || 'months';
       const contract = {
@@ -140,7 +132,6 @@ async function _recomputeTenantsForProperty(
         discount: tenantObj.discount,
         rents: tenantObj.rents || []
       };
-
       const updated = Contract.update(contract, {
         begin: tenantObj.beginDate,
         end: tenantObj.endDate,
@@ -148,7 +139,6 @@ async function _recomputeTenantsForProperty(
         properties: tenantObj.properties,
         frequency: termFrequency
       });
-
       await Collections.Tenant.updateOne(
         { _id: tenant._id },
         { rents: updated.rents }
@@ -157,8 +147,12 @@ async function _recomputeTenantsForProperty(
     } catch (error) {
       logger.error(`Failed to recompute rents for tenant ${tenantObj.name}: ${error}`);
     }
-  }
+  };
+
+  await Promise.all(tenants.map(recomputeOne));
 }
+
+// Recompute rents for all tenants that use a specific property
 
 // ---------------------------------------------------------------------------
 // Building CRUD
@@ -914,8 +908,12 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   const { id } = req.params;
   const { term, expenses: expenseEntries, ownerExpenses } = req.body;
 
-  if (!term) {
-    throw new ServiceError('Term (YYYYMMDDHH) is required', 422);
+  if (!term || !/^\d{10}$/.test(String(term))) {
+    throw new ServiceError('Invalid term format (expected YYYYMMDDHH)', 422);
+  }
+  const termNumber = Number(term);
+  if (termNumber < 2020010100 || termNumber > 2099123100) {
+    throw new ServiceError('Term out of valid range', 422);
   }
   // Array present = user intends to set state for this section (even if empty = clear)
   const expensesProvided = Array.isArray(expenseEntries);

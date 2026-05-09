@@ -9,7 +9,7 @@ import {
   LuFileWarning,
   LuReceipt
 } from 'react-icons/lu';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import FileDropZone from '../ui/file-drop-zone';
@@ -26,11 +26,16 @@ export default function PaymentReceiptDialog({ open, setOpen }) {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
 
+  useEffect(() => {
+    if (!open) {
+      setState('idle');
+      setFiles([]);
+      setResults([]);
+    }
+  }, [open]);
+
   const handleClose = useCallback(() => {
     setOpen(false);
-    setState('idle');
-    setFiles([]);
-    setResults([]);
   }, [setOpen]);
 
   const handleParse = useCallback(async () => {
@@ -42,6 +47,7 @@ export default function PaymentReceiptDialog({ open, setOpen }) {
       setResults(data);
       setState('preview');
     } catch (error) {
+      console.error('Payment receipt parse error:', error);
       toast.error(t('Failed to parse payment receipts'));
       setState('idle');
     }
@@ -62,6 +68,7 @@ export default function PaymentReceiptDialog({ open, setOpen }) {
       );
       handleClose();
     } catch (error) {
+      console.error('Payment confirm error:', error);
       toast.error(t('Failed to confirm payment'));
       setState('preview');
     }
