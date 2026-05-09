@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState } from 'react';
 
 import Layout from './Layout';
+import Loading from './Loading';
 import { StoreContext } from '../store';
 import { useRouter } from 'next/router';
 
@@ -25,15 +26,19 @@ function Application({ children }) {
 
     router.events.on('routeChangeStart', routeChangeStart);
     router.events.on('routeChangeComplete', routeChangeComplete);
+    router.events.on('routeChangeError', routeChangeComplete);
 
     return () => {
       router.events.off('routeChangeStart', routeChangeStart);
       router.events.off('routeChangeComplete', routeChangeComplete);
+      router.events.off('routeChangeError', routeChangeComplete);
     };
   }, [router]);
 
   return (
-    <Layout hideMenu={hideMenu}>{!routeloading && children}</Layout>
+    <Layout hideMenu={hideMenu}>
+      {routeloading ? <Loading /> : children}
+    </Layout>
   );
 }
 
