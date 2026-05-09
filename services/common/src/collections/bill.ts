@@ -20,7 +20,7 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
   term: { type: Number, required: true },
   rfCode: String,
   irisCodeUrl: String,
-  pdfUrl: { type: String, required: true },
+  pdfUrl: String,
   status: {
     type: String,
     enum: ['pending', 'paid'],
@@ -36,5 +36,6 @@ BillSchema.index({ realmId: 1, buildingId: 1 });
 BillSchema.index({ realmId: 1, status: 1 });
 BillSchema.index({ realmId: 1, billingId: 1 });
 BillSchema.index({ realmId: 1, rfCode: 1 });
+BillSchema.index({ realmId: 1, expenseId: 1, term: 1 });
 
 export default mongoose.model<CollectionTypes.Bill>('Bill', BillSchema);

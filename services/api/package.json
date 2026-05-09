@@ -38,7 +38,8 @@
     "mongobackup": "0.3.5",
     "multer": "^2.1.1",
     "nanoid": "5.1.0",
-    "pdfjs-dist": "4.0.379"
+    "pdfjs-dist": "4.0.379",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@microrealestate/types": "*",

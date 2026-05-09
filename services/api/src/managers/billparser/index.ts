@@ -31,9 +31,14 @@ function detectProvider(text: string): Provider | null {
 }
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { getDocument } = pdfjs;
+  // Disable worker for Node.js environment
+  if (pdfjs.GlobalWorkerOptions) {
+    pdfjs.GlobalWorkerOptions.workerSrc = '';
+  }
   const data = new Uint8Array(buffer);
-  const doc = await getDocument({ data }).promise;
+  const doc = await getDocument({ data, useWorkerFetch: false }).promise;
   let fullText = '';
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
@@ -48,69 +53,56 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 export async function extractQrImageFromPdf(
   buffer: Buffer
 ): Promise<Buffer | null> {
-  // QR code extraction from PDF images
-  // pdfjs-dist can extract operator list which includes images
-  // For now, we extract the first small-ish square image from page 1
-  try {
-    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const data = new Uint8Array(buffer);
-    const doc = await getDocument({ data }).promise;
-    const page = await doc.getPage(1);
-    const ops = await page.getOperatorList();
-    const { OPS } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // Extract the first roughly-square small image from page 1.
+  // QR/IRIS codes are typically 100-400px squares.
+  // Uses sharp (prebuilt, no native deps to install) to encode raw pixels to PNG.
+  const sharp = (await import('sharp')).default;
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { getDocument, OPS } = pdfjs;
 
-    for (let i = 0; i < ops.fnArray.length; i++) {
+  if (pdfjs.GlobalWorkerOptions) {
+    pdfjs.GlobalWorkerOptions.workerSrc = '';
+  }
+
+  const data = new Uint8Array(buffer);
+  const doc = await getDocument({ data, useWorkerFetch: false }).promise;
+  const page = await doc.getPage(1);
+  const ops = await page.getOperatorList();
+
+  for (let i = 0; i < ops.fnArray.length; i++) {
+    if (
+      ops.fnArray[i] === OPS.paintImageXObject ||
+      ops.fnArray[i] === OPS.paintJpegXObject
+    ) {
+      const imgName = ops.argsArray[i][0];
+      // In pdfjs v4, objs.get() returns synchronously if loaded
+      const imgData = page.objs.has(imgName)
+        ? page.objs.get(imgName)
+        : null;
+
       if (
-        ops.fnArray[i] === OPS.paintImageXObject ||
-        ops.fnArray[i] === OPS.paintJpegXObject
+        imgData &&
+        imgData.width &&
+        imgData.height &&
+        Math.abs(imgData.width - imgData.height) < 20 &&
+        imgData.width >= 50 &&
+        imgData.width <= 500
       ) {
-        const imgName = ops.argsArray[i][0];
-        const imgData = await new Promise<any>((resolve) => {
-          page.objs.get(imgName, resolve);
-        });
-        // QR codes are roughly square and relatively small
-        if (
-          imgData &&
-          imgData.width &&
-          imgData.height &&
-          Math.abs(imgData.width - imgData.height) < 20 &&
-          imgData.width >= 50 &&
-          imgData.width <= 500
-        ) {
-          // Convert raw image data to PNG buffer
-          const { createCanvas } = await import('canvas');
-          const canvas = createCanvas(imgData.width, imgData.height);
-          const ctx = canvas.getContext('2d');
-          const imageData = ctx.createImageData(
-            imgData.width,
-            imgData.height
-          );
+        const { width, height } = imgData;
+        const src: Uint8Array | Uint8ClampedArray = imgData.data;
+        const channels = src.length === width * height * 3 ? 3 : 4;
 
-          // pdfjs image data can be RGB or RGBA
-          const src = imgData.data;
-          const dest = imageData.data;
-          if (src.length === imgData.width * imgData.height * 3) {
-            // RGB → RGBA
-            for (let j = 0; j < imgData.width * imgData.height; j++) {
-              dest[j * 4] = src[j * 3];
-              dest[j * 4 + 1] = src[j * 3 + 1];
-              dest[j * 4 + 2] = src[j * 3 + 2];
-              dest[j * 4 + 3] = 255;
-            }
-          } else {
-            // Assume RGBA
-            for (let j = 0; j < src.length; j++) {
-              dest[j] = src[j];
-            }
-          }
-          ctx.putImageData(imageData, 0, 0);
-          return canvas.toBuffer('image/png');
-        }
+        const pngBuffer = await sharp(Buffer.from(src), {
+          raw: { width, height, channels }
+        })
+          .png()
+          .toBuffer();
+
+        return pngBuffer;
       }
     }
-  } catch {
-    // QR extraction is best-effort
   }
+
   return null;
 }
 

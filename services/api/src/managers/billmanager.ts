@@ -99,15 +99,17 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       bill.billingIdNormalized
     );
 
-    // Extract QR/IRIS image (best effort)
+    // Extract QR/IRIS image only if we have a match (skip for unmatched)
     let irisCodeBase64: string | undefined;
-    try {
-      const qrBuffer = await extractQrImageFromPdf(file.buffer);
-      if (qrBuffer) {
-        irisCodeBase64 = qrBuffer.toString('base64');
+    if (match) {
+      try {
+        const qrBuffer = await extractQrImageFromPdf(file.buffer);
+        if (qrBuffer) {
+          irisCodeBase64 = qrBuffer.toString('base64');
+        }
+      } catch (e) {
+        logger.debug(`QR extraction failed for ${file.originalname}: ${e}`);
       }
-    } catch (e) {
-      logger.debug(`QR extraction failed for ${file.originalname}: ${e}`);
     }
 
     // Check for existing bill in same term+expense
@@ -157,8 +159,8 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
 
 /**
  * POST /bills/confirm
- * Save confirmed bills: store PDF in B2/S3, create Bill records,
- * update monthly charges.
+ * Save confirmed bills. Accepts irisCodeBase64 from the parse step and
+ * stores it as a data URI. B2 upload can be layered in later.
  */
 export async function confirmBills(req: Req, res: Res): Promise<void> {
   const realmId = req.realm?._id;
@@ -186,10 +188,32 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       dueDate,
       term,
       rfCode,
-      irisCodeUrl,
-      pdfUrl,
+      irisCodeBase64,
       replaceExisting
     } = billData;
+
+    // Verify building belongs to this realm
+    const building = await Collections.Building.findOne({
+      _id: buildingId,
+      realmId
+    }).lean();
+    if (!building) {
+      throw new ServiceError(
+        `Το κτίριο ${buildingId} δεν βρέθηκε`,
+        404
+      );
+    }
+
+    // Verify expense exists on this building
+    const expenseExists = (building as any).expenses?.some(
+      (e: any) => String(e._id) === expenseId
+    );
+    if (!expenseExists) {
+      throw new ServiceError(
+        `Η δαπάνη ${expenseId} δεν βρέθηκε στο κτίριο`,
+        404
+      );
+    }
 
     // If replacing, remove existing bill for same term+expense
     if (replaceExisting) {
@@ -200,6 +224,11 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         term
       });
     }
+
+    // Store IRIS QR as data URI if provided (B2 upload can replace later)
+    const irisCodeUrl = irisCodeBase64
+      ? `data:image/png;base64,${irisCodeBase64}`
+      : undefined;
 
     const bill = new Collections.Bill({
       realmId,
@@ -215,7 +244,6 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       term,
       rfCode,
       irisCodeUrl,
-      pdfUrl,
       status: 'pending',
       createdDate: new Date(),
       updatedDate: new Date()
@@ -247,13 +275,18 @@ export async function parsePaymentReceipts(
     throw new ServiceError('Δεν βρέθηκαν αρχεία PDF', 422);
   }
 
-  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { getDocument } = pdfjs;
+  if (pdfjs.GlobalWorkerOptions) {
+    pdfjs.GlobalWorkerOptions.workerSrc = '';
+  }
+
   const results = [];
 
   for (const file of files) {
     // Extract text from receipt
     const data = new Uint8Array(file.buffer);
-    const doc = await getDocument({ data }).promise;
+    const doc = await getDocument({ data, useWorkerFetch: false }).promise;
     let text = '';
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
@@ -282,11 +315,12 @@ export async function parsePaymentReceipts(
 
       if (pendingBill) {
         // Get building/expense names for display
-        const building = await Collections.Building.findById(
-          (pendingBill as any).buildingId
-        ).lean();
+        const building = await Collections.Building.findOne({
+          _id: (pendingBill as any).buildingId,
+          realmId
+        }).lean();
         const expense = building
-          ? (building as any).expenses.find(
+          ? (building as any).expenses?.find(
               (e: any) =>
                 String(e._id) === String((pendingBill as any).expenseId)
             )
@@ -348,7 +382,7 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
 
 /**
  * GET /bills
- * List bills with optional filters.
+ * List bills with optional filters: buildingId, status, term, expenseId.
  */
 export async function list(req: Req, res: Res): Promise<void> {
   const realmId = req.realm?._id;
@@ -356,10 +390,12 @@ export async function list(req: Req, res: Res): Promise<void> {
     throw new ServiceError('Unauthorized', 401);
   }
 
-  const { buildingId, status } = req.query as any;
+  const { buildingId, status, term, expenseId } = req.query as any;
   const filter: any = { realmId };
   if (buildingId) filter.buildingId = buildingId;
   if (status) filter.status = status;
+  if (term) filter.term = Number(term);
+  if (expenseId) filter.expenseId = expenseId;
 
   const bills = await Collections.Bill.find(filter)
     .sort({ createdDate: -1 })

@@ -360,9 +360,7 @@ export async function saveMonthlyStatement(buildingId, data) {
 export async function parseBillPdfs(files) {
   const formData = new FormData();
   files.forEach((file) => formData.append('bills', file));
-  const response = await apiFetcher().post('/bills/parse', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  });
+  const response = await apiFetcher().post('/bills/parse', formData);
   return response.data;
 }
 
@@ -374,11 +372,7 @@ export async function confirmBills(bills) {
 export async function parsePaymentReceipts(files) {
   const formData = new FormData();
   files.forEach((file) => formData.append('bills', file));
-  const response = await apiFetcher().post(
-    '/bills/payment-receipt',
-    formData,
-    { headers: { 'Content-Type': 'multipart/form-data' } }
-  );
+  const response = await apiFetcher().post('/bills/payment-receipt', formData);
   return response.data;
 }
 

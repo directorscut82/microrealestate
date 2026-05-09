@@ -1,8 +1,11 @@
 import { BillParseResult, normalizeBillingId } from './types.js';
 
 function parseGreekAmount(raw: string): number | null {
-  // Handle "186 , 21" or "186,21" or "186.21"
-  const cleaned = raw.replace(/\s/g, '').replace(',', '.');
+  let cleaned = raw.replace(/\s/g, '');
+  if (cleaned.includes(',')) {
+    // Greek format: dots are thousands separators, comma is decimal
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  }
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
 }
@@ -16,9 +19,11 @@ function parseGreekDate(raw: string): Date | null {
 }
 
 export function parseDehBill(text: string): BillParseResult {
-  // Extract billing ID (Αριθμός παροχής)
+  // Extract billing ID - handle both full and abbreviated forms:
+  // "Αριθμός παροχής 7 00935585-03 2"
+  // "Αρ. παροχής: 7 00935585-03 2"
   const billingIdMatch = text.match(
-    /Αριθμός παροχής\s+([\d][\d\s\-]+\d)/i
+    /(?:Αριθμός\s+παροχής|Αρ\.?\s*παροχής\s*:?)\s+([\d][\d\s\-]+\d)/i
   );
   if (!billingIdMatch) {
     return { success: false, error: 'Δεν βρέθηκε αριθμός παροχής' };

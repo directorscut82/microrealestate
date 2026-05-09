@@ -33,6 +33,22 @@ RF36907738000300008959050
 Ημ/νία Έκδοσης 27/03/2026
 Α/Α Λογαριασμού 1485399694`;
 
+const DEH_BILL_TEXT_ABBREVIATED = `ΔΕΗ A.E.
+dei.gr
+Αρ. παροχής: 7 00935585-03 2
+Συνολικό ποσό πληρωμής *1.186,21€
+ΕΞΟΦΛΗΣΗ ΕΩΣ 22/04/2026
+Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026
+Ημ/νία Έκδοσης 27/03/2026
+RF36907738000300008959050`;
+
+const DEH_BILL_TEXT_LARGE_AMOUNT = `ΔΕΗ A.E.
+dei.gr
+Αριθμός παροχής 7 00935585-03 2
+Συνολικό ποσό πληρωμής *12.345,67€
+Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026
+Ημ/νία Έκδοσης 27/03/2026`;
+
 const DEH_BILL_TEXT_SPACED_AMOUNTS = `ΔΕΗ A.E.
 dei.gr
 Αριθμός παροχής 7 00935585-03 2
@@ -64,6 +80,24 @@ describe('DEH Bill Parser', () => {
       const result = parseDehBill(DEH_BILL_TEXT_SPACED_AMOUNTS);
       expect(result.success).toBe(true);
       expect(result.bill?.totalAmount).toBe(186.21);
+    });
+
+    it('should handle abbreviated billing ID format (Αρ. παροχής:)', () => {
+      const result = parseDehBill(DEH_BILL_TEXT_ABBREVIATED);
+      expect(result.success).toBe(true);
+      expect(result.bill?.billingId).toBe('7 00935585-03 2');
+    });
+
+    it('should parse amounts >= 1000 with dot as thousands separator', () => {
+      const result = parseDehBill(DEH_BILL_TEXT_ABBREVIATED);
+      expect(result.success).toBe(true);
+      expect(result.bill?.totalAmount).toBe(1186.21);
+    });
+
+    it('should parse large amounts with multiple dots (12.345,67)', () => {
+      const result = parseDehBill(DEH_BILL_TEXT_LARGE_AMOUNT);
+      expect(result.success).toBe(true);
+      expect(result.bill?.totalAmount).toBe(12345.67);
     });
 
     it('should extract consumption period', () => {
