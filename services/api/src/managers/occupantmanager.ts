@@ -129,29 +129,31 @@ async function _autoLinkPropertiesToBuildings(
 ): Promise<void> {
   if (!propertyIds.length) return;
 
-  const properties: any[] = await Collections.Property.find({
+  const properties: any[] = await Collections.Property.find(
+    {
     realmId,
     _id: { $in: propertyIds },
-    atakNumber: { $exists: true, $ne: '' }
-  }).lean();
-
-  for (const property of properties) {
-    if (property.buildingId) continue;
-
-    if (!property.atakNumber || property.atakNumber.length < 6) continue;
-
-    const atakPrefix = property.atakNumber.substring(0, 6);
-    const building = await Collections.Building.findOne({
-      realmId,
-      atakPrefix
-    }).lean();
-
-    if (building) {
-      await Collections.Property.findOneAndUpdate(
-        { _id: property._id, realmId },
-        { buildingId: String(building._id) }
-      );
+      atakNumber: { $exists: true, $ne: '' },
+      buildingId: { $exists: false }
     }
+  ).lean();
+
+  if (!properties.length) return;
+
+  // Fetch all buildings once and build prefix map
+  const buildings: any[] = await Collections.Building.find({ realmId }, { atakPrefix: 1 }).lean();
+  const prefixMap = new Map(buildings.map((b: any) => [b.atakPrefix, String(b._id)]));
+
+  const bulkOps = properties
+    .filter((p: any) => p.atakNumber && p.atakNumber.length >= 6)
+    .map((p: any) => {
+      const buildingId = prefixMap.get(p.atakNumber.substring(0, 6));
+      return buildingId ? { updateOne: { filter: { _id: p._id }, update: { buildingId } } } : null;
+    })
+    .filter(Boolean);
+
+  if (bulkOps.length) {
+    await Collections.Property.bulkWrite(bulkOps as any[]);
   }
 }
 

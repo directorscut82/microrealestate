@@ -11,7 +11,9 @@ import express, { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 
-const nanoid = customAlphabet('0123456789', 6);
+const nanoid = customAlphabet('0123456789ABCDEFGHJKLMNPQRSTUVWXYZ', 8);
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function (): Router {
   const {
@@ -32,8 +34,8 @@ export default function (): Router {
         throw new ServiceError('missing fields', 422);
       }
 
-      if (email.includes(';') || email.includes('=')) {
-        logger.error('email contains unsupported characters');
+      if (!EMAIL_RE.test(email)) {
+        logger.error('invalid email format');
         throw new ServiceError('unsupported email', 422);
       }
 
