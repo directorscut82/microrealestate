@@ -612,7 +612,7 @@ export async function remove(req: Req, res: Res) {
     await Collections.Tenant.deleteMany({
       realmId: realm!._id,
       _id: { $in: occupantIds }
-    });
+    }).session(session);
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
