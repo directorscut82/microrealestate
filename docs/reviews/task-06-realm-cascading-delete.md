@@ -1,6 +1,6 @@
 # Task 06 — Realm Cascading Delete
 
-> **Status:** NOT STARTED
+> **Status:** ✅ COMPLETE
 > **Severity:** Medium
 > **Category:** Data Integrity
 > **Files to modify:** `services/api/src/managers/realmmanager.ts`, potentially new migration/cleanup utility
@@ -192,3 +192,40 @@ When a realm (organization) is deleted, all child records — tenants, propertie
 - If using transactions: set a reasonable timeout (30s) for large cascade deletes
 - Consider: should realm deletion also revoke all refresh tokens for that realm's users?
 - Future: if Option A chosen now, Option B/C can be added later as "force delete" admin feature
+
+---
+
+## Implementation Summary (completed 2026-05-09)
+
+### Discovery
+Previously **no DELETE endpoint existed** for realms at all. The API only exposed GET, POST, PATCH. This meant:
+- Data could only be orphaned via direct MongoDB manipulation
+- But also: admins had no way to clean up test/demo organizations
+
+### Strategy Chosen: Option A (prevent delete with informative error)
+- Consistent with existing guards on properties (422 if occupied), tenants (422 if has payments), leases (422 if used)
+- No transaction complexity needed
+- User gets clear error with counts of what needs removal first
+
+### Implementation
+- Added `remove()` function to `services/api/src/managers/realmmanager.ts`
+- Registered `DELETE /realms/:id` route in `services/api/src/routes.ts`
+- Guard checks: `countDocuments` for Tenant, Property, Lease, Building
+- On all zeros: deletes Templates → Documents → Emails → Realm (non-transactional, but these are leaf records)
+- Returns 204 on success with audit log entry
+- Error includes all blockers: "Cannot delete organization: 5 tenant(s), 3 property/ies still exist. Remove them first."
+
+### Tests Written
+- 10 unit tests in `services/api/src/__tests__/realmmanager.test.js`
+- Covers: missing ID, not found, each blocker type independently, all blockers combined, successful deletion, deletion order verification, no-delete-on-blocker verification
+
+### Verification
+- ✅ TypeScript compiles (0 errors)
+- ✅ 10/10 unit tests pass
+- ✅ Route registered and accessible
+- ✅ Existing tests unaffected (309/319 pass — 10 pre-existing billparser failures)
+
+### Future Considerations
+- Could add `?force=true` query param that does full cascade delete in transaction (Option B)
+- Could revoke refresh tokens for realm members on deletion
+- Frontend doesn't currently expose a "Delete Organization" button — would need UI work to use this endpoint
