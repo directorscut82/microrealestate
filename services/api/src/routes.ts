@@ -11,7 +11,28 @@ import * as rentManager from './managers/rentmanager.js';
 import { Middlewares, Service, ServiceError } from '@microrealestate/common';
 import express from 'express';
 import multer from 'multer';
+import { logger } from '@microrealestate/common';
 import { parseImportedPdf } from './managers/pdfimportmanager.js';
+
+// Simple in-memory rate limiter for upload endpoints (no external dep)
+const uploadRateLimits = new Map<string, { count: number; resetAt: number }>();
+const UPLOAD_RATE_WINDOW_MS = 60_000; // 1 minute
+const UPLOAD_RATE_MAX = 10; // 10 uploads per minute per user
+
+function uploadRateLimit(req: any, res: any, next: any) {
+  const key = req.user?.email || req.ip;
+  const now = Date.now();
+  const entry = uploadRateLimits.get(key);
+  if (!entry || now > entry.resetAt) {
+    uploadRateLimits.set(key, { count: 1, resetAt: now + UPLOAD_RATE_WINDOW_MS });
+    return next();
+  }
+  if (entry.count >= UPLOAD_RATE_MAX) {
+    return res.status(429).json({ message: 'Too many uploads, please try again later' });
+  }
+  entry.count++;
+  return next();
+}
 
 export default function routes(): express.Router {
   const { ACCESS_TOKEN_SECRET } = Service.getInstance().envConfig.getValues();
@@ -55,7 +76,7 @@ export default function routes(): express.Router {
   });
   occupantsRouter.post(
     '/import-pdf',
-    upload.single('pdf') as any,
+    uploadRateLimit, upload.single('pdf') as any,
     Middlewares.asyncWrapper(parseImportedPdf as any)
   );
   occupantsRouter.get('/', Middlewares.asyncWrapper(occupantManager.all as any));
@@ -106,7 +127,7 @@ export default function routes(): express.Router {
   const buildingsRouter = express.Router();
   buildingsRouter.post(
     '/import-pdf',
-    upload.single('pdf') as any,
+    uploadRateLimit, upload.single('pdf') as any,
     Middlewares.asyncWrapper(buildingManager.importFromE9 as any)
   );
   buildingsRouter.get('/', Middlewares.asyncWrapper(buildingManager.all as any));
@@ -142,9 +163,9 @@ export default function routes(): express.Router {
   const billsRouter = express.Router();
   billsRouter.get('/', Middlewares.asyncWrapper(billManager.list as any));
   billsRouter.get('/:id', Middlewares.asyncWrapper(billManager.one as any));
-  billsRouter.post('/parse', upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parseBills as any));
+  billsRouter.post('/parse', uploadRateLimit, upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parseBills as any));
   billsRouter.post('/confirm', Middlewares.asyncWrapper(billManager.confirmBills as any));
-  billsRouter.post('/payment-receipt', upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
+  billsRouter.post('/payment-receipt', uploadRateLimit, upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
   billsRouter.post('/confirm-payment', Middlewares.asyncWrapper(billManager.confirmPayment as any));
   router.use('/bills', billsRouter);
 
@@ -171,36 +192,60 @@ export default function routes(): express.Router {
   router.use('/emails', emailRouter);
 
   // Presence awareness — shows who else is viewing the same record
+  const PRESENCE_TTL = 60;
+
   router.post('/presence/:type/:id', Middlewares.asyncWrapper(async (req: any, res: any) => {
     const { type, id } = req.params;
     const redis = Service.getInstance().redisClient;
-    const key = `presence:${req.realm._id}:${type}:${id}:${req.user.email}`;
-    const member = req.realm.members?.find((m: any) => m.email === req.user.email);
-    const name = member?.name || req.user.email;
-    const value = JSON.stringify({ name, email: req.user.email });
-    await redis!.set(key, value, { EX: 60 });
-    // Get all viewers
-    const pattern = `presence:${req.realm._id}:${type}:${id}:*`;
-    const keys = await redis!.keys(pattern);
-    const viewers = [];
-    for (const k of keys) {
-      const v = await redis!.get(k);
-      if (v) viewers.push(JSON.parse(v));
+    if (!redis) {
+      res.json([]);
+      return;
     }
-    res.json(viewers.filter((v: any) => v.email !== req.user.email));
+    try {
+      const setKey = `presence:${req.realm._id}:${type}:${id}`;
+      const member = req.realm.members?.find((m: any) => m.email === req.user.email);
+      const name = member?.name || req.user.email;
+      const raw = await redis.get(setKey);
+      const now = Date.now();
+      const viewers: Record<string, any> = raw ? JSON.parse(raw) : {};
+      viewers[req.user.email] = { name, email: req.user.email, ts: now };
+      for (const email of Object.keys(viewers)) {
+        if (now - viewers[email].ts > PRESENCE_TTL * 1000) {
+          delete viewers[email];
+        }
+      }
+      await redis.set(setKey, JSON.stringify(viewers), { EX: PRESENCE_TTL });
+      const result = Object.values(viewers)
+        .filter((v: any) => v.email !== req.user.email)
+        .map(({ name: n, email: e }: any) => ({ name: n, email: e }));
+      res.json(result);
+    } catch (error) {
+      logger.error(`Presence POST error: ${error}`);
+      res.json([]);
+    }
   }));
 
   router.get('/presence/:type/:id', Middlewares.asyncWrapper(async (req: any, res: any) => {
     const { type, id } = req.params;
     const redis = Service.getInstance().redisClient;
-    const pattern = `presence:${req.realm._id}:${type}:${id}:*`;
-    const keys = await redis!.keys(pattern);
-    const viewers = [];
-    for (const k of keys) {
-      const v = await redis!.get(k);
-      if (v) viewers.push(JSON.parse(v));
+    if (!redis) {
+      res.json([]);
+      return;
     }
-    res.json(viewers.filter((v: any) => v.email !== req.user.email));
+    try {
+      const setKey = `presence:${req.realm._id}:${type}:${id}`;
+      const raw = await redis.get(setKey);
+      if (!raw) { res.json([]); return; }
+      const viewers: Record<string, any> = JSON.parse(raw);
+      const now = Date.now();
+      const result = Object.values(viewers)
+        .filter((v: any) => v.email !== req.user.email && (now - v.ts) < PRESENCE_TTL * 1000)
+        .map(({ name: n, email: e }: any) => ({ name: n, email: e }));
+      res.json(result);
+    } catch (error) {
+      logger.error(`Presence GET error: ${error}`);
+      res.json([]);
+    }
   }));
 
   const apiRouter = express.Router();

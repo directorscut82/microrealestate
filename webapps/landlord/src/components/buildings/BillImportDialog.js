@@ -9,7 +9,7 @@ import {
   LuFileWarning,
   LuReceipt
 } from 'react-icons/lu';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import FileDropZone from '../ui/file-drop-zone';
@@ -138,12 +138,17 @@ export default function BillImportDialog({ open, setOpen, building }) {
   const [results, setResults] = useState([]);
   const [replaceFlags, setReplaceFlags] = useState({});
 
+  useEffect(() => {
+    if (!open) {
+      setState('idle');
+      setFiles([]);
+      setResults([]);
+      setReplaceFlags({});
+    }
+  }, [open]);
+
   const handleClose = useCallback(() => {
     setOpen(false);
-    setState('idle');
-    setFiles([]);
-    setResults([]);
-    setReplaceFlags({});
   }, [setOpen]);
 
   const handleParse = useCallback(async () => {
@@ -155,6 +160,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       setResults(data);
       setState('preview');
     } catch (error) {
+      console.error('Bill parse error:', error);
       toast.error(t('Failed to parse bill PDFs'));
       setState('idle');
     }
@@ -195,6 +201,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       );
       handleClose();
     } catch (error) {
+      console.error('Bill confirm error:', error);
       toast.error(t('Failed to save bills'));
       setState('preview');
     }

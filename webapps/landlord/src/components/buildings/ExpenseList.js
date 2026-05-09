@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -211,8 +211,6 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
-  const formRef = useRef();
-
   const buildingId = building?._id;
   const units = building?.units || [];
 
@@ -397,7 +395,6 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       }
       renderContent={() => (
         <form
-          ref={formRef}
           onSubmit={handleSubmit(onSubmit)}
           autoComplete="off"
         >
@@ -590,7 +587,10 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
           <Button variant="outline" onClick={handleClose}>
             {t('Cancel')}
           </Button>
-          <Button onClick={() => formRef.current?.requestSubmit()}>
+          <Button
+            onClick={handleSubmit(onSubmit)}
+            disabled={addMutation.isPending || updateMutation.isPending || isLoading}
+          >
             {expense?._id ? t('Update') : t('Add')}
           </Button>
         </>

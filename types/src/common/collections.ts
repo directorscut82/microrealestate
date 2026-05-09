@@ -489,6 +489,8 @@ export namespace CollectionTypes {
     dueDate?: Date;
     term: number;
     rfCode?: string;
+    paymentCode?: string;
+    irisCodeBase64?: string;
     irisCodeUrl?: string;
     pdfUrl?: string;
     status: BillStatus;

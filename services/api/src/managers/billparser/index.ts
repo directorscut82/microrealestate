@@ -31,18 +31,24 @@ function detectProvider(text: string): Provider | null {
 }
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const data = new Uint8Array(buffer);
-  const doc = await getDocument({ data }).promise;
-  let fullText = '';
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    fullText +=
-      content.items.map((item: any) => item.str).join(' ') +
-      '\n--- PAGE BREAK ---\n';
+  try {
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const data = new Uint8Array(buffer);
+    const doc = await getDocument({ data }).promise;
+    let fullText = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      fullText +=
+        content.items.map((item: any) => item.str).join(' ') +
+        '\n--- PAGE BREAK ---\n';
+    }
+    return fullText;
+  } catch (error) {
+    throw new Error(
+      `Failed to extract text from PDF: ${String(error)}`
+    );
   }
-  return fullText;
 }
 
 /**
@@ -57,14 +63,18 @@ export async function generateIrisQr(
   if (!rfCode || !paymentCode) {
     return null;
   }
-  const qrContent = rfCode + paymentCode;
-  const QRCode = (await import('qrcode')).default;
-  return QRCode.toBuffer(qrContent, {
-    type: 'png',
-    width: 200,
-    margin: 1,
-    errorCorrectionLevel: 'M'
-  });
+  try {
+    const qrContent = rfCode + paymentCode;
+    const QRCode = (await import('qrcode')).default;
+    return await QRCode.toBuffer(qrContent, {
+      type: 'png',
+      width: 200,
+      margin: 1,
+      errorCorrectionLevel: 'M'
+    });
+  } catch (error) {
+    return null;
+  }
 }
 
 export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {

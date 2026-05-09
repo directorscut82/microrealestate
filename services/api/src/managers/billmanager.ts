@@ -15,8 +15,8 @@ type Res = ServiceResponse;
 // ---------------------------------------------------------------------------
 
 function computeDefaultTerm(periodEnd: Date): number {
-  const year = periodEnd.getFullYear();
-  const month = periodEnd.getMonth() + 1;
+  const year = periodEnd.getUTCFullYear();
+  const month = periodEnd.getUTCMonth() + 1;
   return year * 1000000 + month * 10000 + 100;
 }
 
@@ -33,11 +33,7 @@ async function findExpenseByBillingId(
     for (const expense of building.expenses || []) {
       if (!expense.billingId) continue;
       const expenseNormalized = normalizeBillingId(expense.billingId);
-      if (
-        expenseNormalized === normalizedBillingId ||
-        normalizedBillingId.startsWith(expenseNormalized) ||
-        expenseNormalized.startsWith(normalizedBillingId)
-      ) {
+      if (expenseNormalized === normalizedBillingId) {
         return { building, expense };
       }
     }
@@ -280,14 +276,22 @@ export async function parsePaymentReceipts(
   const results = [];
 
   for (const file of files) {
-    // Extract text from receipt
-    const data = new Uint8Array(file.buffer);
-    const doc = await getDocument({ data }).promise;
     let text = '';
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map((item: any) => item.str).join(' ') + '\n';
+    try {
+      const data = new Uint8Array(file.buffer);
+      const doc = await getDocument({ data }).promise;
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map((item: any) => item.str).join(' ') + '\n';
+      }
+    } catch (error) {
+      results.push({
+        filename: file.originalname,
+        success: false,
+        error: `Αποτυχία ανάγνωσης PDF: ${String(error)}`
+      });
+      continue;
     }
 
     // Find RF codes in receipt

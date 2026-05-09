@@ -19,6 +19,8 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
   dueDate: Date,
   term: { type: Number, required: true },
   rfCode: String,
+  paymentCode: String,
+  irisCodeBase64: String,
   irisCodeUrl: String,
   pdfUrl: String,
   status: {
@@ -32,10 +34,9 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
   updatedDate: Date
 });
 
-BillSchema.index({ realmId: 1, buildingId: 1 });
+BillSchema.index({ realmId: 1, buildingId: 1, expenseId: 1, term: 1 }, { unique: true });
 BillSchema.index({ realmId: 1, status: 1 });
 BillSchema.index({ realmId: 1, billingId: 1 });
 BillSchema.index({ realmId: 1, rfCode: 1 });
-BillSchema.index({ realmId: 1, expenseId: 1, term: 1 });
 
 export default mongoose.model<CollectionTypes.Bill>('Bill', BillSchema);
