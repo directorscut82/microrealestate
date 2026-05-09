@@ -87,6 +87,13 @@ export function parseDehBill(text: string): BillParseResult {
   const rfMatch = text.match(/(RF\d{15,30})/);
   const rfCode = rfMatch ? rfMatch[1] : undefined;
 
+  // Extract payment amount code (e.g., "000000186,21 3" → "000000186213")
+  // This is combined with RF code to form the IRIS QR content
+  const paymentCodeMatch = text.match(/(\d{6,12}),(\d{2})\s+(\d)/);
+  const paymentCode = paymentCodeMatch
+    ? paymentCodeMatch[1] + paymentCodeMatch[2] + paymentCodeMatch[3]
+    : undefined;
+
   return {
     success: true,
     bill: {
@@ -98,7 +105,8 @@ export function parseDehBill(text: string): BillParseResult {
       periodEnd,
       issueDate: issueDate || undefined,
       dueDate: dueDate || undefined,
-      rfCode
+      rfCode,
+      paymentCode
     }
   };
 }
