@@ -13,12 +13,12 @@ describe('Pagination utility', () => {
 
     it('should return defaults when no params provided', () => {
       const result = parsePagination(makeReq());
-      expect(result).toEqual({ page: 1, limit: 100, skip: 0 });
+      expect(result).toEqual({ page: 1, limit: 0, skip: 0, isPaginated: false });
     });
 
     it('should parse valid page and limit', () => {
       const result = parsePagination(makeReq({ page: '3', limit: '25' }));
-      expect(result).toEqual({ page: 3, limit: 25, skip: 50 });
+      expect(result).toEqual({ page: 3, limit: 25, skip: 50, isPaginated: true });
     });
 
     it('should calculate skip correctly for page 1', () => {

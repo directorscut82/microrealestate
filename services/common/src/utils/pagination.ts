@@ -4,6 +4,7 @@ export interface PaginationParams {
   page: number;
   limit: number;
   skip: number;
+  isPaginated: boolean;
 }
 
 export interface PaginationMeta {
@@ -18,6 +19,14 @@ const MAX_LIMIT = 500;
 const MIN_LIMIT = 1;
 
 export function parsePagination(req: Request): PaginationParams {
+  const hasPage = req.query.page !== undefined;
+  const hasLimit = req.query.limit !== undefined;
+  const isPaginated = hasPage || hasLimit;
+
+  if (!isPaginated) {
+    return { page: 1, limit: 0, skip: 0, isPaginated: false };
+  }
+
   const rawPage = Number(req.query.page);
   const rawLimit = Number(req.query.limit);
 
@@ -31,7 +40,7 @@ export function parsePagination(req: Request): PaginationParams {
 
   const skip = (page - 1) * limit;
 
-  return { page, limit, skip };
+  return { page, limit, skip, isPaginated: true };
 }
 
 export function setPaginationHeaders(

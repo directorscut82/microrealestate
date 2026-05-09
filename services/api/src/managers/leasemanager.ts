@@ -148,28 +148,37 @@ export async function remove(req: Req, res: Res) {
   res.sendStatus(200);
 }
 
+
 export async function all(req: Req, res: Res) {
   const realm = req.realm;
-  const { page, limit, skip } = Pagination.parsePagination(req as any);
+  const { page, limit, skip, isPaginated } = Pagination.parsePagination(req as any);
   const filter = { realmId: realm!._id };
-
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
-  const [dbLeases, total] = await Promise.all([
-    Collections.Lease.find(filter)
+
+  if (!isPaginated) {
+    const dbLeases = await Collections.Lease.find(filter)
       .sort({ name: 1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
-    Collections.Lease.countDocuments(filter)
-  ]);
-
-  const meta = Pagination.buildPaginationMeta(total, page, limit);
-  Pagination.setPaginationHeaders(res as any, meta);
-
-  res.json((dbLeases as any[]).map((dbLease: any) => ({
-    ...dbLease,
-    usedByTenants: setOfUsedLeases.has(String(dbLease._id))
-  })));
+      .lean();
+    res.json((dbLeases as any[]).map((dbLease: any) => ({
+      ...dbLease,
+      usedByTenants: setOfUsedLeases.has(String(dbLease._id))
+    })));
+  } else {
+    const [dbLeases, total] = await Promise.all([
+      Collections.Lease.find(filter)
+        .sort({ name: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Collections.Lease.countDocuments(filter)
+    ]);
+    const meta = Pagination.buildPaginationMeta(total, page, limit);
+    Pagination.setPaginationHeaders(res as any, meta);
+    res.json((dbLeases as any[]).map((dbLease: any) => ({
+      ...dbLease,
+      usedByTenants: setOfUsedLeases.has(String(dbLease._id))
+    })));
+  }
 }
 
 export async function one(req: Req, res: Res) {
