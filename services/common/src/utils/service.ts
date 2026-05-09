@@ -96,7 +96,7 @@ export default class Service {
     if (this.useRequestParsers) {
       this.expressServer.use(_cookieParser() as any);
       this.expressServer.use(Express.urlencoded({ extended: true }));
-      this.expressServer.use(Express.json());
+      this.expressServer.use(Express.json({ limit: '50mb' }));
       this.expressServer.use(_methodOverride() as any);
       if (this.useMongo) {
         this.expressServer.use(mongoSanitize({
