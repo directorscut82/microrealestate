@@ -33,10 +33,28 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
     (properties as any[]).map((p: any) => [String(p._id), p])
   );
 
+  // Fetch tenants linked to these properties for occupant info
+  const tenants = propertyIds.length
+    ? await Collections.Tenant.find({
+        realmId,
+        'properties.propertyId': { $in: propertyIds }
+      }, { name: 1, properties: 1 }).lean()
+    : [];
+
+  const tenantByPropertyId = new Map<string, { _id: string; name: string }>();
+  for (const tenant of tenants as any[]) {
+    for (const tp of (tenant.properties || [])) {
+      if (tp.propertyId) {
+        tenantByPropertyId.set(String(tp.propertyId), { _id: String(tenant._id), name: tenant.name });
+      }
+    }
+  }
+
   return buildings.map((building: any) => {
     const units = (building.units || []).map((unit: any) => ({
       ...unit,
-      property: unit.propertyId ? propMap.get(String(unit.propertyId)) : null
+      property: unit.propertyId ? propMap.get(String(unit.propertyId)) : null,
+      tenant: unit.propertyId ? tenantByPropertyId.get(String(unit.propertyId)) || null : null
     }));
 
     const managedCount = units.filter((u: any) => u.isManaged).length;

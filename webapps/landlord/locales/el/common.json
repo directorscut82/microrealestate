@@ -475,6 +475,7 @@
   "Payments - {{year}}.csv": "Καταβολές - {{year}}.csv",
   "Percentage of occupied properties": "Ποσοστό κατειλημμένων ακινήτων",
   "percentage of total": "ποσοστό επί του συνόλου",
+  "Pending Bills": "Εκκρεμείς Λογαριασμοί",
   "Period": "Περίοδος",
   "Pest Control": "Απεντόμωση",
   "Phone": "Τηλέφωνο",
@@ -750,5 +751,8 @@
   "One-time": "Εφάπαξ",
   "Monthly": "Μηνιαίο",
   "From": "Από",
-  "To": "Έως"
+  "To": "Έως",
+  "overdue": "ληξιπρόθεσμα",
+  "Utility bills awaiting payment": "Λογαριασμοί κοινής ωφέλειας σε αναμονή πληρωμής",
+  "Due date": "Ημερομηνία λήξης"
 }

@@ -8,6 +8,7 @@ import {
 import GeneralFigures from '../../components/dashboard/GeneralFigures';
 import MonthFigures from '../../components/dashboard/MonthFigures';
 import Page from '../../components/Page';
+import PendingBills from '../../components/dashboard/PendingBills';
 import Shortcuts from '../../components/dashboard/Shortcuts';
 import { useQuery } from '@tanstack/react-query';
 import Welcome from '../../components/Welcome';
@@ -83,6 +84,10 @@ function Dashboard() {
               dashboardData={dashboardData}
             />
             <YearFigures
+              className="md:col-span-5"
+              dashboardData={dashboardData}
+            />
+            <PendingBills
               className="md:col-span-5"
               dashboardData={dashboardData}
             />

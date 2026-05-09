@@ -87,6 +87,39 @@ async function _fetchBuildingsForProperties(
   return buildings as CollectionTypes.Building[];
 }
 
+// Update building unit occupancyType based on tenant assignments.
+// Call after tenant add/update/delete to keep building overview in sync.
+async function _syncOccupancyForProperties(
+  realmId: string,
+  propertyIds: string[],
+  action: 'link' | 'unlink'
+): Promise<void> {
+  if (!propertyIds.length) return;
+
+  const buildings = await Collections.Building.find({
+    realmId,
+    'units.propertyId': { $in: propertyIds }
+  });
+
+  for (const building of buildings) {
+    let changed = false;
+    for (const unit of (building as any).units) {
+      if (!unit.propertyId || !propertyIds.includes(String(unit.propertyId))) continue;
+      if (unit.occupancyType === 'owner_occupied' || unit.occupancyType === 'parking') continue;
+
+      const newType = action === 'link' ? 'rented' : 'vacant';
+      if (unit.occupancyType !== newType) {
+        unit.occupancyType = newType;
+        changed = true;
+      }
+    }
+    if (changed) {
+      (building as any).updatedDate = new Date();
+      await building.save();
+    }
+  }
+}
+
 // Auto-link properties to buildings by matching ATAK prefix.
 // When a tenant is assigned a property with an ATAK number,
 // the property gets linked to the correct building automatically.
@@ -297,6 +330,12 @@ export async function add(req: Req, res: Res) {
     realmId: realm!._id
   });
 
+  // Sync building occupancy
+  const linkedPropIds = (newOccupant as any).properties
+    ?.map((p: AnyRecord) => p.propertyId)
+    .filter(Boolean) || [];
+  await _syncOccupancyForProperties(realm!._id, linkedPropIds, 'link');
+
   const occupants = await _fetchTenants(req.realm!._id, newOccupant._id);
   res.json(FD.toOccupantData(occupants.length ? occupants[0] : null as any));
 }
@@ -427,6 +466,19 @@ export async function update(req: Req, res: Res) {
     newOccupant
   );
 
+  // Sync building occupancy for added/removed properties
+  const oldPropIds = (originalOccupant.properties || [])
+    .map((p: AnyRecord) => String(p.propertyId))
+    .filter(Boolean);
+  const newPropIds = (newOccupant.properties || [])
+    .map((p: AnyRecord) => String(p.propertyId))
+    .filter(Boolean);
+  const removedPropIds = oldPropIds.filter((id: string) => !newPropIds.includes(id));
+  const addedPropIds = newPropIds.filter((id: string) => !oldPropIds.includes(id));
+
+  if (addedPropIds.length) await _syncOccupancyForProperties(realm!._id, addedPropIds, 'link');
+  if (removedPropIds.length) await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
+
   const newOccupants = await _fetchTenants(req.realm!._id, newOccupant._id);
   res.json(FD.toOccupantData(newOccupants.length ? newOccupants[0] : null as any));
 }
@@ -499,6 +551,14 @@ export async function remove(req: Req, res: Res) {
         logger.error('DELETE documents failed');
         logger.error(errorMessage);
       }
+    }
+
+    // Sync building occupancy for removed tenant's properties
+    const removedPropIds = occupants.flatMap((o: any) =>
+      (o.properties || []).map((p: AnyRecord) => String(p.propertyId)).filter(Boolean)
+    );
+    if (removedPropIds.length) {
+      await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
     }
 
     await Collections.Tenant.deleteMany({
