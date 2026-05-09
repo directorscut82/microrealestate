@@ -13,6 +13,7 @@ import '../components/RichTextEditor/richtexteditor.css';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Application from '../components/Application';
 import config from '../config';
+import ErrorBoundary from '../components/ErrorBoundary';
 import Head from 'next/head';
 import { InjectStoreContext } from '../store';
 import moment from 'moment';
@@ -55,13 +56,15 @@ function MyApp(props) {
         <link rel="shortcut icon" href={`${config.BASE_PATH}/favicon.svg`} />
       </Head>
       <main className={`${roboto.variable} font-sans`}>
-        <QueryClientProvider client={queryClient}>
-          <InjectStoreContext initialData={pageProps.initialState?.store}>
-            <Application {...pageProps}>
-              <Component {...pageProps} />
-            </Application>
-          </InjectStoreContext>
-        </QueryClientProvider>
+        <ErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <InjectStoreContext initialData={pageProps.initialState?.store}>
+              <Application {...pageProps}>
+                <Component {...pageProps} />
+              </Application>
+            </InjectStoreContext>
+          </QueryClientProvider>
+        </ErrorBoundary>
       </main>
     </>
   );
