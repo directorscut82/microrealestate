@@ -648,9 +648,12 @@ export async function all(req: Req, res: Res) {
   const fullTenants = tenantIds.length
     ? await _fetchTenants(req.realm!._id, tenantIds)
     : [];
-  const sorted = tenantIds.map((id) =>
-    fullTenants.find((t) => String(t._id) === id)
-  ).filter(Boolean) as AnyRecord[];
+  const tenantMap = new Map(
+    fullTenants.map((t) => [String(t._id), t])
+  );
+  const sorted = tenantIds
+    .map((id) => tenantMap.get(id))
+    .filter(Boolean) as AnyRecord[];
   res.json(sorted.map((tenant) => FD.toOccupantData(tenant)));
 }
 

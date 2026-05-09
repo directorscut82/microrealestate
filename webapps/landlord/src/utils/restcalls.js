@@ -61,11 +61,13 @@ export async function fetchProperties({ page, limit } = {}) {
 }
 
 export async function fetchPropertiesPage({ page = 1, limit = 100 } = {}) {
-  const response = await apiFetcher().get(
-    `/properties?page=${page}&limit=${limit}`
-  );
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  const response = await apiFetcher().get(`/properties?${params.toString()}`);
   const total = Number(response.headers?.['x-total-count'] || 0);
-  return { items: response.data, total, page, limit };
+  const items = Array.isArray(response.data) ? response.data : [];
+  return { items, total, page, limit };
 }
 
 export async function fetchProperty(id) {
@@ -104,7 +106,8 @@ export async function fetchTenantsPage({ includeArchived = false, page = 1, limi
   params.set('limit', String(limit));
   const response = await apiFetcher().get(`/tenants?${params.toString()}`);
   const total = Number(response.headers?.['x-total-count'] || 0);
-  return { items: response.data, total, page, limit };
+  const items = Array.isArray(response.data) ? response.data : [];
+  return { items, total, page, limit };
 }
 
 export async function fetchTenant(id) {

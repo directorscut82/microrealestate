@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import Header from './Header';
 import Pagination from './Pagination';
@@ -40,6 +40,13 @@ export default function List({
     [filteredData]
   );
 
+  // Reset page index when chunks shrink below current page
+  useEffect(() => {
+    if (pageIndex > chunks.length) {
+      setPageIndex(1);
+    }
+  }, [chunks.length, pageIndex]);
+
   const handleSearch = useCallback(
     (filters, text) => {
       const newFilters = {
@@ -55,6 +62,9 @@ export default function List({
     setPageIndex(pageIndex);
   }, []);
 
+  // Clamp pageIndex to valid range for rendering
+  const safePageIndex = Math.min(pageIndex, chunks.length);
+
   return (
     <div className="flex flex-col gap-8">
       <Header
@@ -63,7 +73,7 @@ export default function List({
         onSearch={handleSearch}
       />
 
-      {renderList?.({ data: chunks[pageIndex - 1] })}
+      {renderList?.({ data: chunks[safePageIndex - 1] || [] })}
 
       <div className="flex flex-col items-center gap-4">
         <Pagination

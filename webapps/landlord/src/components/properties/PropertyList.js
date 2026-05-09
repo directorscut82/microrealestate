@@ -31,7 +31,7 @@ export default function PropertyList({ data }) {
   const grouped = useMemo(() => {
     const map = new Map();
     const ungrouped = [];
-    for (const property of data) {
+    for (const property of data || []) {
       if (property.buildingId) {
         if (!map.has(property.buildingId)) {
           map.set(property.buildingId, {
@@ -47,7 +47,7 @@ export default function PropertyList({ data }) {
     return { buildings: [...map.entries()], ungrouped };
   }, [data, t]);
 
-  if (data.length === 0) {
+  if (!data || data.length === 0) {
     return <EmptyIllustration label={t('No properties found')} />;
   }
 
