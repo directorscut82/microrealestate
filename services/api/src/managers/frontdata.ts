@@ -109,7 +109,7 @@ export function toRentData(
 
   // payment status
   rentToReturn.status = '';
-  if (rentMoment.isSameOrBefore(moment(), 'month')) {
+  if (rentMoment.isSameOrBefore(moment.utc(), 'month')) {
     if (rentToReturn.totalAmount <= 0 || rentToReturn.newBalance >= 0) {
       rentToReturn.status = 'paid';
     } else if (rentToReturn.payment > 0) {
@@ -196,8 +196,8 @@ export function toRentData(
       .reverse()
       .filter((currentRent: AnyRecord) => {
         if (
-          moment(String(currentRent.term), 'YYYYMMDDHH').isSameOrBefore(
-            moment(),
+          moment.utc(String(currentRent.term), 'YYYYMMDDHH').isSameOrBefore(
+            moment.utc(),
             'month'
           )
         ) {
@@ -224,7 +224,7 @@ export function toRentData(
       .reverse()
       .forEach((currentRent: AnyRecord) => {
         const payment = currentRent.total.payment;
-        const term = moment(String(currentRent.term), 'YYYYMMDDHH');
+        const term = moment.utc(String(currentRent.term), 'YYYYMMDDHH');
         rentToReturn.paymentStatus.push({
           month: term.month() + 1,
           status: payment > 0 ? 'partiallypaid' : 'notpaid'
@@ -283,8 +283,8 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
 
   occupant.status = 'inprogress';
   occupant.terminated = false;
-  const currentDate = moment();
-  const endMoment = moment(
+  const currentDate = moment.utc();
+  const endMoment = moment.utc(
     occupant.terminationDate || occupant.endDate,
     'DD/MM/YYYY'
   );
@@ -372,7 +372,7 @@ export function toProperty(
   inputOccupant?: AnyRecord,
   inputOccupants?: AnyRecord[]
 ): AnyRecord {
-  const currentDate = moment();
+  const currentDate = moment.utc();
   let property: AnyRecord = {
     _id: inputProperty._id,
     type: inputProperty.type,
