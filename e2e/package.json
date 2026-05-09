@@ -4,9 +4,10 @@
   "description": "MicroRealEstate e2e tests",
   "private": true,
   "scripts": {
-    "cypress:open": "cypress open",
-    "cypress:run": "cypress run --headed --config video=false",
-    "cypress:ci": "cypress run --config video=false",
+    "pretest": "bash ./backup-before-tests.sh",
+    "cypress:open": "bash ./backup-before-tests.sh && cypress open",
+    "cypress:run": "bash ./backup-before-tests.sh && cypress run --headed --config video=false",
+    "cypress:ci": "bash ./backup-before-tests.sh && cypress run --config video=false",
     "lint": "eslint .",
     "format": "prettier --write '**/*.{js,jsx,ts,tsx,json,css}'"
   },
