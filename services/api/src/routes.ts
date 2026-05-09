@@ -1,4 +1,5 @@
 import * as accountingManager from './managers/accountingmanager.js';
+import * as billManager from './managers/billmanager.js';
 import * as buildingManager from './managers/buildingmanager.js';
 import * as dashboardManager from './managers/dashboardmanager.js';
 import * as emailManager from './managers/emailmanager.js';
@@ -136,6 +137,16 @@ export default function routes(): express.Router {
   buildingsRouter.patch('/:id/repairs/:repairId', Middlewares.asyncWrapper(buildingManager.updateRepair as any));
   buildingsRouter.delete('/:id/repairs/:repairId', Middlewares.asyncWrapper(buildingManager.removeRepair as any));
   router.use('/buildings', buildingsRouter);
+
+  // Bills
+  const billsRouter = express.Router();
+  billsRouter.get('/', Middlewares.asyncWrapper(billManager.list as any));
+  billsRouter.get('/:id', Middlewares.asyncWrapper(billManager.one as any));
+  billsRouter.post('/parse', upload.array('bills', 20), Middlewares.asyncWrapper(billManager.parseBills as any));
+  billsRouter.post('/confirm', Middlewares.asyncWrapper(billManager.confirmBills as any));
+  billsRouter.post('/payment-receipt', upload.array('bills', 20), Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
+  billsRouter.post('/confirm-payment', Middlewares.asyncWrapper(billManager.confirmPayment as any));
+  router.use('/bills', billsRouter);
 
   router.get(
     '/accounting/:year',
