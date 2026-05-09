@@ -55,7 +55,8 @@ function MyApp(props) {
         />
         <link rel="shortcut icon" href={`${config.BASE_PATH}/favicon.svg`} />
       </Head>
-      <main className={`${roboto.variable} font-sans`}>
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-primary focus:text-primary-foreground">Skip to content</a>
+      <main id="main-content" className={`${roboto.variable} font-sans`}>
         <ErrorBoundary>
           <QueryClientProvider client={queryClient}>
             <InjectStoreContext initialData={pageProps.initialState?.store}>
