@@ -11,6 +11,10 @@ import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import axios from 'axios';
 import { customAlphabet } from 'nanoid';
 import moment from 'moment';
+import {
+  validateObjectId,
+  validateFiniteNumber
+} from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -278,6 +282,14 @@ export async function add(req: Req, res: Res) {
     logger.error('missing tenant name');
     throw new ServiceError('missing fields', 422);
   }
+  if (occupant.leaseId) {
+    validateObjectId(occupant.leaseId, 'leaseId');
+  }
+  validateFiniteNumber(occupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
+  validateFiniteNumber(occupant.discount, 'discount', { min: 0, max: 10000000 });
+  if (occupant.beginDate && occupant.endDate && moment(occupant.endDate).isBefore(moment(occupant.beginDate))) {
+    throw new ServiceError('End date must be after begin date', 422);
+  }
 
   const propertyMap = await _buildPropertyMap(realm);
 
@@ -350,6 +362,14 @@ export async function update(req: Req, res: Res) {
   if (!newOccupant.name) {
     logger.error('missing tenant name');
     throw new ServiceError('missing fields', 422);
+  }
+  if (newOccupant.leaseId) {
+    validateObjectId(newOccupant.leaseId, 'leaseId');
+  }
+  validateFiniteNumber(newOccupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
+  validateFiniteNumber(newOccupant.discount, 'discount', { min: 0, max: 10000000 });
+  if (newOccupant.beginDate && newOccupant.endDate && moment(newOccupant.endDate).isBefore(moment(newOccupant.beginDate))) {
+    throw new ServiceError('End date must be after begin date', 422);
   }
 
   const originalOccupant: any = await Collections.Tenant.findOne({

@@ -69,29 +69,34 @@ function _computeBuildingChargeRaw(
   propertyId: string,
   expense: CollectionTypes.BuildingExpense
 ): number {
-  // Find the unit in the building
-  const unit = building.units.find((u) => String(u.propertyId) === String(propertyId));
+  if (!building?.units || !Array.isArray(building.units)) return 0;
+
+  const unit = building.units.find(
+    (u) => String(u.propertyId) === String(propertyId)
+  );
   if (!unit) return 0;
 
   const { allocationMethod, amount, customAllocations } = expense;
+  // For non-fixed methods, amount must be a valid positive number
+  if (allocationMethod !== 'fixed' && (!Number.isFinite(amount) || amount <= 0)) return 0;
 
   switch (allocationMethod) {
     case 'general_thousandths': {
-      const generalTotal = building.units.reduce((sum, u) => sum + (u.generalThousandths || 0), 0);
+      const generalTotal = building.units.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
       if (generalTotal === 0) return 0;
-      return (amount * (unit.generalThousandths || 0)) / generalTotal;
+      return (amount * (Number(unit.generalThousandths) || 0)) / generalTotal;
     }
 
     case 'heating_thousandths': {
-      const heatingTotal = building.units.reduce((sum, u) => sum + (u.heatingThousandths || 0), 0);
+      const heatingTotal = building.units.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
       if (heatingTotal === 0) return 0;
-      return (amount * (unit.heatingThousandths || 0)) / heatingTotal;
+      return (amount * (Number(unit.heatingThousandths) || 0)) / heatingTotal;
     }
 
     case 'elevator_thousandths': {
-      const elevatorTotal = building.units.reduce((sum, u) => sum + (u.elevatorThousandths || 0), 0);
+      const elevatorTotal = building.units.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
       if (elevatorTotal === 0) return 0;
-      return (amount * (unit.elevatorThousandths || 0)) / elevatorTotal;
+      return (amount * (Number(unit.elevatorThousandths) || 0)) / elevatorTotal;
     }
 
     case 'equal': {
@@ -101,33 +106,36 @@ function _computeBuildingChargeRaw(
     }
 
     case 'by_surface': {
-      const totalSurface = building.units.reduce((sum, u) => sum + (u.surface || 0), 0);
+      const totalSurface = building.units.reduce((sum, u) => sum + (Number(u.surface) || 0), 0);
       if (totalSurface === 0) return 0;
-      return (amount * (unit.surface || 0)) / totalSurface;
+      return (amount * (Number(unit.surface) || 0)) / totalSurface;
     }
 
     case 'fixed': {
       // Fixed allocation per unit
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
-      return allocation?.value || 0;
+      const v = Number(allocation?.value);
+      return Number.isFinite(v) && v > 0 ? v : 0;
     }
 
     case 'custom_ratio': {
       // Custom ratio - normalize to sum
       const unitsWithProperty = building.units.filter((u) => u.propertyId);
-      const totalRatio = customAllocations?.reduce((sum, a) => sum + (a.value || 0), 0) || 0;
+      const totalRatio = customAllocations?.reduce((sum, a) => sum + (Number(a.value) || 0), 0) || 0;
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
       // Single-unit fallback: if no ratios set and only 1 unit, give full amount
       if (totalRatio === 0) return unitsWithProperty.length === 1 ? amount : 0;
       if (!allocation) return 0;
-      return (amount * allocation.value) / totalRatio;
+      const av = Number(allocation.value) || 0;
+      return (amount * av) / totalRatio;
     }
 
     case 'custom_percentage': {
       // Custom percentage - value is already a percentage
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
       if (!allocation) return 0;
-      return (amount * allocation.value) / 100;
+      const pct = Number(allocation.value) || 0;
+      return pct > 0 ? (amount * pct) / 100 : 0;
     }
 
     default:
@@ -152,6 +160,8 @@ export default function taskBase(
   rent: Rent
 ): Rent {
   const currentMoment = moment(rentDate, 'DD/MM/YYYY HH:mm');
+  if (!currentMoment.isValid()) return rent;
+
   rent.term = Number(currentMoment.format('YYYYMMDDHH'));
   if (contract.frequency === 'months') {
     rent.term = Number(
@@ -171,7 +181,9 @@ export default function taskBase(
   rent.month = currentMoment.month() + 1;
   rent.year = currentMoment.year();
 
-  contract.properties
+  const properties = contract.properties || [];
+
+  properties
     .filter((property) => {
       const entryMoment = moment(property.entryDate).startOf('day');
       const exitMoment = moment(property.exitDate).endOf('day');
@@ -186,7 +198,7 @@ export default function taskBase(
     .forEach(function (property) {
       if (property.property) {
         const name = property.property.name || '';
-        const preTaxAmount = property.rent || 0;
+        const preTaxAmount = Number(property.rent) || 0;
         const expenses = property.expenses || [];
 
         rent.preTaxAmounts.push({
@@ -224,7 +236,7 @@ export default function taskBase(
   rent.buildingCharges = [];
 
   if (contract.buildings && contract.buildings.length > 0) {
-    contract.properties
+    properties
       .filter((property) => {
         const entryMoment = moment(property.entryDate).startOf('day');
         const exitMoment = moment(property.exitDate).endOf('day');

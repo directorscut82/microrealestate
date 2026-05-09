@@ -4,6 +4,12 @@ import type { CollectionTypes } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
 import type { ParsedE9Unit } from './e9parser.js';
 import * as Contract from './contract.js';
+import {
+  validateObjectId, validateTerm, validateFiniteNumber,
+  validateEnum, validateArrayMaxLength, validateAllocationValues,
+  validatePercentageAllocations, validateRatioAllocations,
+  EXPENSE_TYPES, ALLOCATION_METHODS, REPAIR_STATUSES, CHARGEABLE_TO
+} from '../validators.js';
 import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
 import moment from 'moment';
 
@@ -212,6 +218,12 @@ export async function add(req: Req, res: Res) {
   if (!req.body.atakPrefix?.trim()) {
     throw new ServiceError('ATAK prefix is missing', 422);
   }
+  validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', { min: 1800, max: 2099 });
+  validateFiniteNumber(req.body.totalFloors, 'totalFloors', { min: 1, max: 200 });
+  validateArrayMaxLength(req.body.units, 200, 'units');
+  validateArrayMaxLength(req.body.expenses, 100, 'expenses');
+  validateArrayMaxLength(req.body.contractors, 50, 'contractors');
+  validateArrayMaxLength(req.body.repairs, 100, 'repairs');
 
   const existing = await Collections.Building.findOne({
     realmId: realm!._id,
@@ -683,6 +695,14 @@ export async function addUnit(req: Req, res: Res) {
   if (!req.body.atakNumber?.trim()) {
     throw new ServiceError('Unit ATAK number is missing', 422);
   }
+  validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.heatingThousandths, 'heatingThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.elevatorThousandths, 'elevatorThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
+  validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
+  if (req.body.propertyId) {
+    validateObjectId(req.body.propertyId, 'propertyId');
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -722,6 +742,15 @@ export async function addUnit(req: Req, res: Res) {
 export async function updateUnit(req: Req, res: Res) {
   const realm = req.realm;
   const { id, unitId } = req.params;
+
+  validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.heatingThousandths, 'heatingThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.elevatorThousandths, 'elevatorThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
+  validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
+  if (req.body.propertyId) {
+    validateObjectId(req.body.propertyId, 'propertyId');
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1047,6 +1076,23 @@ export async function addExpense(req: Req, res: Res) {
   if (!req.body.name?.trim()) {
     throw new ServiceError('Expense name is required', 422);
   }
+  validateEnum(req.body.type, EXPENSE_TYPES, 'type', { required: true });
+  validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod', { required: true });
+  validateFiniteNumber(req.body.amount, 'amount', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.ownerAmount, 'ownerAmount', { min: 0, max: 10000000 });
+  if (req.body.startTerm) {
+    validateTerm(req.body.startTerm, 'startTerm');
+  }
+  if (req.body.endTerm) {
+    validateTerm(req.body.endTerm, 'endTerm');
+  }
+  if (req.body.startTerm && req.body.endTerm && Number(req.body.startTerm) > Number(req.body.endTerm)) {
+    throw new ServiceError('startTerm must be before endTerm', 422);
+  }
+  validateAllocationValues(req.body.customAllocations);
+  validatePercentageAllocations(req.body.customAllocations, req.body.allocationMethod);
+  validateRatioAllocations(req.body.customAllocations, req.body.allocationMethod);
+  validateArrayMaxLength(req.body.customAllocations, 200, 'customAllocations');
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1076,6 +1122,26 @@ export async function addExpense(req: Req, res: Res) {
 export async function updateExpense(req: Req, res: Res) {
   const realm = req.realm;
   const { id, expenseId } = req.params;
+
+  if (req.body.type) {
+    validateEnum(req.body.type, EXPENSE_TYPES, 'type');
+  }
+  if (req.body.allocationMethod) {
+    validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod');
+  }
+  validateFiniteNumber(req.body.amount, 'amount', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.ownerAmount, 'ownerAmount', { min: 0, max: 10000000 });
+  if (req.body.startTerm) {
+    validateTerm(req.body.startTerm, 'startTerm');
+  }
+  if (req.body.endTerm) {
+    validateTerm(req.body.endTerm, 'endTerm');
+  }
+  validateAllocationValues(req.body.customAllocations);
+  if (req.body.allocationMethod) {
+    validatePercentageAllocations(req.body.customAllocations, req.body.allocationMethod);
+    validateRatioAllocations(req.body.customAllocations, req.body.allocationMethod);
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1333,6 +1399,17 @@ export async function addRepair(req: Req, res: Res) {
   if (!req.body.title?.trim()) {
     throw new ServiceError('Repair title is required', 422);
   }
+  validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.actualCost, 'actualCost', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.tenantSharePercentage, 'tenantSharePercentage', { min: 0, max: 100 });
+  validateEnum(req.body.chargeableTo, CHARGEABLE_TO, 'chargeableTo');
+  validateEnum(req.body.status, REPAIR_STATUSES, 'status');
+  if (req.body.allocationMethod) {
+    validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod');
+  }
+  if (req.body.chargeTerm) {
+    validateTerm(req.body.chargeTerm, 'chargeTerm');
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1358,6 +1435,22 @@ export async function addRepair(req: Req, res: Res) {
 export async function updateRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id, repairId } = req.params;
+
+  validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.actualCost, 'actualCost', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.tenantSharePercentage, 'tenantSharePercentage', { min: 0, max: 100 });
+  if (req.body.chargeableTo) {
+    validateEnum(req.body.chargeableTo, CHARGEABLE_TO, 'chargeableTo');
+  }
+  if (req.body.status) {
+    validateEnum(req.body.status, REPAIR_STATUSES, 'status');
+  }
+  if (req.body.allocationMethod) {
+    validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod');
+  }
+  if (req.body.chargeTerm) {
+    validateTerm(req.body.chargeTerm, 'chargeTerm');
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
