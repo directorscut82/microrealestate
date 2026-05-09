@@ -625,36 +625,45 @@ export async function remove(req: Req, res: Res) {
 
 export async function all(req: Req, res: Res) {
   const includeArchived = req.query?.includeArchived === 'true';
-  const { page, limit, skip } = Pagination.parsePagination(req as any);
-
+  const { page, limit, skip, isPaginated } = Pagination.parsePagination(req as any);
   const countFilter: AnyRecord = { realmId: req.realm!._id };
   if (!includeArchived) {
     countFilter.$or = [{ archived: { $exists: false } }, { archived: false }];
   }
-  const total = await Collections.Tenant.countDocuments(countFilter);
 
-  const tenants: AnyRecord[] = await Collections.Tenant.aggregate([
-    { $match: countFilter },
-    { $sort: { name: 1 } },
-    { $skip: skip },
-    { $limit: limit }
-  ]);
+  if (!isPaginated) {
+    // No pagination params: return ALL items (backward compatible)
+    const tenants = await _fetchTenants(req.realm!._id);
+    const filtered = includeArchived
+      ? tenants
+      : tenants.filter((t) => !t.archived);
+    res.json(filtered.map((tenant) => FD.toOccupantData(tenant)));
+  } else {
+    // Explicit pagination: apply skip/limit
+    const total = await Collections.Tenant.countDocuments(countFilter);
+    const tenants: AnyRecord[] = await Collections.Tenant.aggregate([
+      { $match: countFilter },
+      { $sort: { name: 1 } },
+      { $skip: skip },
+      { $limit: limit }
+    ]);
 
-  const meta = Pagination.buildPaginationMeta(total, page, limit);
-  Pagination.setPaginationHeaders(res as any, meta);
+    const meta = Pagination.buildPaginationMeta(total, page, limit);
+    Pagination.setPaginationHeaders(res as any, meta);
 
-  // Fetch full data (with $lookup) only for the paginated subset
-  const tenantIds = tenants.map((t) => String(t._id));
-  const fullTenants = tenantIds.length
-    ? await _fetchTenants(req.realm!._id, tenantIds)
-    : [];
-  const tenantMap = new Map(
-    fullTenants.map((t) => [String(t._id), t])
-  );
-  const sorted = tenantIds
-    .map((id) => tenantMap.get(id))
-    .filter(Boolean) as AnyRecord[];
-  res.json(sorted.map((tenant) => FD.toOccupantData(tenant)));
+    // Fetch full data (with $lookup) only for the paginated subset
+    const tenantIds = tenants.map((t) => String(t._id));
+    const fullTenants = tenantIds.length
+      ? await _fetchTenants(req.realm!._id, tenantIds)
+      : [];
+    const tenantMap = new Map(
+      fullTenants.map((t) => [String(t._id), t])
+    );
+    const sorted = tenantIds
+      .map((id) => tenantMap.get(id))
+      .filter(Boolean) as AnyRecord[];
+    res.json(sorted.map((tenant) => FD.toOccupantData(tenant)));
+  }
 }
 
 export async function archive(req: Req, res: Res) {

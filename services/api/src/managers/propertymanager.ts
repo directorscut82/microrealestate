@@ -121,8 +121,16 @@ export async function remove(req: Req, res: Res) {
 
 export async function all(req: Req, res: Res) {
   const realm = req.realm;
-  const { page, limit, skip } = Pagination.parsePagination(req as any);
+  const { page, limit, skip, isPaginated } = Pagination.parsePagination(req as any);
   const filter = { realmId: realm!._id };
+
+  if (!isPaginated) {
+    const dbProperties = await Collections.Property.find(filter)
+      .sort({ name: 1 })
+      .lean();
+    const properties = await _toPropertiesData(realm, dbProperties as any[]);
+    return res.json(properties);
+  }
 
   const [dbProperties, total] = await Promise.all([
     Collections.Property.find(filter)
@@ -132,10 +140,8 @@ export async function all(req: Req, res: Res) {
       .lean(),
     Collections.Property.countDocuments(filter)
   ]);
-
   const meta = Pagination.buildPaginationMeta(total, page, limit);
   Pagination.setPaginationHeaders(res as any, meta);
-
   const properties = await _toPropertiesData(realm, dbProperties as any[]);
   return res.json(properties);
 }
