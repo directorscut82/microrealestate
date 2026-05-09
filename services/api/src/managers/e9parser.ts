@@ -222,7 +222,7 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
 
   // Extract year built: 4-digit year 19xx or 20xx
   let yearBuilt: number | null = null;
-  const yearMatch = rowText.match(/\b(19\d{2}|20[0-2]\d)\b/);
+  const yearMatch = rowText.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) {
     yearBuilt = parseInt(yearMatch[1], 10);
   }
