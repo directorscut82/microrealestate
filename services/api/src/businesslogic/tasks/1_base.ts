@@ -61,6 +61,14 @@ export function computeBuildingChargeForProperty(
   propertyId: string,
   expense: CollectionTypes.BuildingExpense
 ): number {
+  return Math.round(_computeBuildingChargeRaw(building, propertyId, expense) * 100) / 100;
+}
+
+function _computeBuildingChargeRaw(
+  building: CollectionTypes.Building,
+  propertyId: string,
+  expense: CollectionTypes.BuildingExpense
+): number {
   // Find the unit in the building
   const unit = building.units.find((u) => String(u.propertyId) === String(propertyId));
   if (!unit) return 0;
@@ -129,6 +137,8 @@ export function computeBuildingChargeForProperty(
 
 // Check if expense is active for the given term
 function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: number): boolean {
+  // Non-recurring expenses only apply to their start term
+  if (!(expense as any).isRecurring && expense.startTerm && expense.startTerm !== term) return false;
   if (expense.startTerm && term < expense.startTerm) return false;
   if (expense.endTerm && term > expense.endTerm) return false;
   return true;

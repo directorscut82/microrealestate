@@ -154,26 +154,24 @@ const _userSignIn = Middlewares.asyncWrapper(async (req: Request, res: Response)
   }
   const email = rawEmail.trim();
 
+  // Always perform bcrypt compare to prevent timing-based enumeration
   const account = await Collections.Account.findOne({
     email: email.toLowerCase()
   }).lean();
 
-  if (!account) {
-    logger.info(`login failed for ${email} account not found`);
-    throw new ServiceError('invalid credentials', 401);
-  }
-
-  const validPassword = await bcrypt.compare(password, (account as any).password);
-  if (!validPassword) {
-    logger.info(`login failed for ${email} bad password`);
+  const dummyHash = '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01';
+  const validPassword = await bcrypt.compare(
+    password,
+    (account as any)?.password || dummyHash
+  );
+  if (!account || !validPassword) {
+    logger.info(`login failed for ${email}`);
     throw new ServiceError('invalid credentials', 401);
   }
 
   const { refreshToken, accessToken } = await _generateTokens(account as Record<string, any>);
 
-  logger.debug(
-    `create a new refresh token ${refreshToken} for domain ${req.hostname}`
-  );
+  logger.debug(`created refresh token for ${req.hostname}`);
   res.cookie('refreshToken', refreshToken, TOKEN_COOKIE_ATTRIBUTES);
   res.json({ accessToken });
 });
@@ -361,6 +359,13 @@ export default function (): Router {
         throw new ServiceError('missing fields', 422);
       }
 
+      // Verify JWT BEFORE deleting from Redis to prevent race condition
+      try {
+        jwt.verify(resetToken, RESET_TOKEN_SECRET!);
+      } catch (error) {
+        throw new ServiceError('invalid or expired reset token', 403);
+      }
+
       const email = await Service.getInstance().redisClient!.get(resetToken);
       if (!email) {
         throw new ServiceError('invalid credentials', 403);
@@ -368,16 +373,13 @@ export default function (): Router {
 
       await Service.getInstance().redisClient!.del(resetToken);
 
-      try {
-        jwt.verify(resetToken, RESET_TOKEN_SECRET!);
-      } catch (error) {
-        throw new ServiceError(error as string, 403);
-      }
-
       const account = await Collections.Account.findOne({
         email: email.toLowerCase()
       });
-      (account as any).password = password;
+      if (!account) {
+        throw new ServiceError('invalid credentials', 403);
+      }
+      (account as any).password = await bcrypt.hash(password, 10);
       await (account as any).save();
 
       res.sendStatus(200);

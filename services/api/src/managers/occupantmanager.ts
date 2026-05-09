@@ -443,7 +443,7 @@ export async function update(req: Req, res: Res) {
     const hasPaidRents = (newOccupant.rents || []).some(
       (rent: AnyRecord) =>
         (rent.payments &&
-          rent.payments.some((payment: AnyRecord) => payment.amount > 0)) ||
+          rent.payments.some((payment: AnyRecord) => Number(payment.amount) > 0)) ||
         (rent.discounts || []).some(
           (discount: AnyRecord) => discount.origin === 'settlement'
         )
@@ -458,12 +458,12 @@ export async function update(req: Req, res: Res) {
     newOccupant.rents = [];
   }
 
-  await Collections.Tenant.updateOne(
+  await Collections.Tenant.findOneAndUpdate(
     {
       realmId: realm!._id,
       _id: occupantId
     },
-    newOccupant
+    { $set: newOccupant }
   );
 
   // Sync building occupancy for added/removed properties
@@ -504,7 +504,7 @@ export async function remove(req: Req, res: Res) {
     return (occupant.rents || []).some(
       (rent: AnyRecord) =>
         (rent.payments &&
-          rent.payments.some((payment: AnyRecord) => payment.amount > 0)) ||
+          rent.payments.some((payment: AnyRecord) => Number(payment.amount) > 0)) ||
         (rent.discounts || []).some((discount: AnyRecord) => discount.origin === 'settlement')
     );
   });

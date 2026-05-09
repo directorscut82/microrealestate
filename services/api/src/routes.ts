@@ -14,13 +14,19 @@ import multer from 'multer';
 import { logger } from '@microrealestate/common';
 import { parseImportedPdf } from './managers/pdfimportmanager.js';
 
+// Validate that a string looks like a MongoDB ObjectId
+const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
+function isValidObjectId(id: unknown): boolean {
+  return typeof id === 'string' && OBJECT_ID_RE.test(id);
+}
+
 // Simple in-memory rate limiter for upload endpoints (no external dep)
 const uploadRateLimits = new Map<string, { count: number; resetAt: number }>();
 const UPLOAD_RATE_WINDOW_MS = 60_000; // 1 minute
 const UPLOAD_RATE_MAX = 10; // 10 uploads per minute per user
 
 function uploadRateLimit(req: any, res: any, next: any) {
-  const key = req.user?.email || req.ip;
+  const key = `${req.realm?._id}:${req.user?.email || req.ip}`;
   const now = Date.now();
   const entry = uploadRateLimits.get(key);
   if (!entry || now > entry.resetAt) {
@@ -31,6 +37,17 @@ function uploadRateLimit(req: any, res: any, next: any) {
     return res.status(429).json({ message: 'Too many uploads, please try again later' });
   }
   entry.count++;
+  return next();
+}
+
+// Verify uploaded file starts with PDF magic bytes
+function verifyPdfContent(req: any, res: any, next: any) {
+  const file = req.file || (req.files && req.files[0]);
+  if (file && file.buffer) {
+    if (file.buffer.length < 4 || file.buffer.slice(0, 4).toString() !== '%PDF') {
+      return res.status(422).json({ message: 'Invalid PDF file content' });
+    }
+  }
   return next();
 }
 
@@ -76,7 +93,7 @@ export default function routes(): express.Router {
   });
   occupantsRouter.post(
     '/import-pdf',
-    uploadRateLimit, upload.single('pdf') as any,
+    uploadRateLimit, upload.single('pdf') as any, verifyPdfContent,
     Middlewares.asyncWrapper(parseImportedPdf as any)
   );
   occupantsRouter.get('/', Middlewares.asyncWrapper(occupantManager.all as any));
@@ -127,7 +144,7 @@ export default function routes(): express.Router {
   const buildingsRouter = express.Router();
   buildingsRouter.post(
     '/import-pdf',
-    uploadRateLimit, upload.single('pdf') as any,
+    uploadRateLimit, upload.single('pdf') as any, verifyPdfContent,
     Middlewares.asyncWrapper(buildingManager.importFromE9 as any)
   );
   buildingsRouter.get('/', Middlewares.asyncWrapper(buildingManager.all as any));
@@ -163,9 +180,9 @@ export default function routes(): express.Router {
   const billsRouter = express.Router();
   billsRouter.get('/', Middlewares.asyncWrapper(billManager.list as any));
   billsRouter.get('/:id', Middlewares.asyncWrapper(billManager.one as any));
-  billsRouter.post('/parse', uploadRateLimit, upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parseBills as any));
+  billsRouter.post('/parse', uploadRateLimit, upload.array('bills', 5) as any, verifyPdfContent, Middlewares.asyncWrapper(billManager.parseBills as any));
   billsRouter.post('/confirm', Middlewares.asyncWrapper(billManager.confirmBills as any));
-  billsRouter.post('/payment-receipt', uploadRateLimit, upload.array('bills', 20) as any, Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
+  billsRouter.post('/payment-receipt', uploadRateLimit, upload.array('bills', 5) as any, verifyPdfContent, Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any));
   billsRouter.post('/confirm-payment', Middlewares.asyncWrapper(billManager.confirmPayment as any));
   router.use('/bills', billsRouter);
 

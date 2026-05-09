@@ -39,7 +39,7 @@ export function create(contract: Contract): Contract {
     );
   }
 
-  const terms = Math.round(
+  const terms = Math.ceil(
     momentEnd.diff(momentBegin, contract.frequency as moment.unitOfTime.Diff, true)
   );
   contract = {
