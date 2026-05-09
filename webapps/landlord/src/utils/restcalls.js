@@ -351,3 +351,48 @@ export async function saveMonthlyStatement(buildingId, data) {
   );
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// Bills
+// ---------------------------------------------------------------------------
+
+export async function parseBillPdfs(files) {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('bills', file));
+  const response = await apiFetcher().post('/bills/parse', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  return response.data;
+}
+
+export async function confirmBills(bills) {
+  const response = await apiFetcher().post('/bills/confirm', { bills });
+  return response.data;
+}
+
+export async function parsePaymentReceipts(files) {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('bills', file));
+  const response = await apiFetcher().post(
+    '/bills/payment-receipt',
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  );
+  return response.data;
+}
+
+export async function confirmBillPayment(billIds, paymentProofUrl) {
+  const response = await apiFetcher().post('/bills/confirm-payment', {
+    billIds,
+    paymentProofUrl
+  });
+  return response.data;
+}
+
+export async function fetchBills({ buildingId, status } = {}) {
+  const params = new URLSearchParams();
+  if (buildingId) params.set('buildingId', buildingId);
+  if (status) params.set('status', status);
+  const response = await apiFetcher().get(`/bills?${params.toString()}`);
+  return response.data;
+}
