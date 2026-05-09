@@ -1,6 +1,6 @@
 # Task 05 — Frontend Code Review
 
-> **Status:** NOT STARTED
+> **Status:** ✅ COMPLETE
 > **Severity:** High
 > **Category:** Security / Quality
 > **Files to review:** `webapps/landlord/src/utils/fetch.js`, `webapps/landlord/src/utils/restcalls.js`, `webapps/landlord/src/store/`, `webapps/landlord/src/hooks/`, key form components
@@ -148,3 +148,54 @@ Zero frontend files have been reviewed in any code review round. The landlord ap
 - The rich text editor is a high-risk area for XSS — prioritize that review
 - `withAuthentication` HOC uses singleton store — verify it doesn't leak across sessions
 - Tenant portal (`webapps/tenant/`) also needs review but is lower priority (less attack surface, server components)
+
+---
+
+## Review Findings & Fixes (completed 2026-05-09)
+
+### Fixed Issues
+
+| # | Severity | Issue | Fix |
+|---|----------|-------|-----|
+| 1 | HIGH | **No ErrorBoundary** — any render error = full white screen crash | Added `ErrorBoundary` component wrapping entire app in `_app.js` |
+| 2 | MEDIUM | **Payment double-submit** — PaymentTabs didn't track `isSubmitting`, Save button remained clickable during API call | Added `saving` state to `NewPaymentDialog`, extracted `isSubmitting` in PaymentTabs, added `onError` callback to reset on failure |
+| 3 | MEDIUM | **Queued requests hang on refresh failure** — `requestQueue` was cleared without rejecting pending promises, causing unresolved promises forever | Added `catch` block in refresh interceptor that rejects all queued requests before clearing |
+| 4 | LOW | **`buildFetchError` leaks Authorization header** — included full request headers including Bearer token | Destructure and strip `Authorization`/`authorization` before including in error object |
+
+### Verified Safe (No Fix Needed)
+
+| Area | Finding |
+|------|---------|
+| Token storage | ✅ Access token stored in class property (memory only), NOT localStorage/sessionStorage |
+| Refresh token queue | ✅ Properly queues concurrent 401 requests, retries after refresh succeeds |
+| 403 handling | ✅ Forces `window.location.assign()` redirect to login |
+| Logout cleanup | ✅ `signOut()` nulls all user fields, clears localStorage/sessionStorage |
+| `dangerouslySetInnerHTML` | ✅ Only in `chart.js` — renders developer-controlled CSS from config constants, not user input |
+| RichTextEditor XSS | ✅ TipTap (ProseMirror) schema acts as sanitizer — only renders known node types, no raw HTML injection possible |
+| Console logging | ✅ Only logs `METHOD URL STATUS` — no token/body/sensitive data |
+| Form double-submit | ✅ 40+ forms use `isSubmitting` from react-hook-form to disable submit buttons |
+| Store singleton pattern | ✅ `subscribe()` returns unsubscribe fn called in cleanup, no memory leak |
+| `withAuthentication` HOC | ✅ Uses `getStoreInstance()` singleton correctly — avoids race with context on page reload |
+| CORS / `withCredentials` | ✅ Configurable via `CORS_ENABLED` env var |
+| HTTP methods | ✅ All API calls use correct methods (GET reads, POST create, PATCH update, DELETE remove) |
+| `organizationId` header | ✅ Set globally via `setOrganizationId()` on org selection — all realm-scoped calls include it |
+
+### Documented Issues (Not Fixed — Low Impact)
+
+| Issue | Impact | Why Not Fixed |
+|-------|--------|---------------|
+| Query keys not scoped by org ID (`QueryKeys.TENANTS` = flat string) | Could briefly show stale data from previous org on switch | Mitigated by Next.js Pages Router remounting on URL change. Fixing requires refactoring all 100+ `useQuery` calls with no practical user impact |
+| `useMutation` imported but unused in PaymentTabs | Dead code | Pre-existing, harmless (tree-shaken in production build) |
+| No `DOMPurify` on RichTextEditor output | Template HTML rendered via TipTap schema | TipTap's schema-based rendering is functionally equivalent to sanitization for this use case |
+
+### Files Modified
+- `webapps/landlord/src/components/ErrorBoundary.js` — NEW
+- `webapps/landlord/src/pages/_app.js` — Added ErrorBoundary wrapper
+- `webapps/landlord/src/utils/fetch.js` — Reject queued requests on refresh failure + strip auth header
+- `webapps/landlord/src/components/payment/PaymentTabs.js` — Added `isSubmitting`, `onError` prop
+- `webapps/landlord/src/components/payment/NewPaymentDialog.js` — Added `saving` state, disabled button during submit
+
+### Verification
+- ✅ Next.js build succeeds (0 errors)
+- ✅ TypeScript backend compiles (0 errors)
+- ✅ All page bundles generated correctly
