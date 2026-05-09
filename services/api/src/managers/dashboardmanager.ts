@@ -34,16 +34,44 @@ export async function all(req: Req, res: Res) {
     realmId: req.headers.organizationid
   }).count();
 
+  // Compute occupancy rate excluding owner_occupied and parking units
   let occupancyRate: number | undefined;
   if (propertyCount > 0) {
-    const countPropertyRented = activeTenants.reduce(
-      (acc: Set<string>, { properties = [] }: AnyRecord) => {
-        properties.forEach(({ propertyId }: AnyRecord) => acc.add(propertyId));
-        return acc;
-      },
-      new Set<string>()
-    ).size;
-    occupancyRate = countPropertyRented / propertyCount;
+    // Find all property IDs that are linked to non-rentable building units
+    const buildings: AnyRecord[] = await Collections.Building.find({
+      realmId: req.headers.organizationid
+    }).lean();
+
+    const nonRentablePropertyIds = new Set<string>();
+    for (const building of buildings) {
+      for (const unit of (building.units || [])) {
+        if (
+          unit.propertyId &&
+          (unit.occupancyType === 'owner_occupied' || unit.occupancyType === 'parking')
+        ) {
+          nonRentablePropertyIds.add(String(unit.propertyId));
+        }
+      }
+    }
+
+    const rentablePropertyCount = propertyCount - nonRentablePropertyIds.size;
+
+    if (rentablePropertyCount > 0) {
+      const countPropertyRented = activeTenants.reduce(
+        (acc: Set<string>, { properties = [] }: AnyRecord) => {
+          properties.forEach(({ propertyId }: AnyRecord) => {
+            if (!nonRentablePropertyIds.has(String(propertyId))) {
+              acc.add(propertyId);
+            }
+          });
+          return acc;
+        },
+        new Set<string>()
+      ).size;
+      occupancyRate = countPropertyRented / rentablePropertyCount;
+    } else {
+      occupancyRate = 0;
+    }
   }
 
   let totalYearRevenues = 0;
@@ -200,9 +228,73 @@ export async function all(req: Req, res: Res) {
       moment(r1.month, 'MMYYYY').isBefore(moment(r2.month, 'MMYYYY')) ? -1 : 1
     );
 
+  // Pending bills grouped by building
+  const pendingBills = await _fetchPendingBills(
+    req.headers.organizationid as string
+  );
+
   res.json({
     overview,
     topUnpaid,
-    revenues
+    revenues,
+    pendingBills
   });
+}
+
+async function _fetchPendingBills(realmId: string): Promise<AnyRecord[]> {
+  const bills: AnyRecord[] = await Collections.Bill.find({
+    realmId,
+    status: 'pending'
+  })
+    .sort({ dueDate: 1 })
+    .lean();
+
+  if (!bills.length) return [];
+
+  // Get building names for grouping
+  const buildingIds = [...new Set(bills.map((b) => b.buildingId))];
+  const buildings: AnyRecord[] = await Collections.Building.find(
+    { _id: { $in: buildingIds } },
+    { name: 1 }
+  ).lean();
+  const buildingMap = new Map(
+    buildings.map((b) => [String(b._id), b.name])
+  );
+
+  // Get expense names
+  const expenseData = await Collections.Building.find(
+    { _id: { $in: buildingIds } },
+    { expenses: 1 }
+  ).lean();
+  const expenseMap = new Map<string, string>();
+  for (const b of expenseData as AnyRecord[]) {
+    for (const exp of (b.expenses || [])) {
+      expenseMap.set(String(exp._id), exp.name);
+    }
+  }
+
+  // Group by building
+  const grouped: AnyRecord = {};
+  for (const bill of bills) {
+    const buildingId = String(bill.buildingId);
+    if (!grouped[buildingId]) {
+      grouped[buildingId] = {
+        buildingId,
+        buildingName: buildingMap.get(buildingId) || 'Unknown',
+        bills: []
+      };
+    }
+    grouped[buildingId].bills.push({
+      _id: bill._id,
+      expenseName: expenseMap.get(String(bill.expenseId)) || bill.provider,
+      provider: bill.provider,
+      totalAmount: bill.totalAmount,
+      dueDate: bill.dueDate,
+      periodStart: bill.periodStart,
+      periodEnd: bill.periodEnd,
+      status: bill.status
+    });
+  }
+
+  return Object.values(grouped);
 }
