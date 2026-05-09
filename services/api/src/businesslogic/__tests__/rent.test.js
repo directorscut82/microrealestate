@@ -177,15 +177,15 @@ describe('Task 4: VATs', () => {
     ]);
   });
 
-  test('computes vat on charges, debts, and discounts', () => {
+  test('computes vat on charges and discounts (not debts)', () => {
     const r = makeRent();
     r.preTaxAmounts = [{ description: 'Apt', amount: 1000 }];
     r.charges = [{ description: 'Water', amount: 100 }];
     r.debts = [{ description: 'Late', amount: 50 }];
     r.discounts = [{ origin: 'contract', description: 'Disc', amount: 200 }];
     const rent = taskVATs(makeContract({ vatRate: 0.2 }), RENT_DATE, null, null, r);
-    expect(rent.vats).toHaveLength(4);
-    // discount vat is negative
+    // VAT on: preTaxAmounts, charges, discounts (NOT debts - they already include VAT)
+    expect(rent.vats).toHaveLength(3);
     const discountVat = rent.vats.find(v => v.description.includes('Disc'));
     expect(discountVat.amount).toBe(-40);
   });
@@ -318,10 +318,10 @@ describe('Full pipeline: computeRent', () => {
     expect(rent.total.debts).toBe(75);
     expect(rent.total.discount).toBe(75); // 50 contract + 25 settlement
     expect(rent.total.balance).toBe(200); // 500 - 300
-    // VAT: (1000 + 100 + 75 - 75) * 0.1 = 110
-    expect(rent.total.vat).toBe(110);
-    // grandTotal = 1000 + 100 + 75 - 75 + 110 + 200 = 1410
-    expect(rent.total.grandTotal).toBe(1410);
+    // VAT: (1000 + 100 - 75) * 0.1 = 102.5 (debts no longer taxed)
+    expect(rent.total.vat).toBe(102.5);
+    // grandTotal = 1000 + 100 + 75 - 75 + 102.5 + 200 = 1402.5
+    expect(rent.total.grandTotal).toBe(1402.5);
     expect(rent.total.payment).toBe(900);
     expect(rent.description).toBe('January settlement');
   });

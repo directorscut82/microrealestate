@@ -32,17 +32,17 @@ export default function taskTotal(
     0
   );
 
-  rent.total.preTaxAmount = preTaxAmount;
-  rent.total.charges = charges;
-  rent.total.debts = debts;
-  rent.total.discount = discount;
+  rent.total.preTaxAmount = Math.round(preTaxAmount * 100) / 100;
+  rent.total.charges = Math.round(charges * 100) / 100;
+  rent.total.debts = Math.round(debts * 100) / 100;
+  rent.total.discount = Math.round(discount * 100) / 100;
   rent.total.vat = vat;
   rent.total.grandTotal =
     Math.round(
       (preTaxAmount + charges + buildingChargesTotal + debts - discount + vat + rent.total.balance) *
         100
     ) / 100;
-  rent.total.payment = payment;
+  rent.total.payment = Math.round(payment * 100) / 100;
 
   return rent;
 }

@@ -1,4 +1,4 @@
-import { Collections } from '@microrealestate/common';
+import { Collections, logger } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import moment from 'moment';
 
@@ -14,9 +14,10 @@ export async function all(req: Req, res: Res) {
   const beginOfTheYear = moment(now).startOf('year');
   const endOfTheYear = moment(now).endOf('year');
 
-  const allTenants: AnyRecord[] = await Collections.Tenant.find({
-    realmId: req.headers.organizationid
-  });
+  const realmId = req.realm!._id;
+  const allTenants: AnyRecord[] = await Collections.Tenant.find(
+    { realmId }
+  ).lean();
   const activeTenants = allTenants.reduce((acc: AnyRecord[], tenant: AnyRecord) => {
     const terminationMoment = tenant.terminationDate
       ? moment(tenant.terminationDate)
@@ -30,16 +31,16 @@ export async function all(req: Req, res: Res) {
   }, []);
   const tenantCount = activeTenants.length;
 
-  const propertyCount = await Collections.Property.find({
-    realmId: req.headers.organizationid
-  }).count();
+  const propertyCount = await Collections.Property.countDocuments({
+    realmId
+  });
 
   // Compute occupancy rate excluding owner_occupied and parking units
   let occupancyRate: number | undefined;
   if (propertyCount > 0) {
     // Find all property IDs that are linked to non-rentable building units
     const buildings: AnyRecord[] = await Collections.Building.find({
-      realmId: req.headers.organizationid
+      realmId
     }).lean();
 
     const nonRentablePropertyIds = new Set<string>();
@@ -81,7 +82,7 @@ export async function all(req: Req, res: Res) {
       let sumPayments = 0;
       rents.forEach((rent: AnyRecord) => {
         (rent.payments || []).forEach((payment: AnyRecord) => {
-          if (!payment.date || payment.amount === 0) {
+          if (!payment.date || Number(payment.amount) === 0) {
             return;
           }
 
@@ -229,9 +230,12 @@ export async function all(req: Req, res: Res) {
     );
 
   // Pending bills grouped by building
-  const pendingBills = await _fetchPendingBills(
-    req.headers.organizationid as string
-  );
+  let pendingBills: AnyRecord[] = [];
+  try {
+    pendingBills = await _fetchPendingBills(realmId);
+  } catch (error) {
+    logger.error(`Failed to fetch pending bills: ${String(error)}`);
+  }
 
   res.json({
     overview,
@@ -255,19 +259,13 @@ async function _fetchPendingBills(realmId: string): Promise<AnyRecord[]> {
   const buildingIds = [...new Set(bills.map((b) => b.buildingId))];
   const buildings: AnyRecord[] = await Collections.Building.find(
     { _id: { $in: buildingIds } },
-    { name: 1 }
+    { name: 1, expenses: 1 }
   ).lean();
   const buildingMap = new Map(
     buildings.map((b) => [String(b._id), b.name])
   );
-
-  // Get expense names
-  const expenseData = await Collections.Building.find(
-    { _id: { $in: buildingIds } },
-    { expenses: 1 }
-  ).lean();
   const expenseMap = new Map<string, string>();
-  for (const b of expenseData as AnyRecord[]) {
+  for (const b of buildings as AnyRecord[]) {
     for (const exp of (b.expenses || [])) {
       expenseMap.set(String(exp._id), exp.name);
     }

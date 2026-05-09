@@ -14,7 +14,7 @@ export default function taskVATs(
       rent.vats.push({
         origin: 'contract',
         description: `${preTaxAmount.description} T.V.A. (${rate * 100}%)`,
-        amount: preTaxAmount.amount * rate,
+        amount: Math.round(preTaxAmount.amount * rate * 100) / 100,
         rate
       });
     });
@@ -23,25 +23,19 @@ export default function taskVATs(
       rent.vats.push({
         origin: 'contract',
         description: `${charges.description} T.V.A. (${rate * 100}%)`,
-        amount: charges.amount * rate,
+        amount: Math.round(charges.amount * rate * 100) / 100,
         rate
       });
     });
 
-    rent.debts.forEach((debt) => {
-      rent.vats.push({
-        origin: 'debts',
-        description: `${debt.description} T.V.A. (${rate * 100}%)`,
-        amount: debt.amount * rate,
-        rate
-      });
-    });
+    // NOTE: Do NOT apply VAT to debts — they are carried-forward grandTotal
+    // amounts from previous terms that already include VAT.
 
     rent.discounts.forEach((discount) => {
       rent.vats.push({
         origin: discount.origin,
         description: `${discount.description} T.V.A. (${rate * 100}%)`,
-        amount: discount.amount * rate * -1,
+        amount: Math.round(discount.amount * rate * -1 * 100) / 100,
         rate
       });
     });

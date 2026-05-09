@@ -201,12 +201,12 @@ async function _updateByTerm(
   term: string,
   paymentData: AnyRecord
 ): Promise<AnyRecord> {
-  if (!paymentData.promo && paymentData.promo <= 0) {
+  if (!paymentData.promo || Number(paymentData.promo) <= 0) {
     paymentData.promo = 0;
     paymentData.notepromo = null;
   }
 
-  if (!paymentData.extracharge && paymentData.extracharge <= 0) {
+  if (!paymentData.extracharge || Number(paymentData.extracharge) <= 0) {
     paymentData.extracharge = 0;
     paymentData.noteextracharge = null;
   }
