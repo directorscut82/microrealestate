@@ -196,11 +196,7 @@ export default function routes(): express.Router {
   const databaseRouter = express.Router();
   databaseRouter.use(databaseManager.requireAdmin);
   databaseRouter.get('/backup', databaseManager.backup);
-  databaseRouter.post(
-    '/restore',
-    express.json({ limit: '100mb' }),
-    databaseManager.restore
-  );
+  databaseRouter.post('/restore', databaseManager.restore);
   router.use('/database', databaseRouter);
 
   router.get(
