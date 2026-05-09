@@ -28,18 +28,17 @@ export default function Pagination({ chunks, onChange }) {
   return chunks.length > 1 ? (
     <PrimitivePagination>
       <PaginationContent>
-        <PaginationItem>
-          {chunks.map((_, index) => (
+        {chunks.map((_, index) => (
+          <PaginationItem key={index}>
             <PaginationLink
-              key={index}
               href="#"
               isActive={selectedPage === index + 1}
               onClick={() => handlePageChange(index)}
             >
               {index + 1}
             </PaginationLink>
-          ))}
-        </PaginationItem>
+          </PaginationItem>
+        ))}
       </PaginationContent>
     </PrimitivePagination>
   ) : null;
