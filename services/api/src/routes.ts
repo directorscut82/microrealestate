@@ -69,6 +69,7 @@ export default function routes(): express.Router {
   realmsRouter.get('/:id', realmManager.one as any);
   realmsRouter.post('/', Middlewares.asyncWrapper(realmManager.add as any));
   realmsRouter.patch('/:id', Middlewares.asyncWrapper(realmManager.update as any));
+  realmsRouter.delete('/:id', Middlewares.asyncWrapper(realmManager.remove as any));
   router.use('/realms', realmsRouter);
 
   const dashboardRouter = express.Router();
