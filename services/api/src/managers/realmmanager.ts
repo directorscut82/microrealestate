@@ -277,3 +277,44 @@ export function one(req: Req, res: Res) {
 export function all(req: Req, res: Res) {
   res.json(req.realms.map((realm: AnyRecord) => _escapeSecrets(realm)));
 }
+
+export async function remove(req: Req, res: Res) {
+  const realmId = req.params.id;
+  if (!realmId) {
+    throw new ServiceError('missing realm id', 422);
+  }
+
+  const realm = req.realms.find(
+    ({ _id }: AnyRecord) => _id.toString() === realmId
+  );
+  if (!realm) {
+    throw new ServiceError('organization not found', 404);
+  }
+
+  const tenantCount = await Collections.Tenant.countDocuments({ realmId });
+  const propertyCount = await Collections.Property.countDocuments({ realmId });
+  const leaseCount = await Collections.Lease.countDocuments({ realmId });
+  const buildingCount = await Collections.Building.countDocuments({ realmId });
+
+  const blockers: string[] = [];
+  if (tenantCount > 0) blockers.push(`${tenantCount} tenant(s)`);
+  if (propertyCount > 0) blockers.push(`${propertyCount} property/ies`);
+  if (leaseCount > 0) blockers.push(`${leaseCount} lease(s)`);
+  if (buildingCount > 0) blockers.push(`${buildingCount} building(s)`);
+
+  if (blockers.length > 0) {
+    throw new ServiceError(
+      `Cannot delete organization: ${blockers.join(', ')} still exist. Remove them first.`,
+      422
+    );
+  }
+
+  await Collections.Template.deleteMany({ realmId });
+  await Collections.Document.deleteMany({ realmId });
+  await Collections.Email.deleteMany({ realmId });
+  await Collections.Realm.deleteOne({ _id: realmId });
+
+  logger.info(`Realm ${realmId} (${realm.name}) deleted by ${(req.user as AnyRecord)?.email}`);
+
+  res.sendStatus(204);
+}
