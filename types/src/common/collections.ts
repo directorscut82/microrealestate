@@ -490,7 +490,7 @@ export namespace CollectionTypes {
     term: number;
     rfCode?: string;
     irisCodeUrl?: string;
-    pdfUrl: string;
+    pdfUrl?: string;
     status: BillStatus;
     paymentProofUrl?: string;
     paymentDate?: Date;
