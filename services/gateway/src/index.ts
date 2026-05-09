@@ -68,8 +68,7 @@ function configureCORS(application: Express.Application) {
       allowedHeaders:
         //',If-Modified-Since,Range, DNT',
         'Origin,User-Agent,X-Requested-With,Cache-Control,Content-Type,Accept,Authorization,organizationId,timeout',
-      credentials: true,
-      exposedHeaders: 'X-Total-Count,X-Page,X-Limit,X-Total-Pages'
+      credentials: true
     };
 
     application.use('/api', cors(corsOptions));
