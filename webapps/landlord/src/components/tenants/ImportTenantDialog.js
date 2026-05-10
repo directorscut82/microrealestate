@@ -3,14 +3,14 @@ import {
   createLease,
   createProperty,
   createTenant,
-  fetchLeases,
   fetchBuildings,
+  fetchLeases,
   fetchProperties,
   fetchTenants,
   importTenantPdf,
+  QueryKeys,
   updateProperty,
-  updateTenant,
-  QueryKeys
+  updateTenant
 } from '../../utils/restcalls';
 import {
   apiFetcher

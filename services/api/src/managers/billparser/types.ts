@@ -18,5 +18,5 @@ export type BillParseResult = {
 };
 
 export function normalizeBillingId(id: string): string {
-  return id.replace(/[\s\-\.]/g, '');
+  return id.replace(/[\s\-.]/g, '');
 }

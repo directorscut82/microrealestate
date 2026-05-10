@@ -25,18 +25,28 @@ export default function PendingBills({ className, dashboardData }) {
   const { t } = useTranslation('common');
   const pendingBills = dashboardData?.pendingBills || [];
 
-  if (!pendingBills.length) return null;
-
-  const totalPending = useMemo(() => pendingBills.reduce(
-    (sum, group) =>
-      sum + group.bills.reduce((s, b) => s + (b.totalAmount || 0), 0),
-    0
-  ), [pendingBills]);
+  const totalPending = useMemo(
+    () =>
+      pendingBills.reduce(
+        (sum, group) =>
+          sum + group.bills.reduce((s, b) => s + (b.totalAmount || 0), 0),
+        0
+      ),
+    [pendingBills]
+  );
 
   const now = useMemo(() => moment(), []);
-  const overdueBills = useMemo(() => pendingBills.flatMap((group) =>
-    group.bills.filter((b) => b.dueDate && moment(b.dueDate).isBefore(now, 'day'))
-  ), [pendingBills, now]);
+  const overdueBills = useMemo(
+    () =>
+      pendingBills.flatMap((group) =>
+        group.bills.filter(
+          (b) => b.dueDate && moment(b.dueDate).isBefore(now, 'day')
+        )
+      ),
+    [pendingBills, now]
+  );
+
+  if (!pendingBills.length) return null;
 
   return (
     <Card className={cn('', className)}>
@@ -54,9 +64,7 @@ export default function PendingBills({ className, dashboardData }) {
           )}
         </CardTitle>
         <CardDescription className="flex justify-between text-xs">
-          <span>
-            {t('Utility bills awaiting payment')}
-          </span>
+          <span>{t('Utility bills awaiting payment')}</span>
           <span className="font-medium">
             <NumberFormat value={totalPending} showZero={true} />
           </span>
@@ -84,8 +92,7 @@ export default function PendingBills({ className, dashboardData }) {
                 <TableBody>
                   {group.bills.map((bill) => {
                     const isOverdue =
-                      bill.dueDate &&
-                      moment(bill.dueDate).isBefore(now, 'day');
+                      bill.dueDate && moment(bill.dueDate).isBefore(now, 'day');
                     return (
                       <TableRow
                         key={bill._id}

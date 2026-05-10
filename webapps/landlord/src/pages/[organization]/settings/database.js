@@ -17,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '../../../components/ui/alert-dialog';
-import { LuDownload, LuUpload, LuLoader2 } from 'react-icons/lu';
+import { LuDownload, LuLoader2, LuUpload } from 'react-icons/lu';
 import Page from '../../../components/Page';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';

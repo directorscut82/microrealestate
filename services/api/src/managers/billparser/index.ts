@@ -1,4 +1,4 @@
-import { BillParseResult, ParsedBill } from './types.js';
+import type { BillParseResult } from './types.js';
 import { parseDehBill } from './deh.js';
 
 export { normalizeBillingId } from './types.js';
@@ -45,9 +45,7 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
     }
     return fullText;
   } catch (error) {
-    throw new Error(
-      `Failed to extract text from PDF: ${String(error)}`
-    );
+    throw new Error(`Failed to extract text from PDF: ${String(error)}`);
   }
 }
 

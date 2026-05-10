@@ -2,7 +2,7 @@
 jest.mock('winston');
 jest.mock('express-winston');
 
-import { validateObjectId, validateTerm, validateFiniteNumber, validateEnum, validateStringLength, validatePercentageAllocations, validateRatioAllocations, validateAllocationValues, sanitizeMongoObject } from '../validators.js';
+import { sanitizeMongoObject, validateAllocationValues, validateEnum, validateFiniteNumber, validateObjectId, validatePercentageAllocations, validateRatioAllocations, validateStringLength, validateTerm } from '../validators.js';
 
 describe('validators', () => {
   describe('validateObjectId', () => {

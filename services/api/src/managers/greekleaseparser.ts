@@ -95,16 +95,16 @@ function between(text: string, startLabel: string, endLabel: string): string {
 // Map Greek PDF property categories to MRE property types
 const CATEGORY_MAP: Record<string, string> = {
   'Κατοικία/Διαμέρισμα': 'apartment',
-  'Κατοικία': 'apartment',
-  'Διαμέρισμα': 'apartment',
-  'Κατάστημα': 'store',
-  'Γραφείο': 'office',
-  'Αποθήκη': 'store',
+  Κατοικία: 'apartment',
+  Διαμέρισμα: 'apartment',
+  Κατάστημα: 'store',
+  Γραφείο: 'office',
+  Αποθήκη: 'store',
   'Βιομηχανικός χώρος': 'building',
-  'Γκαράζ': 'garage',
-  'Parking': 'parking',
-  'Οικόπεδο': 'building',
-  'Αγροτεμάχιο': 'building'
+  Γκαράζ: 'garage',
+  Parking: 'parking',
+  Οικόπεδο: 'building',
+  Αγροτεμάχιο: 'building'
 };
 
 function mapCategoryToType(category: string): string {
@@ -117,7 +117,12 @@ function mapCategoryToType(category: string): string {
 // Parse "Όροφος 3 ΣΠΑΡΤΙΑΤΩΝ 9 11147 ΓΑΛΑΤΣΙΟΥ, ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)"
 // into structured address fields
 function parseAddress(raw: string): ParsedAddress {
-  const result: ParsedAddress = { street1: '', zipCode: '', city: '', state: '' };
+  const result: ParsedAddress = {
+    street1: '',
+    zipCode: '',
+    city: '',
+    state: ''
+  };
   if (!raw) return result;
 
   // Extract floor: "Όροφος N" or "Ισόγειο" or "Υπόγειο"
@@ -129,7 +134,7 @@ function parseAddress(raw: string): ParsedAddress {
   if (zipMatch) result.zipCode = zipMatch[1];
 
   // Remove floor and zip from the string to isolate street and location
-  let cleaned = raw
+  const cleaned = raw
     .replace(/(Όροφος\s+\d+|Ισόγειο|Υπόγειο)/i, '')
     .replace(/\b\d{5}\b/, '')
     .replace(/\(ΝΟΜΑΡΧΙΑ\)/i, '')
@@ -137,7 +142,10 @@ function parseAddress(raw: string): ParsedAddress {
     .trim();
 
   // Split on comma — typically "STREET CITY, REGION"
-  const parts = cleaned.split(',').map((p) => p.trim()).filter(Boolean);
+  const parts = cleaned
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
 
   if (parts.length >= 2) {
     // Last part is region (ΑΘΗΝΩΝ → ΑΘΗΝΑ)
@@ -277,11 +285,7 @@ export function parseGreekLease(text: string): ParsedLease {
       between(s, 'ΜΗΝΙΑΙΟ ΜΙΣΘΩΜΑ', 'ΑΡΙΘΜΟΣ ΠΑΡΟΧΗΣ ΔΕΗ')
     );
 
-    const dehNumber = between(
-      s,
-      'ΑΡΙΘΜΟΣ ΠΑΡΟΧΗΣ ΔΕΗ',
-      'ΣΤΟΙΧΕΙΑ ΕΝΕΡΓΕΙΑΚΟΥ'
-    );
+    const dehNumber = between(s, 'ΑΡΙΘΜΟΣ ΠΑΡΟΧΗΣ ΔΕΗ', 'ΣΤΟΙΧΕΙΑ ΕΝΕΡΓΕΙΑΚΟΥ');
 
     // Energy certificate — may be in a separate section
     let energyCertificate: ParsedEnergyCertificate | undefined;

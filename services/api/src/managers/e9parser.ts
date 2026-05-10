@@ -53,7 +53,10 @@ export type ParsedE9Result = {
 
 // Returns null on parse failure (instead of 0) to distinguish from actual zero
 function parseGreekDecimal(value: string): number | null {
-  const cleaned = value.replace(/[€\s]/g, '').replace('.', '').replace(',', '.');
+  const cleaned = value
+    .replace(/[€\s]/g, '')
+    .replace('.', '')
+    .replace(',', '.');
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
 }
@@ -98,19 +101,21 @@ function isRealBuildingUnit(unit: {
 // PREFIX SUFFIX STATE(ΝΟΜΑΡΧΙΑ) MUNICIPALITY STREET NUM [X BLOCK_STREETS]
 //   BLOCK_NUM ? FLOOR SURFACE [AUX_SURFACE] ? YEAR OWN_INT, OWN_FRAC ?
 //   ELEC(ΝΑΙ/ΟΧΙ) ? ZIP CITY [DEH_NUMBER]
-function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): ParsedE9Unit | null {
+function parseE9Row(
+  rowText: string,
+  atakPrefix: string,
+  atakSuffix: string
+): ParsedE9Unit | null {
   // Remove the ATAK prefix/suffix from start
   const afterAtak = rowText.substring(12).trim(); // "005578 02430 " = 12 chars
 
   // Extract state — pattern: "ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)" or "ΑΝΑΤ. ΑΤΤΙΚΗΣ (ΝΟΜΑΡΧΙΑ)"
   // Also handle non-ΝΟΜΑΡΧΙΑ states like "ΚΥΚΛΑΔΩΝ"
   const stateMatch = afterAtak.match(
-    /^([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s*\((?:ΝΟΜΑΡΧ[ΙΑ]*|ΝΟΜΑΡΧΙΑ)\)\s*/
+    /^([\u0391-\u03A9\u0386-\u038F.\s]+?)\s*\((?:ΝΟΜΑΡΧ[ΙΑ]*|ΝΟΜΑΡΧΙΑ)\)\s*/
   );
   const stateMatchAlt = !stateMatch
-    ? afterAtak.match(
-        /^([\u0391-\u03A9\u0386-\u038F]{3,})\s+/
-      )
+    ? afterAtak.match(/^([\u0391-\u03A9\u0386-\u038F]{3,})\s+/)
     : null;
   let state = '';
   let rest = afterAtak;
@@ -136,20 +141,21 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   // Rural format FIRST (must be checked before simple street to avoid false matches)
   // "MUNICIPALITY - AREA SETTLEMENT_TYPE SETTLEMENT_NAME X ..."
   const ruralMatch = rest.match(
-    /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+(ΟΙΚΙΣΜΟΣ|ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ|ΘΕΣΗ|ΠΕΡΙΟΧΗ)\s+([\u0391-\u03A9\u0386-\u038F\.\s]+?)\s+X\b/
+    /^([\u0391-\u03A9\u0386-\u038F.\s-]+?)\s+(ΟΙΚΙΣΜΟΣ|ΕΠΙ ΑΓΡΟΤΕΜΑΧΙΟΥ|ΘΕΣΗ|ΠΕΡΙΟΧΗ)\s+([\u0391-\u03A9\u0386-\u038F.\s]+?)\s+X\b/
   );
 
   const compoundStreetMatch = rest.match(
-    /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+?)\s+((?:ΑΓ\.?\s+|ΑΓΙΩΝ\s+|ΑΓΙΟΥ\s+|ΕΘΝ\.?\s+|ΒΑΣΙΛ\.?\s+|ΛΕΩΦ\.?\s+|ΗΡΩΩΝ\s+|ΣΤΡΑΤ\.?\s+)[\u0391-\u03A9\u0386-\u038F]+)\s+(\d+)\s/
+    /^([\u0391-\u03A9\u0386-\u038F.\s-]+?)\s+((?:ΑΓ\.?\s+|ΑΓΙΩΝ\s+|ΑΓΙΟΥ\s+|ΕΘΝ\.?\s+|ΒΑΣΙΛ\.?\s+|ΛΕΩΦ\.?\s+|ΗΡΩΩΝ\s+|ΣΤΡΑΤ\.?\s+)[\u0391-\u03A9\u0386-\u038F]+)\s+(\d+)\s/
   );
   // Simple street (single word before number)
-  const simpleStreetMatch = !compoundStreetMatch && !ruralMatch
-    ? rest.match(
-        /^([\u0391-\u03A9\u0386-\u038F\.\s\-]+)\s+([\u0391-\u03A9\u0386-\u038F]{3,})\s+(\d+)\s/
-      )
-    : null;
+  const simpleStreetMatch =
+    !compoundStreetMatch && !ruralMatch
+      ? rest.match(
+          /^([\u0391-\u03A9\u0386-\u038F.\s-]+)\s+([\u0391-\u03A9\u0386-\u038F]{3,})\s+(\d+)\s/
+        )
+      : null;
   const municipalityAndStreet = !ruralMatch
-    ? (compoundStreetMatch || simpleStreetMatch)
+    ? compoundStreetMatch || simpleStreetMatch
     : null;
 
   let municipality = '';
@@ -181,7 +187,7 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
       const afterX = rest.substring(xPos + 3);
       // Block streets are Greek words until we hit a 2-4 digit number (block number)
       const streetsMatch = afterX.match(
-        /^([\u0391-\u03A9\u0386-\u038F\.\s\(\)]+?)\s+(\d{1,4})\s/
+        /^([\u0391-\u03A9\u0386-\u038F.\s()]+?)\s+(\d{1,4})\s/
       );
       if (streetsMatch) {
         const streetsStr = streetsMatch[1].trim();
@@ -265,21 +271,24 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   let surface = 0;
   let auxSurface = 0;
   if (surfaceCandidates.length >= 1) {
-    surface = parseGreekDecimal(
-      surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2]
-    ) ?? 0;
+    surface =
+      parseGreekDecimal(
+        surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2]
+      ) ?? 0;
   }
   if (surfaceCandidates.length >= 2) {
-    auxSurface = parseGreekDecimal(
-      surfaceCandidates[1][1] + ',' + surfaceCandidates[1][2]
-    ) ?? 0;
+    auxSurface =
+      parseGreekDecimal(
+        surfaceCandidates[1][1] + ',' + surfaceCandidates[1][2]
+      ) ?? 0;
   }
 
   // For large surfaces with dot separators (e.g. "2.478,00" or "1.032,00")
   if (surface === 0) {
     const largeSurfMatch = rowText.match(/\b(\d{1,2}\.\d{3}),(\d{2})\b/);
     if (largeSurfMatch) {
-      surface = parseGreekDecimal(largeSurfMatch[1] + ',' + largeSurfMatch[2]) ?? 0;
+      surface =
+        parseGreekDecimal(largeSurfMatch[1] + ',' + largeSurfMatch[2]) ?? 0;
     }
   }
 
@@ -297,18 +306,17 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
       surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2]
     );
     // Look at the few characters before surface for floor digit
-    const beforeSurface = rowText.substring(
-      Math.max(0, surfacePos - 10),
-      surfacePos
-    ).trim();
+    const beforeSurface = rowText
+      .substring(Math.max(0, surfacePos - 10), surfacePos)
+      .trim();
     // Floor is the last single digit before the surface
     const floorDigits = beforeSurface.match(/(\d+)\s*$/);
     if (floorDigits) {
       floor = parseInt(floorDigits[1], 10);
       // Extract category: look for numbers before the floor digit
-      const beforeFloor = beforeSurface.substring(
-        0, beforeSurface.lastIndexOf(floorDigits[1])
-      ).trim();
+      const beforeFloor = beforeSurface
+        .substring(0, beforeSurface.lastIndexOf(floorDigits[1]))
+        .trim();
       // Category is the last number before floor (could be 1 or 2 digits like 51)
       const catMatch = beforeFloor.match(/(\d+)\s*$/);
       if (catMatch) {
@@ -333,7 +341,7 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
     const xPos = rowText.indexOf(' X ');
     const afterXSection = rowText.substring(xPos + 3);
     const blockMatch = afterXSection.match(
-      /[\u0391-\u03A9\.\s]+?\s+(\d{1,4})\s+\d/
+      /[\u0391-\u03A9.\s]+?\s+(\d{1,4})\s+\d/
     );
     if (blockMatch) {
       blockNumber = blockMatch[1];
@@ -343,11 +351,9 @@ function parseE9Row(rowText: string, atakPrefix: string, atakSuffix: string): Pa
   // City name from row - look after zip code
   let city = municipality;
   if (zipCode) {
-    const afterZipForCity = rowText.substring(
-      rowText.lastIndexOf(zipCode) + 6
-    );
+    const afterZipForCity = rowText.substring(rowText.lastIndexOf(zipCode) + 6);
     const cityMatch = afterZipForCity.match(
-      /^([\u0391-\u03A9\u0386-\u038F\.\s]+)/
+      /^([\u0391-\u03A9\u0386-\u038F.\s]+)/
     );
     if (cityMatch) {
       city = cleanCity(cityMatch[1].trim());
@@ -457,9 +463,7 @@ export function parseE9(text: string): ParsedE9Result {
     const { prefix, suffix } = atakMatches[i];
     const startPos = atakMatches[i].index;
     const endPos =
-      i + 1 < atakMatches.length
-        ? atakMatches[i + 1].index
-        : table1Text.length;
+      i + 1 < atakMatches.length ? atakMatches[i + 1].index : table1Text.length;
     const rowText = table1Text.substring(startPos, endPos);
 
     const unit = parseE9Row(rowText, prefix, suffix);
@@ -526,8 +530,7 @@ export function parseE9(text: string): ParsedE9Result {
       unit.blockStreets.forEach((s) => allBlockStreets.add(s));
     }
 
-    const yearBuilt =
-      buildingUnits.find((u) => u.yearBuilt)?.yearBuilt || null;
+    const yearBuilt = buildingUnits.find((u) => u.yearBuilt)?.yearBuilt || null;
 
     // Use the most complete zipCode available from any unit in the building
     const zipCode = buildingUnits.find((u) => u.zipCode)?.zipCode || '';

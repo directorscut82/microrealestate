@@ -23,7 +23,7 @@ export function parseDehBill(text: string): BillParseResult {
   // "Αριθμός παροχής 7 00935585-03 2"
   // "Αρ. παροχής: 7 00935585-03 2"
   const billingIdMatch = text.match(
-    /(?:Αριθμός\s+παροχής|Αρ\.?\s*παροχής\s*:?)\s+([\d][\d\s\-]+\d)/i
+    /(?:Αριθμός\s+παροχής|Αρ\.?\s*παροχής\s*:?)\s+([\d][\d\s-]+\d)/i
   );
   if (!billingIdMatch) {
     return { success: false, error: 'Δεν βρέθηκε αριθμός παροχής' };
@@ -35,7 +35,7 @@ export function parseDehBill(text: string): BillParseResult {
 
   // Pattern 1: "Συνολικό ποσό πληρωμής" line
   const totalMatch = text.match(
-    /Συνολικό ποσό πληρωμής\s*\*?\s*([\d\s,\.]+)\s*€/i
+    /Συνολικό ποσό πληρωμής\s*\*?\s*([\d\s,.]+)\s*€/i
   );
   if (totalMatch) {
     totalAmount = parseGreekAmount(totalMatch[1]);
@@ -43,7 +43,7 @@ export function parseDehBill(text: string): BillParseResult {
 
   // Pattern 2: "ΠΟΣΟ ΠΛΗΡΩΜΗΣ" then "*amount€"
   if (totalAmount === null) {
-    const altMatch = text.match(/\*\s*([\d,\.]+)\s*€/);
+    const altMatch = text.match(/\*\s*([\d,.]+)\s*€/);
     if (altMatch) {
       totalAmount = parseGreekAmount(altMatch[1]);
     }
@@ -70,9 +70,7 @@ export function parseDehBill(text: string): BillParseResult {
   }
 
   // Extract issue date
-  const issueDateMatch = text.match(
-    /Ημ\/νία Έκδοσης\s+(\d{2}\/\d{2}\/\d{4})/i
-  );
+  const issueDateMatch = text.match(/Ημ\/νία Έκδοσης\s+(\d{2}\/\d{2}\/\d{4})/i);
   const issueDate = issueDateMatch
     ? parseGreekDate(issueDateMatch[1])
     : undefined;

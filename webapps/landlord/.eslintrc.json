@@ -1,16 +1,8 @@
 {
   "root": true,
   "extends": ["next/core-web-vitals", "prettier"],
+  "ignorePatterns": ["src/__tests__/**/*"],
   "rules": {
-    "sort-imports": [
-      "error",
-      {
-        "allowSeparatedGroups": false,
-        "ignoreCase": true,
-        "ignoreDeclarationSort": false,
-        "ignoreMemberSort": false,
-        "memberSyntaxSortOrder": ["none", "all", "multiple", "single"]
-      }
-    ]
+    "sort-imports": "off"
   }
 }

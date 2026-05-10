@@ -5,10 +5,18 @@ import { parseE9 } from './e9parser.js';
 import type { ParsedE9Unit } from './e9parser.js';
 import * as Contract from './contract.js';
 import {
-  validateObjectId, validateTerm, validateFiniteNumber,
-  validateEnum, validateArrayMaxLength, validateAllocationValues,
-  validatePercentageAllocations, validateRatioAllocations,
-  EXPENSE_TYPES, ALLOCATION_METHODS, REPAIR_STATUSES, CHARGEABLE_TO
+  validateObjectId,
+  validateTerm,
+  validateFiniteNumber,
+  validateEnum,
+  validateArrayMaxLength,
+  validateAllocationValues,
+  validatePercentageAllocations,
+  validateRatioAllocations,
+  EXPENSE_TYPES,
+  ALLOCATION_METHODS,
+  REPAIR_STATUSES,
+  CHARGEABLE_TO
 } from '../validators.js';
 import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
 import moment from 'moment';
@@ -41,17 +49,23 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
 
   // Fetch tenants linked to these properties for occupant info
   const tenants = propertyIds.length
-    ? await Collections.Tenant.find({
-        realmId,
-        'properties.propertyId': { $in: propertyIds }
-      }, { name: 1, properties: 1 }).lean()
+    ? await Collections.Tenant.find(
+        {
+          realmId,
+          'properties.propertyId': { $in: propertyIds }
+        },
+        { name: 1, properties: 1 }
+      ).lean()
     : [];
 
   const tenantByPropertyId = new Map<string, { _id: string; name: string }>();
   for (const tenant of tenants as any[]) {
-    for (const tp of (tenant.properties || [])) {
+    for (const tp of tenant.properties || []) {
       if (tp.propertyId) {
-        tenantByPropertyId.set(String(tp.propertyId), { _id: String(tenant._id), name: tenant.name });
+        tenantByPropertyId.set(String(tp.propertyId), {
+          _id: String(tenant._id),
+          name: tenant.name
+        });
       }
     }
   }
@@ -60,7 +74,9 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
     const units = (building.units || []).map((unit: any) => ({
       ...unit,
       property: unit.propertyId ? propMap.get(String(unit.propertyId)) : null,
-      tenant: unit.propertyId ? tenantByPropertyId.get(String(unit.propertyId)) || null : null
+      tenant: unit.propertyId
+        ? tenantByPropertyId.get(String(unit.propertyId)) || null
+        : null
     }));
 
     const managedCount = units.filter((u: any) => u.isManaged).length;
@@ -74,7 +90,7 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
   });
 }
 
-function _findBuilding(building: any, id: string) {
+function _findBuilding(building: any, _id: string) {
   if (!building) {
     throw new ServiceError('Building does not exist', 404);
   }
@@ -90,19 +106,15 @@ function _inferPropertyType(unit: ParsedE9Unit): string {
   }
   // Fallback heuristics when category not available
   if (unit.floor === 0 && unit.category === null) return 'store';
-  if (unit.floor !== null && unit.floor < 0 && unit.category === null) return 'parking';
+  if (unit.floor !== null && unit.floor < 0 && unit.category === null)
+    return 'parking';
   return 'apartment';
 }
 
 // Find the realm member ID for a given email
-function _findMemberIdByEmail(
-  realm: any,
-  email: string
-): string | undefined {
+function _findMemberIdByEmail(realm: any, email: string): string | undefined {
   if (!realm?.members) return undefined;
-  const member = (realm.members as any[]).find(
-    (m: any) => m.email === email
-  );
+  const member = (realm.members as any[]).find((m: any) => m.email === email);
   return member ? String(member._id) : undefined;
 }
 
@@ -133,10 +145,11 @@ async function _recomputeTenantsForProperty(
     tenantObj.properties.forEach((p: any) => {
       p.property = propMap[String(p.propertyId)] || p.property;
     });
-    const buildings: CollectionTypes.Building[] = await Collections.Building.find({
-      realmId,
-      'units.propertyId': { $in: propertyIds }
-    }).lean() as CollectionTypes.Building[];
+    const buildings: CollectionTypes.Building[] =
+      (await Collections.Building.find({
+        realmId,
+        'units.propertyId': { $in: propertyIds }
+      }).lean()) as CollectionTypes.Building[];
     try {
       const termFrequency = tenantObj.frequency || 'months';
       const contract = {
@@ -167,9 +180,13 @@ async function _recomputeTenantsForProperty(
         { _id: tenant._id },
         { rents: updated.rents }
       );
-      logger.info(`Recomputed rents for tenant ${tenantObj.name} (property ${propertyId})`);
+      logger.info(
+        `Recomputed rents for tenant ${tenantObj.name} (property ${propertyId})`
+      );
     } catch (error) {
-      logger.error(`Failed to recompute rents for tenant ${tenantObj.name}: ${error}`);
+      logger.error(
+        `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+      );
     }
   };
 
@@ -190,10 +207,7 @@ export async function all(req: Req, res: Res) {
     .sort({ name: 1 })
     .lean();
 
-  const buildings = await _toBuildingData(
-    realm!._id,
-    dbBuildings as any[]
-  );
+  const buildings = await _toBuildingData(realm!._id, dbBuildings as any[]);
   return res.json(buildings);
 }
 
@@ -218,8 +232,14 @@ export async function add(req: Req, res: Res) {
   if (!req.body.atakPrefix?.trim()) {
     throw new ServiceError('ATAK prefix is missing', 422);
   }
-  validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', { min: 1800, max: 2099 });
-  validateFiniteNumber(req.body.totalFloors, 'totalFloors', { min: 1, max: 200 });
+  validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
+    min: 1800,
+    max: 2099
+  });
+  validateFiniteNumber(req.body.totalFloors, 'totalFloors', {
+    min: 1,
+    max: 200
+  });
   validateArrayMaxLength(req.body.units, 200, 'units');
   validateArrayMaxLength(req.body.expenses, 100, 'expenses');
   validateArrayMaxLength(req.body.contractors, 50, 'contractors');
@@ -239,17 +259,43 @@ export async function add(req: Req, res: Res) {
 
   const now = new Date();
   const {
-    name, description, address, blockNumber, blockStreets,
-    atakPrefix, yearBuilt, totalFloors, hasElevator,
-    hasCentralHeating, heatingType, manager, bankInfo,
-    units, expenses, contractors, repairs, notes
+    name,
+    description,
+    address,
+    blockNumber,
+    blockStreets,
+    atakPrefix,
+    yearBuilt,
+    totalFloors,
+    hasElevator,
+    hasCentralHeating,
+    heatingType,
+    manager,
+    bankInfo,
+    units,
+    expenses,
+    contractors,
+    repairs,
+    notes
   } = req.body;
   const building = new Collections.Building({
-    name, description, address, blockNumber, blockStreets,
-    atakPrefix, yearBuilt, totalFloors, hasElevator,
-    hasCentralHeating, heatingType, manager, bankInfo,
-    units: units || [], expenses: expenses || [],
-    contractors: contractors || [], repairs: repairs || [],
+    name,
+    description,
+    address,
+    blockNumber,
+    blockStreets,
+    atakPrefix,
+    yearBuilt,
+    totalFloors,
+    hasElevator,
+    hasCentralHeating,
+    heatingType,
+    manager,
+    bankInfo,
+    units: units || [],
+    expenses: expenses || [],
+    contractors: contractors || [],
+    repairs: repairs || [],
     notes,
     realmId: realm!._id,
     createdDate: now,
@@ -268,9 +314,7 @@ export async function add(req: Req, res: Res) {
     );
   }
 
-  const buildings = await _toBuildingData(realm!._id, [
-    building.toObject()
-  ]);
+  const buildings = await _toBuildingData(realm!._id, [building.toObject()]);
   return res.json(buildings[0]);
 }
 
@@ -299,16 +343,34 @@ export async function update(req: Req, res: Res) {
     {
       $set: {
         ...(req.body.name !== undefined && { name: req.body.name }),
-        ...(req.body.description !== undefined && { description: req.body.description }),
+        ...(req.body.description !== undefined && {
+          description: req.body.description
+        }),
         ...(req.body.address !== undefined && { address: req.body.address }),
-        ...(req.body.blockNumber !== undefined && { blockNumber: req.body.blockNumber }),
-        ...(req.body.blockStreets !== undefined && { blockStreets: req.body.blockStreets }),
-        ...(req.body.atakPrefix !== undefined && { atakPrefix: req.body.atakPrefix }),
-        ...(req.body.yearBuilt !== undefined && { yearBuilt: req.body.yearBuilt }),
-        ...(req.body.totalFloors !== undefined && { totalFloors: req.body.totalFloors }),
-        ...(req.body.hasElevator !== undefined && { hasElevator: req.body.hasElevator }),
-        ...(req.body.hasCentralHeating !== undefined && { hasCentralHeating: req.body.hasCentralHeating }),
-        ...(req.body.heatingType !== undefined && { heatingType: req.body.heatingType }),
+        ...(req.body.blockNumber !== undefined && {
+          blockNumber: req.body.blockNumber
+        }),
+        ...(req.body.blockStreets !== undefined && {
+          blockStreets: req.body.blockStreets
+        }),
+        ...(req.body.atakPrefix !== undefined && {
+          atakPrefix: req.body.atakPrefix
+        }),
+        ...(req.body.yearBuilt !== undefined && {
+          yearBuilt: req.body.yearBuilt
+        }),
+        ...(req.body.totalFloors !== undefined && {
+          totalFloors: req.body.totalFloors
+        }),
+        ...(req.body.hasElevator !== undefined && {
+          hasElevator: req.body.hasElevator
+        }),
+        ...(req.body.hasCentralHeating !== undefined && {
+          hasCentralHeating: req.body.hasCentralHeating
+        }),
+        ...(req.body.heatingType !== undefined && {
+          heatingType: req.body.heatingType
+        }),
         ...(req.body.manager !== undefined && { manager: req.body.manager }),
         ...(req.body.bankInfo !== undefined && { bankInfo: req.body.bankInfo }),
         ...(req.body.notes !== undefined && { notes: req.body.notes }),
@@ -385,7 +447,10 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
     const data = new Uint8Array(buffer);
     const pdfPromise = getDocument({ data }).promise;
     const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('PDF parsing timed out after 30s')), 30000)
+      setTimeout(
+        () => reject(new Error('PDF parsing timed out after 30s')),
+        30000
+      )
     );
     const doc = await Promise.race([pdfPromise, timeout]);
     for (let i = 1; i <= doc.numPages; i++) {
@@ -396,10 +461,7 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
         '\n--- PAGE BREAK ---\n';
     }
   } catch (error) {
-    throw new ServiceError(
-      'Failed to parse PDF file: ' + String(error),
-      422
-    );
+    throw new ServiceError('Failed to parse PDF file: ' + String(error), 422);
   }
   return fullText;
 }
@@ -417,7 +479,10 @@ export async function importFromE9(req: Req, res: Res) {
   const parsed = parseE9(text);
 
   if (!parsed.owner.taxId) {
-    throw new ServiceError('Could not parse owner information from E9 PDF', 422);
+    throw new ServiceError(
+      'Could not parse owner information from E9 PDF',
+      422
+    );
   }
 
   if (parsed.buildings.length === 0) {
@@ -437,11 +502,11 @@ export async function importFromE9(req: Req, res: Res) {
         }).lean();
 
         if (!existing) {
-            existing = await Collections.Building.findOne({
-              realmId: realm!._id,
-              'address.street1': building.address.street1
-            }).lean();
-          }
+          existing = await Collections.Building.findOne({
+            realmId: realm!._id,
+            'address.street1': building.address.street1
+          }).lean();
+        }
 
         // Check which units can be matched to existing properties
         const unitPreviews = await Promise.all(
@@ -474,7 +539,8 @@ export async function importFromE9(req: Req, res: Res) {
   if (req.query.confirmed === 'true') {
     const createdBuildings = [];
 
-    const ownerFullName = `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
+    const ownerFullName =
+      `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
 
     // Resolve member ID from user email for ownership
     const userEmail = (req as any).user?.email;
@@ -573,9 +639,11 @@ export async function importFromE9(req: Req, res: Res) {
         // Must match floor+surface too: different floors sharing one meter are separate units
         const existingByDeh = parsedUnit.electricitySupplyNumber
           ? (building as any).units.find(
-              (u: any) => u.electricitySupplyNumber === parsedUnit.electricitySupplyNumber
-                && u.floor === parsedUnit.floor
-                && u.surface === parsedUnit.surface
+              (u: any) =>
+                u.electricitySupplyNumber ===
+                  parsedUnit.electricitySupplyNumber &&
+                u.floor === parsedUnit.floor &&
+                u.surface === parsedUnit.surface
             )
           : null;
         if (existingByDeh) {
@@ -593,7 +661,8 @@ export async function importFromE9(req: Req, res: Res) {
           }
           // Store co-owner's ATAK in altAtakNumbers (on building unit and property)
           if (existingByDeh.atakNumber !== parsedUnit.atakNumber) {
-            if (!existingByDeh.altAtakNumbers) existingByDeh.altAtakNumbers = [];
+            if (!existingByDeh.altAtakNumbers)
+              existingByDeh.altAtakNumbers = [];
             if (!existingByDeh.altAtakNumbers.includes(parsedUnit.atakNumber)) {
               existingByDeh.altAtakNumbers.push(parsedUnit.atakNumber);
             }
@@ -618,8 +687,12 @@ export async function importFromE9(req: Req, res: Res) {
           property = await Collections.Property.create({
             realmId: realm!._id,
             name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${
-              parsedUnit.floor == null || parsedUnit.floor === 0 ? 'Ισόγειο'
-              : parsedUnit.floor < 0 ? 'Υπόγειο' : 'Όροφος ' + parsedUnit.floor}`,
+              parsedUnit.floor == null || parsedUnit.floor === 0
+                ? 'Ισόγειο'
+                : parsedUnit.floor < 0
+                  ? 'Υπόγειο'
+                  : 'Όροφος ' + parsedUnit.floor
+            }`,
             type: _inferPropertyType(parsedUnit),
             surface: parsedUnit.surface,
             atakNumber: parsedUnit.atakNumber,
@@ -629,13 +702,18 @@ export async function importFromE9(req: Req, res: Res) {
           });
         } else {
           property.buildingId = String(building!._id) as any;
-          property.electricitySupplyNumber = parsedUnit.electricitySupplyNumber as any;
+          property.electricitySupplyNumber =
+            parsedUnit.electricitySupplyNumber as any;
           // Fix name if it's still just an ATAK number (from lease import)
           if (/^\d{11}$/.test(property.name)) {
-            const floorLabel = parsedUnit.floor == null || parsedUnit.floor === 0
-              ? 'Ισόγειο'
-              : parsedUnit.floor < 0 ? 'Υπόγειο' : `Όροφος ${parsedUnit.floor}`;
-            property.name = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
+            const floorLabel =
+              parsedUnit.floor == null || parsedUnit.floor === 0
+                ? 'Ισόγειο'
+                : parsedUnit.floor < 0
+                  ? 'Υπόγειο'
+                  : `Όροφος ${parsedUnit.floor}`;
+            property.name =
+              `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
           }
           if (parsedUnit.surface && !property.surface) {
             property.surface = parsedUnit.surface as any;
@@ -649,12 +727,14 @@ export async function importFromE9(req: Req, res: Res) {
           surface: parsedUnit.surface,
           yearBuilt: parsedUnit.yearBuilt,
           electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
-          owners: [{
-            type: 'member',
-            name: ownerFullName,
-            percentage: parsedUnit.ownershipPercentage,
-            memberId: memberId || userEmail
-          }],
+          owners: [
+            {
+              type: 'member',
+              name: ownerFullName,
+              percentage: parsedUnit.ownershipPercentage,
+              memberId: memberId || userEmail
+            }
+          ],
           propertyId: String(property._id),
           isManaged: true
         });
@@ -695,9 +775,18 @@ export async function addUnit(req: Req, res: Res) {
   if (!req.body.atakNumber?.trim()) {
     throw new ServiceError('Unit ATAK number is missing', 422);
   }
-  validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', { min: 0, max: 1000 });
-  validateFiniteNumber(req.body.heatingThousandths, 'heatingThousandths', { min: 0, max: 1000 });
-  validateFiniteNumber(req.body.elevatorThousandths, 'elevatorThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', {
+    min: 0,
+    max: 1000
+  });
+  validateFiniteNumber(req.body.heatingThousandths, 'heatingThousandths', {
+    min: 0,
+    max: 1000
+  });
+  validateFiniteNumber(req.body.elevatorThousandths, 'elevatorThousandths', {
+    min: 0,
+    max: 1000
+  });
   validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
   if (req.body.propertyId) {
@@ -733,9 +822,7 @@ export async function addUnit(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, req.body.propertyId);
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -743,9 +830,18 @@ export async function updateUnit(req: Req, res: Res) {
   const realm = req.realm;
   const { id, unitId } = req.params;
 
-  validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', { min: 0, max: 1000 });
-  validateFiniteNumber(req.body.heatingThousandths, 'heatingThousandths', { min: 0, max: 1000 });
-  validateFiniteNumber(req.body.elevatorThousandths, 'elevatorThousandths', { min: 0, max: 1000 });
+  validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', {
+    min: 0,
+    max: 1000
+  });
+  validateFiniteNumber(req.body.heatingThousandths, 'heatingThousandths', {
+    min: 0,
+    max: 1000
+  });
+  validateFiniteNumber(req.body.elevatorThousandths, 'elevatorThousandths', {
+    min: 0,
+    max: 1000
+  });
   validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
   if (req.body.propertyId) {
@@ -791,9 +887,7 @@ export async function updateUnit(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, String(oldPropertyId));
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -836,9 +930,7 @@ export async function removeUnit(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -874,9 +966,7 @@ export async function addMonthlyCharge(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -909,9 +999,7 @@ export async function updateMonthlyCharge(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -944,9 +1032,7 @@ export async function removeMonthlyCharge(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -992,9 +1078,9 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
 
     if (expensesProvided) {
       // Remove existing charges for this term
-      const idsToRemove = unit.monthlyCharges.filter(
-        (c: any) => c.term === Number(term)
-      ).map((c: any) => c._id);
+      const idsToRemove = unit.monthlyCharges
+        .filter((c: any) => c.term === Number(term))
+        .map((c: any) => c._id);
       for (const chargeId of idsToRemove) {
         unit.monthlyCharges.pull(chargeId);
       }
@@ -1005,14 +1091,22 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
 
         // Find the building expense to get its allocation method
         const buildingExpense = (building as any).expenses.id(entry.expenseId);
-        const allocationMethod = entry.allocationMethod || buildingExpense?.allocationMethod || 'equal';
-        const description = entry.description || buildingExpense?.name || 'Building charge';
+        const allocationMethod =
+          entry.allocationMethod ||
+          buildingExpense?.allocationMethod ||
+          'equal';
+        const description =
+          entry.description || buildingExpense?.name || 'Building charge';
 
         // Compute share for this unit
         const share = computeBuildingChargeForProperty(
           (building as any).toObject(),
           String(unit.propertyId),
-          { ...buildingExpense?.toObject?.() || {}, amount: entry.amount, allocationMethod }
+          {
+            ...(buildingExpense?.toObject?.() || {}),
+            amount: entry.amount,
+            allocationMethod
+          }
         );
 
         if (share > 0) {
@@ -1059,9 +1153,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, propId);
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1077,21 +1169,39 @@ export async function addExpense(req: Req, res: Res) {
     throw new ServiceError('Expense name is required', 422);
   }
   validateEnum(req.body.type, EXPENSE_TYPES, 'type', { required: true });
-  validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod', { required: true });
+  validateEnum(
+    req.body.allocationMethod,
+    ALLOCATION_METHODS,
+    'allocationMethod',
+    { required: true }
+  );
   validateFiniteNumber(req.body.amount, 'amount', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.ownerAmount, 'ownerAmount', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.ownerAmount, 'ownerAmount', {
+    min: 0,
+    max: 10000000
+  });
   if (req.body.startTerm) {
     validateTerm(req.body.startTerm, 'startTerm');
   }
   if (req.body.endTerm) {
     validateTerm(req.body.endTerm, 'endTerm');
   }
-  if (req.body.startTerm && req.body.endTerm && Number(req.body.startTerm) > Number(req.body.endTerm)) {
+  if (
+    req.body.startTerm &&
+    req.body.endTerm &&
+    Number(req.body.startTerm) > Number(req.body.endTerm)
+  ) {
     throw new ServiceError('startTerm must be before endTerm', 422);
   }
   validateAllocationValues(req.body.customAllocations);
-  validatePercentageAllocations(req.body.customAllocations, req.body.allocationMethod);
-  validateRatioAllocations(req.body.customAllocations, req.body.allocationMethod);
+  validatePercentageAllocations(
+    req.body.customAllocations,
+    req.body.allocationMethod
+  );
+  validateRatioAllocations(
+    req.body.customAllocations,
+    req.body.allocationMethod
+  );
   validateArrayMaxLength(req.body.customAllocations, 200, 'customAllocations');
 
   const building = await Collections.Building.findOne({
@@ -1113,9 +1223,7 @@ export async function addExpense(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, propId);
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1127,10 +1235,17 @@ export async function updateExpense(req: Req, res: Res) {
     validateEnum(req.body.type, EXPENSE_TYPES, 'type');
   }
   if (req.body.allocationMethod) {
-    validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod');
+    validateEnum(
+      req.body.allocationMethod,
+      ALLOCATION_METHODS,
+      'allocationMethod'
+    );
   }
   validateFiniteNumber(req.body.amount, 'amount', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.ownerAmount, 'ownerAmount', { min: 0, max: 10000000 });
+  validateFiniteNumber(req.body.ownerAmount, 'ownerAmount', {
+    min: 0,
+    max: 10000000
+  });
   if (req.body.startTerm) {
     validateTerm(req.body.startTerm, 'startTerm');
   }
@@ -1139,8 +1254,14 @@ export async function updateExpense(req: Req, res: Res) {
   }
   validateAllocationValues(req.body.customAllocations);
   if (req.body.allocationMethod) {
-    validatePercentageAllocations(req.body.customAllocations, req.body.allocationMethod);
-    validateRatioAllocations(req.body.customAllocations, req.body.allocationMethod);
+    validatePercentageAllocations(
+      req.body.customAllocations,
+      req.body.allocationMethod
+    );
+    validateRatioAllocations(
+      req.body.customAllocations,
+      req.body.allocationMethod
+    );
   }
 
   const building = await Collections.Building.findOne({
@@ -1167,9 +1288,7 @@ export async function updateExpense(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, propId);
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1230,9 +1349,7 @@ export async function removeExpense(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, propId);
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1259,9 +1376,7 @@ export async function addContractor(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1285,9 +1400,7 @@ export async function updateContractor(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1322,9 +1435,7 @@ export async function removeContractor(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1343,9 +1454,8 @@ async function _distributeRepairCharge(
   const cost = repair.actualCost || repair.estimatedCost || 0;
   if (cost <= 0) return;
 
-  const sharePercentage = repair.chargeableTo === 'tenants'
-    ? 100
-    : (repair.tenantSharePercentage || 0);
+  const sharePercentage =
+    repair.chargeableTo === 'tenants' ? 100 : repair.tenantSharePercentage || 0;
   if (sharePercentage <= 0) return;
 
   const effectiveAmount = cost * (sharePercentage / 100);
@@ -1366,7 +1476,8 @@ async function _distributeRepairCharge(
     if (share > 0) {
       // Remove any existing charge for this repair+term combo
       const existingIdx = unit.monthlyCharges.findIndex(
-        (c: any) => c.term === term && c.description === `Repair: ${repair.title}`
+        (c: any) =>
+          c.term === term && c.description === `Repair: ${repair.title}`
       );
       if (existingIdx >= 0) {
         unit.monthlyCharges.pull(unit.monthlyCharges[existingIdx]._id);
@@ -1399,13 +1510,27 @@ export async function addRepair(req: Req, res: Res) {
   if (!req.body.title?.trim()) {
     throw new ServiceError('Repair title is required', 422);
   }
-  validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.actualCost, 'actualCost', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.tenantSharePercentage, 'tenantSharePercentage', { min: 0, max: 100 });
+  validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', {
+    min: 0,
+    max: 10000000
+  });
+  validateFiniteNumber(req.body.actualCost, 'actualCost', {
+    min: 0,
+    max: 10000000
+  });
+  validateFiniteNumber(
+    req.body.tenantSharePercentage,
+    'tenantSharePercentage',
+    { min: 0, max: 100 }
+  );
   validateEnum(req.body.chargeableTo, CHARGEABLE_TO, 'chargeableTo');
   validateEnum(req.body.status, REPAIR_STATUSES, 'status');
   if (req.body.allocationMethod) {
-    validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod');
+    validateEnum(
+      req.body.allocationMethod,
+      ALLOCATION_METHODS,
+      'allocationMethod'
+    );
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
@@ -1423,12 +1548,12 @@ export async function addRepair(req: Req, res: Res) {
   await building!.save();
 
   // Distribute repair cost to tenants if chargeable
-  const newRepair = (building as any).repairs[(building as any).repairs.length - 1];
+  const newRepair = (building as any).repairs[
+    (building as any).repairs.length - 1
+  ];
   await _distributeRepairCharge(building as any, newRepair, realm!._id);
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1436,9 +1561,19 @@ export async function updateRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id, repairId } = req.params;
 
-  validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.actualCost, 'actualCost', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.tenantSharePercentage, 'tenantSharePercentage', { min: 0, max: 100 });
+  validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', {
+    min: 0,
+    max: 10000000
+  });
+  validateFiniteNumber(req.body.actualCost, 'actualCost', {
+    min: 0,
+    max: 10000000
+  });
+  validateFiniteNumber(
+    req.body.tenantSharePercentage,
+    'tenantSharePercentage',
+    { min: 0, max: 100 }
+  );
   if (req.body.chargeableTo) {
     validateEnum(req.body.chargeableTo, CHARGEABLE_TO, 'chargeableTo');
   }
@@ -1446,7 +1581,11 @@ export async function updateRepair(req: Req, res: Res) {
     validateEnum(req.body.status, REPAIR_STATUSES, 'status');
   }
   if (req.body.allocationMethod) {
-    validateEnum(req.body.allocationMethod, ALLOCATION_METHODS, 'allocationMethod');
+    validateEnum(
+      req.body.allocationMethod,
+      ALLOCATION_METHODS,
+      'allocationMethod'
+    );
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
@@ -1471,9 +1610,7 @@ export async function updateRepair(req: Req, res: Res) {
   // Re-distribute repair cost
   await _distributeRepairCharge(building as any, repair, realm!._id);
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
 
@@ -1516,8 +1653,6 @@ export async function removeRepair(req: Req, res: Res) {
     await _recomputeTenantsForProperty(realm!._id, propId);
   }
 
-  const result = await _toBuildingData(realm!._id, [
-    building!.toObject()
-  ]);
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
 }
