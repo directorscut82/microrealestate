@@ -65,6 +65,8 @@ Defined in `services/common/src/collections/`:
 - `Tenant` (model name: `Occupant`) — tenant records with contract details and rent history
 - `Property` — rental properties
 - `Lease` — lease templates (duration, time range)
+- `Building` — polykatoikia with units[], expenses[], contractors[], repairs[], ownerMonthlyExpenses[]
+- `Bill` — utility bill records (DEH, EYDAP, etc.) linked to building expenses, with IRIS QR codes
 - `Document` — generated documents (contracts, notices)
 - `Template` — document templates (HTML/text)
 - `Email` — email sending records
@@ -102,7 +104,8 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 #### Referential Integrity (verified working)
 - **Property deletion**: API returns 422 when property is occupied by a tenant. UI shows toast error.
 - **Contract deletion**: API returns 422 when contract is used by tenants. UI shows toast error.
-- **Tenant deletion**: API returns 422 when tenant has recorded payments. UI disables delete button via `hasPayments` flag.
+- **Tenant deletion**: API returns 422 when tenant has recorded payments, active lease, or unpaid balance. UI shows options dialog with archive/force-delete.
+- **Realm deletion**: API returns 422 when child records exist (tenants, properties, leases, buildings). Returns counts in error.
 - **Duplicate names**: API allows duplicate property and lease names (no unique constraint).
 
 #### Test Infrastructure (resetservice extensions)
@@ -144,3 +147,16 @@ TypeScript services build chain: types → common → service (in that order).
 - `Middlewares.asyncWrapper()` wraps async route handlers to catch errors
 - `Middlewares.errorHandler` is the Express error middleware (registered last)
 - Non-production environments include stack traces in error responses
+
+## Security Middleware
+
+- `express-mongo-sanitize` — strips `$` from request bodies/params/query to prevent NoSQL injection
+- Rate limiting on auth endpoints (signin, signup, forgot-password)
+- `organizationId` header validated as valid MongoDB ObjectId format before query
+- Input validation: percentage sums, enum/range checks, NaN guards on financial fields
+
+## Pagination
+
+- List endpoints (tenants, properties, leases) support `?page=N&limit=M` query params
+- When paginated, response includes `x-total-count` and `x-total-pages` headers
+- Frontend uses `useInfiniteQuery` + Load More button (NOT traditional page numbers)

@@ -38,6 +38,8 @@ inclusion: always
 - multer — file upload handling (pdfgenerator, api PDF import)
 - pdfjs-dist 4.0 — PDF text extraction for lease import (api service)
 - express-mongo-sanitize — NoSQL injection prevention
+- express-rate-limit — rate limiting on auth endpoints
+- qrcode — IRIS QR code generation for utility bill payments
 - i18n — server-side internationalization
 - moment.js — date handling (backend)
 - lodash — utility functions
@@ -87,10 +89,12 @@ inclusion: always
 
 ## Testing
 
-- Jest 29.7 — unit tests (api service, common library)
+- Jest 29.7 — unit tests (api service, common library, landlord frontend)
+  - 14 suites, 319 tests (as of May 2026)
+  - Frontend: 4 test files (ErrorBoundary, token refresh, payment double-submit, fetch errors)
 - Cypress 14.4 — end-to-end tests
-- supertest — HTTP assertion testing (api service)
-- No test framework for frontend apps currently
+  - 67 suites, 583 tests (as of May 2026)
+- supertest — HTTP assertion testing (api service unit tests)
 
 ## DevOps & Infrastructure
 
