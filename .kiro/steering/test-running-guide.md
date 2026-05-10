@@ -130,14 +130,14 @@ curl -s http://localhost:8080/landlord/signin | head -1   # Should return HTML
 ### Run unit tests (no Docker needed)
 ```bash
 cd services/api && npx jest --no-coverage
-# Expects: 3 suites, 48 tests, all passing
+# Expects: 14 suites, 319 tests (309 passing, 10 failing as of May 2026)
 ```
 
 ### Run E2E tests
 ```bash
 cd e2e && npx cypress run
-# Expects: 9 suites, 100 tests (suites 01-09)
-# Runtime: ~5 minutes in dev mode
+# Full run: 67 suites, 583 tests (~523-551 pass per run)
+# Runtime: ~15-20 minutes in dev mode
 ```
 
 ### Run single E2E suite (for debugging)
@@ -161,11 +161,30 @@ finch compose -f docker-compose.microservices.base.yml -f docker-compose.microse
 
 ---
 
+## Production Database Protection (Triple-Layer)
+
+The test infrastructure has three layers preventing accidental production data loss:
+
+1. **Layer 1 — resetservice `assertTestDatabase` guard**: The resetservice checks its own `MONGO_URL` and returns 403 if connected to `mredb` (production). Tests use `mredb_test`. This is enforced at the application level regardless of which compose overlay is active.
+
+2. **Layer 2 — Cypress `before()` hook**: The `resetAppData` command verifies the reset endpoint URL points to the expected test database before wiping.
+
+3. **Layer 3 — Pre-test backup script** (`backup-before-tests.sh`): Takes a mongodump before E2E runs as a safety net.
+
+**Key behavior:**
+- E2E tests wipe `mredb_test` (NOT `mredb`)
+- Production data in `mredb` is NEVER touched by tests
+- If resetservice is accidentally pointed at `mredb`, it refuses with HTTP 403
+- The `docker-compose.microservices.test.yml` sets `MONGO_URL=mongodb://mongo/mredb_test`
+- Dev mode (`docker-compose.microservices.dev.yml`) uses `mredb` for the app but `mredb_test` for resetservice
+
+---
+
 ## Running Unit Tests (no Docker needed)
 
 ```bash
 cd services/api && npx jest --no-coverage
-# Expects: 3 suites, 48 tests, all passing
+# Expects: 14 suites, 319 tests (309 passing, 10 failing as of May 2026)
 ```
 
 ## Container Management

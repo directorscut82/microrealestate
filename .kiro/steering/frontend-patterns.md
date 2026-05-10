@@ -84,6 +84,28 @@ export function useCreateBuilding() {
 }
 ```
 
+## Paginated Lists (Load More pattern)
+
+For paginated endpoints, use `useInfiniteQuery`:
+
+```js
+import { useInfiniteQuery } from '@tanstack/react-query';
+
+export function useTenants() {
+  return useInfiniteQuery({
+    queryKey: ['tenants'],
+    queryFn: async ({ pageParam = 1 }) => {
+      const { data, headers } = await apiFetcher().get(`/tenants?page=${pageParam}&limit=25`);
+      const totalPages = parseInt(headers['x-total-pages'] || '1');
+      return { data, totalPages, page: pageParam };
+    },
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined,
+    initialPageParam: 1,
+  });
+}
+```
+
 ## File Structure for New Pages
 
 ```

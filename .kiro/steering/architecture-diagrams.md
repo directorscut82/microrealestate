@@ -250,6 +250,55 @@ erDiagram
         date sentDate
         string status
     }
+
+    Realm ||--o{ Building : manages
+    Building {
+        string _id PK
+        string realmId FK
+        string name
+        string atakPrefix
+        string heatingType
+    }
+
+    Building ||--o{ BuildingUnit : contains
+    BuildingUnit {
+        string atakNumber
+        number floor
+        number surface
+        number generalThousandths
+        string propertyId FK
+        string occupancyType
+    }
+
+    Building ||--o{ BuildingExpense : has
+    BuildingExpense {
+        string name
+        string type
+        number amount
+        string allocationMethod
+        boolean isRecurring
+        string billingId
+    }
+
+    Building ||--o{ Bill : "tracked by"
+    Bill {
+        string _id PK
+        string realmId FK
+        string buildingId FK
+        string expenseId FK
+        string provider
+        number totalAmount
+        number term
+        string status
+    }
+
+    Building ||--o{ Contractor : employs
+    Contractor {
+        string name
+        string specialty
+        string phone
+    }
+
 ```
 
 ## 5. CI/CD Pipeline
