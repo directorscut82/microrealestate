@@ -37,3 +37,6 @@ mre
 mre.exe
 mre-macos
 
+
+# Working files for NAS deployment debug
+.tmp/

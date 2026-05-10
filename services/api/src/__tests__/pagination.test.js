@@ -1,7 +1,7 @@
 /* eslint-env node */
 import {
-  parsePagination,
   buildPaginationMeta,
+  parsePagination,
   setPaginationHeaders
 } from '@microrealestate/common/dist/utils/pagination.js';
 

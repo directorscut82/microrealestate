@@ -1,4 +1,3 @@
-import moment from 'moment';
 import taskBase from '../tasks/1_base.js';
 import taskDebts from '../tasks/2_debts.js';
 import taskDiscounts from '../tasks/3_discounts.js';
@@ -65,9 +64,7 @@ describe('Task 1: Base', () => {
 
   test('adds preTaxAmounts for active properties', () => {
     const contract = makeContract({
-      properties: [
-        makeProperty('Apt A', 1000, '2023-01-01', '2025-12-31')
-      ]
+      properties: [makeProperty('Apt A', 1000, '2023-01-01', '2025-12-31')]
     });
     const rent = taskBase(contract, RENT_DATE, null, null, makeRent());
     expect(rent.preTaxAmounts).toEqual([
@@ -77,9 +74,7 @@ describe('Task 1: Base', () => {
 
   test('excludes properties outside date range', () => {
     const contract = makeContract({
-      properties: [
-        makeProperty('Apt A', 1000, '2025-01-01', '2025-12-31')
-      ]
+      properties: [makeProperty('Apt A', 1000, '2025-01-01', '2025-12-31')]
     });
     const rent = taskBase(contract, RENT_DATE, null, null, makeRent());
     expect(rent.preTaxAmounts).toEqual([]);
@@ -89,7 +84,12 @@ describe('Task 1: Base', () => {
     const contract = makeContract({
       properties: [
         makeProperty('Apt A', 1000, '2023-01-01', '2025-12-31', [
-          { title: 'Water', amount: 50, beginDate: '01/01/2023', endDate: '31/12/2025' }
+          {
+            title: 'Water',
+            amount: 50,
+            beginDate: '01/01/2023',
+            endDate: '31/12/2025'
+          }
         ])
       ]
     });
@@ -101,7 +101,12 @@ describe('Task 1: Base', () => {
     const contract = makeContract({
       properties: [
         makeProperty('Apt A', 1000, '2023-01-01', '2025-12-31', [
-          { title: 'Water', amount: 50, beginDate: '01/01/2025', endDate: '31/12/2025' }
+          {
+            title: 'Water',
+            amount: 50,
+            beginDate: '01/01/2025',
+            endDate: '31/12/2025'
+          }
         ])
       ]
     });
@@ -111,7 +116,13 @@ describe('Task 1: Base', () => {
 
   test('sets description from settlements', () => {
     const contract = makeContract();
-    const rent = taskBase(contract, RENT_DATE, null, { description: 'Note' }, makeRent());
+    const rent = taskBase(
+      contract,
+      RENT_DATE,
+      null,
+      { description: 'Note' },
+      makeRent()
+    );
     expect(rent.description).toBe('Note');
   });
 });
@@ -121,7 +132,13 @@ describe('Task 2: Debts', () => {
     const settlements = {
       debts: [{ description: 'Late fee', amount: 100 }]
     };
-    const rent = taskDebts(makeContract(), RENT_DATE, null, settlements, makeRent());
+    const rent = taskDebts(
+      makeContract(),
+      RENT_DATE,
+      null,
+      settlements,
+      makeRent()
+    );
     expect(rent.debts).toEqual([{ description: 'Late fee', amount: 100 }]);
   });
 
@@ -144,7 +161,13 @@ describe('Task 3: Discounts', () => {
     const settlements = {
       discounts: [{ description: 'Promo', amount: 50 }]
     };
-    const rent = taskDiscounts(makeContract(), RENT_DATE, null, settlements, makeRent());
+    const rent = taskDiscounts(
+      makeContract(),
+      RENT_DATE,
+      null,
+      settlements,
+      makeRent()
+    );
     expect(rent.discounts).toEqual([
       { origin: 'settlement', description: 'Promo', amount: 50 }
     ]);
@@ -155,7 +178,13 @@ describe('Task 3: Discounts', () => {
     const settlements = {
       discounts: [{ description: 'Promo', amount: 50 }]
     };
-    const rent = taskDiscounts(contract, RENT_DATE, null, settlements, makeRent());
+    const rent = taskDiscounts(
+      contract,
+      RENT_DATE,
+      null,
+      settlements,
+      makeRent()
+    );
     expect(rent.discounts).toHaveLength(2);
   });
 });
@@ -164,16 +193,33 @@ describe('Task 4: VATs', () => {
   test('no vats when vatRate is 0', () => {
     const r = makeRent();
     r.preTaxAmounts = [{ description: 'Apt', amount: 1000 }];
-    const rent = taskVATs(makeContract({ vatRate: 0 }), RENT_DATE, null, null, r);
+    const rent = taskVATs(
+      makeContract({ vatRate: 0 }),
+      RENT_DATE,
+      null,
+      null,
+      r
+    );
     expect(rent.vats).toEqual([]);
   });
 
   test('computes vat on preTaxAmounts', () => {
     const r = makeRent();
     r.preTaxAmounts = [{ description: 'Apt', amount: 1000 }];
-    const rent = taskVATs(makeContract({ vatRate: 0.2 }), RENT_DATE, null, null, r);
+    const rent = taskVATs(
+      makeContract({ vatRate: 0.2 }),
+      RENT_DATE,
+      null,
+      null,
+      r
+    );
     expect(rent.vats).toEqual([
-      { origin: 'contract', description: 'Apt T.V.A. (20%)', amount: 200, rate: 0.2 }
+      {
+        origin: 'contract',
+        description: 'Apt T.V.A. (20%)',
+        amount: 200,
+        rate: 0.2
+      }
     ]);
   });
 
@@ -183,10 +229,16 @@ describe('Task 4: VATs', () => {
     r.charges = [{ description: 'Water', amount: 100 }];
     r.debts = [{ description: 'Late', amount: 50 }];
     r.discounts = [{ origin: 'contract', description: 'Disc', amount: 200 }];
-    const rent = taskVATs(makeContract({ vatRate: 0.2 }), RENT_DATE, null, null, r);
+    const rent = taskVATs(
+      makeContract({ vatRate: 0.2 }),
+      RENT_DATE,
+      null,
+      null,
+      r
+    );
     // VAT on: preTaxAmounts, charges, discounts (NOT debts - they already include VAT)
     expect(rent.vats).toHaveLength(3);
-    const discountVat = rent.vats.find(v => v.description.includes('Disc'));
+    const discountVat = rent.vats.find((v) => v.description.includes('Disc'));
     expect(discountVat.amount).toBe(-40);
   });
 });
@@ -201,7 +253,13 @@ describe('Task 5: Balance', () => {
     const previousRent = {
       total: { grandTotal: 1000, payment: 700 }
     };
-    const rent = taskBalance(makeContract(), RENT_DATE, previousRent, null, makeRent());
+    const rent = taskBalance(
+      makeContract(),
+      RENT_DATE,
+      previousRent,
+      null,
+      makeRent()
+    );
     expect(rent.total.balance).toBe(300);
   });
 
@@ -209,21 +267,44 @@ describe('Task 5: Balance', () => {
     const previousRent = {
       total: { grandTotal: 1000, payment: 1200 }
     };
-    const rent = taskBalance(makeContract(), RENT_DATE, previousRent, null, makeRent());
+    const rent = taskBalance(
+      makeContract(),
+      RENT_DATE,
+      previousRent,
+      null,
+      makeRent()
+    );
     expect(rent.total.balance).toBe(-200);
   });
 });
 
 describe('Task 6: Payments', () => {
   test('adds payments from settlements', () => {
-    const payment = { date: '2024-01-15', amount: 500, type: 'transfer', reference: 'REF1' };
+    const payment = {
+      date: '2024-01-15',
+      amount: 500,
+      type: 'transfer',
+      reference: 'REF1'
+    };
     const settlements = { payments: [payment] };
-    const rent = taskPayments(makeContract(), RENT_DATE, null, settlements, makeRent());
+    const rent = taskPayments(
+      makeContract(),
+      RENT_DATE,
+      null,
+      settlements,
+      makeRent()
+    );
     expect(rent.payments).toEqual([payment]);
   });
 
   test('no payments when settlements is null', () => {
-    const rent = taskPayments(makeContract(), RENT_DATE, null, null, makeRent());
+    const rent = taskPayments(
+      makeContract(),
+      RENT_DATE,
+      null,
+      null,
+      makeRent()
+    );
     expect(rent.payments).toEqual([]);
   });
 });
@@ -299,7 +380,12 @@ describe('Full pipeline: computeRent', () => {
       discount: 50,
       properties: [
         makeProperty('Apt A', 1000, '2023-01-01', '2025-12-31', [
-          { title: 'Parking', amount: 100, beginDate: '01/01/2023', endDate: '31/12/2025' }
+          {
+            title: 'Parking',
+            amount: 100,
+            beginDate: '01/01/2023',
+            endDate: '31/12/2025'
+          }
         ])
       ]
     });
@@ -308,7 +394,9 @@ describe('Full pipeline: computeRent', () => {
       description: 'January settlement',
       debts: [{ description: 'Repair', amount: 75 }],
       discounts: [{ description: 'Loyalty', amount: 25 }],
-      payments: [{ date: '2024-01-10', amount: 900, type: 'check', reference: 'CHK1' }]
+      payments: [
+        { date: '2024-01-10', amount: 900, type: 'check', reference: 'CHK1' }
+      ]
     };
 
     const rent = computeRent(contract, RENT_DATE, previousRent, settlements);

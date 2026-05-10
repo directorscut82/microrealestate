@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { parseBillPdf, generateIrisQr } from '../managers/billparser/index.js';
+import { generateIrisQr, parseBillPdf } from '../managers/billparser/index.js';
 
 /**
  * Integration test: runs the full pipeline against the real DEH bill PDF.

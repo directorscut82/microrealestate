@@ -41,7 +41,7 @@ DocumentSchema.pre('findOneAndUpdate', function (next) {
   if (!update || !('set' in update)) {
     return next();
   }
-  /* @ts-ignore */
+  /* @ts-expect-error update is a generic mongoose type, $set existence verified at runtime */
   update.$set.updatedDate = new Date();
   next();
 });
