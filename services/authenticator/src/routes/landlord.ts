@@ -229,12 +229,11 @@ export default function (): Router {
         if (existingAccount) {
           return res.sendStatus(201);
         }
-        const hashedPassword = await bcrypt.hash(password, 10);
         await Collections.Account.create({
           firstname: firstname.trim(),
           lastname: lastname.trim(),
           email: email.trim().toLowerCase(),
-          password: hashedPassword
+          password: password
         });
         res.sendStatus(201);
       })
@@ -411,7 +410,7 @@ export default function (): Router {
       if (!account) {
         throw new ServiceError('invalid credentials', 403);
       }
-      (account as any).password = await bcrypt.hash(password, 10);
+      (account as any).password = password;
       await (account as any).save();
 
       res.sendStatus(200);
