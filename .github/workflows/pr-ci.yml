@@ -67,9 +67,6 @@ jobs:
           - appname: landlord-frontend
             image: ghcr.io/${{ github.repository }}/landlord-frontend
             dockerfile: webapps/landlord/Dockerfile
-          - appname: tenant-frontend
-            image: ghcr.io/${{ github.repository }}/tenant-frontend
-            dockerfile: webapps/tenant/Dockerfile
 
     steps:
       - name: Checkout
