@@ -18,6 +18,7 @@ import Head from 'next/head';
 import { InjectStoreContext } from '../store';
 import moment from 'moment';
 import { Roboto } from 'next/font/google';
+import { ThemeProvider } from 'next-themes';
 
 const queryClient = new QueryClient();
 
@@ -57,15 +58,23 @@ function MyApp(props) {
       </Head>
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-primary focus:text-primary-foreground">Skip to content</a>
       <main id="main-content" className={`${roboto.variable} font-sans`}>
-        <ErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <InjectStoreContext initialData={pageProps.initialState?.store}>
-              <Application {...pageProps}>
-                <Component {...pageProps} />
-              </Application>
-            </InjectStoreContext>
-          </QueryClientProvider>
-        </ErrorBoundary>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          themes={['light', 'dark', 'midnight', 'forest', 'sunset']}
+          enableSystem={true}
+          disableTransitionOnChange
+        >
+          <ErrorBoundary>
+            <QueryClientProvider client={queryClient}>
+              <InjectStoreContext initialData={pageProps.initialState?.store}>
+                <Application {...pageProps}>
+                  <Component {...pageProps} />
+                </Application>
+              </InjectStoreContext>
+            </QueryClientProvider>
+          </ErrorBoundary>
+        </ThemeProvider>
       </main>
     </>
   );

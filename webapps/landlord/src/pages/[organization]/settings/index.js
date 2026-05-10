@@ -40,6 +40,11 @@ function Settings() {
         </CardHeader>
         <CardContent className="flex flex-col">
           <SettingLink
+            href="/settings/appearance"
+            title={t('Appearance')}
+            description={t('Choose a theme for the application')}
+          />
+          <SettingLink
             href="/settings/account"
             title={t('Account')}
             description={t('Your account information')}
