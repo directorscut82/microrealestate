@@ -1,13 +1,19 @@
 const path = require('path');
 const nextTranslate = require('next-translate-plugin');
-
 module.exports = nextTranslate({
   output: 'standalone',
   eslint: {
     ignoreDuringBuilds: true
   },
   experimental: {
-    externalDir: true
+    externalDir: true,
+    outputFileTracingIncludes: {
+      '/**': [
+        '../../node_modules/async-function/**',
+        '../../node_modules/async-generator-function/**',
+        '../../node_modules/generator-function/**'
+      ]
+    }
   },
   webpack: (
     config /*,
@@ -20,7 +26,6 @@ module.exports = nextTranslate({
       __dirname,
       '../../node_modules/pdfjs-dist/legacy/build/pdf'
     );
-
     return config;
   },
   // base path cannot be set at runtime: https://github.com/vercel/next.js/discussions/41769
