@@ -4,7 +4,7 @@ import Script from 'next/script';
 
 export default function MyDocument() {
   return (
-    <Html translate="no" className="overscroll-none">
+    <Html translate="no" className="overscroll-none" suppressHydrationWarning>
       <Head>
         <Script
           src={`${process.env.BASE_PATH || ''}/__ENV.js`}
