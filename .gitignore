@@ -47,3 +47,6 @@ docker-compose.nas.yml
 
 # Deploy script secrets (GitHub PAT, Portainer token)
 .secrets/
+
+# Local VS Code multi-root workspace file
+*.code-workspace

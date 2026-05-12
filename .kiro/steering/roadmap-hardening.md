@@ -132,6 +132,16 @@ Changes are grouped into phases. Each phase should be completed before the next.
 - Transaction atomicity for multi-document updates
 - 20 unit tests for aggregation logic
 
+### 4.11 Multi-Origin Self-Hosted Deployment ✅ COMPLETE (added May 2026)
+- **Purpose:** Serve the same landlord frontend simultaneously from LAN (`http://192.168.x.x:PORT`) and Tailscale IP (`http://100.x.x.x:PORT`) so family/staff can use the app over a shared Tailnet without DNS setup.
+- **Code changes (applied on `nas` branch only):**
+  1. `services/gateway/src/index.ts` — `configureCORS()` accepts comma-separated `APP_DOMAIN`, builds a CORS regex per origin.
+  2. `services/authenticator/src/index.ts` — removed explicit cookie `domain` attribute so cookies become host-only and work across multiple hostnames.
+  3. `webapps/landlord/src/utils/fetch.js` — `apiFetcher()` uses `window.location.origin` on the client instead of the build-time `GATEWAY_URL`, so the browser always talks to the same origin it loaded from.
+- **Branch strategy:** `master` mirrors upstream for dev. `nas` adds the 3 source changes, `docker-compose.nas.yml`, and `.github/workflows/nas-ci.yml` that builds `:nas` + `:nas-<sha>` tags to GHCR.
+- **Deployment automation:** `scripts/deploy-nas.sh` (invoked via `yarn deploy:nas`) asks 3 questions upfront, pushes to `nas`, waits for the CI build, and triggers a Portainer stack redeploy using the local `.secrets/portainer-token`. `scripts/validate-nas-deploy.sh` sanity-checks `docker-compose.nas.yml` before push.
+- **Docs:** `documentation/DEV_AND_DEPLOY.md` (dev + deploy workflow, troubleshooting, historical gotchas).
+
 ---
 
 ## Phase 5 — Quality & Operations
@@ -161,6 +171,7 @@ Changes are grouped into phases. Each phase should be completed before the next.
 Phase 1-3 ✅ → Phase 4.1-4.2 ✅ (Building + κοινόχρηστα)
                 → Phase 4.5-4.6 ✅ (OCR + SMS)
                 → Phase 4.7-4.10 ✅ (Backup, Security, Pagination, Performance)
+                → Phase 4.11 ✅ (Multi-origin NAS deployment)
                 → Phase 4.3 (Webhooks) → Phase 4.4 (Payments)
 Phase 5 ongoing in parallel
 ```
