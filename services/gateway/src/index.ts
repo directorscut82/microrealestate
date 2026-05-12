@@ -58,12 +58,38 @@ async function Main() {
 function configureCORS(application: Express.Application) {
   const config = Service.getInstance().envConfig.getValues();
   if (config.CORS_ENABLED && (config.DOMAIN_URL || config.APP_DOMAIN)) {
-    let domain = config.APP_DOMAIN;
-    if (config.DOMAIN_URL) {
-      domain = URLUtils.destructUrl(config.DOMAIN_URL).domain;
-    }
+    // APP_DOMAIN may be a comma-separated list of domains to support
+    // multi-origin deployments (e.g. LAN IP + Tailscale IP + domain name).
+    // Prefer APP_DOMAIN over DOMAIN_URL — DOMAIN_URL is the deprecated path
+    // and has a 'http://localhost' fallback that would otherwise mask APP_DOMAIN.
+    const domainsInput = config.APP_DOMAIN
+      ? String(config.APP_DOMAIN)
+      : URLUtils.destructUrl(String(config.DOMAIN_URL || '')).domain || '';
+    const allowedDomains = domainsInput
+      .split(',')
+      .map((d) => d.trim())
+      .filter(Boolean);
+    logger.info(
+      `CORS allowed origins: ${allowedDomains
+        .map((d) => `http(s)://*${d}`)
+        .join(', ')}`
+    );
     const corsOptions = {
-      origin: new RegExp(`^https?://(.*\\.)?${domain}$`),
+      origin: (
+        origin: string | undefined,
+        cb: (err: Error | null, allow?: boolean) => void
+      ) => {
+        // Allow non-browser clients (no Origin header) like server-to-server.
+        if (!origin) return cb(null, true);
+        const ok = allowedDomains.some((d) =>
+          new RegExp(`^https?://(.*\\.)?${d.replace(/\./g, '\\.')}$`).test(
+            origin
+          )
+        );
+        if (ok) return cb(null, true);
+        logger.warn(`CORS blocked origin: ${origin}`);
+        cb(new Error(`Origin ${origin} not allowed by CORS`));
+      },
       methods: 'GET,POST,PUT,PATCH,DELETE',
       allowedHeaders:
         //',If-Modified-Since,Range, DNT',

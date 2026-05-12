@@ -76,32 +76,14 @@ export const setAcceptLanguage = (acceptLanguage) => {
 
 export const apiFetcher = () => {
   if (!apiFetch) {
-    // create an axios instance
-    const baseURL = `${
-      isServer()
-        ? config.DOCKER_GATEWAY_URL || config.GATEWAY_URL
-        : config.GATEWAY_URL
-    }/api/v2`;
+    // On the server (SSR): use the in-docker gateway hostname.
+    // On the client (browser): always call back the EXACT origin the page
+    // was served from. This makes the app work on any hostname (LAN IP,
+    // Tailscale IP, domain name, ...) without origin/cookie mismatches.
+    const baseURL = isServer()
+      ? `${config.DOCKER_GATEWAY_URL || config.GATEWAY_URL}/api/v2`
+      : `${window.location.origin}/api/v2`;
 
-    if (isClient()) {
-      const webAppUrl = new URL(window.location.href);
-      const gatewayUrl = new URL(baseURL);
-
-      if (webAppUrl.origin !== gatewayUrl.origin) {
-        console.error(
-          `-----------------------------------------------------------------------------------------------------
-| 🚨 Important! 🚨                                                                                   |
------------------------------------------------------------------------------------------------------
-Origin mismatch between webapp and api endpoint: ${webAppUrl.origin} vs ${
-            gatewayUrl.origin
-          }
-Please restart the server with APP_DOMAIN=${webAppUrl.hostname}${
-            webAppUrl.port ? ` and APP_PORT=${webAppUrl.port}` : ''
-          }.
------------------------------------------------------------------------------------------------------`
-        );
-      }
-    }
     apiFetch = axios.create({
       baseURL,
       withCredentials
