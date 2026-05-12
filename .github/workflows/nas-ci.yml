@@ -1,0 +1,94 @@
+name: NAS Branch CI
+
+# Builds Docker images for the nas branch. Tagged :nas (always latest build)
+# and :nas-<sha> (pinned to commit SHA for rollback).
+
+on:
+  push:
+    branches:
+      - nas
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Queue workflow if already running
+        uses: ahmadnassri/action-workflow-queue@v1
+
+  lint:
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: yarn
+
+      - name: Lint
+        run: yarn lint
+
+  build-push-images:
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        include:
+          - appname: gateway
+            image: ghcr.io/${{ github.repository }}/gateway
+            dockerfile: services/gateway/Dockerfile
+          - appname: api
+            image: ghcr.io/${{ github.repository }}/api
+            dockerfile: services/api/Dockerfile
+          - appname: tenantapi
+            image: ghcr.io/${{ github.repository }}/tenantapi
+            dockerfile: services/tenantapi/Dockerfile
+          - appname: authenticator
+            image: ghcr.io/${{ github.repository }}/authenticator
+            dockerfile: services/authenticator/Dockerfile
+          - appname: pdfgenerator
+            image: ghcr.io/${{ github.repository }}/pdfgenerator
+            dockerfile: services/pdfgenerator/Dockerfile
+          - appname: emailer
+            image: ghcr.io/${{ github.repository }}/emailer
+            dockerfile: services/emailer/Dockerfile
+          - appname: resetservice
+            image: ghcr.io/${{ github.repository }}/resetservice
+            dockerfile: services/resetservice/Dockerfile
+          - appname: landlord-frontend
+            image: ghcr.io/${{ github.repository }}/landlord-frontend
+            dockerfile: webapps/landlord/Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+
+      - name: Build and push to GitHub Container Registry
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:nas
+            ${{ matrix.image }}:nas-${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
