@@ -138,8 +138,10 @@ Changes are grouped into phases. Each phase should be completed before the next.
   1. `services/gateway/src/index.ts` — `configureCORS()` accepts comma-separated `APP_DOMAIN`, builds a CORS regex per origin.
   2. `services/authenticator/src/index.ts` — removed explicit cookie `domain` attribute so cookies become host-only and work across multiple hostnames.
   3. `webapps/landlord/src/utils/fetch.js` — `apiFetcher()` uses `window.location.origin` on the client instead of the build-time `GATEWAY_URL`, so the browser always talks to the same origin it loaded from.
-- **Branch strategy:** `master` mirrors upstream for dev. `nas` adds the 3 source changes, `docker-compose.nas.yml`, and `.github/workflows/nas-ci.yml` that builds `:nas` + `:nas-<sha>` tags to GHCR.
-- **Deployment automation:** `scripts/deploy-nas.sh` (invoked via `yarn deploy:nas`) asks 3 questions upfront, pushes to `nas`, waits for the CI build, and triggers a Portainer stack redeploy using the local `.secrets/portainer-token`. `scripts/validate-nas-deploy.sh` sanity-checks `docker-compose.nas.yml` before push.
+- **Branch strategy:** `master` mirrors upstream for local dev. `nas` adds the 3 source changes above plus `.github/workflows/nas-ci.yml` which builds `:nas` + `:nas-<sha>` images to GHCR on every push.
+- **Local-only files (gitignored, never pushed):** `docker-compose.nas.yml` (stack definition with inlined secrets), `.secrets/github-pat`, `.secrets/portainer-token`, `.env.nas-secrets`.
+- **Deployment automation:** `scripts/deploy-nas.sh` (invoked via `yarn deploy:nas`) asks 2 questions upfront (wait for CI? redeploy stack?), merges master → nas, pushes, and triggers a Portainer stack redeploy using the local `.secrets/portainer-token`. `scripts/validate-nas-deploy.sh` runs 22 sanity checks on the local `docker-compose.nas.yml` before push.
+- **Known limitation:** The deploy script does not sync from upstream (microrealestate/microrealestate). The fork's git history was rewritten during the initial authorship change, so `git merge upstream/main` fails with "refusing to merge unrelated histories". Use `git cherry-pick <sha>` manually to pull in specific upstream fixes.
 - **Docs:** `documentation/DEV_AND_DEPLOY.md` (dev + deploy workflow, troubleshooting, historical gotchas).
 
 ---
