@@ -43,3 +43,6 @@ mre-macos
 
 # NAS deployment — kept local, pasted into Portainer
 docker-compose.nas.yml
+
+# Deploy script secrets (GitHub PAT, Portainer token)
+.secrets/
