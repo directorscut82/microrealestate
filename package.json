@@ -40,7 +40,8 @@
     "start": "yarn run mre start",
     "stop": "yarn run mre stop",
     "ci": "yarn run mre ci",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "deploy:nas": "bash scripts/deploy-nas.sh"
   },
   "lint-staged": {
     "*.{js,ts,tsx,jsx}": [
