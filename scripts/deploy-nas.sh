@@ -77,10 +77,11 @@ read -r -p "2/3  Wait for GitHub Actions to finish building images? [Y/n] " answ
 read -r -p "3/3  Redeploy the NAS stack after images are ready? [Y/n] " answer_redeploy
 echo
 
-# normalise answers
-sync_upstream="no"; [[ "${answer_upstream,,}" == "y" || "${answer_upstream,,}" == "yes" ]] && sync_upstream="yes"
-wait_ci="yes"; [[ "${answer_wait_ci,,}" == "n" || "${answer_wait_ci,,}" == "no" ]] && wait_ci="no"
-redeploy="yes"; [[ "${answer_redeploy,,}" == "n" || "${answer_redeploy,,}" == "no" ]] && redeploy="no"
+# normalise answers (use tr for bash 3 compat on macOS)
+to_lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
+sync_upstream="no"; a="$(to_lower "${answer_upstream:-}")"; [[ "$a" == "y" || "$a" == "yes" ]] && sync_upstream="yes"
+wait_ci="yes"; a="$(to_lower "${answer_wait_ci:-}")"; [[ "$a" == "n" || "$a" == "no" ]] && wait_ci="no"
+redeploy="yes"; a="$(to_lower "${answer_redeploy:-}")"; [[ "$a" == "n" || "$a" == "no" ]] && redeploy="no"
 
 info "Plan:"
 echo "  - Sync upstream:   $sync_upstream"
