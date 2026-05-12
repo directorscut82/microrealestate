@@ -51,12 +51,12 @@ All packages are scoped under `@microrealestate/*`:
 - `yarn lint` — Lint all workspaces
 - `yarn format` — Format all workspaces with Prettier
 - `yarn e2e:ci` / `yarn e2e:run` / `yarn e2e:open` — Run Cypress e2e tests
-- `yarn deploy:nas` — Push to `nas` branch, wait for GHCR build, trigger Portainer redeploy on the Synology NAS (self-hosted fork only)
+- `yarn deploy:nas` — Merge master → nas, push (GHCR builds `:nas` images), optionally trigger Portainer redeploy on the Synology NAS (self-hosted fork only)
 
 ## Branches
 
-- `master` — tracks upstream, used for local dev and upstreamable changes.
-- `nas` — self-hosted deployment branch for the directorscut82 fork. Adds 3 source changes for multi-origin support (LAN + Tailscale), `docker-compose.nas.yml`, and `.github/workflows/nas-ci.yml` which builds `:nas` + `:nas-<sha>` images to GHCR. Deployment is automated via `scripts/deploy-nas.sh` (invoked by `yarn deploy:nas`). See `documentation/DEV_AND_DEPLOY.md` for the full workflow.
+- `master` — mirrors upstream in spirit (same source code), used for local dev. Authorship on commits was rewritten for the fork so git sees no common ancestor with `microrealestate/microrealestate` anymore — upstream changes can only be pulled via `git cherry-pick`, not `git merge`.
+- `nas` — self-hosted deployment branch for the directorscut82 fork. Adds 3 source changes for multi-origin support (LAN + Tailscale) and `.github/workflows/nas-ci.yml` which builds `:nas` + `:nas-<sha>` images to GHCR. The `docker-compose.nas.yml` stack file is local-only (gitignored) and never pushed. Deployment is automated via `scripts/deploy-nas.sh` (invoked by `yarn deploy:nas`). See `documentation/DEV_AND_DEPLOY.md` for the full workflow.
 
 ## Environment Configuration
 

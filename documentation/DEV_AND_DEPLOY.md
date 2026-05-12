@@ -42,17 +42,15 @@ When you want your latest master changes live on the NAS, run:
 yarn deploy:nas
 ```
 
-The script asks three questions up-front and then does the rest:
+The script asks two questions up-front and then does the rest:
 
-1. **Pull from upstream first?** — merges the original MicroRealEstate upstream
-   into your master. Skip if you don't want upstream changes.
-2. **Wait for CI to finish?** — polls GitHub Actions until images are built.
-3. **Redeploy the NAS stack?** — calls Portainer API to pull new images and
+1. **Wait for CI to finish?** — polls GitHub Actions until images are built.
+2. **Redeploy the NAS stack?** — calls Portainer API to pull new images and
    restart containers.
 
 After you answer, the script:
 
-- Validates master is clean (no uncommitted changes)
+- Validates the working tree is clean (no uncommitted changes)
 - Runs `scripts/validate-nas-deploy.sh` against `docker-compose.nas.yml`
   (catches common mistakes — wrong image tags, missing secrets, dev-only
   services, etc.)
@@ -62,6 +60,13 @@ After you answer, the script:
 - Calls Portainer API to redeploy (if you said yes)
 - Verifies the landlord endpoint returns 200
 - Prints access URLs
+
+> **About upstream updates.** The script does **not** pull from the upstream
+> `microrealestate/microrealestate` repo. This fork's git history was rewritten
+> (authorship change) so git sees no common ancestor with upstream and refuses
+> to merge. If you ever want to pull a specific upstream fix, use
+> `git cherry-pick <sha>` manually — it's a rare, deliberate action that
+> doesn't belong in a routine deploy.
 
 ## Prerequisites (one-time)
 
@@ -109,9 +114,12 @@ tags. If a deploy breaks the NAS:
 
 1. Edit `docker-compose.nas.yml` locally
 2. Change image tags from `:nas` to `:nas-<previous-sha>`
-3. Run `yarn deploy:nas` and answer `n` to "sync upstream" and `n` to "wait
-   for CI" — the script will just re-upload the compose file and tell
-   Portainer to pull the pinned images.
+3. Run `yarn deploy:nas` and answer `n` to "wait for CI" (there's no code
+   change, but the script still pushes the merge to origin — this will
+   trigger a CI rebuild of the `:nas` tag that you're ignoring for this
+   rollback; that's fine, it's just wasted CI time).
+4. The script re-uploads the compose file to Portainer and tells it to
+   pull the pinned `:nas-<previous-sha>` images.
 
 Find previous SHAs at https://github.com/directorscut82/microrealestate/actions.
 
@@ -121,7 +129,7 @@ Find previous SHAs at https://github.com/directorscut82/microrealestate/actions.
 |---------|--------------|-----|
 | `Missing $GH_PAT_FILE` | You haven't set up `.secrets/github-pat` | See Prerequisites above |
 | `Compose validation failed` | `docker-compose.nas.yml` doesn't match expected pattern | Read the FAIL messages, fix the file |
-| `refusing to merge unrelated histories` | This fork's master was rewritten (authorship change) so git sees no common ancestor with upstream | Answer `n` to "Pull from upstream?" — cherry-pick or manually copy changes from upstream when you want them |
+| `refusing to merge unrelated histories` | You tried `git merge upstream/main` manually. This fork's master was rewritten (authorship change) so git sees no common ancestor with upstream | Use `git cherry-pick <sha>` to apply specific upstream commits instead of merging — the deploy script no longer tries to merge from upstream |
 | `Merge conflict` | nas and master diverged | Fix conflicts on nas, commit, re-run |
 | `CI timeout after 1800s` | Build stuck (very rare) | Check GitHub Actions page, retry |
 | `Stack 'mre' not found in Portainer` | Stack was deleted or renamed | Recreate it via Portainer UI first, then re-run |
