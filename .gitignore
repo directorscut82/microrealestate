@@ -6,6 +6,7 @@ tmp
 !.env.domain
 .vscode/ipch
 deploy-*.sh
+!scripts/deploy-*.sh
 dist
 
 # Logs
