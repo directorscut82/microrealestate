@@ -7,7 +7,11 @@ Main();
 async function onStartUp(express: Express.Application): Promise<void> {
   // Validate critical secrets at startup (fail fast instead of runtime errors)
   const config = Service.getInstance().envConfig.getValues();
-  const requiredSecrets = ['ACCESS_TOKEN_SECRET', 'REFRESH_TOKEN_SECRET', 'RESET_TOKEN_SECRET'] as const;
+  const requiredSecrets = [
+    'ACCESS_TOKEN_SECRET',
+    'REFRESH_TOKEN_SECRET',
+    'RESET_TOKEN_SECRET'
+  ] as const;
   for (const key of requiredSecrets) {
     const value = config[key];
     if (!value || String(value).length < 16) {
@@ -24,7 +28,6 @@ async function Main(): Promise<void> {
   let service: Service | undefined;
   try {
     let tokenCookieSecure = process.env.APP_PROTOCOL === 'https';
-    let tokenCookieDomain = process.env.APP_DOMAIN || 'localhost';
 
     // to be removed in next version of the app (deprecated)
     if (process.env.DOMAIN_URL) {
@@ -32,7 +35,6 @@ async function Main(): Promise<void> {
         process.env.DOMAIN_URL || 'http://localhost:8083'
       );
       tokenCookieSecure = DOMAIN_URL.protocol === 'https:';
-      tokenCookieDomain = DOMAIN_URL.hostname;
     }
 
     service = Service.getInstance(
@@ -43,8 +45,11 @@ async function Main(): Promise<void> {
         TOKEN_COOKIE_ATTRIBUTES: {
           httpOnly: true,
           sameSite: 'strict',
-          secure: tokenCookieSecure,
-          domain: tokenCookieDomain
+          secure: tokenCookieSecure
+          // No explicit `domain` attribute: cookies become host-only, bound to
+          // whatever hostname the browser used to reach the app. This lets the
+          // same app serve multiple origins (LAN IP + Tailscale IP + domain
+          // name) with each origin getting its own session cookie.
         }
       })
     );
