@@ -744,7 +744,7 @@ function writeDotEnv(promptsConfig, envConfig) {
     delete envConfig.BASE_PATH;
     delete envConfig.APP_URL;
     delete envConfig.DOMAIN_URL;
-    delete envConfig.API_URL;
+    // Note: API_URL stays — it's now explicitly written in the .env template
     delete envConfig.GATEWAY_URL;
     delete envConfig.LANDLORD_BASE_PATH;
     delete envConfig.LANDLORD_APP_URL;
@@ -838,6 +838,7 @@ EMAIL_BCC=${bccEmails}
 ## api
 DEMO_MODE=${demoMode}
 RESTORE_DB=${restoreDb}
+API_URL=http://api:8200/api/v2
 
 ## landlord frontend
 LANDLORD_BASE_PATH=${landlordBasePath || ''}
