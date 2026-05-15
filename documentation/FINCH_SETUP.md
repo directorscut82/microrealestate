@@ -115,6 +115,44 @@ Then you can use `finch` directly:
 finch compose --profile local up
 ```
 
+## Reclaiming disk space
+
+The Finch VM uses a 50 GB **raw** disk image at `~/.finch/.disks/<id>`. As you pull and rebuild images, the file accumulates layer data and the macOS-side file size creeps toward 50 GB even after you delete containers and images.
+
+**This is expected behavior.** The raw format doesn't auto-trim, so unused blocks stay allocated until you explicitly trim them.
+
+### Quick cleanup (recommended monthly or after big rebuilds)
+
+```shell
+# Stop everything first
+finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
+
+# Remove unused images, stopped containers, and build cache
+finch system prune -a -f
+
+# Remove unused volumes (system prune doesn't touch these)
+finch volume prune -a -f
+
+# Tell macOS to reclaim the freed blocks
+export LIMA_HOME=/Applications/Finch/lima/data
+/Applications/Finch/lima/bin/limactl shell finch sudo fstrim -v /mnt/lima-finch
+```
+
+The `fstrim` command is the one that actually shrinks the file on macOS. Without it, prune frees space inside the VM but the host file stays the same size.
+
+### Verify space was reclaimed
+
+```shell
+du -sh ~/.finch/.disks/
+```
+
+You should see the size drop dramatically. After a full cleanup with no images cached, expect ~1 GB. After re-pulling the MRE images for dev, expect ~15 GB.
+
+### Notes
+
+- `finch vm disk resize` only goes UP, not down. The 50 GB cap is the maximum the VM will ever use; trimming brings actual on-disk usage back close to what's really stored.
+- `finch vm remove && finch vm init` wipes the VM but creates a new 50 GB raw file — same problem. Trimming is the correct approach.
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -123,3 +161,4 @@ finch compose --profile local up
 | `failed to download` during `vm init` | Network timeout — run `finch vm start` to retry |
 | `instance already exists but is stopped` | Run `finch vm start` instead of `finch vm init` |
 | Containers can't pull images | Check your network/VPN; retry usually works |
+| `~/.finch` is using tens of gigabytes on disk | Run the cleanup steps in [Reclaiming disk space](#reclaiming-disk-space). The raw VM disk format doesn't auto-trim. |
