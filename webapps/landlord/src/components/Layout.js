@@ -9,7 +9,9 @@ import { useMediaQuery } from 'usehooks-ts';
 
 export default function Layout({ hideMenu, children }) {
   const store = useContext(StoreContext);
-  const isXLorGreater = useMediaQuery('(min-width: 1280px)');
+  const isXLorGreater = useMediaQuery('(min-width: 1280px)', {
+    initializeWithValue: false
+  });
 
   return (
     <>

@@ -18,11 +18,19 @@ import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { WelcomeIllustration } from '../../components/Illustrations';
 
-function Shortcuts({ firstConnection = false, className, dashboardData = {}, tenants = [], leases = [] }) {
+function Shortcuts({
+  firstConnection = false,
+  className,
+  dashboardData = {},
+  tenants = [],
+  leases = []
+}) {
   const store = useContext(StoreContext);
   const router = useRouter();
   const { t } = useTranslation('common');
-  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const isDesktop = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false
+  });
   const [openNewLeaseDialog, setOpenNewLeaseDialog] = useState(false);
   const [openNewTenantDialog, setOpenNewTenantDialog] = useState(false);
   const [openNewPropertyDialog, setOpenNewPropertyDialog] = useState(false);
