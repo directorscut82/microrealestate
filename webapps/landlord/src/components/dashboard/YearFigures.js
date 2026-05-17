@@ -1,4 +1,12 @@
-import { Bar, BarChart, Legend, ReferenceLine, Tooltip, XAxis, YAxis } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  Legend,
+  ReferenceLine,
+  Tooltip,
+  XAxis,
+  YAxis
+} from 'recharts';
 import { useMemo } from 'react';
 import { ChartContainer } from '../ui/chart';
 import { cn } from '../../utils';
@@ -14,24 +22,28 @@ export default function YearFigures({ className, dashboardData }) {
   const router = useRouter();
   const { t } = useTranslation('common');
   const formatNumber = useFormatNumber();
-  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const isDesktop = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false
+  });
 
   const data = useMemo(() => {
     const now = moment();
-    return dashboardData?.revenues?.reduce((acc, revenues) => {
-      const revenuesMoment = moment(revenues.month, 'MMYYYY');
-      const graphData = {
-        ...revenues,
-        name: revenuesMoment.format('MMM'),
-        yearMonth: moment(revenues.month, 'MMYYYY').format('YYYY.MM')
-      };
-      if (revenuesMoment.isSameOrBefore(now)) {
-        acc.push(graphData);
-      } else {
-        acc.push({ ...graphData, notPaid: 0, paid: 0 });
-      }
-      return acc;
-    }, []) || [];
+    return (
+      dashboardData?.revenues?.reduce((acc, revenues) => {
+        const revenuesMoment = moment(revenues.month, 'MMYYYY');
+        const graphData = {
+          ...revenues,
+          name: revenuesMoment.format('MMM'),
+          yearMonth: moment(revenues.month, 'MMYYYY').format('YYYY.MM')
+        };
+        if (revenuesMoment.isSameOrBefore(now)) {
+          acc.push(graphData);
+        } else {
+          acc.push({ ...graphData, notPaid: 0, paid: 0 });
+        }
+        return acc;
+      }, []) || []
+    );
   }, [dashboardData?.revenues]);
 
   const hasRevenues = useMemo(() => {
@@ -72,8 +84,15 @@ export default function YearFigures({ className, dashboardData }) {
               const balance = tenant.paid - tenant.due;
               return (
                 <div key={i} className="flex justify-between gap-2">
-                  <span className="text-muted-foreground truncate">{tenant.name}</span>
-                  <span className={cn('whitespace-nowrap', balance < 0 ? 'text-warning' : 'text-success')}>
+                  <span className="text-muted-foreground truncate">
+                    {tenant.name}
+                  </span>
+                  <span
+                    className={cn(
+                      'whitespace-nowrap',
+                      balance < 0 ? 'text-warning' : 'text-success'
+                    )}
+                  >
                     {formatNumber(tenant.paid)} / {formatNumber(tenant.due)}
                   </span>
                 </div>
@@ -142,7 +161,10 @@ export default function YearFigures({ className, dashboardData }) {
                 </div>
               )}
             />
-            <Tooltip content={<CustomBarTooltip />} cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }} />
+            <Tooltip
+              content={<CustomBarTooltip />}
+              cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
+            />
             <Bar
               dataKey="notPaid"
               fill="hsl(var(--chart-1))"
