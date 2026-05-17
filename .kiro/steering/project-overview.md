@@ -67,6 +67,15 @@ All packages are scoped under `@microrealestate/*`:
 
 ## Where to find more
 
+This repo uses a single source of truth for agent-readable documentation: the steering files in `.kiro/steering/`. Other agent tools read the same content via symlinks — never edit the symlinks, edit the steering file.
+
+| Tool | Reads from | Backed by |
+|------|-----------|-----------|
+| Kiro | `.kiro/steering/*.md` (auto-loaded) | original |
+| Claude Code | `CLAUDE.md` at repo root | symlink → `AGENTS.md` |
+| Generic agents | `AGENTS.md` at repo root | original (lightweight pointer to steering) |
+| Wasabi (Amazon Q) | `wasabi-toolbag/content/*.md` | symlinks → the 7 steering files |
+
 The other steering files (loaded automatically alongside this one) cover:
 - `tech-stack.md` — runtime, package versions, backend/frontend libraries
 - `architecture-patterns.md` — service bootstrap, auth flow, multi-tenancy, frontend gotchas (Tenant=Occupant, store reactivity, etc.)
@@ -83,4 +92,3 @@ Non-steering documentation (read on-demand):
 - `documentation/LINT_DEBT.md` — open lint debt with concrete fix plan (must be paid down before new feature merges)
 - `documentation/DEVELOPER.md` — upstream-style dev guide (Docker, debugging, e2e)
 - `documentation/NAS_DEPLOYMENT_PLAN.archive.md` — historical execution plan, archived
-- `wasabi-toolbag/content/{workspace-summary,project-deep-knowledge}.md` — extended reference (broadly mirrors steering)
