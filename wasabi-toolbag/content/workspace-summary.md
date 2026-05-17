@@ -4,7 +4,9 @@
 
 MicroRealEstate is a **property rental management platform** built as a **Yarn 3 monorepo** with a microservices architecture. It provides landlord management and tenant self-service portals backed by containerized API services.
 
-**Branch:** `feature/pdf-import-sms-gateway`
+This is a fork (`directorscut82/microrealestate`) self-hosted on a Synology NAS. Two-branch workflow:
+- `master` — local development, mirrors upstream source code.
+- `nas` — production layer for the NAS (multi-origin support: LAN + Tailscale, NAS-specific CI building `:nas` and `:nas-<sha>` images to GHCR).
 
 ---
 
@@ -108,6 +110,7 @@ MongoDB:27017, Redis:6379 (shared data layer)
 | `yarn e2e:run` | Run Cypress E2E tests headless |
 | `yarn e2e:open` | Open Cypress interactive runner |
 | `yarn ci` | CI orchestration |
+| `yarn deploy:nas` | Merge master → nas, push (CI builds `:nas` images), trigger Portainer stack redeploy on the NAS |
 
 ### Service Build Pattern
 Backend services use TypeScript compilation with `@swc/jest` for testing:
@@ -119,11 +122,18 @@ yarn test         # Jest with --experimental-vm-modules
 ```
 
 ### Docker Compose Overlays
-- `docker-compose.yml` — Standalone production config
+- `docker-compose.yml` — Standalone production config with Caddy
 - `docker-compose.microservices.base.yml` — Env-driven base
 - `docker-compose.microservices.dev.yml` — Hot-reload, debug ports, volume mounts
 - `docker-compose.microservices.prod.yml` — Memory limits, production Dockerfiles
 - `docker-compose.microservices.test.yml` — CI/E2E testing config
+- `docker-compose.nas.yml` — Local-only (gitignored), NAS production stack with inlined secrets, used by Portainer on the Synology NAS
+
+### Container Runtime — Finch (not Docker)
+Local development on macOS uses **Finch**, not Docker Desktop. All compose commands use `finch compose`. The CLI auto-detects Finch when present. See `documentation/FINCH_SETUP.md` for setup, including the periodic disk reclaim procedure (`finch system prune -a -f && finch volume prune -a -f` followed by `fstrim` inside the VM via `limactl shell`).
+
+### Deploying to NAS — `yarn deploy:nas`
+Runs `scripts/deploy-nas.sh` which merges `master` → `nas`, pushes (CI builds the `:nas` images), and triggers a Portainer stack redeploy via the Portainer REST API. Reads tokens from `.secrets/github-pat` and `.secrets/portainer-token` (both gitignored). See `documentation/DEV_AND_DEPLOY.md` for the full flow.
 
 ---
 

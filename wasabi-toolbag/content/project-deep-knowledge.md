@@ -55,6 +55,16 @@ Requires `Authorization: Bearer {accessToken}` + `organizationId` header.
 - `GET /documents/:id`, `POST /documents`
 - `GET|POST /templates`
 
+**Buildings** (κοινόχρηστα):
+- `GET|POST /buildings`, `GET|PATCH|DELETE /buildings/:id`
+- Sub-resources: `units`, `expenses`, `contractors`, `repairs`
+- Monthly statement generation per building/month
+
+**Bills** (utility bill imports — DEH etc.):
+- `POST /bills/parse` — extract bill data from PDF (returns parsed payload)
+- `POST /bills/confirm` — persist after user review, auto-match to building expense
+- `POST /bills/parse-payment` / `POST /bills/confirm-payment` — payment receipt import
+
 **Organizations:**
 - `GET /realms`, `GET|PATCH /realms/:id`
 - `POST /realms/:id/members`, `DELETE /realms/:id/members/:memberId`
@@ -102,6 +112,10 @@ Requires `Authorization: Bearer {accessToken}` + `organizationId` header.
 **Document** — `_id`, `realmId`, `tenantId`, `templateId`, `type`, `name`, `description`, `mimeType`, `expiryDate`, `url`, `versionId`
 
 **Email** — `_id`, `templateName`, `sentTo`, `sentDate`, `status`, `params`
+
+**Building** — `_id`, `realmId`, `name`, `address`, `atakPrefix`, `blockNumber`, `totalFloors`, `heatingType`, `manager`, `bankInfo`, sub-documents `units[]` (atakNumber, floor, surface, thousandths {general/heating/elevator}, owners, occupancyType, propertyId link, monthlyCharges), `expenses[]` (name, type, amount, allocationMethod, customAllocations, isRecurring, billingId), `contractors[]`, `repairs[]`, `ownerMonthlyExpenses[]`. CRUD at `/api/v2/buildings` with sub-resource routes for units, expenses, contractors, repairs.
+
+**Bill** — `_id`, `realmId`, `buildingId`, `expenseId`, `provider` (DEH etc.), `totalAmount`, `term`, `status`, IRIS QR code + RF payment code fields. Imported via `POST /api/v2/bills/parse` → `POST /api/v2/bills/confirm`.
 
 ### Critical Data Notes
 - All data scoped by `realmId` — `checkOrganization` middleware resolves from `organizationId` header
@@ -200,6 +214,8 @@ Handles: Express setup, MongoDB/Redis connections, request parsing, logging midd
 
 10. **Presence awareness:** `POST/GET /api/v2/presence/:type/:id`, Redis 60s TTL, frontend `usePresence` hook polls every 30s, `PresenceBanner` component on detail pages.
 
+11. **`useMediaQuery` is SSR-unsafe by default:** Always pass `{ initializeWithValue: false }`. Without it, the hook reads `window.matchMedia` on the first render — server returns `false` (no window), client returns the real value, producing a hydration error like "Did not expect server HTML to contain a `<div>` in `<div>`". With the option set, both server and client return the default on first render and the client updates after mount via `useEffect`.
+
 ### Referential Integrity (enforced)
 - DELETE property → 422 if occupied by tenant
 - DELETE lease → 422 if used by tenants
@@ -221,7 +237,7 @@ src/hooks/useNewFeature.js                 # React Query hooks
 
 ---
 
-## Current State (2026-04-22)
+## Current State (2026-05)
 
 ### Completed Migrations
 - ✅ MUI v4 → shadcn/ui + Tailwind (zero @material-ui imports)
@@ -230,27 +246,26 @@ src/hooks/useNewFeature.js                 # React Query hooks
 - ✅ All backend services migrated to TypeScript (58 files, 0 errors)
 - ✅ Store reactivity: subscribe/notify + useSyncExternalStore
 
-### Features Built on Feature Branch
+### Major Features Shipped
 - Greek AADE lease PDF import (parser + API + frontend dialog, 13 unit tests)
+- Greek DEH utility-bill PDF import + IRIS QR code generation (`Bill` collection)
 - SMS Gateway integration (via Android sms-gate.app cloud API)
+- Building entity (`Building` collection) with units, expenses, contractors, repairs, plus κοινόχρηστα monthly statement generation and 8 expense allocation methods
+- Database backup/restore in Settings UI with triple-layer production protection (`assertTestDatabase` guard in resetservice, Cypress before-hook URL check, pre-test backup script)
+- Server-side pagination on tenant/property/lease lists (`useInfiniteQuery` Load More pattern)
+- Dashboard performance: MongoDB aggregation pipeline replacing full-array loads
 - Presence awareness (Redis-backed, 30s polling)
 - Tenant archive (archive instead of delete, toggle visibility)
 - Extended property fields (ATAK, DEH, energy certificate, land surface)
 - Extended tenant fields (co-tenants, declaration, amendment, lease notes)
 - Delete tenant safety checks + options dialog
-- Separate SMS button on Rents page
 - Resetservice seed + OTP APIs
-- 15 app code bugs fixed
+- Frontend hardening: ErrorBoundary, token refresh queue fix, payment double-submit prevention, auth header leak fix
+- Multi-origin self-hosted deployment (NAS): same landlord frontend served from LAN IP and Tailscale IP simultaneously, applied on the `nas` branch only
 
-### Test Coverage: 583 tests across 59 suites
-- Unit: 61 passing (4 suites)
-- E2E 01-17: 157 tests ✅
-- E2E 20-28: 158 tests (2-5 non-deterministic failures per run)
-- E2E 30-42: 129 tests ✅
-- E2E 50-57: 61 tests ✅
-- E2E 58-62: 43 tests (suite 59 has pre-existing React hydration error)
-- E2E 63-70: 36 tests ✅
-- Full run: ~523-551 out of 583 pass
+### Test Coverage
+- Unit: 14 suites, 319 tests in `services/api` (309 passing, 10 failing as of May 2026); 4 frontend test files in `webapps/landlord/src/__tests__/`
+- E2E: 67 Cypress suites, 583 tests, ~523-551 pass per run depending on `selectByLabel` non-determinism
 
 ### Known Non-deterministic Failures
 `selectByLabel` Cypress command occasionally fails when Radix Select opens before React Query data loads. Retry logic (5 attempts) mitigates but doesn't eliminate. Affects suites 20, 22, 25, 27, 28.
@@ -259,8 +274,12 @@ src/hooks/useNewFeature.js                 # React Query hooks
 - Seed API bypasses rent pipeline — use `seedAndComputeRents` command
 - Seeded tenants don't have `usedByTenants` flag computed
 - Payment form requires date field (validates but won't submit without it)
-- Tenant portal has pre-existing React hydration error (#418)
+- Tenant portal suite 59 has pre-existing React hydration error (#418, separate from the landlord SSR fix shipped May 2026)
 - `next-translate-plugin` shows non-fatal "Debug Failure" warning during build
+- Lint debt: `@typescript-eslint/no-explicit-any` and `sort-imports` are temporarily disabled across several services. Tracked in `documentation/LINT_DEBT.md` with concrete fix plan; must be paid down before new feature work merges.
+
+### Upstream Sync — Not Automated
+The fork's git history was rewritten (authorship change), so `git merge upstream/main` fails with "refusing to merge unrelated histories". To pull in specific upstream fixes, use `git cherry-pick <sha>` manually. Documented in `documentation/DEV_AND_DEPLOY.md`.
 
 ---
 
@@ -271,23 +290,29 @@ src/hooks/useNewFeature.js                 # React Query hooks
 - **Phase 2** — Data integrity (referential guards, Redis TTL alignment) ✅
 - **Phase 3** — Codebase consistency (TS migration, MobX removal, frontend patterns) ✅
 
-### Phase 4 — Architecture Extensions (in progress)
-- **4.1 Building entity** — new collection, property links, CRUD API, UI
-- **4.2 Building Services** — κοινόχρηστα, shared expenses, allocation methods, rent pipeline integration
-- **4.3 Webhooks** — event system for external integrations (payments, OCR)
-- **4.4 Payment gateway** — online rent payments (Stripe, Viva Wallet)
-- **4.5 Document ingestion/OCR** — ✅ Greek PDF import done; remaining: other doc types, batch import
-- **4.6 SMS Gateway** — ✅ Complete
+### Phase 4 — Architecture Extensions
+- **4.1 Building entity** ✅ — `Building` collection with units, expenses, contractors, repairs
+- **4.2 Building Services** ✅ — κοινόχρηστα with 8 allocation methods, monthly statements, retroactive rent recalc
+- **4.3 Webhooks** — NOT STARTED (event system for external integrations: payments, OCR)
+- **4.4 Payment gateway** — NOT STARTED (online rent payments: Stripe, Viva Wallet)
+- **4.5 Document ingestion/OCR** ✅ — Greek AADE lease + DEH bill imports, IRIS QR codes
+- **4.6 SMS Gateway** ✅ — Android sms-gate.app integration
+- **4.7 Database Backup/Restore** ✅ — Full backup with triple-layer production protection
+- **4.8 Security Hardening** ✅ — express-mongo-sanitize, validation, rate limiting, race fixes
+- **4.9 Server-Side Pagination** ✅ — `page`/`limit` query params, `useInfiniteQuery` Load More
+- **4.10 Dashboard Performance** ✅ — MongoDB aggregation pipeline, transaction atomicity
+- **4.11 Multi-Origin NAS Deployment** ✅ — `nas` branch, Portainer stack, comma-separated `APP_DOMAIN`, host-only cookies, `window.location.origin` on the client
 
 ### Phase 5 — Quality & Operations
-- Unit tests for rent computation, auth flows, building expense allocation
-- OpenAPI/Swagger documentation
-- Finch support in CLI
+- **5.1 Unit tests** — IN PROGRESS (14 suites, 319 tests)
+- **5.2 E2E coverage** — EXTENSIVE (67 suites, 583 tests)
+- **5.3 API documentation (OpenAPI/Swagger)** — NOT STARTED
+- **5.4 Finch support in CLI** — NOT STARTED (CLI's `findCRI()` only detects docker/docker-compose/podman)
 
 ### Implementation Order
 ```
-Phase 1-3 ✅ → 4.1 (Building) → 4.2 (Services/κοινόχρηστα)
-                → 4.3 (Webhooks) → 4.4 (Payments) + 4.5 (OCR)
+Phase 1-3 ✅ → 4.1-4.2 ✅ → 4.5-4.6 ✅ → 4.7-4.10 ✅ → 4.11 ✅
+                → 4.3 (Webhooks) → 4.4 (Payments)
 Phase 5 ongoing in parallel
 ```
 
@@ -314,6 +339,29 @@ finch compose -f docker-compose.microservices.base.yml -f docker-compose.microse
 **Critical .env requirements:**
 - `API_URL=http://api:8200/api/v2` (gateway crashes without it)
 - `MONGO_URL=mongodb://mongo/mredb` (NOT `demodb`)
+
+**Disk reclaim:** Finch's VM uses a 50 GB raw disk image at `~/.finch/.disks/` that doesn't auto-shrink. Run periodically:
+```bash
+finch system prune -a -f && finch volume prune -a -f
+export LIMA_HOME=/Applications/Finch/lima/data
+/Applications/Finch/lima/bin/limactl shell finch sudo fstrim -v /mnt/lima-finch
+```
+See `documentation/FINCH_SETUP.md`.
+
+---
+
+## NAS Deployment (`nas` branch)
+
+Two-branch model:
+- `master` — local dev, source code mirrors upstream.
+- `nas` — production layer with 3 source modifications for multi-origin support and `.github/workflows/nas-ci.yml` building `:nas` + `:nas-<sha>` images to GHCR.
+
+The 3 nas-only source changes:
+1. `services/gateway/src/index.ts` — `configureCORS()` accepts comma-separated `APP_DOMAIN` and builds a CORS regex per origin.
+2. `services/authenticator/src/index.ts` — removed cookie `domain` attribute (cookies become host-only, work on multiple hostnames).
+3. `webapps/landlord/src/utils/fetch.js` — `apiFetcher()` uses `window.location.origin` on the client instead of build-time `GATEWAY_URL`, so the browser always calls back to the origin that served the page.
+
+`docker-compose.nas.yml` and `.secrets/{github-pat,portainer-token}` are local-only (gitignored). Deploy with `yarn deploy:nas`. See `documentation/DEV_AND_DEPLOY.md` for full workflow + troubleshooting.
 
 ---
 
