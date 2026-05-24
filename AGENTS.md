@@ -23,6 +23,21 @@ The minimum sequence:
 
 If you cannot reproduce or verify a claim within 2-3 read commands, ask the user before continuing — it is cheaper than guessing wrong three times in a row.
 
+## Quick triage: signin returns HTTP 500 locally
+
+This is the #1 local-dev failure. The cookie/rate-limit theory is almost always wrong — start here instead.
+
+1. **Check gateway logs first**: `finch logs microrealestate-gateway-1 2>&1 | grep -iE "cors|error" | tail -10`
+2. If you see `CORS blocked origin: http://localhost:8080`: open `.env`, ensure `APP_DOMAIN=localhost:8080` is present, then **recreate** the gateway (don't just restart — `finch restart` does NOT reload env vars):
+   ```
+   finch rm -f microrealestate-gateway-1
+   finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml up -d gateway
+   ```
+3. If you don't see CORS errors but the gateway is unreachable: verify `API_URL=http://api:8200/api/v2` is in `.env` (gateway crashes silently without it).
+4. If credentials really don't match (auth code is reached but fails): the bcrypt hash in `accounts` collection may be from before the May 2026 double-hash fix. Reset directly in mongo — see `services/api/src/businesslogic/` for the bcrypt utility, or run `bcrypt.hash(password, 10)` inside the authenticator container and `db.accounts.updateOne(...)` inside mongo.
+
+For a general "HTTP 500 from gateway" decision tree, see `.kiro/steering/test-running-guide.md`.
+
 ## Table of Contents
 
 - [Directory Map](#directory-map) — where to find code
