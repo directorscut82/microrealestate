@@ -46,13 +46,19 @@ const contractorSpecialties = [
 ];
 
 const schema = z.object({
-  name: z.string().min(1),
-  company: z.string().optional(),
-  specialty: z.string().min(1),
-  phone: z.string().optional(),
-  email: z.string().optional(),
-  taxId: z.string().optional(),
-  notes: z.string().optional()
+  name: z.string().trim().min(1).max(200),
+  company: z.string().trim().max(200).optional(),
+  specialty: z.string().trim().min(1).max(60),
+  phone: z.string().trim().max(60).optional(),
+  email: z
+    .string()
+    .trim()
+    .email()
+    .max(200)
+    .or(z.literal(''))
+    .optional(),
+  taxId: z.string().trim().max(60).optional(),
+  notes: z.string().trim().max(2000).optional()
 });
 
 export default function ContractorList({ building }) {

@@ -95,8 +95,13 @@ export default function SignIn() {
     [router, store, t]
   );
 
+  useEffect(() => {
+    if (store.organization.selected?.name) {
+      router.push(`/${store.organization.selected.name}/dashboard`);
+    }
+  }, [store.organization.selected?.name, router]);
+
   if (store.organization.selected?.name) {
-    router.push(`/${store.organization.selected.name}/dashboard`);
     return null;
   }
 

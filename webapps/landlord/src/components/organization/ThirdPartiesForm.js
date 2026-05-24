@@ -15,21 +15,31 @@ import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
+const optionalEmail = z
+  .string()
+  .trim()
+  .email()
+  .or(z.literal(''))
+  .optional();
+
 const schema = z.object({
   emailDeliveryServiceActive: z.boolean(),
   emailDeliveryServiceName: z.string().optional(),
   gmail_email: z.string().optional(),
   gmail_appPassword: z.string().optional(),
   smtp_server: z.string().optional(),
-  smtp_port: z.coerce.number().optional(),
+  smtp_port: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.coerce.number().int().min(1).max(65535).optional()
+  ),
   smtp_secure: z.boolean().optional(),
   smtp_authentication: z.boolean().optional(),
   smtp_username: z.string().optional(),
   smtp_password: z.string().optional(),
   mailgun_apiKey: z.string().optional(),
   mailgun_domain: z.string().optional(),
-  fromEmail: z.string().optional(),
-  replyToEmail: z.string().optional(),
+  fromEmail: optionalEmail,
+  replyToEmail: optionalEmail,
   b2Active: z.boolean(),
   keyId: z.string().optional(),
   applicationKey: z.string().optional(),
@@ -110,9 +120,9 @@ export default function ThirdPartiesForm({ organization }) {
       endpoint: organization.thirdParties?.b2?.endpoint || '',
       bucket: organization.thirdParties?.b2?.bucket || '',
       smsActive: !!organization.thirdParties?.smsGateway?.selected,
-      smsUrl: organization.thirdParties?.smsGateway?.url || 'https://api.sms-gate.app',
-      smsUsername: organization.thirdParties?.smsGateway?.username || 'LAGOWP',
-      smsPassword: organization.thirdParties?.smsGateway?.password || 'covwi9wr81hxvt'
+      smsUrl: organization.thirdParties?.smsGateway?.url || '',
+      smsUsername: organization.thirdParties?.smsGateway?.username || '',
+      smsPassword: organization.thirdParties?.smsGateway?.password || ''
     };
   }, [organization]);
 

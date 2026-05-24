@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -35,6 +35,12 @@ export default function SignUp() {
     defaultValues: { firstName: '', lastName: '', email: '', password: '' }
   });
 
+  useEffect(() => {
+    if (store.organization.selected?.name) {
+      router.push(`/${store.organization.selected.name}/dashboard`);
+    }
+  }, [store.organization.selected?.name, router]);
+
   if (!config.SIGNUP) {
     return <ErrorPage statusCode={404} />;
   }
@@ -68,7 +74,6 @@ export default function SignUp() {
   };
 
   if (store.organization.selected?.name) {
-    router.push(`/${store.organization.selected.name}/dashboard`);
     return null;
   }
 

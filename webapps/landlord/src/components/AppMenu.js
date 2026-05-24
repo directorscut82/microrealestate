@@ -188,6 +188,9 @@ export function HamburgerMenu({ className, onChange }) {
                 store.organization.selected?.name ||
                 ''}
             </SheetTitle>
+            <SheetDescription className="sr-only">
+              {config.APP_NAME}
+            </SheetDescription>
           </SheetHeader>
           <Separator className="my-2" />
           <nav className="flex-grow overflow-auto px-3 flex flex-col gap-0.5">

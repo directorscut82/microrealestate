@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -57,8 +57,13 @@ export default function ForgotPassword() {
     router.push('/signin');
   };
 
+  useEffect(() => {
+    if (store.organization.selected?.name) {
+      router.push(`/${store.organization.selected.name}/dashboard`);
+    }
+  }, [store.organization.selected?.name, router]);
+
   if (store.organization.selected?.name) {
-    router.push(`/${store.organization.selected.name}/dashboard`);
     return null;
   }
 

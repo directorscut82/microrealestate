@@ -230,8 +230,9 @@
   }
 
   /* Sea-blue focus ring on every interactive element. Visible on bone + cream. */
-  :focus-visible {
-    outline: none;
+  :where(button, a, [role='button'], input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 
   /*

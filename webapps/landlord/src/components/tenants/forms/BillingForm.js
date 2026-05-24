@@ -48,7 +48,6 @@ const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
   });
 
   const isVat = watch('isVat');
-  const discount = watch('discount');
   const stepperMode = tenant?.stepperMode;
 
   const _onSubmit = async (billing) => {
@@ -102,17 +101,15 @@ const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
             </div>
           </>
         )}
-        {discount > 0 ? (
-          <div className="space-y-2">
-            <Label htmlFor="discount">{t('Discount')}</Label>
-            <Input
-              id="discount"
-              type="number"
-              disabled={readOnly}
-              {...register('discount')}
-            />
-          </div>
-        ) : null}
+        <div className="space-y-2">
+          <Label htmlFor="discount">{t('Discount')}</Label>
+          <Input
+            id="discount"
+            type="number"
+            disabled={readOnly}
+            {...register('discount')}
+          />
+        </div>
       </div>
       {!readOnly && (
         <Button type="submit" className="mt-6" disabled={isSubmitting} data-cy="submit">

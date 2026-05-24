@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert } from '../../../../components/ui/alert';
 import { Button } from '../../../../components/ui/button';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
+import ErrorPage from 'next/error';
 import { GrDocumentPdf } from 'react-icons/gr';
 import { List } from '../../../../components/ResourceList';
 import { LuRotateCw } from 'react-icons/lu';
@@ -230,14 +231,19 @@ function Rents() {
   const store = useContext(StoreContext);
   const router = useRouter();
   const { yearMonth } = router.query;
+  const isYearMonthValid = useMemo(
+    () => moment(yearMonth, 'YYYY.MM', true).isValid(),
+    [yearMonth]
+  );
   const period = useMemo(
     () =>
-      router.query.yearMonth ? moment(router.query.yearMonth, 'YYYY.MM') : moment(),
-    [router.query.yearMonth]
+      isYearMonthValid ? moment(yearMonth, 'YYYY.MM') : moment(),
+    [yearMonth, isYearMonthValid]
   );
   const { data, isError, isLoading } = useQuery({
     queryKey: [QueryKeys.RENTS, yearMonth],
-    queryFn: () => fetchRents(yearMonth)
+    queryFn: () => fetchRents(yearMonth),
+    enabled: isYearMonthValid
   });
   const [rentSelected, setRentSelected] = useState([]);
 
@@ -249,6 +255,10 @@ function Rents() {
     toast.error(t('Error fetching rents'));
   }
 
+  if (yearMonth && !isYearMonthValid) {
+    return <ErrorPage statusCode={404} />;
+  }
+
   return (
     <Page loading={isLoading} dataCy="rentsPage">
       <div className="my-4">
@@ -256,7 +266,7 @@ function Rents() {
       </div>
 
       {!store.organization.canSendEmails ? (
-        <Alert variant="info" className="mb-4">
+        <Alert variant="warning" className="mb-4">
           <LuAlertTriangle className="size-4" />
           <div className="text-body">
             {t(

@@ -32,12 +32,25 @@ import usePaymentTypes from '../../hooks/usePaymentTypes';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
-const paymentSchema = z.object({
-  amount: z.coerce.number().min(0).optional(),
-  date: z.string().optional(),
-  type: z.enum(['cash', 'transfer', 'levy', 'cheque']),
-  reference: z.string().optional()
-});
+const paymentSchema = z
+  .object({
+    amount: z.preprocess(
+      (v) => (v === '' || v == null ? undefined : v),
+      z.coerce.number().min(0).optional()
+    ),
+    date: z.string().optional(),
+    type: z.enum(['cash', 'transfer', 'levy', 'cheque']),
+    reference: z.string().optional()
+  })
+  .refine(
+    ({ amount, date }) => {
+      if (amount == null || amount === 0) return true;
+      // Any positive amount must be ≥ 0.01 to prevent micro-payments.
+      if (amount < 0.01) return false;
+      return !!(date && date.length > 0);
+    },
+    { message: 'Date required when amount > 0', path: ['date'] }
+  );
 
 const schema = z.object({
   payments: z.array(paymentSchema).min(1),
@@ -107,7 +120,9 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
       clonedValues.payments = clonedValues.payments
         .filter(({ amount }) => amount > 0)
         .map((payment) => {
-          payment.date = moment(payment.date).format('DD/MM/YYYY');
+          payment.date = payment.date
+            ? moment(payment.date).format('DD/MM/YYYY')
+            : '';
           if (payment.type === 'cash') delete payment.reference;
           return payment;
         });
@@ -119,11 +134,14 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         ...clonedValues
       };
 
-      const period = moment(String(rent.term), 'YYYYMMDDHH').format('YYYY.MM');
       try {
         await payRent({ term: String(rent.term), payment });
-        queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, period] });
+        // Invalidate via prefix so all rent periods, dashboards, tenants and
+        // accounting screens refetch (no specific period to keep stale).
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
         onSubmit?.();
       } catch (error) {
         console.error(error);
@@ -131,7 +149,7 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         onError?.();
       }
     },
-    [onSubmit, queryClient, rent._id, rent.month, rent.term, rent.year, t]
+    [onSubmit, onError, queryClient, rent._id, rent.month, rent.term, rent.year, t]
   );
 
   const payments = watch('payments');

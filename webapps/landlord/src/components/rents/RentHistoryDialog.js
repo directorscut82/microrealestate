@@ -126,8 +126,8 @@ function RentHistory({ tenantId }) {
   );
 
   const handleClose = useCallback(() => {
-    fetchTenantRents(false);
-  }, [fetchTenantRents]);
+    fetchRents(false);
+  }, [fetchRents]);
 
   return (
     <>

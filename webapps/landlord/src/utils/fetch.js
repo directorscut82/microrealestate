@@ -131,6 +131,9 @@ Please restart the server with APP_DOMAIN=${webAppUrl.hostname}${
               requestQueue.push({ resolve, reject });
             })
               .then(async () => {
+                // Mark retry BEFORE re-firing so a second 401 falls through
+                // to a normal rejection instead of looping back here.
+                originalRequest._retry = true;
                 // use latest authorization token
                 originalRequest.headers['Authorization'] =
                   apiFetch.defaults.headers.common['Authorization'];
@@ -172,16 +175,22 @@ Please restart the server with APP_DOMAIN=${webAppUrl.hostname}${
       }
     );
 
-    // force signin on 403
+    // Force signin only when 403 originates from an auth-flow endpoint.
+    // For other 403s, propagate the error so the caller can handle it
+    // without yanking the user out of an in-progress edit.
     apiFetch.interceptors.response.use(
       (response) => response,
       (error) => {
-        // Force signin if an api responded 403
         if (error.response?.status === 403) {
-          if (isClient()) {
-            window.location.assign(`${config.BASE_PATH}`);
+          const url = error.response?.config?.url || '';
+          const isAuthEndpoint =
+            url.includes('/refreshtoken') || url.includes('auth');
+          if (isAuthEndpoint) {
+            if (isClient()) {
+              window.location.assign(`${config.BASE_PATH}`);
+            }
+            throw new Cancel('Operation canceled force login');
           }
-          throw new Cancel('Operation canceled force login');
         }
         return Promise.reject(error);
       }
