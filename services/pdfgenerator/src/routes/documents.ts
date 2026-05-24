@@ -612,6 +612,10 @@ export default function () {
       const organizationId = req.headers.organizationid;
       const documentIds = req.params.ids.split(',');
 
+      // Validate every id BEFORE the Mongoose query — without this a malformed
+      // id (or a NoSQL probe) would surface as a CastError 500 inside $in.
+      documentIds.forEach((id) => assertValidObjectId(id, 'document id'));
+
       // fetch documents
       const documents = await Collections.Document.find({
         _id: { $in: documentIds },

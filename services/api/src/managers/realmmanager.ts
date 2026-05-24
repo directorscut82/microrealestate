@@ -165,6 +165,22 @@ export async function update(req: Req, res: Res) {
     });
   }
 
+  // Type-guard the `selected` flag on every third-party provider before the
+  // deep-merge below. Without this a payload like
+  // `thirdParties.smsGateway.selected = "true"` (string) or {$ne:false} would
+  // be persisted verbatim and downstream `if (selected)` checks would behave
+  // unexpectedly across services that read this config.
+  const PROVIDERS = ['gmail', 'smtp', 'mailgun', 'b2', 'smsGateway'] as const;
+  for (const p of PROVIDERS) {
+    const sel = req.body.thirdParties?.[p]?.selected;
+    if (sel !== undefined && typeof sel !== 'boolean') {
+      throw new ServiceError(
+        `thirdParties.${p}.selected must be a boolean`,
+        422
+      );
+    }
+  }
+
   const smtpPasswordUpdated = !!req.body.thirdParties?.smtp?.passwordUpdated;
   const mailgunApiKeyUpdated = !!req.body.thirdParties?.mailgun?.apiKeyUpdated;
   const b2KeyIdUpdated = !!req.body.thirdParties?.b2?.keyIdUpdated;

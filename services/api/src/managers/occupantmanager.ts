@@ -406,6 +406,15 @@ export async function update(req: Req, res: Res) {
 
   const newOccupant = _formatTenant(req.body);
 
+  // _formatTenant sets company/legalForm/siret/capital to null for non-company
+  // tenants. When the frontend round-trips that document back on edit, the
+  // null values reach validateStringField (which only accepts string) and
+  // 422 on the second save. Normalize null → undefined so the validators
+  // simply skip these optional fields.
+  ['company', 'legalForm', 'siret', 'manager'].forEach((field) => {
+    if (newOccupant[field] === null) newOccupant[field] = undefined;
+  });
+
   if (!newOccupant.properties) {
     newOccupant.properties = [];
   }
