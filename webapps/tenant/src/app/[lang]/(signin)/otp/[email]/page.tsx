@@ -44,16 +44,25 @@ export default function OTP({
   const apiFetcher = useApiFetcher();
   const router = useRouter();
   const [loading, setLoading] = useState<boolean>(false);
-  const email = decodeURIComponent(params.email);
+  const decodedEmail = (() => {
+    try {
+      return decodeURIComponent(params.email);
+    } catch {
+      return '';
+    }
+  })();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const email = emailRegex.test(decodedEmail) ? decodedEmail : '';
 
   async function onSubmit(values: OTPFormValues) {
     try {
       setLoading(true);
       await new Promise((res) => setTimeout(res, 1000));
-      const response = await apiFetcher.get(
-        `/api/v2/authenticator/tenant/signedin?otp=${values.otp}`
+      const response = await apiFetcher.post(
+        '/api/v2/authenticator/tenant/signedin',
+        { otp: values.otp }
       );
-      if (response.status >= 200 && response.status < 300) {
+      if (response.status === 200 || response.status === 201) {
         return window.location.replace(`${getEnv('BASE_PATH')}/dashboard`);
       }
     } catch (error) {

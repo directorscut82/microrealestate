@@ -68,10 +68,20 @@ export function getT(locale: Locale, messages: LocalizedMessages): TFunction {
         type: plural.type
       }).select(plural.count);
       message = messageObj[pluralKey];
+      if (typeof message !== 'string') {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn(
+            `localized plural form "${pluralKey}" missing for key: ${key}`
+          );
+        }
+        return replaceData(key, data);
+      }
       return replaceData(message, data);
     }
 
-    console.warn(`localized message not found for key: ${key}`);
-    return `### ${key} ###`;
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`localized message not found for key: ${key}`);
+    }
+    return key;
   };
 }

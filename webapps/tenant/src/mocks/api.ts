@@ -109,17 +109,6 @@ export const getAllTenants: {
               : (['transfer', 'credit-card', 'cash'] as PaymentMethod[])
           };
         }).sort((a, b) => b.term - a.term),
-        // loop to build an array of 12 scanned documents
-        documents: Array.from({ length: 5 }, (_, i) => {
-          // build a random document name and description
-          const name = `document-${i + 1}.pdf`;
-          const description = `Document ${i + 1}`;
-          return {
-            url: `${i + 1}`,
-            name,
-            description
-          };
-        }),
         balance: 1000,
         deposit: 900
       }

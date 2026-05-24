@@ -21,10 +21,14 @@ export default function useSession(): {
       try {
         setStatus('loading');
         hasBeenFetched.current = true;
-        const {
-          data: { email }
-        } = await apiFetcher.get('/api/v2/authenticator/tenant/session');
-        currentSession = { email };
+        const { data } = await apiFetcher.get(
+          '/api/v2/authenticator/tenant/session'
+        );
+        if (!data || typeof data.email !== 'string') {
+          currentSession = null;
+        } else {
+          currentSession = { email: data.email };
+        }
       } catch (e) {
         console.error(e);
       } finally {

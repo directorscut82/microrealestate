@@ -1,5 +1,5 @@
 'use client';
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosError, AxiosInstance } from 'axios';
 import getEnv from '../env/client';
 
 const withCredentials = getEnv('CORS_ENABLED') === 'true';
@@ -19,9 +19,14 @@ export default function useApiFetcher() {
   apiFetcher.interceptors.response.use(
     (response) => response,
     (error) => {
-      if (!error.config?.url?.includes('/signedin')) {
-        // Force signin if an api responded 401 or 403
-        if ([401, 403].includes(error.response?.status)) {
+      // Only force-redirect on real auth errors from a real response.
+      if (
+        error instanceof AxiosError &&
+        [401, 403].includes(error.response?.status as number)
+      ) {
+        // The /signedin endpoint represents the in-flight OTP check itself;
+        // redirecting on its 401 would interrupt the user's verification flow.
+        if (!error.config?.url?.includes('/signedin')) {
           window.location.href = `${getEnv('BASE_PATH') || ''}/signin`;
           throw new axios.Cancel('Operation canceled force login');
         }
