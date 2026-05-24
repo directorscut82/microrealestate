@@ -420,6 +420,15 @@ export default function () {
       // we take or whether it errored. The previous code only removed the
       // file inside the s3 branch which leaked uploads when s3 was disabled
       // and on uncaught failures.
+      //
+      // Edge case for local-disk uploads: multer.diskStorage already writes
+      // the file directly into UPLOADS_DIRECTORY (see uploadmiddelware.ts),
+      // so the "temp" path IS the final destination. The earlier code did
+      // a self-copy with fs.copyFileSync(src, src) and then removed it in
+      // the finally block — i.e. it deleted the just-uploaded file. Track
+      // whether the file is already at its destination to skip both the
+      // copy and the cleanup in that case.
+      let isAlreadyAtDestination = false;
       try {
         if (s3.isEnabled(b2Config)) {
           try {
@@ -458,8 +467,12 @@ export default function () {
             ) {
               throw new ServiceError('invalid upload path', 422);
             }
-            fs.mkdirSync(path.dirname(resolvedTarget), { recursive: true });
-            fs.copyFileSync(file.path, resolvedTarget);
+            isAlreadyAtDestination =
+              path.resolve(file.path) === resolvedTarget;
+            if (!isAlreadyAtDestination) {
+              fs.mkdirSync(path.dirname(resolvedTarget), { recursive: true });
+              fs.copyFileSync(file.path, resolvedTarget);
+            }
           }
           return res.status(201).send({
             fileName: req.body.fileName,
@@ -468,7 +481,11 @@ export default function () {
         }
       } finally {
         try {
-          if ((req as any).file?.path) {
+          if (
+            !isAlreadyAtDestination &&
+            (req as any).file?.path &&
+            fs.existsSync((req as any).file.path)
+          ) {
             fs.removeSync((req as any).file.path);
           }
         } catch (err) {

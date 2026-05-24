@@ -12,7 +12,12 @@ export default function taskDiscounts(
     if (Number.isFinite(amount) && amount > 0) {
       rent.discounts.push({
         origin: 'contract',
-        description: 'Remise exceptionnelle',
+        // Locale-neutral fallback. Previously hardcoded 'Remise exceptionnelle'
+        // shipped untranslated French to Greek/English UIs because this string
+        // is persisted into the rent ledger and rendered as-is. A literal
+        // 'Discount' lets the frontend localize via its own catalog while
+        // still being intelligible if it leaks through.
+        description: 'Discount',
         amount
       });
     }
