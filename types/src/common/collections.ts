@@ -359,7 +359,8 @@ export namespace CollectionTypes {
     term: number;
     amount: number;
     description: string;
-    expenseId?: string;
+    expenseId?: string | null;
+    repairId?: string | null;
   };
 
   export type BuildingUnit = {

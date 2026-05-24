@@ -1166,6 +1166,35 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     throw new ServiceError('Building has no units', 422);
   }
 
+  // Validate every referenced expenseId exists on the building before we
+  // mutate any unit. Silently accepting unknown ids leaves orphan charges.
+  if (expensesProvided) {
+    for (const entry of expenseEntries || []) {
+      if (entry?.expenseId) {
+        const exp = (building as any).expenses.id(entry.expenseId);
+        if (!exp) {
+          throw new ServiceError(
+            `Unknown expenseId: ${entry.expenseId}`,
+            422
+          );
+        }
+      }
+    }
+  }
+  if (ownerExpensesProvided) {
+    for (const entry of ownerExpenses || []) {
+      if (entry?.expenseId) {
+        const exp = (building as any).expenses.id(entry.expenseId);
+        if (!exp) {
+          throw new ServiceError(
+            `Unknown expenseId: ${entry.expenseId}`,
+            422
+          );
+        }
+      }
+    }
+  }
+
   // For each unit, remove existing monthly charges for this term, then add new ones
   for (const unit of units) {
     if (!unit.propertyId) continue;
@@ -1579,24 +1608,69 @@ export async function removeContractor(req: Req, res: Res) {
 // Repairs
 // ---------------------------------------------------------------------------
 
+async function _removeRepairCharges(building: any, repair: any): Promise<void> {
+  const repairIdStr = String(repair._id);
+  for (const unit of building.units) {
+    // Prefer scoping by repairId (handles renames). Fall back to legacy
+    // description match for charges created before repairId was introduced.
+    const legacyDescription = `Repair: ${repair.title}`;
+    const toRemove = unit.monthlyCharges.filter(
+      (c: any) =>
+        (c.repairId && String(c.repairId) === repairIdStr) ||
+        (!c.repairId && c.description === legacyDescription)
+    );
+    for (const charge of toRemove) {
+      unit.monthlyCharges.pull(charge._id);
+    }
+  }
+}
+
 async function _distributeRepairCharge(
   building: any,
   repair: any,
   realmId: string
 ): Promise<void> {
+  // Cancelled repairs must not retain monthly charges. Wipe any prior
+  // distribution for this repair and bail out before re-creating.
+  if (repair.status === 'cancelled') {
+    await _removeRepairCharges(building, repair);
+    building.updatedDate = new Date();
+    await building.save();
+
+    const propertyIds = building.units
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    for (const propId of propertyIds) {
+      await _recomputeTenantsForProperty(realmId, propId);
+    }
+    return;
+  }
+
   if (!repair.chargeableTo || repair.chargeableTo === 'owners') return;
   if (!repair.chargeTerm) return;
 
   const cost = repair.actualCost || repair.estimatedCost || 0;
   if (cost <= 0) return;
 
-  const sharePercentage =
-    repair.chargeableTo === 'tenants' ? 100 : repair.tenantSharePercentage || 0;
+  // Respect explicit tenantSharePercentage when provided. Default depends on
+  // chargeableTo: 'tenants' implies 100% to tenants, 'split' implies 0%
+  // unless a percentage was set explicitly.
+  const sharePercentage = (() => {
+    if (repair.chargeableTo === 'owners') return 0;
+    if (
+      typeof repair.tenantSharePercentage === 'number' &&
+      Number.isFinite(repair.tenantSharePercentage)
+    ) {
+      return Math.max(0, Math.min(100, repair.tenantSharePercentage));
+    }
+    return repair.chargeableTo === 'tenants' ? 100 : 0;
+  })();
   if (sharePercentage <= 0) return;
 
   const effectiveAmount = cost * (sharePercentage / 100);
   const allocationMethod = repair.allocationMethod || 'general_thousandths';
   const term = Number(repair.chargeTerm);
+  const repairIdStr = String(repair._id);
 
   const buildingObj = building.toObject ? building.toObject() : building;
 
@@ -1609,20 +1683,26 @@ async function _distributeRepairCharge(
       { amount: effectiveAmount, allocationMethod, name: repair.title } as any
     );
 
-    if (share > 0) {
-      // Remove any existing charge for this repair+term combo
-      const existingIdx = unit.monthlyCharges.findIndex(
-        (c: any) =>
-          c.term === term && c.description === `Repair: ${repair.title}`
-      );
-      if (existingIdx >= 0) {
-        unit.monthlyCharges.pull(unit.monthlyCharges[existingIdx]._id);
-      }
+    // Remove existing charges for THIS repair (regardless of title), so
+    // renaming a repair doesn't double-count via description-based de-dup.
+    const legacyDescription = `Repair: ${repair.title}`;
+    const toRemove = unit.monthlyCharges.filter(
+      (c: any) =>
+        (c.repairId && String(c.repairId) === repairIdStr) ||
+        (!c.repairId &&
+          c.term === term &&
+          c.description === legacyDescription)
+    );
+    for (const charge of toRemove) {
+      unit.monthlyCharges.pull(charge._id);
+    }
 
+    if (share > 0) {
       unit.monthlyCharges.push({
         term,
         amount: Math.round(share * 100) / 100,
-        description: `Repair: ${repair.title}`
+        description: `Repair: ${repair.title}`,
+        repairId: repairIdStr
       });
     }
   }
@@ -1766,16 +1846,9 @@ export async function removeRepair(req: Req, res: Res) {
     throw new ServiceError('Repair does not exist', 404);
   }
 
-  // Clean up monthlyCharges created by _distributeRepairCharge
-  const chargeDescription = `Repair: ${repair.title}`;
-  for (const unit of (building as any).units) {
-    const toRemove = unit.monthlyCharges.filter(
-      (c: any) => c.description === chargeDescription
-    );
-    for (const charge of toRemove) {
-      unit.monthlyCharges.pull(charge._id);
-    }
-  }
+  // Clean up monthlyCharges created by _distributeRepairCharge — scope by
+  // repairId (with legacy description fallback) so renames don't leak.
+  await _removeRepairCharges(building, repair);
 
   (building as any).repairs.pull(repair._id);
   (building as any).updatedDate = new Date();

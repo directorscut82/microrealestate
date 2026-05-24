@@ -325,6 +325,10 @@ export default function routes(): express.Router {
     '/confirm-payment',
     Middlewares.asyncWrapper(billManager.confirmPayment as any)
   );
+  billsRouter.delete(
+    '/:id',
+    Middlewares.asyncWrapper(billManager.remove as any)
+  );
   router.use('/bills', billsRouter);
 
   // Database backup/restore (admin only).
