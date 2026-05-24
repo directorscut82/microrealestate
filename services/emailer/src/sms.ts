@@ -5,6 +5,7 @@ interface SmsConfig {
   url: string;
   username: string;
   password: string;
+  countryCode: string;
 }
 
 async function getConfig(realmId: string): Promise<SmsConfig | null> {
@@ -13,7 +14,21 @@ async function getConfig(realmId: string): Promise<SmsConfig | null> {
   if (!sms?.selected || !sms?.url || !sms?.username || !sms?.password) {
     return null;
   }
-  return { url: sms.url, username: sms.username, password: Crypto.decrypt(sms.password) };
+  // countryCode is optional on the realm config; default to +30 (Greece) to
+  // preserve historical behavior. Stored as e.g. "+30" or "30" — normalize.
+  const rawCountryCode =
+    typeof sms.countryCode === 'string' && sms.countryCode.trim()
+      ? sms.countryCode.trim()
+      : '+30';
+  const countryCode = rawCountryCode.startsWith('+')
+    ? rawCountryCode
+    : `+${rawCountryCode}`;
+  return {
+    url: sms.url,
+    username: sms.username,
+    password: Crypto.decrypt(sms.password),
+    countryCode
+  };
 }
 
 export async function sendSms(
@@ -30,7 +45,7 @@ export async function sendSms(
   // Ensure E.164 format
   let normalized = phoneNumber.replace(/[\s\-()]/g, '');
   if (!normalized.startsWith('+')) {
-    normalized = '+30' + normalized;
+    normalized = config.countryCode + normalized;
   }
 
   try {

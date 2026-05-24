@@ -33,8 +33,17 @@ export async function start() {
 
 export async function exit() {
   const { TEMPORARY_DIRECTORY } = Service.getInstance().envConfig.getValues();
-  fs.rmSync(TEMPORARY_DIRECTORY as string);
-  await settings['pdf engine'].exit();
+  // recursive+force so a non-empty temp dir doesn't crash shutdown.
+  try {
+    fs.rmSync(TEMPORARY_DIRECTORY as string, { recursive: true, force: true });
+  } catch (err) {
+    logger.warn(`failed to remove temp dir ${TEMPORARY_DIRECTORY}`, err);
+  }
+  // The chromium engine exposes `stop()`, not `exit()`. Calling the missing
+  // method threw on shutdown and orphaned the chromium process.
+  if (typeof settings['pdf engine'].stop === 'function') {
+    await settings['pdf engine'].stop();
+  }
 }
 
 export async function generate(documentId: string, params: Record<string, string>): Promise<string> {

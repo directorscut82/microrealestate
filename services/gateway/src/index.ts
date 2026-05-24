@@ -58,12 +58,44 @@ async function Main() {
 function configureCORS(application: Express.Application) {
   const config = Service.getInstance().envConfig.getValues();
   if (config.CORS_ENABLED && (config.DOMAIN_URL || config.APP_DOMAIN)) {
-    let domain = config.APP_DOMAIN;
-    if (config.DOMAIN_URL) {
-      domain = URLUtils.destructUrl(config.DOMAIN_URL).domain;
+    // Build the list of allowed origin domains (with optional port).
+    // APP_DOMAIN may be a comma-separated list (multi-origin NAS deployments,
+    // e.g. "localhost:8080,192.168.0.96:1350,100.121.85.7:1350").
+    const rawDomains: string[] = [];
+    if (config.APP_DOMAIN) {
+      rawDomains.push(
+        ...String(config.APP_DOMAIN)
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean)
+      );
     }
+    if (config.DOMAIN_URL) {
+      rawDomains.push(URLUtils.destructUrl(config.DOMAIN_URL).domain);
+    }
+
+    // Escape regex meta-chars in each domain literal (dots, ports, etc.) and
+    // require an exact match (no leading subdomain capture). Without this,
+    // an origin like `attacker.com.example.com` would slip past
+    // `^https?://(.*\.)?example.com$`.
+    const escapedDomains = rawDomains.map((d) =>
+      d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    );
+
+    const allowedOriginRegexes = escapedDomains.map(
+      (d) => new RegExp(`^https?://${d}$`)
+    );
+
     const corsOptions = {
-      origin: new RegExp(`^https?://(.*\\.)?${domain}$`),
+      origin: (
+        origin: string | undefined,
+        callback: (err: Error | null, allow?: boolean) => void
+      ) => {
+        // Allow same-origin / non-browser callers (no Origin header)
+        if (!origin) return callback(null, true);
+        const allowed = allowedOriginRegexes.some((re) => re.test(origin));
+        return callback(null, allowed);
+      },
       methods: 'GET,POST,PUT,PATCH,DELETE',
       allowedHeaders:
         //',If-Modified-Since,Range, DNT',

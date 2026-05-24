@@ -73,8 +73,15 @@ export async function getAllTenants(
   });
 }
 
+// Mongoose populate result type — `.populate(['realmId', 'leaseId'])` replaces
+// the foreign-key string fields with the full documents at runtime.
+type PopulatedTenant = Omit<CollectionTypes.Tenant, 'realmId' | 'leaseId'> & {
+  realmId: CollectionTypes.Realm;
+  leaseId: CollectionTypes.Lease;
+};
+
 function _toTenantResponse(
-  tenant: CollectionTypes.Tenant,
+  tenant: PopulatedTenant,
   lastTerm: number
 ): TenantAPI.TenantDataType {
   const now = moment.utc();
@@ -85,8 +92,8 @@ function _toTenantResponse(
   const totalAmount = totalPreTaxAmount + totalChargesAmount + totalVatAmount;
   const { remainingIterations, remainingIterationsToPay } =
     _computeRemainingIterations(tenant, lastTerm, totalAmount);
-  const landlord = tenant.realmId as CollectionTypes.Realm;
-  const lease = tenant.leaseId as CollectionTypes.Lease;
+  const landlord = tenant.realmId;
+  const lease = tenant.leaseId;
   return {
     tenant: {
       id: tenant._id,
@@ -140,12 +147,6 @@ function _toTenantResponse(
           description: property.property.description,
           type: property.property.type
         })) || [],
-      documents: [],
-      // tenant.leaseId.documents.map((document) => ({
-      //   name: document.name,
-      //   description: document.description,
-      //   url: document.url,
-      // })),
       invoices: tenant.rents
         ?.filter(({ term }) => term <= lastTerm)
         .sort((r1, r2) => r2.term - r1.term)
@@ -181,11 +182,11 @@ function _toTenantResponse(
 }
 
 function _computeRemainingIterations(
-  tenant: CollectionTypes.Tenant,
+  tenant: PopulatedTenant,
   lastTerm: number,
   rentAmount: number
 ) {
-  const timeRange = (tenant.leaseId as CollectionTypes.Lease).timeRange;
+  const timeRange = tenant.leaseId.timeRange;
   const remainingIterations = Math.ceil(
     moment(tenant.terminationDate || tenant.endDate).diff(
       moment(lastTerm, 'YYYYMMDDHH').startOf(timeRange),
@@ -214,8 +215,10 @@ function _computeBalance(rents: CollectionTypes.PartRent[], lastTerm: number) {
   if (!rents || rents.length === 0) {
     return 0;
   }
-  // find the rent closest to the last term
-  const rent = rents.reduce<CollectionTypes.PartRent | null>((prev, curr) => {
+  // The rents array order from Mongo is not guaranteed; sort ascending by term
+  // before scanning so the "closest to lastTerm" reducer is correct.
+  const sorted = [...rents].sort((a, b) => a.term - b.term);
+  const rent = sorted.reduce<CollectionTypes.PartRent | null>((prev, curr) => {
     if (curr.term <= lastTerm) {
       return curr;
     }
@@ -225,5 +228,5 @@ function _computeBalance(rents: CollectionTypes.PartRent[], lastTerm: number) {
   if (!rent) {
     return 0;
   }
-  return -rent.total.grandTotal + rent.total.payment;
+  return -rent.total.grandTotal + (rent.total.payment || 0);
 }

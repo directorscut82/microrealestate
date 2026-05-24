@@ -217,8 +217,9 @@ function _resolveTemplates(element: any, templateValues: any): any {
   if (element.type === 'template') {
     element.type = 'text';
     element.text = Handlebars.compile(element.attrs.id)(templateValues) || ' ';
-    // TODO check if this doesn't open XSS issues
-    element.text = element.text.replace(/&#x27;/g, "'");
+    // Keep HTML entities escaped — un-escaping &#x27; back to ' is a textbook
+    // way to reintroduce XSS by allowing user-controlled apostrophes through
+    // an attribute boundary in downstream renderers.
     delete element.attrs;
   }
   return element;
@@ -246,7 +247,17 @@ export default function () {
     Middlewares.asyncWrapper(async (req, res) => {
       try {
         logger.debug(`generate pdf file for ${JSON.stringify(req.params)}`);
-        const pdfFile = await pdf.generate(req.params.document, req.params);
+        const realm = (req as any).realm;
+        if (!realm?._id) {
+          throw new ServiceError('organization required', 404);
+        }
+        // Pass the caller's realmId into the data picker so the underlying
+        // Tenant.findOne is realm-scoped — without this, anyone with a valid
+        // session in any org could fetch any tenant's PDF by id.
+        const pdfFile = await pdf.generate(req.params.document, {
+          ...req.params,
+          realmId: String(realm._id)
+        });
         return res.download(pdfFile);
       } catch (error) {
         throw new ServiceError(error as Error, 404);
@@ -300,19 +311,44 @@ export default function () {
           throw new ServiceError('missing fields', 422);
         }
 
-        if ((documentFound as any).url.indexOf('..') !== -1) {
-          logger.error('document url invalid containing ".."');
-          throw new ServiceError('missing fields', 422);
+        const url: string = (documentFound as any).url;
+
+        // Robust path traversal check: resolve the absolute path and confirm
+        // it stays inside UPLOADS_DIRECTORY. The previous `indexOf('..')`
+        // string match missed URL-encoded variants like `%2e%2e` and
+        // mixed-separator attempts. `path.resolve` decodes `..` segments
+        // so any escape attempt resolves outside the uploads root.
+        const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
+        const filePath = path.resolve(uploadsRoot, url);
+        if (
+          filePath !== uploadsRoot &&
+          !filePath.startsWith(uploadsRoot + path.sep)
+        ) {
+          logger.error(`document url ${url} escapes uploads root`);
+          throw new ServiceError('forbidden', 403);
         }
 
+        // figure out mime + filename for safe download response
+        const mimeType =
+          (documentFound as any).mimeType || 'application/octet-stream';
+        const safeName = path
+          .basename(url)
+          .replace(/[\r\n"]/g, '')
+          .replace(/[^A-Za-z0-9._-]/g, '_');
+
         // first try to download from file system
-        const filePath = path.join(UPLOADS_DIRECTORY as string, (documentFound as any).url);
         if (fs.existsSync(filePath)) {
           try {
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader(
+              'Content-Disposition',
+              `attachment; filename="${safeName}"`
+            );
+            res.setHeader('X-Content-Type-Options', 'nosniff');
             return fs.createReadStream(filePath).pipe(res);
           } catch (error) {
             logger.error(
-              `cannot download file ${(documentFound as any).url} from file system`,
+              `cannot download file ${url} from file system`,
               error
             );
             throw new ServiceError('cannot download file', 404);
@@ -320,16 +356,19 @@ export default function () {
         }
 
         // otherwise download from s3
-        if (s3.isEnabled((req as any).realm.thirdParties.b2)) {
+        if (s3.isEnabled((req as any).realm?.thirdParties?.b2)) {
           try {
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader(
+              'Content-Disposition',
+              `attachment; filename="${safeName}"`
+            );
+            res.setHeader('X-Content-Type-Options', 'nosniff');
             return s3
-              .downloadFile((req as any).realm.thirdParties.b2, (documentFound as any).url)
+              .downloadFile((req as any).realm.thirdParties.b2, url)
               .pipe(res);
           } catch (error) {
-            logger.error(
-              `cannot download file ${(documentFound as any).url} from s3`,
-              error
-            );
+            logger.error(`cannot download file ${url} from s3`, error);
             throw new ServiceError('cannot download file', 404);
           }
         }
@@ -345,28 +384,39 @@ export default function () {
     uploadMiddleware(),
     Middlewares.asyncWrapper(async (req, res) => {
       const key = [req.body.s3Dir, req.body.fileName].join('/');
-      if (s3.isEnabled((req as any).realm.thirdParties.b2)) {
-        try {
-          const data = await s3.uploadFile((req as any).realm.thirdParties.b2, {
-            file: (req as any).file!,
-            fileName: req.body.fileName,
-            url: key
-          });
-          return res.status(201).send(data);
-        } catch (error) {
-          throw new ServiceError(error as Error, 500);
-        } finally {
+      // Optional-chain so a realm without thirdParties (or without b2) does
+      // not crash the route — previously this threw on `.b2` of undefined.
+      const b2Config = (req as any).realm?.thirdParties?.b2;
+      // Always clean up the temp upload, regardless of which storage path
+      // we take or whether it errored. The previous code only removed the
+      // file inside the s3 branch which leaked uploads when s3 was disabled
+      // and on uncaught failures.
+      try {
+        if (s3.isEnabled(b2Config)) {
           try {
-            fs.removeSync((req as any).file!.path);
-          } catch (err) {
-            // catch error and do nothing
+            const data = await s3.uploadFile(b2Config, {
+              file: (req as any).file!,
+              fileName: req.body.fileName,
+              url: key
+            });
+            return res.status(201).send(data);
+          } catch (error) {
+            throw new ServiceError(error as Error, 500);
           }
+        } else {
+          return res.status(201).send({
+            fileName: req.body.fileName,
+            key
+          });
         }
-      } else {
-        return res.status(201).send({
-          fileName: req.body.fileName,
-          key
-        });
+      } finally {
+        try {
+          if ((req as any).file?.path) {
+            fs.removeSync((req as any).file.path);
+          }
+        } catch (err) {
+          // best-effort cleanup
+        }
       }
     })
   );
@@ -392,6 +442,13 @@ export default function () {
         if (!template) {
           throw new ServiceError('template not found', 404);
         }
+      }
+
+      // Caller must give us either a literal `type` or a `templateId` we can
+      // use to pull `type` from. Without this the next line dereferences
+      // `template.type` on `undefined` and throws an opaque 500.
+      if (!dataSet.type && !template) {
+        throw new ServiceError('type or templateId required', 422);
       }
 
       const documentToCreate: any = {
@@ -445,23 +502,37 @@ export default function () {
         throw new ServiceError('missing fields', 422);
       }
 
-      const doc = req.body || {};
+      const incoming = req.body || {};
 
-      if (!['text'].includes(doc.type)) {
+      // Trust the STORED type, not the incoming payload — otherwise a caller
+      // can claim type='text' and slip through this guard while updating a
+      // 'file' document. Fetch the doc first, scoped to the caller's realm.
+      const stored = await Collections.Document.findOne({
+        _id: incoming._id,
+        realmId: organizationId
+      });
+      if (!stored) {
+        throw new ServiceError('document not found', 404);
+      }
+      if ((stored as any).type !== 'text') {
         throw new ServiceError('document cannot be modified', 405);
+      }
+
+      // Allowlist editable fields explicitly. Spreading the entire body let
+      // a client overwrite realmId, type, tenantId, etc.
+      const update: Record<string, unknown> = {};
+      for (const field of ['name', 'description', 'contents', 'html'] as const) {
+        if (Object.prototype.hasOwnProperty.call(incoming, field)) {
+          update[field] = incoming[field];
+        }
       }
 
       const updatedDocument = await Collections.Document.findOneAndUpdate(
         {
-          _id: doc._id,
+          _id: incoming._id,
           realmId: organizationId
         },
-        {
-          $set: {
-            ...doc,
-            realmId: organizationId
-          }
-        },
+        { $set: update },
         { new: true }
       );
 
