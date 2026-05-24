@@ -26,7 +26,15 @@ type AnyRecord = Record<string, any>;
 const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 12);
 
 function _stringToDate(dateString?: string): Date | undefined {
-  return dateString ? moment.utc(dateString, 'DD/MM/YYYY').toDate() : undefined;
+  if (!dateString) return undefined;
+  // Strict parse — without this, `Invalid Date` flows down through
+  // _formatTenant into Mongoose, where the schema cast errors as a generic
+  // 500. Surface a clean 422 to the client instead.
+  const m = moment.utc(dateString, 'DD/MM/YYYY', true);
+  if (!m.isValid()) {
+    throw new ServiceError(`Invalid date: ${dateString}`, 422);
+  }
+  return m.toDate();
 }
 
 function _formatTenant(tenant: AnyRecord): AnyRecord {
@@ -339,7 +347,14 @@ export async function add(req: Req, res: Res) {
   }
   validateFiniteNumber(occupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
   validateFiniteNumber(occupant.discount, 'discount', { min: 0, max: 10000000 });
-  if (occupant.beginDate && occupant.endDate && moment(occupant.endDate).isBefore(moment(occupant.beginDate))) {
+  // Use isSameOrBefore so equal begin/end dates surface here as 422 rather
+  // than later inside Contract.create as a 409 (the contract layer treats
+  // equal dates as a duration error).
+  if (
+    occupant.beginDate &&
+    occupant.endDate &&
+    moment(occupant.endDate).isSameOrBefore(moment(occupant.beginDate))
+  ) {
     throw new ServiceError('End date must be after begin date', 422);
   }
 
@@ -374,6 +389,9 @@ export async function add(req: Req, res: Res) {
         occupant.properties
       );
 
+      // Schema default ('months') applies at persistence time. Fall back
+      // here too because Contract.create requires frequency for the rent
+      // term math regardless of what Mongoose will set on save.
       const contract = Contract.create({
         begin: occupant.beginDate,
         end: occupant.endDate,
@@ -478,7 +496,13 @@ export async function update(req: Req, res: Res) {
   }
   validateFiniteNumber(newOccupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
   validateFiniteNumber(newOccupant.discount, 'discount', { min: 0, max: 10000000 });
-  if (newOccupant.beginDate && newOccupant.endDate && moment(newOccupant.endDate).isBefore(moment(newOccupant.beginDate))) {
+  // Use isSameOrBefore so equal begin/end dates surface here as 422 rather
+  // than later inside Contract.update/create as a 409.
+  if (
+    newOccupant.beginDate &&
+    newOccupant.endDate &&
+    moment(newOccupant.endDate).isSameOrBefore(moment(newOccupant.beginDate))
+  ) {
     throw new ServiceError('End date must be after begin date', 422);
   }
 
