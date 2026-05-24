@@ -5,13 +5,15 @@ import {
   Service,
   ServiceError
 } from '@microrealestate/common';
+import { authRateLimit } from './index.js';
 import axios from 'axios';
 import { customAlphabet } from 'nanoid';
 import express, { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 
-const nanoid = customAlphabet('0123456789ABCDEFGHJKLMNPQRSTUVWXYZ', 8);
+// 6-digit OTP — landlord/tenant UIs render six input boxes.
+const nanoid = customAlphabet('0123456789ABCDEFGHJKLMNPQRSTUVWXYZ', 6);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -26,9 +28,13 @@ export default function (): Router {
 
   tenantRouter.post(
     '/signin',
+    authRateLimit,
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
-      let { email } = req.body;
-      email = email?.trim().toLowerCase();
+      const rawEmail = req.body?.email;
+      if (typeof rawEmail !== 'string') {
+        throw new ServiceError('email must be a string', 422);
+      }
+      const email = rawEmail.trim().toLowerCase();
       if (!email) {
         logger.error('missing email field');
         throw new ServiceError('missing fields', 422);
@@ -44,6 +50,8 @@ export default function (): Router {
       });
       if (!tenants.length) {
         logger.info(`login failed for ${email} tenant not found`);
+        // Constant-time-ish behavior: still return 204 immediately so the
+        // unknown-tenant branch is indistinguishable from the known one.
         return res.sendStatus(204);
       }
 
@@ -59,21 +67,30 @@ export default function (): Router {
 
       logger.debug(`OTP created for email ${email} on domain ${req.hostname}`);
 
-      await axios.post(
-        `${EMAILER_URL}/otp`,
-        {
-          templateName: 'otp',
-          recordId: email,
-          params: {
-            otp
+      // Fire-and-forget: do not await the emailer so the known-tenant
+      // branch returns in roughly the same time as the unknown-tenant
+      // branch (no email-delivery timing leak).
+      axios
+        .post(
+          `${EMAILER_URL}/otp`,
+          {
+            templateName: 'otp',
+            recordId: email,
+            params: {
+              otp
+            }
+          },
+          {
+            headers: {
+              'Accept-Language': (req as any).rawLocale.code
+            }
           }
-        },
-        {
-          headers: {
-            'Accept-Language': (req as any).rawLocale.code
-          }
-        }
-      );
+        )
+        .catch((err: any) => {
+          logger.error(
+            `failed to dispatch OTP email for ${email}: ${err?.message || err}`
+          );
+        });
 
       res.sendStatus(204);
     })
@@ -97,18 +114,19 @@ export default function (): Router {
   tenantRouter.get(
     '/signedin',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
-      const { otp } = req.query;
-      if (!otp) {
+      const rawOtp = req.query.otp;
+      if (typeof rawOtp !== 'string' || !rawOtp) {
         throw new ServiceError('invalid otp', 401);
       }
+      const otp = rawOtp;
 
-      const rawPayload = await Service.getInstance().redisClient!.get(otp as string);
+      const rawPayload = await Service.getInstance().redisClient!.get(otp);
       if (!rawPayload) {
         throw new ServiceError('invalid or expired OTP',
           401
         );
       }
-      await Service.getInstance().redisClient!.del(otp as string);
+      await Service.getInstance().redisClient!.del(otp);
 
       const payload = rawPayload.split(';').reduce<Record<string, string>>((acc, rawValue) => {
         const [key, value] = rawValue.split('=');
@@ -121,7 +139,8 @@ export default function (): Router {
       const now = new Date().getTime();
       const expiresAt = Number(payload.expiresAt) || 0;
       if (now > expiresAt) {
-        logger.debug(`otp ${otp} has expired`);
+        // Don't log the OTP value itself.
+        logger.debug('otp expired');
         throw new ServiceError('invalid otp', 401);
       }
 

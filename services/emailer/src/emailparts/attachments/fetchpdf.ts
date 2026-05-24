@@ -16,7 +16,7 @@ export default function (
   const uri = `${PDFGENERATOR_URL}/documents/${templateName}/${recordId}/${params.term}`;
   const fileDir = path.join(TEMPORARY_DIRECTORY as string, templateName);
   if (!fs.existsSync(fileDir)) {
-    fs.mkdirSync(fileDir);
+    fs.mkdirSync(fileDir, { recursive: true });
   }
   const filePath = path.join(fileDir, filename);
   const wStream = fs.createWriteStream(filePath);

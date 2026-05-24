@@ -138,7 +138,10 @@ export async function send(
     throw new ServiceError(`missing content for ${templateName}`, 422);
   }
 
-  return await Promise.all(
+  // Use allSettled so a single bad recipient doesn't sink the whole batch.
+  // Each entry surfaces per-recipient success or failure, with the same
+  // shape callers used to receive on success.
+  const settled = await Promise.allSettled(
     recipientsList.map(async (recipients) => {
       const email = {
         ...recipients,
@@ -148,11 +151,11 @@ export async function send(
       logger.debug(`recipients:
 ${email.to}
 subject:
-${email.subject} 
+${email.subject}
 text:
 ${email.text}
 html:
-${email.html} 
+${email.html}
 attachments:
 ${email.attachment
   .map((a: any) => `${a.filename} size: ${a.data?.length || 0}`)
@@ -161,7 +164,9 @@ ${email.attachment
       let status: any;
       if (ALLOW_SENDING_EMAILS) {
         status = await EmailEngine.sendEmail(email, data);
-        new Collections.Email({
+        // Persist the audit trail before returning so callers see a
+        // consistent state on success.
+        await new Collections.Email({
           templateName,
           recordId,
           params,
@@ -189,4 +194,24 @@ ${email.attachment
       };
     })
   );
+
+  return settled.map((outcome, index) => {
+    const recipientEmail = recipientsList[index]?.to;
+    if (outcome.status === 'fulfilled') {
+      return outcome.value;
+    }
+    const reason: any = outcome.reason;
+    logger.error(
+      `failed to send ${templateName} to ${recipientEmail}: ${reason?.message || reason}`
+    );
+    return {
+      ...result,
+      email: recipientEmail,
+      status: {
+        id: null,
+        to: recipientEmail,
+        error: reason?.message || String(reason)
+      }
+    };
+  });
 }

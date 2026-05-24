@@ -3,12 +3,14 @@ import landlordRouter from './landlord.js';
 import locale from 'locale';
 import tenantRouter from './tenant.js';
 
-// In-memory rate limiter for auth endpoints
+// In-memory rate limiter for credential-handling auth endpoints only.
+// Applied per-route (signin/signup/forgotpassword) so an attacker burning
+// IPs on /signin can't lock active users out of /refreshtoken or /session.
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 60_000; // 1 minute
 const RATE_MAX_ATTEMPTS = 10; // 10 attempts per minute per IP
 
-function authRateLimit(req: Request, res: Response, next: NextFunction) {
+export function authRateLimit(req: Request, res: Response, next: NextFunction) {
   const key = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
   const entry = rateLimitMap.get(key);
@@ -37,7 +39,6 @@ setInterval(() => {
 export default function (): Router {
   const router = express.Router();
   router.use(locale(['fr-FR', 'en-US', 'pt-BR', 'de-DE', 'es-CO', 'el'], 'en-US'));
-  router.use(authRateLimit);
   router.use('/landlord', landlordRouter());
   router.use('/tenant', tenantRouter());
   return router;

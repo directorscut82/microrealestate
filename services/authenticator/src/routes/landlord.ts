@@ -5,6 +5,7 @@ import {
   Service,
   ServiceError
 } from '@microrealestate/common';
+import { authRateLimit } from './index.js';
 import axios from 'axios';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -35,10 +36,41 @@ const _generateTokens = async (dbAccount: Record<string, any>): Promise<{ refres
   return { refreshToken, accessToken };
 };
 
+// Atomic GET+DEL of the refresh token to prevent the classic
+//   GET (valid) -> verify -> DEL  race
+// where two concurrent refresh requests would both see the token as valid,
+// both delete it, and both mint new tokens (allowing replay).
+// Returns the token's payload on success, null otherwise.
+const _consumeRefreshToken = async (oldRefreshToken: string): Promise<string | null> => {
+  const redis = Service.getInstance().redisClient!;
+  const client: any = (redis as any).client || redis;
+
+  // ioredis exposes getdel; node-redis v4 exposes GETDEL via the modern API.
+  // Fall back to a Lua script otherwise.
+  if (typeof client.getdel === 'function') {
+    return await client.getdel(oldRefreshToken);
+  }
+  if (typeof client.GETDEL === 'function') {
+    return await client.GETDEL(oldRefreshToken);
+  }
+  if (typeof client.eval === 'function') {
+    const script =
+      "local v = redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]); end; return v";
+    return (await client.eval(script, 1, oldRefreshToken)) as string | null;
+  }
+  // Last-resort fallback (non-atomic) — should never hit in practice.
+  const value = await client.get(oldRefreshToken);
+  if (value) {
+    await client.del(oldRefreshToken);
+  }
+  return value;
+};
+
 const _refreshTokens = async (oldRefreshToken: string): Promise<{ refreshToken?: string; accessToken?: string }> => {
   const { REFRESH_TOKEN_SECRET } = Service.getInstance().envConfig.getValues();
-  const oldAccessToken =
-    await Service.getInstance().redisClient!.get(oldRefreshToken);
+
+  // Atomic consume: only the first concurrent request wins.
+  const oldAccessToken = await _consumeRefreshToken(oldRefreshToken);
   if (!oldAccessToken) {
     logger.error('refresh token not found in database');
     return {};
@@ -51,9 +83,8 @@ const _refreshTokens = async (oldRefreshToken: string): Promise<{ refreshToken?:
       account = payload.account;
     }
   } catch (exc) {
-    logger.error(exc as string);
+    logger.error('refresh token verification failed', { error: (exc as Error)?.message });
   }
-  await _clearTokens(oldRefreshToken);
 
   if (!account) {
     return {};
@@ -77,22 +108,22 @@ const _applicationSignIn = Middlewares.asyncWrapper(async (req: Request, res: Re
     throw new ServiceError('missing fields', 422);
   }
 
-  let organizationId: string | undefined;
-  let keyId: string | undefined;
   let payload: jwt.JwtPayload;
   try {
     payload = jwt.verify(clientSecret, APPCREDZ_TOKEN_SECRET!, { algorithms: ['HS256'] }) as jwt.JwtPayload;
   } catch (exc) {
     if (exc instanceof jwt.TokenExpiredError) {
-      logger.info(
-        `login failed for application ${clientId}@${organizationId}: expired token`
-      );
+      // organizationId is unknown here — the token expired before we could
+      // parse it. Log only what we actually have.
+      logger.info(`login failed for application ${clientId}: expired token`);
       throw new ServiceError('expired clientId', 401);
     } else {
       throw new ServiceError('invalid credentials', 401);
     }
   }
 
+  let organizationId: string | undefined;
+  let keyId: string | undefined;
   if (payload?.organizationId && payload?.jti) {
     organizationId = payload.organizationId;
     keyId = payload.jti;
@@ -152,6 +183,9 @@ const _userSignIn = Middlewares.asyncWrapper(async (req: Request, res: Response)
   const { TOKEN_COOKIE_ATTRIBUTES } =
     Service.getInstance().envConfig.getValues() as any;
   const { email: rawEmail, password } = req.body;
+  if (typeof rawEmail !== 'string' || typeof password !== 'string') {
+    throw new ServiceError('email and password must be strings', 422);
+  }
   if ([rawEmail, password].some((el) => !el || !String(el).trim())) {
     logger.error('login failed some fields are missing');
     throw new ServiceError('missing fields', 422);
@@ -204,6 +238,7 @@ export default function (): Router {
   if (SIGNUP) {
     landlordRouter.post(
       '/signup',
+      authRateLimit,
       Middlewares.asyncWrapper(async (req: Request, res: Response) => {
         const { firstname, lastname, email, password } = req.body;
         if (
@@ -242,6 +277,7 @@ export default function (): Router {
 
   landlordRouter.post(
     '/signin',
+    authRateLimit,
     Middlewares.asyncWrapper(async (req: Request, res: Response, next) => {
       if (!req.body.email && !req.body.clientId) {
         throw new ServiceError('missing fields', 422);
@@ -334,8 +370,12 @@ export default function (): Router {
 
   landlordRouter.post(
     '/forgotpassword',
+    authRateLimit,
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const { email } = req.body;
+      if (typeof email !== 'string') {
+        throw new ServiceError('email must be a string', 422);
+      }
       if (!email) {
         logger.error('missing email field');
         throw new ServiceError('missing fields', 422);
