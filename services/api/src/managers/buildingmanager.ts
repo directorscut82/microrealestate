@@ -1267,6 +1267,15 @@ export async function addExpense(req: Req, res: Res) {
     delete req.body.recurring;
   }
 
+  // A non-recurring expense MUST be anchored to a specific term — otherwise
+  // it has no meaning in the rent pipeline (it would never fire).
+  if (req.body.isRecurring === false && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for non-recurring expenses',
+      422
+    );
+  }
+
   if (!req.body.name?.trim()) {
     throw new ServiceError('Expense name is required', 422);
   }
@@ -1338,6 +1347,16 @@ export async function updateExpense(req: Req, res: Res) {
   if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
     req.body.isRecurring = req.body.recurring;
     delete req.body.recurring;
+  }
+
+  // A non-recurring expense MUST be anchored to a specific term — same
+  // invariant as addExpense; updates that flip recurring → false without a
+  // startTerm would silently produce dead expenses.
+  if (req.body.isRecurring === false && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for non-recurring expenses',
+      422
+    );
   }
 
   if (req.body.type) {
