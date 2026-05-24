@@ -7,6 +7,14 @@ import { Toaster } from '../components/ui/sonner';
 import { useContext } from 'react';
 import { useMediaQuery } from 'usehooks-ts';
 
+/*
+ * Layout — DESIGN.md app shell.
+ *
+ * Two-region layout: cream nav rail (240px on desktop, sheet on tablet/mobile)
+ * + bone content area. The top bar floats above with a hairline rule under it,
+ * not a shadow (the Flat-By-Default rule). The OrganizationMenu sits at the
+ * top-right; the hamburger appears below the xl breakpoint.
+ */
 export default function Layout({ hideMenu, children }) {
   const store = useContext(StoreContext);
   const isXLorGreater = useMediaQuery('(min-width: 1280px)', {
@@ -17,17 +25,17 @@ export default function Layout({ hideMenu, children }) {
     <>
       {hideMenu ? (
         <>
-          <div className="sticky top-0 z-50 shadow">
+          <div className="sticky top-0 z-50 bg-bone border-b border-stone-line">
             <EnvironmentBar />
           </div>
           <div className={cn('flex-grow')}>{children}</div>
         </>
       ) : (
         <>
-          <div className="sticky top-0 z-50 shadow">
+          <div className="sticky top-0 z-50 bg-bone border-b border-stone-line">
             <EnvironmentBar />
             {store.user?.signedIn ? (
-              <div className="flex items-center xl:justify-end bg-card w-full gap-2 py-1">
+              <div className="flex items-center xl:justify-end w-full gap-2 px-4 py-2">
                 {!isXLorGreater ? (
                   <HamburgerMenu className="flex flex-grow items-center" />
                 ) : null}
@@ -39,7 +47,7 @@ export default function Layout({ hideMenu, children }) {
             {store.user?.signedIn && isXLorGreater ? <SideMenu /> : null}
             <div
               className={cn(
-                'flex-grow',
+                'flex-grow min-h-screen',
                 store.user?.signedIn ? 'xl:ml-60' : ''
               )}
             >
@@ -49,22 +57,7 @@ export default function Layout({ hideMenu, children }) {
         </>
       )}
 
-      <Toaster
-        position="bottom-center"
-        closeButton
-        toastOptions={{
-          unstyled: true,
-          classNames: {
-            error:
-              'flex items-center gap-2 p-4 rounded-lg shadow-lg bg-destructive text-destructive-foreground',
-            success:
-              'flex items-center gap-2 p-4 rounded-lg shadow-lg bg-success text-success-foreground',
-            warning:
-              'flex items-center gap-2 p-4 rounded-lg shadow-lg bg-warning text-warning-foreground',
-            info: 'flex items-center gap-2 p-4 rounded-lg shadow-lg bg-info text-info-foreground'
-          }
-        }}
-      />
+      <Toaster position="bottom-center" closeButton />
     </>
   );
 }

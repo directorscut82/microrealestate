@@ -106,14 +106,12 @@ function Properties() {
         hasMore={hasNextPage}
         isLoadingMore={isFetchingNextPage}
         renderActions={() => (
-          <Button
-            variant="secondary"
-            className="w-full gap-2"
-            onClick={handleAction}
-          >
-            <LuPlusCircle className="size-4" />
-            {t('Add a property')}
-          </Button>
+          <div className="flex justify-end">
+            <Button onClick={handleAction} size="sm" className="gap-2">
+              <LuPlusCircle className="size-4" />
+              {t('Add a property')}
+            </Button>
+          </div>
         )}
         renderList={PropertyList}
       />

@@ -1,13 +1,18 @@
 import React, { useContext } from 'react';
-import { Card } from '../components/ui/card';
+import { Card, CardContent } from '../components/ui/card';
 import Landlord from '../components/organization/LandlordForm';
 import { StoreContext } from '../store';
-
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
-import Welcome from '../components/Welcome';
 import { withAuthentication } from '../components/Authentication';
 
+/*
+ * FirstAccess — DESIGN.md onboarding page.
+ *
+ * Centered form on cream body. Three layers of hierarchy: a quiet greeting
+ * (label-sized, ink-muted), a real page title (headline weight), and the
+ * organization form sitting in a single bone card directly below.
+ */
 function FirstAccess() {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
@@ -20,17 +25,24 @@ function FirstAccess() {
 
   return (
     <div
-      className="mt-10 mx-4 text-center sm:text-left sm:container sm:w-[36rem]"
+      className="mx-auto w-full max-w-xl px-6 pt-12 pb-16"
       data-cy="firstaccessPage"
     >
-      <div className="py-5">
-        <Welcome className="text-center sm:text-left" />
-      </div>
-      <div className="text-lg mb-4">
-        {t('One more step, tell us who will rent the properties')}
-      </div>
-      <Card className="p-6">
-        <Landlord firstAccess />
+      <header className="mb-8 space-y-2">
+        <div className="text-label text-ink-muted uppercase tracking-wide">
+          {t('Welcome {{firstName}} {{lastName}}!', {
+            firstName: store.user.firstName,
+            lastName: store.user.lastName
+          })}
+        </div>
+        <h1 className="text-headline font-medium text-ink tracking-tight">
+          {t('One more step, tell us who will rent the properties')}
+        </h1>
+      </header>
+      <Card>
+        <CardContent className="pt-6">
+          <Landlord firstAccess />
+        </CardContent>
       </Card>
     </div>
   );

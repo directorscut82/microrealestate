@@ -3,28 +3,14 @@ import PropertyListItem from './PropertyListItem';
 import { useMemo } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
-const ACCENT_COLORS = [
-  'border-l-blue-500',
-  'border-l-emerald-500',
-  'border-l-amber-500',
-  'border-l-violet-500',
-  'border-l-rose-500',
-  'border-l-cyan-500',
-  'border-l-orange-500',
-  'border-l-indigo-500'
-];
-
-const BG_COLORS = [
-  'bg-blue-50/50',
-  'bg-emerald-50/50',
-  'bg-amber-50/50',
-  'bg-violet-50/50',
-  'bg-rose-50/50',
-  'bg-cyan-50/50',
-  'bg-orange-50/50',
-  'bg-indigo-50/50'
-];
-
+/*
+ * PropertyList — DESIGN.md grouped list.
+ *
+ * Buildings group as labeled sections (a small UPPERCASE label, hairline
+ * separator, then a grid of property cards). NO colored side-stripes, NO
+ * pastel-tinted backgrounds. NO nested cards. The label IS the grouping
+ * affordance.
+ */
 export default function PropertyList({ data }) {
   const { t } = useTranslation('common');
 
@@ -35,7 +21,10 @@ export default function PropertyList({ data }) {
       if (property.buildingId) {
         if (!map.has(property.buildingId)) {
           map.set(property.buildingId, {
-            buildingName: property.buildingName || property.address?.street1 || t('Building'),
+            buildingName:
+              property.buildingName ||
+              property.address?.street1 ||
+              t('Building'),
             properties: []
           });
         }
@@ -52,40 +41,44 @@ export default function PropertyList({ data }) {
   }
 
   return (
-    <div className="space-y-8">
-      {grouped.buildings.map(([buildingId, group], idx) => {
-        const accent = ACCENT_COLORS[idx % ACCENT_COLORS.length];
-        const bg = BG_COLORS[idx % BG_COLORS.length];
-        return (
-          <div key={buildingId} className={`rounded-lg p-4 ${bg}`}>
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
+    <div className="space-y-10">
+      {grouped.buildings.map(([buildingId, group]) => (
+        <section key={buildingId}>
+          <header className="flex items-baseline justify-between gap-3 mb-3 pb-2 border-b border-stone-line">
+            <h3 className="text-label font-medium text-ink-muted uppercase tracking-wide">
               {group.buildingName}
             </h3>
-            <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-              {group.properties.map((property) => (
-                <PropertyListItem
-                  key={property._id}
-                  property={property}
-                  accent={accent}
-                />
-              ))}
-            </div>
+            <span className="text-label text-ink-muted">
+              {t('{{count}} properties', { count: group.properties.length })}
+            </span>
+          </header>
+          <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+            {group.properties.map((property) => (
+              <PropertyListItem key={property._id} property={property} />
+            ))}
           </div>
-        );
-      })}
+        </section>
+      ))}
       {grouped.ungrouped.length > 0 && (
-        <div>
+        <section>
           {grouped.buildings.length > 0 && (
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
-              {t('Other')}
-            </h3>
+            <header className="flex items-baseline justify-between gap-3 mb-3 pb-2 border-b border-stone-line">
+              <h3 className="text-label font-medium text-ink-muted uppercase tracking-wide">
+                {t('Other')}
+              </h3>
+              <span className="text-label text-ink-muted">
+                {t('{{count}} properties', {
+                  count: grouped.ungrouped.length
+                })}
+              </span>
+            </header>
           )}
-          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             {grouped.ungrouped.map((property) => (
               <PropertyListItem key={property._id} property={property} />
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

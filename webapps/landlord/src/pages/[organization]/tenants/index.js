@@ -142,37 +142,37 @@ function Tenants() {
         hasMore={hasNextPage}
         isLoadingMore={isFetchingNextPage}
         renderActions={() => (
-          <div className="flex flex-col gap-2 w-full">
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                className="flex-1 gap-2"
-                onClick={onNewTenant}
-              >
-                <LuPlusCircle className="size-4" />
-                {t('Add a tenant')}
-              </Button>
-              <Button
-                variant="secondary"
-                className="flex-1 gap-2"
-                onClick={onImportTenant}
-              >
-                <LuFileUp className="size-4" />
-                {t('Import PDF')}
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="showArchived"
-                checked={showArchived}
-                onCheckedChange={setShowArchived}
-                data-cy="showArchivedToggle"
-              />
-              <Label htmlFor="showArchived" className="text-sm text-muted-foreground">
-                <LuArchive className="inline size-3 mr-1" />
-                {t('Show archived')}
-              </Label>
-            </div>
+          <div className="flex items-center gap-2 md:justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onImportTenant}
+              className="gap-2"
+            >
+              <LuFileUp className="size-4" />
+              {t('Import PDF')}
+            </Button>
+            <Button onClick={onNewTenant} size="sm" className="gap-2">
+              <LuPlusCircle className="size-4" />
+              {t('Add a tenant')}
+            </Button>
+          </div>
+        )}
+        renderSubFilters={() => (
+          <div className="flex items-center gap-2">
+            <Switch
+              id="showArchived"
+              checked={showArchived}
+              onCheckedChange={setShowArchived}
+              data-cy="showArchivedToggle"
+            />
+            <Label
+              htmlFor="showArchived"
+              className="text-label text-ink-muted inline-flex items-center gap-1.5"
+            >
+              <LuArchive className="size-3.5" />
+              {t('Show archived')}
+            </Label>
           </div>
         )}
         renderList={({ data }) => <TenantList tenants={data} />}

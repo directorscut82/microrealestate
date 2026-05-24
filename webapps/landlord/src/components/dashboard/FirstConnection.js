@@ -59,10 +59,10 @@ export default function FirstConnection({
   ]);
 
   return (
-    <div>
-      <div className="mb-8 text-xl">
+    <div className="max-w-2xl">
+      <h2 className="mb-6 text-headline font-medium text-ink tracking-tight">
         {t('Follow these steps to start managing your properties')}
-      </div>
+      </h2>
       <Stepper activeStep={activeStep}>
         {steps.map(
           ({ key, stepLabel, buttonLabel, onClick, dataCy, isDone }) => {
@@ -71,13 +71,12 @@ export default function FirstConnection({
                 key={key}
                 stepLabel={stepLabel}
                 isDone={isDone}
-                className="p-4"
+                className="pt-3"
               >
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={onClick}
-                  className="w-52"
                   data-cy={dataCy}
                 >
                   {buttonLabel}
