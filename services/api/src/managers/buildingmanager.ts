@@ -136,6 +136,7 @@ async function _recomputeTenantsForProperty(
       .map((p: any) => p.propertyId)
       .filter(Boolean);
     const properties = await Collections.Property.find({
+      realmId,
       _id: { $in: propertyIds }
     }).lean();
     const propMap = properties.reduce((acc: any, p: any) => {
@@ -321,6 +322,30 @@ export async function add(req: Req, res: Res) {
 export async function update(req: Req, res: Res) {
   const realm = req.realm;
 
+  // Mirror validations from add()
+  if (req.body.name !== undefined) {
+    if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
+      throw new ServiceError('Building name is missing', 422);
+    }
+  }
+  if (req.body.atakPrefix !== undefined) {
+    if (typeof req.body.atakPrefix !== 'string' || !req.body.atakPrefix.trim()) {
+      throw new ServiceError('ATAK prefix is missing', 422);
+    }
+  }
+  if (req.body.yearBuilt !== undefined) {
+    validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
+      min: 1800,
+      max: 2099
+    });
+  }
+  if (req.body.totalFloors !== undefined) {
+    validateFiniteNumber(req.body.totalFloors, 'totalFloors', {
+      min: 1,
+      max: 200
+    });
+  }
+
   if (req.body.atakPrefix) {
     const existing = await Collections.Building.findOne({
       _id: req.params.id,
@@ -421,6 +446,13 @@ export async function remove(req: Req, res: Res) {
       }
     }
   }
+
+  // Cascade-delete linked Bill records before the buildings — otherwise
+  // bills reference dangling buildingIds.
+  await Collections.Bill.deleteMany({
+    realmId: realm!._id,
+    buildingId: { $in: ids }
+  });
 
   await Collections.Building.deleteMany({
     _id: { $in: ids },
@@ -772,7 +804,10 @@ export async function addUnit(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
 
-  if (!req.body.atakNumber?.trim()) {
+  if (typeof req.body.atakNumber !== 'string') {
+    throw new ServiceError('atakNumber must be a string', 422);
+  }
+  if (!req.body.atakNumber.trim()) {
     throw new ServiceError('Unit ATAK number is missing', 422);
   }
   validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', {
@@ -1336,6 +1371,14 @@ export async function removeExpense(req: Req, res: Res) {
       (building as any).ownerMonthlyExpenses.pull(eid);
     }
     (building as any).expenses.pull(expense._id);
+
+    // Delete linked Bill records — they reference this expense and would
+    // become orphans otherwise.
+    await Collections.Bill.deleteMany({
+      realmId: realm!._id,
+      buildingId: id,
+      expenseId: expId
+    });
   }
 
   (building as any).updatedDate = new Date();

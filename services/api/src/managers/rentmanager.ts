@@ -189,7 +189,7 @@ export async function update(req: ReqNoParams, res: Res) {
   validateFiniteNumber(paymentData.extracharge, 'extracharge', { min: 0, max: 10000000 });
   validateArrayMaxLength(paymentData.payments, 20, 'payments');
 
-  const term = `${paymentData.year}${paymentData.month}0100`;
+  const term = `${paymentData.year}${String(paymentData.month).padStart(2, '0')}0100`;
 
   res.json(
     await _updateByTerm(authorizationHeader, locale, realm, term, paymentData)
@@ -245,6 +245,20 @@ async function _updateByTerm(
   const occupant = occupantDoc;
   const documentVersion = occupant.__v;
 
+  // Fetch buildings for the tenant's properties so building charges (and
+  // their VATs) are recomputed when the rent is repaid. Without this,
+  // Contract.payTerm rebuilds rents using contract.buildings = undefined
+  // and silently drops the buildingCharges line items.
+  const propertyIds = (occupant.properties || [])
+    .map((p: AnyRecord) => p.propertyId)
+    .filter(Boolean);
+  const buildings = propertyIds.length
+    ? ((await Collections.Building.find({
+        realmId: realm!._id,
+        'units.propertyId': { $in: propertyIds }
+      }).lean()) as any[])
+    : [];
+
   const contract: AnyRecord = {
     frequency: occupant.frequency || 'months',
     begin: occupant.beginDate,
@@ -252,6 +266,7 @@ async function _updateByTerm(
     discount: occupant.discount || 0,
     vatRate: occupant.vatRatio,
     properties: occupant.properties,
+    buildings,
     rents: occupant.rents
   };
 
@@ -264,8 +279,20 @@ async function _updateByTerm(
 
   if (paymentData) {
     if (paymentData.payments && paymentData.payments.length) {
+      // Validate every payment amount BEFORE the filter so a malformed
+      // value surfaces as 422 instead of silently disappearing.
+      paymentData.payments.forEach((p: AnyRecord, idx: number) => {
+        if (p?.amount !== undefined && p.amount !== null && p.amount !== '') {
+          validateFiniteNumber(p.amount, `payments[${idx}].amount`, {
+            min: 0,
+            max: 10000000
+          });
+        }
+      });
       settlements.payments = paymentData.payments
-        .filter(({ amount }: AnyRecord) => amount && Number(amount) > 0)
+        .filter(({ amount }: AnyRecord) =>
+          Number.isFinite(Number(amount)) && Number(amount) >= 0.01
+        )
         .map((payment: AnyRecord) => ({
           date: payment.date || '',
           amount: Number(payment.amount),
@@ -276,21 +303,21 @@ async function _updateByTerm(
     }
 
     if (paymentData.promo) {
+      // Store the user-entered amount as-is. VAT is applied centrally in
+      // task 4 (4_vats.ts); previously dividing by (1 + vatRate) here and
+      // multiplying back in frontdata.ts caused round-trip drift.
       settlements.discounts.push({
         origin: 'settlement',
         description: paymentData.notepromo || '',
-        amount:
-          paymentData.promo *
-          (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
+        amount: Number(paymentData.promo)
       });
     }
 
     if (paymentData.extracharge) {
+      // Same rationale as promo above — single VAT pass via task 4.
       settlements.debts.push({
         description: paymentData.noteextracharge || '',
-        amount:
-          paymentData.extracharge *
-          (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
+        amount: Number(paymentData.extracharge)
       });
     }
 

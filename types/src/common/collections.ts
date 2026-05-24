@@ -86,6 +86,17 @@ export namespace CollectionTypes {
         fromEmail: string;
         replyToEmail: string;
       };
+      smtp?: {
+        selected: boolean;
+        server: string;
+        port: number;
+        secure: boolean;
+        authentication: boolean;
+        username: string;
+        password: string;
+        fromEmail: string;
+        replyToEmail: string;
+      };
       mailgun: {
         selected: boolean;
         apiKey: string;
@@ -121,7 +132,7 @@ export namespace CollectionTypes {
     description: string;
     mimeType?: string;
     expiryDate?: Date;
-    contents?: Record<string, never>;
+    contents?: Record<string, any>;
     html?: string;
     url?: string;
     versionId?: string;
@@ -131,9 +142,10 @@ export namespace CollectionTypes {
 
   export type Email = {
     _id: string;
+    realmId: string;
     templateName: string;
     recordId: string;
-    params: Record<string, never>;
+    params: Record<string, any>;
     sentTo: string;
     sentDate: Date;
     status: string;
@@ -174,11 +186,6 @@ export namespace CollectionTypes {
       energyClass: string;
       inspectorNumber: string;
     };
-
-    // TODO to remove, replaced by address
-    building: string;
-    level: string;
-    location: string;
   };
 
   export type Template = {
@@ -268,7 +275,7 @@ export namespace CollectionTypes {
 
   export type Tenant = {
     _id: string;
-    realmId: string | Realm;
+    realmId: string;
     name: string;
     firstName?: string;
     lastName?: string;
@@ -477,7 +484,7 @@ export namespace CollectionTypes {
 
   export type Bill = {
     _id: string;
-    realmId: string | Realm;
+    realmId: string;
     buildingId: string | Building;
     expenseId: string;
     provider: BillProvider;

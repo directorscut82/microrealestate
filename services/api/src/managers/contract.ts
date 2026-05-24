@@ -48,7 +48,7 @@ export function create(contract: Contract): Contract {
     rents: []
   };
 
-  const current = moment(momentBegin);
+  const current = moment.utc(momentBegin);
   let previousRent: Rent | null = null;
   while (
     current.isSameOrBefore(

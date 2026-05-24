@@ -96,7 +96,11 @@ export default class Service {
     if (this.useRequestParsers) {
       this.expressServer.use(_cookieParser() as any);
       this.expressServer.use(Express.urlencoded({ extended: true }));
-      this.expressServer.use(Express.json({ limit: '50mb' }));
+      // Tight default JSON body limit. Auth and most APIs only need a few
+      // hundred bytes; 50mb here lets a single bad request swing memory hard.
+      // Routes that need more (e.g. DB restore) should use multipart uploads
+      // (multer) which have their own size controls.
+      this.expressServer.use(Express.json({ limit: '1mb' }));
       this.expressServer.use(_methodOverride() as any);
       if (this.useMongo) {
         this.expressServer.use(mongoSanitize({

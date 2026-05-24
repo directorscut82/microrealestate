@@ -49,7 +49,9 @@ export function errorHandler(
     responseBody.stack = error.stack;
   }
 
-  logger.error(String(error));
+  // Pass the error object so winston captures the stack and metadata
+  // instead of a flat `[object Object]` / coerced string.
+  logger.error(error);
   res.status(responseBody.status).json(responseBody);
 }
 
@@ -119,7 +121,10 @@ export function needAccessToken(
         return res.sendStatus(401);
       }
     } catch (error) {
-      logger.warn(String(error));
+      logger.warn('jwt verification failed', {
+        error: (error as Error)?.message,
+        name: (error as Error)?.name
+      });
       return res.sendStatus(401);
     }
 
@@ -138,6 +143,57 @@ export function checkOrganization() {
 
     // skip organization checks when request comes from tenantapi with sessionToken cookie
     if (!req.headers.authorization && req.cookies.sessionToken) {
+      // Best-effort: if the session token (or organizationid header)
+      // carries an organizationId, resolve req.realm so downstream code
+      // doesn't crash dereferencing req.realm. We deliberately do NOT
+      // jwt-verify here — the auth middleware already validated the token
+      // against ACCESS_TOKEN_SECRET; we only peek at unverified claims to
+      // pull the realmId. If nothing is available we fall through to next()
+      // preserving the previous behavior.
+      try {
+        let orgIdCandidate: string | undefined;
+
+        const sessionToken = req.cookies.sessionToken;
+        if (typeof sessionToken === 'string') {
+          const decoded = JWT.decode(sessionToken) as JWT.JwtPayload | null;
+          if (decoded) {
+            if (typeof decoded.organizationId === 'string') {
+              orgIdCandidate = decoded.organizationId;
+            } else if (
+              decoded.account &&
+              typeof (decoded.account as any).organizationId === 'string'
+            ) {
+              orgIdCandidate = (decoded.account as any).organizationId;
+            }
+          }
+        }
+
+        if (
+          !orgIdCandidate &&
+          typeof req.headers.organizationid === 'string'
+        ) {
+          orgIdCandidate = req.headers.organizationid;
+        }
+
+        if (
+          orgIdCandidate &&
+          /^[a-f0-9]{24}$/i.test(orgIdCandidate)
+        ) {
+          const realmDoc = (
+            await Realm.findOne<MongooseDocument<CollectionTypes.Realm>>({
+              _id: orgIdCandidate
+            })
+          )?.toObject();
+          if (realmDoc) {
+            realmDoc._id = String(realmDoc._id);
+            req.realm = realmDoc;
+          }
+        }
+      } catch (err) {
+        logger.warn('failed to resolve realm for sessionToken request', {
+          error: (err as Error)?.message
+        });
+      }
       return next();
     }
 

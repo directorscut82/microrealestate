@@ -5,6 +5,7 @@ import {
   generateIrisQr,
   normalizeBillingId
 } from './billparser/index.js';
+import { validateObjectId } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -392,10 +393,16 @@ export async function list(req: Req, res: Res): Promise<void> {
 
   const { buildingId, status, term, expenseId } = req.query as any;
   const filter: any = { realmId };
-  if (buildingId) filter.buildingId = buildingId;
+  if (buildingId) {
+    validateObjectId(buildingId, 'buildingId');
+    filter.buildingId = buildingId;
+  }
   if (status) filter.status = status;
   if (term) filter.term = Number(term);
-  if (expenseId) filter.expenseId = expenseId;
+  if (expenseId) {
+    validateObjectId(expenseId, 'expenseId');
+    filter.expenseId = expenseId;
+  }
 
   const bills = await Collections.Bill.find(filter)
     .sort({ createdDate: -1 })

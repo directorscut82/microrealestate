@@ -14,7 +14,8 @@ import { customAlphabet } from 'nanoid';
 import moment from 'moment';
 import {
   validateObjectId,
-  validateFiniteNumber
+  validateFiniteNumber,
+  validateStringField
 } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -279,7 +280,28 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
 
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
+
+  // Strict type guards for fields that .trim()/.toLowerCase() will hit later
+  if (req.body?.name !== undefined && typeof req.body.name !== 'string') {
+    throw new ServiceError('name must be a string', 422);
+  }
+  if (req.body?.manager !== undefined && typeof req.body.manager !== 'string') {
+    throw new ServiceError('manager must be a string', 422);
+  }
+  if (req.body?.company !== undefined && typeof req.body.company !== 'string') {
+    throw new ServiceError('company must be a string', 422);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...occupant } = _formatTenant(req.body);
+
+  // Validate + normalize name (trim, length cap, non-empty)
+  const trimmedName = validateStringField(occupant.name, 'name', {
+    min: 1,
+    max: 200,
+    required: true
+  });
+  occupant.name = trimmedName;
 
   if (!occupant.name) {
     logger.error('missing tenant name');
@@ -367,7 +389,12 @@ export async function add(req: Req, res: Res) {
 export async function update(req: Req, res: Res) {
   const realm = req.realm;
   const occupantId = req.params.id;
+  validateObjectId(occupantId, 'tenant id');
   const newOccupant = _formatTenant(req.body);
+
+  if (!newOccupant.properties) {
+    newOccupant.properties = [];
+  }
 
   if (!newOccupant.name) {
     logger.error('missing tenant name');
@@ -496,6 +523,27 @@ export async function update(req: Req, res: Res) {
         409
       );
     }
+
+    // Refuse to wipe historical paid rents on the original document either —
+    // _propertiesHaveRentData() returning false (e.g. user removed entryDate
+    // on a property) would otherwise silently delete the rent ledger.
+    const originalHasPaidRents = (originalOccupant.rents || []).some(
+      (rent: AnyRecord) =>
+        (rent.payments &&
+          rent.payments.some(
+            (payment: AnyRecord) => Number(payment.amount) > 0
+          )) ||
+        (rent.discounts || []).some(
+          (discount: AnyRecord) => discount.origin === 'settlement'
+        )
+    );
+    if (originalHasPaidRents) {
+      throw new ServiceError(
+        'cannot clear rents: tenant has recorded payments. Restore property rent/entry/exit dates before saving.',
+        422
+      );
+    }
+
     newOccupant.rents = [];
   }
 
@@ -534,7 +582,7 @@ export async function update(req: Req, res: Res) {
   if (addedPropIds.length) await _syncOccupancyForProperties(realm!._id, addedPropIds, 'link');
   if (removedPropIds.length) await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
 
-  const newOccupants = await _fetchTenants(req.realm!._id, newOccupant._id);
+  const newOccupants = await _fetchTenants(req.realm!._id, occupantId);
   res.json(FD.toOccupantData(newOccupants.length ? newOccupants[0] : null as any));
 }
 
@@ -545,6 +593,10 @@ export async function remove(req: Req, res: Res) {
   if (!occupantIds.length) {
     throw new ServiceError('tenant not found', 404);
   }
+
+  // Validate each id before using $in — prevents NoSQL injection /
+  // CastError 500s when the URL contains a malformed id.
+  occupantIds.forEach((id: string) => validateObjectId(id, 'tenant id'));
 
   const occupants: any[] = await Collections.Tenant.find({
     realmId: realm!._id,
@@ -574,26 +626,25 @@ export async function remove(req: Req, res: Res) {
   // Note: active lease and unpaid balance are warned in the frontend,
   // not blocked here. Only paid rents are a hard block.
 
-  const session = await Collections.startSession();
-  session.startTransaction();
-  try {
-    const documents: any[] = await Collections.Document.find(
-      {
-        realmId: realm!._id,
-        tenantId: { $in: occupantIds }
-      },
-      {
-        _id: 1
-      }
-    );
+  // Mongo standalone (our local/dev deployment) does not support
+  // transactions. Delete sequentially and let any per-step failure surface.
+  const documents: any[] = await Collections.Document.find(
+    {
+      realmId: realm!._id,
+      tenantId: { $in: occupantIds }
+    },
+    {
+      _id: 1
+    }
+  );
 
-    const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
-    const documentIds = documents.map(({ _id }: any) => _id).join(',');
-    if (!documentIds) {
-      logger.debug('no documents to delete for tenant');
-    } else {
-      const documentsEndPoint = `${PDFGENERATOR_URL}/documents/${documentIds}`;
-      try {
+  const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
+  const documentIds = documents.map(({ _id }: any) => _id).join(',');
+  if (!documentIds) {
+    logger.debug('no documents to delete for tenant');
+  } else {
+    const documentsEndPoint = `${PDFGENERATOR_URL}/documents/${documentIds}`;
+    try {
       await axios.delete(documentsEndPoint, {
         headers: {
           authorization: req.headers.authorization,
@@ -601,32 +652,26 @@ export async function remove(req: Req, res: Res) {
           'Accept-Language': req.headers['accept-language']
         }
       });
-      } catch (error: any) {
-        const errorMessage = error.response?.data?.message || error.message;
-        logger.error('DELETE documents failed');
-        logger.error(errorMessage);
-      }
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || error.message;
+      logger.error('DELETE documents failed');
+      logger.error(errorMessage);
     }
-
-    // Sync building occupancy for removed tenant's properties
-    const removedPropIds = occupants.flatMap((o: any) =>
-      (o.properties || []).map((p: AnyRecord) => String(p.propertyId)).filter(Boolean)
-    );
-    if (removedPropIds.length) {
-      await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
-    }
-
-    await Collections.Tenant.deleteMany({
-      realmId: realm!._id,
-      _id: { $in: occupantIds }
-    }).session(session);
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    throw new ServiceError(String(error), 500);
-  } finally {
-    session.endSession();
   }
+
+  // Sync building occupancy for removed tenant's properties
+  const removedPropIds = occupants.flatMap((o: any) =>
+    (o.properties || []).map((p: AnyRecord) => String(p.propertyId)).filter(Boolean)
+  );
+  if (removedPropIds.length) {
+    await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
+  }
+
+  await Collections.Tenant.deleteMany({
+    realmId: realm!._id,
+    _id: { $in: occupantIds }
+  });
+
   res.sendStatus(200);
 }
 
@@ -677,6 +722,7 @@ export async function all(req: Req, res: Res) {
 
 export async function archive(req: Req, res: Res) {
   const tenantId = req.params.id;
+  validateObjectId(tenantId, 'tenant id');
   const tenant = await Collections.Tenant.findOneAndUpdate(
     { _id: tenantId, realmId: req.realm!._id },
     { $set: { archived: true } },
@@ -690,6 +736,7 @@ export async function archive(req: Req, res: Res) {
 
 export async function unarchive(req: Req, res: Res) {
   const tenantId = req.params.id;
+  validateObjectId(tenantId, 'tenant id');
   const tenant = await Collections.Tenant.findOneAndUpdate(
     { _id: tenantId, realmId: req.realm!._id },
     { $set: { archived: false } },
@@ -703,6 +750,7 @@ export async function unarchive(req: Req, res: Res) {
 
 export async function one(req: Req, res: Res) {
   const occupantId = req.params.id;
+  validateObjectId(occupantId, 'tenant id');
   const tenants = await _fetchTenants(req.realm!._id, occupantId);
   if (!tenants.length) {
     throw new ServiceError('tenant not found', 404);

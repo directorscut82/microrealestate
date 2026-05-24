@@ -1,4 +1,5 @@
 import type { CollectionTypes } from '@microrealestate/types';
+import { logger } from '@microrealestate/common';
 import moment from 'moment';
 
 export interface Contract {
@@ -112,19 +113,37 @@ function _computeBuildingChargeRaw(
     }
 
     case 'fixed': {
-      // Fixed allocation per unit
+      // Fixed allocation per unit. Negative values are misconfiguration
+      // (a "negative fixed share") — log and clamp to 0 instead of silently
+      // accepting them or letting them bubble into the rent total.
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
       const v = Number(allocation?.value);
-      return Number.isFinite(v) && v > 0 ? v : 0;
+      if (Number.isFinite(v) && v < 0) {
+        logger.warn(
+          `Fixed allocation has negative value (${v}) for property ${propertyId} ` +
+            `in building ${building._id}; clamping to 0.`
+        );
+      }
+      return Math.max(0, Number.isFinite(v) ? v : 0);
     }
 
     case 'custom_ratio': {
-      // Custom ratio - normalize to sum
+      // Custom ratio — normalize to sum.
+      // Single-unit fallback: if NO ratios are configured but the building
+      // has exactly one unit, that unit takes the full amount. With more
+      // than one unit and no ratios we cannot infer a split, so we return
+      // 0 and surface the misconfiguration in logs for the operator.
       const unitsWithProperty = building.units.filter((u) => u.propertyId);
       const totalRatio = customAllocations?.reduce((sum, a) => sum + (Number(a.value) || 0), 0) || 0;
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
-      // Single-unit fallback: if no ratios set and only 1 unit, give full amount
-      if (totalRatio === 0) return unitsWithProperty.length === 1 ? amount : 0;
+      if (totalRatio === 0) {
+        if (unitsWithProperty.length === 1) return amount;
+        logger.warn(
+          `custom_ratio allocation has no ratios set for building ${building._id} ` +
+            `(${unitsWithProperty.length} units). Returning 0 share for property ${propertyId}.`
+        );
+        return 0;
+      }
       if (!allocation) return 0;
       const av = Number(allocation.value) || 0;
       return (amount * av) / totalRatio;

@@ -35,11 +35,12 @@ RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/roo
 
 FROM base
 ENV NODE_ENV production
-RUN apk --no-cache add mongodb-tools
+RUN apk --no-cache add mongodb-tools tini
 WORKDIR /usr/app
 COPY --from=deps /usr/app ./
 COPY --from=build /usr/app/services/api/dist ./services/api/dist
 COPY services/api/scripts ./services/api/scripts
 
 USER 1000
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "services/api/dist/index.js"]
