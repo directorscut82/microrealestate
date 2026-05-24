@@ -70,9 +70,8 @@ export async function add(req: Req, res: Res) {
     min: 0,
     max: 1000000
   });
-  if (req.body.type !== undefined) {
-    validateEnum(req.body.type, PROPERTY_TYPES, 'type');
-  }
+  // type is required — validate before letting Mongoose throw a ValidationError.
+  validateEnum(req.body.type, PROPERTY_TYPES, 'type', { required: true });
   const property = new Collections.Property({
     ...req.body,
     realmId: realm!._id
@@ -112,12 +111,22 @@ export async function update(req: Req, res: Res) {
     }
   }
 
+  // Letterboxes don't have surfaces. If the type is being switched to
+  // 'letterbox', explicitly $unset surface/landSurface so a stale apartment
+  // surface doesn't carry over (and confuse downstream charge allocations).
+  const updateOps: Record<string, any> = { $set: payload };
+  if (payload.type === 'letterbox') {
+    updateOps.$unset = { surface: '', landSurface: '' };
+    delete updateOps.$set.surface;
+    delete updateOps.$set.landSurface;
+  }
+
   const dbProperty = await Collections.Property.findOneAndUpdate(
     {
       realmId: realm!._id,
       _id: property._id
     },
-    { $set: payload },
+    updateOps,
     { new: true }
   ).lean();
 
@@ -146,10 +155,23 @@ export async function remove(req: Req, res: Res) {
     );
   }
 
-  await Collections.Property.deleteMany({
+  const result = await Collections.Property.deleteMany({
     _id: { $in: ids },
     realmId: realm!._id
   });
+
+  if ((result?.deletedCount ?? 0) === 0) {
+    throw new ServiceError('Property not found', 404);
+  }
+
+  // Clean up dangling building.units[].propertyId references — otherwise a
+  // building keeps a unit pointing at a deleted property which then
+  // surfaces as a null property in _toBuildingData.
+  await Collections.Building.updateMany(
+    { realmId: realm!._id, 'units.propertyId': { $in: ids } },
+    { $set: { 'units.$[elem].propertyId': null } },
+    { arrayFilters: [{ 'elem.propertyId': { $in: ids } }] }
+  );
 
   res.sendStatus(200);
 }

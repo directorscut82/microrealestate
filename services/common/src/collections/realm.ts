@@ -90,7 +90,8 @@ const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
       selected: Boolean,
       url: String,
       username: String,
-      password: String
+      password: String,
+      countryCode: String // e.g., '+30', '+1'
     }
   },
   locale: String,

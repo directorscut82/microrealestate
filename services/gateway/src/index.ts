@@ -14,6 +14,13 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 Main();
 
 async function onStartUp(application: Express.Application) {
+  // The gateway IS the edge proxy — there is no upstream proxy in front of
+  // it that we trust to set X-Forwarded-For correctly. Disabling
+  // trust-proxy makes Express ignore client-supplied X-F-F headers and
+  // exposes the real connecting peer through req.socket.remoteAddress.
+  // Combined with the rate limiter keying on req.socket.remoteAddress (not
+  // req.ip), this kills the X-F-F-spoofed-rate-limit-bypass path.
+  application.set('trust proxy', false);
   exposeHealthCheck(application);
   exposeFrontends(application);
   configureCORS(application);
@@ -224,20 +231,10 @@ function exposeHealthCheck(application: Express.Application) {
         return `${url.origin}/health`;
       });
 
-      if (config.EXPOSE_FRONTENDS) {
-        if (!config.LANDLORD_BASE_PATH || !config.TENANT_BASE_PATH) {
-          throw new ServiceError(
-            'LANDLORD_BASE_PATH or TENANT_BASE_PATH env is not defined',
-            500
-          );
-        }
-        endpoints.push(
-          `${config.LANDLORD_FRONTEND_URL}${config.LANDLORD_BASE_PATH}/health`
-        );
-        endpoints.push(
-          `${config.TENANT_FRONTEND_URL}${config.TENANT_BASE_PATH}/health`
-        );
-      }
+      // Note: deliberately NOT probing the landlord / tenant Next.js
+      // frontends. They do not expose a /health endpoint, so the previous
+      // probe always 404'd which the aggregator treated as 500. Backend
+      // service health (each /health below) is what matters for routing.
 
       const results = await Promise.all(
         endpoints.map(async (endpoint) => {

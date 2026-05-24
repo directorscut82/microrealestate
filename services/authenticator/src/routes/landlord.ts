@@ -391,21 +391,31 @@ export default function (): Router {
           EX: 3600
         });
 
-        await axios.post(
-          `${EMAILER_URL}/resetpassword`,
-          {
-            templateName: 'reset_password',
-            recordId: email,
-            params: {
-              token
+        // Fire-and-forget: do NOT await the emailer. Awaiting a network call
+        // here makes the known-account branch ~200ms slower than the
+        // unknown-account branch (~7ms), which is a textbook user-enumeration
+        // timing oracle. Returning 204 immediately closes that channel.
+        axios
+          .post(
+            `${EMAILER_URL}/resetpassword`,
+            {
+              templateName: 'reset_password',
+              recordId: email,
+              params: {
+                token
+              }
+            },
+            {
+              headers: {
+                'Accept-Language': (req as any).rawLocale.code
+              }
             }
-          },
-          {
-            headers: {
-              'Accept-Language': (req as any).rawLocale.code
-            }
-          }
-        );
+          )
+          .catch((err: any) => {
+            logger.error(
+              `failed to dispatch reset_password email for ${email}: ${err?.message || err}`
+            );
+          });
       }
       res.sendStatus(204);
     })

@@ -118,7 +118,12 @@ export default function SignIn() {
       <form onSubmit={handleSubmit(signIn)} className="space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="email">{t('Email Address')}</Label>
-          <Input id="email" {...register('email')} />
+          <Input
+            id="email"
+            type="email"
+            autoComplete="username"
+            {...register('email')}
+          />
           {errors.email && (
             <p className="text-label text-oxide">{errors.email.message}</p>
           )}

@@ -13,7 +13,8 @@ import type { CollectionTypes } from '@microrealestate/types';
 import {
   validateObjectId,
   validateFiniteNumber,
-  validateArrayMaxLength
+  validateArrayMaxLength,
+  validateDateString
 } from '../validators.js';
 
 type AnyRecord = Record<string, any>;
@@ -288,6 +289,13 @@ async function _updateByTerm(
             max: 10000000
           });
         }
+        // Validate optional payment.date in DD/MM/YYYY when present.
+        // Empty string and missing are tolerated (legacy callers); but a
+        // non-empty malformed value must surface as 422 instead of being
+        // stored verbatim and breaking downstream date parsing.
+        if (p?.date !== undefined && p.date !== null && p.date !== '') {
+          validateDateString(p.date, `payments[${idx}].date`);
+        }
       });
       settlements.payments = paymentData.payments
         .filter(({ amount }: AnyRecord) =>
@@ -337,7 +345,16 @@ async function _updateByTerm(
     }
   }
 
-  occupant.rents = Contract.payTerm(contract as any, term, settlements).rents;
+  // Contract.payTerm throws plain Errors for business-rule failures (e.g.
+  // payment term outside contract frame, payments lost). Surface those as
+  // 422 so the client gets an actionable error instead of a generic 500.
+  try {
+    occupant.rents = Contract.payTerm(contract as any, term, settlements).rents;
+  } catch (e: any) {
+    const msg = (e && e.message) || String(e);
+    if (e instanceof ServiceError) throw e;
+    throw new ServiceError(msg, 422);
+  }
 
   const emailStatus =
     (await _getEmailStatus(

@@ -89,6 +89,7 @@ export default function ForgotPassword() {
               <Label htmlFor="email">{t('Email Address')}</Label>
               <Input
                 id="email"
+                type="email"
                 autoComplete="email"
                 {...register('email')}
               />

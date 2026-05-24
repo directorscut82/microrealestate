@@ -20,6 +20,7 @@ import moment from 'moment';
 import { IBM_Plex_Mono, Manrope } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
 import { useEffect } from 'react';
+import useTranslation from 'next-translate/useTranslation';
 
 const queryClient = new QueryClient();
 
@@ -57,6 +58,7 @@ const fontVariables = `${manrope.variable} ${plexMono.variable}`;
 
 function MyApp(props) {
   const { Component, pageProps } = props;
+  const { t } = useTranslation('common');
   moment.locale(pageProps?.__lang ?? 'en');
 
   // Apply font CSS variables to <html> so Radix portals inherit them.
@@ -100,7 +102,7 @@ function MyApp(props) {
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-primary focus:text-primary-foreground"
       >
-        Skip to content
+        {t('Skip to content')}
       </a>
       <main id="main-content" className={`${fontVariables} font-sans`}>
         <ThemeProvider

@@ -9,8 +9,19 @@ const DocumentSchema = new mongoose.Schema<CollectionTypes.Document>({
   realmId: { type: String, ref: Realm, required: true },
   tenantId: { type: String, ref: Tenant, required: true },
   leaseId: { type: String, ref: Lease, required: true },
-  templateId: { type: String, ref: Template, required: true },
-  type: { type: String, enum: ['text', 'file'], required: true },
+  templateId: {
+    type: String,
+    ref: Template,
+    required: function (this: CollectionTypes.Document) {
+      return this.type === 'text';
+    }
+  },
+  // 'fileDescriptor' is accepted for legacy data
+  type: {
+    type: String,
+    enum: ['text', 'file', 'fileDescriptor'],
+    required: true
+  },
   name: String,
   description: String,
   mimeType: String, // used only when type === "file"

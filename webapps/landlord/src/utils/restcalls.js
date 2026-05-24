@@ -60,6 +60,9 @@ export async function fetchProperties({ page, limit } = {}) {
   return response.data;
 }
 
+// NOTE: backend supports only `page` and `limit` query params for pagination.
+// Search, sort, and status filters are applied client-side; the API does not
+// accept them as parameters.
 export async function fetchPropertiesPage({ page = 1, limit = 100 } = {}) {
   const params = new URLSearchParams();
   params.set('page', String(page));
@@ -99,6 +102,9 @@ export async function fetchTenants({ includeArchived = false, page, limit } = {}
   return response.data;
 }
 
+// NOTE: backend supports only `page`, `limit`, and `includeArchived` query
+// params. Search, sort, and status filters are applied client-side; the API
+// does not accept them as parameters.
 export async function fetchTenantsPage({ includeArchived = false, page = 1, limit = 100 } = {}) {
   const params = new URLSearchParams();
   if (includeArchived) params.set('includeArchived', 'true');

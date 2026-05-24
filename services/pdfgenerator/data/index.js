@@ -100,8 +100,20 @@ export async function getRentsData(params) {
     tenant.contract.terminationDate = dbTenant.terminationDate;
   }
 
+  // Sanitize fileName before it becomes a filesystem path. dbTenant.name
+  // is user-controlled and previously flowed straight into file IO,
+  // which crashed on names containing `/`, `..`, or quotes — and worse,
+  // could escape the output directory. Allow ASCII alphanum, dot,
+  // dash, underscore plus the Greek code blocks to keep Greek tenant
+  // names intact. Same shape as the emailer attachments sanitize().
+  const sanitize = (s) =>
+    String(s || 'tenant')
+      .replace(/[^A-Za-z0-9._\-Ͱ-Ͽἀ-῿]/g, '_')
+      .slice(0, 100);
+  const fileName = `${sanitize(dbTenant.name)}-${term}`;
+
   return {
-    fileName: `${dbTenant.name}-${term}`,
+    fileName,
     tenant,
     landlord
   };

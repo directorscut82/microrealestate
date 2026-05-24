@@ -111,10 +111,13 @@ export default function (): Router {
     })
   );
 
-  tenantRouter.get(
-    '/signedin',
+  // Shared handler for GET (otp via query) and POST (otp via body). The
+  // landlord/tenant frontend sends POST after the recent client refactor;
+  // we keep GET for backward compat with bookmarked email-link flows.
+  const signedInHandler = (otpSource: 'query' | 'body') =>
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
-      const rawOtp = req.query.otp;
+      const rawOtp =
+        otpSource === 'query' ? req.query.otp : (req.body || {}).otp;
       if (typeof rawOtp !== 'string' || !rawOtp) {
         throw new ServiceError('invalid otp', 401);
       }
@@ -122,19 +125,23 @@ export default function (): Router {
 
       const rawPayload = await Service.getInstance().redisClient!.get(otp);
       if (!rawPayload) {
-        throw new ServiceError('invalid or expired OTP',
-          401
-        );
+        // Plain ServiceError(401). The error handler (in common middlewares)
+        // is responsible for stripping the stack from the response body —
+        // do not include any extra detail here that might leak via
+        // err.cause / err.stack on a misconfigured error handler.
+        throw new ServiceError('invalid or expired OTP', 401);
       }
       await Service.getInstance().redisClient!.del(otp);
 
-      const payload = rawPayload.split(';').reduce<Record<string, string>>((acc, rawValue) => {
-        const [key, value] = rawValue.split('=');
-        if (key) {
-          acc[key] = value;
-        }
-        return acc;
-      }, {});
+      const payload = rawPayload
+        .split(';')
+        .reduce<Record<string, string>>((acc, rawValue) => {
+          const [key, value] = rawValue.split('=');
+          if (key) {
+            acc[key] = value;
+          }
+          return acc;
+        }, {});
 
       const now = new Date().getTime();
       const expiresAt = Number(payload.expiresAt) || 0;
@@ -148,13 +155,22 @@ export default function (): Router {
       const sessionToken = jwt.sign({ account }, ACCESS_TOKEN_SECRET!, {
         expiresIn: PRODUCTION ? '30m' : '12h'
       });
-      await Service.getInstance().redisClient!.set(sessionToken, payload.email, {
-        EX: PRODUCTION ? 1800 : 43200
-      });
+      await Service.getInstance().redisClient!.set(
+        sessionToken,
+        payload.email,
+        {
+          EX: PRODUCTION ? 1800 : 43200
+        }
+      );
+      // Cookie-only — never echo the sessionToken in the JSON body. Tokens
+      // in body get logged by intermediate proxies, captured by browser
+      // history extensions, and dragged into client-side error reports.
       res.cookie('sessionToken', sessionToken, TOKEN_COOKIE_ATTRIBUTES);
-      res.json({ sessionToken });
-    })
-  );
+      return res.sendStatus(200);
+    });
+
+  tenantRouter.get('/signedin', authRateLimit, signedInHandler('query'));
+  tenantRouter.post('/signedin', authRateLimit, signedInHandler('body'));
 
   tenantRouter.get(
     '/session',

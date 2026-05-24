@@ -39,6 +39,12 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
 
 PropertySchema.index({ realmId: 1 });
 PropertySchema.index({ realmId: 1, name: 1 });
+// Within a realm, the cadastral ATAK number identifies a property uniquely.
+// Sparse so legacy properties without an atakNumber are not affected.
+PropertySchema.index(
+  { realmId: 1, atakNumber: 1 },
+  { unique: true, sparse: true }
+);
 
 export default mongoose.model<CollectionTypes.Property>(
   'Property',

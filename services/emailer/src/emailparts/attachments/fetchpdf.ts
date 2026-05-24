@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { Service } from '@microrealestate/common';
 
-export default function (
+export default async function (
   authorizationHeader: string | undefined,
   organizationId: string,
   templateName: string,
@@ -19,30 +19,29 @@ export default function (
     fs.mkdirSync(fileDir, { recursive: true });
   }
   const filePath = path.join(fileDir, filename);
-  const wStream = fs.createWriteStream(filePath);
 
-  return axios
-    .get(uri, {
-      responseType: 'stream',
-      headers: {
-        authorization: authorizationHeader,
-        organizationid: organizationId
-      }
-    })
-    .then((response) => {
-      return new Promise<string>((resolve, reject) => {
-        let isErrorOccured = false;
-        wStream.on('error', (error) => {
-          isErrorOccured = true;
-          wStream.close();
-          reject(error);
-        });
-        wStream.on('close', () => {
-          if (!isErrorOccured) {
-            resolve(filePath);
-          }
-        });
-        response.data.pipe(wStream);
-      });
-    });
+  // Stream pipe gave us a "close" event on any HTTP outcome — including
+  // an HTML error page that Mongoose then handed off as a "PDF". Switch
+  // to arraybuffer + magic-byte sniff so we fail fast and loud on the
+  // upstream instead of mailing a fake PDF to the customer.
+  const response = await axios.get(uri, {
+    responseType: 'arraybuffer',
+    timeout: 30000,
+    // Don't let axios throw on 4xx/5xx — we want to surface a clear error.
+    validateStatus: () => true,
+    headers: {
+      authorization: authorizationHeader,
+      organizationid: organizationId
+    }
+  });
+
+  if (response.status !== 200) {
+    throw new Error(`PDF fetch HTTP ${response.status} for ${uri}`);
+  }
+  const buf = Buffer.from(response.data);
+  if (buf.length < 4 || buf.slice(0, 4).toString() !== '%PDF') {
+    throw new Error(`fetched file is not a valid PDF (${uri})`);
+  }
+  fs.writeFileSync(filePath, buf);
+  return filePath;
 }

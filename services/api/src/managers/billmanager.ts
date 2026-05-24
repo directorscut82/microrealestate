@@ -30,9 +30,19 @@ async function findExpenseByBillingId(
 } | null> {
   const buildings = await Collections.Building.find({ realmId }).lean();
 
+  // Compute the current YYYYMMDDHH term — soft-deleted expenses carry
+  // endTerm < current and must be skipped so a freshly imported bill does
+  // not auto-link to a retired expense.
+  const now = new Date();
+  const currentTerm = Number(
+    `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}0100`
+  );
+
   for (const building of buildings) {
     for (const expense of building.expenses || []) {
       if (!expense.billingId) continue;
+      // Skip soft-deleted (endTerm < current) expenses.
+      if (expense.endTerm && Number(expense.endTerm) < currentTerm) continue;
       const expenseNormalized = normalizeBillingId(expense.billingId);
       if (expenseNormalized === normalizedBillingId) {
         return { building, expense };

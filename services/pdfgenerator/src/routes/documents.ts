@@ -12,8 +12,38 @@ import express from 'express';
 import fs from 'fs-extra';
 import Handlebars from 'handlebars';
 import moment from 'moment';
+import multer from 'multer';
 import path from 'path';
 import uploadMiddleware from '../utils/uploadmiddelware.js';
+
+// MongoDB ObjectIds are 24-character lowercase hex strings. Validating
+// before the Mongoose query prevents Mongoose's CastError from bubbling
+// up as a 500 — and short-circuits any URL-encoded path-traversal in
+// the :id slot.
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/;
+function assertValidObjectId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !OBJECT_ID_RE.test(value)) {
+    throw new ServiceError(`invalid ${name}`, 422);
+  }
+  return value;
+}
+
+// Translate multer's MulterError class into a clean HTTP response. The
+// previous handler bubbled the raw error to the express default 500
+// handler, leaking the stack and using the wrong status code (413 is
+// the correct response for a payload-too-large upload).
+function handleUploadError(
+  err: any,
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (err instanceof multer.MulterError) {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 422;
+    return res.status(status).json({ status, message: err.message });
+  }
+  return next(err);
+}
 
 async function _getTempate(organization: any, templateId: string) {
   const template = await Collections.Template.findOne({
@@ -284,12 +314,10 @@ export default function () {
   documentsApi.get(
     '/:id',
     Middlewares.asyncWrapper(async (req, res) => {
-      const documentId = req.params.id;
-
-      if (!documentId) {
-        logger.error('missing document id');
-        throw new ServiceError('missing fields', 422);
-      }
+      // Validate the id BEFORE the Mongoose query. URL-encoded `..`
+      // sequences would otherwise reach Mongoose, throw CastError, and
+      // bubble out as an opaque 500 with a stack trace.
+      const documentId = assertValidObjectId(req.params.id, 'document id');
 
       const documentFound = await Collections.Document.findOne({
         _id: documentId,
@@ -382,6 +410,7 @@ export default function () {
   documentsApi.post(
     '/upload',
     uploadMiddleware(),
+    handleUploadError,
     Middlewares.asyncWrapper(async (req, res) => {
       const key = [req.body.s3Dir, req.body.fileName].join('/');
       // Optional-chain so a realm without thirdParties (or without b2) does
@@ -404,6 +433,34 @@ export default function () {
             throw new ServiceError(error as Error, 500);
           }
         } else {
+          // Local-disk fallback: when S3/B2 is not configured, persist the
+          // upload to UPLOADS_DIRECTORY so the document is actually
+          // retrievable later. The previous code returned 201 with the key
+          // but threw the temp file away in the finally block — a silent
+          // data-loss bug for self-hosted deployments without object
+          // storage.
+          const file = (req as any).file;
+          if (file?.path) {
+            const orgPath = String(req.body.s3Dir || '');
+            const targetPath = path.join(
+              UPLOADS_DIRECTORY as string,
+              orgPath,
+              req.body.fileName
+            );
+            // Defense-in-depth: confirm the resolved target stays inside
+            // UPLOADS_DIRECTORY. sanitizePath in uploadmiddelware already
+            // strips traversal but a double-check costs nothing.
+            const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
+            const resolvedTarget = path.resolve(targetPath);
+            if (
+              resolvedTarget !== uploadsRoot &&
+              !resolvedTarget.startsWith(uploadsRoot + path.sep)
+            ) {
+              throw new ServiceError('invalid upload path', 422);
+            }
+            fs.mkdirSync(path.dirname(resolvedTarget), { recursive: true });
+            fs.copyFileSync(file.path, resolvedTarget);
+          }
           return res.status(201).send({
             fileName: req.body.fileName,
             key
@@ -444,11 +501,16 @@ export default function () {
         }
       }
 
-      // Caller must give us either a literal `type` or a `templateId` we can
-      // use to pull `type` from. Without this the next line dereferences
-      // `template.type` on `undefined` and throws an opaque 500.
-      if (!dataSet.type && !template) {
+      // Documents of type='file' do not need a template — they are direct
+      // uploads (PDFs, images, etc). Only require type or templateId for
+      // non-file documents. Without this branch the schema's required:true
+      // on templateId would 500 every legitimate file upload.
+      const incomingType = dataSet.type || template?.type;
+      if (!incomingType) {
         throw new ServiceError('type or templateId required', 422);
+      }
+      if (incomingType !== 'file' && !dataSet.templateId && !template) {
+        throw new ServiceError('templateId required for non-file documents', 422);
       }
 
       const documentToCreate: any = {
@@ -557,13 +619,27 @@ export default function () {
       });
 
       // delete documents from file systems
+      // The previous `indexOf('..')` check missed URL-encoded variants
+      // (`%2e%2e`) and mixed-separator escapes. Use the same path.resolve
+      // guard the GET handler uses: resolve to absolute, then verify the
+      // result stays inside UPLOADS_DIRECTORY. Drop anything that escapes.
+      const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
       documents.forEach((doc: any) => {
-        if (doc.type !== 'file' || doc.url.indexOf('..') !== -1) {
+        if (doc.type !== 'file') {
           return;
         }
-        const filePath = path.join(UPLOADS_DIRECTORY as string, doc.url);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        const resolved = path.resolve(uploadsRoot, doc.url);
+        if (
+          resolved !== uploadsRoot &&
+          !resolved.startsWith(uploadsRoot + path.sep)
+        ) {
+          logger.warn(
+            `refusing to delete file outside uploads root: ${doc.url}`
+          );
+          return;
+        }
+        if (fs.existsSync(resolved)) {
+          fs.unlinkSync(resolved);
         }
       });
 

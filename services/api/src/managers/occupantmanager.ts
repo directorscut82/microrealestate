@@ -390,10 +390,47 @@ export async function update(req: Req, res: Res) {
   const realm = req.realm;
   const occupantId = req.params.id;
   validateObjectId(occupantId, 'tenant id');
+
+  // Strict type guards — these fields hit .trim()/.toLowerCase() / Mongoose
+  // string casts later. A non-string (e.g. {$ne: ''} NoSQL injection probe)
+  // would otherwise reach Mongoose and surface as a generic 500.
+  if (req.body?.name !== undefined && typeof req.body.name !== 'string') {
+    throw new ServiceError('name must be a string', 422);
+  }
+  if (req.body?.manager !== undefined && typeof req.body.manager !== 'string') {
+    throw new ServiceError('manager must be a string', 422);
+  }
+  if (req.body?.company !== undefined && typeof req.body.company !== 'string') {
+    throw new ServiceError('company must be a string', 422);
+  }
+
   const newOccupant = _formatTenant(req.body);
 
   if (!newOccupant.properties) {
     newOccupant.properties = [];
+  }
+
+  // Validate + normalize name (trim, length cap, non-empty) — mirror add().
+  // After _formatTenant, .name has already been derived from manager/company
+  // when applicable, so we apply the same field-level validation here.
+  newOccupant.name = validateStringField(newOccupant.name, 'name', {
+    min: 1,
+    max: 200,
+    required: true
+  });
+  if (newOccupant.manager !== undefined) {
+    const trimmedManager = validateStringField(newOccupant.manager, 'manager', {
+      min: 1,
+      max: 200
+    });
+    if (trimmedManager !== undefined) newOccupant.manager = trimmedManager;
+  }
+  if (newOccupant.company !== undefined) {
+    const trimmedCompany = validateStringField(newOccupant.company, 'company', {
+      min: 1,
+      max: 200
+    });
+    if (trimmedCompany !== undefined) newOccupant.company = trimmedCompany;
   }
 
   if (!newOccupant.name) {
@@ -425,7 +462,14 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('tenant not found', 404);
   }
   const originalOccupant = originalOccupantDoc;
-  const documentVersion = originalOccupant.__v;
+  // Optimistic lock: prefer the __v the client read with, falling back to
+  // the fresh value only if the client didn't send one. This catches the
+  // case where two concurrent edits started from the same GET response —
+  // without it, both POSTs would re-read the latest __v here and both win.
+  const requestedVersion = Number(req.body.__v);
+  const documentVersion = Number.isFinite(requestedVersion)
+    ? requestedVersion
+    : originalOccupant.__v;
 
   if (originalOccupant.documents) {
     newOccupant.documents = originalOccupant.documents;
@@ -619,7 +663,7 @@ export async function remove(req: Req, res: Res) {
   if (occupantsWithPaidRents.length) {
     throw new ServiceError(
       `impossible to remove ${occupantsWithPaidRents[0].name} some rents have been paid`,
-      409
+      422
     );
   }
 
