@@ -35,7 +35,7 @@ export function DateRangePicker({
   );
 
   let fnsLocale = enUS;
-  if (locale === 'fr') {
+  if (locale === 'fr-FR') {
     fnsLocale = fr;
   } else if (locale === 'de-DE') {
     fnsLocale = de;

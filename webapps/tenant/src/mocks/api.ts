@@ -33,7 +33,7 @@ export const getAllTenants: {
       landlord: {
         name: 'Real Estate Company',
         currency: 'EUR',
-        locale: 'fr',
+        locale: 'fr-FR',
         addresses: [
           {
             street1: '1 rue de la Paix',
