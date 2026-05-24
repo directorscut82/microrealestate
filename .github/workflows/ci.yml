@@ -5,6 +5,10 @@ on:
     branches:
       - master
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   setup:
     runs-on: ubuntu-latest
@@ -61,6 +65,9 @@ jobs:
           - appname: landlord-frontend
             image: ghcr.io/${{ github.repository }}/landlord-frontend
             dockerfile: webapps/landlord/Dockerfile
+          - appname: tenant-frontend
+            image: ghcr.io/${{ github.repository }}/tenant-frontend
+            dockerfile: webapps/tenant/Dockerfile
 
     steps:
       - name: Checkout

@@ -99,13 +99,23 @@ happens. Highlights:
 - Gateway exposes port 1350 to host
 - No `resetservice` container (dev/CI only)
 - No Node debug ports exposed
-- All 9 expected services present
+- All 10 expected services present (now includes `tenant-frontend`)
 - `mem_limit` on every service
 - `restart: unless-stopped` on every service
 - No placeholder `change_this_*` secrets
 - Volumes use `/volume1/docker/mre/` paths
 
 If any check fails, the script aborts with a clear error.
+
+## Environment variables of note
+
+A few env vars caused us pain over time and are worth calling out:
+
+| Var | Purpose | Notes |
+|-----|---------|-------|
+| `APP_DOMAIN` | Host (and optional `:port`) seen by the browser. Used by the gateway to compute allowed CORS origins and by the authenticator to scope cookies. | Now defaulted in `base.env` to `localhost:8080`. Pass it explicitly in production compose so it includes the public hostname (and Tailscale IP if applicable). |
+| `AUTHENTICATOR_APPCREDZ_TOKEN_SECRET` | JWT secret for application credential tokens (M2M / API access). Distinct from access/refresh/reset secrets. | Now persisted by the CLI's `writeDotEnv()` (it used to be silently dropped between runs, which caused signed app tokens to be rejected after every config rewrite). Default placeholder added to `base.env`. |
+| `RESETSERVICE` OTP behaviour | The reset service no longer returns the OTP in its HTTP response — it logs it and emails it like the production flow. E2E/test code that scraped OTPs from the response must read them from logs or from the test mailbox instead. | Behaviour change only affects test/dev environments — `resetservice` is never deployed to the NAS. |
 
 ## Rolling back a bad deploy
 
