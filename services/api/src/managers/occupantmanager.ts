@@ -499,13 +499,20 @@ export async function update(req: Req, res: Res) {
     newOccupant.rents = [];
   }
 
+  // Strip identity / version fields from the payload — $set must not target
+  // the same paths that the filter clause (_id, realmId) and $inc (__v) own,
+  // otherwise MongoDB rejects the update with "Updating the path '__v' would
+  // create a conflict at '__v'". The frontend POSTs the full tenant document
+  // back on edit, including these fields.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id, __v, realmId: _realmId, ...occupantPatch } = newOccupant;
   const updated = await Collections.Tenant.findOneAndUpdate(
     {
       realmId: realm!._id,
       _id: occupantId,
       __v: documentVersion
     },
-    { $set: newOccupant, $inc: { __v: 1 } }
+    { $set: occupantPatch, $inc: { __v: 1 } }
   );
   if (!updated) {
     throw new ServiceError(

@@ -171,31 +171,35 @@ const PropertyForm = ({ property, onSubmit }) => {
           <Label htmlFor="description">{t('Description')}</Label>
           <Input id="description" {...register('description')} />
         </Field>
+        {/* Surface in m² applies to almost every property type — apartments,
+            offices, stores, garages and parking spots all have a measurable
+            footprint. Only mailboxes don't. Phone/digicode are physical-access
+            fields that don't apply to parking or mailboxes. */}
+        {typeValue !== 'letterbox' && (
+          <Row>
+            <Field>
+              <Label htmlFor="surface">{t('Surface')}</Label>
+              <Input id="surface" type="number" {...register('surface')} />
+            </Field>
+            <Field>
+              <Label htmlFor="landSurface">{t('Land Surface')}</Label>
+              <Input id="landSurface" type="number" {...register('landSurface')} />
+            </Field>
+          </Row>
+        )}
         {['store', 'building', 'apartment', 'room', 'office', 'garage'].includes(
           typeValue
         ) && (
-          <>
-            <Row>
-              <Field>
-                <Label htmlFor="surface">{t('Surface')}</Label>
-                <Input id="surface" type="number" {...register('surface')} />
-              </Field>
-              <Field>
-                <Label htmlFor="landSurface">{t('Land Surface')}</Label>
-                <Input id="landSurface" type="number" {...register('landSurface')} />
-              </Field>
-            </Row>
-            <Row>
-              <Field>
-                <Label htmlFor="phone">{t('Phone')}</Label>
-                <Input id="phone" {...register('phone')} />
-              </Field>
-              <Field>
-                <Label htmlFor="digicode">{t('Digicode')}</Label>
-                <Input id="digicode" {...register('digicode')} />
-              </Field>
-            </Row>
-          </>
+          <Row>
+            <Field>
+              <Label htmlFor="phone">{t('Phone')}</Label>
+              <Input id="phone" {...register('phone')} />
+            </Field>
+            <Field>
+              <Label htmlFor="digicode">{t('Digicode')}</Label>
+              <Input id="digicode" {...register('digicode')} />
+            </Field>
+          </Row>
         )}
         <Row>
           <Field>
