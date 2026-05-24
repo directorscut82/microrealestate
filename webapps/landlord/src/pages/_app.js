@@ -12,6 +12,7 @@ import '../components/RichTextEditor/richtexteditor.css';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Application from '../components/Application';
+import { applyZodTranslator } from '../utils/zodErrorMap';
 import config from '../config';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Head from 'next/head';
@@ -59,6 +60,7 @@ const fontVariables = `${manrope.variable} ${plexMono.variable}`;
 function MyApp(props) {
   const { Component, pageProps } = props;
   const { t } = useTranslation('common');
+  applyZodTranslator(t);
   moment.locale(pageProps?.__lang ?? 'en');
 
   // Apply font CSS variables to <html> so Radix portals inherit them.

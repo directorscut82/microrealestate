@@ -47,6 +47,7 @@ async function Main() {
       name: 'tenantapi',
       useRequestParsers: true,
       useMongo: true,
+      useRedis: true,
       onStartUp
     });
 
