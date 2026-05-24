@@ -11,7 +11,7 @@ export default function MyDocument() {
           strategy="beforeInteractive"
         />
       </Head>
-      <body className="bg-body text-foreground">
+      <body className="bg-canvas text-foreground">
         <Main />
         <NextScript />
       </body>

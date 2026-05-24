@@ -23,7 +23,7 @@ import Page from '../../../components/Page';
 import PresenceBanner from '../../../components/PresenceBanner';
 import usePresence from '../../../hooks/usePresence';
 import PropertyForm from '../../../components/properties/PropertyForm';
-import ShortcutButton from '../../../components/ShortcutButton';
+import { Button } from '../../../components/ui/button';
 import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -172,19 +172,21 @@ function Property() {
     <Page
       loading={isLoading}
       ActionBar={
-        <div className="grid grid-cols-5 gap-1.5 md:gap-4">
-          <ShortcutButton
-            label={t('Back')}
-            Icon={LuArrowLeft}
-            onClick={handleBack}
-          />
-          <ShortcutButton
-            label={t('Delete')}
-            Icon={LuTrash}
+        <div className="flex items-center justify-between gap-2">
+          <Button variant="ghost" size="sm" onClick={handleBack} className="gap-2">
+            <LuArrowLeft className="size-4" />
+            {t('Back')}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
             onClick={() => setOpenConfirmDeletePropertyDialog(true)}
-            className="col-start-2 col-end-2"
-            dataCy="removeResourceButton"
-          />
+            data-cy="removeResourceButton"
+            className="gap-2"
+          >
+            <LuTrash className="size-4" />
+            {t('Delete')}
+          </Button>
         </div>
       }
       dataCy="propertyPage"

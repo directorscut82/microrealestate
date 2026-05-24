@@ -2,176 +2,182 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * MicroRealEstate — The Pangrati Apartment
+ * Token system per /DESIGN.md.
+ *
+ * Tokens are exposed in two forms so Tailwind's color helpers
+ * (`bg-primary/80`, etc.) keep working:
+ *
+ *   --color-<name>      OKLCH literal, used directly in CSS
+ *   --<role>            comma-separated H S L triplet legacy form,
+ *                       consumed by tailwind.config.js via hsl(var(--role))
+ *
+ * The DESIGN.md frontmatter is the canonical definition; if the two ever
+ * disagree, the OKLCH values below win.
+ */
+
 @layer base {
   :root {
-    --body: 210 20% 98.04%;
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --success: 142.1 76.2% 36.3%;
-    --success-foreground: 355.7 100% 97.3%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --warning: 24.6 95% 53.1%;
-    --warning-foreground: 60 9.1% 97.8%;
-    --border: 220 13.04% 90.98;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
-    --chart-1: 0 72% 51%;
-    --chart-2: 142 71% 45%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --chart-1-border: 0 72% 40%;
-    --chart-2-border: 142 71% 35%;
+    /* Inks (text) */
+    --color-ink: oklch(20% 0.012 240);
+    --color-ink-soft: oklch(34% 0.010 240);
+    --color-ink-muted: oklch(50% 0.008 240);
+
+    /* Papers (surfaces) — moderate warmth.
+     * Bone is the lifted card surface (97%). Cream is the page (94%).
+     * The 3-step gap separates cards from the body. Rail uses cream so
+     * it reads as part of the page, not a card; cards on cream then sit
+     * on bone and clearly elevate. */
+    --color-bone: oklch(97% 0.010 78);
+    --color-cream: oklch(94% 0.014 78);
+    --color-stone: oklch(91% 0.012 70);
+    --color-stone-line: oklch(86% 0.018 78);
+    --color-marble: oklch(80% 0.018 78);
+
+    /* Accents — Petrol is the single earned accent.
+     * Quiet dark teal-blue, far from the original cobalt sea. Used only for
+     * focus rings, the active rail indicator, and link hover. Oxide and
+     * olive cover status (error / success). Token names kept as "sea" so
+     * existing callers don't have to be rewritten — they now point to
+     * petrol. */
+    /* Petrol — swatch hue/lightness, chroma raised so small UI controls
+     * (toggles, donut arcs, focus rings) actually read as teal at small
+     * sizes. Big blocks looked the same; tiny pills now show the color. */
+    --color-sea: oklch(35% 0.090 220);
+    --color-sea-deep: oklch(28% 0.092 220);
+    --color-sea-tint: color-mix(in oklch, oklch(35% 0.090 220) 15%, oklch(98% 0 0));
+    --color-oxide: oklch(55% 0.144 35);
+    --color-oxide-tint: oklch(92% 0.034 35);
+    --color-olive: oklch(48% 0.080 130);
+    --color-olive-tint: oklch(92% 0.030 130);
+    /* Dashboard chart colors live in components/dashboard/MonthFigures.js
+     * (paidColor/unpaidColor exports) so SVG fill works directly. These
+     * tokens are kept only as fallback for legacy consumers. */
+    --chart-paid: #7a8c4a;
+    --chart-unpaid: #bdb8b1;
+
+    /* Shadows — overlays only */
+    --shadow-floating:
+      0 8px 24px oklch(20% 0.012 240 / 0.08),
+      0 1px 2px oklch(20% 0.012 240 / 0.06);
+    --shadow-modal:
+      0 24px 64px oklch(20% 0.012 240 / 0.16),
+      0 2px 4px oklch(20% 0.012 240 / 0.08);
+    --shadow-toast: 0 12px 32px oklch(20% 0.012 240 / 0.12);
+
+    /* Motion */
+    --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+    --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+    --duration-fast: 120ms;
+    --duration-base: 180ms;
+    --duration-slow: 260ms;
+
+    /*
+     * shadcn/Tailwind-compatible HSL aliases.
+     * Each value is the closest sRGB approximation of its OKLCH counterpart
+     * so the existing Tailwind theme keys (bg-primary, text-foreground, etc.)
+     * keep producing the right paint. New code should prefer the named
+     * tokens above (sea, ink, bone…) over the role aliases.
+     */
+    --canvas: 40 30% 92%;          /* cream — visibly warm aged paper */
+    --background: 40 28% 95%;    /* bone */
+    --foreground: 230 20% 14%;   /* ink */
+    --card: 40 28% 95%;          /* bone */
+    --card-foreground: 230 20% 14%;
+    --popover: 40 28% 95%;       /* bone */
+    --popover-foreground: 230 20% 14%;
+    --primary: 230 20% 14%;      /* ink (primary buttons are ink) */
+    --primary-foreground: 40 28% 95%;
+    --secondary: 40 30% 92%;     /* cream */
+    --secondary-foreground: 230 20% 14%;
+    --muted: 40 28% 87%;         /* stone */
+    --muted-foreground: 230 8% 38%; /* ink-muted */
+    --accent: 40 30% 92%;        /* cream — used as ghost-button hover, etc. */
+    --accent-foreground: 230 20% 14%;
+    --success: 130 38% 32%;      /* olive */
+    --success-foreground: 40 28% 95%;
+    --destructive: 18 58% 44%;   /* oxide */
+    --destructive-foreground: 40 28% 95%;
+    --warning: 18 58% 44%;       /* oxide (we use one warning color) */
+    --warning-foreground: 40 28% 95%;
+    --border: 40 24% 82%;        /* stone-line — warm hairline */
+    --input: 40 24% 82%;         /* stone-line */
+    --ring: 200 36% 30%;         /* petrol oklch(35% 0.050 220) approx */
+    --radius: 0.625rem;          /* 10px — buttons, inputs */
+    --chart-1: 200 36% 30%;
+    --chart-2: 130 38% 32%;      /* olive */
+    --chart-3: 18 58% 44%;       /* oxide */
+    --chart-4: 38 18% 60%;       /* marble */
+    --chart-5: 230 20% 32%;      /* ink-soft */
+    --chart-1-border: 218 70% 28%;
+    --chart-2-border: 130 42% 24%;
   }
 
   .dark {
-    --body: 222.2 84% 4.9%;
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 217.2 32.6% 12%;
-    --card-foreground: 210 40% 98%;
-    --popover: 217.2 32.6% 12%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --success: 142.1 70% 45%;
-    --success-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 50%;
-    --destructive-foreground: 210 40% 98%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-    --border: 217.2 32.6% 20%;
-    --input: 217.2 32.6% 20%;
-    --ring: 224.3 76.3% 48%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-    --chart-1-border: 220 70% 40%;
-    --chart-2-border: 160 60% 15%;
-  }
+    /*
+     * Pangrati at midnight. Same warm materials, the lights are out.
+     * Neutrals stay at hue ~85 (paper warmth). Sea is the only blue.
+     */
+    /*
+     * Dark theme — cool slate, GitHub-Dark-Dimmed reference.
+     * Hue 250, very low chroma 0.008–0.014. Low enough to never read as
+     * blue, high enough that the surfaces have life and don't feel sterile.
+     * Page at 20% / card at 26% is the tonal gap that loved dark themes
+     * use (GitHub Dimmed, Linear, Apple system dark).
+     */
+    --color-ink: oklch(94% 0.008 250);
+    --color-ink-soft: oklch(76% 0.010 250);
+    --color-ink-muted: oklch(60% 0.012 250);
 
-  .midnight {
-    --body: 260 60% 7%;
-    --background: 260 50% 9%;
-    --foreground: 240 20% 92%;
-    --card: 260 45% 13%;
-    --card-foreground: 240 20% 92%;
-    --popover: 260 45% 13%;
-    --popover-foreground: 240 20% 92%;
-    --primary: 263 70% 65%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 260 40% 18%;
-    --secondary-foreground: 240 20% 92%;
-    --muted: 260 30% 18%;
-    --muted-foreground: 240 15% 60%;
-    --accent: 260 40% 20%;
-    --accent-foreground: 240 20% 92%;
-    --success: 160 70% 45%;
-    --success-foreground: 0 0% 100%;
-    --destructive: 0 70% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --warning: 45 90% 55%;
-    --warning-foreground: 0 0% 0%;
-    --border: 260 30% 20%;
-    --input: 260 30% 20%;
-    --ring: 263 70% 65%;
-    --chart-1: 263 70% 65%;
-    --chart-2: 200 60% 55%;
-    --chart-3: 330 60% 60%;
-    --chart-4: 180 50% 50%;
-    --chart-5: 45 70% 60%;
-    --chart-1-border: 263 70% 55%;
-    --chart-2-border: 200 60% 45%;
-  }
+    --color-bone: oklch(26% 0.014 250);    /* card surface */
+    --color-cream: oklch(20% 0.012 250);   /* page surface */
+    --color-stone: oklch(32% 0.016 250);
+    --color-stone-line: oklch(38% 0.018 250);
+    --color-marble: oklch(50% 0.018 250);
 
-  .forest {
-    --body: 150 25% 96%;
-    --background: 150 15% 98%;
-    --foreground: 150 40% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 150 40% 10%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 150 40% 10%;
-    --primary: 152 76% 32%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 145 25% 91%;
-    --secondary-foreground: 150 30% 15%;
-    --muted: 145 15% 92%;
-    --muted-foreground: 150 10% 40%;
-    --accent: 145 25% 89%;
-    --accent-foreground: 150 30% 15%;
-    --success: 152 76% 32%;
-    --success-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --warning: 35 92% 50%;
-    --warning-foreground: 0 0% 0%;
-    --border: 145 15% 86%;
-    --input: 145 15% 86%;
-    --ring: 152 76% 32%;
-    --chart-1: 152 76% 32%;
-    --chart-2: 200 55% 45%;
-    --chart-3: 35 80% 50%;
-    --chart-4: 100 50% 45%;
-    --chart-5: 280 40% 55%;
-    --chart-1-border: 152 76% 22%;
-    --chart-2-border: 200 55% 35%;
-  }
+    --color-sea: oklch(70% 0.060 220);
+    --color-sea-deep: oklch(60% 0.066 220);
+    --color-sea-tint: oklch(30% 0.040 220);
+    --color-oxide: oklch(74% 0.110 35);
+    --color-oxide-tint: oklch(34% 0.062 35);
+    --color-olive: oklch(72% 0.078 130);
+    --color-olive-tint: oklch(32% 0.046 130);
+    --chart-paid: #9bb15c;
+    --chart-unpaid: #6a6864;
 
-  .sunset {
-    --body: 30 30% 96%;
-    --background: 30 20% 98%;
-    --foreground: 20 40% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 20 40% 10%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 20 40% 10%;
-    --primary: 16 90% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 25 30% 91%;
-    --secondary-foreground: 20 30% 15%;
-    --muted: 25 15% 92%;
-    --muted-foreground: 20 10% 42%;
-    --accent: 25 30% 89%;
-    --accent-foreground: 20 30% 15%;
-    --success: 152 70% 35%;
-    --success-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --warning: 45 95% 50%;
-    --warning-foreground: 0 0% 0%;
-    --border: 25 15% 85%;
-    --input: 25 15% 85%;
-    --ring: 16 90% 50%;
-    --chart-1: 16 90% 50%;
-    --chart-2: 45 80% 45%;
-    --chart-3: 350 65% 55%;
-    --chart-4: 30 60% 60%;
-    --chart-5: 0 55% 50%;
-    --chart-1-border: 16 90% 40%;
-    --chart-2-border: 45 80% 35%;
+    /* HSL aliases — cool slate. */
+    --canvas: 222 14% 16%;
+    --background: 222 14% 22%;
+    --foreground: 220 16% 92%;
+    --card: 222 14% 22%;
+    --card-foreground: 220 16% 92%;
+    --popover: 222 14% 22%;
+    --popover-foreground: 220 16% 92%;
+    --primary: 220 16% 92%;       /* ink (text) — buttons stay neutral */
+    --primary-foreground: 222 14% 16%;
+    --secondary: 222 14% 28%;
+    --secondary-foreground: 220 16% 92%;
+    --muted: 222 14% 28%;
+    --muted-foreground: 220 12% 70%;
+    --accent: 222 14% 28%;
+    --accent-foreground: 220 16% 92%;
+    --success: 130 28% 58%;
+    --success-foreground: 222 14% 16%;
+    --destructive: 18 56% 62%;
+    --destructive-foreground: 222 14% 16%;
+    --warning: 18 56% 62%;
+    --warning-foreground: 222 14% 16%;
+    --border: 222 14% 32%;
+    --input: 222 14% 32%;
+    --ring: 200 26% 60%;          /* petrol (lifted) */
+    --chart-1: 200 26% 60%;
+    --chart-2: 130 30% 58%;
+    --chart-3: 18 58% 62%;
+    --chart-4: 38 14% 64%;
+    --chart-5: 38 18% 88%;
+    --chart-1-border: 218 60% 50%;
+    --chart-2-border: 130 30% 44%;
   }
 }
 
@@ -179,17 +185,132 @@
   * {
     @apply border-border;
   }
+
+  html,
   body {
-    @apply bg-body text-foreground;
-    font-family: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
+    /* Surface uses the cream page color, content cards lift onto bone. */
+    background-color: hsl(var(--canvas));
+  }
+
+  body {
+    @apply text-foreground;
+    font-family: var(--font-sans), 'Manrope', ui-sans-serif, system-ui,
+      -apple-system, 'Segoe UI', sans-serif;
     font-feature-settings:
-      'rlig' 1,
+      'kern' 1,
+      'liga' 1,
       'calt' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-weight: 400;
+  }
+
+  /*
+   * font-display is a legacy alias that now resolves to the sans family.
+   * Hierarchy comes from size + weight, not a separate display family.
+   */
+  .font-display,
+  .font-headline {
+    font-family: var(--font-sans), 'Manrope', ui-sans-serif, system-ui,
+      sans-serif;
+    font-feature-settings:
+      'kern' 1,
+      'liga' 1,
+      'calt' 1;
+  }
+
+  /* Tabular monospace for any number that stacks. */
+  .font-mono,
+  .tabular {
+    font-family: var(--font-mono), 'IBM Plex Mono', 'SF Mono', ui-monospace,
+      Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.005em;
+  }
+
+  /* Sea-blue focus ring on every interactive element. Visible on bone + cream. */
+  :focus-visible {
+    outline: none;
+  }
+
+  /*
+   * The Backdrop Rule. Modal-class overlays use ink at 32% alpha rather than
+   * default Radix black so the warm tone of the page survives.
+   */
+  [data-radix-dialog-overlay],
+  [data-radix-drawer-overlay] {
+    background-color: oklch(20% 0.012 240 / 0.5) !important;
+    backdrop-filter: blur(2px);
+  }
+
+  /* prefers-reduced-motion: cut non-essential motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
 @layer utilities {
   .w-screen-nomargin-sm {
     width: calc(100vw - (2 * (0.5rem)));
+  }
+
+  /* Ink-on-bone color tokens for the rare case we need them outside Tailwind. */
+  .text-ink {
+    color: var(--color-ink);
+  }
+  .text-ink-soft {
+    color: var(--color-ink-soft);
+  }
+  .text-ink-muted {
+    color: var(--color-ink-muted);
+  }
+  .bg-bone {
+    background-color: var(--color-bone);
+  }
+  .bg-cream {
+    background-color: var(--color-cream);
+  }
+  .bg-stone {
+    background-color: var(--color-stone);
+  }
+  .border-stone-line {
+    border-color: var(--color-stone-line);
+  }
+  .border-marble {
+    border-color: var(--color-marble);
+  }
+
+  /*
+   * The active-row indicator. Inset 2px sea-blue bar on the leading edge,
+   * implemented as box-shadow so it never becomes a banned side-stripe border.
+   */
+  .indicator-active {
+    box-shadow: inset 2px 0 0 var(--color-sea);
+  }
+
+  /* Floating overlays: popover, dropdown, command palette. */
+  .shadow-floating {
+    box-shadow: var(--shadow-floating);
+  }
+  .shadow-modal {
+    box-shadow: var(--shadow-modal);
+  }
+  .shadow-toast {
+    box-shadow: var(--shadow-toast);
+  }
+
+  .ease-out-quart {
+    transition-timing-function: var(--ease-out-quart);
+  }
+  .ease-out-expo {
+    transition-timing-function: var(--ease-out-expo);
   }
 }

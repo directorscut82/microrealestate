@@ -1,9 +1,9 @@
 /* eslint-disable sort-imports */
-import { Card, CardContent } from '../../components/ui/card';
 import { LuKeyRound, LuStopCircle, LuUserCircle } from 'react-icons/lu';
 import { TbCashRegister } from 'react-icons/tb';
 import { useCallback, useContext, useMemo, useState } from 'react';
 import { cn } from '../../utils';
+import { Card, CardContent } from '../ui/card';
 import FirstConnection from './FirstConnection';
 import NewLeaseDialog from '../organization/lease/NewLeaseDialog';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
@@ -16,8 +16,16 @@ import TerminateLeaseDialog from '../tenants/TerminateLeaseDialog';
 import { useMediaQuery } from 'usehooks-ts';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
-import { WelcomeIllustration } from '../../components/Illustrations';
 
+/*
+ * Shortcuts — DESIGN.md app shell shortcut bar.
+ *
+ * On mobile, a fixed bottom strip with a top hairline (no card-in-card; the
+ * strip is its own surface). On desktop, an inline grid of bone tiles.
+ *
+ * First-connection mode embeds an illustration + step list inside a Card,
+ * which is the legitimate use of a card here (welcoming new users).
+ */
 function Shortcuts({
   firstConnection = false,
   className,
@@ -71,10 +79,7 @@ function Shortcuts({
     <>
       {firstConnection ? (
         <Card className={className}>
-          <CardContent className="flex items-center justify-center pt-6 ">
-            <div className="hidden lg:block h-full w-1/2">
-              <WelcomeIllustration />
-            </div>
+          <CardContent className="pt-6">
             <FirstConnection
               hasContract={hasContract}
               hasProperty={hasProperty}
@@ -86,10 +91,10 @@ function Shortcuts({
           </CardContent>
         </Card>
       ) : (
-        <Card
+        <div
           className={cn(
-            'fixed grid grid-cols-5 gap-1.5 bottom-0 left-0 w-full z-50 border-t rounded-none',
-            'md:relative md:z-auto md:rounded-md md:border md:gap-4 md:p-4',
+            'fixed grid grid-cols-5 gap-px bottom-0 left-0 w-full z-40 bg-bone border-t border-stone-line',
+            'md:relative md:z-auto md:bg-transparent md:border-0 md:gap-3',
             className
           )}
         >
@@ -98,32 +103,28 @@ function Shortcuts({
             label={isDesktop ? t('Pay a rent') : t('Pay')}
             disabled={!dashboardData?.overview?.tenantCount}
             onClick={handlePayment}
-            className="md:flex md:flex-col md:items-center md:justify-start"
-            data-cy="shortcutSettleRent"
+            dataCy="shortcutSettleRent"
           />
 
           <ShortcutButton
             Icon={LuStopCircle}
             label={isDesktop ? t('Terminate a lease') : t('Terminate')}
             onClick={handleTerminateLease}
-            className="md:flex md:flex-col md:items-center md:justify-start"
-            data-cy="shortcutTerminateLease"
+            dataCy="shortcutTerminateLease"
           />
 
           <ShortcutButton
             Icon={LuKeyRound}
             label={isDesktop ? t('Add a property') : t('Add')}
             onClick={handleAddProperty}
-            className="md:flex md:flex-col md:items-center md:justify-start"
-            data-cy="shortcutAddProperty"
+            dataCy="shortcutAddProperty"
           />
 
           <ShortcutButton
             Icon={LuUserCircle}
             label={isDesktop ? t('Add a tenant') : t('Add')}
             onClick={handleAddTenant}
-            className="md:flex md:flex-col md:items-center md:justify-start"
-            data-cy="shortcutAddTenant"
+            dataCy="shortcutAddTenant"
           />
 
           {store.user.isAdministrator && (
@@ -131,11 +132,10 @@ function Shortcuts({
               Icon={RiContractLine}
               label={isDesktop ? t('Create a contract') : t('Create')}
               onClick={handleCreateContract}
-              className="md:flex md:flex-col md:items-center md:justify-start"
-              data-cy="shortcutCreateContract"
+              dataCy="shortcutCreateContract"
             />
           )}
-        </Card>
+        </div>
       )}
       <NewPaymentDialog
         open={openNewPaymentDialog}

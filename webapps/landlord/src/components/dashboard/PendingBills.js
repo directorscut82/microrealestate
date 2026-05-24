@@ -21,6 +21,14 @@ import { useMemo } from 'react';
 import NumberFormat from '../NumberFormat';
 import useTranslation from 'next-translate/useTranslation';
 
+/*
+ * PendingBills — DESIGN.md ledger pattern.
+ *
+ * Building groups stack as labeled tables (no nested cards). Overdue rows
+ * tint the entire row in oxide-tint (full background, never side-stripe).
+ * Numbers use the table's numeric column treatment.
+ */
+
 export default function PendingBills({ className, dashboardData }) {
   const { t } = useTranslation('common');
   const pendingBills = dashboardData?.pendingBills || [];
@@ -51,42 +59,42 @@ export default function PendingBills({ className, dashboardData }) {
   return (
     <Card className={cn('', className)}>
       <CardHeader>
-        <CardTitle className="flex items-center justify-between font-normal text-xs xl:text-base">
-          <span className="flex items-center gap-2">
-            <LuReceipt className="size-5" />
-            {t('Pending Bills')}
-          </span>
-          {overdueBills.length > 0 && (
-            <Badge variant="destructive" className="text-xs">
-              <LuAlertTriangle className="size-3 mr-1" />
-              {overdueBills.length} {t('overdue')}
-            </Badge>
-          )}
-        </CardTitle>
-        <CardDescription className="flex justify-between text-xs">
-          <span>{t('Utility bills awaiting payment')}</span>
-          <span className="font-medium">
-            <NumberFormat value={totalPending} showZero={true} />
-          </span>
-        </CardDescription>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1 min-w-0">
+            <CardTitle className="font-sans text-title font-semibold flex items-center gap-2 text-ink">
+              <LuReceipt className="size-4 text-ink-muted" />
+              {t('Pending Bills')}
+            </CardTitle>
+            <CardDescription>
+              {t('Utility bills awaiting payment')}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {overdueBills.length > 0 && (
+              <Badge variant="overdue">
+                <LuAlertTriangle className="size-3" />
+                {overdueBills.length} {t('overdue')}
+              </Badge>
+            )}
+            <span className="font-mono tabular-nums text-title font-semibold text-ink">
+              <NumberFormat value={totalPending} showZero={true} />
+            </span>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
+        <div className="space-y-5">
           {pendingBills.map((group) => (
             <div key={group.buildingId}>
-              <div className="text-sm font-medium text-muted-foreground mb-2">
+              <div className="text-label font-medium text-ink-muted uppercase tracking-wide mb-2 px-1">
                 {group.buildingName}
               </div>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs">{t('Expense')}</TableHead>
-                    <TableHead className="text-xs text-right">
-                      {t('Amount')}
-                    </TableHead>
-                    <TableHead className="text-xs text-right">
-                      {t('Due date')}
-                    </TableHead>
+                    <TableHead>{t('Expense')}</TableHead>
+                    <TableHead numeric>{t('Amount')}</TableHead>
+                    <TableHead numeric>{t('Due date')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -96,28 +104,34 @@ export default function PendingBills({ className, dashboardData }) {
                     return (
                       <TableRow
                         key={bill._id}
-                        className={cn(isOverdue && 'bg-destructive/5')}
+                        className={cn(
+                          isOverdue && 'bg-oxide-tint/60 hover:bg-oxide-tint'
+                        )}
                       >
-                        <TableCell className="text-sm">
-                          <div>{bill.expenseName}</div>
+                        <TableCell>
+                          <div className="text-ink">{bill.expenseName}</div>
                           {bill.periodStart && bill.periodEnd && (
-                            <div className="text-xs text-muted-foreground">
-                              {moment(bill.periodStart).format('DD/MM')} —{' '}
+                            <div className="text-label text-ink-muted mt-0.5">
+                              {moment(bill.periodStart).format('DD/MM')}
+                              {' – '}
                               {moment(bill.periodEnd).format('DD/MM/YY')}
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm text-right font-medium">
+                        <TableCell numeric className="font-medium">
                           <NumberFormat
                             value={bill.totalAmount}
                             showZero={true}
                           />
                         </TableCell>
-                        <TableCell className="text-sm text-right">
+                        <TableCell numeric>
                           {bill.dueDate ? (
                             <span
                               className={cn(
-                                isOverdue && 'text-destructive font-medium'
+                                'font-mono tabular-nums',
+                                isOverdue
+                                  ? 'text-oxide font-semibold'
+                                  : 'text-ink'
                               )}
                             >
                               {moment(bill.dueDate).format('DD/MM/YY')}

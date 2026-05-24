@@ -50,3 +50,10 @@ docker-compose.nas.yml
 
 # Local VS Code multi-root workspace file
 *.code-workspace
+
+# macOS Finder metadata
+.DS_Store
+
+# Local agent tooling / session artifacts
+.claude/
+.impeccable/
