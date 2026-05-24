@@ -85,6 +85,19 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
    finch logs microrealestate-authenticator-1 2>&1 | tail -20
    ```
 
+## HTTP 500 from gateway — general debug path
+
+Before pattern-matching on a known failure in the table below, walk this checklist. It catches ~95% of "gateway returned 500" symptoms in dev.
+
+1. **Are all 11 containers up?** `finch ps -a --format '{{.Names}} {{.Status}}'` — every line must say `Up`. Anything `Exited` or missing is the prime suspect.
+2. **Did the gateway log a CORS rejection?** `finch logs microrealestate-gateway-1 2>&1 | grep -i cors | tail -5`. If yes → set `APP_DOMAIN=localhost:8080` in `.env` and recreate the gateway (see Common Issues below).
+3. **Did the gateway log "Missing target option"?** That's the proxy crashing because `API_URL` (or another `*_URL`) is unset. Check `.env`.
+4. **Is the downstream service alive?** The gateway is a proxy — most 500s come from the service it proxies to (api, authenticator, etc.). For a signin failure, look at: `finch logs microrealestate-authenticator-1 2>&1 | tail -20`. For tenant data: `finch logs microrealestate-api-1 2>&1 | tail -20`.
+5. **Did the request body get rejected by `express-mongo-sanitize`?** Look for `$` characters in the request body — they get stripped silently. Unusual but possible.
+6. **Read the code that emits the error** before guessing. The stack trace in the gateway log tells you exactly which file and line; open it before proposing a fix.
+
+The signin-specific quick-triage lives in `AGENTS.md` (top of file) so an agent dispatched cold has it in their first read.
+
 ## Common Issues
 
 | Symptom | Cause | Fix |

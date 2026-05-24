@@ -48,7 +48,11 @@ Verify it's running:
 
 ## 3. Configure the Environment
 
-Copy the env template and generate secrets:
+The repo ships two versioned env files:
+- `base.env` — defaults (kept in git). Read by the CLI scripts, NOT by docker compose.
+- `.env.domain` — minimal template you copy into `.env` for local dev.
+
+Copy the template and generate secrets:
 
 ```shell
 cp .env.domain .env
@@ -69,6 +73,19 @@ Update these keys in `.env` with unique generated values:
 - `CIPHER_IV_KEY`
 - `CIPHER_KEY`
 - `REDIS_PASSWORD`
+
+**These three lines must also be in `.env`** (not in `.env.domain` by default — easy to miss):
+
+```
+API_URL=http://api:8200/api/v2
+MONGO_URL=mongodb://mongo/mredb
+APP_DOMAIN=localhost:8080
+```
+
+Why each is needed:
+- `API_URL` — gateway proxy target. Missing → gateway crashes silently with `[HPM] Missing "target" option`. Docker compose does NOT expand variables from `base.env`, only from `.env`.
+- `MONGO_URL` — points at the right database. `base.env` defaults to `demodb`, which is wrong. Real data lives in `mredb`.
+- `APP_DOMAIN` — gateway CORS allowlist. Without it, signin returns HTTP 500 with `CORS blocked origin: http://localhost:8080` because `DOMAIN_URL` parsing strips the port. See `.kiro/steering/architecture-patterns.md` for the full gotcha.
 
 The email configuration (`GMAIL_EMAIL`, `SMTP_*`, etc.) can be left as defaults for local testing — email features just won't work.
 
