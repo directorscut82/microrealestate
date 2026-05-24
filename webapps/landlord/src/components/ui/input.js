@@ -12,11 +12,18 @@ import { cn } from '../../utils';
  * with tabular numerals, right-aligned. The Tabular-Numeral Rule.
  */
 const Input = React.forwardRef(
-  ({ className, type, variant, ...props }, ref) => {
+  ({ className, type, variant, step, ...props }, ref) => {
     const isNumeric = variant === 'numeric';
+    // For type="number", default step="any" so decimal values are accepted.
+    // Native HTML <input type="number"> defaults to step="1" which silently
+    // rejects fractional input on most browsers — bites surface in m²,
+    // monetary amounts, thousandths, etc. Callers can still override (e.g.
+    // step="0.01" for currency or step="1" for whole-number-only fields).
+    const effectiveStep = type === 'number' ? (step ?? 'any') : step;
     return (
       <input
         type={type}
+        step={effectiveStep}
         className={cn(
           'flex h-10 w-full rounded-md border border-stone-line bg-bone px-3.5 py-2 text-body text-ink',
           'transition-colors duration-fast ease-out-quart',
