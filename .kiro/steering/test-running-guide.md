@@ -99,6 +99,7 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
 | Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
 | `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
 | Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
+| Gateway logs `CORS blocked origin: http://localhost:8080` and signin returns 500 | `DOMAIN_URL` parsing strips the port (`destructUrl()` returns hostname only) | Add `APP_DOMAIN=localhost:8080` to `.env`. Ensure `docker-compose.microservices.base.yml` exports `- APP_DOMAIN` to the gateway. Recreate the container (`finch rm -f microrealestate-gateway-1 && finch compose ... up -d gateway`) — `restart` does NOT reload env. |
 
 ## How to Run Tests (without getting stuck)
 
@@ -106,7 +107,8 @@ Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or
 1. **Container runtime is `finch`** (not docker). All commands use `finch compose`.
 2. **`.env` must contain `API_URL=http://api:8200/api/v2`** — docker compose does NOT read `base.env` for variable substitution. If `API_URL` is missing, the gateway crashes silently with `Missing "target" option`.
 3. **`.env` must have `MONGO_URL=mongodb://mongo/mredb`** — base.env defaults to `demodb` which is wrong. All real data is in `mredb`.
-4. **Dev mode required for code changes** — GHCR images don't pick up local changes. Always start with dev compose overlay.
+4. **`.env` must have `APP_DOMAIN=localhost:8080`** — without it the gateway's CORS allowlist is built from `DOMAIN_URL=http://localhost`, whose port gets stripped by `destructUrl()`. The browser origin `http://localhost:8080` then fails CORS with HTTP 500 and the signin POST never reaches the authenticator.
+5. **Dev mode required for code changes** — GHCR images don't pick up local changes. Always start with dev compose overlay.
 
 ### Start services (dev mode)
 ```bash
@@ -150,6 +152,7 @@ cd e2e && npx cypress run --spec cypress/e2e/04_contracts.cy.js
 |---------|-------|-----|
 | Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
 | App shows signup page but user exists | `MONGO_URL` pointing to wrong database | Verify `.env` has `MONGO_URL=mongodb://mongo/mredb` |
+| Signin POST returns HTTP 500, gateway logs `CORS blocked origin: http://localhost:8080` | `APP_DOMAIN` not set or not exported to gateway container | Add `APP_DOMAIN=localhost:8080` to `.env`. Recreate the gateway container (`restart` does NOT reload env vars). |
 | Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
 | `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
 | Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
