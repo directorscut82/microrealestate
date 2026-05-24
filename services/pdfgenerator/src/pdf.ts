@@ -1,5 +1,5 @@
 import * as PdfEngine from './engine/chromeheadless.js';
-import { logger, Service, ServiceError } from '@microrealestate/common';
+import { Collections, logger, Service, ServiceError } from '@microrealestate/common';
 import dataPicker from './datapicker.js';
 import ejs from 'ejs';
 import fs from 'fs';
@@ -36,21 +36,73 @@ const settings: Record<string, any> = {
 };
 
 // Background cleanup so generated PDFs and intermediate temp files are
-// not retained forever. Runs every 5 minutes, deletes anything older
-// than 1 hour. .unref() so the timer never holds the process open at
-// shutdown.
+// not retained forever. Runs every 5 minutes. .unref() so the timer never
+// holds the process open at shutdown.
+//
+// TEMPORARY_DIRECTORY / PDF_DIRECTORY hold short-lived render artifacts and
+// expire after 1h. UPLOADS_DIRECTORY holds user-uploaded source files that
+// might be referenced by Document records, so we use a longer 24h floor and
+// additionally skip any file that is referenced by an existing Document.
+// This catches orphans from failed POST /documents calls without ever
+// removing a live attachment.
 let cleanupTimer: NodeJS.Timeout | null = null;
 const CLEANUP_INTERVAL_MS = 300_000; // 5m
-const FILE_MAX_AGE_MS = 3_600_000; // 1h
+const TEMP_FILE_MAX_AGE_MS = 3_600_000; // 1h — temp + pdf
+const UPLOAD_FILE_MAX_AGE_MS = 86_400_000; // 24h — uploads (longer than render artifacts)
+
+async function _collectReferencedUploadUrls(
+  uploadsRoot: string
+): Promise<Set<string>> {
+  // Pull every file-typed Document and translate its stored relative URL
+  // to an absolute path under uploadsRoot, matching the layout used by the
+  // upload route. We compare absolute paths so a moved uploads root or a
+  // weird `..` in a stored URL still maps back consistently.
+  const referenced = new Set<string>();
+  try {
+    const docs: any[] = await Collections.Document.find(
+      { type: 'file' },
+      { url: 1 }
+    ).lean();
+    for (const doc of docs) {
+      if (!doc?.url || typeof doc.url !== 'string') continue;
+      const resolved = path.resolve(uploadsRoot, doc.url);
+      referenced.add(resolved);
+    }
+  } catch (err) {
+    logger.warn(`pdf cleanup: failed to load Document refs: ${err}`);
+  }
+  return referenced;
+}
+
+function _walkDirSync(dir: string): string[] {
+  const out: string[] = [];
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      out.push(...(_walkDirSync(p) as string[]));
+    } else if (e.isFile()) {
+      out.push(p);
+    }
+  }
+  return out;
+}
 
 function startCleanupTimer() {
   if (cleanupTimer) {
     return;
   }
-  cleanupTimer = setInterval(() => {
-    const { TEMPORARY_DIRECTORY, PDF_DIRECTORY } =
+  cleanupTimer = setInterval(async () => {
+    const { TEMPORARY_DIRECTORY, PDF_DIRECTORY, UPLOADS_DIRECTORY } =
       Service.getInstance().envConfig.getValues();
     const now = Date.now();
+
+    // Render artifacts — flat directory, 1h floor.
     for (const dir of [
       TEMPORARY_DIRECTORY as string,
       PDF_DIRECTORY as string
@@ -63,7 +115,7 @@ function startCleanupTimer() {
           const p = path.join(dir, f);
           try {
             const stat = fs.statSync(p);
-            if (now - stat.mtimeMs > FILE_MAX_AGE_MS) {
+            if (now - stat.mtimeMs > TEMP_FILE_MAX_AGE_MS) {
               fs.rmSync(p, { recursive: true, force: true });
             }
           } catch (err) {
@@ -72,6 +124,29 @@ function startCleanupTimer() {
         }
       } catch (err) {
         logger.warn(`pdf cleanup: failed to read dir ${dir}: ${err}`);
+      }
+    }
+
+    // Uploads — nested by org, 24h floor, skip if referenced by a Document.
+    const uploadsRoot = UPLOADS_DIRECTORY as string;
+    if (uploadsRoot && fs.existsSync(uploadsRoot)) {
+      try {
+        const resolvedRoot = path.resolve(uploadsRoot);
+        const referenced = await _collectReferencedUploadUrls(resolvedRoot);
+        const files = _walkDirSync(resolvedRoot);
+        for (const p of files) {
+          try {
+            if (referenced.has(path.resolve(p))) continue;
+            const stat = fs.statSync(p);
+            if (now - stat.mtimeMs > UPLOAD_FILE_MAX_AGE_MS) {
+              fs.rmSync(p, { force: true });
+            }
+          } catch (err) {
+            logger.warn(`pdf cleanup: failed to inspect upload ${p}: ${err}`);
+          }
+        }
+      } catch (err) {
+        logger.warn(`pdf cleanup: failed to scan uploads ${uploadsRoot}: ${err}`);
       }
     }
   }, CLEANUP_INTERVAL_MS);

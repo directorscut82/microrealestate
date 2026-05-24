@@ -79,11 +79,36 @@ export async function update(req: ReqWithId, res: Res) {
     lease.active = lease.numberOfTerms > 0 && !!lease.timeRange;
   }
 
+  // Fetch the existing lease BEFORE the in-use guard so we can compare the
+  // incoming payload against the persisted document. Without this ordering
+  // we cannot detect attempts to mutate protected fields on an in-use lease.
+  const existingLease: any = await Collections.Lease.findOne({
+    realmId: realm!._id,
+    _id: lease._id
+  }).lean();
+
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
 
-  const existingLease: any = setOfUsedLeases.has(String(lease._id))
-    ? await Collections.Lease.findOne({ realmId: realm!._id, _id: lease._id }).lean()
-    : null;
+  // When a lease is already referenced by tenants, refuse changes to fields
+  // that would invalidate previously-computed rent ledgers (numberOfTerms,
+  // timeRange). Previously these fields were silently dropped from the $set
+  // payload — the request returned 200 but the values never persisted, which
+  // is worse than failing loud because the user has no signal their change
+  // was rejected.
+  if (setOfUsedLeases.has(String(lease._id))) {
+    const protectedFields = ['numberOfTerms', 'timeRange'];
+    const requestedChange = protectedFields.some(
+      (f) =>
+        lease[f] !== undefined &&
+        String(lease[f]) !== String(existingLease?.[f])
+    );
+    if (requestedChange) {
+      throw new ServiceError(
+        'Cannot change numberOfTerms or timeRange on a lease in use by tenants',
+        422
+      );
+    }
+  }
 
   // Strip identity / version fields from the unrestricted-edit payload —
   // $set must not target the same paths used in the filter clause, otherwise

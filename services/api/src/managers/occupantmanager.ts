@@ -292,6 +292,26 @@ export async function add(req: Req, res: Res) {
     throw new ServiceError('company must be a string', 422);
   }
 
+  // Reject empty/whitespace propertyId entries early. _buildPropertyMap
+  // would otherwise return undefined for `""`, _formatTenant happily passes
+  // it through, and the rent computation crashes deep in Contract.create
+  // with an opaque message — or worse, persists a tenant with an unusable
+  // properties[] entry.
+  if (Array.isArray(req.body.properties)) {
+    req.body.properties.forEach((p: AnyRecord, i: number) => {
+      if (
+        p?.propertyId !== undefined &&
+        p?.propertyId !== null &&
+        (typeof p.propertyId !== 'string' || !p.propertyId.trim())
+      ) {
+        throw new ServiceError(
+          `properties[${i}].propertyId must be a valid id or omitted`,
+          422
+        );
+      }
+    });
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...occupant } = _formatTenant(req.body);
 
