@@ -88,9 +88,15 @@ async function backup(
       continue;
     }
     try {
+      // The realms collection itself has no `realmId` field (it IS the
+      // realm) — find by `_id` so the current realm document is captured.
+      // Without this, the backup contains a realms array that's always
+      // empty and a restore can never recover member/branding data.
+      const filter =
+        collName === 'realms' ? { _id: realmId } : { realmId };
       const docs = await db
         .collection(collName)
-        .find({ realmId })
+        .find(filter)
         .toArray();
       data[collName] = docs.map(serializeDoc);
     } catch (e) {
@@ -141,6 +147,29 @@ async function restore(
     { deleted: number; inserted: number; skipped?: number }
   > = {};
 
+  // DRY-RUN VALIDATION: walk the entire payload BEFORE deleting anything.
+  // If a single document claims a different realmId, abort with 422 and
+  // leave the database untouched. The previous "wipe-then-validate" path
+  // would delete the realm's data and only then refuse the bad docs,
+  // resulting in a permanent data-loss footgun on payloads with even one
+  // misrouted entry.
+  for (const [collName, docs] of Object.entries(payload.collections)) {
+    if (collName === 'accounts') continue;
+    if (!Array.isArray(docs)) continue;
+    // The realms collection's documents identify themselves by _id, not
+    // realmId — skip the cross-realm guard for that collection.
+    if (collName === 'realms') continue;
+    for (const rawDoc of docs as any[]) {
+      const d = deserializeDoc(rawDoc);
+      if (d && d.realmId != null && String(d.realmId) !== realmIdStr) {
+        throw new ServiceError(
+          `Restore aborted: doc in ${collName} has realmId mismatch`,
+          422
+        );
+      }
+    }
+  }
+
   for (const collName of COLLECTIONS_TO_BACKUP) {
     // accounts is global (no realmId) — never wipe or restore it via the
     // per-realm backup endpoint.
@@ -158,14 +187,21 @@ async function restore(
     const collection = db.collection(collName);
 
     // Only wipe THIS realm's documents — never the whole collection.
-    const deleteResult = await collection.deleteMany({ realmId });
+    const deleteFilter =
+      collName === 'realms' ? { _id: realmId } : { realmId };
+    const deleteResult = await collection.deleteMany(deleteFilter);
     const deleted = deleteResult.deletedCount || 0;
 
     // Only accept docs whose realmId matches the caller's realm. A backup
     // from another realm or an injected payload must not cross over.
     const deserialized = docs.map(deserializeDoc);
     const matching = deserialized.filter((d: any) => {
-      if (!d || d.realmId == null) return false;
+      if (!d) return false;
+      // For the realms collection, match the _id of the current realm.
+      if (collName === 'realms') {
+        return d._id != null && String(d._id) === realmIdStr;
+      }
+      if (d.realmId == null) return false;
       return String(d.realmId) === realmIdStr;
     });
     const skipped = deserialized.length - matching.length;

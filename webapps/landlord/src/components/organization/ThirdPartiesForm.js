@@ -48,7 +48,12 @@ const schema = z.object({
   smsActive: z.boolean(),
   smsUrl: z.string().optional(),
   smsUsername: z.string().optional(),
-  smsPassword: z.string().optional()
+  smsPassword: z.string().optional(),
+  smsCountryCode: z
+    .string()
+    .regex(/^\+\d{1,4}$/)
+    .or(z.literal(''))
+    .optional()
 });
 
 function SectionWithSwitch({ label, description, switchChecked, onSwitchChange, children }) {
@@ -122,7 +127,8 @@ export default function ThirdPartiesForm({ organization }) {
       smsActive: !!organization.thirdParties?.smsGateway?.selected,
       smsUrl: organization.thirdParties?.smsGateway?.url || '',
       smsUsername: organization.thirdParties?.smsGateway?.username || '',
-      smsPassword: organization.thirdParties?.smsGateway?.password || ''
+      smsPassword: organization.thirdParties?.smsGateway?.password || '',
+      smsCountryCode: organization.thirdParties?.smsGateway?.countryCode || ''
     };
   }, [organization]);
 
@@ -193,7 +199,8 @@ export default function ThirdPartiesForm({ organization }) {
           url: values.smsUrl,
           username: values.smsUsername,
           password: values.smsPassword,
-          passwordUpdated: values.smsPassword !== initialValues.smsPassword
+          passwordUpdated: values.smsPassword !== initialValues.smsPassword,
+          countryCode: values.smsCountryCode
         };
       } else {
         formData.thirdParties.smsGateway = null;
@@ -293,6 +300,7 @@ export default function ThirdPartiesForm({ organization }) {
             <div className="space-y-2 mt-2"><Label htmlFor="smsUrl">{t('Server URL')}</Label><Input id="smsUrl" {...register('smsUrl')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="smsUsername">{t('Username')}</Label><Input id="smsUsername" {...register('smsUsername')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="smsPassword">{t('Password')}</Label><Input id="smsPassword" type="password" {...register('smsPassword')} /></div>
+            <div className="space-y-2 mt-2"><Label htmlFor="smsCountryCode">{t('SMS Country Code')}</Label><Input id="smsCountryCode" placeholder="+30" {...register('smsCountryCode')} /></div>
           </>
         ) : null}
       </SectionWithSwitch>

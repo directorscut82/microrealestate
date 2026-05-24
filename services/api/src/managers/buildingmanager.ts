@@ -241,6 +241,13 @@ export async function add(req: Req, res: Res) {
     min: 1,
     max: 200
   });
+  if (req.body.heatingType !== undefined && req.body.heatingType !== '') {
+    validateEnum(
+      req.body.heatingType,
+      ['central_oil', 'central_gas', 'autonomous', 'none'] as const,
+      'heatingType'
+    );
+  }
   validateArrayMaxLength(req.body.units, 200, 'units');
   validateArrayMaxLength(req.body.expenses, 100, 'expenses');
   validateArrayMaxLength(req.body.contractors, 50, 'contractors');
@@ -344,6 +351,13 @@ export async function update(req: Req, res: Res) {
       min: 1,
       max: 200
     });
+  }
+  if (req.body.heatingType !== undefined && req.body.heatingType !== '') {
+    validateEnum(
+      req.body.heatingType,
+      ['central_oil', 'central_gas', 'autonomous', 'none'] as const,
+      'heatingType'
+    );
   }
 
   if (req.body.atakPrefix) {
@@ -845,6 +859,29 @@ export async function addUnit(req: Req, res: Res) {
     );
   }
   (building as any).units.push(req.body);
+
+  // Building-wide thousandths sums must not exceed 1000 across all units —
+  // each scheme is supposed to total 1000 across the building. Reject if
+  // adding this unit would push any sum above 1000.
+  {
+    const sums = (
+      ['generalThousandths', 'heatingThousandths', 'elevatorThousandths'] as const
+    ).map((field) => ({
+      field,
+      total: (building as any).units.reduce(
+        (s: number, u: any) => s + (Number(u[field]) || 0),
+        0
+      )
+    }));
+    const overflow = sums.find((s) => s.total > 1000);
+    if (overflow) {
+      throw new ServiceError(
+        `${overflow.field} sum (${overflow.total}) exceeds 1000`,
+        422
+      );
+    }
+  }
+
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -897,6 +934,28 @@ export async function updateUnit(req: Req, res: Res) {
 
   const oldPropertyId = unit.propertyId;
   unit.set(req.body);
+
+  // Validate building-wide thousandths totals after the update — if the
+  // edit pushes any of the three schemes above 1000, refuse the change.
+  {
+    const sums = (
+      ['generalThousandths', 'heatingThousandths', 'elevatorThousandths'] as const
+    ).map((field) => ({
+      field,
+      total: (building as any).units.reduce(
+        (s: number, u: any) => s + (Number(u[field]) || 0),
+        0
+      )
+    }));
+    const overflow = sums.find((s) => s.total > 1000);
+    if (overflow) {
+      throw new ServiceError(
+        `${overflow.field} sum (${overflow.total}) exceeds 1000`,
+        422
+      );
+    }
+  }
+
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -1200,6 +1259,14 @@ export async function addExpense(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
 
+  // Normalize alternate field name from older UI builds: `recurring` →
+  // `isRecurring`. Without this, the schema default (true) silently kicks
+  // in and a one-off expense becomes recurring forever.
+  if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
+    req.body.isRecurring = req.body.recurring;
+    delete req.body.recurring;
+  }
+
   if (!req.body.name?.trim()) {
     throw new ServiceError('Expense name is required', 422);
   }
@@ -1265,6 +1332,13 @@ export async function addExpense(req: Req, res: Res) {
 export async function updateExpense(req: Req, res: Res) {
   const realm = req.realm;
   const { id, expenseId } = req.params;
+
+  // Normalize alternate field name from older UI builds: `recurring` →
+  // `isRecurring`. See note in addExpense.
+  if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
+    req.body.isRecurring = req.body.recurring;
+    delete req.body.recurring;
+  }
 
   if (req.body.type) {
     validateEnum(req.body.type, EXPENSE_TYPES, 'type');

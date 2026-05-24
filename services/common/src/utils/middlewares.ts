@@ -15,6 +15,16 @@ import logger from './logger.js';
 import Realm from '../collections/realm.js';
 import ServiceError from './serviceerror.js';
 
+/**
+ * Minimal contract for the redis client we use in middlewares. We only need a
+ * `get` to verify session-token presence (revocation check). Defining it here
+ * keeps the middleware decoupled from the concrete RedisClient class so it
+ * can be unit-tested with a stub.
+ */
+export interface RevocationStore {
+  get: (key: string) => Promise<string | null>;
+}
+
 type ErrorBodyType = {
   status: number;
   message: string;
@@ -40,29 +50,49 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   next: Express.NextFunction
 ) {
+  // Resolve the response status: ServiceError owns statusCode; other Express
+  // / body-parser errors carry status or statusCode (e.g. PayloadTooLargeError
+  // with statusCode 413). Fall back to 500 only when nothing meaningful is
+  // attached.
+  const anyErr = error as any;
+  let status = 500;
+  if (error instanceof ServiceError && error.statusCode) {
+    status = error.statusCode;
+  } else if (Number.isFinite(anyErr?.status)) {
+    status = Number(anyErr.status);
+  } else if (Number.isFinite(anyErr?.statusCode)) {
+    status = Number(anyErr.statusCode);
+  }
+
   const responseBody: ErrorBodyType = {
-    status: error instanceof ServiceError ? error.statusCode || 500 : 500,
+    status,
     message: error.message
   };
 
-  if (process.env.NODE_ENV !== 'production') {
+  // Stack is gated by an explicit DEBUG_ERRORS=true flag rather than the
+  // implicit NODE_ENV !== 'production' check. The stricter gate prevents
+  // accidentally leaking stack traces in staging / dev-flavoured prod
+  // builds where NODE_ENV happens to not be set to "production".
+  if (process.env.DEBUG_ERRORS === 'true') {
     responseBody.stack = error.stack;
   }
 
-  // Pass the error object so winston captures the stack and metadata
-  // instead of a flat `[object Object]` / coerced string.
-  logger.error(error);
+  // Winston's `logger.error(errorObject)` historically dropped the message
+  // on this codebase, leaving empty `[object Object]` log lines. Stringify
+  // explicitly so the message and stack land in the log output.
+  logger.error(error.stack || error.message || String(error));
   res.status(responseBody.status).json(responseBody);
 }
 
 export function needAccessToken(
-  accessTokenSecret: string | undefined
+  accessTokenSecret: string | undefined,
+  revocationStore?: RevocationStore
 ): (
   req: Express.Request,
   res: Express.Response,
   next: Express.NextFunction
-) => void {
-  return (
+) => void | Promise<void | Express.Response> {
+  return async (
     request: Express.Request,
     res: Express.Response,
     next: Express.NextFunction
@@ -74,6 +104,7 @@ export function needAccessToken(
     }
 
     let accessToken;
+    let isSessionCookie = false;
     // landlord api sends accessToken in the authorization header
     if (req.headers.authorization) {
       accessToken = req.headers.authorization.split(' ')[1];
@@ -82,6 +113,7 @@ export function needAccessToken(
     // tenant api sends accessToken in the sessionToken cookie
     if (!req.headers.authorization && req.cookies && req.cookies.sessionToken) {
       accessToken = req.cookies.sessionToken;
+      isSessionCookie = true;
     }
 
     if (!accessToken) {
@@ -95,6 +127,20 @@ export function needAccessToken(
         accessTokenSecret,
         { algorithms: ['HS256'] }
       ) as JWT.JwtPayload;
+
+      // Bearer access tokens are stateless by design and rotate every ~5 min,
+      // so we never check Redis for them (perf cost + no logout primitive).
+      // Tenant sessionToken cookies are long-lived. The /signout handler
+      // deletes them from Redis to revoke the session, so we MUST verify the
+      // token is still present here — otherwise the cookie keeps working
+      // after signout.
+      if (isSessionCookie && revocationStore) {
+        const stored = await revocationStore.get(accessToken);
+        if (!stored) {
+          logger.warn('sessionToken revoked or expired in store');
+          return res.sendStatus(401);
+        }
+      }
       if (decoded.account) {
         const user: UserServicePrincipal = {
           type: 'user',

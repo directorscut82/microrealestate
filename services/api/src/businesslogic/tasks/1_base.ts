@@ -81,27 +81,33 @@ function _computeBuildingChargeRaw(
   // For non-fixed methods, amount must be a valid positive number
   if (allocationMethod !== 'fixed' && (!Number.isFinite(amount) || amount <= 0)) return 0;
 
+  // Many allocation methods must only count "managed" units (those with a
+  // linked propertyId). Unmanaged units inflate the denominator and silently
+  // shrink every managed unit's share, leaking money out of the building's
+  // recoverable charges.
+  const managedUnits = building.units.filter((u) => u.propertyId);
+
   switch (allocationMethod) {
     case 'general_thousandths': {
-      const generalTotal = building.units.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
+      const generalTotal = managedUnits.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
       if (generalTotal === 0) return 0;
       return (amount * (Number(unit.generalThousandths) || 0)) / generalTotal;
     }
 
     case 'heating_thousandths': {
-      const heatingTotal = building.units.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
+      const heatingTotal = managedUnits.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
       if (heatingTotal === 0) return 0;
       return (amount * (Number(unit.heatingThousandths) || 0)) / heatingTotal;
     }
 
     case 'elevator_thousandths': {
-      const elevatorTotal = building.units.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
+      const elevatorTotal = managedUnits.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
       if (elevatorTotal === 0) return 0;
       return (amount * (Number(unit.elevatorThousandths) || 0)) / elevatorTotal;
     }
 
     case 'equal': {
-      const totalUnits = building.units.length;
+      const totalUnits = managedUnits.length;
       if (totalUnits === 0) return 0;
       return amount / totalUnits;
     }
@@ -164,8 +170,15 @@ function _computeBuildingChargeRaw(
 
 // Check if expense is active for the given term
 function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: number): boolean {
-  // Non-recurring expenses only apply to their start term
-  if (!(expense as any).isRecurring && expense.startTerm && expense.startTerm !== term) return false;
+  // Non-recurring expenses MUST have an explicit startTerm — without one
+  // they would otherwise be treated as "active forever" by the date-range
+  // checks below, which is the opposite of the intended behavior. Reject
+  // them so misconfigured one-shot expenses don't silently bill every
+  // term until end of time.
+  if (!(expense as any).isRecurring) {
+    if (!expense.startTerm) return false;
+    if (expense.startTerm !== term) return false;
+  }
   if (expense.startTerm && term < expense.startTerm) return false;
   if (expense.endTerm && term > expense.endTerm) return false;
   return true;

@@ -77,6 +77,7 @@ export default function ResetPassword() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="new-password"
                 {...register('password')}
               />
               {errors.password && (
@@ -92,6 +93,7 @@ export default function ResetPassword() {
               <Input
                 id="confirmationPassword"
                 type="password"
+                autoComplete="new-password"
                 {...register('confirmationPassword')}
               />
               {errors.confirmationPassword && (

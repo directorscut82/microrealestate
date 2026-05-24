@@ -327,11 +327,19 @@ export default function routes(): express.Router {
   );
   router.use('/bills', billsRouter);
 
-  // Database backup/restore (admin only)
+  // Database backup/restore (admin only).
+  // The /restore route accepts the entire backup payload as JSON, which can
+  // easily exceed the global body-parser limit (default 100kb). Install a
+  // per-route express.json with a 50mb cap so real backups aren't rejected
+  // upfront with PayloadTooLargeError.
   const databaseRouter = express.Router();
   databaseRouter.use(databaseManager.requireAdmin);
   databaseRouter.get('/backup', databaseManager.backup);
-  databaseRouter.post('/restore', databaseManager.restore);
+  databaseRouter.post(
+    '/restore',
+    express.json({ limit: '50mb' }),
+    databaseManager.restore
+  );
   router.use('/database', databaseRouter);
 
   router.get(

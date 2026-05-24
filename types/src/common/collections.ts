@@ -115,6 +115,7 @@ export namespace CollectionTypes {
         url: string;
         username: string;
         password: string;
+        countryCode?: string;
       };
     };
     locale: Locale;
@@ -126,8 +127,8 @@ export namespace CollectionTypes {
     realmId: string;
     tenantId: string;
     leaseId: string;
-    templateId: string;
-    type: 'text' | 'file';
+    templateId?: string;
+    type: 'text' | 'file' | 'fileDescriptor';
     name: string;
     description: string;
     mimeType?: string;

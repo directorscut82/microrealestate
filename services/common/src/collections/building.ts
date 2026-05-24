@@ -108,13 +108,21 @@ const BuildingExpenseSchema = new mongoose.Schema({
 const ContractorSchema = new mongoose.Schema({
   name: { type: String, required: true },
   company: String,
+  // Includes legacy values 'plumbing'/'electrical' alongside the canonical
+  // contractor specialty names so older imports validate without migration.
   specialty: {
     type: String,
     enum: [
+      'plumbing',
+      'electrical',
       'plumber',
       'electrician',
-      'elevator',
       'painter',
+      'carpenter',
+      'mason',
+      'gardener',
+      'cleaner',
+      'elevator',
       'locksmith',
       'hvac',
       'general',
@@ -150,8 +158,8 @@ const RepairSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['scheduled', 'in_progress', 'completed', 'cancelled'],
-    default: 'scheduled'
+    enum: ['planned', 'in_progress', 'completed', 'cancelled'],
+    default: 'planned'
   },
   urgency: {
     type: String,

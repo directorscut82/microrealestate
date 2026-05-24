@@ -5,7 +5,12 @@ import {
   ServiceError
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
-import { validateEnum, validateArrayMaxLength, LOCALES } from '../validators.js';
+import {
+  validateEnum,
+  validateArrayMaxLength,
+  validateStringField,
+  LOCALES
+} from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -33,11 +38,17 @@ function _hasRequiredFields(realm: AnyRecord): void {
 }
 
 function _isNameAlreadyTaken(realm: AnyRecord, realms: AnyRecord[] = []): void {
-  if (
-    realms
-      .map(({ name }: AnyRecord) => name.trim().toLowerCase())
-      .includes(realm.name.trim().toLowerCase())
-  ) {
+  // Exclude the realm under edit from the duplicate check — comparing
+  // against itself by name was producing false 409s when an admin renamed
+  // the realm but kept the casing close to the original (or used the same
+  // exact name). The check should only fire for OTHER realms.
+  const candidate = String(realm.name || '').trim().toLowerCase();
+  const selfId = realm._id ? String(realm._id) : null;
+  const collision = realms.some((r: AnyRecord) => {
+    if (selfId && String(r._id) === selfId) return false;
+    return String(r.name || '').trim().toLowerCase() === candidate;
+  });
+  if (collision) {
     throw new ServiceError('landlord name already taken', 409);
   }
 }
@@ -68,6 +79,35 @@ function _escapeSecrets(realm: AnyRecord): AnyRecord {
 }
 
 export async function add(req: Req, res: Res) {
+  // Force-inject the caller as the sole administrator member. Without this,
+  // an authenticated user could POST { members: [{ email: 'victim@x' }] }
+  // and create a "phantom" realm owned by someone else (or themselves +
+  // unwanted observers).
+  const callerEmail = (req.user as AnyRecord)?.email;
+  if (!callerEmail) {
+    throw new ServiceError('authenticated user required to create realm', 401);
+  }
+  req.body.members = [
+    {
+      email: callerEmail,
+      role: 'administrator',
+      registered: true
+    }
+  ];
+
+  // Name validation (trim, length cap, non-empty) — mirror update().
+  req.body.name = validateStringField(req.body.name, 'name', {
+    min: 1,
+    max: 200,
+    required: true
+  });
+
+  // Locale validation — update() already does this; add() previously only
+  // failed via Mongoose schema validation as a generic 500.
+  if (req.body.locale !== undefined) {
+    validateEnum(req.body.locale, LOCALES, 'locale');
+  }
+
   const newRealm: any = new Collections.Realm(req.body);
 
   _hasRequiredFields(newRealm);
@@ -117,6 +157,13 @@ export async function update(req: Req, res: Res) {
     !!req.body.thirdParties?.gmail?.appPasswordUpdated;
   validateEnum(req.body.locale, LOCALES, 'locale');
   validateArrayMaxLength(req.body.members, 50, 'members');
+  if (req.body.name !== undefined) {
+    req.body.name = validateStringField(req.body.name, 'name', {
+      min: 1,
+      max: 200,
+      required: true
+    });
+  }
 
   const smtpPasswordUpdated = !!req.body.thirdParties?.smtp?.passwordUpdated;
   const mailgunApiKeyUpdated = !!req.body.thirdParties?.mailgun?.apiKeyUpdated;
@@ -146,7 +193,18 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('organization not found', 404);
   }
 
-  const updatedRealm: AnyRecord = { ...previousRealm.toObject(), ...req.body };
+  // Deep-merge thirdParties so a PATCH that touches a single provider does
+  // not wipe configuration for the others. Previously a body containing
+  // only `thirdParties.gmail = {...}` would replace the whole subtree and
+  // erase smtp/mailgun/b2/smsGateway settings that the user never touched.
+  const previousObj = previousRealm.toObject();
+  const updatedRealm: AnyRecord = {
+    ...previousObj,
+    ...req.body,
+    thirdParties: req.body.thirdParties
+      ? { ...(previousObj.thirdParties || {}), ...req.body.thirdParties }
+      : previousObj.thirdParties
+  };
 
   _hasRequiredFields(updatedRealm);
   if (

@@ -6,7 +6,13 @@ import {
 } from '@microrealestate/common';
 import type { ReqNoParams, ReqWithId, ReqWithIds, Res } from '../types/requests.js';
 import type { CollectionTypes } from '@microrealestate/types';
-import { validateObjectId } from '../validators.js';
+import {
+  validateObjectId,
+  validateEnum,
+  validateFiniteNumber,
+  validateArrayMaxLength,
+  TIME_RANGES
+} from '../validators.js';
 
 async function _leaseUsedByTenant(realm: CollectionTypes.Realm | null | undefined): Promise<Set<string>> {
   const tenants = await Collections.Tenant.find(
@@ -25,6 +31,18 @@ export async function add(req: ReqNoParams, res: Res) {
     logger.error('missing lease name');
     throw new ServiceError('missing fields', 422);
   }
+
+  // Validate enum + numeric inputs BEFORE Mongoose. add() previously left
+  // these to schema validation which throws a generic ValidationError that
+  // bubbles to errorHandler as a 500.
+  if (lease.timeRange !== undefined) {
+    validateEnum(lease.timeRange, TIME_RANGES, 'timeRange');
+  }
+  validateFiniteNumber(lease.numberOfTerms, 'numberOfTerms', {
+    min: 1,
+    max: 1000,
+    required: true
+  });
 
   const realm = req.realm;
   const dbLease: any = new Collections.Lease({
@@ -47,6 +65,16 @@ export async function update(req: ReqWithId, res: Res) {
     throw new ServiceError('missing fields', 422);
   }
 
+  if (lease.timeRange !== undefined) {
+    validateEnum(lease.timeRange, TIME_RANGES, 'timeRange');
+  }
+  if (lease.numberOfTerms !== undefined) {
+    validateFiniteNumber(lease.numberOfTerms, 'numberOfTerms', {
+      min: 1,
+      max: 1000
+    });
+  }
+
   if (lease.active === undefined) {
     lease.active = lease.numberOfTerms > 0 && !!lease.timeRange;
   }
@@ -56,6 +84,13 @@ export async function update(req: ReqWithId, res: Res) {
   const existingLease: any = setOfUsedLeases.has(String(lease._id))
     ? await Collections.Lease.findOne({ realmId: realm!._id, _id: lease._id }).lean()
     : null;
+
+  // Strip identity / version fields from the unrestricted-edit payload —
+  // $set must not target the same paths used in the filter clause, otherwise
+  // MongoDB rejects with "Updating the path '_id' would create a conflict".
+  // Mirrors the equivalent fix in occupantmanager.update().
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id, __v, realmId: _realmId, ...leasePayload } = lease;
 
   const dbLease: any = await Collections.Lease.findOneAndUpdate(
     {
@@ -69,7 +104,7 @@ export async function update(req: ReqWithId, res: Res) {
           active: lease.active ?? existingLease?.active,
           stepperMode: lease.stepperMode ?? existingLease?.stepperMode
         }
-      : lease,
+      : leasePayload,
     { new: true }
   ).lean();
 
@@ -90,6 +125,7 @@ export async function remove(req: ReqWithIds, res: Res) {
     throw new ServiceError('missing fields', 422);
   }
 
+  validateArrayMaxLength(leaseIds, 50, 'lease ids');
   leaseIds.forEach((id: string) => validateObjectId(id, 'lease id'));
 
   const setOfUsedLeases = await _leaseUsedByTenant(realm);

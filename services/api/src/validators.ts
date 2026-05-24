@@ -199,6 +199,58 @@ export function validateStringField(
 }
 
 /**
+ * Validate a date string in DD/MM/YYYY format. Rejects empty strings (when
+ * required) and structurally invalid dates (e.g. 31/02/2024). Returns the
+ * trimmed string when valid, or undefined when empty and not required.
+ */
+export function validateDateString(
+  value: unknown,
+  fieldName: string,
+  opts: { required?: boolean } = {}
+): string | undefined {
+  const { required = false } = opts;
+  if (value == null || value === '') {
+    if (required) {
+      throw new ServiceError(`${fieldName} is required`, 422);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new ServiceError(`${fieldName} must be a string`, 422);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    if (required) {
+      throw new ServiceError(`${fieldName} is required`, 422);
+    }
+    return undefined;
+  }
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  if (!m) {
+    throw new ServiceError(
+      `${fieldName} must be in DD/MM/YYYY format`,
+      422
+    );
+  }
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  if (year < 1900 || year > 2999 || month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new ServiceError(`${fieldName} is not a valid date`, 422);
+  }
+  // Cross-check using Date — catches 31/02 etc.
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    throw new ServiceError(`${fieldName} is not a valid date`, 422);
+  }
+  return trimmed;
+}
+
+/**
  * Validate custom_percentage allocations sum to 100
  */
 export function validatePercentageAllocations(
