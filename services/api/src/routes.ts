@@ -369,6 +369,13 @@ export default function routes(): express.Router {
 
   // Presence awareness — shows who else is viewing the same record
   const PRESENCE_TTL = 60;
+  const VALID_PRESENCE_TYPES = [
+    'tenant',
+    'property',
+    'lease',
+    'realm',
+    'building'
+  ];
 
   // Lua script for atomic presence update (prevents read-modify-write race)
   const PRESENCE_LUA = `
@@ -391,6 +398,9 @@ export default function routes(): express.Router {
     '/presence/:type/:id',
     Middlewares.asyncWrapper(async (req: any, res: any) => {
       const { type, id } = req.params;
+      if (!VALID_PRESENCE_TYPES.includes(type)) {
+        throw new ServiceError(`Invalid presence type: ${type}`, 422);
+      }
       const redis = Service.getInstance().redisClient;
       if (!redis) {
         res.json([]);
@@ -425,6 +435,9 @@ export default function routes(): express.Router {
     '/presence/:type/:id',
     Middlewares.asyncWrapper(async (req: any, res: any) => {
       const { type, id } = req.params;
+      if (!VALID_PRESENCE_TYPES.includes(type)) {
+        throw new ServiceError(`Invalid presence type: ${type}`, 422);
+      }
       const redis = Service.getInstance().redisClient;
       if (!redis) {
         res.json([]);

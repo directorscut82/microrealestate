@@ -330,7 +330,20 @@ export async function update(req: Req, res: Res) {
   });
 
   previousRealm.set(updatedRealm);
-  res.json(_escapeSecrets(await previousRealm.save()));
+  // Mongoose throws VersionError when the document was modified between
+  // findOne and save (optimistic concurrency control on __v). Surface that
+  // as a 409 instead of leaking it as a generic 500.
+  try {
+    res.json(_escapeSecrets(await previousRealm.save()));
+  } catch (err: any) {
+    if (err && err.name === 'VersionError') {
+      throw new ServiceError(
+        'Realm was modified concurrently. Please retry.',
+        409
+      );
+    }
+    throw err;
+  }
 }
 
 export function one(req: Req, res: Res) {

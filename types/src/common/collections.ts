@@ -308,6 +308,7 @@ export namespace CollectionTypes {
     beginDate: Date;
     endDate: Date;
     terminationDate: Date;
+    frequency?: 'days' | 'weeks' | 'months' | 'years' | 'hours';
     properties:
       | {
           propertyId: string;

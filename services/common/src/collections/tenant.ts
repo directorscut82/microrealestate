@@ -50,6 +50,14 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   beginDate: Date,
   endDate: Date,
   terminationDate: Date,
+  // Rent term frequency for the contract math. Without this field, payloads
+  // setting frequency = 'weeks'/'days'/etc. were silently lost on save and
+  // every reload computed terms as months.
+  frequency: {
+    type: String,
+    enum: ['days', 'weeks', 'months', 'years', 'hours'],
+    default: 'months'
+  },
   properties: [
     {
       _id: false,

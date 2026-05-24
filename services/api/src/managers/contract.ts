@@ -65,6 +65,11 @@ export function create(contract: Contract): Contract {
     previousRent = rent;
     current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
   }
+  // Defensive: rents are pushed in chronological order above, but downstream
+  // consumers (rent ledger UI, payTerm previousRent lookup) assume sort by
+  // term ascending. If any future change introduces out-of-order pushes,
+  // this guarantees the invariant holds.
+  contract.rents.sort((a, b) => Number(a.term) - Number(b.term));
   return contract;
 }
 
