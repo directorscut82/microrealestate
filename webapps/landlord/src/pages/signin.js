@@ -102,60 +102,62 @@ export default function SignIn() {
 
   return (
     <SignInUpLayout>
-      <div className="p-5 md:p-0 md:max-w-md w-full">
-        <form onSubmit={handleSubmit(signIn)} className="space-y-10">
-          <div className="text-2xl text-center md:text-left md:text-4xl font-medium text-secondary-foreground">
-            {t('Sign in to your account')}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="email">{t('Email Address')}</Label>
-            <Input id="email" {...register('email')} />
-            {errors.email && (
-              <p className="text-sm text-destructive">
-                {errors.email.message}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">{t('Password')}</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              {...register('password')}
-            />
-            {errors.password && (
-              <p className="text-sm text-destructive">
-                {errors.password.message}
-              </p>
-            )}
-          </div>
-          {!config.DEMO_MODE && (
-            <div className="text-right">
-              <Link href="/forgotpassword" data-cy="forgotpassword">
-                {t('Forgot password?')}
-              </Link>
-            </div>
-          )}
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isSubmitting}
-            data-cy="submit"
-          >
-            {!isSubmitting ? t('Sign in') : t('Signing in')}
-          </Button>
-        </form>
+      <div className="space-y-2 mb-8">
+        <h1 className="text-headline font-medium text-ink tracking-tight">
+          {t('Sign in to your account')}
+        </h1>
+        <p className="text-body text-ink-muted">
+          {t('Welcome back')}
+        </p>
       </div>
+      <form onSubmit={handleSubmit(signIn)} className="space-y-5">
+        <div className="space-y-1.5">
+          <Label htmlFor="email">{t('Email Address')}</Label>
+          <Input id="email" {...register('email')} />
+          {errors.email && (
+            <p className="text-label text-oxide">{errors.email.message}</p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="password">{t('Password')}</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            {...register('password')}
+          />
+          {errors.password && (
+            <p className="text-label text-oxide">
+              {errors.password.message}
+            </p>
+          )}
+        </div>
+        {!config.DEMO_MODE && (
+          <div className="flex justify-end">
+            <Link
+              href="/forgotpassword"
+              data-cy="forgotpassword"
+              className="text-label"
+            >
+              {t('Forgot password?')}
+            </Link>
+          </div>
+        )}
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={isSubmitting}
+          data-cy="submit"
+        >
+          {!isSubmitting ? t('Sign in') : t('Signing in')}
+        </Button>
+      </form>
       {!config.DEMO_MODE && config.SIGNUP && (
-        <div className="mt-10 lg:mt-0 lg:absolute lg:bottom-10 text-center text-muted-foreground w-full">
-          {t('New to {{APP_NAME}}?', {
-            APP_NAME: config.APP_NAME
-          })}{' '}
+        <div className="mt-8 text-center text-body text-ink-muted">
+          {t('New to {{APP_NAME}}?', { APP_NAME: config.APP_NAME })}{' '}
           <Link href="/signup" data-cy="signup">
             {t('Create an account')}
           </Link>
-          .
         </div>
       )}
     </SignInUpLayout>

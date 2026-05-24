@@ -42,17 +42,15 @@ When you want your latest master changes live on the NAS, run:
 yarn deploy:nas
 ```
 
-The script asks three questions up-front and then does the rest:
+The script asks two questions up-front and then does the rest:
 
-1. **Pull from upstream first?** — merges the original MicroRealEstate upstream
-   into your master. Skip if you don't want upstream changes.
-2. **Wait for CI to finish?** — polls GitHub Actions until images are built.
-3. **Redeploy the NAS stack?** — calls Portainer API to pull new images and
+1. **Wait for CI to finish?** — polls GitHub Actions until images are built.
+2. **Redeploy the NAS stack?** — calls Portainer API to pull new images and
    restart containers.
 
 After you answer, the script:
 
-- Validates master is clean (no uncommitted changes)
+- Validates the working tree is clean (no uncommitted changes)
 - Runs `scripts/validate-nas-deploy.sh` against `docker-compose.nas.yml`
   (catches common mistakes — wrong image tags, missing secrets, dev-only
   services, etc.)
@@ -62,6 +60,13 @@ After you answer, the script:
 - Calls Portainer API to redeploy (if you said yes)
 - Verifies the landlord endpoint returns 200
 - Prints access URLs
+
+> **About upstream updates.** The script does **not** pull from the upstream
+> `microrealestate/microrealestate` repo. This fork's git history was rewritten
+> (authorship change) so git sees no common ancestor with upstream and refuses
+> to merge. If you ever want to pull a specific upstream fix, use
+> `git cherry-pick <sha>` manually — it's a rare, deliberate action that
+> doesn't belong in a routine deploy.
 
 ## Prerequisites (one-time)
 
@@ -109,9 +114,12 @@ tags. If a deploy breaks the NAS:
 
 1. Edit `docker-compose.nas.yml` locally
 2. Change image tags from `:nas` to `:nas-<previous-sha>`
-3. Run `yarn deploy:nas` and answer `n` to "sync upstream" and `n` to "wait
-   for CI" — the script will just re-upload the compose file and tell
-   Portainer to pull the pinned images.
+3. Run `yarn deploy:nas` and answer `n` to "wait for CI" (there's no code
+   change, but the script still pushes the merge to origin — this will
+   trigger a CI rebuild of the `:nas` tag that you're ignoring for this
+   rollback; that's fine, it's just wasted CI time).
+4. The script re-uploads the compose file to Portainer and tells it to
+   pull the pinned `:nas-<previous-sha>` images.
 
 Find previous SHAs at https://github.com/directorscut82/microrealestate/actions.
 
@@ -121,7 +129,53 @@ Find previous SHAs at https://github.com/directorscut82/microrealestate/actions.
 |---------|--------------|-----|
 | `Missing $GH_PAT_FILE` | You haven't set up `.secrets/github-pat` | See Prerequisites above |
 | `Compose validation failed` | `docker-compose.nas.yml` doesn't match expected pattern | Read the FAIL messages, fix the file |
-| `Cannot fast-forward master from upstream` | You have local commits on master not in upstream | Rebase or merge manually, then re-run |
-| `Merge conflict` | nas and master diverged | Fix conflicts, commit, re-run |
+| `refusing to merge unrelated histories` | You tried `git merge upstream/main` manually. This fork's master was rewritten (authorship change) so git sees no common ancestor with upstream | Use `git cherry-pick <sha>` to apply specific upstream commits instead of merging — the deploy script no longer tries to merge from upstream |
+| `Merge conflict` | nas and master diverged | Fix conflicts on nas, commit, re-run |
 | `CI timeout after 1800s` | Build stuck (very rare) | Check GitHub Actions page, retry |
 | `Stack 'mre' not found in Portainer` | Stack was deleted or renamed | Recreate it via Portainer UI first, then re-run |
+| `Connection timed out` calling Portainer | NAS is asleep or you're off LAN | Wake the NAS (open `http://<nas-ip>:5000`), or connect to the LAN Wi-Fi, or use Tailscale |
+| Dev gateway crashes with `[HPM] Missing "target" option` | `API_URL` missing from `.env` | Already fixed in `cli/src/commands.js` on master. If it ever comes back: `echo 'API_URL=http://api:8200/api/v2' >> .env` |
+| Sign-in works on LAN but fails from phone via Tailscale | `APP_DOMAIN` in compose doesn't include the Tailscale IP | Edit `docker-compose.nas.yml`, add the IP to the comma-list in both gateway and authenticator services, redeploy |
+
+## Historical gotchas (already fixed, here for context)
+
+These tripped us up during initial setup. They're all fixed now but kept for
+reference if they ever resurface.
+
+### `.env` kept losing `API_URL`
+The CLI's `writeDotEnv()` runs on every `mre dev`/`mre start` call and
+regenerates `.env` from a template. The template didn't include `API_URL`,
+and the cleanup phase explicitly deleted it from the carry-over env. So the
+gateway started every time with an empty `API_URL`, causing
+`[HPM] Missing "target" option`. Fixed by adding `API_URL=http://api:8200/api/v2`
+to the template and removing the `delete envConfig.API_URL;` line.
+
+### Cross-origin login silently failed
+With `APP_DOMAIN=192.168.0.96`, the gateway's CORS regex only allowed that one
+hostname. When a family member hit the app via Tailscale IP `100.121.85.7`,
+the preflight `OPTIONS` returned without an `Access-Control-Allow-Origin`
+matching the phone's origin, so the browser silently refused to send the
+actual sign-in POST. The gateway logs showed only `OPTIONS 204` with no
+follow-up `POST`. Fixed by making APP_DOMAIN accept a comma-separated list of
+allowed domains.
+
+### Cookies bound to one domain
+Authenticator set `domain: APP_DOMAIN` on session cookies. Even if CORS
+allowed multiple origins, the browser wouldn't send a cookie set for
+`192.168.0.96` when visiting `100.121.85.7`. Fixed by removing the `domain`
+attribute entirely — cookies become host-only, each origin gets its own
+session cookie automatically.
+
+### Frontend hardcoded GATEWAY_URL at build time
+`webapps/landlord/src/utils/fetch.js` used `config.GATEWAY_URL` as the axios
+`baseURL` in the browser. Even with CORS and cookies fixed, the frontend was
+still trying to talk back to the baked-in hostname. Fixed by using
+`window.location.origin` on the client so the frontend always calls back to
+whichever origin served the page.
+
+### Portainer-managed stack vs "limited" stack
+Initially we created the NAS stack by pasting into Portainer's web editor,
+and Synology Container Manager raced to register the containers first. The
+stack showed up as "created outside of Portainer — control is limited" with
+no Editor tab. Fixed by removing the stack + containers + network and
+redeploying via Portainer's REST API (what `scripts/deploy-nas.sh` now does).

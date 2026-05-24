@@ -1,7 +1,6 @@
 import { Cell, Pie, PieChart, Tooltip } from 'recharts';
 import { LuAlertTriangle, LuBanknote } from 'react-icons/lu';
 import { useMemo } from 'react';
-import { Button } from '../ui/button';
 import { CelebrationIllustration } from '../../components/Illustrations';
 import { ChartContainer } from '../ui/chart';
 import { cn } from '../../utils';
@@ -12,22 +11,47 @@ import useFormatNumber from '../../hooks/useFormatNumber';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
+/*
+ * MonthFigures — DESIGN.md committed-color exception for data viz.
+ *
+ * Charts are the one place where Full-palette color is permitted: each
+ * category gets a deliberate role color. Paid segments use bold OKLCH; unpaid
+ * segments use a desaturated marble version of the same hue. The user can
+ * read the boldness as much as the hue.
+ *
+ * All hues stay within the system's palette: sea, olive, oxide, marble,
+ * with a small set of tertiary hues drawn from Mediterranean materials
+ * (terracotta, copper, slate, sage). No neon.
+ */
+
 const CATEGORY_COLORS = {
-  rent: { bold: 'hsl(210, 70%, 50%)', faded: 'hsl(210, 30%, 82%)' },
-  charges: { bold: 'hsl(262, 60%, 55%)', faded: 'hsl(262, 25%, 82%)' },
-  heating: { bold: 'hsl(15, 85%, 50%)', faded: 'hsl(15, 40%, 82%)' },
-  elevator: { bold: 'hsl(200, 70%, 50%)', faded: 'hsl(200, 30%, 82%)' },
-  cleaning: { bold: 'hsl(170, 60%, 45%)', faded: 'hsl(170, 25%, 82%)' },
-  water_common: { bold: 'hsl(220, 70%, 55%)', faded: 'hsl(220, 30%, 82%)' },
-  electricity_common: { bold: 'hsl(45, 90%, 50%)', faded: 'hsl(45, 40%, 82%)' },
-  insurance: { bold: 'hsl(280, 50%, 50%)', faded: 'hsl(280, 25%, 82%)' },
-  management_fee: { bold: 'hsl(320, 50%, 50%)', faded: 'hsl(320, 25%, 82%)' },
-  garden: { bold: 'hsl(100, 60%, 40%)', faded: 'hsl(100, 25%, 80%)' },
-  repairs_fund: { bold: 'hsl(30, 70%, 50%)', faded: 'hsl(30, 30%, 82%)' },
-  pest_control: { bold: 'hsl(60, 50%, 40%)', faded: 'hsl(60, 25%, 80%)' },
-  repair: { bold: 'hsl(340, 65%, 50%)', faded: 'hsl(340, 30%, 82%)' },
-  monthly_charge: { bold: 'hsl(25, 85%, 55%)', faded: 'hsl(25, 40%, 82%)' },
-  other: { bold: 'hsl(0, 0%, 50%)', faded: 'hsl(0, 0%, 82%)' }
+  // Charts use a quiet earth-tone palette built around petrol. Each
+  // category is muted (chroma 0.04–0.08 for paid, 0.018–0.028 for unpaid)
+  // so the dashboard reads as a ledger, not a marketing slide.
+  rent: { bold: 'oklch(94% 0.038 140)', faded: 'oklch(92% 0.022 22)' }, // mint / pink
+  charges: { bold: 'oklch(40% 0.020 240)', faded: 'oklch(85% 0.012 240)' }, // slate
+  heating: { bold: 'oklch(50% 0.080 35)', faded: 'oklch(86% 0.024 35)' }, // terracotta
+  elevator: { bold: 'oklch(45% 0.040 200)', faded: 'oklch(86% 0.016 200)' }, // dim teal
+  cleaning: { bold: 'oklch(50% 0.040 180)', faded: 'oklch(86% 0.016 180)' }, // dusty teal
+  water_common: { bold: 'oklch(42% 0.045 220)', faded: 'oklch(86% 0.018 220)' }, // water
+  electricity_common: {
+    bold: 'oklch(55% 0.080 75)',
+    faded: 'oklch(88% 0.022 75)'
+  }, // muted amber
+  insurance: { bold: 'oklch(40% 0.060 290)', faded: 'oklch(84% 0.018 290)' }, // plum
+  management_fee: {
+    bold: 'oklch(45% 0.060 320)',
+    faded: 'oklch(84% 0.018 320)'
+  }, // mauve
+  garden: { bold: 'oklch(45% 0.070 130)', faded: 'oklch(86% 0.020 130)' }, // olive
+  repairs_fund: { bold: 'oklch(48% 0.070 60)', faded: 'oklch(86% 0.020 60)' }, // ochre
+  pest_control: { bold: 'oklch(45% 0.045 110)', faded: 'oklch(84% 0.016 110)' }, // sage
+  repair: { bold: 'oklch(48% 0.090 20)', faded: 'oklch(86% 0.022 20)' }, // copper
+  monthly_charge: {
+    bold: 'oklch(48% 0.080 50)',
+    faded: 'oklch(86% 0.022 50)'
+  }, // umber
+  other: { bold: 'oklch(50% 0.012 240)', faded: 'oklch(82% 0.008 240)' } // marble
 };
 
 const TYPE_LABELS = {
@@ -48,9 +72,66 @@ const TYPE_LABELS = {
   other: 'Other'
 };
 
+// Single rule for the whole dashboard: paid is colored by category,
+// unpaid is one neutral grey regardless of category. Donut, bar chart,
+// and tooltip text all read from these.
+//
+// Categories: rent → olive, charges (Έξοδα ενοικιαστή) → terracotta,
+// building (Κοινόχρηστα, all subtypes rolled together) → petrol.
+const PAID_LIGHT = {
+  rent: '#7a8c4a',
+  extra: '#c66a3a',
+  building: '#3a6e7c'
+};
+const PAID_DARK = {
+  rent: '#9bb15c',
+  extra: '#df8856',
+  building: '#5b94a4'
+};
+// Universal unpaid grey (light & dark have separate values for legibility).
+export const UNPAID_LIGHT = '#bdb8b1';
+export const UNPAID_DARK = '#6a6864';
+
+const BUILDING_TYPES = new Set([
+  'heating',
+  'elevator',
+  'cleaning',
+  'water_common',
+  'electricity_common',
+  'insurance',
+  'management_fee',
+  'garden',
+  'repairs_fund',
+  'pest_control',
+  'repair',
+  'monthly_charge',
+  'other'
+]);
+
+function isDark() {
+  if (typeof document === 'undefined') return false;
+  return document.documentElement.classList.contains('dark');
+}
+
+function bucketFor(type) {
+  if (type === 'rent') return 'rent';
+  if (type === 'charges') return 'extra';
+  if (BUILDING_TYPES.has(type)) return 'building';
+  return 'building';
+}
+
+export function paidColor(type) {
+  const dark = isDark();
+  const bucket = bucketFor(type);
+  return (dark ? PAID_DARK : PAID_LIGHT)[bucket];
+}
+
+export function unpaidColor() {
+  return isDark() ? UNPAID_DARK : UNPAID_LIGHT;
+}
+
 function getColor(type, status) {
-  const colors = CATEGORY_COLORS[type] || CATEGORY_COLORS.other;
-  return status === 'paid' ? colors.bold : colors.faded;
+  return status === 'paid' ? paidColor(type) : unpaidColor();
 }
 
 export default function MonthFigures({ className, dashboardData }) {
@@ -61,14 +142,31 @@ export default function MonthFigures({ className, dashboardData }) {
 
   const currentRevenues = useMemo(() => {
     const currentMonth = moment().format('MMYYYY');
-    return dashboardData?.revenues?.find(
-      ({ month }) => currentMonth === month
-    ) || { month: currentMonth, paid: 0, notPaid: 0, baseRent: 0, charges: 0, buildingCharges: 0, buildingChargesByType: {}, tenants: [] };
+    return (
+      dashboardData?.revenues?.find(({ month }) => currentMonth === month) || {
+        month: currentMonth,
+        paid: 0,
+        notPaid: 0,
+        baseRent: 0,
+        charges: 0,
+        buildingCharges: 0,
+        buildingChargesByType: {},
+        tenants: []
+      }
+    );
   }, [dashboardData?.revenues]);
 
   const { pieData, legend } = useMemo(() => {
-    const { baseRent, charges, buildingChargesByType = {}, paid } = currentRevenues;
-    const totalBuildingCharges = Object.values(buildingChargesByType).reduce((s, v) => s + v, 0);
+    const {
+      baseRent,
+      charges,
+      buildingChargesByType = {},
+      paid
+    } = currentRevenues;
+    const totalBuildingCharges = Object.values(buildingChargesByType).reduce(
+      (s, v) => s + v,
+      0
+    );
     const totalDue = baseRent + charges + totalBuildingCharges;
     if (totalDue === 0) return { pieData: [], legend: [] };
 
@@ -76,33 +174,66 @@ export default function MonthFigures({ className, dashboardData }) {
     const segments = [];
     const legendItems = [];
 
-    // Rent
     if (baseRent > 0) {
       const rentPaid = Math.round(baseRent * paidRatio);
       const rentUnpaid = baseRent - rentPaid;
       legendItems.push({ type: 'rent', label: t(TYPE_LABELS.rent) });
-      if (rentPaid > 0) segments.push({ name: t('Rent') + ' (' + t('paid') + ')', value: rentPaid, color: getColor('rent', 'paid'), type: 'rent' });
-      if (rentUnpaid > 0) segments.push({ name: t('Rent') + ' (' + t('unpaid') + ')', value: rentUnpaid, color: getColor('rent', 'unpaid'), type: 'rent' });
+      if (rentPaid > 0)
+        segments.push({
+          name: t('Rent') + ' (' + t('collected') + ')',
+          value: rentPaid,
+          color: getColor('rent', 'paid'),
+          type: 'rent'
+        });
+      if (rentUnpaid > 0)
+        segments.push({
+          name: t('Rent') + ' (' + t('owed') + ')',
+          value: rentUnpaid,
+          color: getColor('rent', 'unpaid'),
+          type: 'rent'
+        });
     }
 
-    // Per-tenant extra charges
     if (charges > 0) {
       const chargesPaid = Math.round(charges * paidRatio);
       const chargesUnpaid = charges - chargesPaid;
       legendItems.push({ type: 'charges', label: t(TYPE_LABELS.charges) });
-      if (chargesPaid > 0) segments.push({ name: t('Extra charges') + ' (' + t('paid') + ')', value: chargesPaid, color: getColor('charges', 'paid'), type: 'charges' });
-      if (chargesUnpaid > 0) segments.push({ name: t('Extra charges') + ' (' + t('unpaid') + ')', value: chargesUnpaid, color: getColor('charges', 'unpaid'), type: 'charges' });
+      if (chargesPaid > 0)
+        segments.push({
+          name: t('Extra charges') + ' (' + t('collected') + ')',
+          value: chargesPaid,
+          color: getColor('charges', 'paid'),
+          type: 'charges'
+        });
+      if (chargesUnpaid > 0)
+        segments.push({
+          name: t('Extra charges') + ' (' + t('owed') + ')',
+          value: chargesUnpaid,
+          color: getColor('charges', 'unpaid'),
+          type: 'charges'
+        });
     }
 
-    // Each building charge type as its own segment
     Object.entries(buildingChargesByType).forEach(([type, amount]) => {
       if (amount <= 0) return;
       const label = t(TYPE_LABELS[type] || type);
       legendItems.push({ type, label });
       const typePaid = Math.round(amount * paidRatio);
       const typeUnpaid = amount - typePaid;
-      if (typePaid > 0) segments.push({ name: label + ' (' + t('paid') + ')', value: typePaid, color: getColor(type, 'paid'), type });
-      if (typeUnpaid > 0) segments.push({ name: label + ' (' + t('unpaid') + ')', value: typeUnpaid, color: getColor(type, 'unpaid'), type });
+      if (typePaid > 0)
+        segments.push({
+          name: label + ' (' + t('collected') + ')',
+          value: typePaid,
+          color: getColor(type, 'paid'),
+          type
+        });
+      if (typeUnpaid > 0)
+        segments.push({
+          name: label + ' (' + t('owed') + ')',
+          value: typeUnpaid,
+          color: getColor(type, 'unpaid'),
+          type
+        });
     });
 
     return { pieData: segments, legend: legendItems };
@@ -112,29 +243,51 @@ export default function MonthFigures({ className, dashboardData }) {
     if (!active || !payload?.length) return null;
     const entry = payload[0].payload;
     const tenants = currentRevenues.tenants || [];
-    const totalDue = currentRevenues.baseRent + currentRevenues.charges +
-      Object.values(currentRevenues.buildingChargesByType || {}).reduce((s, v) => s + v, 0);
+    const totalDue =
+      currentRevenues.baseRent +
+      currentRevenues.charges +
+      Object.values(currentRevenues.buildingChargesByType || {}).reduce(
+        (s, v) => s + v,
+        0
+      );
     const paidRatio = totalDue > 0 ? currentRevenues.paid / totalDue : 0;
 
     return (
-      <div className="bg-popover/75 backdrop-blur-md border border-border/50 rounded-lg shadow-md px-3 py-2 text-xs max-w-72">
-        <div className="font-medium text-sm mb-0.5">{entry.name}</div>
-        <div className="mb-1.5">{formatNumber(entry.value)}</div>
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-64">
+        <div className="font-medium text-body text-ink mb-0.5 leading-tight">
+          {entry.name}
+        </div>
+        <div className="font-mono tabular-nums text-label text-ink mb-1.5">
+          {formatNumber(entry.value)}
+        </div>
         {tenants.length > 0 && (
-          <div className="border-t border-border/40 pt-1.5 space-y-1">
+          <div className="border-t border-stone-line pt-1.5 space-y-1">
             {tenants.map((tenant, i) => {
-              const catAmount = entry.type === 'rent' ? tenant.baseRent
-                : entry.type === 'charges' ? tenant.charges
-                : (tenant.buildingChargesByType?.[entry.type] || 0);
+              const catAmount =
+                entry.type === 'rent'
+                  ? tenant.baseRent
+                  : entry.type === 'charges'
+                    ? tenant.charges
+                    : tenant.buildingChargesByType?.[entry.type] || 0;
               if (catAmount <= 0) return null;
-              const catPaid = Math.round(catAmount * Math.min(paidRatio, 1));
+              const catPaid = Math.round(
+                catAmount * Math.min(paidRatio, 1)
+              );
               return (
                 <div key={i}>
-                  <div className="truncate">{tenant.name}</div>
-                  <div className="flex gap-3 text-muted-foreground">
-                    <span>{t('Due')}: {formatNumber(catAmount)}</span>
-                    <span className={catPaid >= catAmount ? 'text-success' : 'text-warning'}>
-                      {t('Paid')}: {formatNumber(catPaid)}
+                  <div className="truncate text-label text-ink-soft">{tenant.name}</div>
+                  <div className="flex gap-2 text-label text-ink-muted font-mono tabular-nums">
+                    <span>
+                      {t('Owed')}: {formatNumber(catAmount)}
+                    </span>
+                    <span
+                      style={{
+                        color:
+                          catPaid >= catAmount ? paidColor('rent') : undefined
+                      }}
+                      className={catPaid >= catAmount ? '' : 'text-ink-muted'}
+                    >
+                      {t('Collected')}: {formatNumber(catPaid)}
                     </span>
                   </div>
                 </div>
@@ -146,8 +299,13 @@ export default function MonthFigures({ className, dashboardData }) {
     );
   };
 
-  const totalDue = currentRevenues.baseRent + currentRevenues.charges +
-    Object.values(currentRevenues.buildingChargesByType || {}).reduce((s, v) => s + v, 0);
+  const totalDue =
+    currentRevenues.baseRent +
+    currentRevenues.charges +
+    Object.values(currentRevenues.buildingChargesByType || {}).reduce(
+      (s, v) => s + v,
+      0
+    );
   const totalPaid = currentRevenues.paid || 0;
 
   return (
@@ -168,23 +326,23 @@ export default function MonthFigures({ className, dashboardData }) {
               {dashboardData.topUnpaid.map(({ tenant, balance }) => (
                 <div
                   key={tenant._id}
-                  className="flex items-center text-sm md:text-base"
+                  className="flex items-center justify-between gap-3 py-2 border-b border-stone-line last:border-b-0"
                 >
-                  <Button
-                    variant="link"
+                  <button
+                    type="button"
                     onClick={() => {
                       router.push(
                         `/${router.query.organization}/rents/${yearMonth}?search=${tenant.name}`
                       );
                     }}
-                    className="justify-start flex-grow p-0 m-0"
+                    className="text-left text-body text-ink truncate flex-grow hover:text-sea-deep transition-colors duration-base ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sea rounded-sm"
                   >
                     {tenant.name}
-                  </Button>
+                  </button>
                   <NumberFormat
                     value={balance}
                     withColor
-                    className="font-semibold"
+                    className="font-medium"
                   />
                 </div>
               ))}
@@ -206,15 +364,33 @@ export default function MonthFigures({ className, dashboardData }) {
           <div>
             {pieData.length > 0 ? (
               <>
-                <div className="flex flex-wrap justify-center gap-3 text-xs mb-2">
-                  {legend.map(({ type, label }) => (
-                    <div key={type} className="flex items-center gap-1">
-                      <div className="size-3 rounded-sm" style={{ background: getColor(type, 'paid') }} />
-                      <span>{label}</span>
-                    </div>
-                  ))}
+                <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-label text-ink-soft mb-3">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: getColor('rent', 'paid') }}
+                      aria-hidden="true"
+                    />
+                    <span>{t('Rent')}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: getColor('charges', 'paid') }}
+                      aria-hidden="true"
+                    />
+                    <span>{t('Extra charges')}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: getColor('heating', 'paid') }}
+                      aria-hidden="true"
+                    />
+                    <span>{t('Building charges')}</span>
+                  </div>
                 </div>
-                <div className="flex justify-center text-[10px] text-muted-foreground mb-1">
+                <div className="flex justify-center text-label text-ink-muted mb-1">
                   <span>{t('Bold = paid, faded = unpaid')}</span>
                 </div>
                 <ChartContainer
@@ -241,19 +417,26 @@ export default function MonthFigures({ className, dashboardData }) {
                     <Tooltip content={<CustomTooltip />} />
                   </PieChart>
                 </ChartContainer>
-                <div className="flex justify-between text-sm mt-1 px-4">
+                <div className="flex justify-between text-body mt-1 px-4 font-mono tabular-nums">
                   <div>
-                    <span className="text-muted-foreground">{t('Paid')}: </span>
-                    <span className="font-semibold text-success">{formatNumber(totalPaid)}</span>
+                    <span className="text-ink-muted">{t('Collected')}: </span>
+                    <span
+                      className="font-semibold"
+                      style={{ color: paidColor('rent') }}
+                    >
+                      {formatNumber(totalPaid)}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">{t('Due')}: </span>
-                    <span className="font-semibold">{formatNumber(totalDue)}</span>
+                    <span className="text-ink-muted">{t('Owed')}: </span>
+                    <span className="font-semibold text-ink">
+                      {formatNumber(totalDue)}
+                    </span>
                   </div>
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-[320px] text-muted-foreground">
+              <div className="flex items-center justify-center h-[320px] text-ink-muted">
                 {t('No data')}
               </div>
             )}

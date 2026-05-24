@@ -1,4 +1,8 @@
-# MRE → Synology DS920+ NAS Deployment — Revised Plan
+# [ARCHIVED] MRE → Synology DS920+ NAS Deployment — Revised Plan
+
+> **This is a historical execution plan.** The work described here is complete.
+> For the current workflow, see [DEV_AND_DEPLOY.md](./DEV_AND_DEPLOY.md).
+> Kept for reference (decisions made, why we did what we did).
 
 **Target:** Self-hosted MicroRealEstate on Synology DS920+ via Portainer stack,
 accessed on port **1350** via LAN and Tailscale.

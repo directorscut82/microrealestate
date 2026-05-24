@@ -1,88 +1,67 @@
-import config from '../config';
+import {
+  LuCheckCircle,
+  LuFileText,
+  LuInbox,
+  LuMapPin,
+  LuScroll,
+  LuSparkles
+} from 'react-icons/lu';
 import useTranslation from 'next-translate/useTranslation';
 
-function Illustration({ src, label, alt, priority = false }) {
+/*
+ * Illustrations — DESIGN.md type-only empty states.
+ *
+ * Earlier revisions used unDraw stock SVGs (smiling people, houses, project-
+ * completion celebrations). PRODUCT.md flags those as the generic property-
+ * tech SaaS anti-reference, so they're gone. Each empty state now renders as
+ * a quiet single-icon + label pattern in ink-muted on cream, sitting flat on
+ * the surface (no card-in-card, no decoration). The icon family is Lucide,
+ * matching the rest of the system.
+ *
+ * The label prop remains for backward compatibility with existing callers.
+ */
+
+function EmptyState({ icon: Icon, label, className = '' }) {
   return (
-    <div className="flex flex-col gap-4 items-center w-full h-full">
-      <div className="relative w-full h-full">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={src} alt={alt} className="w-full h-full object-contain" />
-      </div>
-      {!!label && <p className="text-xl text-muted-foreground">{label}</p>}
+    <div
+      className={`flex flex-col items-center justify-center gap-3 py-16 text-ink-muted ${className}`}
+    >
+      {Icon ? <Icon className="size-8 text-ink-muted/60" /> : null}
+      {label ? (
+        <p className="text-body text-ink-muted text-center max-w-sm">
+          {label}
+        </p>
+      ) : null}
     </div>
   );
 }
 
-export const SignInUpIllustration = ({ label }) => {
-  const { t } = useTranslation('common');
-  return (
-    <div className="h-64 w-full">
-      <Illustration
-        src={`${config.BASE_PATH}/undraw_choosing_house_re_1rv7.svg`}
-        priority={true}
-        alt="welcome"
-      />
-    </div>
-  );
-};
+export const SignInUpIllustration = () => null;
 
 export const EmptyIllustration = ({ label }) => {
   const { t } = useTranslation('common');
+  return <EmptyState icon={LuInbox} label={label || t('No data found')} />;
+};
+
+export const LocationIllustration = () => <EmptyState icon={LuMapPin} />;
+
+export const BlankDocumentIllustration = () => (
+  <EmptyState icon={LuFileText} />
+);
+
+export const TermsDocumentIllustration = () => <EmptyState icon={LuScroll} />;
+
+export const WelcomeIllustration = () => null;
+
+export const CelebrationIllustration = ({ label }) => {
+  const { t } = useTranslation('common');
   return (
-    <div className="h-64 w-full">
-      <Illustration
-        src={`${config.BASE_PATH}/undraw_Empty_re_opql.svg`}
-        label={label || t('No data found')}
-        priority={true}
-        alt="no data found"
-      />
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-olive">
+      <LuCheckCircle className="size-7" />
+      <p className="text-body text-ink text-center">
+        {label || t('Done')}
+      </p>
+      <LuSparkles className="size-3 text-olive/60" />
     </div>
   );
 };
-
-export const LocationIllustration = () => (
-  <div className="h-64 w-full">
-    <Illustration
-      src={`${config.BASE_PATH}/undraw_Location_tracking.svg`}
-      alt="no location found"
-    />
-  </div>
-);
-
-export const BlankDocumentIllustration = () => (
-  <div className="h-64 w-full">
-    <Illustration
-      src={`${config.BASE_PATH}/undraw_add_document_re_mbjx.svg`}
-      alt="blank document"
-    />
-  </div>
-);
-
-export const TermsDocumentIllustration = ({ alt = '' }) => (
-  <div className="h-64 w-full">
-    <Illustration
-      src={`${config.BASE_PATH}/undraw_Terms_re_6ak4.svg`}
-      alt={alt}
-    />
-  </div>
-);
-
-export const WelcomeIllustration = () => (
-  <div className="h-64 w-full">
-    <Illustration
-      src={`${config.BASE_PATH}/undraw_project_completed_re_jr7u.svg`}
-      priority={true}
-      alt="welcome"
-    />
-  </div>
-);
-
-export const CelebrationIllustration = ({ label }) => (
-  <div className={`h-56 w-full`}>
-    <Illustration
-      src={`${config.BASE_PATH}/undraw_Celebration_re_kc9k.svg`}
-      label={label}
-      alt="celebration"
-    />
-  </div>
-);

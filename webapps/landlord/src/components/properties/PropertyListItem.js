@@ -1,20 +1,20 @@
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from '../../components/ui/card';
 import { useCallback } from 'react';
 import { Badge } from '../../components/ui/badge';
-import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import NumberFormat from '../../components/NumberFormat';
 import PropertyAvatar from './PropertyAvatar';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function PropertyListItem({ property, accent }) {
+/*
+ * PropertyListItem — DESIGN.md card consumer.
+ *
+ * Bone surface, hairline border, no colored side-stripe, no boxed price.
+ * Property name in ink (NOT sea — sea reserved for genuine link affordances).
+ * Status pill in the bottom-right consistently. Hover lifts to cream tonally,
+ * no shadow.
+ */
+export default function PropertyListItem({ property }) {
   const router = useRouter();
   const { t } = useTranslation('common');
 
@@ -24,56 +24,54 @@ export default function PropertyListItem({ property, accent }) {
     );
   }, [router, property]);
 
+  const isVacant = property.status === 'vacant';
+
   return (
-    <Card
-      className={cn('cursor-pointer', accent && `border-l-4 ${accent}`)}
+    <button
+      type="button"
       onClick={onClick}
+      data-cy="openResourceButton"
+      className={cn(
+        'group flex flex-col w-full rounded-lg border border-stone-line bg-bone',
+        'text-left transition-colors duration-base ease-out-quart',
+        'hover:bg-cream',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sea focus-visible:ring-offset-2 focus-visible:ring-offset-cream'
+      )}
     >
-      <CardHeader className="mb-2 pb-2">
-        <CardTitle className="flex justify-start items-center gap-2">
-          <PropertyAvatar property={property} />
-          <div className="min-w-0">
-            <Button
-              variant="link"
-              className="w-fit h-fit p-0 text-sm font-semibold whitespace-normal text-left"
-              data-cy="openResourceButton"
-            >
-              {property.name}
-            </Button>
-            {property.description && (
-              <div className="text-xs font-normal text-muted-foreground truncate">
-                {property.description}
-              </div>
-            )}
+      <div className="flex items-start gap-3 px-5 pt-4 pb-3">
+        <PropertyAvatar property={property} />
+        <div className="min-w-0 flex-1">
+          <div className="text-title font-medium text-ink truncate">
+            {property.name}
           </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="text-right space-y-1 pb-3">
-        <div className="text-xs text-muted-foreground">
+          {property.description && (
+            <div className="text-label text-ink-muted truncate mt-0.5">
+              {property.description}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-baseline justify-between gap-3 px-5 py-3 border-t border-stone-line">
+        <div className="text-label text-ink-muted truncate">
           {t('Rent excluding tax and expenses')}
         </div>
         <NumberFormat
           value={property.price}
-          className="text-xl font-medium border py-1.5 px-3 rounded bg-card"
+          className="text-body text-ink shrink-0"
         />
-      </CardContent>
-      <CardFooter className="p-0 flex-col">
-        <div className="flex items-center justify-between w-full py-3 px-6 border-t">
-          <div className="text-xs text-muted-foreground">
-            {property.status !== 'vacant'
-              ? t('Occupied by {{tenant}}', {
-                  tenant: property.occupantLabel
-                })
-              : null}
-          </div>
-          <Badge
-            variant={property.status === 'vacant' ? 'success' : 'secondary'}
-            className="text-xs font-normal"
-          >
-            {property.status === 'vacant' ? t('Vacant') : t('Rented')}
-          </Badge>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-stone-line">
+        <div className="text-label text-ink-muted truncate">
+          {!isVacant && property.occupantLabel
+            ? t('Occupied by {{tenant}}', { tenant: property.occupantLabel })
+            : null}
         </div>
-      </CardFooter>
-    </Card>
+        <Badge variant={isVacant ? 'paid' : 'archived'} className="shrink-0">
+          {isVacant ? t('Vacant') : t('Rented')}
+        </Badge>
+      </div>
+    </button>
   );
 }

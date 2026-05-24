@@ -3,13 +3,16 @@
 # deploy-nas.sh — one-command deploy to NAS
 #
 # What it does:
-#   1. Asks upfront about upstream sync, CI wait, NAS redeploy
-#   2. Validates local state (clean master, nas branch exists, compose file OK)
-#   3. Fast-forwards master from upstream if requested
-#   4. Merges master -> nas
-#   5. Pushes nas to GitHub (triggers CI to build :nas images)
-#   6. Waits for CI to finish (if requested)
-#   7. Redeploys the Portainer stack (if requested)
+#   1. Asks upfront about CI wait and NAS redeploy
+#   2. Validates local state (clean tree, nas branch exists, compose file OK)
+#   3. Merges master -> nas
+#   4. Pushes nas to GitHub (triggers CI to build :nas images)
+#   5. Waits for CI to finish (if requested)
+#   6. Redeploys the Portainer stack (if requested)
+#
+# Note: upstream sync is NOT automated. This fork has rewritten commit history
+# (authorship rewrite), so upstream and this fork have unrelated git histories.
+# To pull specific upstream fixes, use git cherry-pick manually.
 #
 # Requirements on your Mac:
 #   - .secrets/github-pat     (GitHub PAT with repo+workflow+write:packages)
@@ -72,24 +75,21 @@ info "   NAS DEPLOY — $FORK"
 info "============================================"
 echo
 
-read -r -p "1/3  Pull latest from upstream into master before deploying? [y/N] " answer_upstream
-read -r -p "2/3  Wait for GitHub Actions to finish building images? [Y/n] " answer_wait_ci
-read -r -p "3/3  Redeploy the NAS stack after images are ready? [Y/n] " answer_redeploy
+read -r -p "1/2  Wait for GitHub Actions to finish building images? [Y/n] " answer_wait_ci
+read -r -p "2/2  Redeploy the NAS stack after images are ready? [Y/n] " answer_redeploy
 echo
 
 # normalise answers (use tr for bash 3 compat on macOS)
 to_lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
-sync_upstream="no"; a="$(to_lower "${answer_upstream:-}")"; [[ "$a" == "y" || "$a" == "yes" ]] && sync_upstream="yes"
 wait_ci="yes"; a="$(to_lower "${answer_wait_ci:-}")"; [[ "$a" == "n" || "$a" == "no" ]] && wait_ci="no"
 redeploy="yes"; a="$(to_lower "${answer_redeploy:-}")"; [[ "$a" == "n" || "$a" == "no" ]] && redeploy="no"
 
 info "Plan:"
-echo "  - Sync upstream:   $sync_upstream"
 echo "  - Wait for CI:     $wait_ci"
 echo "  - Redeploy NAS:    $redeploy"
 echo
 
-# ---- validate master is clean ----
+# ---- validate working tree is clean ----
 current_branch="$(git rev-parse --abbrev-ref HEAD)"
 if ! git diff --quiet || ! git diff --cached --quiet; then
   err "Working tree has uncommitted changes. Commit or stash first."
@@ -105,14 +105,6 @@ if ! git show-ref --quiet refs/heads/nas; then
 fi
 ok "nas branch exists"
 
-# ---- validate upstream remote if needed ----
-if [[ "$sync_upstream" == "yes" ]]; then
-  if ! git remote | grep -q '^upstream$'; then
-    err "No 'upstream' remote configured. Add it: git remote add upstream <url>"
-    exit 1
-  fi
-fi
-
 # ---- validate compose file exists ----
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   err "Missing $COMPOSE_FILE. This file should exist locally (gitignored)."
@@ -127,18 +119,6 @@ bash scripts/validate-nas-deploy.sh || {
   exit 1
 }
 ok "Compose file validated"
-
-# ---- optional: sync from upstream ----
-if [[ "$sync_upstream" == "yes" ]]; then
-  info "Fetching from upstream..."
-  git fetch upstream master
-  git checkout master
-  git merge --ff-only upstream/master || {
-    err "Cannot fast-forward master from upstream. Resolve manually."
-    exit 1
-  }
-  ok "master synced with upstream"
-fi
 
 # ---- merge master -> nas ----
 info "Switching to nas branch..."

@@ -16,7 +16,7 @@ import LeaseTabs from '../../../../components/organization/lease/LeaseTabs';
 import Page from '../../../../components/Page';
 import PresenceBanner from '../../../../components/PresenceBanner';
 import usePresence from '../../../../hooks/usePresence';
-import ShortcutButton from '../../../../components/ShortcutButton';
+import { Button } from '../../../../components/ui/button';
 import { StoreContext } from '../../../../store';
 import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -112,22 +112,22 @@ function Contract() {
     <Page
       loading={leaseLoading}
       ActionBar={
-        <div className="grid grid-cols-5 gap-1.5 md:gap-4">
-          <ShortcutButton
-            label={t('Back')}
-            Icon={LuArrowLeft}
-            onClick={handleBack}
-          />
-          <ShortcutButton
-            label={t('Delete')}
-            Icon={LuTrash}
+        <div className="flex items-center justify-between gap-2">
+          <Button variant="ghost" size="sm" onClick={handleBack} className="gap-2">
+            <LuArrowLeft className="size-4" />
+            {t('Back')}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
             onClick={() => setOpenRemoveContractDialog(true)}
-            disabled={
-              lease?.usedByTenants || store.user.role !== ADMIN_ROLE
-            }
-            className="col-start-2 col-end-2"
-            dataCy="removeResourceButton"
-          />
+            disabled={lease?.usedByTenants || store.user.role !== ADMIN_ROLE}
+            data-cy="removeResourceButton"
+            className="gap-2"
+          >
+            <LuTrash className="size-4" />
+            {t('Delete')}
+          </Button>
         </div>
       }
       dataCy="contractPage"

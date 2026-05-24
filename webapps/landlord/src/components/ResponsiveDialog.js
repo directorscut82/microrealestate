@@ -34,7 +34,9 @@ export default function ResponsiveDialog({
   renderFooter,
   isLoading
 }) {
-  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const isDesktop = useMediaQuery('(min-width: 768px)', {
+    initializeWithValue: false
+  });
   const handleOpenChange = (value) => {
     if (isLoading) {
       return;

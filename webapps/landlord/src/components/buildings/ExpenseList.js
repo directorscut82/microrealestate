@@ -547,7 +547,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
             </div>
 
             {isRecurring && amount > 0 && (
-              <div className="flex items-center gap-2 ml-6">
+              <div className="flex items-center gap-2 ml-14 border-l-2 border-stone-line pl-4 py-1">
                 <Switch
                   id="startFromCurrentMonth"
                   checked={watch('startFromCurrentMonth')}
@@ -555,7 +555,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                     setValue('startFromCurrentMonth', checked)
                   }
                 />
-                <Label htmlFor="startFromCurrentMonth" className="text-sm text-muted-foreground">
+                <Label htmlFor="startFromCurrentMonth" className="text-label text-ink-muted">
                   {t('Start billing from current month only')}
                 </Label>
               </div>
