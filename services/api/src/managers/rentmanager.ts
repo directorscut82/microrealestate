@@ -303,21 +303,32 @@ async function _updateByTerm(
     }
 
     if (paymentData.promo) {
-      // Store the user-entered amount as-is. VAT is applied centrally in
-      // task 4 (4_vats.ts); previously dividing by (1 + vatRate) here and
-      // multiplying back in frontdata.ts caused round-trip drift.
+      // The user enters a VAT-inclusive amount. We store the net-of-VAT
+      // amount: task 4 (4_vats.ts) adds a VAT line for settlement
+      // discounts, and frontdata.ts:toRentData multiplies the net back to
+      // gross for display. Net effect on grandTotal: -original_promo.
       settlements.discounts.push({
         origin: 'settlement',
         description: paymentData.notepromo || '',
-        amount: Number(paymentData.promo)
+        amount:
+          Number(paymentData.promo) *
+          (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
       });
     }
 
     if (paymentData.extracharge) {
-      // Same rationale as promo above — single VAT pass via task 4.
+      // Same net-of-VAT storage as promo. KNOWN ISSUE: task 4 does NOT
+      // apply VAT to debts (they are treated as carried-forward
+      // grandTotal amounts), so the actual grandTotal increment is
+      // extra/(1+vat) while the UI displays `extra`. Net under-bill of
+      // ~vat% on the displayed extracharge. Out of scope for this fix
+      // wave — would require either applying VAT to debts in task 4 OR
+      // changing the storage convention. See bug-hunt notes H7.
       settlements.debts.push({
         description: paymentData.noteextracharge || '',
-        amount: Number(paymentData.extracharge)
+        amount:
+          Number(paymentData.extracharge) *
+          (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
       });
     }
 
