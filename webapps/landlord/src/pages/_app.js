@@ -19,6 +19,7 @@ import { InjectStoreContext } from '../store';
 import moment from 'moment';
 import { IBM_Plex_Mono, Manrope } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
+import { useEffect } from 'react';
 
 const queryClient = new QueryClient();
 
@@ -65,6 +66,24 @@ function MyApp(props) {
       plexMono.variable
     );
   }
+
+  // Reset retired theme values from localStorage to 'system'.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem('theme');
+      if (stored && !['light', 'dark', 'system'].includes(stored)) {
+        window.localStorage.setItem('theme', 'system');
+        // Strip stale theme class names from <html>.
+        const root = document.documentElement;
+        ['midnight', 'forest', 'sunset'].forEach((cls) =>
+          root.classList.remove(cls)
+        );
+      }
+    } catch {
+      // localStorage may be unavailable (private mode, SSR boundary).
+    }
+  }, []);
 
   return (
     <>

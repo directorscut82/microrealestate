@@ -17,27 +17,32 @@ import PropertyIcon from './PropertyIcon';
 import types from './types';
 import useTranslation from 'next-translate/useTranslation';
 
+const optionalNumber = z.preprocess(
+  (v) => (v === '' || v == null ? undefined : v),
+  z.coerce.number().min(0).max(1000000).optional()
+);
+
 const schema = z.object({
-  type: z.string().min(1),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  surface: z.union([z.string(), z.number()]).optional(),
-  landSurface: z.union([z.string(), z.number()]).optional(),
-  phone: z.string().optional(),
-  digicode: z.string().optional(),
-  atakNumber: z.string().optional(),
-  dehNumber: z.string().optional(),
-  energyClass: z.string().optional(),
-  energyCertNumber: z.string().optional(),
+  type: z.string().trim().min(1).max(60),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  surface: optionalNumber,
+  landSurface: optionalNumber,
+  phone: z.string().trim().max(60).optional(),
+  digicode: z.string().trim().max(60).optional(),
+  atakNumber: z.string().trim().max(60).optional(),
+  dehNumber: z.string().trim().max(60).optional(),
+  energyClass: z.string().trim().max(60).optional(),
+  energyCertNumber: z.string().trim().max(60).optional(),
   address: z.object({
-    street1: z.string().optional(),
-    street2: z.string().optional(),
-    city: z.string().optional(),
-    zipCode: z.string().optional(),
-    state: z.string().optional(),
-    country: z.string().optional()
+    street1: z.string().trim().max(200).optional(),
+    street2: z.string().trim().max(200).optional(),
+    city: z.string().trim().max(120).optional(),
+    zipCode: z.string().trim().max(30).optional(),
+    state: z.string().trim().max(120).optional(),
+    country: z.string().trim().max(120).optional()
   }),
-  rent: z.coerce.number().min(0)
+  rent: z.coerce.number().min(0).max(10000000).finite()
 });
 
 function Section({ label, children }) {

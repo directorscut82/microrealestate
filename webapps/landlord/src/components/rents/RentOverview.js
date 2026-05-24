@@ -15,6 +15,7 @@ import useTranslation from 'next-translate/useTranslation';
  */
 
 function PeriodNav({ period, onChange }) {
+  const { t } = useTranslation('common');
   const handlePrev = () => onChange(period.clone().subtract(1, 'month'));
   const handleNext = () => onChange(period.clone().add(1, 'month'));
 
@@ -24,7 +25,7 @@ function PeriodNav({ period, onChange }) {
         variant="ghost"
         size="icon"
         onClick={handlePrev}
-        aria-label="previous month"
+        aria-label={t('Previous month')}
         className="h-8 w-8"
       >
         <LuChevronLeft className="size-4" />
@@ -36,7 +37,7 @@ function PeriodNav({ period, onChange }) {
         variant="ghost"
         size="icon"
         onClick={handleNext}
-        aria-label="next month"
+        aria-label={t('Next month')}
         className="h-8 w-8"
       >
         <LuChevronRight className="size-4" />
@@ -46,6 +47,7 @@ function PeriodNav({ period, onChange }) {
 }
 
 function Stat({ label, count, amount, color, className }) {
+  const { t } = useTranslation('common');
   return (
     <div className={cn('flex flex-col gap-0.5 min-w-0', className)}>
       <span className="text-label text-ink-muted uppercase tracking-wide">
@@ -62,7 +64,7 @@ function Stat({ label, count, amount, color, className }) {
         </span>
         {typeof count === 'number' ? (
           <span className="text-label text-ink-muted">
-            {count} {count === 1 ? 'rent' : 'rents'}
+            {t('{{count}} rents', { count })}
           </span>
         ) : null}
       </div>

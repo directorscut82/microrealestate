@@ -100,7 +100,7 @@ export default function TenantListItem({ tenant }) {
       <CardFooter className="p-0 flex-col">
         <div className="flex items-center justify-end w-full py-3 px-5">
           <Badge
-            variant={tenant.terminated ? 'archived' : 'paid'}
+            variant={tenant.terminated ? 'secondary' : 'success'}
             className="font-normal text-label leading-none"
           >
             <span

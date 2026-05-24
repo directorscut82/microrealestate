@@ -37,6 +37,12 @@ export function mergeOrganization(organization = {}, orgPart) {
         applicationKeyUpdated: false
       }
     : null;
+  const smsGateway = organization.thirdParties?.smsGateway
+    ? {
+        ...organization.thirdParties.smsGateway,
+        passwordUpdated: false
+      }
+    : null;
 
   const mergedOrg = {
     ...organization,
@@ -45,7 +51,8 @@ export function mergeOrganization(organization = {}, orgPart) {
       gmail,
       smtp,
       mailgun,
-      b2
+      b2,
+      smsGateway
     },
     ...orgPart
   };

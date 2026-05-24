@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useEffect } from 'react';
 import { Card, CardContent } from '../components/ui/card';
 import Landlord from '../components/organization/LandlordForm';
 import { StoreContext } from '../store';
@@ -18,8 +18,13 @@ function FirstAccess() {
   const store = useContext(StoreContext);
   const router = useRouter();
 
+  useEffect(() => {
+    if (store.organization.items.length && store.organization.selected?.name) {
+      router.push(`/${store.organization.selected.name}/dashboard`);
+    }
+  }, [store.organization.items.length, store.organization.selected?.name, router]);
+
   if (store.organization.items.length) {
-    router.push(`/${store.organization.selected.name}/dashboard`);
     return null;
   }
 

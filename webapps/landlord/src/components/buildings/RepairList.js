@@ -52,7 +52,7 @@ const repairCategories = [
   'other'
 ];
 
-const repairStatuses = ['scheduled', 'in_progress', 'completed', 'cancelled'];
+const repairStatuses = ['planned', 'in_progress', 'completed', 'cancelled'];
 
 const repairUrgencies = ['emergency', 'normal', 'low'];
 
@@ -91,7 +91,7 @@ const schema = z.object({
 
 function getStatusBadgeVariant(status) {
   switch (status) {
-    case 'scheduled':
+    case 'planned':
       return 'secondary';
     case 'in_progress':
       return 'default';
@@ -192,21 +192,21 @@ export default function RepairList({ building }) {
 
   const initialValues = useMemo(
     () => ({
-      title: selectedRepair?.title || '',
-      description: selectedRepair?.description || '',
-      category: selectedRepair?.category || 'general',
-      status: selectedRepair?.status || 'scheduled',
-      urgency: selectedRepair?.urgency || 'normal',
-      estimatedCost: selectedRepair?.estimatedCost || '',
-      actualCost: selectedRepair?.actualCost || '',
-      chargeableTo: selectedRepair?.chargeableTo || 'owners',
+      title: selectedRepair?.title ?? '',
+      description: selectedRepair?.description ?? '',
+      category: selectedRepair?.category ?? 'general',
+      status: selectedRepair?.status ?? 'planned',
+      urgency: selectedRepair?.urgency ?? 'normal',
+      estimatedCost: selectedRepair?.estimatedCost ?? '',
+      actualCost: selectedRepair?.actualCost ?? '',
+      chargeableTo: selectedRepair?.chargeableTo ?? 'owners',
       tenantSharePercentage: selectedRepair?.tenantSharePercentage ?? 50,
       allocationMethod:
-        selectedRepair?.allocationMethod || 'general_thousandths',
+        selectedRepair?.allocationMethod ?? 'general_thousandths',
       chargeTerm: selectedRepair?.chargeTerm
         ? String(selectedRepair.chargeTerm)
         : getCurrentTerm(),
-      contractorId: selectedRepair?.contractorId || '',
+      contractorId: selectedRepair?.contractorId ?? '',
       reportedDate: selectedRepair?.reportedDate
         ? selectedRepair.reportedDate.substring(0, 10)
         : new Date().toISOString().substring(0, 10),
@@ -216,9 +216,9 @@ export default function RepairList({ building }) {
       completionDate: selectedRepair?.completionDate
         ? selectedRepair.completionDate.substring(0, 10)
         : '',
-      isPaidFromRepairsFund: selectedRepair?.isPaidFromRepairsFund || false,
-      invoiceReference: selectedRepair?.invoiceReference || '',
-      notes: selectedRepair?.notes || ''
+      isPaidFromRepairsFund: selectedRepair?.isPaidFromRepairsFund ?? false,
+      invoiceReference: selectedRepair?.invoiceReference ?? '',
+      notes: selectedRepair?.notes ?? ''
     }),
     [selectedRepair]
   );

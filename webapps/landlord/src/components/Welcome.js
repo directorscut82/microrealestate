@@ -15,7 +15,7 @@ export default function Welcome({ className }) {
   return (
     <div
       className={cn(
-        'text-title font-medium text-ink-soft tracking-tight',
+        'text-2xl font-semibold text-ink tracking-tight',
         className
       )}
     >

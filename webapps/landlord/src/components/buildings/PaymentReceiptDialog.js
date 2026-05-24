@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function PaymentReceiptDialog({ open, setOpen }) {
+export default function PaymentReceiptDialog({ open, setOpen, building }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [state, setState] = useState('idle');
@@ -63,6 +63,11 @@ export default function PaymentReceiptDialog({ open, setOpen }) {
       const billIds = matched.map((r) => r.billId);
       await confirmBillPayment(billIds);
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
+      if (building?._id) {
+        queryClient.invalidateQueries({
+          queryKey: [QueryKeys.BUILDINGS, building._id]
+        });
+      }
       toast.success(
         t('{{count}} bill(s) marked as paid', { count: billIds.length })
       );
@@ -72,7 +77,7 @@ export default function PaymentReceiptDialog({ open, setOpen }) {
       toast.error(t('Failed to confirm payment'));
       setState('preview');
     }
-  }, [results, handleClose, queryClient, t]);
+  }, [results, handleClose, queryClient, t, building?._id]);
 
   const matchedCount = results.filter((r) => r.success && r.billId).length;
   const failedCount = results.filter((r) => !r.success).length;

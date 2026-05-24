@@ -646,7 +646,12 @@ export default function ExpenseList({ building }) {
     mutationFn: ({ expenseId, mode }) =>
       removeBuildingExpense(building._id, expenseId, mode),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({
+        queryKey: [QueryKeys.BUILDINGS, building._id]
+      });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
     }
   });
 
@@ -944,6 +949,7 @@ export default function ExpenseList({ building }) {
       <PaymentReceiptDialog
         open={openPaymentReceipt}
         setOpen={setOpenPaymentReceipt}
+        building={building}
       />
     </div>
   );

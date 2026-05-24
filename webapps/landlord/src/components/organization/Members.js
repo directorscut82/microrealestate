@@ -185,7 +185,7 @@ export default function Members({ organization }) {
             >
               <div className="flex flex-col">
                 <div className="text-lg md:text-xl">{app.name}</div>
-                {!isExpired ? (
+                {isExpired ? (
                   <div className="text-warning text-xs">
                     {t('Token is expired')}
                   </div>

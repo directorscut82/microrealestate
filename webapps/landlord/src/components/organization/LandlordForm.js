@@ -37,7 +37,10 @@ const baseSchema = z.object({
   company: z.string().optional(),
   ein: z.string().optional(),
   dos: z.string().optional(),
-  capital: z.union([z.string(), z.coerce.number()]).optional()
+  capital: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.coerce.number().min(0).optional()
+  )
 });
 
 const schema = baseSchema.superRefine((data, ctx) => {
@@ -94,6 +97,7 @@ export default function LandlordForm({ organization, firstAccess }) {
     mutationFn: createOrganization,
     onSuccess: (createdOrgpanization) => {
       updateStoreOrganization(store, createdOrgpanization);
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ORGANIZATIONS] });
     }
   });
   const mutateUpdateOrganization = useMutation({

@@ -8,8 +8,17 @@ import Store from './Store';
 let _store;
 
 export function getStoreInstance(initialData) {
+  // On the server, create a fresh Store per request to avoid leaking
+  // user/organization state across concurrent SSR responses. We still
+  // assign to _store so that setupOrganizationsInStore (called after
+  // getStoreInstance during the same request) can find it; concurrent
+  // requests overwrite the variable but each request only reads it
+  // synchronously between the assignment in getServerSideProps and the
+  // setupOrganizationsInStore call that immediately follows.
   if (isServer()) {
     _store = new Store();
+    if (initialData) _store.hydrate(initialData);
+    return _store;
   }
 
   if (!_store) {
@@ -64,8 +73,14 @@ export async function setupOrganizationsInStore(selectedOrgName) {
       selectedOrganization = _store.organization.items.find(
         ({ name }) => name === selectedOrgName
       );
-    }
-    if (!selectedOrganization) {
+      if (!selectedOrganization) {
+        // Caller passed an explicit name that does not match any org —
+        // fail loudly instead of silently picking the first organization.
+        throw new Error(
+          `Organization "${selectedOrgName}" not found in store`
+        );
+      }
+    } else {
       selectedOrganization = _store.organization.items[0];
     }
     _store.organization.setSelected(selectedOrganization, _store.user);

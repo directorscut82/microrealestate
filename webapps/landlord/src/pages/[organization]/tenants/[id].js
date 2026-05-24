@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import ConfirmDialog from '../../../components/ConfirmDialog';
+import ErrorPage from 'next/error';
 import {
   Dialog,
   DialogContent,
@@ -58,8 +59,12 @@ function Tenant() {
   const { data: tenant, isLoading: tenantLoading } = useQuery({
     queryKey: [QueryKeys.TENANTS, tenantId],
     queryFn: () => fetchTenant(tenantId),
-    enabled: !!tenantId
+    enabled: !!tenantId && tenantId !== 'new'
   });
+
+  // Distinguish "creating new tenant" from "tenant id not found".
+  const tenantNotFound =
+    tenantId && tenantId !== 'new' && !tenantLoading && !tenant;
 
   const { data: properties = [] } = useQuery({
     queryKey: [QueryKeys.PROPERTIES],
@@ -232,6 +237,10 @@ function Tenant() {
     () => setOpenConfirmEditTenant(true),
     []
   );
+
+  if (tenantNotFound) {
+    return <ErrorPage statusCode={404} />;
+  }
 
   return (
     <Page
