@@ -165,6 +165,11 @@ Changes are grouped into phases. Each phase should be completed before the next.
 ### 5.4 Finch support in CLI — NOT STARTED
 - **Problem:** CLI's `findCRI()` only detects docker/docker-compose/podman
 
+### 5.5 `destructUrl()` should preserve the port — NOT STARTED
+- **Problem:** `services/common/src/utils/url.ts:destructUrl()` returns `domain = url.hostname` (port goes into a separate `port` field). Callers that build CORS regexes or domain strings — primarily `services/gateway/src/index.ts:configureCORS()` — silently drop the port, so `DOMAIN_URL=http://localhost:8080` produces an allowlist that rejects `http://localhost:8080`.
+- **Workaround in place:** Set `APP_DOMAIN=localhost:8080` (or whatever `host:port`) in `.env`. `APP_DOMAIN` is used verbatim and is the documented escape hatch for any non-default port.
+- **Proposed fix:** Make `destructUrl()` return `domain = url.host` (which includes the port) when a port is present, OR have `configureCORS()` build the regex from `host` not `domain`. ~5 lines, but touches shared utility code used by other services — verify no caller relies on port-less `domain` first.
+
 ---
 
 ## Implementation Order

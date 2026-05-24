@@ -4,6 +4,25 @@
 
 > **Single source of truth.** Agent-readable docs live in `.kiro/steering/`. Other tools read the same content via symlinks (`CLAUDE.md` → this file; `wasabi-toolbag/content/0N-*.md` → the 7 steering files). When updating documentation, edit the steering file. Never edit a symlink.
 
+## Working principles for agents — read before debugging
+
+When a live issue is reported (CORS error, login failure, deployment failure, container crash, etc.), **read the relevant code before proposing a fix.** Pattern-matching on log lines and error messages alone produces wrong answers fast and costs the user trust slowly.
+
+The minimum sequence:
+
+1. **Read the file emitting the error** — find the function that produced the message, read its full logic, and trace its inputs (env vars, config, imports). Do not skim.
+2. **Read the helpers it depends on** — if the function uses `URLUtils.destructUrl()`, `bcrypt.compare()`, `jwt.verify()`, or any other shared utility, open that file too. The bug is often in the helper, not the caller.
+3. **Verify your hypothesis with a read-only command** before changing anything — `curl` the endpoint with the exact `Origin`/`Authorization` headers, `mongo` query the actual record, `printenv` the running container.
+4. **Then** propose a fix. State the root cause in one sentence and the proposed change in one sentence before editing files.
+
+**Anti-patterns to avoid:**
+- "Stale cookie" / "rate limit" / "cache" as default explanations when you haven't verified them. Check the logs for the specific request first.
+- Patching env vars or config without reading the code that consumes them.
+- Restarting services repeatedly hoping the symptom changes.
+- Claiming a fix worked without re-running the failing command end-to-end.
+
+If you cannot reproduce or verify a claim within 2-3 read commands, ask the user before continuing — it is cheaper than guessing wrong three times in a row.
+
 ## Table of Contents
 
 - [Directory Map](#directory-map) — where to find code
