@@ -70,15 +70,29 @@ function injectLocale(request: NextRequest) {
   }
 }
 
+const REDIRECT_LOOP_HEADER = 'x-mre-signin-redirects';
+const MAX_SIGNIN_REDIRECTS = 3;
+
 async function redirectSignIn(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const locale = getLocaleFromPathname(pathname);
 
   if (
     [`/${locale}/signin`, `/${locale}/otp`].some(
-      (p) => pathname.indexOf(p) !== -1
+      (p) => pathname === p || pathname.startsWith(p + '/')
     )
   ) {
+    return;
+  }
+
+  // Redirect loop guard: short-circuit if we've already bounced too many times.
+  const prevRedirects = Number(
+    request.headers.get(REDIRECT_LOOP_HEADER) || '0'
+  );
+  if (prevRedirects >= MAX_SIGNIN_REDIRECTS) {
+    console.error(
+      `redirectSignIn: redirect loop detected (${prevRedirects} hops) for ${pathname}`
+    );
     return;
   }
 
@@ -91,7 +105,8 @@ async function redirectSignIn(request: NextRequest) {
           cookie: `sessionToken=${
             request.cookies.get('sessionToken')?.value || ''
           }`
-        }
+        },
+        signal: AbortSignal.timeout(5000)
       }
     );
     if (response.status === 200) {
@@ -103,7 +118,12 @@ async function redirectSignIn(request: NextRequest) {
 
   if (!session) {
     request.nextUrl.pathname = '/signin';
-    return NextResponse.redirect(request.nextUrl);
+    const response = NextResponse.redirect(request.nextUrl);
+    response.headers.set(
+      REDIRECT_LOOP_HEADER,
+      String(prevRedirects + 1)
+    );
+    return response;
   }
 }
 

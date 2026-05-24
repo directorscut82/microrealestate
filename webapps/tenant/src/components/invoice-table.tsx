@@ -36,6 +36,8 @@ export function InvoiceTable({ lease }: { lease: Lease }) {
     DateRange | { month?: number; year: number } | null
   >();
 
+  const today = useMemo(() => new Date(), []);
+
   const filteredInvoices = useMemo(() => {
     if (!filter) {
       return lease.invoices;
@@ -114,7 +116,7 @@ export function InvoiceTable({ lease }: { lease: Lease }) {
           <TermPicker
             timeRange={lease.timeRange}
             fromDate={lease.beginDate}
-            toDate={new Date()}
+            toDate={today}
             onValueChange={onTermChange}
           />
         </div>
