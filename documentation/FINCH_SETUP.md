@@ -85,9 +85,12 @@ APP_DOMAIN=localhost:8080
 Why each is needed:
 - `API_URL` — gateway proxy target. Missing → gateway crashes silently with `[HPM] Missing "target" option`. Docker compose does NOT expand variables from `base.env`, only from `.env`.
 - `MONGO_URL` — points at the right database. `base.env` defaults to `demodb`, which is wrong. Real data lives in `mredb`.
-- `APP_DOMAIN` — gateway CORS allowlist. Without it, signin returns HTTP 500 with `CORS blocked origin: http://localhost:8080` because `DOMAIN_URL` parsing strips the port. See `.kiro/steering/architecture-patterns.md` for the full gotcha.
+- `APP_DOMAIN` — gateway CORS allowlist. Without it, signin returns HTTP 500 with `CORS blocked origin: http://localhost:8080` because `DOMAIN_URL` parsing strips the port. `base.env` now defaults `APP_DOMAIN=localhost:8080` so a fresh checkout works out of the box; override in `.env` for non-local dev. See `.kiro/steering/architecture-patterns.md` for the full gotcha.
+- `APPCREDZ_TOKEN_SECRET` — JWT secret for application credential tokens (M2M / API access). Distinct from access/refresh/reset secrets. The CLI used to drop this from `.env` on every regeneration; it is now persisted, and `base.env` ships a `change_this_appcredz_token_secret` placeholder.
 
 The email configuration (`GMAIL_EMAIL`, `SMTP_*`, etc.) can be left as defaults for local testing — email features just won't work.
+
+> **Note on the reset service (dev/CI only).** The reset service no longer returns the OTP in its HTTP response — it logs it and emails it the same way as the production flow. Test/dev code that scraped OTPs from the response body must read them from container logs or the test mailbox now. The reset service is never deployed to the NAS.
 
 ## 4. Start the Application
 

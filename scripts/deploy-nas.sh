@@ -195,7 +195,7 @@ if [[ "$redeploy" == "yes" ]]; then
   # even when the remote SHA has changed, leaving the stack on a stale image.
   # We pull each image explicitly via the Docker API to guarantee freshness.
   info "Force-pulling all :nas images via Docker API..."
-  IMAGES=(authenticator api gateway emailer pdfgenerator tenantapi landlord-frontend resetservice)
+  IMAGES=(authenticator api gateway emailer pdfgenerator tenantapi landlord-frontend tenant-frontend resetservice)
   for img in "${IMAGES[@]}"; do
     pull_status=$(curl -sS -X POST \
       -H "X-API-Key: $PORTAINER_TOKEN" \
@@ -209,7 +209,7 @@ if [[ "$redeploy" == "yes" ]]; then
       exit 1
     fi
   done
-  ok "All 8 images pulled"
+  ok "All 9 images pulled"
 
   # ---- Update the stack — Portainer will recreate containers using the pulled images ----
   info "Updating stack (recreates containers)..."
@@ -238,9 +238,9 @@ if [[ "$redeploy" == "yes" ]]; then
     total=$(echo "$containers" | jq -r '[.[] | select(.Names[] | test("mre-"))] | length')
     running=$(echo "$containers" | jq -r '[.[] | select(.Names[] | test("mre-")) | select(.State == "running")] | length')
     printf "\r  %d/%d containers running (try %d/30)...      " "$running" "$total" "$i"
-    if [[ "$running" -eq 9 ]]; then
+    if [[ "$running" -eq 10 ]]; then
       echo
-      ok "All 9 containers running"
+      ok "All 10 containers running"
       break
     fi
   done
@@ -254,7 +254,7 @@ if [[ "$redeploy" == "yes" ]]; then
   containers=$(curl -sS -H "X-API-Key: $PORTAINER_TOKEN" \
     "$PORTAINER_URL/api/endpoints/$PORTAINER_ENDPOINT_ID/docker/containers/json?all=true")
   mismatch=0
-  for cname in mre-authenticator-1 mre-api-1 mre-gateway-1 mre-emailer-1 mre-pdfgenerator-1 mre-tenantapi-1 mre-landlord-frontend-1 mre-resetservice-1; do
+  for cname in mre-authenticator-1 mre-api-1 mre-gateway-1 mre-emailer-1 mre-pdfgenerator-1 mre-tenantapi-1 mre-landlord-frontend-1 mre-tenant-frontend-1 mre-resetservice-1; do
     imgid=$(echo "$containers" | jq -r ".[] | select(.Names[] | test(\"$cname\")) | .ImageID" | head -1)
     if [[ -z "$imgid" || "$imgid" == "null" ]]; then
       err "  $cname: not found"
@@ -277,7 +277,7 @@ if [[ "$redeploy" == "yes" ]]; then
     err "To recover, force-recreate the affected containers in Portainer UI, or re-run this script."
     exit 1
   fi
-  ok "All 8 app containers run revision ${NEW_SHA:0:8}"
+  ok "All 9 app containers run revision ${NEW_SHA:0:8}"
 
   # Final sanity check: landlord HTTP responds + serves expected content
   info "Checking landlord app responds..."

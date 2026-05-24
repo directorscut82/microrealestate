@@ -9,7 +9,7 @@ services:
     volumes:
       - ./data/redis:/data
     command:
-      - 'bash'
+      - 'sh'
       - '-c'
       - 'docker-entrypoint.sh --requirepass $REDIS_PASSWORD --loglevel warning'
     networks:
@@ -102,6 +102,11 @@ services:
       - UPLOAD_MAX_SIZE
     expose:
       - '$PDFGENERATOR_PORT'
+    tmpfs:
+      - /tmp
+      - /usr/app/services/pdfgenerator/tmp
+      - /usr/app/services/pdfgenerator/pdf_documents
+      - /usr/app/services/pdfgenerator/uploads
     networks:
       - net
     depends_on:
@@ -138,6 +143,9 @@ services:
       - EMAIL_BCC
     expose:
       - '$EMAILER_PORT'
+    tmpfs:
+      - /tmp
+      - /usr/app/services/emailer/tmp
     networks:
       - net
     depends_on:

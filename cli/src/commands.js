@@ -723,7 +723,6 @@ function writeDotEnv(promptsConfig, envConfig) {
     delete envConfig.AUTHENTICATOR_ACCESS_TOKEN_SECRET;
     delete envConfig.AUTHENTICATOR_REFRESH_TOKEN_SECRET;
     delete envConfig.AUTHENTICATOR_RESET_TOKEN_SECRET;
-    delete envConfig.AUTHENTICATOR_APPCREDZ_TOKEN_SECRET;
     delete envConfig.ALLOW_SENDING_EMAILS;
     delete envConfig.GMAIL_EMAIL;
     delete envConfig.GMAIL_APP_PASSWORD;
