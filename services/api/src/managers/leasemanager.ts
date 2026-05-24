@@ -116,36 +116,30 @@ export async function remove(req: ReqWithIds, res: Res) {
     .filter(({ linkedResourceIds }: any) => linkedResourceIds.length <= 1)
     .reduce((acc: string[], { _id }: any) => [...acc, _id], []);
 
-  const session = await Collections.startSession();
-  session.startTransaction();
-  try {
-    await Promise.all([
-      Collections.Lease.deleteMany({
-        _id: { $in: leaseIds },
-        realmId: realm!._id
-      }).session(session),
-      Collections.Template.deleteMany({
-        _id: { $in: templateIdsToRemove },
-        realmId: realm!._id
-      }).session(session),
-      Collections.Template.updateMany(
-        {
-          realmId: realm!._id,
-          linkedResourceIds: { $in: leaseIds }
-        },
-        {
-          $pull: { linkedResourceIds: { $in: leaseIds } }
-        },
-        { session }
-      )
-    ]);
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    throw new ServiceError(String(error), 500);
-  } finally {
-    session.endSession();
-  }
+  // Mongo standalone (NAS deployment) doesn't support multi-document
+  // transactions, so we run the deletes in parallel without a session.
+  // Failure mode: if one delete succeeds and another fails, we get partial
+  // cleanup. Acceptable for now — the realmId filter prevents cross-realm
+  // damage and a retry will re-converge.
+  await Promise.all([
+    Collections.Lease.deleteMany({
+      _id: { $in: leaseIds },
+      realmId: realm!._id
+    }),
+    Collections.Template.deleteMany({
+      _id: { $in: templateIdsToRemove },
+      realmId: realm!._id
+    }),
+    Collections.Template.updateMany(
+      {
+        realmId: realm!._id,
+        linkedResourceIds: { $in: leaseIds }
+      },
+      {
+        $pull: { linkedResourceIds: { $in: leaseIds } }
+      }
+    )
+  ]);
   res.sendStatus(200);
 }
 
