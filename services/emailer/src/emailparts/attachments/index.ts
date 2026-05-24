@@ -31,14 +31,19 @@ export async function build(
     .format('MM_YY')}_${tenant.reference}`;
   // tenant.name is user-controlled and previously flowed straight into
   // a filesystem path. Inputs like `<script>`, `..`, or `/` either
-  // crashed the FS write or escaped the temp dir. We allow ASCII
-  // alphanum, dot, dash, underscore plus the Greek code blocks
-  // (Ͱ-Ͽ, ἀ-῿) to keep Greek customer names intact, and replace
-  // anything else with `_`. The 100-char cap defends against the
-  // 255-byte filesystem limit on common volumes.
+  // crashed the FS write or escaped the temp dir. Defense in depth:
+  //   1. Strip path-unsafe + control chars first (defends FS layer).
+  //   2. Allow only ASCII alphanum + ._- + Greek code blocks
+  //      (Ͱ-Ͽ, ἀ-῿) + whitespace, replace everything else with `_`.
+  //   3. Collapse runs of whitespace to a single underscore so the
+  //      resulting filename never contains spaces.
+  // The 100-char cap defends against the 255-byte filesystem limit
+  // on common volumes.
   const sanitize = (s: any) =>
-    String(s || '')
-      .replace(/[^A-Za-z0-9._\-Ͱ-Ͽἀ-῿]/g, '_')
+    String(s || 'unknown')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+      .replace(/[^A-Za-z0-9._\-Ͱ-Ͽἀ-῿\s]/g, '_')
+      .replace(/\s+/g, '_')
       .slice(0, 100);
   const filename = `${sanitize(i18n.__(templateName))}-${sanitize(tenant.name)}-${sanitize(billingRef)}.pdf`;
   const filePath = await fetchPDF(

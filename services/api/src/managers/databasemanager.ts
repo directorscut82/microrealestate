@@ -1,6 +1,8 @@
 import * as Express from 'express';
+import { Types as MongooseTypes } from 'mongoose';
 import { ObjectId } from 'mongodb';
 import {
+  Collections,
   Middlewares,
   Service,
   ServiceError,
@@ -89,16 +91,21 @@ async function backup(
     }
     try {
       // The realms collection itself has no `realmId` field (it IS the
-      // realm) — find by `_id` so the current realm document is captured.
-      // Without this, the backup contains a realms array that's always
-      // empty and a restore can never recover member/branding data.
-      const filter =
-        collName === 'realms' ? { _id: realmId } : { realmId };
-      const docs = await db
-        .collection(collName)
-        .find(filter)
-        .toArray();
-      data[collName] = docs.map(serializeDoc);
+      // realm) — and its `_id` is an ObjectId in Mongo while `realmId`
+      // arrives as a string from the middleware. Raw collection.find
+      // doesn't coerce the types, so the previous `{_id: realmId}` filter
+      // matched zero docs and the backup's realms array was always empty.
+      // Use Mongoose's findById which casts string → ObjectId for us.
+      if (collName === 'realms') {
+        const realmDoc = await Collections.Realm.findById(realmId).lean();
+        data[collName] = realmDoc ? [serializeDoc(realmDoc)] : [];
+      } else {
+        const docs = await db
+          .collection(collName)
+          .find({ realmId })
+          .toArray();
+        data[collName] = docs.map(serializeDoc);
+      }
     } catch (e) {
       data[collName] = [];
     }
@@ -187,8 +194,12 @@ async function restore(
     const collection = db.collection(collName);
 
     // Only wipe THIS realm's documents — never the whole collection.
+    // realmId is a STRING from the middleware; Mongo stores realm._id as
+    // ObjectId. Raw collection.deleteMany does not coerce, so we must cast
+    // when matching against `_id` directly (the realms special case).
+    const realmObjectId = new MongooseTypes.ObjectId(realmIdStr);
     const deleteFilter =
-      collName === 'realms' ? { _id: realmId } : { realmId };
+      collName === 'realms' ? { _id: realmObjectId } : { realmId };
     const deleteResult = await collection.deleteMany(deleteFilter);
     const deleted = deleteResult.deletedCount || 0;
 

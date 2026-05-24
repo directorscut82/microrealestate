@@ -118,7 +118,12 @@ export default function (): Router {
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const rawOtp =
         otpSource === 'query' ? req.query.otp : (req.body || {}).otp;
-      if (typeof rawOtp !== 'string' || !rawOtp) {
+      // Type-confusion (array, object, number) → 422 so it's distinct from
+      // wrong/expired credentials. Mirrors the landlord typeof guards.
+      if (rawOtp !== undefined && typeof rawOtp !== 'string') {
+        throw new ServiceError('otp must be a string', 422);
+      }
+      if (!rawOtp || !rawOtp.trim()) {
         throw new ServiceError('invalid otp', 401);
       }
       const otp = rawOtp;
