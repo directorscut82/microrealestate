@@ -46,6 +46,7 @@ services:
       - TENANT_FRONTEND_URL
       - TENANT_BASE_PATH
       - DOMAIN_URL
+      - APP_DOMAIN
       - CORS_ENABLED
       - TENANTAPI_URL
     ports:
