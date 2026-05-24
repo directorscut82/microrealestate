@@ -74,62 +74,70 @@ export default function SignUp() {
 
   return (
     <SignInUpLayout>
-      <div className="p-5 md:p-0 md:max-w-md w-full">
-        <form onSubmit={handleSubmit(signUp)} className="space-y-10">
-          <div className="text-2xl text-center md:text-left md:text-4xl font-medium text-secondary-foreground">
-            {t('Sign up and manage your properties online')}
-          </div>
-          <div className="space-y-2">
+      <div className="space-y-2 mb-8">
+        <h1 className="text-headline font-medium text-ink tracking-tight">
+          {t('Sign up and manage your properties online')}
+        </h1>
+        <p className="text-body text-ink-muted">
+          {t('Create an account in a minute')}
+        </p>
+      </div>
+      <form onSubmit={handleSubmit(signUp)} className="space-y-5">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
             <Label htmlFor="firstName">{t('First name')}</Label>
             <Input id="firstName" {...register('firstName')} />
             {errors.firstName && (
-              <p className="text-sm text-destructive">{errors.firstName.message}</p>
+              <p className="text-label text-oxide">
+                {errors.firstName.message}
+              </p>
             )}
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="lastName">{t('Last name')}</Label>
             <Input id="lastName" {...register('lastName')} />
             {errors.lastName && (
-              <p className="text-sm text-destructive">{errors.lastName.message}</p>
+              <p className="text-label text-oxide">
+                {errors.lastName.message}
+              </p>
             )}
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="email">{t('Email Address')}</Label>
-            <Input id="email" {...register('email')} />
-            {errors.email && (
-              <p className="text-sm text-destructive">{errors.email.message}</p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">{t('Password')}</Label>
-            <Input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              {...register('password')}
-            />
-            {errors.password && (
-              <p className="text-sm text-destructive">{errors.password.message}</p>
-            )}
-          </div>
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isSubmitting}
-            data-cy="submit"
-          >
-            {!isSubmitting ? t('Agree & Join') : t('Joining')}
-          </Button>
-        </form>
-      </div>
-      <div className="mt-10 lg:mt-0 lg:absolute lg:bottom-10 text-center text-muted-foreground w-full">
-        {t('Already on {{APP_NAME}}?', {
-          APP_NAME: config.APP_NAME
-        })}{' '}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="email">{t('Email Address')}</Label>
+          <Input id="email" {...register('email')} />
+          {errors.email && (
+            <p className="text-label text-oxide">{errors.email.message}</p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="password">{t('Password')}</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            {...register('password')}
+          />
+          {errors.password && (
+            <p className="text-label text-oxide">
+              {errors.password.message}
+            </p>
+          )}
+        </div>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={isSubmitting}
+          data-cy="submit"
+        >
+          {!isSubmitting ? t('Agree & Join') : t('Joining')}
+        </Button>
+      </form>
+      <div className="mt-8 text-center text-body text-ink-muted">
+        {t('Already on {{APP_NAME}}?', { APP_NAME: config.APP_NAME })}{' '}
         <Link href="/signin" data-cy="signin">
           {t('Sign in')}
         </Link>
-        .
       </div>
     </SignInUpLayout>
   );

@@ -37,15 +37,19 @@ export function RentAmount({
   withColor = true,
   className
 }) {
+  // Label and digits both at text-label size so the column reads as one
+  // tight stack instead of label-on-top-of-headline. Mono digits are
+  // optically wider than sans, which is why the visual gap looked off.
   return (
-    <div className={cn('flex flex-col text-right', className)}>
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className={cn('flex flex-col text-right min-w-0 leading-snug', className)}>
+      <div className="text-label text-ink-muted truncate">{label}</div>
       <NumberFormat
         value={amount}
         align="right"
         creditColor={creditColor}
         debitColor={debitColor}
         withColor={withColor}
+        className="text-label text-ink"
       />
     </div>
   );

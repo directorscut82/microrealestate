@@ -171,11 +171,13 @@ export default function LandlordForm({ organization, firstAccess }) {
           };
         }
         await mutateCreateOrganization.mutateAsync(createdOrgpanization);
-        router.push(
-          `/${router.query.organization}/dashboard`,
-          undefined,
-          { locale: store.organization.selected.locale }
-        );
+        // First-access redirect uses the freshly created organization's name
+        // (router.query.organization is undefined on /firstaccess).
+        const targetOrgName =
+          store.organization.selected?.name ?? createdOrgpanization.name;
+        router.push(`/${targetOrgName}/dashboard`, undefined, {
+          locale: store.organization.selected?.locale ?? createdOrgpanization.locale
+        });
       } else {
         const updatedOrgPart = {
           name: landlord.name,

@@ -6,83 +6,56 @@ import {
   CardTitle
 } from '../../../components/ui/card';
 import { LuCheck, LuMonitor, LuMoon, LuSun } from 'react-icons/lu';
+import { cn } from '../../../utils';
 import Page from '../../../components/Page';
 import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
+/*
+ * Appearance — DESIGN.md theme picker.
+ *
+ * Three themes: system, light (the Pangrati Apartment), dark (same materials,
+ * lights out). The previous experimental themes (midnight, forest, sunset)
+ * have been retired in favor of one disciplined system.
+ */
+
 const THEMES = [
   {
     id: 'system',
     icon: LuMonitor,
     preview: {
-      sidebar: '#1e293b',
-      bg: '#f8fafc',
-      header: '#2563eb',
-      card: '#ffffff',
-      text: '#334155',
-      accent: '#2563eb'
+      sidebar: 'oklch(96% 0.006 85)',
+      bg: 'oklch(96% 0.006 85)',
+      header: 'oklch(20% 0.012 240)',
+      card: 'oklch(98% 0.004 85)',
+      text: 'oklch(34% 0.010 240)',
+      accent: 'oklch(48% 0.092 240)'
     }
   },
   {
     id: 'light',
     icon: LuSun,
     preview: {
-      sidebar: '#1e293b',
-      bg: '#f8fafc',
-      header: '#2563eb',
-      card: '#ffffff',
-      text: '#334155',
-      accent: '#2563eb'
+      sidebar: 'oklch(96% 0.006 85)',
+      bg: 'oklch(96% 0.006 85)',
+      header: 'oklch(20% 0.012 240)',
+      card: 'oklch(98% 0.004 85)',
+      text: 'oklch(34% 0.010 240)',
+      accent: 'oklch(48% 0.092 240)'
     }
   },
   {
     id: 'dark',
     icon: LuMoon,
     preview: {
-      sidebar: '#0f172a',
-      bg: '#0f172a',
-      header: '#3b82f6',
-      card: '#1e293b',
-      text: '#94a3b8',
-      accent: '#3b82f6'
-    }
-  },
-  {
-    id: 'midnight',
-    icon: null,
-    preview: {
-      sidebar: '#0c0a20',
-      bg: '#13112b',
-      header: '#a78bfa',
-      card: '#1e1b3a',
-      text: '#a5b4fc',
-      accent: '#a78bfa'
-    }
-  },
-  {
-    id: 'forest',
-    icon: null,
-    preview: {
-      sidebar: '#14261a',
-      bg: '#f0fdf4',
-      header: '#16a34a',
-      card: '#ffffff',
-      text: '#166534',
-      accent: '#16a34a'
-    }
-  },
-  {
-    id: 'sunset',
-    icon: null,
-    preview: {
-      sidebar: '#2d1b0e',
-      bg: '#fffbf5',
-      header: '#ea580c',
-      card: '#ffffff',
-      text: '#78350f',
-      accent: '#ea580c'
+      sidebar: 'oklch(17% 0.014 240)',
+      bg: 'oklch(17% 0.014 240)',
+      header: 'oklch(95% 0.006 85)',
+      card: 'oklch(22% 0.014 240)',
+      text: 'oklch(80% 0.008 85)',
+      accent: 'oklch(68% 0.110 240)'
     }
   }
 ];
@@ -91,19 +64,22 @@ function ThemeCard({ themeId, icon: Icon, preview, isSelected, onSelect, t }) {
   return (
     <button
       onClick={() => onSelect(themeId)}
-      className={`group relative flex flex-col gap-3 rounded-xl border-2 p-3 transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 ${
+      className={cn(
+        'group relative flex flex-col gap-3 rounded-lg border p-3 text-left',
+        'transition-colors duration-base ease-out-quart',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sea focus-visible:ring-offset-2 focus-visible:ring-offset-cream',
         isSelected
-          ? 'border-primary shadow-md ring-2 ring-primary/20 bg-primary/5'
-          : 'border-border hover:border-primary/40 bg-card'
-      }`}
+          ? 'border-sea bg-sea-tint/40 indicator-active'
+          : 'border-stone-line bg-bone hover:border-marble'
+      )}
     >
       {isSelected && (
-        <div className="absolute -top-2 -right-2 rounded-full bg-primary p-1 shadow-sm">
-          <LuCheck className="h-3 w-3 text-primary-foreground" />
+        <div className="absolute -top-2 -right-2 rounded-pill bg-sea p-1 shadow-floating">
+          <LuCheck className="h-3 w-3 text-bone" />
         </div>
       )}
       <div
-        className="w-full aspect-[4/3] rounded-lg overflow-hidden border shadow-sm"
+        className="w-full aspect-[4/3] rounded-md overflow-hidden border border-stone-line"
         style={{ backgroundColor: preview.bg }}
       >
         <div className="flex h-full">
@@ -111,30 +87,74 @@ function ThemeCard({ themeId, icon: Icon, preview, isSelected, onSelect, t }) {
             className="w-1/4 h-full p-1.5 flex flex-col gap-1"
             style={{ backgroundColor: preview.sidebar }}
           >
-            <div className="h-1.5 w-full rounded-full opacity-60" style={{ backgroundColor: preview.accent }} />
-            <div className="h-1.5 w-3/4 rounded-full opacity-30" style={{ backgroundColor: preview.text }} />
-            <div className="h-1.5 w-3/4 rounded-full opacity-30" style={{ backgroundColor: preview.text }} />
-            <div className="h-1.5 w-3/4 rounded-full opacity-30" style={{ backgroundColor: preview.text }} />
+            <div
+              className="h-1.5 w-full rounded-pill"
+              style={{ backgroundColor: preview.accent, opacity: 0.7 }}
+            />
+            <div
+              className="h-1.5 w-3/4 rounded-pill"
+              style={{ backgroundColor: preview.text, opacity: 0.3 }}
+            />
+            <div
+              className="h-1.5 w-3/4 rounded-pill"
+              style={{ backgroundColor: preview.text, opacity: 0.3 }}
+            />
+            <div
+              className="h-1.5 w-3/4 rounded-pill"
+              style={{ backgroundColor: preview.text, opacity: 0.3 }}
+            />
           </div>
           <div className="flex-1 p-2 flex flex-col gap-1.5">
-            <div className="h-2 w-20 rounded-sm" style={{ backgroundColor: preview.header }} />
+            <div
+              className="h-2 w-20 rounded-sm"
+              style={{ backgroundColor: preview.header }}
+            />
             <div className="flex gap-1 flex-1">
-              <div className="flex-1 rounded-md p-1.5" style={{ backgroundColor: preview.card, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                <div className="h-1.5 w-full rounded-full mb-1" style={{ backgroundColor: preview.text, opacity: 0.3 }} />
-                <div className="h-1.5 w-2/3 rounded-full" style={{ backgroundColor: preview.text, opacity: 0.2 }} />
+              <div
+                className="flex-1 rounded-md p-1.5 border"
+                style={{
+                  backgroundColor: preview.card,
+                  borderColor: preview.text + '30'
+                }}
+              >
+                <div
+                  className="h-1.5 w-full rounded-pill mb-1"
+                  style={{ backgroundColor: preview.text, opacity: 0.3 }}
+                />
+                <div
+                  className="h-1.5 w-2/3 rounded-pill"
+                  style={{ backgroundColor: preview.text, opacity: 0.2 }}
+                />
               </div>
-              <div className="flex-1 rounded-md p-1.5" style={{ backgroundColor: preview.card, boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                <div className="h-1.5 w-full rounded-full mb-1" style={{ backgroundColor: preview.text, opacity: 0.3 }} />
-                <div className="h-1.5 w-2/3 rounded-full" style={{ backgroundColor: preview.text, opacity: 0.2 }} />
+              <div
+                className="flex-1 rounded-md p-1.5 border"
+                style={{
+                  backgroundColor: preview.card,
+                  borderColor: preview.text + '30'
+                }}
+              >
+                <div
+                  className="h-1.5 w-full rounded-pill mb-1"
+                  style={{ backgroundColor: preview.text, opacity: 0.3 }}
+                />
+                <div
+                  className="h-1.5 w-2/3 rounded-pill"
+                  style={{ backgroundColor: preview.text, opacity: 0.2 }}
+                />
               </div>
             </div>
-            <div className="h-4 w-14 rounded-md self-end" style={{ backgroundColor: preview.accent }} />
+            <div
+              className="h-4 w-14 rounded-md self-end"
+              style={{ backgroundColor: preview.accent }}
+            />
           </div>
         </div>
       </div>
-      <div className="flex items-center justify-center gap-2">
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-        <span className="text-sm font-medium">{t(themeId)}</span>
+      <div className="flex items-center gap-2">
+        {Icon && <Icon className="h-4 w-4 text-ink-muted" />}
+        <span className="text-title font-semibold text-ink capitalize">
+          {t(themeId)}
+        </span>
       </div>
     </button>
   );
@@ -161,7 +181,7 @@ function Appearance() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-5 max-w-2xl">
             {THEMES.map(({ id, icon, preview }) => (
               <ThemeCard
                 key={id}

@@ -1,0 +1,1 @@
+../../.kiro/steering/frontend-patterns.md

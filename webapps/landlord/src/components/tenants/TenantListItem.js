@@ -52,15 +52,15 @@ export default function TenantListItem({ tenant }) {
           <div>
             <Button
               variant="link"
-              className="w-fit h-fit p-0 text-xl whitespace-normal"
+              className="w-fit h-fit p-0 text-title font-medium whitespace-normal"
               data-cy="openResourceButton"
             >
               {tenant.name}
             </Button>
             {tenant.archived && (
-              <Badge variant="secondary" className="ml-1 text-xs">{t('Archived')}</Badge>
+              <Badge variant="secondary" className="ml-1 text-label">{t('Archived')}</Badge>
             )}
-            <div className="text-xs font-normal text-muted-foreground">
+            <div className="text-label font-normal text-ink-muted">
               {tenant.isCompany
                 ? _.startCase(_.capitalize(tenant.manager))
                 : null}
@@ -98,11 +98,18 @@ export default function TenantListItem({ tenant }) {
       </CardContent>
 
       <CardFooter className="p-0 flex-col">
-        <div className="flex items-center justify-end w-full py-4 px-6">
+        <div className="flex items-center justify-end w-full py-3 px-5">
           <Badge
-            variant={tenant.terminated ? 'secondary' : 'success'}
-            className="font-normal"
+            variant={tenant.terminated ? 'archived' : 'paid'}
+            className="font-normal text-label leading-none"
           >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'size-1.5 rounded-pill shrink-0',
+                tenant.terminated ? 'bg-ink-muted' : 'bg-olive'
+              )}
+            />
             {tenant.terminated ? t('Lease ended') : t('Lease running')}
           </Badge>
         </div>

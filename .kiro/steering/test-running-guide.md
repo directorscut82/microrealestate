@@ -205,6 +205,24 @@ finch compose -f docker-compose.microservices.base.yml -f docker-compose.microse
 finch restart microrealestate-landlord-frontend-1
 ```
 
+### Reclaim Finch disk space (run periodically)
+The Finch VM uses a 50GB raw disk image at `~/.finch/.disks/`. Pulling/rebuilding accumulates layer data that macOS doesn't auto-reclaim. If `du -sh ~/.finch` is in the tens of gigabytes:
+
+```bash
+# Stop the dev stack first
+finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
+
+# Remove unused images/containers/build cache + all unused volumes
+finch system prune -a -f
+finch volume prune -a -f
+
+# Tell macOS to reclaim freed blocks (this is the step that actually shrinks the file)
+export LIMA_HOME=/Applications/Finch/lima/data
+/Applications/Finch/lima/bin/limactl shell finch sudo fstrim -v /mnt/lima-finch
+```
+
+A typical reclaim after months of dev use is 30+ GB. `finch vm disk resize` can only grow, not shrink, so trimming is the correct approach. See `documentation/FINCH_SETUP.md` for full details.
+
 ---
 
 ## Test Suite Status

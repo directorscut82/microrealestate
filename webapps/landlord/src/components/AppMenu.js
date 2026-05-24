@@ -28,6 +28,14 @@ import { StoreContext } from '../store';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
+/*
+ * AppMenu — DESIGN.md Components / Navigation Rail.
+ *
+ * Cream rail, 240px wide on desktop. Active item lifts to bone with a 2px
+ * inset sea-blue indicator on the leading edge. The Lift-Means-Above rule:
+ * the rail itself has no shadow; depth is tonal.
+ */
+
 const menuItems = [
   {
     key: 'dashboard',
@@ -149,19 +157,11 @@ export function HamburgerMenu({ className, onChange }) {
         moment().format('YYYY.MM')
       );
       pathname = pathname.replace('[year]', moment().year());
-      router.push(
-        `/${router.query.organization}${pathname}`,
-        undefined,
-        {
-          locale: store.organization.selected.locale
-        }
-      );
+      router.push(`/${router.query.organization}${pathname}`, undefined, {
+        locale: store.organization.selected.locale
+      });
     },
-    [
-      onChange,
-      router,
-      store.organization.selected?.locale
-    ]
+    [onChange, router, store.organization.selected?.locale]
   );
 
   return (
@@ -170,38 +170,47 @@ export function HamburgerMenu({ className, onChange }) {
         <SheetTrigger asChild>
           <Button
             data-cy="appMenu"
-            className="text-muted-foreground bg-card hover:bg-card"
+            variant="ghost"
+            size="icon"
+            className="text-ink-soft hover:text-ink"
+            aria-label={t('Menu')}
           >
-            <LuMenu />
+            <LuMenu className="size-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="flex flex-col px-0">
+        <SheetContent side="left" className="flex flex-col px-0 bg-stone">
           <SheetHeader className="px-4">
-            <SheetTitle> {router.query.organization}</SheetTitle>
-            <SheetDescription>{config.APP_NAME}</SheetDescription>
+            <div className="text-label text-ink-muted uppercase tracking-wide">
+              {config.APP_NAME}
+            </div>
+            <SheetTitle className="!text-title !font-medium">
+              {router.query.organization ||
+                store.organization.selected?.name ||
+                ''}
+            </SheetTitle>
           </SheetHeader>
-          <Separator className="bg-secondary-foreground/25 flex-col" />
-          <div className="flex-grow overflow-auto">
+          <Separator className="my-2" />
+          <nav className="flex-grow overflow-auto px-3 flex flex-col gap-0.5">
             {menuItems
               .filter((menuItem) => !menuItem.hidden)
               .map((item) => {
                 return (
-                  <div key={item.key}>
-                    <SheetClose asChild>
-                      <SideMenuButton
-                        item={item}
-                        selected={item === selectedMenu}
-                        onClick={() => handleMenuClick(item)}
-                      />
-                    </SheetClose>
-                  </div>
+                  <SheetClose asChild key={item.key}>
+                    <SideMenuButton
+                      item={item}
+                      selected={item === selectedMenu}
+                      onClick={() => handleMenuClick(item)}
+                    />
+                  </SheetClose>
                 );
               })}
-          </div>
+          </nav>
         </SheetContent>
       </Sheet>
       {selectedMenu ? (
-        <span className="text-base flex-grow">{t(selectedMenu.labelId)}</span>
+        <span className="text-title font-medium flex-grow ml-2 text-ink">
+          {t(selectedMenu.labelId)}
+        </span>
       ) : null}
     </div>
   );
@@ -231,47 +240,48 @@ export function SideMenu({ className }) {
         moment().format('YYYY.MM')
       );
       pathname = pathname.replace('[year]', moment().year());
-      router.push(
-        `/${router.query.organization}${pathname}`,
-        undefined,
-        {
-          locale: store.organization.selected.locale
-        }
-      );
+      router.push(`/${router.query.organization}${pathname}`, undefined, {
+        locale: store.organization.selected.locale
+      });
     },
-    [
-      router,
-      store.organization.selected?.locale
-    ]
+    [router, store.organization.selected?.locale]
   );
 
   return (
-    <div
+    <aside
       className={cn(
-        'bg-card flex flex-col fixed w-60 h-full z-50 shadow-md',
+        'bg-stone border-r border-stone-line flex flex-col fixed w-60 h-full z-40',
         className
       )}
     >
-      <div className="whitespace-nowrap text-2xl font-semibold px-4 -mt-10">
-        {router.query.organization}
+      <div className="px-4 pt-6 pb-3">
+        <div className="text-label text-ink-muted uppercase tracking-wide mb-1">
+          {config.APP_NAME}
+        </div>
+        <div
+          className="text-title font-medium text-ink truncate"
+          title={router.query.organization || store.organization.selected?.name}
+        >
+          {router.query.organization ||
+            store.organization.selected?.name ||
+            ''}
+        </div>
       </div>
-      <div className="text-muted-foreground px-4 mt-2">{config.APP_NAME}</div>
-      <Separator className="bg-secondary-foreground/25 my-4" />
-      <div className="flex-grow overflow-auto">
+      <Separator />
+      <nav className="flex-grow overflow-auto px-3 py-4 flex flex-col gap-0.5">
         {menuItems
           .filter((menuItem) => !menuItem.hidden)
           .map((item) => {
             return (
-              <div key={item.key}>
-                <SideMenuButton
-                  item={item}
-                  selected={item === selectedMenu}
-                  onClick={handleMenuClick(item)}
-                />
-              </div>
+              <SideMenuButton
+                key={item.key}
+                item={item}
+                selected={item === selectedMenu}
+                onClick={handleMenuClick(item)}
+              />
             );
           })}
-      </div>
-    </div>
+      </nav>
+    </aside>
   );
 }

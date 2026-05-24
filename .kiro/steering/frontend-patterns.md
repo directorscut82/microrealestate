@@ -171,6 +171,34 @@ export default function Buildings() {
 }
 ```
 
+## SSR Gotchas (Pages Router)
+
+The landlord app uses Next.js Pages Router and renders pages on the server. Anything that reads from `window`, browser APIs, or media queries on first render produces a server/client mismatch and a hydration error like `Did not expect server HTML to contain a <div> in <div>`.
+
+Common offenders and fixes:
+
+### `useMediaQuery` from `usehooks-ts`
+
+Always pass `{ initializeWithValue: false }`. The hook then returns the default (`false`) on the first render in both server and client, and updates after mount via `useEffect`.
+
+```js
+// ❌ Hydration mismatch on screens that match the query
+const isDesktop = useMediaQuery('(min-width: 768px)');
+
+// ✅ SSR-safe
+const isDesktop = useMediaQuery('(min-width: 768px)', {
+  initializeWithValue: false
+});
+```
+
+### Anything that reads `window`, `document`, `localStorage`, `navigator`
+
+Either guard with `typeof window !== 'undefined'` or move the access into a `useEffect`. The store classes use `useSyncExternalStore` for this reason — initial server render returns the initial snapshot, the client picks up the real value after mount.
+
+### Date/time formatting
+
+`moment().format(...)` and similar can produce different output on server vs client if locales aren't pinned. Pass `locale` explicitly or do the formatting inside `useEffect`.
+
 ## Quick Reference: Legacy → Current
 
 | Legacy (avoid) | Current (use) |

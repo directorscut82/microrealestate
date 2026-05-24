@@ -42,12 +42,25 @@ const schema = z.object({
 
 function Section({ label, children }) {
   return (
-    <div className="pb-10">
-      <div className="text-xl">{label}</div>
-      <Separator className="mt-1 mb-2" />
-      {children}
-    </div>
+    <section className="pb-12">
+      <div className="text-label uppercase tracking-wide text-ink-muted mb-2">
+        {label}
+      </div>
+      <Separator className="mb-5" />
+      <div className="space-y-4">{children}</div>
+    </section>
   );
+}
+
+// Two-column field row on md+ viewports. Greek labels need more room
+// than English so we never go to 3- or 4-col grids; long forms simply
+// scroll instead.
+function Row({ children }) {
+  return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
+}
+
+function Field({ children }) {
+  return <div className="space-y-1.5">{children}</div>;
 }
 
 const PropertyForm = ({ property, onSubmit }) => {
@@ -121,8 +134,8 @@ const PropertyForm = ({ property, onSubmit }) => {
       });
     })} autoComplete="off">
       <Section label={t('Property information')}>
-        <div className="sm:flex sm:gap-2">
-          <div className="space-y-2 flex-1">
+        <Row>
+          <Field>
             <Label>{t('Property Type')}</Label>
             <Select
               value={typeValue}
@@ -143,106 +156,112 @@ const PropertyForm = ({ property, onSubmit }) => {
               </SelectContent>
             </Select>
             {errors.type && (
-              <p className="text-sm text-destructive">{errors.type.message}</p>
+              <p className="text-label text-oxide">{errors.type.message}</p>
             )}
-          </div>
-          <div className="space-y-2 flex-1">
+          </Field>
+          <Field>
             <Label htmlFor="name">{t('Name')}</Label>
             <Input id="name" {...register('name')} />
             {errors.name && (
-              <p className="text-sm text-destructive">{errors.name.message}</p>
+              <p className="text-label text-oxide">{errors.name.message}</p>
             )}
-          </div>
-        </div>
-        <div className="space-y-2 mt-2">
+          </Field>
+        </Row>
+        <Field>
           <Label htmlFor="description">{t('Description')}</Label>
           <Input id="description" {...register('description')} />
-        </div>
+        </Field>
         {['store', 'building', 'apartment', 'room', 'office', 'garage'].includes(
           typeValue
         ) && (
-          <div className="sm:flex sm:gap-2 mt-2">
-            <div className="space-y-2 flex-1">
-              <Label htmlFor="surface">{t('Surface')}</Label>
-              <Input id="surface" type="number" {...register('surface')} />
-            </div>
-            <div className="space-y-2 flex-1">
-              <Label htmlFor="landSurface">{t('Land Surface')}</Label>
-              <Input id="landSurface" type="number" {...register('landSurface')} />
-            </div>
-            <div className="space-y-2 flex-1">
-              <Label htmlFor="phone">{t('Phone')}</Label>
-              <Input id="phone" {...register('phone')} />
-            </div>
-            <div className="space-y-2 flex-1">
-              <Label htmlFor="digicode">{t('Digicode')}</Label>
-              <Input id="digicode" {...register('digicode')} />
-            </div>
-          </div>
+          <>
+            <Row>
+              <Field>
+                <Label htmlFor="surface">{t('Surface')}</Label>
+                <Input id="surface" type="number" {...register('surface')} />
+              </Field>
+              <Field>
+                <Label htmlFor="landSurface">{t('Land Surface')}</Label>
+                <Input id="landSurface" type="number" {...register('landSurface')} />
+              </Field>
+            </Row>
+            <Row>
+              <Field>
+                <Label htmlFor="phone">{t('Phone')}</Label>
+                <Input id="phone" {...register('phone')} />
+              </Field>
+              <Field>
+                <Label htmlFor="digicode">{t('Digicode')}</Label>
+                <Input id="digicode" {...register('digicode')} />
+              </Field>
+            </Row>
+          </>
         )}
-        <div className="sm:flex sm:gap-2 mt-2">
-          <div className="space-y-2 flex-1">
+        <Row>
+          <Field>
             <Label htmlFor="atakNumber">{t('ATAK Number')}</Label>
             <Input id="atakNumber" {...register('atakNumber')} />
-          </div>
-          <div className="space-y-2 flex-1">
+          </Field>
+          <Field>
             <Label htmlFor="dehNumber">{t('DEH Number')}</Label>
             <Input id="dehNumber" {...register('dehNumber')} />
-          </div>
-        </div>
-        <div className="sm:flex sm:gap-2 mt-2">
-          <div className="space-y-2 flex-1">
+          </Field>
+        </Row>
+        <Row>
+          <Field>
             <Label htmlFor="energyClass">{t('Energy Class')}</Label>
             <Input id="energyClass" {...register('energyClass')} />
-          </div>
-          <div className="space-y-2 flex-1">
+          </Field>
+          <Field>
             <Label htmlFor="energyCertNumber">{t('Energy Certificate')}</Label>
             <Input id="energyCertNumber" {...register('energyCertNumber')} />
-          </div>
-        </div>
+          </Field>
+        </Row>
       </Section>
       <Section label={t('Address')}>
-        <div className="space-y-2">
+        <Field>
           <Label htmlFor="address.street1">{t('Street 1')}</Label>
           <Input id="address.street1" {...register('address.street1')} />
-        </div>
-        <div className="space-y-2 mt-2">
+        </Field>
+        <Field>
           <Label htmlFor="address.street2">{t('Street 2')}</Label>
           <Input id="address.street2" {...register('address.street2')} />
-        </div>
-        <div className="sm:flex sm:gap-2 mt-2">
-          <div className="space-y-2 flex-1">
+        </Field>
+        <Row>
+          <Field>
             <Label htmlFor="address.zipCode">{t('Zip code')}</Label>
             <Input id="address.zipCode" {...register('address.zipCode')} />
-          </div>
-          <div className="space-y-2 flex-1">
+          </Field>
+          <Field>
             <Label htmlFor="address.city">{t('City')}</Label>
             <Input id="address.city" {...register('address.city')} />
-          </div>
-        </div>
-        <div className="sm:flex sm:gap-2 mt-2">
-          <div className="space-y-2 flex-1">
+          </Field>
+        </Row>
+        <Row>
+          <Field>
             <Label htmlFor="address.state">{t('State')}</Label>
             <Input id="address.state" {...register('address.state')} />
-          </div>
-          <div className="space-y-2 flex-1">
+          </Field>
+          <Field>
             <Label htmlFor="address.country">{t('Country')}</Label>
             <Input id="address.country" {...register('address.country')} />
-          </div>
-        </div>
+          </Field>
+        </Row>
       </Section>
       <Section label={t('Rent')}>
-        <div className="space-y-2">
+        <Field>
           <Label htmlFor="rent">{t('Rent excluding tax and expenses')}</Label>
           <Input id="rent" type="number" {...register('rent')} />
           {errors.rent && (
-            <p className="text-sm text-destructive">{errors.rent.message}</p>
+            <p className="text-label text-oxide">{errors.rent.message}</p>
           )}
-        </div>
+        </Field>
       </Section>
-      <Button type="submit" disabled={isSubmitting} data-cy="submit">
-        {!isSubmitting ? t('Save') : t('Saving')}
-      </Button>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={isSubmitting} data-cy="submit">
+          {!isSubmitting ? t('Save') : t('Saving')}
+        </Button>
+      </div>
     </form>
   );
 };

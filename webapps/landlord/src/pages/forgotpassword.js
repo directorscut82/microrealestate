@@ -66,51 +66,57 @@ export default function ForgotPassword() {
     <SignInUpLayout>
       {!emailSent ? (
         <>
-          <div className="p-5 md:p-0 md:max-w-md w-full">
-            <form
-              onSubmit={handleSubmit(forgotPassword)}
-              className="space-y-10"
-            >
-              <div className="text-2xl text-center md:text-left md:text-4xl font-medium text-secondary-foreground">
-                {t('Reset your password')}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">{t('Email Address')}</Label>
-                <Input
-                  id="email"
-                  autoComplete="email"
-                  {...register('email')}
-                />
-                {errors.email && (
-                  <p className="text-sm text-destructive">
-                    {errors.email.message}
-                  </p>
-                )}
-              </div>
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isSubmitting}
-                data-cy="submit"
-              >
-                {!isSubmitting ? t('Reset') : t('Reseting')}
-              </Button>
-            </form>
+          <div className="space-y-2 mb-8">
+            <h1 className="text-headline font-medium text-ink tracking-tight">
+              {t('Reset your password')}
+            </h1>
+            <p className="text-body text-ink-muted">
+              {t(
+                "Enter your email and we'll send you a link to reset your password"
+              )}
+            </p>
           </div>
-          <div className="mt-10 lg:mt-0 lg:absolute lg:bottom-10 text-center text-muted-foreground w-full">
+          <form
+            onSubmit={handleSubmit(forgotPassword)}
+            className="space-y-5"
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="email">{t('Email Address')}</Label>
+              <Input
+                id="email"
+                autoComplete="email"
+                {...register('email')}
+              />
+              {errors.email && (
+                <p className="text-label text-oxide">
+                  {errors.email.message}
+                </p>
+              )}
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isSubmitting}
+              data-cy="submit"
+            >
+              {!isSubmitting ? t('Reset') : t('Reseting')}
+            </Button>
+          </form>
+          <div className="mt-8 text-center text-body text-ink-muted">
             <Link href="/signin" data-cy="signin">
               {t('Sign in')}
             </Link>
-            .
           </div>
         </>
       ) : (
-        <div className="p-5 text-center lg:text-left md:p-0 md:max-w-md w-full space-y-10">
-          <div className="flex items-center justify-center lg:justify-normal text-success font-semibold">
-            <LuCheckCircle />
-            <span className="ml-2 text-lg my-4">{t('Check your email')}</span>
+        <div className="space-y-6">
+          <div className="flex items-center gap-2 text-olive">
+            <LuCheckCircle className="size-5" />
+            <span className="text-headline font-medium tracking-tight">
+              {t('Check your email')}
+            </span>
           </div>
-          <div>
+          <div className="text-body text-ink-soft space-y-2">
             <p>
               {t('An email has been sent to your email address {{email}}', {
                 email: emailSent

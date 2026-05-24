@@ -256,14 +256,12 @@ function Rents() {
       </div>
 
       {!store.organization.canSendEmails ? (
-        <Alert variant="warning" className="mb-4">
-          <div className="flex items-center gap-4">
-            <LuAlertTriangle className="size-6" />
-            <div className="text-sm">
-              {t(
-                'Unable to send documents by email without configuring the mail service in Settings page'
-              )}
-            </div>
+        <Alert variant="info" className="mb-4">
+          <LuAlertTriangle className="size-4" />
+          <div className="text-body">
+            {t(
+              'Unable to send documents by email without configuring the mail service in Settings page'
+            )}
           </div>
         </Alert>
       ) : null}

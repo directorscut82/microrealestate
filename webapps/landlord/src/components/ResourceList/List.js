@@ -26,6 +26,7 @@ export default function List({
   filters,
   filterFn,
   renderActions,
+  renderSubFilters,
   renderList,
   onLoadMore,
   hasMore,
@@ -66,12 +67,16 @@ export default function List({
   const safePageIndex = Math.min(pageIndex, chunks.length);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <Header
         filters={filters}
         renderActions={renderActions}
         onSearch={handleSearch}
       />
+
+      {renderSubFilters ? (
+        <div className="flex justify-end -mt-3">{renderSubFilters()}</div>
+      ) : null}
 
       {renderList?.({ data: chunks[safePageIndex - 1] || [] })}
 
