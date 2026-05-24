@@ -24,7 +24,8 @@ const MonthlyChargeSchema = new mongoose.Schema({
   term: { type: Number, required: true },
   amount: { type: Number, required: true },
   description: String,
-  expenseId: String
+  expenseId: { type: String, default: null },
+  repairId: { type: String, default: null }
 });
 
 const BuildingUnitSchema = new mongoose.Schema({
