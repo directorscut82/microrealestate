@@ -63,16 +63,21 @@ export function toRentData(
     )
   );
 
-  // VAT is applied centrally in task 4 (4_vats.ts). Promo and extracharge
-  // are stored as the user-entered values, so we don't multiply by
-  // (1 + vatRate) here. We still safely read the contract VAT rate
-  // because settlement-only VATs (no contract VAT) must not crash on
-  // [].at(0).rate.
+  // Storage convention: promo and extracharge are stored net-of-VAT in
+  // rentmanager.ts (divided by (1+vatRate)). Display convention here:
+  // multiply back to gross for the UI. Net effect for promo is correct
+  // because task 4 adds a settlement-VAT line (-net*vat) so grandTotal
+  // moves by -original_promo. For extracharge there's no symmetric VAT
+  // line (debts skip VAT in task 4) so the display value matches what
+  // the user entered but the actual grandTotal increment is
+  // extra/(1+vat). Known imbalance — see rentmanager.ts comment.
+  // We safely read the contract VAT rate via filter+[0] to avoid
+  // crashing when only settlement VAT lines exist (rent.vats[0] may
+  // not be the contract one).
   const contractVat = (rent.vats || []).filter(
     (vat: AnyRecord) => vat.origin === 'contract'
   )[0];
   const vatRate = contractVat?.rate ?? 0;
-  void vatRate;
 
   Object.assign(
     rentToReturn,
@@ -101,6 +106,18 @@ export function toRentData(
         { vatAmount: 0 }
       )
   );
+
+  // Display gross-of-VAT: rentmanager stores net-of-VAT, we multiply back.
+  if (vatRate) {
+    if (rentToReturn.promo > 0) {
+      rentToReturn.promo =
+        Math.round(rentToReturn.promo * (1 + vatRate) * 100) / 100;
+    }
+    if (rentToReturn.extracharge > 0) {
+      rentToReturn.extracharge =
+        Math.round(rentToReturn.extracharge * (1 + vatRate) * 100) / 100;
+    }
+  }
 
   // payment status
   rentToReturn.status = '';

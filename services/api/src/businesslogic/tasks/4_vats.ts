@@ -39,18 +39,13 @@ export default function taskVATs(
       });
     });
 
-    // Apply VAT to building charges (κοινόχρηστα) so VAT is computed once,
-    // uniformly, against every line item in the rent.
-    rent.buildingCharges?.forEach((charge) => {
-      const amount = Number(charge.amount) || 0;
-      const vatAmount = Math.round(amount * rate * 100) / 100;
-      rent.vats.push({
-        origin: 'building',
-        description: `${charge.description} T.V.A. (${rate * 100}%)`,
-        amount: vatAmount,
-        rate
-      });
-    });
+    // KNOWN ISSUE (H6): VAT is NOT applied to rent.buildingCharges. The
+    // building-charge feature (commit e80c095) and earlier upstream code
+    // never added a VAT pass for them. Whether κοινόχρηστα should carry
+    // VAT depends on Greek tax law context I don't have. Adding a naive
+    // rate*amount line here changes grandTotal by ~vat% on every tenant
+    // with building charges — risky without knowing the storage
+    // convention. Documented and deferred to user.
 
     // NOTE: Do NOT apply VAT to debts — they are carried-forward grandTotal
     // amounts from previous terms that already include VAT.
