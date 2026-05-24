@@ -1,7 +1,12 @@
 export function destructUrl(baseUrl: string) {
   const url = new URL(baseUrl);
   let subDomain;
-  let domain = url.hostname;
+  // Use `host` (includes the port if present) instead of `hostname` so the
+  // returned `domain` is a complete origin authority. With this,
+  // DOMAIN_URL=http://localhost:8080 yields `domain === 'localhost:8080'` and
+  // the CORS regex matches the browser's Origin header byte-for-byte —
+  // making the separate APP_DOMAIN env redundant.
+  let domain = url.host;
 
   if (!/^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/.test(url.hostname)) {
     // avoid the split if hostname is an IP address
@@ -9,6 +14,9 @@ export function destructUrl(baseUrl: string) {
     if (canonicalHostname.length >= 3) {
       subDomain = canonicalHostname.slice(0, -2).join('.');
       domain = `${canonicalHostname.at(-2)}.${canonicalHostname.at(-1)}`;
+      if (url.port) {
+        domain += `:${url.port}`;
+      }
     }
   }
 

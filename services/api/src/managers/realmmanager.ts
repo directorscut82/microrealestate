@@ -279,6 +279,13 @@ export function all(req: Req, res: Res) {
 }
 
 export async function remove(req: Req, res: Res) {
+  // Only an administrator may delete a realm. Without this check, any
+  // authenticated user (including a renter on another realm) can call
+  // DELETE /realms/:id and erase data.
+  if ((req.user as AnyRecord)?.role !== 'administrator') {
+    throw new ServiceError('forbidden', 403);
+  }
+
   const realmId = req.params.id;
   if (!realmId) {
     throw new ServiceError('missing realm id', 422);
@@ -312,6 +319,9 @@ export async function remove(req: Req, res: Res) {
   await Collections.Template.deleteMany({ realmId });
   await Collections.Document.deleteMany({ realmId });
   await Collections.Email.deleteMany({ realmId });
+  // Bills outlive tenants/properties (they may exist before any tenant is
+  // attached), so we cascade-delete them here before the realm itself.
+  await Collections.Bill.deleteMany({ realmId });
   await Collections.Realm.deleteOne({ _id: realmId });
 
   logger.info(`Realm ${realmId} (${realm.name}) deleted by ${(req.user as AnyRecord)?.email}`);

@@ -63,21 +63,16 @@ export function toRentData(
     )
   );
 
-  const vatRate =
-    rent.vats && rent.vats.length
-      ? rent.vats.filter((vat: AnyRecord) => vat.origin === 'contract')[0].rate
-      : 0;
-  if (vatRate) {
-    if (rentToReturn.promo > 0) {
-      rentToReturn.promo =
-        Math.round(rentToReturn.promo * (1 + vatRate) * 100) / 100;
-    }
-
-    if (rentToReturn.extracharge > 0) {
-      rentToReturn.extracharge =
-        Math.round(rentToReturn.extracharge * (1 + vatRate) * 100) / 100;
-    }
-  }
+  // VAT is applied centrally in task 4 (4_vats.ts). Promo and extracharge
+  // are stored as the user-entered values, so we don't multiply by
+  // (1 + vatRate) here. We still safely read the contract VAT rate
+  // because settlement-only VATs (no contract VAT) must not crash on
+  // [].at(0).rate.
+  const contractVat = (rent.vats || []).filter(
+    (vat: AnyRecord) => vat.origin === 'contract'
+  )[0];
+  const vatRate = contractVat?.rate ?? 0;
+  void vatRate;
 
   Object.assign(
     rentToReturn,
@@ -240,8 +235,8 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
   const occupant: AnyRecord = JSON.parse(JSON.stringify(inputOccupant));
 
   Object.assign(occupant, {
-    beginDate: moment(occupant.beginDate).format('DD/MM/YYYY'),
-    endDate: moment(occupant.endDate).format('DD/MM/YYYY'),
+    beginDate: moment.utc(occupant.beginDate).format('DD/MM/YYYY'),
+    endDate: moment.utc(occupant.endDate).format('DD/MM/YYYY'),
     frequency: occupant.frequency || 'months',
     street1: occupant.street1 || '',
     street2: occupant.street2 || '',
@@ -261,7 +256,7 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
   });
 
   if (occupant.terminationDate) {
-    occupant.terminationDate = moment(occupant.terminationDate).format(
+    occupant.terminationDate = moment.utc(occupant.terminationDate).format(
       'DD/MM/YYYY'
     );
   }
@@ -313,17 +308,17 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
       }
       if (item.property) {
         if (item.entryDate) {
-          item.entryDate = moment(item.entryDate).format('DD/MM/YYYY');
+          item.entryDate = moment.utc(item.entryDate).format('DD/MM/YYYY');
         }
         if (item.exitDate) {
-          item.exitDate = moment(item.exitDate).format('DD/MM/YYYY');
+          item.exitDate = moment.utc(item.exitDate).format('DD/MM/YYYY');
         }
         item.expenses.forEach((expense: AnyRecord) => {
           expense.beginDate = expense.beginDate
-            ? moment(expense.beginDate).format('DD/MM/YYYY')
+            ? moment.utc(expense.beginDate).format('DD/MM/YYYY')
             : item.entryDate;
           expense.endDate = expense.endDate
-            ? moment(expense.endDate).format('DD/MM/YYYY')
+            ? moment.utc(expense.endDate).format('DD/MM/YYYY')
             : item.exitDate;
         });
         if (item.property.type === 'parking') {
@@ -393,24 +388,23 @@ export function toProperty(
     lastBusyDay: '',
     occupantLabel: '',
     available: true,
-    status: 'vacant',
-    location: inputProperty.location
+    status: 'vacant'
   };
   if (inputOccupant) {
     property = {
       ...property,
-      beginDate: moment(inputOccupant.entryDate).format('DD/MM/YYYY'),
-      endDate: moment(inputOccupant.exitDate).format('DD/MM/YYYY'),
-      lastBusyDay: moment(
+      beginDate: moment.utc(inputOccupant.entryDate).format('DD/MM/YYYY'),
+      endDate: moment.utc(inputOccupant.exitDate).format('DD/MM/YYYY'),
+      lastBusyDay: moment.utc(
         inputOccupant.terminationDate || inputOccupant.endDate
       ).format('DD/MM/YYYY'),
       occupantLabel: inputOccupant.name
     };
     if (property.lastBusyDay) {
-      property.available = moment(property.lastBusyDay, 'DD/MM/YYYY').isBefore(
-        currentDate,
-        'day'
-      );
+      property.available = moment.utc(
+        property.lastBusyDay,
+        'DD/MM/YYYY'
+      ).isBefore(currentDate, 'day');
       if (!property.available) {
         property.status = 'occupied';
       }
@@ -422,10 +416,10 @@ export function toProperty(
       return {
         id: occupant._id,
         name: occupant.name,
-        beginDate: moment(occupant.beginDate).format('DD/MM/YYYY'),
-        endDate: moment(occupant.terminationDate || occupant.endDate).format(
-          'DD/MM/YYYY'
-        )
+        beginDate: moment.utc(occupant.beginDate).format('DD/MM/YYYY'),
+        endDate: moment.utc(
+          occupant.terminationDate || occupant.endDate
+        ).format('DD/MM/YYYY')
       };
     });
   }

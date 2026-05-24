@@ -39,6 +39,19 @@ export default function taskVATs(
       });
     });
 
+    // Apply VAT to building charges (κοινόχρηστα) so VAT is computed once,
+    // uniformly, against every line item in the rent.
+    rent.buildingCharges?.forEach((charge) => {
+      const amount = Number(charge.amount) || 0;
+      const vatAmount = Math.round(amount * rate * 100) / 100;
+      rent.vats.push({
+        origin: 'building',
+        description: `${charge.description} T.V.A. (${rate * 100}%)`,
+        amount: vatAmount,
+        rate
+      });
+    });
+
     // NOTE: Do NOT apply VAT to debts — they are carried-forward grandTotal
     // amounts from previous terms that already include VAT.
 

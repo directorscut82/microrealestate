@@ -125,7 +125,7 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   //     }
   //   }
   // ],
-  rents: {},
+  rents: [mongoose.Schema.Types.Mixed],
 
   // billing
   isVat: Boolean,

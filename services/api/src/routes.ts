@@ -68,8 +68,14 @@ export default function routes(): express.Router {
   );
 
   const realmsRouter = express.Router();
-  realmsRouter.get('/', realmManager.all as any);
-  realmsRouter.get('/:id', realmManager.one as any);
+  realmsRouter.get(
+    '/',
+    Middlewares.asyncWrapper(realmManager.all as any)
+  );
+  realmsRouter.get(
+    '/:id',
+    Middlewares.asyncWrapper(realmManager.one as any)
+  );
   realmsRouter.post('/', Middlewares.asyncWrapper(realmManager.add as any));
   realmsRouter.patch(
     '/:id',

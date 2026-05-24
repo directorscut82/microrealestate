@@ -8,7 +8,9 @@ import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
   validateObjectId,
   validateFiniteNumber,
-  sanitizeMongoObject
+  validateEnum,
+  sanitizeMongoObject,
+  PROPERTY_TYPES
 } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,11 +57,22 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
 
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
+  // Strict type guard — name is .trim()'d below
+  if (req.body?.name !== undefined && typeof req.body.name !== 'string') {
+    throw new ServiceError('name must be a string', 422);
+  }
   if (!req.body.name?.trim()) {
     throw new ServiceError('Property name is missing', 422);
   }
   validateFiniteNumber(req.body.price, 'price', { min: 0, max: 10000000 });
   validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
+  validateFiniteNumber(req.body.landSurface, 'landSurface', {
+    min: 0,
+    max: 1000000
+  });
+  if (req.body.type !== undefined) {
+    validateEnum(req.body.type, PROPERTY_TYPES, 'type');
+  }
   const property = new Collections.Property({
     ...req.body,
     realmId: realm!._id
@@ -76,14 +89,35 @@ export async function update(req: Req, res: Res) {
   validateObjectId(property._id, 'property id');
   validateFiniteNumber(property.price, 'price', { min: 0, max: 10000000 });
   validateFiniteNumber(property.surface, 'surface', { min: 0, max: 100000 });
+  validateFiniteNumber(property.landSurface, 'landSurface', {
+    min: 0,
+    max: 1000000
+  });
+  if (property.type !== undefined) {
+    validateEnum(property.type, PROPERTY_TYPES, 'type');
+  }
   const sanitized = sanitizeMongoObject(property);
+
+  // Strip identity / version fields — frontend POSTs the full document back
+  // on edit. Mirrors occupantmanager.update().
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id, __v, realmId: _realmId, ...payload } = sanitized as any;
+
+  // Drop null / empty-string numeric fields rather than $set'ing them to null —
+  // the frontend may send "" for cleared optional inputs and Mongoose will
+  // happily cast that to 0.
+  for (const k of ['surface', 'landSurface', 'price'] as const) {
+    if (payload[k] === null || payload[k] === '') {
+      delete payload[k];
+    }
+  }
 
   const dbProperty = await Collections.Property.findOneAndUpdate(
     {
       realmId: realm!._id,
-      _id: sanitized._id
+      _id: property._id
     },
-    sanitized,
+    { $set: payload },
     { new: true }
   ).lean();
 
@@ -97,6 +131,7 @@ export async function update(req: Req, res: Res) {
 export async function remove(req: Req, res: Res) {
   const realm = req.realm;
   const ids = req.params.ids.split(',');
+  ids.forEach((id: string) => validateObjectId(id, 'property id'));
 
   const tenantsUsingProperties = await Collections.Tenant.find({
     realmId: realm!._id,

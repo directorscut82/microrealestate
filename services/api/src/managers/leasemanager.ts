@@ -6,6 +6,7 @@ import {
 } from '@microrealestate/common';
 import type { ReqNoParams, ReqWithId, ReqWithIds, Res } from '../types/requests.js';
 import type { CollectionTypes } from '@microrealestate/types';
+import { validateObjectId } from '../validators.js';
 
 async function _leaseUsedByTenant(realm: CollectionTypes.Realm | null | undefined): Promise<Set<string>> {
   const tenants = await Collections.Tenant.find(
@@ -88,6 +89,8 @@ export async function remove(req: ReqWithIds, res: Res) {
     logger.error('missing lease ids');
     throw new ServiceError('missing fields', 422);
   }
+
+  leaseIds.forEach((id: string) => validateObjectId(id, 'lease id'));
 
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
   if (leaseIds.some((leaseId: string) => setOfUsedLeases.has(leaseId))) {

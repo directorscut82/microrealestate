@@ -28,6 +28,17 @@ const TIME_RANGES = ['months', 'weeks', 'days', 'years'] as const;
 
 const LOCALES = ['en', 'fr-FR', 'de-DE', 'el', 'es-CO', 'pt-BR'] as const;
 
+const PROPERTY_TYPES = [
+  'store',
+  'building',
+  'apartment',
+  'room',
+  'office',
+  'garage',
+  'parking',
+  'letterbox'
+] as const;
+
 export function validateObjectId(
   id: unknown,
   fieldName = 'id'
@@ -149,6 +160,45 @@ export function validateStringLength(
 }
 
 /**
+ * Strict version of validateStringLength: validates name-style fields with
+ * a {min, max, required} options shape. Trims whitespace before checking
+ * minimum length and rejects pure whitespace strings.
+ */
+export function validateStringField(
+  value: unknown,
+  fieldName: string,
+  opts: { min?: number; max?: number; required?: boolean } = {}
+): string | undefined {
+  const { min, max, required = false } = opts;
+  if (value == null || value === '') {
+    if (required) {
+      throw new ServiceError(`${fieldName} is required`, 422);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new ServiceError(`${fieldName} must be a string`, 422);
+  }
+  const trimmed = value.trim();
+  if (required && trimmed.length === 0) {
+    throw new ServiceError(`${fieldName} is required`, 422);
+  }
+  if (min != null && trimmed.length < min) {
+    throw new ServiceError(
+      `${fieldName} must be at least ${min} character${min === 1 ? '' : 's'}`,
+      422
+    );
+  }
+  if (max != null && value.length > max) {
+    throw new ServiceError(
+      `${fieldName} must be at most ${max} characters`,
+      422
+    );
+  }
+  return trimmed;
+}
+
+/**
  * Validate custom_percentage allocations sum to 100
  */
 export function validatePercentageAllocations(
@@ -215,18 +265,35 @@ export function validateAllocationValues(
 }
 
 /**
- * Strip MongoDB operators from an object (prevent injection)
+ * Strip MongoDB operators from an object (prevent injection).
+ * Walks nested objects and arrays, dropping any `$`-prefixed key at any depth.
+ * Dates, ObjectIds, Buffers and other non-plain objects are returned as-is.
  */
+function _isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function _sanitizeRecursive(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(_sanitizeRecursive);
+  }
+  if (_isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (k.startsWith('$')) continue;
+      out[k] = _sanitizeRecursive(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function sanitizeMongoObject(
   obj: Record<string, unknown>
 ): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (!key.startsWith('$')) {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
+  return _sanitizeRecursive(obj) as Record<string, unknown>;
 }
 
 // Re-export constants for use in managers
@@ -236,5 +303,6 @@ export {
   REPAIR_STATUSES,
   CHARGEABLE_TO,
   TIME_RANGES,
-  LOCALES
+  LOCALES,
+  PROPERTY_TYPES
 };
