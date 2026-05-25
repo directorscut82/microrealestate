@@ -41,6 +41,7 @@ export async function build(
   // on common volumes.
   const sanitize = (s: any) =>
     String(s || 'unknown')
+      // eslint-disable-next-line no-control-regex
       .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
       .replace(/[^A-Za-z0-9._\-Ͱ-Ͽἀ-῿\s]/g, '_')
       .replace(/\s+/g, '_')
