@@ -196,6 +196,12 @@ export default function taskBase(
 
   rent.term = Number(currentMoment.format('YYYYMMDDHH'));
   if (contract.frequency === 'months') {
+    // NOTE: contract.ts uses startOf('month') so mid-month begin/end dates
+    // produce a full-month rent (a tenant who moves in on the 20th is
+    // billed the full month for that month). If proration is required,
+    // change here to compute partial-month rent based on
+    // day-of-month / daysInMonth — and apply the same scaling in
+    // 2_amount.ts where preTaxAmount is computed.
     rent.term = Number(
       moment.utc(currentMoment).startOf('month').format('YYYYMMDDHH')
     );

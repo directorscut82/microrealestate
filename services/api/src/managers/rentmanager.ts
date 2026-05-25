@@ -217,6 +217,13 @@ export async function updateByTerm(req: ReqWithIdTerm, res: Res) {
   );
 }
 
+// NOTE: payments array is REPLACED, not appended. Callers must include
+// all existing payments + new ones in the request body. Stale-state writes
+// (a tab that read the rent before another tab added a payment) will
+// silently lose prior payments. The optimistic __v lock catches concurrent
+// writes against the same baseline but not stale single-tab writes.
+// This is intentional PUT semantics — confirm with product before changing
+// to merge/append behavior.
 async function _updateByTerm(
   authorizationHeader: string | undefined,
   locale: string | undefined,

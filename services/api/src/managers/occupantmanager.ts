@@ -371,6 +371,29 @@ export async function add(req: Req, res: Res) {
       [];
   });
 
+  // Reject discounts that exceed the rentable amount. Without this, a 600€
+  // discount on a 500€ rent slips through, produces a negative preTaxAmount
+  // (-100€), and task 4_vats then computes a negative VAT (e.g. -13€) and a
+  // negative grandTotal (-113€) — values that propagate into accounting,
+  // dashboard totals and CSV exports.
+  if (
+    Number(occupant.discount) > 0 &&
+    Array.isArray(occupant.properties) &&
+    occupant.properties.length
+  ) {
+    const totalRent = occupant.properties.reduce(
+      (sum: number, p: AnyRecord) =>
+        sum + (Number(p.rent) || Number(p.property?.price) || 0),
+      0
+    );
+    if (Number(occupant.discount) > totalRent) {
+      throw new ServiceError(
+        `Discount (${occupant.discount}) cannot exceed total rent (${totalRent})`,
+        422
+      );
+    }
+  }
+
   try {
     occupant.rents = [];
     if (
@@ -542,6 +565,27 @@ export async function update(req: Req, res: Res) {
 
     return rentedProperty;
   });
+
+  // Mirror the cap check from add(): a discount > total rent silently
+  // produces negative preTaxAmount → negative VAT → negative grandTotal,
+  // which then poisons every aggregator that consumes it.
+  if (
+    Number(newOccupant.discount) > 0 &&
+    Array.isArray(newOccupant.properties) &&
+    newOccupant.properties.length
+  ) {
+    const totalRent = newOccupant.properties.reduce(
+      (sum: number, p: AnyRecord) =>
+        sum + (Number(p.rent) || Number(p.property?.price) || 0),
+      0
+    );
+    if (Number(newOccupant.discount) > totalRent) {
+      throw new ServiceError(
+        `Discount (${newOccupant.discount}) cannot exceed total rent (${totalRent})`,
+        422
+      );
+    }
+  }
 
   if (
     newOccupant.beginDate &&
