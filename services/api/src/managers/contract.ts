@@ -95,10 +95,27 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
 
   const updatedContract = create(modifiedContract);
 
+  // Freeze paid past terms: re-pricing already-paid bills (V9/V10) is wrong.
+  // After Contract.create rebuilt all rents from the new property/expense
+  // state, restore frozen past paid rents from the original document so
+  // their preTaxAmounts/charges/buildingCharges/discounts/vats/total stay
+  // pinned to what was billed. Non-frozen rents (current/future, or
+  // unpaid past) keep the recomputed base and replay settlements via
+  // payTerm so expense changes still take effect going forward.
+  const currentTerm = _currentTermFor(modifiedContract);
   if (inputContract.rents) {
     inputContract.rents
       .filter((rent) => _isPayment(rent))
       .forEach((paidRent) => {
+        if (_isFrozen(paidRent, currentTerm)) {
+          const idx = updatedContract.rents.findIndex(
+            (r) => r.term === paidRent.term
+          );
+          if (idx > -1) {
+            updatedContract.rents[idx] = _.cloneDeep(paidRent);
+          }
+          return;
+        }
         payTerm(updatedContract, paidRent.term, {
           payments: paidRent.payments,
           vats: paidRent.vats.filter((vat) => vat.origin === 'settlement'),
@@ -166,8 +183,19 @@ export function payTerm(
 
   let previousRent: Rent | null =
     previousRentIndex > -1 ? contract.rents[previousRentIndex] : null;
+  const targetTerm = Number(term);
+  const currentTerm = _currentTermFor(contract);
   contract.rents.forEach((rent, index) => {
     if (index > previousRentIndex) {
+      // Freeze: a paid past term that is NOT the term being paid must not
+      // be re-priced when a later term is paid. The act of paying the
+      // current term may walk the loop forward; that walk must skip
+      // already-frozen rents instead of overwriting their charges.
+      if (rent.term !== targetTerm && _isFrozen(rent, currentTerm)) {
+        previousRent = contract.rents[index];
+        current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
+        return;
+      }
       if (index > previousRentIndex + 1) {
         const { debts, discounts, payments } = rent;
         settlements = {
@@ -188,6 +216,27 @@ export function payTerm(
   });
 
   return contract;
+}
+
+// "Frozen" = a past-term rent that has at least one settlement (payment,
+// settlement-origin discount, debt, or description). Frozen rents must NOT
+// be re-priced when expenses, properties, or building charges change —
+// historical bills are immutable once any settlement has been recorded
+// against them. Future-dated paid rents and unpaid past rents stay
+// editable so a landlord can correct mistakes before they're paid.
+function _isFrozen(rent: Rent, currentTerm: number): boolean {
+  if (!rent || typeof rent.term !== 'number') return false;
+  if (rent.term >= currentTerm) return false;
+  return _isPayment(rent);
+}
+
+// Compute the current term (YYYYMMDDHH) using the contract's frequency.
+// 'months' is the dominant case in MRE; falls back to a generic startOf
+// match for other frequencies.
+function _currentTermFor(contract: Pick<Contract, 'frequency'>): number {
+  const now = moment.utc();
+  const freq = (contract?.frequency || 'months') as moment.unitOfTime.StartOf;
+  return Number(now.startOf(freq).format('YYYYMMDDHH'));
 }
 
 const _isPayment = (rent: Rent): boolean => {
