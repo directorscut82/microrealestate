@@ -130,13 +130,14 @@ export default function NewTenantDialog({ open, setOpen }) {
         );
       } catch (error) {
         const status = error?.response?.status;
+        const apiMessage = error?.response?.data?.message;
         switch (status) {
           case 422:
-            return toast.error(t('Tenant name is missing'));
+            return toast.error(apiMessage || t('Tenant name is missing'));
           case 403:
             return toast.error(t('You are not allowed to add a tenant'));
           case 409:
-            return toast.error(t('The tenant already exists'));
+            return toast.error(apiMessage || t('The tenant already exists'));
           default:
             return toast.error(t('Something went wrong'));
         }
