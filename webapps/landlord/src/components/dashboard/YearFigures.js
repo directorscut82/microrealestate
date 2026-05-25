@@ -101,7 +101,7 @@ export default function YearFigures({ className, dashboardData }) {
           <span style={{ color: CHART_PAID_LIGHT }}>{t('Collected')}</span>
           <span className="text-ink">{formatNumber(data.paid)}</span>
         </div>
-        {data.notPaid < 0 && (
+        {data.notPaid > 0 && (
           <div className="flex justify-between gap-3 mb-0.5 font-mono tabular-nums text-label">
             <span className="text-ink-muted">{t('Owed')}</span>
             <span className="text-ink">{formatNumber(data.notPaid)}</span>
