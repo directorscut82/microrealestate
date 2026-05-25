@@ -102,11 +102,16 @@ services:
       - UPLOAD_MAX_SIZE
     expose:
       - '$PDFGENERATOR_PORT'
+    # Wave-20 F4: tmpfs mounts default to root:root mode 1777 in containerd,
+    # which masks the chown lines in the Dockerfile. The pdfgenerator runs
+    # as uid 1000 (USER 1000) and writes invoice PDFs under tmp/ — without
+    # explicit mode 0777 the writes fail with EACCES, manifested as a 404
+    # "PDF not found" from the API. /tmp keeps the standard 1777 (sticky).
     tmpfs:
       - /tmp
-      - /usr/app/services/pdfgenerator/tmp
-      - /usr/app/services/pdfgenerator/pdf_documents
-      - /usr/app/services/pdfgenerator/uploads
+      - /usr/app/services/pdfgenerator/tmp:mode=0777
+      - /usr/app/services/pdfgenerator/pdf_documents:mode=0777
+      - /usr/app/services/pdfgenerator/uploads:mode=0777
     networks:
       - net
     depends_on:

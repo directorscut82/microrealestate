@@ -168,26 +168,56 @@ export function toRentData(
   // payment status
   // Wave-17 B4: status was previously gated on `isSameOrBefore(now, 'month')`
   // which left every future-dated rent with status='' — even fully prepaid
-  // months. The UI ledger then renders an empty status column instead of
-  // "paid" / "notpaid". Assign status for every rent regardless of position
-  // relative to today; prepayments are reflected as 'paid', upcoming-but-
-  // unpaid as 'notpaid'. The legacy gate had no other purpose (all consumers
-  // already tolerate the three-value enum).
+  // months. Assign status for every rent regardless of position relative
+  // to today.
   //
   // Wave-17 B3: when caller passes the FULL ledger as `allRents`, promote a
   // partiallypaid (or notpaid) past rent to 'paid' as soon as a later term's
-  // payment has closed the running cumulative deficit. Without `allRents` we
-  // fall back to per-term newBalance only (legacy behaviour, used by code
-  // paths that don't yet plumb the ledger).
-  if (rentToReturn.totalAmount <= 0 || rentToReturn.newBalance >= 0) {
+  // payment has closed the running cumulative deficit.
+  //
+  // Wave-20 F5: previous rule `totalAmount <= 0 || newBalance >= 0` flipped
+  // every future month with negative grandTotal (carry-credit covered) to
+  // 'paid' even when the tenant had paid €0 in that term. That misled the
+  // dashboard into showing "all paid through year-end" after a single
+  // overpayment.
+  //
+  // New decision tree:
+  //   - direct payment > 0 AND it covers grandTotal → 'paid'
+  //   - direct payment > 0 but not enough → 'partiallypaid' (unless a later
+  //     catch-up has retroactively closed the deficit, then 'paid')
+  //   - direct payment == 0 AND grandTotal <= 0 (carry credit covers) AND a
+  //     prior overpayment chain settles it (allRents available) → 'paid'
+  //   - direct payment == 0 AND a later catch-up retroactively closes the
+  //     deficit → 'paid' (legacy B3 chain)
+  //   - everything else → 'notpaid'
+  const directPaid = Number(rentToReturn.payment) || 0;
+  const grandTotalDue = Number(rentToReturn.totalAmount) || 0;
+  if (directPaid > 0 && rentToReturn.newBalance >= -0.005) {
     rentToReturn.status = 'paid';
   } else if (
+    directPaid > 0 &&
     allRents &&
     _isSettledByCarryForward(Number(rentToReturn.term), allRents)
   ) {
     rentToReturn.status = 'paid';
-  } else if (rentToReturn.payment > 0) {
+  } else if (directPaid > 0) {
     rentToReturn.status = 'partiallypaid';
+  } else if (
+    directPaid === 0 &&
+    grandTotalDue <= 0 &&
+    allRents &&
+    _isSettledByCarryForward(Number(rentToReturn.term), allRents)
+  ) {
+    // Carry-credit covers the bill AND a prior overpayment chain accounts
+    // for it. Without the carry-forward check we'd flip empty-zero-bill
+    // months to paid even when no money has ever been paid.
+    rentToReturn.status = 'paid';
+  } else if (
+    directPaid === 0 &&
+    allRents &&
+    _isSettledByCarryForward(Number(rentToReturn.term), allRents)
+  ) {
+    rentToReturn.status = 'paid';
   } else {
     rentToReturn.status = 'notpaid';
   }

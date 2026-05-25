@@ -29,6 +29,12 @@ const MonthlyChargeSchema = new mongoose.Schema({
 });
 
 const BuildingUnitSchema = new mongoose.Schema({
+  // Wave-20 F11: persist `name` so POST /buildings :: units[i].name and
+  // POST /buildings/:id/units (addUnit) round-trip the user-entered label.
+  // Previously the schema lacked this field and Mongoose silently dropped
+  // it, leaving the UI blank for every unit. `unitLabel` is the legacy
+  // field and is kept for backwards compat with older imports.
+  name: String,
   atakNumber: { type: String, required: true },
   altAtakNumbers: [String],
   floor: Number,

@@ -222,6 +222,118 @@ export async function _attachTenantGroupsToBuildings(
   }
 }
 
+// Wave-20 F1: building-wide sibling recompute.
+//
+// Equal allocation expenses divide a fixed pool by the number of UNIQUE
+// active tenants in the building. The denominator changes whenever any
+// tenant lifecycle event (add/update/remove/terminate) changes the cohort,
+// so every SIBLING tenant in the same building must be recomputed — not
+// only the tenant being mutated. Without this, the FIRST tenant created
+// keeps its old €120 share even after three more tenants join (they should
+// all see €30). Same staleness on terminationDate edits and removes.
+//
+// Excluding the just-mutated tenant prevents redundant work and avoids
+// fighting the upstream computation (which already wrote the correct
+// rents for that tenant). The freeze logic in contract.ts protects paid
+// historical rents from being repriced.
+async function _recomputeSiblingTenantsInBuildings(
+  realmId: string,
+  propertyIds: string[],
+  excludeTenantId?: string
+): Promise<void> {
+  if (!propertyIds.length) return;
+
+  // Find all buildings that contain ANY of the affected propertyIds.
+  const buildings: any[] = await Collections.Building.find({
+    realmId,
+    'units.propertyId': { $in: propertyIds }
+  }).lean();
+  if (!buildings.length) return;
+
+  // Collect every propertyId across all touched buildings — these are the
+  // siblings whose tenants need recomputing.
+  const siblingPropIds = new Set<string>();
+  for (const b of buildings) {
+    for (const u of (b.units || []) as AnyRecord[]) {
+      if (u.propertyId) siblingPropIds.add(String(u.propertyId));
+    }
+  }
+  if (!siblingPropIds.size) return;
+
+  const tenantFilter: AnyRecord = {
+    realmId,
+    'properties.propertyId': { $in: Array.from(siblingPropIds) }
+  };
+  if (excludeTenantId) {
+    tenantFilter._id = { $ne: new Collections.ObjectId(excludeTenantId) };
+  }
+  const siblings: AnyRecord[] = await Collections.Tenant.find(tenantFilter).lean();
+  if (!siblings.length) return;
+
+  for (const tenantObj of siblings) {
+    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
+    if (!tenantObj.properties?.length) continue;
+    const tenantPropIds = (tenantObj.properties as AnyRecord[])
+      .map((p) => p.propertyId)
+      .filter(Boolean);
+    if (!tenantPropIds.length) continue;
+
+    const props: any[] = await Collections.Property.find({
+      realmId,
+      _id: { $in: tenantPropIds }
+    }).lean();
+    const propMap = props.reduce((acc: AnyRecord, p: any) => {
+      acc[String(p._id)] = p;
+      return acc;
+    }, {});
+    (tenantObj.properties as AnyRecord[]).forEach((p) => {
+      p.property = propMap[String(p.propertyId)] || p.property;
+    });
+
+    const tenantBuildings: any[] = await Collections.Building.find({
+      realmId,
+      'units.propertyId': { $in: tenantPropIds }
+    }).lean();
+    await _attachTenantGroupsToBuildings(realmId, tenantBuildings);
+
+    try {
+      const termFrequency = tenantObj.frequency || 'months';
+      const contractIn = {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        frequency: termFrequency,
+        terms: Math.ceil(
+          moment(tenantObj.endDate).diff(
+            moment(tenantObj.beginDate),
+            termFrequency as moment.unitOfTime.Diff,
+            true
+          )
+        ),
+        properties: tenantObj.properties,
+        buildings: tenantBuildings,
+        vatRate: tenantObj.vatRatio,
+        discount: tenantObj.discount,
+        rents: tenantObj.rents || []
+      };
+      const updated = Contract.update(contractIn as any, {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        termination: tenantObj.terminationDate,
+        properties: tenantObj.properties,
+        frequency: termFrequency
+      });
+      await Collections.Tenant.updateOne(
+        { _id: tenantObj._id },
+        { rents: updated.rents }
+      );
+    } catch (error) {
+      logger.error(
+        `sibling recompute failed for tenant ${tenantObj.name}: ${error}`
+      );
+    }
+  }
+}
+
 // Update building unit occupancyType based on tenant assignments.
 // Call after tenant add/update/delete to keep building overview in sync.
 async function _syncOccupancyForProperties(
@@ -396,6 +508,60 @@ async function _fetchTenants(realmId: string, tenantId?: string | string[]): Pro
   );
 
   return tenants;
+}
+
+// Wave-20 F7: validate per-property date windows. Without this guard, a
+// payload like {entryDate:01/12, exitDate:01/01} silently collapses every
+// rent term to €0 because the contract loop computes negative spans.
+// Wave-20 F8: also reject duplicate propertyIds — the same propertyId
+// appearing twice doubles the billing and corrupts the rent ledger.
+function _validatePropertyWindows(
+  tenant: AnyRecord
+): void {
+  const props = tenant.properties as AnyRecord[] | undefined;
+  if (!Array.isArray(props) || props.length === 0) return;
+
+  // Wave-20 F8: dedupe propertyIds.
+  const seen = new Set<string>();
+  for (let i = 0; i < props.length; i++) {
+    const pid = props[i]?.propertyId ? String(props[i].propertyId) : '';
+    if (!pid) continue;
+    if (seen.has(pid)) {
+      throw new ServiceError(
+        `duplicate propertyId in properties array: ${pid}`,
+        422
+      );
+    }
+    seen.add(pid);
+  }
+
+  const tenantBegin = tenant.beginDate ? moment.utc(tenant.beginDate) : null;
+  const tenantEnd = tenant.endDate ? moment.utc(tenant.endDate) : null;
+
+  for (let i = 0; i < props.length; i++) {
+    const p = props[i];
+    const entry = p?.entryDate ? moment.utc(p.entryDate) : null;
+    const exit = p?.exitDate ? moment.utc(p.exitDate) : null;
+
+    if (entry && exit && entry.isAfter(exit)) {
+      throw new ServiceError(
+        `properties[${i}].entryDate must be on or before exitDate`,
+        422
+      );
+    }
+    if (tenantBegin && entry && entry.isBefore(tenantBegin)) {
+      throw new ServiceError(
+        `properties[${i}].entryDate cannot be before tenant beginDate`,
+        422
+      );
+    }
+    if (tenantEnd && exit && exit.isAfter(tenantEnd)) {
+      throw new ServiceError(
+        `properties[${i}].exitDate cannot be after tenant endDate`,
+        422
+      );
+    }
+  }
 }
 
 function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
@@ -603,6 +769,9 @@ export async function add(req: Req, res: Res) {
     throw new ServiceError('End date must be after begin date', 422);
   }
 
+  // Wave-20 F7+F8: per-property date windows + duplicate propertyId guard.
+  _validatePropertyWindows(occupant);
+
   // Cross-tenant overlap guard: block double-booking the same property in
   // overlapping date windows within the same realm.
   await _assertNoDoubleOccupancy(realm!._id, occupant);
@@ -697,6 +866,16 @@ export async function add(req: Req, res: Res) {
     ?.map((p: AnyRecord) => p.propertyId)
     .filter(Boolean) || [];
   await _syncOccupancyForProperties(realm!._id, linkedPropIds, 'link');
+
+  // Wave-20 F1: cohort changed — sibling tenants in the same building(s)
+  // need re-allocation (equal-method denominator depends on cohort size).
+  if (linkedPropIds.length) {
+    await _recomputeSiblingTenantsInBuildings(
+      realm!._id,
+      linkedPropIds,
+      String(newOccupant._id)
+    );
+  }
 
   const occupants = await _fetchTenants(req.realm!._id, newOccupant._id);
   res.json(FD.toOccupantData(occupants.length ? occupants[0] : null as any));
@@ -812,6 +991,9 @@ export async function update(req: Req, res: Res) {
   if (originalOccupant.documents) {
     newOccupant.documents = originalOccupant.documents;
   }
+
+  // Wave-20 F7+F8: per-property date windows + duplicate propertyId guard.
+  _validatePropertyWindows(newOccupant);
 
   // Cross-tenant overlap guard for edits — exclude this tenant's own _id so
   // extending dates doesn't conflict with itself.
@@ -997,6 +1179,21 @@ export async function update(req: Req, res: Res) {
   if (addedPropIds.length) await _syncOccupancyForProperties(realm!._id, addedPropIds, 'link');
   if (removedPropIds.length) await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
 
+  // Wave-20 F1: any change in cohort membership (added/removed properties)
+  // OR change to lease window (terminationDate, endDate) requires sibling
+  // tenants in the affected building(s) to re-allocate equal-method
+  // expenses for current/future terms.
+  const allTouchedPropIds = Array.from(
+    new Set([...oldPropIds, ...newPropIds])
+  );
+  if (allTouchedPropIds.length) {
+    await _recomputeSiblingTenantsInBuildings(
+      realm!._id,
+      allTouchedPropIds,
+      occupantId
+    );
+  }
+
   const newOccupants = await _fetchTenants(req.realm!._id, occupantId);
   res.json(FD.toOccupantData(newOccupants.length ? newOccupants[0] : null as any));
 }
@@ -1097,6 +1294,25 @@ export async function remove(req: Req, res: Res) {
     await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
   }
 
+  // Wave-20 F1: deleting tenants shrinks the equal-allocation cohort —
+  // sibling tenants in the same building(s) must recompute their share.
+  // Run BEFORE the delete so the persistent state still reflects the
+  // outgoing tenants when _attachTenantGroupsToBuildings reads, and
+  // pass the deleted ids as exclusions.
+  if (removedPropIds.length) {
+    await _recomputeSiblingTenantsInBuildings(
+      realm!._id,
+      removedPropIds,
+      undefined
+    );
+    // Note: `excludeTenantId` only takes a single id; with multiple
+    // tenants being deleted we accept that the dying tenants may
+    // briefly recompute before being removed. The subsequent
+    // deleteMany is what removes them from the cohort permanently.
+    // Run the recompute AGAIN after the delete so the cohort denominator
+    // reflects the post-delete state.
+  }
+
   const tenantDeleteResult = await Collections.Tenant.deleteMany({
     realmId: realm!._id,
     _id: { $in: occupantIds }
@@ -1106,6 +1322,18 @@ export async function remove(req: Req, res: Res) {
     throw new ServiceError(
       'No records deleted (none of the ids matched)',
       404
+    );
+  }
+
+  // Wave-20 F1: post-delete sibling recompute now that the cohort has
+  // truly shrunk. Equal-allocation buildings need this second pass so
+  // the surviving tenants see the correct (smaller) denominator on
+  // their NEXT current/future term.
+  if (removedPropIds.length) {
+    await _recomputeSiblingTenantsInBuildings(
+      realm!._id,
+      removedPropIds,
+      undefined
     );
   }
 

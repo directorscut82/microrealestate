@@ -130,6 +130,44 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
       });
   }
 
+  // Wave-20 F2: forward carry-in sweep after freeze restoration.
+  //
+  // create() computed every rent.total.balance using the NEW pricing
+  // chain (because the loop runs chronologically with previousRent =
+  // just-built new-price rent). The freeze restoration above pinned
+  // frozen past terms back to their old (billed) values — but the
+  // carry-in balance baked into each non-frozen rent still references
+  // the new-price prior grandTotal/payment, not the actually-billed
+  // restored ones.
+  //
+  // Concretely: tenant paid Jan-Apr fully at €400 (old). Landlord PATCHes
+  // rent to €450. May was computed in create() with previousRent = NEW
+  // April (grandTotal=450, payment=0) → May.balance=450, May.grandTotal
+  // becomes 450+450=900, surfacing a phantom carry-in. After freeze
+  // restoration April is back to OLD (grandTotal=400, payment=400), but
+  // May still carries the stale balance unless we re-derive it here.
+  //
+  // Walk forward and recompute total.balance + grandTotal for every
+  // non-frozen rent so its balance truly reflects the restored prior.
+  const restoredRents = updatedContract.rents;
+  for (let i = 1; i < restoredRents.length; i++) {
+    const rent = restoredRents[i];
+    if (!rent || !rent.total) continue;
+    if (_isFrozen(rent, currentTerm)) continue;
+    const prev = restoredRents[i - 1];
+    if (!prev || !prev.total) continue;
+    const prevDue = Number(prev.total.grandTotal) || 0;
+    const prevPaid = Number(prev.total.payment) || 0;
+    const newBalance = Math.round((prevDue - prevPaid) * 100) / 100;
+    const oldBalance = Number(rent.total.balance) || 0;
+    if (Math.abs(newBalance - oldBalance) < 0.005) continue;
+    // Re-derive grandTotal: subtract old balance, add new balance.
+    rent.total.balance = newBalance;
+    const oldGrandTotal = Number(rent.total.grandTotal) || 0;
+    rent.total.grandTotal =
+      Math.round((oldGrandTotal - oldBalance + newBalance) * 100) / 100;
+  }
+
   return updatedContract;
 }
 

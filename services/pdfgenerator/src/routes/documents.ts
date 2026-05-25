@@ -347,6 +347,18 @@ export default function () {
         if (error instanceof ServiceError) {
           throw error;
         }
+        // Wave-20 F4: filesystem permission/missing errors are infra
+        // failures (500), not "not found" (404). Treating EACCES/ENOENT
+        // as 404 misled the user into thinking their data was missing
+        // when the container couldn't write the PDF. Strip the absolute
+        // path from the message so we don't leak internal layout.
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === 'EACCES' || code === 'ENOENT' || code === 'EROFS') {
+          logger.error(
+            `PDF generation filesystem error (${code}): ${(error as Error).message}`
+          );
+          throw new ServiceError('PDF generation failed', 500);
+        }
         throw new ServiceError(error as Error, 404);
       }
     })
