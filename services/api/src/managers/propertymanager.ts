@@ -5,6 +5,7 @@ import {
   ServiceError
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import moment from 'moment';
 import {
   validateObjectId,
   validateFiniteNumber,
@@ -12,6 +13,15 @@ import {
   sanitizeMongoObject,
   PROPERTY_TYPES
 } from '../validators.js';
+
+// Surface lower-bound depends on property type. A 0-surface apartment is
+// nonsensical; parking spots may legitimately have a tiny declared surface
+// (or 0 if the user enters it consciously). Apply only when surface is
+// supplied — keeps the field optional.
+function _surfaceMinForType(type: unknown): number {
+  if (type === 'parking' || type === 'letterbox') return 0;
+  return 1;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -65,13 +75,29 @@ export async function add(req: Req, res: Res) {
     throw new ServiceError('Property name is missing', 422);
   }
   validateFiniteNumber(req.body.price, 'price', { min: 0, max: 10000000 });
-  validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
+  // type is required — validate before letting Mongoose throw a ValidationError.
+  validateEnum(req.body.type, PROPERTY_TYPES, 'type', { required: true });
+  // Type-aware surface lower bound (F3): 0 m² apartment/store/etc. is a
+  // data-quality bug; parking/letterbox may legitimately be 0.
+  validateFiniteNumber(req.body.surface, 'surface', {
+    min: _surfaceMinForType(req.body.type),
+    max: 100000
+  });
   validateFiniteNumber(req.body.landSurface, 'landSurface', {
     min: 0,
     max: 1000000
   });
-  // type is required — validate before letting Mongoose throw a ValidationError.
-  validateEnum(req.body.type, PROPERTY_TYPES, 'type', { required: true });
+  // F5: reject energyCertificate.issueDate set in the future (>today+1 day to
+  // tolerate timezone drift).
+  if (req.body?.energyCertificate?.issueDate) {
+    const d = moment.utc(req.body.energyCertificate.issueDate);
+    if (!d.isValid() || d.isAfter(moment.utc().add(1, 'day'))) {
+      throw new ServiceError(
+        'energyCertificate.issueDate cannot be in the future',
+        422
+      );
+    }
+  }
   const property = new Collections.Property({
     ...req.body,
     realmId: realm!._id
@@ -87,14 +113,66 @@ export async function update(req: Req, res: Res) {
 
   validateObjectId(property._id, 'property id');
   validateFiniteNumber(property.price, 'price', { min: 0, max: 10000000 });
-  validateFiniteNumber(property.surface, 'surface', { min: 0, max: 100000 });
+  if (property.type !== undefined) {
+    validateEnum(property.type, PROPERTY_TYPES, 'type');
+  }
+
+  // Look up the existing record so we can (a) compare type changes for the
+  // occupied-type-lock (F6) and (b) compute the surface lower bound based on
+  // the *effective* type after this update (F3).
+  const existing: any = await Collections.Property.findOne({
+    _id: property._id,
+    realmId: realm!._id
+  }).lean();
+  if (!existing) {
+    throw new ServiceError('Property not found', 404);
+  }
+  const effectiveType =
+    property.type !== undefined ? property.type : existing.type;
+
+  validateFiniteNumber(property.surface, 'surface', {
+    min: _surfaceMinForType(effectiveType),
+    max: 100000
+  });
   validateFiniteNumber(property.landSurface, 'landSurface', {
     min: 0,
     max: 1000000
   });
-  if (property.type !== undefined) {
-    validateEnum(property.type, PROPERTY_TYPES, 'type');
+
+  // F5: future energyCertificate.issueDate guard on update too.
+  if (property?.energyCertificate?.issueDate) {
+    const d = moment.utc(property.energyCertificate.issueDate);
+    if (!d.isValid() || d.isAfter(moment.utc().add(1, 'day'))) {
+      throw new ServiceError(
+        'energyCertificate.issueDate cannot be in the future',
+        422
+      );
+    }
   }
+
+  // F6: refuse to mutate `type` while the property is occupied. Type changes
+  // shift UI rendering (parking has no rooms, apartment does) and pricing
+  // semantics; allowing them silently corrupts charge allocation. Other
+  // mutable fields (name, description, surface) remain editable.
+  if (property.type !== undefined && property.type !== existing.type) {
+    const now = new Date();
+    const occupiedBy = await Collections.Tenant.findOne({
+      realmId: realm!._id,
+      'properties.propertyId': String(property._id),
+      $or: [
+        { terminationDate: { $exists: false } },
+        { terminationDate: null },
+        { terminationDate: { $gt: now } }
+      ]
+    }).lean();
+    if (occupiedBy) {
+      throw new ServiceError(
+        'Cannot change property type while occupied. Terminate or reassign tenant first.',
+        422
+      );
+    }
+  }
+
   const sanitized = sanitizeMongoObject(property);
 
   // Strip identity / version fields — frontend POSTs the full document back

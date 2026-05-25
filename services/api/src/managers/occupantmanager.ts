@@ -286,6 +286,72 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
   );
 }
 
+// Cross-tenant double-occupancy guard. For every propertyId in the incoming
+// tenant's properties[], reject if another active tenant in the same realm
+// occupies that property during an overlapping date window. Excludes the
+// current tenant's own _id (so editing your own tenant doesn't fail) and
+// tenants who have already terminated by their effective end date.
+async function _assertNoDoubleOccupancy(
+  realmId: string,
+  incoming: AnyRecord,
+  excludeTenantId?: string
+): Promise<void> {
+  if (!Array.isArray(incoming.properties) || !incoming.properties.length) return;
+
+  const incomingBegin = incoming.beginDate
+    ? moment.utc(incoming.beginDate)
+    : null;
+  const incomingEnd = incoming.terminationDate
+    ? moment.utc(incoming.terminationDate)
+    : incoming.endDate
+    ? moment.utc(incoming.endDate)
+    : null;
+  if (!incomingBegin || !incomingEnd) return;
+
+  const propertyIds = incoming.properties
+    .map((p: AnyRecord) => p.propertyId)
+    .filter(Boolean);
+  if (!propertyIds.length) return;
+
+  const filter: AnyRecord = {
+    realmId,
+    'properties.propertyId': { $in: propertyIds }
+  };
+  if (excludeTenantId) {
+    filter._id = { $ne: new Collections.ObjectId(excludeTenantId) };
+  }
+
+  const others: AnyRecord[] = await Collections.Tenant.find(filter).lean();
+  for (const other of others) {
+    const otherBegin = other.beginDate ? moment.utc(other.beginDate) : null;
+    const otherEnd = other.terminationDate
+      ? moment.utc(other.terminationDate)
+      : other.endDate
+      ? moment.utc(other.endDate)
+      : null;
+    if (!otherBegin || !otherEnd) continue;
+
+    // Date-range overlap: (otherBegin <= incomingEnd) AND (otherEnd >= incomingBegin)
+    const overlaps =
+      otherBegin.isSameOrBefore(incomingEnd) &&
+      otherEnd.isSameOrAfter(incomingBegin);
+    if (!overlaps) continue;
+
+    const otherPropIds = (other.properties || [])
+      .map((p: AnyRecord) => String(p.propertyId))
+      .filter(Boolean);
+    const conflictId = propertyIds.find((id: string) =>
+      otherPropIds.includes(String(id))
+    );
+    if (conflictId) {
+      throw new ServiceError(
+        `Property is already assigned to another tenant during this period: ${other.name}`,
+        422
+      );
+    }
+  }
+}
+
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
 
@@ -377,6 +443,10 @@ export async function add(req: Req, res: Res) {
     throw new ServiceError('End date must be after begin date', 422);
   }
 
+  // Cross-tenant overlap guard: block double-booking the same property in
+  // overlapping date windows within the same realm.
+  await _assertNoDoubleOccupancy(realm!._id, occupant);
+
   const propertyMap = await _buildPropertyMap(realm);
 
   occupant.properties?.forEach((property: AnyRecord) => {
@@ -448,7 +518,10 @@ export async function add(req: Req, res: Res) {
       occupant.rents = contract.rents;
     }
   } catch (error) {
-    throw new ServiceError(String(error), 409);
+    // Contract.create throws on validation issues (bad frequency, empty
+    // properties, termination out of range, end<=begin). These are
+    // unprocessable entity (422), not concurrency conflicts (409).
+    throw new ServiceError(String(error), 422);
   }
 
   const newOccupant: any = await Collections.Tenant.create({
@@ -577,6 +650,10 @@ export async function update(req: Req, res: Res) {
     newOccupant.documents = originalOccupant.documents;
   }
 
+  // Cross-tenant overlap guard for edits — exclude this tenant's own _id so
+  // extending dates doesn't conflict with itself.
+  await _assertNoDoubleOccupancy(realm!._id, newOccupant, occupantId);
+
   const propertyMap = await _buildPropertyMap(realm);
 
   newOccupant.properties = newOccupant.properties.map((rentedProperty: AnyRecord) => {
@@ -672,7 +749,11 @@ export async function update(req: Req, res: Res) {
       const newContract = Contract.update(contract, modification);
       newOccupant.rents = newContract.rents;
     } catch (e) {
-      throw new ServiceError(String(e), 409);
+      // Contract.update throws on validation issues (e.g. termination out of
+      // contract time frame, bad date ranges). These are 422, not 409.
+      // 409 is reserved below for genuine optimistic-lock concurrency
+      // conflicts (the __v mismatch).
+      throw new ServiceError(String(e), 422);
     }
   } else {
     const hasPaidRents = (newOccupant.rents || []).some(
@@ -687,7 +768,7 @@ export async function update(req: Req, res: Res) {
     if (hasPaidRents) {
       throw new ServiceError(
         'impossible to update tenant some rents have been paid',
-        409
+        422
       );
     }
 
