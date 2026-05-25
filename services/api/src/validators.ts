@@ -26,9 +26,21 @@ const CHARGEABLE_TO = ['owners', 'tenants', 'split'] as const;
 
 const TIME_RANGES = ['months', 'weeks', 'days', 'years'] as const;
 
-// Accept both 'en' (legacy) and 'en-US' (IETF tag) — the frontend currently
-// emits 'en-US', which previously 422'd against the enum below.
-const LOCALES = ['en', 'en-US', 'fr-FR', 'de-DE', 'el', 'es-CO', 'pt-BR'] as const;
+// Accept both short forms and IETF tags. Frontend may emit either ('en-US'
+// vs 'en', 'el-GR' vs 'el'). Aliases are normalized in the manager layer
+// when persisted; downstream locale resolution (PDF/CSV/i18n) keys on the
+// short form so e.g. 'el-GR' resolves to the same Greek translations as
+// 'el'.
+const LOCALES = [
+  'en',
+  'en-US',
+  'fr-FR',
+  'de-DE',
+  'el',
+  'el-GR',
+  'es-CO',
+  'pt-BR'
+] as const;
 
 const PROPERTY_TYPES = [
   'store',

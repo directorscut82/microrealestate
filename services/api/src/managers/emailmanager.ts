@@ -44,7 +44,14 @@ async function _sendEmail(req: Req, message: AnyRecord): Promise<AnyRecord[]> {
     logger.error(`POST ${EMAILER_URL} failed`);
     logger.error(`data sent: ${JSON.stringify(postData)}`);
     logger.error(errorMessage);
-    throw new Error(errorMessage);
+    // Propagate upstream client errors (4xx) verbatim so the landlord API
+    // returns the same status as the emailer (e.g. 422 "missing recipients"
+    // for tenants with no contacts) instead of swallowing everything as 500.
+    const upstream = error?.response?.status;
+    if (Number.isFinite(upstream) && upstream >= 400 && upstream < 500) {
+      throw new ServiceError(errorMessage, upstream);
+    }
+    throw new ServiceError(`Email send failed: ${errorMessage}`, 500);
   }
 }
 
