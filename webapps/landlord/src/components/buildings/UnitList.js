@@ -20,6 +20,13 @@ import ConfirmDialog from '../ConfirmDialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import ResponsiveDialog from '../ResponsiveDialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '../ui/select';
 import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
@@ -46,8 +53,18 @@ const unitSchema = z.object({
   heatingThousandths: optionalNumber(0, 1000),
   elevatorThousandths: optionalNumber(0, 1000),
   isManaged: z.boolean(),
+  occupancyType: z
+    .enum(['rented', 'owner_occupied', 'vacant', 'parking'])
+    .optional(),
   propertyId: z.string().trim().max(60).optional()
 });
+
+const OCCUPANCY_TYPES = [
+  { value: 'rented', labelKey: 'rented' },
+  { value: 'owner_occupied', labelKey: 'owner_occupied' },
+  { value: 'vacant', labelKey: 'vacant' },
+  { value: 'parking', labelKey: 'parking' }
+];
 
 function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   const { t } = useTranslation('common');
@@ -55,19 +72,25 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
 
+  // Unit thousandths feed expense allocations and rent computation —
+  // editing a unit invalidates rent caches, not just the building view.
+  const _invalidateAllUnitDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingUnit(buildingId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
-    }
+    onSuccess: _invalidateAllUnitDependents
   });
 
   const updateMutation = useMutation({
     mutationFn: (data) =>
       updateBuildingUnit(buildingId, { ...data, _id: unit._id }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS, buildingId] });
-    }
+    onSuccess: _invalidateAllUnitDependents
   });
 
   const {
@@ -88,17 +111,20 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
       heatingThousandths: '',
       elevatorThousandths: '',
       isManaged: true,
+      occupancyType: 'vacant',
       propertyId: ''
     },
     values: unit
       ? {
           ...unit,
-          isManaged: unit.isManaged ?? true
+          isManaged: unit.isManaged ?? true,
+          occupancyType: unit.occupancyType || 'vacant'
         }
       : undefined
   });
 
   const isManaged = watch('isManaged');
+  const occupancyType = watch('occupancyType');
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -202,6 +228,29 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
               <Label htmlFor="isManaged">{t('Managed Unit')}</Label>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="occupancyType">{t('Occupancy type')}</Label>
+              <Select
+                value={occupancyType}
+                onValueChange={(val) => setValue('occupancyType', val)}
+              >
+                <SelectTrigger id="occupancyType">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OCCUPANCY_TYPES.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {t(opt.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-label text-ink-muted">
+                {t(
+                  'Mark a unit as owner-occupied to track owner expenses and exclude from occupancy rate.'
+                )}
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="propertyId">{t('Property ID (optional)')}</Label>
               <Input id="propertyId" {...register('propertyId')} />
             </div>
@@ -234,6 +283,9 @@ export default function UnitList({ building }) {
     mutationFn: (unitId) => removeBuildingUnit(building._id, unitId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
     }
   });
 

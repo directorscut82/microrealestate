@@ -163,10 +163,135 @@ export default function BuildingDashboard({ building }) {
     return s;
   }, [sortedUnits]);
 
+  // Annual esoda / eksoda summary for this building.
+  // Esoda  = sum of monthly rent across all currently-rented units × 12.
+  // Eksoda = sum of recurring building expenses (×12) + one-time expenses
+  //          + sum of repair actualCost/estimatedCost + sum of all owner
+  //          monthly expense entries already recorded.
+  // Owner-occupied + parking units contribute zero esoda but still incur
+  // their share of any owner-tracked expenses.
+  const finance = useMemo(() => {
+    const monthlyEsoda = sortedUnits.reduce((sum, unit) => {
+      if (!unit.propertyId) return sum;
+      const property = propertyMap.get(
+        typeof unit.propertyId === 'string' ? unit.propertyId : unit.propertyId?._id
+      );
+      const tenantInfo = property ? tenantByPropertyId.get(property._id) : null;
+      if (!tenantInfo) return sum;
+      return sum + (Number(tenantInfo.rent) || 0);
+    }, 0);
+
+    const recurringMonthlyEksoda = (building?.expenses || [])
+      .filter((e) => e.isRecurring && e.amount > 0)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const oneTimeEksoda = (building?.expenses || [])
+      .filter((e) => !e.isRecurring && e.amount > 0)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const repairEksoda = (building?.repairs || [])
+      .filter((r) => r.status !== 'cancelled')
+      .reduce(
+        (sum, r) => sum + (Number(r.actualCost) || Number(r.estimatedCost) || 0),
+        0
+      );
+    const ownerEksoda = (building?.ownerMonthlyExpenses || []).reduce(
+      (sum, e) => sum + (Number(e.amount) || 0),
+      0
+    );
+
+    const annualEsoda = monthlyEsoda * 12;
+    const annualEksoda =
+      recurringMonthlyEksoda * 12 +
+      oneTimeEksoda +
+      repairEksoda +
+      ownerEksoda;
+    const net = annualEsoda - annualEksoda;
+    return {
+      monthlyEsoda,
+      annualEsoda,
+      recurringMonthlyEksoda,
+      oneTimeEksoda,
+      repairEksoda,
+      ownerEksoda,
+      annualEksoda,
+      net
+    };
+  }, [
+    sortedUnits,
+    propertyMap,
+    tenantByPropertyId,
+    building?.expenses,
+    building?.repairs,
+    building?.ownerMonthlyExpenses
+  ]);
+
   if (!building) return null;
 
   return (
     <div className="space-y-6">
+      {/* Esoda / Eksoda summary (annual projection) — at the top so the
+          landlord sees the headline financial picture before the unit list. */}
+      <Card className="p-4">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <div className="text-label text-muted-foreground uppercase tracking-wide">
+              {t('Income vs expenses')}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {t(
+                'Annual projection — current monthly rent × 12, recurring expenses × 12, plus all one-time expenses, repairs, and owner-tracked expenses.'
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-6 text-right font-mono tabular-nums">
+            <div>
+              <div className="text-label text-muted-foreground uppercase">
+                {t('Income')}
+              </div>
+              <div className="text-xl font-medium text-olive">
+                €{finance.annualEsoda.toFixed(2)}
+              </div>
+            </div>
+            <div>
+              <div className="text-label text-muted-foreground uppercase">
+                {t('Expenses')}
+              </div>
+              <div className="text-xl font-medium text-oxide">
+                €{finance.annualEksoda.toFixed(2)}
+              </div>
+            </div>
+            <div>
+              <div className="text-label text-muted-foreground uppercase">
+                {t('Net')}
+              </div>
+              <div
+                className={cn(
+                  'text-xl font-semibold',
+                  finance.net >= 0 ? 'text-olive' : 'text-oxide'
+                )}
+              >
+                €{finance.net.toFixed(2)}
+              </div>
+            </div>
+          </div>
+        </div>
+        {finance.annualEksoda > 0 && (
+          <div className="mt-3 pt-3 border-t border-stone-line/60 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
+            <div>
+              {t('Recurring')} ×12: €{(finance.recurringMonthlyEksoda * 12).toFixed(2)}
+            </div>
+            <div>
+              {t('One-time')}: €{finance.oneTimeEksoda.toFixed(2)}
+            </div>
+            <div>
+              {t('Repairs')}: €{finance.repairEksoda.toFixed(2)}
+            </div>
+            <div>
+              {t('Owner expenses')}: €{finance.ownerEksoda.toFixed(2)}
+            </div>
+          </div>
+        )}
+      </Card>
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="p-4 text-center">
