@@ -51,19 +51,34 @@ function _filterData(data, filters) {
               .indexOf(cleanedSearchText) != -1;
         }
 
-        // Search match contact
+        // Search match contact — schema stores phone1 and phone2 (the
+        // older `phone` field was kept for backward compatibility but the
+        // form writes phone1/phone2). Scan all three so search works on
+        // both legacy and new docs.
         if (!found) {
           found = !!contacts
-            ?.map(({ contact = '', email = '', phone = '' }) => ({
-              contact: contact.replace(regExp, '').toLowerCase(),
-              email: email.toLowerCase(),
-              phone: phone.replace(regExp, '')
-            }))
+            ?.map(
+              ({
+                contact = '',
+                email = '',
+                phone = '',
+                phone1 = '',
+                phone2 = ''
+              }) => ({
+                contact: contact.replace(regExp, '').toLowerCase(),
+                email: email.toLowerCase(),
+                phone: phone.replace(regExp, ''),
+                phone1: phone1.replace(regExp, ''),
+                phone2: phone2.replace(regExp, '')
+              })
+            )
             .filter(
-              ({ contact, email, phone }) =>
+              ({ contact, email, phone, phone1, phone2 }) =>
                 contact.indexOf(cleanedSearchText) != -1 ||
                 email.indexOf(cleanedSearchText) != -1 ||
-                phone.indexOf(cleanedSearchText) != -1
+                phone.indexOf(cleanedSearchText) != -1 ||
+                phone1.indexOf(cleanedSearchText) != -1 ||
+                phone2.indexOf(cleanedSearchText) != -1
             ).length;
         }
 

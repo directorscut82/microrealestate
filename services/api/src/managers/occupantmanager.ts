@@ -574,6 +574,56 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
   );
 }
 
+// Wave-24 A1+A5: shared body-shape validators applied by add() and update().
+// Without a single helper, drift between POST and PATCH was the source of A1
+// (PATCH had guaranty validators but POST didn't) and A5 (negative
+// properties[].rent slipping through). Centralizing makes future drift
+// impossible.
+function _validateOccupantPayload(body: AnyRecord): void {
+  // Wave-24 A1: deposit field validators on add(). PATCH already had these
+  // (wave-21 C28-B1/B2); POST silently persisted negatives.
+  if (body.guaranty !== undefined) {
+    validateFiniteNumber(body.guaranty, 'guaranty', {
+      min: 0,
+      max: 10000000
+    });
+  }
+  if (body.guarantyPayback !== undefined) {
+    validateFiniteNumber(body.guarantyPayback, 'guarantyPayback', {
+      min: 0,
+      max: 10000000
+    });
+  }
+  // If both are present, the per-property guard mirroring update() catches
+  // payback > guaranty before save. Skip when only one is present (the other
+  // is loaded later for the effective comparison in update()).
+  if (
+    body.guaranty !== undefined &&
+    body.guarantyPayback !== undefined &&
+    Number.isFinite(Number(body.guaranty)) &&
+    Number.isFinite(Number(body.guarantyPayback)) &&
+    Number(body.guarantyPayback) > Number(body.guaranty)
+  ) {
+    throw new ServiceError(
+      'guarantyPayback cannot exceed guaranty',
+      422
+    );
+  }
+
+  // Wave-24 A5: negative properties[].rent silently produced negative
+  // grandTotal entries for the term. Validate each property.rent here.
+  if (Array.isArray(body.properties)) {
+    body.properties.forEach((p: AnyRecord, i: number) => {
+      if (p?.rent !== undefined && p.rent !== null && p.rent !== '') {
+        validateFiniteNumber(p.rent, `properties[${i}].rent`, {
+          min: 0,
+          max: 10000000
+        });
+      }
+    });
+  }
+}
+
 // Cross-tenant double-occupancy guard. For every propertyId in the incoming
 // tenant's properties[], reject if another active tenant in the same realm
 // occupies that SAME propertyId during an overlapping per-property date
@@ -728,6 +778,16 @@ export async function add(req: Req, res: Res) {
       }
     });
   }
+
+  // Wave-24 A2: empty-string leaseId from the frontend was being passed
+  // through to Mongoose, which then cast-failed on every subsequent GET that
+  // populated `leaseId`. Normalize to undefined so the doc has no leaseId.
+  if (req.body.leaseId === '' || req.body.leaseId === null) {
+    delete req.body.leaseId;
+  }
+
+  // Wave-24 A1+A5: shared body-shape validators (deposit + per-property rent).
+  _validateOccupantPayload(req.body);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, ...occupant } = _formatTenant(req.body);
@@ -893,6 +953,14 @@ export async function update(req: Req, res: Res) {
   const realm = req.realm;
   const occupantId = req.params.id;
   validateObjectId(occupantId, 'tenant id');
+
+  // Wave-24 A2: empty-string leaseId on edit poisons populate() in tenantmanager.
+  if (req.body.leaseId === '' || req.body.leaseId === null) {
+    delete req.body.leaseId;
+  }
+
+  // Wave-24 A5: per-property rent validation (mirror add()).
+  _validateOccupantPayload(req.body);
 
   // Strict type guard for `name` — hits .trim() later. Mongoose string casts
   // would otherwise turn a non-string (e.g. {$ne: ''} NoSQL injection probe)

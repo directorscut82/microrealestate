@@ -57,6 +57,13 @@ function getRequestLocale(request: NextRequest) {
   }
 }
 
+// Wave-24 B17: when the URL begins with a locale-shaped segment (e.g. /fr-CA/
+// or /xx-XX/) that isn't in our supported set, the previous code treated it
+// as "no locale present" and prepended the negotiated locale, producing
+// /en/fr-CA/page (a non-existent route). Strip the offending segment first
+// so the user lands on /en/page instead.
+const LOCALE_SHAPE_RE = /^\/[a-z]{2}(-[A-Z]{2})?(\/|$)/;
+
 function injectLocale(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const requestLocale = getRequestLocale(request);
@@ -64,7 +71,18 @@ function injectLocale(request: NextRequest) {
   const locale = pathnameLocale || requestLocale;
 
   if (!pathnameLocale) {
-    request.nextUrl.pathname = `/${locale}${pathname}`;
+    let basePathname = pathname;
+    // If the path opens with something that LOOKS like a locale tag but
+    // isn't one we support, drop it before prepending the negotiated
+    // locale.
+    if (LOCALE_SHAPE_RE.test(pathname)) {
+      const m = pathname.match(LOCALE_SHAPE_RE);
+      if (m) {
+        const stripped = pathname.slice(m[0].length - (m[2] === '/' ? 1 : 0));
+        basePathname = stripped.startsWith('/') ? stripped : `/${stripped}`;
+      }
+    }
+    request.nextUrl.pathname = `/${locale}${basePathname === '/' ? '' : basePathname}`;
     console.debug('====>', pathname, 'redirected to', request.nextUrl.pathname);
     return NextResponse.redirect(request.nextUrl);
   }

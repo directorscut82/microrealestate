@@ -25,7 +25,10 @@ function _filterData(data = [], filters) {
   }
 
   if (filters.searchText) {
-    const regExp = /\s|\.-/gi;
+    // Wave-24 B3: the previous `\s|\.-` regex matched a literal "." followed
+    // by "-" rather than the intended "any of space, dot, or hyphen".
+    // Fix to a true character class.
+    const regExp = /\s|\.|-/gi;
     const cleaned = filters.searchText.toLowerCase().replace(regExp, '');
     filteredItems = filteredItems.filter(
       (b) =>

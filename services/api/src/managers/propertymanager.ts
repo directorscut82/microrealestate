@@ -233,37 +233,38 @@ export async function remove(req: Req, res: Res) {
   const ids = req.params.ids.split(',');
   ids.forEach((id: string) => validateObjectId(id, 'property id'));
 
-  const tenantsUsingProperties = await Collections.Tenant.find({
-    realmId: realm!._id,
-    'properties.propertyId': { $in: ids }
-  }).lean();
-
-  if ((tenantsUsingProperties as any[]).length) {
-    const names = (tenantsUsingProperties as any[]).map(({ name }: any) => name).join(', ');
-    throw new ServiceError(
-      `Property cannot be deleted because it is used by: ${names}`,
-      422
-    );
-  }
-
-  // Wave-21 C30-B2: refuse delete if any building unit still references the
-  // property. Symmetric with the building delete guard. Forces the caller
-  // to detach the unit first (PATCH the unit's propertyId or remove it),
-  // otherwise unit.propertyId would become a stale pointer that breaks
-  // allocation and surfaces as null in _toBuildingData.
-  const buildingsLinking = await Collections.Building.find(
-    {
+  // Wave-24 B14: collect BOTH guard results so the user sees every blocker
+  // in one error rather than fixing them one at a time.
+  const [tenantsUsingProperties, buildingsLinking] = await Promise.all([
+    Collections.Tenant.find({
       realmId: realm!._id,
-      'units.propertyId': { $in: ids }
-    },
-    { name: 1, units: 1 }
-  ).lean();
+      'properties.propertyId': { $in: ids }
+    }).lean(),
+    Collections.Building.find(
+      {
+        realmId: realm!._id,
+        'units.propertyId': { $in: ids }
+      },
+      { name: 1, units: 1 }
+    ).lean()
+  ]);
+
+  const blockers: string[] = [];
+  if ((tenantsUsingProperties as any[]).length) {
+    const names = (tenantsUsingProperties as any[])
+      .map(({ name }: any) => name)
+      .join(', ');
+    blockers.push(`tenant(s): ${names}`);
+  }
   if ((buildingsLinking as any[]).length) {
     const names = (buildingsLinking as any[])
       .map(({ name }: any) => name)
       .join(', ');
+    blockers.push(`building unit(s) in: ${names} (detach the unit first)`);
+  }
+  if (blockers.length) {
     throw new ServiceError(
-      `Property cannot be deleted because it is still linked to a unit in building(s): ${names}. Detach the unit first.`,
+      `Property cannot be deleted because it is still referenced by ${blockers.join(' AND ')}`,
       422
     );
   }

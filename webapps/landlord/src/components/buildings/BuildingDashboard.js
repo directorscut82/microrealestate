@@ -15,6 +15,7 @@ import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
+import NumberFormat from '../NumberFormat';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
@@ -181,11 +182,15 @@ export default function BuildingDashboard({ building }) {
       return sum + (Number(tenantInfo.rent) || 0);
     }, 0);
 
+    // Wave-24 A13: legacy seed data persists this flag as `recurring`
+    // (without the is- prefix). Read both so existing buildings show the
+    // correct totals after upgrade — the new schema field shadows the
+    // legacy one when both happen to be set.
     const recurringMonthlyEksoda = (building?.expenses || [])
-      .filter((e) => e.isRecurring && e.amount > 0)
+      .filter((e) => (e.isRecurring ?? e.recurring) && e.amount > 0)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     const oneTimeEksoda = (building?.expenses || [])
-      .filter((e) => !e.isRecurring && e.amount > 0)
+      .filter((e) => !(e.isRecurring ?? e.recurring) && e.amount > 0)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     const repairEksoda = (building?.repairs || [])
       .filter((r) => r.status !== 'cancelled')
@@ -242,13 +247,13 @@ export default function BuildingDashboard({ building }) {
               )}
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-6 text-right font-mono tabular-nums">
+          <div className="grid grid-cols-3 gap-6 text-right">
             <div>
               <div className="text-label text-muted-foreground uppercase">
                 {t('Income')}
               </div>
               <div className="text-xl font-medium text-olive">
-                €{finance.annualEsoda.toFixed(2)}
+                <NumberFormat value={finance.annualEsoda} showZero />
               </div>
             </div>
             <div>
@@ -256,7 +261,7 @@ export default function BuildingDashboard({ building }) {
                 {t('Expenses')}
               </div>
               <div className="text-xl font-medium text-oxide">
-                €{finance.annualEksoda.toFixed(2)}
+                <NumberFormat value={finance.annualEksoda} showZero />
               </div>
             </div>
             <div>
@@ -269,7 +274,7 @@ export default function BuildingDashboard({ building }) {
                   finance.net >= 0 ? 'text-olive' : 'text-oxide'
                 )}
               >
-                €{finance.net.toFixed(2)}
+                <NumberFormat value={finance.net} showZero />
               </div>
             </div>
           </div>
@@ -277,16 +282,18 @@ export default function BuildingDashboard({ building }) {
         {finance.annualEksoda > 0 && (
           <div className="mt-3 pt-3 border-t border-stone-line/60 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
             <div>
-              {t('Recurring')} ×12: €{(finance.recurringMonthlyEksoda * 12).toFixed(2)}
+              {t('Recurring')} ×12:{' '}
+              <NumberFormat value={finance.recurringMonthlyEksoda * 12} showZero />
             </div>
             <div>
-              {t('One-time')}: €{finance.oneTimeEksoda.toFixed(2)}
+              {t('One-time')}: <NumberFormat value={finance.oneTimeEksoda} showZero />
             </div>
             <div>
-              {t('Repairs')}: €{finance.repairEksoda.toFixed(2)}
+              {t('Repairs')}: <NumberFormat value={finance.repairEksoda} showZero />
             </div>
             <div>
-              {t('Owner expenses')}: €{finance.ownerEksoda.toFixed(2)}
+              {t('Owner expenses')}:{' '}
+              <NumberFormat value={finance.ownerEksoda} showZero />
             </div>
           </div>
         )}
@@ -385,11 +392,15 @@ export default function BuildingDashboard({ building }) {
                     .join(', ');
                 }
 
-                // Rent display
+                // Rent display — use NumberFormat so currency follows the
+                // realm locale (€ in el-GR, $ in en-US, etc.) instead of
+                // being hardcoded.
                 const rentDisplay =
-                  effectiveOccupancy === 'rented' && tenantInfo?.rent
-                    ? `€${tenantInfo.rent}`
-                    : '';
+                  effectiveOccupancy === 'rented' && tenantInfo?.rent ? (
+                    <NumberFormat value={Number(tenantInfo.rent)} />
+                  ) : (
+                    ''
+                  );
 
                 return (
                   <TableRow

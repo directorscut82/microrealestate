@@ -9,6 +9,17 @@ import express, { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 
+// Wave-24 A9+B12: ObjectId guard + bulk-delete cap. We intentionally avoid a
+// shared validators import so pdfgenerator has no api-package dependency.
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/;
+function _assertObjectId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !OBJECT_ID_RE.test(value)) {
+    throw new ServiceError(`invalid ${name}`, 422);
+  }
+  return value;
+}
+const MAX_BULK_DELETE = 50;
+
 /**
  * route: /templates
  */
@@ -145,15 +156,21 @@ export default function () {
       }
 
       const template = req.body || {};
-      const updatedTemplate = await Collections.Template.findOneAndReplace(
+      _assertObjectId(template._id, 'template id');
+
+      // Wave-24 A9: findOneAndReplace silently wipes any field the caller
+      // forgot to include in the PATCH body (linkedResourceIds, html, etc.).
+      // Switch to findOneAndUpdate({$set: ...}) and strip server-owned
+      // identity fields from the $set payload to avoid Mongo's "Updating
+      // the path '_id' would create a conflict" error.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _id, __v, realmId: _realmId, ...rest } = template as any;
+      const updatedTemplate = await Collections.Template.findOneAndUpdate(
         {
           _id: template._id,
           realmId: organizationId
         },
-        {
-          ...template,
-          realmId: organizationId
-        },
+        { $set: rest },
         { new: true }
       );
 
@@ -170,6 +187,14 @@ export default function () {
     Middlewares.asyncWrapper(async (req, res) => {
       const organizationId = req.headers.organizationid;
       const templateIds = req.params.ids.split(',');
+      // Wave-24 B12: cap bulk delete + validate every id.
+      if (templateIds.length > MAX_BULK_DELETE) {
+        throw new ServiceError(
+          `template ids exceeds maximum of ${MAX_BULK_DELETE} items`,
+          422
+        );
+      }
+      templateIds.forEach((id) => _assertObjectId(id, 'template id'));
       const result = await Collections.Template.deleteMany({
         _id: { $in: templateIds },
         realmId: organizationId

@@ -144,7 +144,7 @@ export async function sendSmsOnly(req: Req, res: Res) {
 
 export async function send(req: Req, res: Res) {
   const realm = req.realm;
-  const { document, tenantIds, terms, year, month } = req.body;
+  const { document, tenantIds, terms, year, month, force } = req.body;
   const defaultTerm = moment.utc(`${year}/${month}/01`, 'YYYY/MM/DD').format(
     'YYYYMMDDHH'
   );
@@ -154,10 +154,48 @@ export async function send(req: Req, res: Res) {
     realmId: realm!._id
   }).lean();
 
+  // Wave-24 A10: prevent accidental double-send. The Email collection tracks
+  // every successfully-sent message; a 60-minute lookback for the same
+  // (tenantId, templateName, term) is sufficient to catch double-clicks
+  // and accidental re-submits without blocking legitimate retries
+  // (a force=true flag bypasses the guard for the rare resend case).
+  const recentlySentKeys = new Set<string>();
+  if (!force) {
+    const sixtyMinAgo = moment.utc().subtract(60, 'minutes').toDate();
+    const sentRecords: AnyRecord[] = await Collections.Email.find({
+      realmId: String(realm!._id),
+      recordId: { $in: tenantIds },
+      templateName: document,
+      sentDate: { $gte: sixtyMinAgo }
+    })
+      .lean();
+    for (const r of sentRecords as AnyRecord[]) {
+      const tk = String(r.recordId);
+      const term = Number(r.params?.term);
+      if (Number.isFinite(term)) {
+        recentlySentKeys.add(`${tk}|${term}`);
+      }
+    }
+  }
+
   const statusList = await Promise.all(
     tenants.map(async (tenant: AnyRecord, index: number) => {
       const tenantId = String(tenant._id);
       const term = Number((terms && terms[index]) || defaultTerm);
+
+      // Wave-24 A10: skip + warn if the same (tenant, document, term) was
+      // emailed within the last 60 minutes. Force=true bypasses.
+      if (recentlySentKeys.has(`${tenantId}|${term}`)) {
+        return {
+          name: tenant.name,
+          tenantId,
+          document,
+          term,
+          skipped: true,
+          reason:
+            'Already sent within the last 60 minutes. Pass force=true to resend.'
+        };
+      }
 
       try {
         const emailStatus = await _sendEmail(req, {

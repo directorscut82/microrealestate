@@ -21,12 +21,27 @@ export async function getOneTenant(
   }
   const tenantId = req.params.tenantId;
 
+  // Wave-24 A11: GET /tenantapi/tenant/me — resolve to the caller's tenant.
+  // Without this, "me" was passed to Mongo as an ObjectId and threw 500.
+  // Match by email contact alone; if multiple tenants share the contact
+  // email (rare — same person renting from two landlords), return the
+  // first match. The full list is also reachable via getAllTenants.
+  const filter: Record<string, unknown> =
+    tenantId === 'me'
+      ? { 'contacts.email': { $eq: email.toLowerCase() } }
+      : {
+          _id: tenantId,
+          'contacts.email': { $eq: email.toLowerCase() }
+        };
+
+  // Validate non-"me" id format up front to avoid CastError 500.
+  if (tenantId !== 'me' && !/^[a-fA-F0-9]{24}$/.test(String(tenantId))) {
+    throw new ServiceError('invalid tenant id', 422);
+  }
+
   const dbTenant = await Collections.Tenant.findOne<
     MongooseDocument<CollectionTypes.Tenant>
-  >({
-    _id: tenantId,
-    'contacts.email': { $eq: email.toLowerCase() }
-  }).populate<{
+  >(filter).populate<{
     realmId: CollectionTypes.Realm;
     leaseId: CollectionTypes.Lease;
   }>(['realmId', 'leaseId']);
@@ -80,15 +95,30 @@ type PopulatedTenant = Omit<CollectionTypes.Tenant, 'realmId' | 'leaseId'> & {
   leaseId: CollectionTypes.Lease;
 };
 
+// Wave-24 B16: legacy/seed rents may lack `.total`. Defensive shape so the
+// tenant API doesn't 500 on a malformed historical rent.
+const ZERO_TOTAL = {
+  preTaxAmount: 0,
+  charges: 0,
+  vat: 0,
+  balance: 0,
+  grandTotal: 0,
+  payment: 0
+};
+function _safeTotal(rent: { total?: any } | null | undefined) {
+  return (rent?.total as any) ?? ZERO_TOTAL;
+}
+
 function _toTenantResponse(
   tenant: PopulatedTenant,
   lastTerm: number
 ): TenantAPI.TenantDataType {
   const now = moment.utc();
   const firstRent = tenant.rents?.[0];
-  const totalPreTaxAmount = firstRent?.total.preTaxAmount || 0;
-  const totalChargesAmount = firstRent?.total.charges || 0;
-  const totalVatAmount = firstRent?.total.vat || 0;
+  const firstTotal = _safeTotal(firstRent as any);
+  const totalPreTaxAmount = firstTotal.preTaxAmount || 0;
+  const totalChargesAmount = firstTotal.charges || 0;
+  const totalVatAmount = firstTotal.vat || 0;
   const totalAmount = totalPreTaxAmount + totalChargesAmount + totalVatAmount;
   const { remainingIterations, remainingIterationsToPay } =
     _computeRemainingIterations(tenant, lastTerm, totalAmount);
@@ -151,23 +181,27 @@ function _toTenantResponse(
         ?.filter(({ term }) => term <= lastTerm)
         .sort((r1, r2) => r2.term - r1.term)
         .map((rent) => {
+          const total = _safeTotal(rent as any);
+          const payments = Array.isArray((rent as any).payments)
+            ? (rent as any).payments
+            : [];
           return {
             id: `${tenant._id}-${rent.term}`,
             term: rent.term,
-            balance: rent.total.balance,
-            grandTotal: rent.total.grandTotal,
-            payment: rent.total.payment || 0,
-            methods: rent.payments
-              .filter((payment) => !!payment)
-              .map((payment) => payment.type),
+            balance: total.balance,
+            grandTotal: total.grandTotal,
+            payment: total.payment || 0,
+            methods: payments
+              .filter((payment: any) => !!payment)
+              .map((payment: any) => payment.type),
             status:
-              rent.total.grandTotal - (rent.total.payment || 0) <= 0
+              total.grandTotal - (total.payment || 0) <= 0
                 ? 'paid'
-                : rent.total.payment > 0
+                : total.payment > 0
                   ? 'partially-paid'
                   : 'unpaid',
             payments:
-              rent.payments.map((payment) => ({
+              payments.map((payment: any) => ({
                 date: payment.date,
                 method: payment.type,
                 reference: payment.reference,
@@ -228,5 +262,7 @@ function _computeBalance(rents: CollectionTypes.PartRent[], lastTerm: number) {
   if (!rent) {
     return 0;
   }
-  return -rent.total.grandTotal + (rent.total.payment || 0);
+  // Wave-24 B16: defensive read.
+  const total = _safeTotal(rent as any);
+  return -total.grandTotal + (total.payment || 0);
 }

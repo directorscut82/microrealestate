@@ -15,8 +15,15 @@ import {
   validateObjectId,
   validateFiniteNumber,
   validateArrayMaxLength,
-  validateDateString
+  validateDateString,
+  validateTerm,
+  validateEnum,
+  validateStringLength
 } from '../validators.js';
+
+// Wave-24 B6: payment.type accepted any string (e.g. "BITCOIN"). Restrict to
+// the canonical set the UI offers.
+const PAYMENT_TYPES = ['cash', 'transfer', 'levy', 'cheque', ''] as const;
 
 type AnyRecord = Record<string, any>;
 
@@ -199,6 +206,10 @@ export async function update(req: ReqNoParams, res: Res) {
   validateFiniteNumber(paymentData.promo, 'promo', { min: 0, max: 10000000 });
   validateFiniteNumber(paymentData.extracharge, 'extracharge', { min: 0, max: 10000000 });
   validateArrayMaxLength(paymentData.payments, 20, 'payments');
+  // Wave-24 B7: cap free-text descriptors to prevent runaway document size.
+  validateStringLength(paymentData.notepromo, 1000, 'notepromo');
+  validateStringLength(paymentData.noteextracharge, 1000, 'noteextracharge');
+  validateStringLength(paymentData.description, 1000, 'description');
 
   const term = `${paymentData.year}${String(paymentData.month).padStart(2, '0')}0100`;
 
@@ -234,6 +245,10 @@ export async function updateByTerm(req: ReqWithIdTerm, res: Res) {
   validateFiniteNumber(paymentData.promo, 'promo', { min: 0, max: 10000000 });
   validateFiniteNumber(paymentData.extracharge, 'extracharge', { min: 0, max: 10000000 });
   validateArrayMaxLength(paymentData.payments, 20, 'payments');
+  // Wave-24 B7: cap free-text descriptors.
+  validateStringLength(paymentData.notepromo, 1000, 'notepromo');
+  validateStringLength(paymentData.noteextracharge, 1000, 'noteextracharge');
+  validateStringLength(paymentData.description, 1000, 'description');
 
   res.json(
     await _updateByTerm(authorizationHeader, locale, realm, term, paymentData)
@@ -323,6 +338,26 @@ async function _updateByTerm(
             min: 0,
             max: 10000000
           });
+        }
+        // Wave-24 B6: enum guard on payment.type.
+        if (p?.type !== undefined && p.type !== null) {
+          validateEnum(p.type, PAYMENT_TYPES, `payments[${idx}].type`);
+        }
+        // Wave-24 B7: cap length on free-text fields so a paste-bomb doesn't
+        // bloat the embedded array document.
+        if (p?.reference !== undefined && p.reference !== null) {
+          validateStringLength(
+            p.reference,
+            1000,
+            `payments[${idx}].reference`
+          );
+        }
+        if (p?.description !== undefined && p.description !== null) {
+          validateStringLength(
+            p.description,
+            1000,
+            `payments[${idx}].description`
+          );
         }
         // Validate optional payment.date in DD/MM/YYYY when present.
         // Empty string and missing are tolerated (legacy callers); but a
@@ -464,6 +499,9 @@ async function _updateByTerm(
 export async function rentsOfOccupant(req: ReqWithId, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
+  // Wave-24 A3: validate the tenant id early so a bad path returns 422 not
+  // a Mongoose CastError 500 from `_findOccupants`.
+  validateObjectId(id, 'tenant id');
   const term = Number(moment.utc().format('YYYYMMDDHH'));
 
   const dbOccupants = await _findOccupants(realm, id);
@@ -496,6 +534,11 @@ export async function rentsOfOccupant(req: ReqWithId, res: Res) {
 export async function rentOfOccupantByTerm(req: ReqWithIdTerm, res: Res) {
   const realm = req.realm;
   const { id, term } = req.params;
+  // Wave-24 A3: term parameter is reflected straight into a Mongo query and
+  // string-compared. An invalid value like "notaterm" would silently match
+  // the first rent in the array (Number(NaN) → 0). Validate up front.
+  validateObjectId(id, 'tenant id');
+  validateTerm(term, 'term');
 
   res.json(
     await _rentOfOccupant(

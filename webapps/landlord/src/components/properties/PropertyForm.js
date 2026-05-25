@@ -34,6 +34,11 @@ const schema = z.object({
   dehNumber: z.string().trim().max(60).optional(),
   energyClass: z.string().trim().max(60).optional(),
   energyCertNumber: z.string().trim().max(60).optional(),
+  // Wave-24 A16: schema persists these fields but the UI never rendered
+  // them, so the API guard for future-dated issueDates was unreachable.
+  // Issue date is HTML `date` (YYYY-MM-DD) — converted to ISO at submit.
+  energyCertIssueDate: z.string().trim().max(20).optional(),
+  energyCertInspectorNumber: z.string().trim().max(60).optional(),
   address: z.object({
     street1: z.string().trim().max(200).optional(),
     street2: z.string().trim().max(200).optional(),
@@ -84,6 +89,11 @@ const PropertyForm = ({ property, onSubmit }) => {
       dehNumber: property?.dehNumber || '',
       energyClass: property?.energyCertificate?.energyClass || '',
       energyCertNumber: property?.energyCertificate?.number || '',
+      energyCertIssueDate: property?.energyCertificate?.issueDate
+        ? String(property.energyCertificate.issueDate).substring(0, 10)
+        : '',
+      energyCertInspectorNumber:
+        property?.energyCertificate?.inspectorNumber || '',
       address: property?.address || {
         street1: '',
         street2: '',
@@ -124,16 +134,31 @@ const PropertyForm = ({ property, onSubmit }) => {
 
   return (
     <form onSubmit={handleSubmit((data) => {
-      const { energyClass, energyCertNumber, atakNumber, dehNumber, ...rest } = data;
+      const {
+        energyClass,
+        energyCertNumber,
+        energyCertIssueDate,
+        energyCertInspectorNumber,
+        atakNumber,
+        dehNumber,
+        ...rest
+      } = data;
+      const hasEnergyData =
+        energyClass ||
+        energyCertNumber ||
+        energyCertIssueDate ||
+        energyCertInspectorNumber;
       onSubmit({
         ...rest,
         atakNumber,
         dehNumber,
-        energyCertificate: energyClass || energyCertNumber
+        energyCertificate: hasEnergyData
           ? {
               ...(property?.energyCertificate || {}),
               energyClass: energyClass || '',
-              number: energyCertNumber || ''
+              number: energyCertNumber || '',
+              issueDate: energyCertIssueDate || undefined,
+              inspectorNumber: energyCertInspectorNumber || ''
             }
           : undefined
       });
@@ -224,6 +249,30 @@ const PropertyForm = ({ property, onSubmit }) => {
           <Field>
             <Label htmlFor="energyCertNumber">{t('Energy Certificate')}</Label>
             <Input id="energyCertNumber" {...register('energyCertNumber')} />
+          </Field>
+        </Row>
+        <Row>
+          <Field>
+            <Label htmlFor="energyCertIssueDate">
+              {t('Energy Certificate Issue Date')}
+            </Label>
+            {/* API guard refuses dates in the future (wave-16). max=today
+                stops the user from picking one in the date picker. */}
+            <Input
+              id="energyCertIssueDate"
+              type="date"
+              max={new Date().toISOString().substring(0, 10)}
+              {...register('energyCertIssueDate')}
+            />
+          </Field>
+          <Field>
+            <Label htmlFor="energyCertInspectorNumber">
+              {t('Energy Inspector Number')}
+            </Label>
+            <Input
+              id="energyCertInspectorNumber"
+              {...register('energyCertInspectorNumber')}
+            />
           </Field>
         </Row>
       </Section>
