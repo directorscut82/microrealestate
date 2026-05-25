@@ -8,6 +8,7 @@ import {
   validateObjectId,
   validateTerm,
   validateFiniteNumber,
+  validateStringField,
   validateEnum,
   validateArrayMaxLength,
   validateAllocationValues,
@@ -858,6 +859,24 @@ export async function addUnit(req: Req, res: Res) {
       422
     );
   }
+
+  // Prevent orphan units across buildings: if the property is already
+  // referenced by a unit in a DIFFERENT building, refuse the link until
+  // the caller removes the previous unit. Otherwise rent computation
+  // walks both buildings and double-bills the tenant.
+  if (req.body.propertyId) {
+    const otherBuilding = await Collections.Building.findOne({
+      realmId: realm!._id,
+      'units.propertyId': req.body.propertyId
+    }).lean();
+    if (otherBuilding && String((otherBuilding as any)._id) !== String(id)) {
+      throw new ServiceError(
+        'Property is already linked to a unit in another building. Remove that unit first.',
+        422
+      );
+    }
+  }
+
   (building as any).units.push(req.body);
 
   // Building-wide thousandths sums must not exceed 1000 across all units —
@@ -1036,9 +1055,22 @@ export async function addMonthlyCharge(req: Req, res: Res) {
   const realm = req.realm;
   const { id, unitId } = req.params;
 
-  if (req.body.amount == null) {
-    throw new ServiceError('Charge amount is required', 422);
+  // Pre-validate inputs before save() — without this a missing/bad term
+  // surfaces as a Mongoose ValidationError (HTTP 500 with raw schema text).
+  if (req.body.term == null || !/^\d{10}$/.test(String(req.body.term))) {
+    throw new ServiceError('Invalid term format', 422);
   }
+  validateTerm(req.body.term, 'term');
+  validateFiniteNumber(req.body.amount, 'amount', {
+    min: 0,
+    max: 10000000,
+    required: true
+  });
+  validateStringField(req.body.description, 'description', {
+    min: 1,
+    max: 200,
+    required: true
+  });
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1067,6 +1099,27 @@ export async function addMonthlyCharge(req: Req, res: Res) {
 export async function updateMonthlyCharge(req: Req, res: Res) {
   const realm = req.realm;
   const { id, unitId, chargeId } = req.params;
+
+  // Mirror addMonthlyCharge validation so partial updates can't smuggle a
+  // bad term/amount/description and trigger a Mongoose 500 on save.
+  if (req.body.term !== undefined) {
+    if (!/^\d{10}$/.test(String(req.body.term))) {
+      throw new ServiceError('Invalid term format', 422);
+    }
+    validateTerm(req.body.term, 'term');
+  }
+  if (req.body.amount !== undefined) {
+    validateFiniteNumber(req.body.amount, 'amount', {
+      min: 0,
+      max: 10000000
+    });
+  }
+  if (req.body.description !== undefined) {
+    validateStringField(req.body.description, 'description', {
+      min: 1,
+      max: 200
+    });
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,

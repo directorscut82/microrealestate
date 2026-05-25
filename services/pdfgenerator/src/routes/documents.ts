@@ -281,6 +281,33 @@ export default function () {
         if (!realm?._id) {
           throw new ServiceError('organization required', 404);
         }
+
+        // Pre-flight: confirm the tenant exists in this realm AND has a
+        // rent entry for the requested term. Without this, the renderer
+        // happily produces a ~1KB blank PDF for terms outside the
+        // contract window — a silent data integrity bug.
+        const tenantId = req.params.id;
+        const term = req.params.term;
+        if (!OBJECT_ID_RE.test(String(tenantId))) {
+          throw new ServiceError('invalid tenant id', 422);
+        }
+        if (!/^\d{10}$/.test(String(term))) {
+          throw new ServiceError('invalid term format', 422);
+        }
+        const tenant = await Collections.Tenant.findOne({
+          _id: tenantId,
+          realmId: String(realm._id)
+        }).lean();
+        if (!tenant) {
+          throw new ServiceError('tenant not found', 404);
+        }
+        const termNumber = Number(term);
+        const rents = (tenant as any).rents || [];
+        const hasTerm = rents.some((r: any) => Number(r.term) === termNumber);
+        if (!hasTerm) {
+          throw new ServiceError('rent not found for term', 404);
+        }
+
         // Pass the caller's realmId into the data picker so the underlying
         // Tenant.findOne is realm-scoped — without this, anyone with a valid
         // session in any org could fetch any tenant's PDF by id.
@@ -290,6 +317,11 @@ export default function () {
         });
         return res.download(pdfFile);
       } catch (error) {
+        // Preserve explicit ServiceError status codes; only fall back to 404
+        // for unexpected errors from the PDF pipeline.
+        if (error instanceof ServiceError) {
+          throw error;
+        }
         throw new ServiceError(error as Error, 404);
       }
     })
