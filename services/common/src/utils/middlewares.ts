@@ -330,8 +330,15 @@ export function checkOrganization() {
 
     // current user is not a member of the organization
     if (!req.realms.find(({ _id }) => _id === req.realm?._id)) {
+      // 403 = authenticated but not authorized for this org. 404 is reserved
+      // for "the org doesn't exist at all" — semantics matter here for the
+      // frontend, which uses 403 to redirect to the org-picker rather than
+      // showing a generic "not found" screen on a revoked-member case.
       logger.warn('current user is not a member of the organization');
-      return res.sendStatus(404);
+      return res.status(403).json({
+        status: 403,
+        message: 'You are not a member of this organization'
+      });
     }
 
     // resolve the role for the current realm

@@ -365,6 +365,58 @@ export function all(req: Req, res: Res) {
   res.json(req.realms.map((realm: AnyRecord) => _escapeSecrets(realm)));
 }
 
+export async function leaveRealm(req: Req, res: Res) {
+  const realm = req.realm;
+  if (!realm) {
+    throw new ServiceError('organization not found', 404);
+  }
+  const email = (req.user as AnyRecord)?.email;
+  if (!email) {
+    throw new ServiceError('authenticated user required', 401);
+  }
+
+  // Pull the caller from the realm's members list.
+  const updated: any = await Collections.Realm.findOneAndUpdate(
+    { _id: realm._id, 'members.email': email },
+    { $pull: { members: { email } } },
+    { new: true }
+  );
+
+  if (!updated) {
+    // Either the realm vanished or the caller wasn't a member of it.
+    throw new ServiceError('not a member of this organization', 404);
+  }
+
+  // If pulling the caller would leave the realm without any administrators,
+  // refuse and restore the membership. The check happens AFTER the pull so
+  // we can read `updated.members` directly — the alternative (read first,
+  // then pull) opens a TOCTOU race.
+  const remainingAdmins = (updated.members || []).filter(
+    (m: AnyRecord) => m.role === 'administrator'
+  );
+  if (remainingAdmins.length === 0) {
+    await Collections.Realm.updateOne(
+      { _id: realm._id },
+      {
+        $push: {
+          members: {
+            email,
+            role: 'administrator',
+            registered: true
+          }
+        }
+      }
+    );
+    throw new ServiceError(
+      'Cannot leave: you are the only administrator. Promote another member first.',
+      422
+    );
+  }
+
+  logger.info(`User ${email} left realm ${realm._id} (${realm.name})`);
+  res.sendStatus(204);
+}
+
 export async function remove(req: Req, res: Res) {
   // Only an administrator may delete a realm. Without this check, any
   // authenticated user (including a renter on another realm) can call

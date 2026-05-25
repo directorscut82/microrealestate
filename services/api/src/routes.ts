@@ -72,6 +72,12 @@ export default function routes(): express.Router {
     '/',
     Middlewares.asyncWrapper(realmManager.all as any)
   );
+  // Self-leave must be declared BEFORE the parameterized routes — otherwise
+  // express matches '/:id' against 'me' and routes the DELETE to remove().
+  realmsRouter.delete(
+    '/me/membership',
+    Middlewares.asyncWrapper(realmManager.leaveRealm as any)
+  );
   realmsRouter.get(
     '/:id',
     Middlewares.asyncWrapper(realmManager.one as any)
