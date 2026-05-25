@@ -136,9 +136,12 @@ function getCurrentTerm() {
 }
 
 function generateTermOptions() {
+  // Wave-24 B13: widen the visible window from -3..+12 to -12..+24 so a
+  // landlord can backdate a repair charge up to a year (legitimate after
+  // late vendor invoices) and pre-schedule almost two years out.
   const options = [];
   const now = new Date();
-  for (let i = -3; i <= 12; i++) {
+  for (let i = -12; i <= 24; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');

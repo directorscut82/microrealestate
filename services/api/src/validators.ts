@@ -293,6 +293,31 @@ export function validateDateString(
 }
 
 /**
+ * Validate a year parameter. Enforces integer in 1900..2099 (inclusive).
+ * Wave-24 A17: /accounting/abc, /csv/settlements/-1, /csv/settlements/9999
+ * were all returning 200 with empty/garbage data because the manager
+ * coerced bad inputs via `Number(req.params.year)` and quietly mapped 0
+ * or NaN onto the empty result set.
+ */
+export function validateYear(value: unknown, fieldName = 'year'): number {
+  if (value == null || value === '') {
+    throw new ServiceError(`${fieldName} is required`, 422);
+  }
+  const s = String(value);
+  if (!/^-?\d+$/.test(s)) {
+    throw new ServiceError(`${fieldName} must be an integer`, 422);
+  }
+  const n = Number(s);
+  if (!Number.isInteger(n) || n < 1900 || n > 2099) {
+    throw new ServiceError(
+      `${fieldName} must be an integer in [1900, 2099]`,
+      422
+    );
+  }
+  return n;
+}
+
+/**
  * Validate custom_percentage allocations sum to 100
  */
 export function validatePercentageAllocations(

@@ -1,5 +1,6 @@
 import {
   addBuildingUnit,
+  fetchProperties,
   QueryKeys,
   removeBuildingUnit,
   updateBuildingUnit
@@ -13,8 +14,8 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import ConfirmDialog from '../ConfirmDialog';
 import { Input } from '../ui/input';
@@ -42,10 +43,12 @@ const optionalNumber = (min, max) =>
 
 const unitSchema = z.object({
   atakNumber: z.string().trim().min(1).max(60),
-  // Negative integers allowed for basements (-1 .. -10).
+  // Wave-24 A15: align with API min/max (-5..200). The previous UI cap of
+  // 50 floors meant edits at higher floors silently failed validation
+  // server-side; the basement min was outside the API range entirely.
   floor: z.preprocess(
     (v) => (v === '' || v == null ? undefined : v),
-    z.coerce.number().int().min(-10).max(50).optional()
+    z.coerce.number().int().min(-5).max(200).optional()
   ),
   unitLabel: z.string().trim().max(120).optional(),
   surface: optionalNumber(0, 1000000),
@@ -66,11 +69,31 @@ const OCCUPANCY_TYPES = [
   { value: 'parking', labelKey: 'parking' }
 ];
 
+// Wave-24 B4: turn propertyId from a free-text 24-hex input into a Select
+// over the realm's properties. The previous UX required the user to paste
+// an ObjectId which they had no way to find from the UI.
+const UNLINKED_VALUE = '__unlinked__';
+
 function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
+
+  const { data: properties } = useQuery({
+    queryKey: [QueryKeys.PROPERTIES],
+    queryFn: fetchProperties
+  });
+  const propertyOptions = useMemo(
+    () =>
+      (properties || [])
+        .map((p) => ({
+          id: p._id,
+          label: `${p.name || p.atakNumber || p._id}${p.atakNumber ? ` (${p.atakNumber})` : ''}`
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [properties]
+  );
 
   // Unit thousandths feed expense allocations and rent computation —
   // editing a unit invalidates rent caches, not just the building view.
@@ -125,6 +148,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
 
   const isManaged = watch('isManaged');
   const occupancyType = watch('occupancyType');
+  const propertyIdValue = watch('propertyId');
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -251,8 +275,27 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="propertyId">{t('Property ID (optional)')}</Label>
-              <Input id="propertyId" {...register('propertyId')} />
+              <Label htmlFor="propertyId">{t('Linked property')}</Label>
+              <Select
+                value={propertyIdValue || UNLINKED_VALUE}
+                onValueChange={(val) =>
+                  setValue('propertyId', val === UNLINKED_VALUE ? '' : val)
+                }
+              >
+                <SelectTrigger id="propertyId">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNLINKED_VALUE}>
+                    {t('(unlinked)')}
+                  </SelectItem>
+                  {propertyOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </form>

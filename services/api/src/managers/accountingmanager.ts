@@ -3,6 +3,7 @@ import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import i18n from 'i18n';
 import moment from 'moment';
 import { Parser } from 'json2csv';
+import { validateYear } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -148,9 +149,13 @@ function _incomingTenants(
       const beginDate = rawData
         ? tenant.beginDate
         : moment.utc(tenant.beginDate).format('YYYY-MM-DD');
-      const endDate = rawData
-        ? tenant.endDate
-        : moment.utc(tenant.endDate).format('YYYY-MM-DD');
+      // Wave-24 B15: tenant.endDate reflects the post-renewal end (incoming
+      // year may show a date 30 years in the future). Without a separate
+      // "original endDate" field on the schema we can't reconstruct the
+      // contract's intended end on the date the tenant entered. Drop the
+      // misleading endDate from the incoming CSV/JSON entirely. The
+      // outgoing CSV (where endDate IS the tenant's actual departure)
+      // keeps it.
       const terminationDate = rawData
         ? tenant.terminationDate
         : tenant.terminationDate
@@ -163,7 +168,6 @@ function _incomingTenants(
         reference: tenant.reference,
         properties: _properties(tenant, rawData),
         beginDate,
-        endDate,
         terminationDate,
         guaranty: NumberFormat.format(_round(tenant.guaranty || 0))
       };
@@ -322,7 +326,7 @@ function _settlements(
 export async function all(req: Req, res: Res) {
   const realm = req.realm!;
   const year = req.params?.year
-    ? Number(req.params?.year)
+    ? validateYear(req.params.year, 'year')
     : new Date().getFullYear();
 
   const tenants = await _fetchData(String(realm._id), year);
@@ -339,18 +343,19 @@ async function incomingTenantsAsCsv(req: Req, res: Res) {
   const realm = req.realm!;
   const realmId = String(realm._id);
   const year = req.params?.year
-    ? Number(req.params?.year)
+    ? validateYear(req.params.year, 'year')
     : new Date().getFullYear();
   i18n.setLocale(realm.locale);
 
   const tenants = await _fetchData(realmId, year);
   const data = _incomingTenants(tenants, realm.locale, realm.currency, false);
+  // Wave-24 B15: drop the misleading "Contract end date" column — see
+  // _incomingTenants for the rationale.
   const fields = [
     { label: i18n.__('Name'), value: 'name' },
     { label: i18n.__('Reference'), value: 'reference' },
     { label: i18n.__('Properties'), value: 'properties' },
     { label: i18n.__('Contract begin date'), value: 'beginDate' },
-    { label: i18n.__('Contract end date'), value: 'endDate' },
     { label: i18n.__('Contract termination date'), value: 'terminationDate' },
     { label: i18n.__('Deposit'), value: 'guaranty' }
   ];
@@ -364,7 +369,7 @@ async function outgoingTenantsAsCsv(req: Req, res: Res) {
   const realm = req.realm!;
   const realmId = String(realm._id);
   const year = req.params?.year
-    ? Number(req.params?.year)
+    ? validateYear(req.params.year, 'year')
     : new Date().getFullYear();
 
   i18n.setLocale(realm.locale);
@@ -394,7 +399,7 @@ async function settlementsAsCsv(req: Req, res: Res) {
   const realm = req.realm!;
   const realmId = String(realm._id);
   const year = req.params?.year
-    ? Number(req.params?.year)
+    ? validateYear(req.params.year, 'year')
     : new Date().getFullYear();
   i18n.setLocale(realm.locale);
 

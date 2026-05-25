@@ -11,6 +11,7 @@ import {
   validateEnum,
   validateFiniteNumber,
   validateArrayMaxLength,
+  validateStringField,
   TIME_RANGES
 } from '../validators.js';
 
@@ -31,6 +32,14 @@ export async function add(req: ReqNoParams, res: Res) {
   const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = (req.body || {}) as any;
   req.body = rest;
   const lease = req.body;
+  // Wave-24 B10: whitespace-only names previously slipped through (`!lease.name`
+  // is falsy for empty string but not for "   "). validateStringField trims
+  // before checking minLength.
+  lease.name = validateStringField(lease.name, 'name', {
+    min: 1,
+    max: 200,
+    required: true
+  });
   if (!lease.name) {
     logger.error('missing lease name');
     throw new ServiceError('missing fields', 422);
@@ -49,6 +58,23 @@ export async function add(req: ReqNoParams, res: Res) {
   });
 
   const realm = req.realm;
+  // Wave-24 B11: case-insensitive duplicate-name check within the realm. The
+  // schema comment promises uniqueness but the DB index was relaxed in wave
+  // 15 (lease.ts). Enforce here in the manager.
+  const candidateName = lease.name.trim().toLowerCase();
+  const allLeases: any[] = await Collections.Lease.find({
+    realmId: realm!._id
+  }).lean();
+  if (
+    allLeases.some(
+      (l) => String(l.name || '').trim().toLowerCase() === candidateName
+    )
+  ) {
+    throw new ServiceError(
+      `lease with name '${lease.name}' already exists`,
+      422
+    );
+  }
   const dbLease: any = new Collections.Lease({
     ...lease,
     active: !!lease.active && !!lease.numberOfTerms && !!lease.timeRange,
@@ -64,6 +90,25 @@ export async function update(req: ReqWithId, res: Res) {
   const realm = req.realm;
   const lease = req.body;
 
+  // Wave-24 A7: URL :id is authoritative. Previously update() used
+  // req.body._id and silently 404'd when missing, returned wrong document
+  // when mismatched. Mirror the rentmanager pattern.
+  const urlId = req.params.id;
+  validateObjectId(urlId, 'lease id');
+  if (lease._id !== undefined && String(lease._id) !== String(urlId)) {
+    throw new ServiceError(
+      'body._id must match URL :id',
+      422
+    );
+  }
+  lease._id = urlId;
+
+  // Wave-24 B10: whitespace-only names slipped through.
+  lease.name = validateStringField(lease.name, 'name', {
+    min: 1,
+    max: 200,
+    required: true
+  });
   if (!lease.name) {
     logger.error('missing lease name');
     throw new ServiceError('missing fields', 422);
@@ -90,6 +135,30 @@ export async function update(req: ReqWithId, res: Res) {
     realmId: realm!._id,
     _id: lease._id
   }).lean();
+
+  // Wave-24 B11: refuse duplicate name (case-insensitive) within realm.
+  if (lease.name && existingLease) {
+    const candidateName = String(lease.name).trim().toLowerCase();
+    if (
+      candidateName !==
+      String(existingLease.name || '').trim().toLowerCase()
+    ) {
+      const allLeases: any[] = await Collections.Lease.find({
+        realmId: realm!._id,
+        _id: { $ne: lease._id }
+      }).lean();
+      if (
+        allLeases.some(
+          (l) => String(l.name || '').trim().toLowerCase() === candidateName
+        )
+      ) {
+        throw new ServiceError(
+          `lease with name '${lease.name}' already exists`,
+          422
+        );
+      }
+    }
+  }
 
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
 
@@ -260,6 +329,8 @@ export async function all(req: ReqNoParams, res: Res) {
 export async function one(req: ReqWithId, res: Res) {
   const realm = req.realm;
   const leaseId = req.params.id;
+  // Wave-24 A6: GET /leases/notvalid was 500 (CastError). Validate up front.
+  validateObjectId(leaseId, 'lease id');
 
   const dbLease: any = await Collections.Lease.findOne({
     _id: leaseId,

@@ -9,9 +9,16 @@ import {
   validateEnum,
   validateArrayMaxLength,
   validateStringField,
+  validateFiniteNumber,
   LOCALES,
   CURRENCIES
 } from '../validators.js';
+
+// Wave-24 B8: a permissive RFC-5322-ish email regex. We don't need full
+// 822/5322 grammar — most callers send well-formed addresses; this is
+// defensive validation against `members[].email = "not-an-email"` which
+// would otherwise persist verbatim and fail downstream auth flows.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -35,21 +42,33 @@ function _normalizeLocale<T>(input: T): T {
 }
 
 function _hasRequiredFields(realm: AnyRecord): void {
-  [
+  // Wave-24 B9: distinguish "missing field" from "no administrator". Both
+  // were collapsed into the same generic 'missing fields' message which
+  // gave the user no signal which constraint failed.
+  const baseFields = [
     { name: 'name', provided: !!realm.name },
     { name: 'members', provided: !!realm.members },
     { name: 'currency', provided: !!realm.currency },
-    {
-      name: 'member with administator role',
-      provided: !!realm.members.find(({ role }: AnyRecord) => role === 'administrator')
-    },
     { name: 'locale', provided: !!realm.locale }
-  ].forEach((field) => {
+  ];
+  for (const field of baseFields) {
     if (!field.provided) {
       logger.error(`missing landlord ${field.name}`);
-      throw new ServiceError('missing fields', 422);
+      throw new ServiceError(`missing fields: ${field.name}`, 422);
     }
-  });
+  }
+  const hasAdmin =
+    Array.isArray(realm.members) &&
+    realm.members.some(
+      ({ role }: AnyRecord) => role === 'administrator'
+    );
+  if (!hasAdmin) {
+    logger.error('missing landlord member with administrator role');
+    throw new ServiceError(
+      'at least one administrator member is required',
+      422
+    );
+  }
 }
 
 function _isNameAlreadyTaken(realm: AnyRecord, realms: AnyRecord[] = []): void {
@@ -181,6 +200,33 @@ export async function update(req: Req, res: Res) {
     validateEnum(req.body.currency, CURRENCIES, 'currency');
   }
   validateArrayMaxLength(req.body.members, 50, 'members');
+
+  // Wave-24 A8: companyInfo.capital was reaching Mongoose unvalidated.
+  // "abc" → schema cast error 500 + "headers already sent" log because the
+  // error fires after .save() partially serializes a response.
+  if (req.body.companyInfo?.capital !== undefined && req.body.companyInfo.capital !== '') {
+    validateFiniteNumber(req.body.companyInfo.capital, 'companyInfo.capital', {
+      min: 0,
+      max: 1e15
+    });
+  }
+
+  // Wave-24 B8: members[].email was accepted as any string ("not-an-email").
+  // Validate before the dedup pass so a bad email surfaces the field name.
+  if (Array.isArray(req.body.members)) {
+    for (let i = 0; i < req.body.members.length; i++) {
+      const m = req.body.members[i];
+      if (m?.email !== undefined && m.email !== null && m.email !== '') {
+        if (typeof m.email !== 'string' || !EMAIL_RE.test(m.email.trim())) {
+          throw new ServiceError(
+            `members[${i}].email is not a valid email`,
+            422
+          );
+        }
+      }
+    }
+  }
+
   // Wave-21 C29-B2: dedupe members by email (case-insensitive). Without
   // this, a payload [{X,admin},{X,admin}] persists both rows, polluting
   // the access list. Conflicting roles resolve to administrator > renter.

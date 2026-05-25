@@ -1118,6 +1118,27 @@ export async function updateUnit(req: Req, res: Res) {
     throw new ServiceError('Unit does not exist', 404);
   }
 
+  // Wave-24 A14: refuse renaming a unit's atakNumber to one already used by
+  // another unit in the same building. Mirror the addUnit guard.
+  if (
+    req.body.atakNumber !== undefined &&
+    req.body.atakNumber !== null &&
+    String(req.body.atakNumber).trim() !== '' &&
+    String(req.body.atakNumber) !== String(unit.atakNumber)
+  ) {
+    const collision = (building as any).units.find(
+      (u: any) =>
+        String(u._id) !== String(unit._id) &&
+        u.atakNumber === req.body.atakNumber
+    );
+    if (collision) {
+      throw new ServiceError(
+        'ATAK number is already used by another unit in this building',
+        422
+      );
+    }
+  }
+
   const oldPropertyId = unit.propertyId;
   unit.set(req.body);
 

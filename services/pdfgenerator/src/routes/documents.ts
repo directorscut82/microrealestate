@@ -706,6 +706,14 @@ export default function () {
       const organizationId = req.headers.organizationid;
       const documentIds = req.params.ids.split(',');
 
+      // Wave-24 B12: cap bulk delete to prevent megaqueries.
+      if (documentIds.length > 50) {
+        throw new ServiceError(
+          'document ids exceeds maximum of 50 items',
+          422
+        );
+      }
+
       // Validate every id BEFORE the Mongoose query — without this a malformed
       // id (or a NoSQL probe) would surface as a CastError 500 inside $in.
       documentIds.forEach((id) => assertValidObjectId(id, 'document id'));

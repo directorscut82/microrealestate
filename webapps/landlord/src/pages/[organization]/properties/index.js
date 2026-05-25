@@ -44,9 +44,21 @@ function _filterData(data = [], filters) {
       .toLowerCase()
       .replace(regExp, '');
 
+    // Wave-24 B2: extend the search beyond `name` to atakNumber, address
+    // street/city, and surface — these are the fields landlords actually
+    // type when looking for a property.
+    const matchField = (val) =>
+      String(val ?? '')
+        .replace(regExp, '')
+        .toLowerCase()
+        .indexOf(cleanedSearchText) != -1;
     filteredItems = filteredItems.filter(
-      ({ name }) =>
-        name.replace(regExp, '').toLowerCase().indexOf(cleanedSearchText) != -1
+      ({ name, atakNumber, address, surface }) =>
+        matchField(name) ||
+        matchField(atakNumber) ||
+        matchField(address?.street1) ||
+        matchField(address?.city) ||
+        matchField(surface)
     );
   }
   return filteredItems;

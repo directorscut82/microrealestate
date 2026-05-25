@@ -58,6 +58,30 @@ export function toRentData(
 ): AnyRecord {
   const rent: AnyRecord = JSON.parse(JSON.stringify(inputRent));
 
+  // Wave-24 A4: legacy/seed data sometimes lacks rent.total entirely. Without
+  // a defensive default, every read of rent.total.balance/grandTotal/payment
+  // crashes the request with a TypeError 500 — and because rent.total is also
+  // referenced by the carry-forward helper above, a single bad rent doc poisons
+  // the whole tenant view. Default to a zero-shaped total so the UI shows €0
+  // for that term rather than failing the whole API call.
+  if (!rent.total || typeof rent.total !== 'object') {
+    rent.total = {
+      balance: 0,
+      grandTotal: 0,
+      payment: 0,
+      preTaxAmount: 0,
+      vatAmount: 0,
+      discountAmount: 0,
+      charges: 0,
+      vat: 0,
+      discount: 0
+    };
+  }
+  if (!Array.isArray(rent.discounts)) rent.discounts = [];
+  if (!Array.isArray(rent.debts)) rent.debts = [];
+  if (!Array.isArray(rent.vats)) rent.vats = [];
+  if (!Array.isArray(rent.payments)) rent.payments = [];
+
   const rentToReturn: AnyRecord = {
     month: rent.month,
     year: rent.year,
