@@ -416,19 +416,24 @@ export default function () {
         // figure out mime + filename for safe download response
         const mimeType =
           (documentFound as any).mimeType || 'application/octet-stream';
-        const safeName = path
-          .basename(url)
-          .replace(/[\r\n"]/g, '')
-          .replace(/[^A-Za-z0-9._-]/g, '_');
+        // Preserve the original (possibly non-ASCII) filename for the user
+        // via RFC 5987 `filename*=UTF-8''<encoded>`, while keeping a sanitized
+        // ASCII fallback in `filename=` for legacy clients. Strip CR/LF/quotes
+        // from both to prevent header-injection.
+        const originalName = (
+          (documentFound as any).name || path.basename(url)
+        )
+          .toString()
+          .replace(/[\r\n"]/g, '');
+        const asciiFallback = originalName.replace(/[^A-Za-z0-9._-]/g, '_');
+        const utf8Encoded = encodeURIComponent(originalName);
+        const contentDisposition = `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
 
         // first try to download from file system
         if (fs.existsSync(filePath)) {
           try {
             res.setHeader('Content-Type', mimeType);
-            res.setHeader(
-              'Content-Disposition',
-              `attachment; filename="${safeName}"`
-            );
+            res.setHeader('Content-Disposition', contentDisposition);
             res.setHeader('X-Content-Type-Options', 'nosniff');
             return fs.createReadStream(filePath).pipe(res);
           } catch (error) {
@@ -444,10 +449,7 @@ export default function () {
         if (s3.isEnabled((req as any).realm?.thirdParties?.b2)) {
           try {
             res.setHeader('Content-Type', mimeType);
-            res.setHeader(
-              'Content-Disposition',
-              `attachment; filename="${safeName}"`
-            );
+            res.setHeader('Content-Disposition', contentDisposition);
             res.setHeader('X-Content-Type-Options', 'nosniff');
             return s3
               .downloadFile((req as any).realm.thirdParties.b2, url)
