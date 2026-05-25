@@ -13,6 +13,7 @@ import { z } from 'zod';
 import _ from 'lodash';
 import { Button } from '../ui/button';
 import { Collapse } from '../ui/collapse';
+import { DatePickerInput } from '../ui/date-picker-input';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
@@ -173,7 +174,22 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                 <div className="grid gap-2 items-end grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-1">
                     <Label htmlFor={`payments.${index}.date`}>{t('Date')}</Label>
-                    <Input id={`payments.${index}.date`} type="date" {...register(`payments.${index}.date`)} />
+                    <DatePickerInput
+                      id={`payments.${index}.date`}
+                      value={
+                        payments?.[index]?.date
+                          ? moment(payments[index].date, 'YYYY-MM-DD').format('DD/MM/YYYY')
+                          : ''
+                      }
+                      onChange={(d) => {
+                        // Store ISO format internally so the existing _handleSubmit
+                        // moment(payment.date).format('DD/MM/YYYY') still works.
+                        const iso = d ? moment(d, 'DD/MM/YYYY').format('YYYY-MM-DD') : '';
+                        setValue(`payments.${index}.date`, iso, {
+                          shouldDirty: true
+                        });
+                      }}
+                    />
                   </div>
                   <div className="space-y-1">
                     <Label>{t('Type')}</Label>

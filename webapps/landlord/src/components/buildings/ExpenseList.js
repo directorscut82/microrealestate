@@ -389,11 +389,19 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
             (a) => a.value > 0
           );
         }
-        // Set startTerm for recurring with fixed amount
-        if (payload.isRecurring && payload.amount > 0 && data.startFromCurrentMonth) {
+        // Set startTerm for recurring with fixed amount.
+        // On EDIT, preserve the persisted startTerm (RHF only carries registered
+        // fields, so without this the PATCH would strip it and the API would
+        // reject with "startTerm is required for recurring expenses").
+        if (data.startFromCurrentMonth) {
           const now = new Date();
           const term = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0100`;
           payload.startTerm = Number(term);
+        } else if (expense?.startTerm) {
+          payload.startTerm = expense.startTerm;
+        }
+        if (expense?.endTerm) {
+          payload.endTerm = expense.endTerm;
         }
         // Owner expense tracking
         if (!payload.trackOwnerExpense) {

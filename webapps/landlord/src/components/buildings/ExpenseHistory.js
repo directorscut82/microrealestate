@@ -6,11 +6,29 @@ import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 
+function isExpenseActiveForTerm(expense, term) {
+  // Mirrors services/api/src/businesslogic/tasks/1_base.ts isExpenseActiveForTerm
+  if (!expense) return false;
+  if (expense.isRecurring === false) {
+    if (!expense.startTerm) return false;
+    const expMonth = Math.floor(Number(expense.startTerm) / 10000);
+    const tMonth = Math.floor(Number(term) / 10000);
+    return expMonth === tMonth;
+  }
+  // Recurring: active if startTerm <= term <= endTerm (endTerm optional).
+  if (!expense.startTerm) return false;
+  if (Number(term) < Number(expense.startTerm)) return false;
+  if (expense.endTerm && Number(term) > Number(expense.endTerm)) return false;
+  return true;
+}
+
 function getHistoryData(building, t) {
   const units = building?.units || [];
   const expenses = building?.expenses || [];
   const termMap = {};
 
+  // 1. Persisted per-unit monthly charges (one-off entries via Monthly Statement,
+  // repair distributions, manual unit charges).
   for (const unit of units) {
     if (!unit.monthlyCharges) continue;
     for (const charge of unit.monthlyCharges) {
@@ -45,7 +63,48 @@ function getHistoryData(building, t) {
     }
   }
 
-  // Include owner monthly expenses
+  // 2. Recurring building expenses are computed live (not persisted to
+  // monthlyCharges). Project them into the history for every term they're
+  // active in, so the user can see them in the History pane. The amount
+  // shown is the BUILDING-LEVEL amount (entry.amount), not the per-unit
+  // share — matches what the landlord typed in.
+  const currentTerm = Number(moment.utc().startOf('month').format('YYYYMMDDHH'));
+  for (const expense of expenses) {
+    if (!expense?.amount) continue;
+    if (!expense.startTerm) continue;
+    // Range to project: from startTerm (or earliest known term) up to
+    // endTerm (or current month for recurring without endTerm).
+    const start = Number(expense.startTerm);
+    const end = expense.endTerm
+      ? Number(expense.endTerm)
+      : (expense.isRecurring === false ? start : currentTerm);
+    let cursor = moment.utc(String(start).padEnd(10, '0'), 'YYYYMMDDHH');
+    const endMoment = moment.utc(String(end).padEnd(10, '0'), 'YYYYMMDDHH');
+    while (cursor.isSameOrBefore(endMoment, 'month')) {
+      const term = cursor.format('YYYYMM') + '0100';
+      if (!isExpenseActiveForTerm(expense, term)) {
+        cursor.add(1, 'month');
+        continue;
+      }
+      if (!termMap[term]) {
+        termMap[term] = {};
+      }
+      const key = String(expense._id);
+      // Skip if a persisted monthlyCharge already covers this expense for
+      // this term (it's the authoritative override).
+      if (!termMap[term][key]) {
+        termMap[term][key] = {
+          expenseId: expense._id,
+          description: expense.name + (expense.isRecurring ? ` (${t('recurring')})` : ''),
+          total: Number(expense.amount) || 0,
+          isRecurring: !!expense.isRecurring
+        };
+      }
+      cursor.add(1, 'month');
+    }
+  }
+
+  // 3. Include owner monthly expenses
   const ownerExpenses = building?.ownerMonthlyExpenses || [];
   for (const entry of ownerExpenses) {
     const term = String(entry.term);
