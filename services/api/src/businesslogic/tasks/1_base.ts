@@ -113,13 +113,36 @@ function _computeBuildingChargeRaw(
     }
 
     case 'equal': {
+      // Wave-17 B1: "equal" must split per-tenant, not per-managed-unit.
+      // A tenant occupying multiple units in the same building (e.g.
+      // apartment + storage) was previously billed once per unit, so
+      // their cleaning/management charge appeared twice on the rent.
+      // _tenantGroups (attached by occupantmanager._attachTenantGroupsToBuildings)
+      // exposes the unique-tenant grouping; if present, divide by group
+      // count and emit the line on only ONE propertyId per group (the
+      // sorted-min, deterministic carrier).
+      const groups = (building as any)._tenantGroups as
+        | string[][]
+        | undefined;
+      if (groups && groups.length > 0) {
+        const myGroup = groups.find((g) =>
+          g.includes(String(propertyId))
+        );
+        if (!myGroup) return 0;
+        if (String(propertyId) !== myGroup[0]) return 0;
+        const totalGroups = groups.length;
+        const base = Math.round((amount / totalGroups) * 100) / 100;
+        // Push rounding remainder onto the LAST group (lex-max by carrier
+        // id) so totals reconcile (100/3 → 33.33+33.33+33.34 = 100.00).
+        const carriers = groups.map((g) => g[0]).sort();
+        if (myGroup[0] === carriers[carriers.length - 1]) {
+          return Math.round((amount - base * (totalGroups - 1)) * 100) / 100;
+        }
+        return base;
+      }
+      // Fallback (legacy / tests without _tenantGroups): per-managed-unit.
       const totalUnits = managedUnits.length;
       if (totalUnits === 0) return 0;
-      // Wave-14 F1: the per-unit share is round2(amount/n), but n equal
-      // shares of round2(amount/n) under-recover the original amount when
-      // it doesn't divide cleanly. Push the rounding remainder onto the
-      // LAST managed unit (deterministic by sorted propertyId) so the
-      // total reconciles. Example: 100/3 → 33.33+33.33+33.34 = 100.00.
       const base = Math.round((amount / totalUnits) * 100) / 100;
       const sortedIds = managedUnits
         .map((u) => String(u.propertyId))

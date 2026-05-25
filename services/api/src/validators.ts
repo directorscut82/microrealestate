@@ -50,7 +50,13 @@ const PROPERTY_TYPES = [
   'office',
   'garage',
   'parking',
-  'letterbox'
+  'letterbox',
+  // Wave-17 B8: 'storage' (αποθήκη) is a common Greek property type for
+  // cellars / storage rooms attached to buildings. We expose ONE canonical
+  // type (not 'cellar' as a separate id) — the i18n label is per-locale.
+  // Surface lower-bound for 'storage' follows the parking/letterbox path
+  // (allow 0) since basements may be declared with no usable surface.
+  'storage'
 ] as const;
 
 export function validateObjectId(

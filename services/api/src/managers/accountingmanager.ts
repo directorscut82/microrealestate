@@ -59,25 +59,21 @@ async function _fetchData(realmId: string, year: number): Promise<AnyRecord[]> {
             { $lt: ['$beginDate', new Date(`${year + 1}-01-01T00:00:00`)] }
           ]
         },
+        // Wave-17 B6: "outgoing" means the tenant ACTUALLY left during the
+        // year, i.e. terminationDate set and falling in [year]. A bare
+        // endDate match is not a departure event — many active leases run
+        // through year-end and renew automatically; including them here
+        // pollutes the outgoing CSV with still-active tenants.
         outgoing: {
-          $or: [
+          $and: [
+            { $ne: ['$terminationDate', null] },
             {
-              $and: [
-                {
-                  $gte: ['$terminationDate', new Date(`${year}-01-01T00:00:00`)]
-                },
-                {
-                  $lt: [
-                    '$terminationDate',
-                    new Date(`${year + 1}-01-01T00:00:00`)
-                  ]
-                }
-              ]
+              $gte: ['$terminationDate', new Date(`${year}-01-01T00:00:00`)]
             },
             {
-              $and: [
-                { $gte: ['$endDate', new Date(`${year}-01-01T00:00:00`)] },
-                { $lt: ['$endDate', new Date(`${year + 1}-01-01T00:00:00`)] }
+              $lt: [
+                '$terminationDate',
+                new Date(`${year + 1}-01-01T00:00:00`)
               ]
             }
           ]

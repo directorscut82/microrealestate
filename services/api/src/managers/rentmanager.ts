@@ -1,5 +1,6 @@
 import * as Contract from './contract.js';
 import * as FD from './frontdata.js';
+import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
   Collections,
   logger,
@@ -136,13 +137,22 @@ async function _getRentsDataByTerm(
 
   const rents = (dbOccupants as AnyRecord[]).reduce(
     (acc: AnyRecord[], occupant: AnyRecord) => {
+      // Wave-17 B3: pass the full ledger so a past partiallypaid rent gets
+      // promoted to 'paid' on the dashboard once a later overpayment has
+      // cleared the running deficit.
+      const allRents = occupant._allRents || occupant.rents;
       acc.push(
         ...occupant.rents
           .filter(
             (rent: AnyRecord) => rent.term >= startTerm && rent.term <= endTerm
           )
           .map((rent: AnyRecord) =>
-            FD.toRentData(rent, occupant, (emailStatus as AnyRecord)?.[occupant._id])
+            FD.toRentData(
+              rent,
+              occupant,
+              (emailStatus as AnyRecord)?.[occupant._id],
+              allRents
+            )
           )
       );
       return acc;
@@ -266,6 +276,11 @@ async function _updateByTerm(
         'units.propertyId': { $in: propertyIds }
       }).lean()) as any[])
     : [];
+  // Wave-17 B1: attach tenant groups so "equal" allocation divides by
+  // unique tenants when payTerm rebuilds rents.
+  if (buildings.length) {
+    await _attachTenantGroupsToBuildings(String(realm!._id), buildings);
+  }
 
   const contract: AnyRecord = {
     frequency: occupant.frequency || 'months',
@@ -406,7 +421,11 @@ async function _updateByTerm(
   return FD.toRentData(
     rent,
     savedOccupant,
-    (emailStatus as AnyRecord)?.[String(savedOccupant._id)]
+    (emailStatus as AnyRecord)?.[String(savedOccupant._id)],
+    // Wave-17 B3: savedOccupant.rents contains the full ledger here (no
+    // term filter has been applied), so the running-balance check sees
+    // every prior/later rent including the just-saved settlement.
+    savedOccupant.rents
   );
 }
 
@@ -421,8 +440,14 @@ export async function rentsOfOccupant(req: ReqWithId, res: Res) {
   }
 
   const dbOccupant = dbOccupants[0];
+  // Wave-17 B3: precompute "running deficit cleared by/at term X" so a past
+  // partiallypaid rent gets promoted to 'paid' when a later overpayment
+  // covers the carried balance. Passing _allRents lets toRentData detect a
+  // future rent whose own newBalance returns to >= 0 — that rent is the
+  // catch-up that retroactively closes prior deficits.
+  const allRents = dbOccupant._allRents || dbOccupant.rents;
   const rentsToReturn = dbOccupant.rents.map((currentRent: AnyRecord) => {
-    const rent: AnyRecord = FD.toRentData(currentRent);
+    const rent: AnyRecord = FD.toRentData(currentRent, undefined, undefined, allRents);
     if (currentRent.term === term) {
       rent.active = 'active';
     }
@@ -477,10 +502,14 @@ async function _rentOfOccupant(
   if (!dbOccupant.rents.length) {
     throw new ServiceError('rent not found', 404);
   }
+  // Wave-17 B3: pass the full unfiltered ledger (_allRents) so the running
+  // balance through this term reflects later catch-up payments.
+  const allRents = dbOccupant._allRents || dbOccupant.rents;
   const rent: AnyRecord = FD.toRentData(
     dbOccupant.rents[0],
     dbOccupant,
-    (emailStatus as AnyRecord)?.[dbOccupant._id]
+    (emailStatus as AnyRecord)?.[dbOccupant._id],
+    allRents
   );
   if (rent.term === Number(moment.utc().format('YYYYMMDDHH'))) {
     rent.active = 'active';

@@ -19,7 +19,12 @@ import {
 // (or 0 if the user enters it consciously). Apply only when surface is
 // supplied — keeps the field optional.
 function _surfaceMinForType(type: unknown): number {
-  if (type === 'parking' || type === 'letterbox') return 0;
+  // Wave-17 B8: 'storage' (αποθήκη) follows parking/letterbox — allow a
+  // 0-surface declaration since cellars are sometimes recorded without a
+  // formal surface measurement.
+  if (type === 'parking' || type === 'letterbox' || type === 'storage') {
+    return 0;
+  }
   return 1;
 }
 

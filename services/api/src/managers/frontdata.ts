@@ -4,13 +4,59 @@ import moment from 'moment';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
 
+// Wave-17 B3: compute, for a given target term, whether the running
+// cumulative balance through that term has been settled by a later
+// payment. Walks rents in chronological order, accumulating
+// (monthlyBill - paymentForThisRent) deltas. The target term is
+// "settled-via-carryforward" iff there exists some term >= target where
+// the cumulative balance is at or below the rounding tolerance.
+//
+// IMPORTANT: rent.total.grandTotal already includes the carried
+// rent.total.balance from the prior month (see businesslogic/tasks/7_total.ts).
+// Using grandTotal directly here would double-count the carry-in. The
+// per-month bill is therefore (grandTotal - balance), which we feed into
+// the running sum so each term contributes its OWN charges and payments
+// exactly once.
+function _isSettledByCarryForward(
+  targetTerm: number,
+  allRents: AnyRecord[]
+): boolean {
+  if (!Array.isArray(allRents) || allRents.length === 0) return false;
+  const sorted = [...allRents].sort(
+    (a, b) => Number(a.term) - Number(b.term)
+  );
+  let running = 0;
+  let reachedTarget = false;
+  for (const r of sorted) {
+    const grandTotal = Number(r?.total?.grandTotal) || 0;
+    const carryIn = Number(r?.total?.balance) || 0;
+    const monthlyBill = grandTotal - carryIn;
+    const paymentsSum = (r.payments || []).reduce(
+      (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
+      0
+    );
+    const settlementDiscounts = (r.discounts || [])
+      .filter((d: AnyRecord) => d.origin === 'settlement')
+      .reduce((s: number, d: AnyRecord) => s + (Number(d.amount) || 0), 0);
+    const cashIn = paymentsSum + settlementDiscounts;
+    running += monthlyBill - cashIn;
+    if (Number(r.term) === Number(targetTerm)) {
+      reachedTarget = true;
+    }
+    if (reachedTarget && running <= 0.01) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function toRentData(
   inputRent: AnyRecord,
   inputOccupant?: AnyRecord,
-  emailStatus?: AnyRecord
+  emailStatus?: AnyRecord,
+  allRents?: AnyRecord[]
 ): AnyRecord {
   const rent: AnyRecord = JSON.parse(JSON.stringify(inputRent));
-  const rentMoment = moment.utc(String(rent.term), 'YYYYMMDDHH');
 
   const rentToReturn: AnyRecord = {
     month: rent.month,
@@ -120,15 +166,30 @@ export function toRentData(
   }
 
   // payment status
-  rentToReturn.status = '';
-  if (rentMoment.isSameOrBefore(moment.utc(), 'month')) {
-    if (rentToReturn.totalAmount <= 0 || rentToReturn.newBalance >= 0) {
-      rentToReturn.status = 'paid';
-    } else if (rentToReturn.payment > 0) {
-      rentToReturn.status = 'partiallypaid';
-    } else {
-      rentToReturn.status = 'notpaid';
-    }
+  // Wave-17 B4: status was previously gated on `isSameOrBefore(now, 'month')`
+  // which left every future-dated rent with status='' — even fully prepaid
+  // months. The UI ledger then renders an empty status column instead of
+  // "paid" / "notpaid". Assign status for every rent regardless of position
+  // relative to today; prepayments are reflected as 'paid', upcoming-but-
+  // unpaid as 'notpaid'. The legacy gate had no other purpose (all consumers
+  // already tolerate the three-value enum).
+  //
+  // Wave-17 B3: when caller passes the FULL ledger as `allRents`, promote a
+  // partiallypaid (or notpaid) past rent to 'paid' as soon as a later term's
+  // payment has closed the running cumulative deficit. Without `allRents` we
+  // fall back to per-term newBalance only (legacy behaviour, used by code
+  // paths that don't yet plumb the ledger).
+  if (rentToReturn.totalAmount <= 0 || rentToReturn.newBalance >= 0) {
+    rentToReturn.status = 'paid';
+  } else if (
+    allRents &&
+    _isSettledByCarryForward(Number(rentToReturn.term), allRents)
+  ) {
+    rentToReturn.status = 'paid';
+  } else if (rentToReturn.payment > 0) {
+    rentToReturn.status = 'partiallypaid';
+  } else {
+    rentToReturn.status = 'notpaid';
   }
 
   if (inputOccupant) {
