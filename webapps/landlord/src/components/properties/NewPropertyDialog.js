@@ -48,7 +48,16 @@ export default function NewPropertyDialog({ open, setOpen }) {
 
   const createMutation = useMutation({
     mutationFn: createProperty,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] })
+    onSuccess: () => {
+      // New properties become available for tenant assignment and feed into
+      // dashboard/rent computation as soon as a tenant picks them up. Keep
+      // the rent stack consistent per the property-mutation rule.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    }
   });
 
   const {

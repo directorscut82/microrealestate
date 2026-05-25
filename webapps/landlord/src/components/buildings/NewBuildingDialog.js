@@ -28,8 +28,15 @@ export default function NewBuildingDialog({ open, setOpen }) {
 
   const createMutation = useMutation({
     mutationFn: createBuilding,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] })
+    onSuccess: () => {
+      // Creating a building can affect dashboard counts and downstream rent
+      // computation once units/tenants are linked. Keep the rent stack in
+      // sync per the cross-cutting building-mutation rule.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    }
   });
 
   const {

@@ -27,12 +27,20 @@ function TenantDocumentList({ tenant, templates = [], documents = [], disabled =
   const [openTextDocumentDialog, setOpenTextDocumentDialog] = useState(false);
   const [selectedTextDocument, setSelectedTextDocument] = useState(null);
 
+  // Tenant text-document mutations refresh the docs cache and the tenant
+  // cache (the tenant detail page renders the document list). No rent
+  // cache impact — text documents are templated content, not rent inputs.
+  const _invalidateTenantDocCaches = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const createDocMutation = useMutation({
     mutationFn: async (doc) => {
       const response = await apiFetcher().post('/documents', doc);
       return response.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+    onSuccess: _invalidateTenantDocCaches
   });
 
   const updateDocMutation = useMutation({
@@ -40,14 +48,14 @@ function TenantDocumentList({ tenant, templates = [], documents = [], disabled =
       const response = await apiFetcher().patch('/documents', doc);
       return response.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+    onSuccess: _invalidateTenantDocCaches
   });
 
   const deleteDocMutation = useMutation({
     mutationFn: async (ids) => {
       await apiFetcher().delete(`/documents/${ids.join(',')}`);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+    onSuccess: _invalidateTenantDocCaches
   });
 
   const textDocuments = useMemo(() =>

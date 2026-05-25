@@ -418,9 +418,17 @@ export default function ImportTenantDialog({ open, setOpen }) {
       return created;
     },
     onSuccess: (tenants) => {
+      // Bulk-import touches tenants, properties, leases, and (when past
+      // months are settled) the rent + accounting ledgers. Buildings can
+      // be created mid-import as well. Invalidate the entire stack so no
+      // downstream screen carries stale data after the dialog closes.
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
       handleClose();
       if (tenants.length === 1 && tenants[0]?._id) {
         router.push(

@@ -49,19 +49,27 @@ function UploadFileList({ tenant, templates = [], documents = [], disabled }) {
       .map((template) => ({ template, document: existingDocuments[template._id] }));
   }, [documents, templates, tenant?._id, tenant?.leaseId, tenant?.terminated]);
 
+  // Tenant document mutations refresh the docs cache and the tenant cache so
+  // the documents tab on the tenant detail page reflects the change. No rent
+  // impact — file uploads/deletes don't touch the rent ledger.
+  const _invalidateTenantDocCaches = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const createDocMutation = useMutation({
     mutationFn: async (doc) => {
       const response = await apiFetcher().post('/documents', doc);
       return response.data;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+    onSuccess: _invalidateTenantDocCaches
   });
 
   const deleteDocMutation = useMutation({
     mutationFn: async (ids) => {
       await apiFetcher().delete(`/documents/${ids.join(',')}`);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.DOCUMENTS] })
+    onSuccess: _invalidateTenantDocCaches
   });
 
   const handleView = useCallback((doc, template) => {

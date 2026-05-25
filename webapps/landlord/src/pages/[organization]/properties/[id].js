@@ -103,19 +103,26 @@ function Property() {
   const notFound =
     propertyId && propertyId !== 'new' && !isLoading && !property;
 
+  // Property create/update/delete affects building unit lists, tenant
+  // assignments, dashboard counters and rent computation (price changes
+  // propagate into open rent terms). Invalidate the full stack.
+  const _invalidateAllPropertyDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (data) =>
       data._id ? updateProperty(data) : createProperty(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
-    }
+    onSuccess: _invalidateAllPropertyDependents
   });
 
   const removeMutation = useMutation({
     mutationFn: (ids) => deleteProperty(ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
-    }
+    onSuccess: _invalidateAllPropertyDependents
   });
 
   const handleBack = useCallback(() => {

@@ -93,10 +93,20 @@ function Actions({ values, yearMonth, onDone }) {
   const [selectedDocumentName, setSelectedDocumentName] = useState(null);
   const disabled = !values?.length;
 
+  // Sending invoices/notices stamps the rent record (lastSentDate / emailed
+  // timestamps) and writes a Document. Refresh RENTS broadly (cross-period
+  // ledger views) and the dashboard summary which counts unsent notices.
+  const _invalidateRentSendDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, yearMonth] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const sendMutation = useMutation({
     mutationFn: sendRentEmails,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, yearMonth] });
+      _invalidateRentSendDependents();
       onDone?.();
     }
   });
@@ -105,7 +115,7 @@ function Actions({ values, yearMonth, onDone }) {
     mutationFn: sendRentSms,
     onSuccess: () => {
       toast.success(t('SMS sent'));
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS, yearMonth] });
+      _invalidateRentSendDependents();
       onDone?.();
     }
   });

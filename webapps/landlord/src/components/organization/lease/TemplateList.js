@@ -52,14 +52,23 @@ function TemplateList({ leaseId }) {
     [allTemplates, leaseId]
   );
 
+  // Templates are referenced by tenant documents (TenantDocumentList renders
+  // text templates linked to the lease). Refreshing TENANTS keeps tenant
+  // detail pages consistent. No rent impact — templates don't drive rent
+  // computation.
+  const _invalidateTemplateDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TEMPLATES] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (tmpl) => tmpl._id ? updateTemplate(tmpl) : createTemplate(tmpl),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.TEMPLATES] })
+    onSuccess: _invalidateTemplateDependents
   });
 
   const removeMutation = useMutation({
     mutationFn: deleteTemplate,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.TEMPLATES] })
+    onSuccess: _invalidateTemplateDependents
   });
 
   const handleLoadTemplate = useCallback(async () => {

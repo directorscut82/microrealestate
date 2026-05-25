@@ -37,7 +37,12 @@ function LeasesSettings() {
   const leaseMutation = useMutation({
     mutationFn: updateLease,
     onSuccess: () => {
+      // Toggling lease active state changes which leases are available for
+      // tenants and may affect rent generation. Invalidate TENANTS+RENTS
+      // per the lease-mutation rule.
       queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
     }
   });
 

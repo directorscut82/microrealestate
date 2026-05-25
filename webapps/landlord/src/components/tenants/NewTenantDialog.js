@@ -61,7 +61,12 @@ export default function NewTenantDialog({ open, setOpen }) {
   const mutation = useMutation({
     mutationFn: createTenant,
     onSuccess: () => {
+      // A new tenant adds rows to dashboard + rent ledger once a property
+      // is assigned downstream. Invalidate RENTS/DASHBOARD now so initial
+      // landings on those screens see the new record.
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
     }
   });
 

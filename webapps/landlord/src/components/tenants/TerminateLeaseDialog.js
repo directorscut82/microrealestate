@@ -35,8 +35,13 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
   const terminateMutation = useMutation({
     mutationFn: updateTenant,
     onSuccess: () => {
+      // Termination truncates the rent series and frees the property. Rent
+      // ledgers, dashboard counts, and property occupancy all need refresh
+      // alongside the tenant cache.
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
     }
   });
 
