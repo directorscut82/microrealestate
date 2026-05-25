@@ -2077,6 +2077,36 @@ export async function addRepair(req: Req, res: Res) {
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
+
+    // A repair targeting a paid past month would silently no-op: the rent
+    // is frozen (wave-13) so the new monthlyCharge gets written but the
+    // tenant ledger is never repriced. Refuse loudly instead of writing
+    // dead data.
+    if (
+      req.body.chargeableTo &&
+      req.body.chargeableTo !== 'owners' &&
+      (req.body.actualCost > 0 || req.body.estimatedCost > 0)
+    ) {
+      const currentTerm = Number(
+        moment.utc().startOf('month').format('YYYYMMDDHH')
+      );
+      if (Number(req.body.chargeTerm) < currentTerm) {
+        // Check whether ANY tenant in this building has a paid rent for
+        // that term. If yes, the bill is frozen and our charge would be
+        // invisible.
+        const paidExists = await Collections.Tenant.exists({
+          realmId: realm!._id,
+          'rents.term': Number(req.body.chargeTerm),
+          'rents.payments.amount': { $gt: 0 }
+        } as any);
+        if (paidExists) {
+          throw new ServiceError(
+            'Charge month is in the past and at least one tenant has paid rent for that month. Past-paid rents are frozen — pick a current or future month.',
+            422
+          );
+        }
+      }
+    }
   }
 
   const building = await Collections.Building.findOne({
