@@ -9,7 +9,8 @@ import {
   validateEnum,
   validateArrayMaxLength,
   validateStringField,
-  LOCALES
+  LOCALES,
+  CURRENCIES
 } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -172,7 +173,41 @@ export async function update(req: Req, res: Res) {
     !!req.body.thirdParties?.gmail?.appPasswordUpdated;
   validateEnum(req.body.locale, LOCALES, 'locale');
   req.body.locale = _normalizeLocale(req.body.locale);
+  // Wave-21 C29-B1: validate currency against ISO-4217 subset. Letting an
+  // arbitrary string through here causes Intl.NumberFormat to throw a
+  // RangeError when the accounting CSV tries to format amounts with it,
+  // surfacing as a generic 500 to the user.
+  if (req.body.currency !== undefined) {
+    validateEnum(req.body.currency, CURRENCIES, 'currency');
+  }
   validateArrayMaxLength(req.body.members, 50, 'members');
+  // Wave-21 C29-B2: dedupe members by email (case-insensitive). Without
+  // this, a payload [{X,admin},{X,admin}] persists both rows, polluting
+  // the access list. Conflicting roles resolve to administrator > renter.
+  if (Array.isArray(req.body.members)) {
+    const ROLE_RANK: Record<string, number> = {
+      administrator: 2,
+      renter: 1,
+      tenant: 0
+    };
+    const byEmail = new Map<string, AnyRecord>();
+    for (const member of req.body.members as AnyRecord[]) {
+      if (!member?.email || typeof member.email !== 'string') continue;
+      const key = member.email.trim().toLowerCase();
+      if (!key) continue;
+      const existing = byEmail.get(key);
+      if (!existing) {
+        byEmail.set(key, { ...member, email: member.email.trim() });
+        continue;
+      }
+      const existingRank = ROLE_RANK[String(existing.role || '')] ?? -1;
+      const incomingRank = ROLE_RANK[String(member.role || '')] ?? -1;
+      if (incomingRank > existingRank) {
+        byEmail.set(key, { ...member, email: member.email.trim() });
+      }
+    }
+    req.body.members = Array.from(byEmail.values());
+  }
   if (req.body.name !== undefined) {
     req.body.name = validateStringField(req.body.name, 'name', {
       min: 1,

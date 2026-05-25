@@ -26,6 +26,10 @@ async function _leaseUsedByTenant(realm: CollectionTypes.Realm | null | undefine
 }
 
 export async function add(req: ReqNoParams, res: Res) {
+  // Wave-21 C30-B5: strip server-owned identity fields from the payload.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = (req.body || {}) as any;
+  req.body = rest;
   const lease = req.body;
   if (!lease.name) {
     logger.error('missing lease name');

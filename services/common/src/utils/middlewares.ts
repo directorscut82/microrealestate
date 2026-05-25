@@ -56,17 +56,29 @@ export function errorHandler(
   // attached.
   const anyErr = error as any;
   let status = 500;
+  let message = error.message;
   if (error instanceof ServiceError && error.statusCode) {
     status = error.statusCode;
   } else if (Number.isFinite(anyErr?.status)) {
     status = Number(anyErr.status);
   } else if (Number.isFinite(anyErr?.statusCode)) {
     status = Number(anyErr.statusCode);
+  } else if (
+    anyErr?.code === 11000 ||
+    anyErr?.code === 11001 ||
+    anyErr?.name === 'MongoServerError' && anyErr?.code === 11000
+  ) {
+    // Wave-21 C30-B5: convert raw mongo duplicate-key errors into 409 with a
+    // sanitized message. The native E11000 message includes the offending
+    // value and full index name — useful in logs but not safe to surface to
+    // the client (it leaks index names and document content).
+    status = 409;
+    message = 'Duplicate resource: a record with this identifier already exists';
   }
 
   const responseBody: ErrorBodyType = {
     status,
-    message: error.message
+    message
   };
 
   // Stack is gated by an explicit DEBUG_ERRORS=true flag rather than the

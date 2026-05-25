@@ -42,6 +42,28 @@ const LOCALES = [
   'pt-BR'
 ] as const;
 
+// Wave-21 C29-B1: ISO-4217 subset accepted on realm.currency. Without this
+// guard, a malformed currency code (e.g. "NOTACURRENCY") was accepted at
+// PATCH time and later crashed Intl.NumberFormat in the accounting CSV
+// pipeline with a 500. Add new codes here as needed; the list intentionally
+// stays narrow to keep the surface area small.
+const CURRENCIES = [
+  'EUR',
+  'USD',
+  'GBP',
+  'BRL',
+  'COP',
+  'AUD',
+  'CAD',
+  'CHF',
+  'JPY',
+  'CNY',
+  'INR',
+  'NOK',
+  'SEK',
+  'DKK'
+] as const;
+
 const PROPERTY_TYPES = [
   'store',
   'building',
@@ -376,5 +398,6 @@ export {
   CHARGEABLE_TO,
   TIME_RANGES,
   LOCALES,
-  PROPERTY_TYPES
+  PROPERTY_TYPES,
+  CURRENCIES
 };

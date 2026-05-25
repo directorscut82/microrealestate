@@ -366,6 +366,10 @@ export async function one(req: Req, res: Res) {
 
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
+  // Wave-21 C30-B5: strip server-owned identity fields from the payload.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = req.body || {};
+  req.body = rest;
   if (!req.body.name?.trim()) {
     throw new ServiceError('Building name is missing', 422);
   }
@@ -979,6 +983,19 @@ export async function addUnit(req: Req, res: Res) {
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
   if (req.body.propertyId) {
     validateObjectId(req.body.propertyId, 'propertyId');
+    // Wave-21 C30-B4: cross-realm guard. Without this, a malicious admin in
+    // realm A can attach a propertyId from realm B to one of their units,
+    // silently linking foreign data into their own building.
+    const sameRealmProperty = await Collections.Property.findOne({
+      _id: req.body.propertyId,
+      realmId: realm!._id
+    }).lean();
+    if (!sameRealmProperty) {
+      throw new ServiceError(
+        'propertyId does not exist in this realm',
+        422
+      );
+    }
   }
 
   const building = await Collections.Building.findOne({
@@ -1075,6 +1092,18 @@ export async function updateUnit(req: Req, res: Res) {
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
   if (req.body.propertyId) {
     validateObjectId(req.body.propertyId, 'propertyId');
+    // Wave-21 C30-B4: cross-realm guard. Mirror addUnit — block linking a
+    // unit to a property from a different realm.
+    const sameRealmProperty = await Collections.Property.findOne({
+      _id: req.body.propertyId,
+      realmId: realm!._id
+    }).lean();
+    if (!sameRealmProperty) {
+      throw new ServiceError(
+        'propertyId does not exist in this realm',
+        422
+      );
+    }
   }
 
   const building = await Collections.Building.findOne({
