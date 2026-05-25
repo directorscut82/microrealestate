@@ -19,6 +19,20 @@ type AnyRecord = Record<string, any>;
 
 const SECRET_PLACEHOLDER = '**********';
 
+// Map regional IETF tags accepted by the API onto the canonical short form
+// downstream code keys on (i18n catalogues, moment.locale, accounting CSV).
+// Without this, a realm saved with locale 'el-GR' would later fail i18n
+// lookups that key on 'el'. 'en-US' / 'fr-FR' / 'pt-BR' / 'de-DE' / 'es-CO'
+// already match catalogue keys exactly, so no remap is needed.
+const LOCALE_ALIASES: Record<string, string> = {
+  'el-GR': 'el'
+};
+
+function _normalizeLocale<T>(input: T): T {
+  if (typeof input !== 'string') return input;
+  return (LOCALE_ALIASES[input] ?? input) as T;
+}
+
 function _hasRequiredFields(realm: AnyRecord): void {
   [
     { name: 'name', provided: !!realm.name },
@@ -106,6 +120,7 @@ export async function add(req: Req, res: Res) {
   // failed via Mongoose schema validation as a generic 500.
   if (req.body.locale !== undefined) {
     validateEnum(req.body.locale, LOCALES, 'locale');
+    req.body.locale = _normalizeLocale(req.body.locale);
   }
 
   const newRealm: any = new Collections.Realm(req.body);
@@ -156,6 +171,7 @@ export async function update(req: Req, res: Res) {
   const gmailAppPasswordUpdated =
     !!req.body.thirdParties?.gmail?.appPasswordUpdated;
   validateEnum(req.body.locale, LOCALES, 'locale');
+  req.body.locale = _normalizeLocale(req.body.locale);
   validateArrayMaxLength(req.body.members, 50, 'members');
   if (req.body.name !== undefined) {
     req.body.name = validateStringField(req.body.name, 'name', {

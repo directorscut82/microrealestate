@@ -67,6 +67,26 @@ export default function routes(): express.Router {
     Middlewares.notRoles(['tenant'])
   );
 
+  // Write-guard: only `administrator` may mutate. `renter` is read-only,
+  // `tenant` is already blocked above. Centralised here (rather than per-
+  // route) to avoid drift — every new POST/PATCH/PUT/DELETE under /api/v2
+  // automatically inherits the guard. GETs (and OPTIONS/HEAD) pass through.
+  router.use((req, res, next) => {
+    const method = req.method.toUpperCase();
+    if (method === 'GET' || method === 'OPTIONS' || method === 'HEAD') {
+      return next();
+    }
+    const role = (req as any).user?.role;
+    // Service / application principals (no realm-scoped role) are unaffected.
+    if (role && role !== 'administrator') {
+      return res.status(403).json({
+        status: 403,
+        message: 'Insufficient role for write operation'
+      });
+    }
+    return next();
+  });
+
   const realmsRouter = express.Router();
   realmsRouter.get(
     '/',

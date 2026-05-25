@@ -205,7 +205,8 @@ function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: 
 export default function taskBase(
   contract: Contract,
   rentDate: string,
-  previousRent: Rent | null,
+  // Unused here — kept for RentTask signature compatibility (used by 5_balance).
+  _previousRent: Rent | null,
   settlements: Settlements | undefined,
   rent: Rent
 ): Rent {

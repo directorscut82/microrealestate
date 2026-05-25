@@ -34,7 +34,9 @@ function assertValidObjectId(value: unknown, name: string): string {
 // the correct response for a payload-too-large upload).
 function handleUploadError(
   err: any,
-  req: express.Request,
+  // express requires the 4-arg signature for error middlewares; req is unused
+  // here but must remain in the signature for express to pick this handler up.
+  _req: express.Request,
   res: express.Response,
   next: express.NextFunction
 ) {
@@ -237,11 +239,34 @@ async function _getTemplateValues(organization: any, tenantId: string, leaseId: 
   return templateValues;
 }
 
+// Substitute `{{path.to.field}}` markers in plain-text nodes with values
+// from the template-values context. Missing fields render as empty strings
+// (no crash) so authors can use optional fields safely. This complements
+// the richtext template-node substitution below — without it, plain-text
+// Handlebars markers typed directly into a paragraph were emitted verbatim.
+function _resolveString(s: string, ctx: any): string {
+  return s.replace(/\{\{([\w.[\]]+)\}\}/g, (_m, path: string) => {
+    try {
+      const segments = path.match(/[^.[\]]+/g) || [];
+      let v: any = ctx;
+      for (const seg of segments) v = v?.[seg];
+      return v == null ? '' : String(v);
+    } catch {
+      return '';
+    }
+  });
+}
+
 function _resolveTemplates(element: any, templateValues: any): any {
   if (element.content) {
     element.content = element.content.map((childElement: any) =>
       _resolveTemplates(childElement, templateValues)
     );
+  }
+
+  // Plain text nodes — substitute any `{{...}}` markers in-place.
+  if (element.type === 'text' && typeof element.text === 'string') {
+    element.text = _resolveString(element.text, templateValues);
   }
 
   if (element.type === 'template') {
