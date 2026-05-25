@@ -112,6 +112,11 @@ const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
   },
   locale: String,
   currency: String
+}, {
+  // Optimistic concurrency: bumps __v on every save() and rejects with a
+  // VersionError if the document was modified between findOne and save.
+  // realmmanager.update() catches VersionError and surfaces it as a 409.
+  optimisticConcurrency: true
 });
 
 RealmSchema.index({ name: 1 });

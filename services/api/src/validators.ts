@@ -26,7 +26,9 @@ const CHARGEABLE_TO = ['owners', 'tenants', 'split'] as const;
 
 const TIME_RANGES = ['months', 'weeks', 'days', 'years'] as const;
 
-const LOCALES = ['en', 'fr-FR', 'de-DE', 'el', 'es-CO', 'pt-BR'] as const;
+// Accept both 'en' (legacy) and 'en-US' (IETF tag) — the frontend currently
+// emits 'en-US', which previously 422'd against the enum below.
+const LOCALES = ['en', 'en-US', 'fr-FR', 'de-DE', 'el', 'es-CO', 'pt-BR'] as const;
 
 const PROPERTY_TYPES = [
   'store',

@@ -254,8 +254,11 @@ export async function all(req: Req, res: Res) {
         }
 
         acc[key].paid += tenantPaid;
+        // notPaid is the unsigned shortfall (due − paid), only when paid <
+        // due. Stored as a positive amount so dashboards/CSVs don't have to
+        // re-flip the sign on the client.
         acc[key].notPaid +=
-          tenantPaid - tenantDue < 0 ? tenantPaid - tenantDue : 0;
+          tenantPaid - tenantDue < 0 ? tenantDue - tenantPaid : 0;
         acc[key].baseRent += tenantBaseRent;
         acc[key].charges += tenantCharges;
         acc[key].buildingCharges += tenantBuildingCharges;
@@ -290,7 +293,10 @@ export async function all(req: Req, res: Res) {
       return {
         ...v,
         paid: _round(v.paid),
-        notPaid: _round(v.notPaid),
+        // Math.abs is a belt-and-braces guard: the accumulator is already
+        // computed as the unsigned shortfall, but FP drift on the running
+        // sum could in theory leave a -0.0 here.
+        notPaid: Math.abs(_round(v.notPaid)),
         baseRent: _round(v.baseRent),
         charges: _round(v.charges),
         buildingCharges: _round(v.buildingCharges),

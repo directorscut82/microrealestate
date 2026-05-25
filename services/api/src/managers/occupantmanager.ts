@@ -289,16 +289,25 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
 
-  // Strict type guards for fields that .trim()/.toLowerCase() will hit later
+  // Strict type guard for `name` — hits .trim() later. Mongoose string casts
+  // would otherwise turn a non-string (e.g. {$ne: ''} NoSQL injection probe)
+  // into a generic 500.
   if (req.body?.name !== undefined && typeof req.body.name !== 'string') {
     throw new ServiceError('name must be a string', 422);
   }
-  if (req.body?.manager !== undefined && typeof req.body.manager !== 'string') {
-    throw new ServiceError('manager must be a string', 422);
-  }
-  if (req.body?.company !== undefined && typeof req.body.company !== 'string') {
-    throw new ServiceError('company must be a string', 422);
-  }
+
+  // Optional fields that the frontend round-trips with `null` when the tenant
+  // is an individual (non-company). Allow string OR null OR undefined; reject
+  // anything else (numbers, objects, mongo operators) before _formatTenant.
+  ['company', 'legalForm', 'siret', 'manager'].forEach((field) => {
+    const v = req.body?.[field];
+    if (v !== undefined && v !== null && typeof v !== 'string') {
+      throw new ServiceError(
+        `${field} must be a string, null, or omitted`,
+        422
+      );
+    }
+  });
 
   // Reject empty/whitespace propertyId entries early. _buildPropertyMap
   // would otherwise return undefined for `""`, _formatTenant happily passes
@@ -343,6 +352,16 @@ export async function add(req: Req, res: Res) {
     });
     if (!leaseExists) {
       throw new ServiceError('Lease not found', 404);
+    }
+    // A tenant attached to a lease but with no properties materializes the
+    // configured number of zero-rent terms (e.g. 12 monthly entries with
+    // grandTotal=0), polluting the rent ledger and dashboards. Refuse
+    // upfront — the UI should pick at least one property before save.
+    if (!occupant.properties || occupant.properties.length === 0) {
+      throw new ServiceError(
+        'Tenant with a lease must have at least one property',
+        422
+      );
     }
   }
   validateFiniteNumber(occupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
@@ -452,18 +471,25 @@ export async function update(req: Req, res: Res) {
   const occupantId = req.params.id;
   validateObjectId(occupantId, 'tenant id');
 
-  // Strict type guards — these fields hit .trim()/.toLowerCase() / Mongoose
-  // string casts later. A non-string (e.g. {$ne: ''} NoSQL injection probe)
-  // would otherwise reach Mongoose and surface as a generic 500.
+  // Strict type guard for `name` — hits .trim() later. Mongoose string casts
+  // would otherwise turn a non-string (e.g. {$ne: ''} NoSQL injection probe)
+  // into a generic 500.
   if (req.body?.name !== undefined && typeof req.body.name !== 'string') {
     throw new ServiceError('name must be a string', 422);
   }
-  if (req.body?.manager !== undefined && typeof req.body.manager !== 'string') {
-    throw new ServiceError('manager must be a string', 422);
-  }
-  if (req.body?.company !== undefined && typeof req.body.company !== 'string') {
-    throw new ServiceError('company must be a string', 422);
-  }
+
+  // Optional fields that the frontend round-trips with `null` when the tenant
+  // is an individual (non-company). Allow string OR null OR undefined; reject
+  // anything else (numbers, objects, mongo operators) before _formatTenant.
+  ['company', 'legalForm', 'siret', 'manager'].forEach((field) => {
+    const v = req.body?.[field];
+    if (v !== undefined && v !== null && typeof v !== 'string') {
+      throw new ServiceError(
+        `${field} must be a string, null, or omitted`,
+        422
+      );
+    }
+  });
 
   const newOccupant = _formatTenant(req.body);
 
@@ -748,19 +774,34 @@ export async function remove(req: Req, res: Res) {
     throw new ServiceError('tenant not found', 404);
   }
 
-  const occupantsWithPaidRents = occupants.filter((occupant: AnyRecord) => {
-    return (occupant.rents || []).some(
-      (rent: AnyRecord) =>
-        (rent.payments &&
-          rent.payments.some((payment: AnyRecord) => Number(payment.amount) > 0)) ||
-        (rent.discounts || []).some((discount: AnyRecord) => discount.origin === 'settlement')
-    );
-  });
+  // Admin escape hatch: ?force=true skips the paid-rents guard so realm
+  // owners can clean up demo / mistakenly-imported tenants. The frontend
+  // does not surface this query param — it is intentionally CLI/curl-only.
+  const force = req.query?.force === 'true';
 
-  if (occupantsWithPaidRents.length) {
-    throw new ServiceError(
-      `impossible to remove ${occupantsWithPaidRents[0].name} some rents have been paid`,
-      422
+  if (!force) {
+    const occupantsWithPaidRents = occupants.filter((occupant: AnyRecord) => {
+      return (occupant.rents || []).some(
+        (rent: AnyRecord) =>
+          (rent.payments &&
+            rent.payments.some(
+              (payment: AnyRecord) => Number(payment.amount) > 0
+            )) ||
+          (rent.discounts || []).some(
+            (discount: AnyRecord) => discount.origin === 'settlement'
+          )
+      );
+    });
+
+    if (occupantsWithPaidRents.length) {
+      throw new ServiceError(
+        `impossible to remove ${occupantsWithPaidRents[0].name} some rents have been paid`,
+        422
+      );
+    }
+  } else {
+    logger.warn(
+      `force-delete tenant(s) ${occupantIds.join(',')} bypassing paid-rents guard`
     );
   }
 
