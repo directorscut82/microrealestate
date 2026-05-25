@@ -1880,6 +1880,23 @@ export async function removeContractor(req: Req, res: Res) {
 // Repairs
 // ---------------------------------------------------------------------------
 
+// Mirrors the Repair schema's `category` enum in
+// services/common/src/collections/building.ts. Validating up-front keeps a
+// missing/invalid category from surfacing as a Mongoose ValidationError 500.
+const VALID_REPAIR_CATEGORIES = [
+  'plumbing',
+  'electrical',
+  'elevator',
+  'roof',
+  'facade',
+  'heating',
+  'doors_windows',
+  'painting',
+  'flooring',
+  'general',
+  'other'
+];
+
 async function _removeRepairCharges(building: any, repair: any): Promise<void> {
   const repairIdStr = String(repair._id);
   for (const unit of building.units) {
@@ -1999,6 +2016,14 @@ export async function addRepair(req: Req, res: Res) {
   if (!req.body.title?.trim()) {
     throw new ServiceError('Repair title is required', 422);
   }
+  // Validate category up-front. Without this, a missing/invalid category
+  // becomes a Mongoose ValidationError that surfaces as 500.
+  if (!req.body.category) {
+    throw new ServiceError('Repair category is required', 422);
+  }
+  if (!VALID_REPAIR_CATEGORIES.includes(req.body.category)) {
+    throw new ServiceError(`Invalid category: ${req.body.category}`, 422);
+  }
   validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', {
     min: 0,
     max: 10000000
@@ -2049,6 +2074,18 @@ export async function addRepair(req: Req, res: Res) {
 export async function updateRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id, repairId } = req.params;
+
+  // PATCH semantics: only validate category when it is being changed.
+  // undefined means "don't touch"; null/empty/other-value triggers 422
+  // before save() so a Mongoose ValidationError can't surface as 500.
+  if (req.body.category !== undefined) {
+    if (!req.body.category) {
+      throw new ServiceError('Repair category is required', 422);
+    }
+    if (!VALID_REPAIR_CATEGORIES.includes(req.body.category)) {
+      throw new ServiceError(`Invalid category: ${req.body.category}`, 422);
+    }
+  }
 
   validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', {
     min: 0,
