@@ -24,10 +24,17 @@ const MonthlyChargeSchema = new mongoose.Schema({
   term: { type: Number, required: true },
   amount: { type: Number, required: true },
   description: String,
-  expenseId: String
+  expenseId: { type: String, default: null },
+  repairId: { type: String, default: null }
 });
 
 const BuildingUnitSchema = new mongoose.Schema({
+  // Wave-20 F11: persist `name` so POST /buildings :: units[i].name and
+  // POST /buildings/:id/units (addUnit) round-trip the user-entered label.
+  // Previously the schema lacked this field and Mongoose silently dropped
+  // it, leaving the UI blank for every unit. `unitLabel` is the legacy
+  // field and is kept for backwards compat with older imports.
+  name: String,
   atakNumber: { type: String, required: true },
   altAtakNumbers: [String],
   floor: Number,
@@ -108,13 +115,21 @@ const BuildingExpenseSchema = new mongoose.Schema({
 const ContractorSchema = new mongoose.Schema({
   name: { type: String, required: true },
   company: String,
+  // Includes legacy values 'plumbing'/'electrical' alongside the canonical
+  // contractor specialty names so older imports validate without migration.
   specialty: {
     type: String,
     enum: [
+      'plumbing',
+      'electrical',
       'plumber',
       'electrician',
-      'elevator',
       'painter',
+      'carpenter',
+      'mason',
+      'gardener',
+      'cleaner',
+      'elevator',
       'locksmith',
       'hvac',
       'general',
@@ -150,8 +165,8 @@ const RepairSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['scheduled', 'in_progress', 'completed', 'cancelled'],
-    default: 'scheduled'
+    enum: ['planned', 'in_progress', 'completed', 'cancelled'],
+    default: 'planned'
   },
   urgency: {
     type: String,

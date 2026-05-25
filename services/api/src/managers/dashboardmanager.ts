@@ -7,6 +7,12 @@ type Req = ServiceRequest<any, any, any>;
 type Res = ServiceResponse;
 type AnyRecord = Record<string, any>;
 
+// Avoid floating-point drift on aggregated sums (e.g. 6624.399999999999).
+// Round every aggregate result before returning to API consumers.
+function _round(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 export async function all(req: Req, res: Res) {
   const now = moment.utc();
   const beginOfTheMonth = moment.utc(now).startOf('month');
@@ -61,8 +67,12 @@ export async function all(req: Req, res: Res) {
   );
   const tenantCount = activeTenants.length;
 
+  // Wave-20 F9: exclude building shells from the rentable count. A
+  // type='building' Property is a building wrapper, not a rentable unit;
+  // including it inflates propertyCount and dilutes occupancyRate.
   const propertyCount = await Collections.Property.countDocuments({
-    realmId
+    realmId,
+    type: { $ne: 'building' }
   });
 
   // Compute occupancy rate excluding owner_occupied and parking units
@@ -135,6 +145,8 @@ export async function all(req: Req, res: Res) {
       },
       0
     );
+    // Round once at the outer aggregate; nested .reduce on Number adds noise.
+    totalYearRevenues = _round(totalYearRevenues);
   }
 
   const overview =
@@ -167,9 +179,10 @@ export async function all(req: Req, res: Res) {
               }
             );
             if (currentRent) {
-              const balance =
+              const balance = _round(
                 (currentRent.total?.payment || 0) -
-                (currentRent.total?.grandTotal || 0);
+                  (currentRent.total?.grandTotal || 0)
+              );
               acc.push({
                 tenant: { _id: tenant._id, name: _tenantName(tenant) },
                 balance
@@ -245,8 +258,15 @@ export async function all(req: Req, res: Res) {
         }
 
         acc[key].paid += tenantPaid;
+        // Wave-14 F5: notPaid is the unsigned shortfall on THIS MONTH'S bill
+        // only — exclude balance carry-forward so summing the column doesn't
+        // double-count prior months. The internal cumulative ledger
+        // (rent.total.balance) is unchanged; only this aggregator output
+        // is per-month.
+        const tenantBalance = rent.total?.balance || 0;
+        const tenantMonthDue = tenantDue - tenantBalance;
         acc[key].notPaid +=
-          tenantPaid - tenantDue < 0 ? tenantPaid - tenantDue : 0;
+          tenantPaid < tenantMonthDue ? tenantMonthDue - tenantPaid : 0;
         acc[key].baseRent += tenantBaseRent;
         acc[key].charges += tenantCharges;
         acc[key].buildingCharges += tenantBuildingCharges;
@@ -267,17 +287,47 @@ export async function all(req: Req, res: Res) {
       return acc;
     }, emptyRevenues)
   )
-    .map(([, value]) => ({
-      ...(value as AnyRecord),
-      paid:
-        (value as AnyRecord).paid > 0
-          ? Math.round((value as AnyRecord).paid * 100) / 100
-          : (value as AnyRecord).paid,
-      notPaid:
-        (value as AnyRecord).notPaid < 0
-          ? Math.round((value as AnyRecord).notPaid * 100) / 100
-          : (value as AnyRecord).notPaid
-    }))
+    .map(([, value]) => {
+      const v = value as AnyRecord;
+      // Round every aggregated field (sums of floats accumulate FP drift).
+      // Nested per-type and per-tenant breakdowns must be rounded too —
+      // the dashboard sums them on the client.
+      const buildingChargesByType: AnyRecord = {};
+      Object.entries(v.buildingChargesByType || {}).forEach(
+        ([type, amount]) => {
+          buildingChargesByType[type] = _round(amount as number);
+        }
+      );
+      return {
+        ...v,
+        paid: _round(v.paid),
+        // Math.abs is a belt-and-braces guard: the accumulator is already
+        // computed as the unsigned shortfall, but FP drift on the running
+        // sum could in theory leave a -0.0 here.
+        notPaid: Math.abs(_round(v.notPaid)),
+        baseRent: _round(v.baseRent),
+        charges: _round(v.charges),
+        buildingCharges: _round(v.buildingCharges),
+        buildingChargesByType,
+        tenants: (v.tenants || []).map((t: AnyRecord) => {
+          const byType: AnyRecord = {};
+          Object.entries(t.buildingChargesByType || {}).forEach(
+            ([type, amount]) => {
+              byType[type] = _round(amount as number);
+            }
+          );
+          return {
+            ...t,
+            paid: _round(t.paid),
+            due: _round(t.due),
+            baseRent: _round(t.baseRent),
+            charges: _round(t.charges),
+            buildingCharges: _round(t.buildingCharges),
+            buildingChargesByType: byType
+          };
+        })
+      };
+    })
     .sort((r1: AnyRecord, r2: AnyRecord) =>
       moment.utc(r1.month, 'MMYYYY').isBefore(moment.utc(r2.month, 'MMYYYY'))
         ? -1

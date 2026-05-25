@@ -44,10 +44,23 @@ export default function ResponsiveDialog({
     setOpen(value);
   };
 
+  const handleEscape = (e) => {
+    if (isLoading) {
+      e.preventDefault();
+      return;
+    }
+    // Funnel Esc through the same close path so any caller-supplied
+    // setOpen(false) cleanup (form reset, dirty check) runs.
+    setOpen(false);
+  };
+
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={handleOpenChange} modal={true}>
-        <DialogContent onInteractOutside={(e) => e.preventDefault()}>
+        <DialogContent
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={handleEscape}
+        >
           {renderHeader ? (
             <DialogHeader className="text-lg font-semibold leading-none tracking-tight px-4">
               <DialogTitle className="hidden">Dialog</DialogTitle>

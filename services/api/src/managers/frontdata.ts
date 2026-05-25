@@ -4,13 +4,59 @@ import moment from 'moment';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
 
+// Wave-17 B3: compute, for a given target term, whether the running
+// cumulative balance through that term has been settled by a later
+// payment. Walks rents in chronological order, accumulating
+// (monthlyBill - paymentForThisRent) deltas. The target term is
+// "settled-via-carryforward" iff there exists some term >= target where
+// the cumulative balance is at or below the rounding tolerance.
+//
+// IMPORTANT: rent.total.grandTotal already includes the carried
+// rent.total.balance from the prior month (see businesslogic/tasks/7_total.ts).
+// Using grandTotal directly here would double-count the carry-in. The
+// per-month bill is therefore (grandTotal - balance), which we feed into
+// the running sum so each term contributes its OWN charges and payments
+// exactly once.
+function _isSettledByCarryForward(
+  targetTerm: number,
+  allRents: AnyRecord[]
+): boolean {
+  if (!Array.isArray(allRents) || allRents.length === 0) return false;
+  const sorted = [...allRents].sort(
+    (a, b) => Number(a.term) - Number(b.term)
+  );
+  let running = 0;
+  let reachedTarget = false;
+  for (const r of sorted) {
+    const grandTotal = Number(r?.total?.grandTotal) || 0;
+    const carryIn = Number(r?.total?.balance) || 0;
+    const monthlyBill = grandTotal - carryIn;
+    const paymentsSum = (r.payments || []).reduce(
+      (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
+      0
+    );
+    const settlementDiscounts = (r.discounts || [])
+      .filter((d: AnyRecord) => d.origin === 'settlement')
+      .reduce((s: number, d: AnyRecord) => s + (Number(d.amount) || 0), 0);
+    const cashIn = paymentsSum + settlementDiscounts;
+    running += monthlyBill - cashIn;
+    if (Number(r.term) === Number(targetTerm)) {
+      reachedTarget = true;
+    }
+    if (reachedTarget && running <= 0.01) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function toRentData(
   inputRent: AnyRecord,
   inputOccupant?: AnyRecord,
-  emailStatus?: AnyRecord
+  emailStatus?: AnyRecord,
+  allRents?: AnyRecord[]
 ): AnyRecord {
   const rent: AnyRecord = JSON.parse(JSON.stringify(inputRent));
-  const rentMoment = moment.utc(String(rent.term), 'YYYYMMDDHH');
 
   const rentToReturn: AnyRecord = {
     month: rent.month,
@@ -63,21 +109,21 @@ export function toRentData(
     )
   );
 
-  const vatRate =
-    rent.vats && rent.vats.length
-      ? rent.vats.filter((vat: AnyRecord) => vat.origin === 'contract')[0].rate
-      : 0;
-  if (vatRate) {
-    if (rentToReturn.promo > 0) {
-      rentToReturn.promo =
-        Math.round(rentToReturn.promo * (1 + vatRate) * 100) / 100;
-    }
-
-    if (rentToReturn.extracharge > 0) {
-      rentToReturn.extracharge =
-        Math.round(rentToReturn.extracharge * (1 + vatRate) * 100) / 100;
-    }
-  }
+  // Storage convention: promo and extracharge are stored net-of-VAT in
+  // rentmanager.ts (divided by (1+vatRate)). Display convention here:
+  // multiply back to gross for the UI. Net effect for promo is correct
+  // because task 4 adds a settlement-VAT line (-net*vat) so grandTotal
+  // moves by -original_promo. For extracharge there's no symmetric VAT
+  // line (debts skip VAT in task 4) so the display value matches what
+  // the user entered but the actual grandTotal increment is
+  // extra/(1+vat). Known imbalance — see rentmanager.ts comment.
+  // We safely read the contract VAT rate via filter+[0] to avoid
+  // crashing when only settlement VAT lines exist (rent.vats[0] may
+  // not be the contract one).
+  const contractVat = (rent.vats || []).filter(
+    (vat: AnyRecord) => vat.origin === 'contract'
+  )[0];
+  const vatRate = contractVat?.rate ?? 0;
 
   Object.assign(
     rentToReturn,
@@ -107,16 +153,73 @@ export function toRentData(
       )
   );
 
-  // payment status
-  rentToReturn.status = '';
-  if (rentMoment.isSameOrBefore(moment.utc(), 'month')) {
-    if (rentToReturn.totalAmount <= 0 || rentToReturn.newBalance >= 0) {
-      rentToReturn.status = 'paid';
-    } else if (rentToReturn.payment > 0) {
-      rentToReturn.status = 'partiallypaid';
-    } else {
-      rentToReturn.status = 'notpaid';
+  // Display gross-of-VAT: rentmanager stores net-of-VAT, we multiply back.
+  if (vatRate) {
+    if (rentToReturn.promo > 0) {
+      rentToReturn.promo =
+        Math.round(rentToReturn.promo * (1 + vatRate) * 100) / 100;
     }
+    if (rentToReturn.extracharge > 0) {
+      rentToReturn.extracharge =
+        Math.round(rentToReturn.extracharge * (1 + vatRate) * 100) / 100;
+    }
+  }
+
+  // payment status
+  // Wave-17 B4: status was previously gated on `isSameOrBefore(now, 'month')`
+  // which left every future-dated rent with status='' — even fully prepaid
+  // months. Assign status for every rent regardless of position relative
+  // to today.
+  //
+  // Wave-17 B3: when caller passes the FULL ledger as `allRents`, promote a
+  // partiallypaid (or notpaid) past rent to 'paid' as soon as a later term's
+  // payment has closed the running cumulative deficit.
+  //
+  // Wave-20 F5: previous rule `totalAmount <= 0 || newBalance >= 0` flipped
+  // every future month with negative grandTotal (carry-credit covered) to
+  // 'paid' even when the tenant had paid €0 in that term. That misled the
+  // dashboard into showing "all paid through year-end" after a single
+  // overpayment.
+  //
+  // New decision tree:
+  //   - direct payment > 0 AND it covers grandTotal → 'paid'
+  //   - direct payment > 0 but not enough → 'partiallypaid' (unless a later
+  //     catch-up has retroactively closed the deficit, then 'paid')
+  //   - direct payment == 0 AND grandTotal <= 0 (carry credit covers) AND a
+  //     prior overpayment chain settles it (allRents available) → 'paid'
+  //   - direct payment == 0 AND a later catch-up retroactively closes the
+  //     deficit → 'paid' (legacy B3 chain)
+  //   - everything else → 'notpaid'
+  const directPaid = Number(rentToReturn.payment) || 0;
+  const grandTotalDue = Number(rentToReturn.totalAmount) || 0;
+  if (directPaid > 0 && rentToReturn.newBalance >= -0.005) {
+    rentToReturn.status = 'paid';
+  } else if (
+    directPaid > 0 &&
+    allRents &&
+    _isSettledByCarryForward(Number(rentToReturn.term), allRents)
+  ) {
+    rentToReturn.status = 'paid';
+  } else if (directPaid > 0) {
+    rentToReturn.status = 'partiallypaid';
+  } else if (
+    directPaid === 0 &&
+    grandTotalDue <= 0 &&
+    allRents &&
+    _isSettledByCarryForward(Number(rentToReturn.term), allRents)
+  ) {
+    // Carry-credit covers the bill AND a prior overpayment chain accounts
+    // for it. Without the carry-forward check we'd flip empty-zero-bill
+    // months to paid even when no money has ever been paid.
+    rentToReturn.status = 'paid';
+  } else if (
+    directPaid === 0 &&
+    allRents &&
+    _isSettledByCarryForward(Number(rentToReturn.term), allRents)
+  ) {
+    rentToReturn.status = 'paid';
+  } else {
+    rentToReturn.status = 'notpaid';
   }
 
   if (inputOccupant) {
@@ -240,8 +343,8 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
   const occupant: AnyRecord = JSON.parse(JSON.stringify(inputOccupant));
 
   Object.assign(occupant, {
-    beginDate: moment(occupant.beginDate).format('DD/MM/YYYY'),
-    endDate: moment(occupant.endDate).format('DD/MM/YYYY'),
+    beginDate: moment.utc(occupant.beginDate).format('DD/MM/YYYY'),
+    endDate: moment.utc(occupant.endDate).format('DD/MM/YYYY'),
     frequency: occupant.frequency || 'months',
     street1: occupant.street1 || '',
     street2: occupant.street2 || '',
@@ -261,7 +364,7 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
   });
 
   if (occupant.terminationDate) {
-    occupant.terminationDate = moment(occupant.terminationDate).format(
+    occupant.terminationDate = moment.utc(occupant.terminationDate).format(
       'DD/MM/YYYY'
     );
   }
@@ -313,17 +416,17 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
       }
       if (item.property) {
         if (item.entryDate) {
-          item.entryDate = moment(item.entryDate).format('DD/MM/YYYY');
+          item.entryDate = moment.utc(item.entryDate).format('DD/MM/YYYY');
         }
         if (item.exitDate) {
-          item.exitDate = moment(item.exitDate).format('DD/MM/YYYY');
+          item.exitDate = moment.utc(item.exitDate).format('DD/MM/YYYY');
         }
         item.expenses.forEach((expense: AnyRecord) => {
           expense.beginDate = expense.beginDate
-            ? moment(expense.beginDate).format('DD/MM/YYYY')
+            ? moment.utc(expense.beginDate).format('DD/MM/YYYY')
             : item.entryDate;
           expense.endDate = expense.endDate
-            ? moment(expense.endDate).format('DD/MM/YYYY')
+            ? moment.utc(expense.endDate).format('DD/MM/YYYY')
             : item.exitDate;
         });
         if (item.property.type === 'parking') {
@@ -393,24 +496,23 @@ export function toProperty(
     lastBusyDay: '',
     occupantLabel: '',
     available: true,
-    status: 'vacant',
-    location: inputProperty.location
+    status: 'vacant'
   };
   if (inputOccupant) {
     property = {
       ...property,
-      beginDate: moment(inputOccupant.entryDate).format('DD/MM/YYYY'),
-      endDate: moment(inputOccupant.exitDate).format('DD/MM/YYYY'),
-      lastBusyDay: moment(
+      beginDate: moment.utc(inputOccupant.entryDate).format('DD/MM/YYYY'),
+      endDate: moment.utc(inputOccupant.exitDate).format('DD/MM/YYYY'),
+      lastBusyDay: moment.utc(
         inputOccupant.terminationDate || inputOccupant.endDate
       ).format('DD/MM/YYYY'),
       occupantLabel: inputOccupant.name
     };
     if (property.lastBusyDay) {
-      property.available = moment(property.lastBusyDay, 'DD/MM/YYYY').isBefore(
-        currentDate,
-        'day'
-      );
+      property.available = moment.utc(
+        property.lastBusyDay,
+        'DD/MM/YYYY'
+      ).isBefore(currentDate, 'day');
       if (!property.available) {
         property.status = 'occupied';
       }
@@ -422,10 +524,10 @@ export function toProperty(
       return {
         id: occupant._id,
         name: occupant.name,
-        beginDate: moment(occupant.beginDate).format('DD/MM/YYYY'),
-        endDate: moment(occupant.terminationDate || occupant.endDate).format(
-          'DD/MM/YYYY'
-        )
+        beginDate: moment.utc(occupant.beginDate).format('DD/MM/YYYY'),
+        endDate: moment.utc(
+          occupant.terminationDate || occupant.endDate
+        ).format('DD/MM/YYYY')
       };
     });
   }

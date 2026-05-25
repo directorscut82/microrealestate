@@ -39,6 +39,18 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
 
 PropertySchema.index({ realmId: 1 });
 PropertySchema.index({ realmId: 1, name: 1 });
+// Within a realm, the cadastral ATAK number identifies a property uniquely.
+// Partial index so legacy/null atakNumbers are excluded from the uniqueness
+// constraint (sparse alone treats compound-null as a value in Mongo 4.4).
+PropertySchema.index(
+  { realmId: 1, atakNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      atakNumber: { $exists: true, $type: 'string', $gt: '' }
+    }
+  }
+);
 
 export default mongoose.model<CollectionTypes.Property>(
   'Property',

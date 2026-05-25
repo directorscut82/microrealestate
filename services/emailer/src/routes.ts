@@ -70,7 +70,16 @@ export default function routes(): express.Router {
     '/emailer/status/:startTerm/:endTerm?',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const { startTerm, endTerm } = req.params;
+      // Realm-scope the lookup. Without this the status query returned
+      // every realm's audit rows that matched startTerm/endTerm.
+      const realmId = String(
+        (req as any).realm?._id || req.headers.organizationid || ''
+      );
+      if (!realmId) {
+        throw new ServiceError('organizationId required', 422);
+      }
       const result = await Emailer.status(
+        realmId,
         null,
         Number(startTerm),
         endTerm ? Number(endTerm) : null

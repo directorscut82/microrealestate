@@ -72,66 +72,33 @@ const TYPE_LABELS = {
   other: 'Other'
 };
 
-// Single rule for the whole dashboard: paid is colored by category,
-// unpaid is one neutral grey regardless of category. Donut, bar chart,
-// and tooltip text all read from these.
-//
-// Categories: rent → olive, charges (Έξοδα ενοικιαστή) → terracotta,
-// building (Κοινόχρηστα, all subtypes rolled together) → petrol.
-const PAID_LIGHT = {
-  rent: '#7a8c4a',
-  extra: '#c66a3a',
-  building: '#3a6e7c'
-};
-const PAID_DARK = {
-  rent: '#9bb15c',
-  extra: '#df8856',
-  building: '#5b94a4'
-};
-// Universal unpaid grey (light & dark have separate values for legibility).
+// Universal unpaid grey kept as fallback for any caller still using a
+// single neutral. New code uses CATEGORY_COLORS[type].faded.
 export const UNPAID_LIGHT = '#bdb8b1';
 export const UNPAID_DARK = '#6a6864';
-
-const BUILDING_TYPES = new Set([
-  'heating',
-  'elevator',
-  'cleaning',
-  'water_common',
-  'electricity_common',
-  'insurance',
-  'management_fee',
-  'garden',
-  'repairs_fund',
-  'pest_control',
-  'repair',
-  'monthly_charge',
-  'other'
-]);
 
 function isDark() {
   if (typeof document === 'undefined') return false;
   return document.documentElement.classList.contains('dark');
 }
 
-function bucketFor(type) {
-  if (type === 'rent') return 'rent';
-  if (type === 'charges') return 'extra';
-  if (BUILDING_TYPES.has(type)) return 'building';
-  return 'building';
+function categoryFor(type) {
+  return CATEGORY_COLORS[type] ? type : 'other';
 }
 
 export function paidColor(type) {
-  const dark = isDark();
-  const bucket = bucketFor(type);
-  return (dark ? PAID_DARK : PAID_LIGHT)[bucket];
+  return CATEGORY_COLORS[categoryFor(type)].bold;
 }
 
-export function unpaidColor() {
+export function unpaidColor(type) {
+  if (type && CATEGORY_COLORS[type]) {
+    return CATEGORY_COLORS[type].faded;
+  }
   return isDark() ? UNPAID_DARK : UNPAID_LIGHT;
 }
 
 function getColor(type, status) {
-  return status === 'paid' ? paidColor(type) : unpaidColor();
+  return status === 'paid' ? paidColor(type) : unpaidColor(type);
 }
 
 export default function MonthFigures({ className, dashboardData }) {
@@ -243,14 +210,6 @@ export default function MonthFigures({ className, dashboardData }) {
     if (!active || !payload?.length) return null;
     const entry = payload[0].payload;
     const tenants = currentRevenues.tenants || [];
-    const totalDue =
-      currentRevenues.baseRent +
-      currentRevenues.charges +
-      Object.values(currentRevenues.buildingChargesByType || {}).reduce(
-        (s, v) => s + v,
-        0
-      );
-    const paidRatio = totalDue > 0 ? currentRevenues.paid / totalDue : 0;
 
     return (
       <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-64">
@@ -270,9 +229,11 @@ export default function MonthFigures({ className, dashboardData }) {
                     ? tenant.charges
                     : tenant.buildingChargesByType?.[entry.type] || 0;
               if (catAmount <= 0) return null;
-              const catPaid = Math.round(
-                catAmount * Math.min(paidRatio, 1)
-              );
+              // Per-tenant proportional ratio against per-tenant due — best we
+              // can do without per-category paid breakdown from the API.
+              const tenantPaidRatio =
+                tenant.due > 0 ? Math.min(tenant.paid / tenant.due, 1) : 0;
+              const catPaid = Math.round(catAmount * tenantPaidRatio);
               return (
                 <div key={i}>
                   <div className="truncate text-label text-ink-soft">{tenant.name}</div>
@@ -283,7 +244,9 @@ export default function MonthFigures({ className, dashboardData }) {
                     <span
                       style={{
                         color:
-                          catPaid >= catAmount ? paidColor('rent') : undefined
+                          catPaid >= catAmount
+                            ? paidColor(entry.type)
+                            : undefined
                       }}
                       className={catPaid >= catAmount ? '' : 'text-ink-muted'}
                     >
@@ -332,7 +295,7 @@ export default function MonthFigures({ className, dashboardData }) {
                     type="button"
                     onClick={() => {
                       router.push(
-                        `/${router.query.organization}/rents/${yearMonth}?search=${tenant.name}`
+                        `/${router.query.organization}/rents/${yearMonth}?search=${encodeURIComponent(tenant.name)}`
                       );
                     }}
                     className="text-left text-body text-ink truncate flex-grow hover:text-sea-deep transition-colors duration-base ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sea rounded-sm"
@@ -365,30 +328,16 @@ export default function MonthFigures({ className, dashboardData }) {
             {pieData.length > 0 ? (
               <>
                 <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-label text-ink-soft mb-3">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="size-2.5 rounded-pill"
-                      style={{ background: getColor('rent', 'paid') }}
-                      aria-hidden="true"
-                    />
-                    <span>{t('Rent')}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="size-2.5 rounded-pill"
-                      style={{ background: getColor('charges', 'paid') }}
-                      aria-hidden="true"
-                    />
-                    <span>{t('Extra charges')}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="size-2.5 rounded-pill"
-                      style={{ background: getColor('heating', 'paid') }}
-                      aria-hidden="true"
-                    />
-                    <span>{t('Building charges')}</span>
-                  </div>
+                  {legend.map(({ type, label }) => (
+                    <div key={type} className="flex items-center gap-1.5">
+                      <span
+                        className="size-2.5 rounded-pill"
+                        style={{ background: getColor(type, 'paid') }}
+                        aria-hidden="true"
+                      />
+                      <span>{label}</span>
+                    </div>
+                  ))}
                 </div>
                 <div className="flex justify-center text-label text-ink-muted mb-1">
                   <span>{t('Bold = paid, faded = unpaid')}</span>

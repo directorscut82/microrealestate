@@ -18,14 +18,34 @@ const SUPPORTED_MIMETYPES = [
   'image/gif', 'image/png', 'image/jpeg', 'image/jpg', 'image/jpe', 'application/pdf'
 ];
 
+// Error messages use stable keys; the form translates them via t() at render
+// time. This keeps the schema module-level (no t() in scope) without leaking
+// English to the UI.
+const FILE_REQUIRED = 'file_required';
+const FILE_TOO_BIG = 'file_too_big';
+const FILE_TYPE_INVALID = 'file_type_invalid';
+
 const schema = z.object({
   templateId: z.string().min(1),
   expiryDate: z.string().optional(),
   file: z.any()
-    .refine((f) => f instanceof File, { message: 'File is required' })
-    .refine((f) => f instanceof File && f.size <= UPLOAD_MAX_SIZE, { message: 'File is too big. Maximum size is 2Go.' })
-    .refine((f) => f instanceof File && SUPPORTED_MIMETYPES.includes(f.type), { message: 'Only images or pdf are accepted.' })
+    .refine((f) => f instanceof File, { message: FILE_REQUIRED })
+    .refine((f) => f instanceof File && f.size <= UPLOAD_MAX_SIZE, { message: FILE_TOO_BIG })
+    .refine((f) => f instanceof File && SUPPORTED_MIMETYPES.includes(f.type), { message: FILE_TYPE_INVALID })
 });
+
+function translateFileError(t, message) {
+  switch (message) {
+    case FILE_REQUIRED:
+      return t('File is required');
+    case FILE_TOO_BIG:
+      return t('File is too big. Maximum size is 2Go.');
+    case FILE_TYPE_INVALID:
+      return t('Only images or pdf are accepted.');
+    default:
+      return message;
+  }
+}
 
 export default function UploadDialog({ open, setOpen, data: selectedTemplate, onSave, tenant, templates: allTemplates = [] }) {
   const { t } = useTranslation('common');
@@ -107,7 +127,7 @@ export default function UploadDialog({ open, setOpen, data: selectedTemplate, on
             <div className="space-y-2">
               <Label htmlFor="file">{t('File')}</Label>
               <Input id="file" type="file" accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf" onChange={(e) => setValue('file', e.target.files?.[0], { shouldValidate: true })} />
-              {errors.file && <p className="text-sm text-destructive">{errors.file.message}</p>}
+              {errors.file && <p className="text-sm text-destructive">{translateFileError(t, errors.file.message)}</p>}
             </div>
           </div>
         </form>

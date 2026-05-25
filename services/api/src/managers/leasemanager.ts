@@ -6,6 +6,13 @@ import {
 } from '@microrealestate/common';
 import type { ReqNoParams, ReqWithId, ReqWithIds, Res } from '../types/requests.js';
 import type { CollectionTypes } from '@microrealestate/types';
+import {
+  validateObjectId,
+  validateEnum,
+  validateFiniteNumber,
+  validateArrayMaxLength,
+  TIME_RANGES
+} from '../validators.js';
 
 async function _leaseUsedByTenant(realm: CollectionTypes.Realm | null | undefined): Promise<Set<string>> {
   const tenants = await Collections.Tenant.find(
@@ -19,11 +26,27 @@ async function _leaseUsedByTenant(realm: CollectionTypes.Realm | null | undefine
 }
 
 export async function add(req: ReqNoParams, res: Res) {
+  // Wave-21 C30-B5: strip server-owned identity fields from the payload.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = (req.body || {}) as any;
+  req.body = rest;
   const lease = req.body;
   if (!lease.name) {
     logger.error('missing lease name');
     throw new ServiceError('missing fields', 422);
   }
+
+  // Validate enum + numeric inputs BEFORE Mongoose. add() previously left
+  // these to schema validation which throws a generic ValidationError that
+  // bubbles to errorHandler as a 500.
+  if (lease.timeRange !== undefined) {
+    validateEnum(lease.timeRange, TIME_RANGES, 'timeRange');
+  }
+  validateFiniteNumber(lease.numberOfTerms, 'numberOfTerms', {
+    min: 1,
+    max: 1000,
+    required: true
+  });
 
   const realm = req.realm;
   const dbLease: any = new Collections.Lease({
@@ -46,15 +69,57 @@ export async function update(req: ReqWithId, res: Res) {
     throw new ServiceError('missing fields', 422);
   }
 
+  if (lease.timeRange !== undefined) {
+    validateEnum(lease.timeRange, TIME_RANGES, 'timeRange');
+  }
+  if (lease.numberOfTerms !== undefined) {
+    validateFiniteNumber(lease.numberOfTerms, 'numberOfTerms', {
+      min: 1,
+      max: 1000
+    });
+  }
+
   if (lease.active === undefined) {
     lease.active = lease.numberOfTerms > 0 && !!lease.timeRange;
   }
 
+  // Fetch the existing lease BEFORE the in-use guard so we can compare the
+  // incoming payload against the persisted document. Without this ordering
+  // we cannot detect attempts to mutate protected fields on an in-use lease.
+  const existingLease: any = await Collections.Lease.findOne({
+    realmId: realm!._id,
+    _id: lease._id
+  }).lean();
+
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
 
-  const existingLease: any = setOfUsedLeases.has(String(lease._id))
-    ? await Collections.Lease.findOne({ realmId: realm!._id, _id: lease._id }).lean()
-    : null;
+  // When a lease is already referenced by tenants, refuse changes to fields
+  // that would invalidate previously-computed rent ledgers (numberOfTerms,
+  // timeRange). Previously these fields were silently dropped from the $set
+  // payload — the request returned 200 but the values never persisted, which
+  // is worse than failing loud because the user has no signal their change
+  // was rejected.
+  if (setOfUsedLeases.has(String(lease._id))) {
+    const protectedFields = ['numberOfTerms', 'timeRange'];
+    const requestedChange = protectedFields.some(
+      (f) =>
+        lease[f] !== undefined &&
+        String(lease[f]) !== String(existingLease?.[f])
+    );
+    if (requestedChange) {
+      throw new ServiceError(
+        'Cannot change numberOfTerms or timeRange on a lease in use by tenants',
+        422
+      );
+    }
+  }
+
+  // Strip identity / version fields from the unrestricted-edit payload —
+  // $set must not target the same paths used in the filter clause, otherwise
+  // MongoDB rejects with "Updating the path '_id' would create a conflict".
+  // Mirrors the equivalent fix in occupantmanager.update().
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id, __v, realmId: _realmId, ...leasePayload } = lease;
 
   const dbLease: any = await Collections.Lease.findOneAndUpdate(
     {
@@ -68,7 +133,7 @@ export async function update(req: ReqWithId, res: Res) {
           active: lease.active ?? existingLease?.active,
           stepperMode: lease.stepperMode ?? existingLease?.stepperMode
         }
-      : lease,
+      : leasePayload,
     { new: true }
   ).lean();
 
@@ -88,6 +153,9 @@ export async function remove(req: ReqWithIds, res: Res) {
     logger.error('missing lease ids');
     throw new ServiceError('missing fields', 422);
   }
+
+  validateArrayMaxLength(leaseIds, 50, 'lease ids');
+  leaseIds.forEach((id: string) => validateObjectId(id, 'lease id'));
 
   const setOfUsedLeases = await _leaseUsedByTenant(realm);
   if (leaseIds.some((leaseId: string) => setOfUsedLeases.has(leaseId))) {
@@ -113,36 +181,46 @@ export async function remove(req: ReqWithIds, res: Res) {
     .filter(({ linkedResourceIds }: any) => linkedResourceIds.length <= 1)
     .reduce((acc: string[], { _id }: any) => [...acc, _id], []);
 
-  const session = await Collections.startSession();
-  session.startTransaction();
-  try {
-    await Promise.all([
-      Collections.Lease.deleteMany({
-        _id: { $in: leaseIds },
-        realmId: realm!._id
-      }).session(session),
-      Collections.Template.deleteMany({
-        _id: { $in: templateIdsToRemove },
-        realmId: realm!._id
-      }).session(session),
-      Collections.Template.updateMany(
-        {
-          realmId: realm!._id,
-          linkedResourceIds: { $in: leaseIds }
-        },
-        {
-          $pull: { linkedResourceIds: { $in: leaseIds } }
-        },
-        { session }
-      )
-    ]);
-    await session.commitTransaction();
-  } catch (error) {
-    await session.abortTransaction();
-    throw new ServiceError(String(error), 500);
-  } finally {
-    session.endSession();
+  // Mongo standalone (NAS deployment) doesn't support multi-document
+  // transactions, so we run the deletes in parallel without a session.
+  // Failure mode: if one delete succeeds and another fails, we get partial
+  // cleanup. Acceptable for now — the realmId filter prevents cross-realm
+  // damage and a retry will re-converge.
+  const [leaseDeleteResult] = await Promise.all([
+    Collections.Lease.deleteMany({
+      _id: { $in: leaseIds },
+      realmId: realm!._id
+    }),
+    Collections.Template.deleteMany({
+      _id: { $in: templateIdsToRemove },
+      realmId: realm!._id
+    }),
+    Collections.Template.updateMany(
+      {
+        realmId: realm!._id,
+        linkedResourceIds: { $in: leaseIds }
+      },
+      {
+        $pull: { linkedResourceIds: { $in: leaseIds } }
+      }
+    )
+  ]);
+
+  if ((leaseDeleteResult?.deletedCount ?? 0) === 0) {
+    throw new ServiceError(
+      'No records deleted (none of the ids matched)',
+      404
+    );
   }
+
+  // Partial-success path: report counts so the client can detect drift.
+  if ((leaseDeleteResult.deletedCount ?? 0) < leaseIds.length) {
+    return res.status(200).json({
+      deleted: leaseDeleteResult.deletedCount,
+      requested: leaseIds.length
+    });
+  }
+
   res.sendStatus(200);
 }
 

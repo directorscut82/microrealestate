@@ -38,6 +38,12 @@ export default function PropertyIcon({ type, className }) {
     case 'letterbox':
       TypeIcon = LuMailbox;
       break;
+    case 'storage':
+      // LuWarehouse is the closest icon for a storage / cellar room.
+      // Garage already uses Warehouse — that's acceptable visual overlap
+      // for two related "storage-style" categories.
+      TypeIcon = LuWarehouse;
+      break;
   }
 
   return <TypeIcon className={cn('size-6', className)} />;

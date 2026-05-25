@@ -68,11 +68,12 @@ function OrganizationsSettings() {
                 variant="outline"
                 className="text-secondary-foreground/70 h-fit w-fit"
               >
-                {t(
-                  organization.members.find(
-                    (member) => member.user === store.user._id
-                  ).role
-                )}
+                {(() => {
+                  const member = organization.members.find(
+                    (m) => m.email === store.user.email
+                  );
+                  return member ? t(member.role) : '';
+                })()}
               </Badge>
             </Card>
           ))}

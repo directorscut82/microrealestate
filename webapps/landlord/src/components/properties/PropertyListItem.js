@@ -68,7 +68,7 @@ export default function PropertyListItem({ property }) {
             ? t('Occupied by {{tenant}}', { tenant: property.occupantLabel })
             : null}
         </div>
-        <Badge variant={isVacant ? 'paid' : 'archived'} className="shrink-0">
+        <Badge variant={isVacant ? 'success' : 'secondary'} className="shrink-0">
           {isVacant ? t('Vacant') : t('Rented')}
         </Badge>
       </div>

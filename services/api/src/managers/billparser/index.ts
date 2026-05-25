@@ -1,3 +1,4 @@
+import { logger, ServiceError } from '@microrealestate/common';
 import type { BillParseResult } from './types.js';
 import { parseDehBill } from './deh.js';
 
@@ -44,8 +45,13 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
         '\n--- PAGE BREAK ---\n';
     }
     return fullText;
-  } catch (error) {
-    throw new Error(`Failed to extract text from PDF: ${String(error)}`);
+  } catch (err: any) {
+    if (err instanceof ServiceError) throw err;
+    logger.warn(`Bill PDF parse failed: ${err?.message || err}`);
+    throw new ServiceError(
+      `Could not parse bill PDF: ${err?.message || 'invalid PDF structure'}`,
+      422
+    );
   }
 }
 

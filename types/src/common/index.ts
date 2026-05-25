@@ -47,10 +47,18 @@ export type UnitOwnerType = 'member' | 'external';
 export type OccupancyType = 'rented' | 'owner_occupied' | 'vacant' | 'parking';
 
 export type ContractorSpecialty =
+  // Legacy values kept for backwards compatibility with imported data.
+  | 'plumbing'
+  | 'electrical'
+  // Canonical specialty names.
   | 'plumber'
   | 'electrician'
-  | 'elevator'
   | 'painter'
+  | 'carpenter'
+  | 'mason'
+  | 'gardener'
+  | 'cleaner'
+  | 'elevator'
   | 'locksmith'
   | 'hvac'
   | 'general'
@@ -70,7 +78,7 @@ export type RepairCategory =
   | 'other';
 
 export type RepairStatus =
-  | 'scheduled'
+  | 'planned'
   | 'in_progress'
   | 'completed'
   | 'cancelled';

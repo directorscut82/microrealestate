@@ -40,17 +40,20 @@ RUN apk upgrade --no-cache --available \
       chromium-swiftshader \
       ttf-freefont \
       font-noto-emoji \
+      tini \
     && apk add --no-cache \
       --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
       font-wqy-zenhei
 ENV NODE_ENV production
-ENV CHROMIUM_BIN /usr/bin/chromium-browser  
+ENV CHROMIUM_BIN /usr/bin/chromium-browser
 WORKDIR /usr/app
 COPY --from=deps /usr/app ./
 COPY --from=build /usr/app/services/pdfgenerator/dist ./services/pdfgenerator/dist
 COPY services/pdfgenerator/data ./services/pdfgenerator/data
 COPY services/pdfgenerator/templates ./services/pdfgenerator/templates
-# prepare temp directories
+# prepare temp directories (note: /tmp, ./services/pdfgenerator/tmp,
+# ./services/pdfgenerator/pdf_documents, ./services/pdfgenerator/uploads
+# are mounted as tmpfs at runtime — see docker-compose.microservices.base.yml)
 RUN mkdir -p ./services/pdfgenerator/tmp \
     && mkdir -p ./services/pdfgenerator/pdf_documents \
     && mkdir -p ./services/pdfgenerator/uploads
@@ -62,4 +65,5 @@ RUN chown -R 1000 ./services/pdfgenerator/data \
     && chown -R 1000 ./services/pdfgenerator/uploads
 
 USER 1000
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "services/pdfgenerator/dist/index.js"]

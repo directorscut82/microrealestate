@@ -1,6 +1,8 @@
 // Parser for Greek government lease PDFs (AADE Taxisnet)
 // Handles both original declarations and amendments (ΤΡΟΠΟΠΟΙΗΤΙΚΗ ΔΗΛΩΣΗ)
 
+import { logger } from '@microrealestate/common';
+
 export type ParsedLandlord = {
   name: string;
   taxId: string;
@@ -58,7 +60,13 @@ export type ParsedLease = {
 };
 
 function parseGreekDecimal(value: string): number {
-  const cleaned = value.replace(/[€\s]/g, '').replace(',', '.');
+  // Greek number format: dot is the thousands separator, comma is the
+  // decimal separator (e.g. "1.234,56" → 1234.56). Mirrors the DEH bill
+  // parser: strip dots first, then convert the comma.
+  let cleaned = value.replace(/[€\s]/g, '');
+  if (cleaned.includes(',')) {
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  }
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
 }
@@ -76,7 +84,7 @@ function extractMoney(text: string): number {
 function extractSurface(text: string): number {
   const m = text.match(/([\d.,]+)\s*τμ/);
   if (!m) return 0;
-  return parseFloat(m[1].replace(',', '.')) || 0;
+  return parseGreekDecimal(m[1]);
 }
 
 // Extract value between two labels. endLabel supports | for alternation.
@@ -111,6 +119,9 @@ function mapCategoryToType(category: string): string {
   for (const [key, value] of Object.entries(CATEGORY_MAP)) {
     if (category.includes(key)) return value;
   }
+  logger.warn(
+    `greekleaseparser: unknown property category "${category}", falling back to 'apartment'`
+  );
   return 'apartment';
 }
 

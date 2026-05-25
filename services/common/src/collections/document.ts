@@ -6,11 +6,22 @@ import Template from './template.js';
 import Tenant from './tenant.js';
 
 const DocumentSchema = new mongoose.Schema<CollectionTypes.Document>({
-  realmId: { type: String, ref: Realm },
-  tenantId: { type: String, ref: Tenant },
-  leaseId: { type: String, ref: Lease },
-  templateId: { type: String, ref: Template },
-  type: String, // one of 'text', 'file'
+  realmId: { type: String, ref: Realm, required: true },
+  tenantId: { type: String, ref: Tenant, required: true },
+  leaseId: { type: String, ref: Lease, required: true },
+  templateId: {
+    type: String,
+    ref: Template,
+    required: function (this: CollectionTypes.Document) {
+      return this.type === 'text';
+    }
+  },
+  // 'fileDescriptor' is accepted for legacy data
+  type: {
+    type: String,
+    enum: ['text', 'file', 'fileDescriptor'],
+    required: true
+  },
   name: String,
   description: String,
   mimeType: String, // used only when type === "file"

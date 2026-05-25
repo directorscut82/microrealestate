@@ -10,13 +10,24 @@ const baseURL =
   'http://localhost';
 
 export default function getApiFetcher() {
+  // Build a Cookie header from ALL request cookies, not just sessionToken.
+  // Overwriting with only sessionToken would drop other cookies (CSRF, locale,
+  // session affinity, etc.) that downstream services may legitimately depend on.
+  const allCookies = cookies()
+    .getAll()
+    .map(({ name, value }) => `${name}=${value}`)
+    .join('; ');
   const sessionToken = cookies().get('sessionToken')?.value;
+  const cookieHeader = allCookies
+    ? allCookies
+    : `sessionToken=${sessionToken ?? ''}`;
+
   const apiFetcher = axios.create({
     baseURL,
     withCredentials,
 
     headers: {
-      Cookie: `sessionToken=${sessionToken}`
+      Cookie: cookieHeader
     }
   });
 

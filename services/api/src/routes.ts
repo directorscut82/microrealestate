@@ -67,9 +67,41 @@ export default function routes(): express.Router {
     Middlewares.notRoles(['tenant'])
   );
 
+  // Write-guard: only `administrator` may mutate. `renter` is read-only,
+  // `tenant` is already blocked above. Centralised here (rather than per-
+  // route) to avoid drift — every new POST/PATCH/PUT/DELETE under /api/v2
+  // automatically inherits the guard. GETs (and OPTIONS/HEAD) pass through.
+  router.use((req, res, next) => {
+    const method = req.method.toUpperCase();
+    if (method === 'GET' || method === 'OPTIONS' || method === 'HEAD') {
+      return next();
+    }
+    const role = (req as any).user?.role;
+    // Service / application principals (no realm-scoped role) are unaffected.
+    if (role && role !== 'administrator') {
+      return res.status(403).json({
+        status: 403,
+        message: 'Insufficient role for write operation'
+      });
+    }
+    return next();
+  });
+
   const realmsRouter = express.Router();
-  realmsRouter.get('/', realmManager.all as any);
-  realmsRouter.get('/:id', realmManager.one as any);
+  realmsRouter.get(
+    '/',
+    Middlewares.asyncWrapper(realmManager.all as any)
+  );
+  // Self-leave must be declared BEFORE the parameterized routes — otherwise
+  // express matches '/:id' against 'me' and routes the DELETE to remove().
+  realmsRouter.delete(
+    '/me/membership',
+    Middlewares.asyncWrapper(realmManager.leaveRealm as any)
+  );
+  realmsRouter.get(
+    '/:id',
+    Middlewares.asyncWrapper(realmManager.one as any)
+  );
   realmsRouter.post('/', Middlewares.asyncWrapper(realmManager.add as any));
   realmsRouter.patch(
     '/:id',
@@ -319,13 +351,25 @@ export default function routes(): express.Router {
     '/confirm-payment',
     Middlewares.asyncWrapper(billManager.confirmPayment as any)
   );
+  billsRouter.delete(
+    '/:id',
+    Middlewares.asyncWrapper(billManager.remove as any)
+  );
   router.use('/bills', billsRouter);
 
-  // Database backup/restore (admin only)
+  // Database backup/restore (admin only).
+  // The /restore route accepts the entire backup payload as JSON, which can
+  // easily exceed the global body-parser limit (default 100kb). Install a
+  // per-route express.json with a 50mb cap so real backups aren't rejected
+  // upfront with PayloadTooLargeError.
   const databaseRouter = express.Router();
   databaseRouter.use(databaseManager.requireAdmin);
   databaseRouter.get('/backup', databaseManager.backup);
-  databaseRouter.post('/restore', databaseManager.restore);
+  databaseRouter.post(
+    '/restore',
+    express.json({ limit: '50mb' }),
+    databaseManager.restore
+  );
   router.use('/database', databaseRouter);
 
   router.get(
@@ -355,6 +399,13 @@ export default function routes(): express.Router {
 
   // Presence awareness — shows who else is viewing the same record
   const PRESENCE_TTL = 60;
+  const VALID_PRESENCE_TYPES = [
+    'tenant',
+    'property',
+    'lease',
+    'realm',
+    'building'
+  ];
 
   // Lua script for atomic presence update (prevents read-modify-write race)
   const PRESENCE_LUA = `
@@ -377,6 +428,9 @@ export default function routes(): express.Router {
     '/presence/:type/:id',
     Middlewares.asyncWrapper(async (req: any, res: any) => {
       const { type, id } = req.params;
+      if (!VALID_PRESENCE_TYPES.includes(type)) {
+        throw new ServiceError(`Invalid presence type: ${type}`, 422);
+      }
       const redis = Service.getInstance().redisClient;
       if (!redis) {
         res.json([]);
@@ -411,6 +465,9 @@ export default function routes(): express.Router {
     '/presence/:type/:id',
     Middlewares.asyncWrapper(async (req: any, res: any) => {
       const { type, id } = req.params;
+      if (!VALID_PRESENCE_TYPES.includes(type)) {
+        throw new ServiceError(`Invalid presence type: ${type}`, 422);
+      }
       const redis = Service.getInstance().redisClient;
       if (!redis) {
         res.json([]);

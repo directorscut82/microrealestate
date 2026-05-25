@@ -4,10 +4,12 @@ import type { CollectionTypes } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
 import type { ParsedE9Unit } from './e9parser.js';
 import * as Contract from './contract.js';
+import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
   validateObjectId,
   validateTerm,
   validateFiniteNumber,
+  validateStringField,
   validateEnum,
   validateArrayMaxLength,
   validateAllocationValues,
@@ -97,6 +99,41 @@ function _findBuilding(building: any, _id: string) {
   return building;
 }
 
+// Wave-18 B5: validate that every customAllocations[].propertyId references
+// a unit that belongs to this building, and that custom_percentage shares
+// sum to 100 (±0.01 tolerance). Without this guard, an expense saved with
+// a foreign / non-existent propertyId silently produces a dead allocation
+// that never bills anyone.
+function _assertCustomAllocationPropertyIds(
+  building: any,
+  customAllocations: any,
+  allocationMethod: string | undefined
+): void {
+  if (!Array.isArray(customAllocations) || customAllocations.length === 0) return;
+  const allocationKinds = new Set([
+    'custom_percentage',
+    'custom_ratio',
+    'fixed'
+  ]);
+  if (!allocationMethod || !allocationKinds.has(allocationMethod)) return;
+
+  const validPropIds = new Set(
+    ((building?.units || []) as any[])
+      .map((u) => (u.propertyId ? String(u.propertyId) : ''))
+      .filter(Boolean)
+  );
+
+  customAllocations.forEach((a: any, i: number) => {
+    if (!a?.propertyId) return;
+    if (!validPropIds.has(String(a.propertyId))) {
+      throw new ServiceError(
+        `customAllocations[${i}].propertyId is not in this building`,
+        422
+      );
+    }
+  });
+}
+
 // Infer property type from E9 parsed unit data
 function _inferPropertyType(unit: ParsedE9Unit): string {
   // Category from E9: 1=apartment, 2=store, 51=parking/storage
@@ -136,6 +173,7 @@ async function _recomputeTenantsForProperty(
       .map((p: any) => p.propertyId)
       .filter(Boolean);
     const properties = await Collections.Property.find({
+      realmId,
       _id: { $in: propertyIds }
     }).lean();
     const propMap = properties.reduce((acc: any, p: any) => {
@@ -150,6 +188,9 @@ async function _recomputeTenantsForProperty(
         realmId,
         'units.propertyId': { $in: propertyIds }
       }).lean()) as CollectionTypes.Building[];
+    // Wave-17 B1: attach tenant groups so "equal" allocation divides by
+    // unique tenants (not units) and emits one line per tenant/expense.
+    await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
     try {
       const termFrequency = tenantObj.frequency || 'months';
       const contract = {
@@ -193,6 +234,105 @@ async function _recomputeTenantsForProperty(
   await Promise.all(tenants.map(recomputeOne));
 }
 
+// Wave-14 F6: recompute rents for every tenant linked to ANY managed unit
+// of a building, deduped. Building-expense edits (add/update/remove) must
+// produce a deterministic forward-looking recompute for all tenants — the
+// per-property loop previously used here ran once per propertyId and
+// could leave some tenants out-of-sync when the in-memory building state
+// drifted between sequential calls. The freeze logic in contract.ts
+// protects already-paid historical rents.
+async function _recomputeTenantsForBuilding(
+  realmId: string,
+  building: any
+): Promise<void> {
+  const propertyIds = ((building as any)?.units || [])
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  if (!propertyIds.length) return;
+
+  const tenants = await Collections.Tenant.find({
+    realmId,
+    'properties.propertyId': { $in: propertyIds }
+  }).lean();
+  if (!tenants.length) return;
+
+  // Dedupe by tenant _id so a tenant linked to multiple managed units of
+  // this building is recomputed exactly once.
+  const seen = new Set<string>();
+  const unique: any[] = [];
+  for (const t of tenants) {
+    const id = String(t._id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(t);
+  }
+
+  for (const tenantObj of unique) {
+    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
+    if (!tenantObj.properties?.length) continue;
+    const tenantPropIds = tenantObj.properties
+      .map((p: any) => p.propertyId)
+      .filter(Boolean);
+    const properties = await Collections.Property.find({
+      realmId,
+      _id: { $in: tenantPropIds }
+    }).lean();
+    const propMap = properties.reduce((acc: any, p: any) => {
+      acc[String(p._id)] = p;
+      return acc;
+    }, {});
+    tenantObj.properties.forEach((p: any) => {
+      p.property = propMap[String(p.propertyId)] || p.property;
+    });
+    const buildings: CollectionTypes.Building[] =
+      (await Collections.Building.find({
+        realmId,
+        'units.propertyId': { $in: tenantPropIds }
+      }).lean()) as CollectionTypes.Building[];
+    // Wave-17 B1: attach tenant groups so "equal" allocation divides by
+    // unique tenants (not units) and emits one line per tenant/expense.
+    await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
+    try {
+      const termFrequency = tenantObj.frequency || 'months';
+      const contract = {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        frequency: termFrequency,
+        terms: Math.ceil(
+          moment(tenantObj.endDate).diff(
+            moment(tenantObj.beginDate),
+            termFrequency as moment.unitOfTime.Diff,
+            true
+          )
+        ),
+        properties: tenantObj.properties,
+        buildings,
+        vatRate: tenantObj.vatRatio,
+        discount: tenantObj.discount,
+        rents: tenantObj.rents || []
+      };
+      const updated = Contract.update(contract, {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        termination: tenantObj.terminationDate,
+        properties: tenantObj.properties,
+        frequency: termFrequency
+      });
+      await Collections.Tenant.updateOne(
+        { _id: tenantObj._id },
+        { rents: updated.rents }
+      );
+      logger.info(
+        `Recomputed rents for tenant ${tenantObj.name} (building ${building._id})`
+      );
+    } catch (error) {
+      logger.error(
+        `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+      );
+    }
+  }
+}
+
 // Recompute rents for all tenants that use a specific property
 
 // ---------------------------------------------------------------------------
@@ -226,6 +366,10 @@ export async function one(req: Req, res: Res) {
 
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
+  // Wave-21 C30-B5: strip server-owned identity fields from the payload.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = req.body || {};
+  req.body = rest;
   if (!req.body.name?.trim()) {
     throw new ServiceError('Building name is missing', 422);
   }
@@ -240,6 +384,13 @@ export async function add(req: Req, res: Res) {
     min: 1,
     max: 200
   });
+  if (req.body.heatingType !== undefined && req.body.heatingType !== '') {
+    validateEnum(
+      req.body.heatingType,
+      ['central_oil', 'central_gas', 'autonomous', 'none'] as const,
+      'heatingType'
+    );
+  }
   validateArrayMaxLength(req.body.units, 200, 'units');
   validateArrayMaxLength(req.body.expenses, 100, 'expenses');
   validateArrayMaxLength(req.body.contractors, 50, 'contractors');
@@ -320,6 +471,37 @@ export async function add(req: Req, res: Res) {
 
 export async function update(req: Req, res: Res) {
   const realm = req.realm;
+
+  // Mirror validations from add()
+  if (req.body.name !== undefined) {
+    if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
+      throw new ServiceError('Building name is missing', 422);
+    }
+  }
+  if (req.body.atakPrefix !== undefined) {
+    if (typeof req.body.atakPrefix !== 'string' || !req.body.atakPrefix.trim()) {
+      throw new ServiceError('ATAK prefix is missing', 422);
+    }
+  }
+  if (req.body.yearBuilt !== undefined) {
+    validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
+      min: 1800,
+      max: 2099
+    });
+  }
+  if (req.body.totalFloors !== undefined) {
+    validateFiniteNumber(req.body.totalFloors, 'totalFloors', {
+      min: 1,
+      max: 200
+    });
+  }
+  if (req.body.heatingType !== undefined && req.body.heatingType !== '') {
+    validateEnum(
+      req.body.heatingType,
+      ['central_oil', 'central_gas', 'autonomous', 'none'] as const,
+      'heatingType'
+    );
+  }
 
   if (req.body.atakPrefix) {
     const existing = await Collections.Building.findOne({
@@ -421,6 +603,13 @@ export async function remove(req: Req, res: Res) {
       }
     }
   }
+
+  // Cascade-delete linked Bill records before the buildings — otherwise
+  // bills reference dangling buildingIds.
+  await Collections.Bill.deleteMany({
+    realmId: realm!._id,
+    buildingId: { $in: ids }
+  });
 
   await Collections.Building.deleteMany({
     _id: { $in: ids },
@@ -772,7 +961,10 @@ export async function addUnit(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
 
-  if (!req.body.atakNumber?.trim()) {
+  if (typeof req.body.atakNumber !== 'string') {
+    throw new ServiceError('atakNumber must be a string', 422);
+  }
+  if (!req.body.atakNumber.trim()) {
     throw new ServiceError('Unit ATAK number is missing', 422);
   }
   validateFiniteNumber(req.body.generalThousandths, 'generalThousandths', {
@@ -791,6 +983,19 @@ export async function addUnit(req: Req, res: Res) {
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
   if (req.body.propertyId) {
     validateObjectId(req.body.propertyId, 'propertyId');
+    // Wave-21 C30-B4: cross-realm guard. Without this, a malicious admin in
+    // realm A can attach a propertyId from realm B to one of their units,
+    // silently linking foreign data into their own building.
+    const sameRealmProperty = await Collections.Property.findOne({
+      _id: req.body.propertyId,
+      realmId: realm!._id
+    }).lean();
+    if (!sameRealmProperty) {
+      throw new ServiceError(
+        'propertyId does not exist in this realm',
+        422
+      );
+    }
   }
 
   const building = await Collections.Building.findOne({
@@ -809,7 +1014,48 @@ export async function addUnit(req: Req, res: Res) {
       422
     );
   }
+
+  // Prevent orphan units across buildings: if the property is already
+  // referenced by a unit in a DIFFERENT building, refuse the link until
+  // the caller removes the previous unit. Otherwise rent computation
+  // walks both buildings and double-bills the tenant.
+  if (req.body.propertyId) {
+    const otherBuilding = await Collections.Building.findOne({
+      realmId: realm!._id,
+      'units.propertyId': req.body.propertyId
+    }).lean();
+    if (otherBuilding && String((otherBuilding as any)._id) !== String(id)) {
+      throw new ServiceError(
+        'Property is already linked to a unit in another building. Remove that unit first.',
+        422
+      );
+    }
+  }
+
   (building as any).units.push(req.body);
+
+  // Building-wide thousandths sums must not exceed 1000 across all units —
+  // each scheme is supposed to total 1000 across the building. Reject if
+  // adding this unit would push any sum above 1000.
+  {
+    const sums = (
+      ['generalThousandths', 'heatingThousandths', 'elevatorThousandths'] as const
+    ).map((field) => ({
+      field,
+      total: (building as any).units.reduce(
+        (s: number, u: any) => s + (Number(u[field]) || 0),
+        0
+      )
+    }));
+    const overflow = sums.find((s) => s.total > 1000);
+    if (overflow) {
+      throw new ServiceError(
+        `${overflow.field} sum (${overflow.total}) exceeds 1000`,
+        422
+      );
+    }
+  }
+
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -846,6 +1092,18 @@ export async function updateUnit(req: Req, res: Res) {
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
   if (req.body.propertyId) {
     validateObjectId(req.body.propertyId, 'propertyId');
+    // Wave-21 C30-B4: cross-realm guard. Mirror addUnit — block linking a
+    // unit to a property from a different realm.
+    const sameRealmProperty = await Collections.Property.findOne({
+      _id: req.body.propertyId,
+      realmId: realm!._id
+    }).lean();
+    if (!sameRealmProperty) {
+      throw new ServiceError(
+        'propertyId does not exist in this realm',
+        422
+      );
+    }
   }
 
   const building = await Collections.Building.findOne({
@@ -862,6 +1120,28 @@ export async function updateUnit(req: Req, res: Res) {
 
   const oldPropertyId = unit.propertyId;
   unit.set(req.body);
+
+  // Validate building-wide thousandths totals after the update — if the
+  // edit pushes any of the three schemes above 1000, refuse the change.
+  {
+    const sums = (
+      ['generalThousandths', 'heatingThousandths', 'elevatorThousandths'] as const
+    ).map((field) => ({
+      field,
+      total: (building as any).units.reduce(
+        (s: number, u: any) => s + (Number(u[field]) || 0),
+        0
+      )
+    }));
+    const overflow = sums.find((s) => s.total > 1000);
+    if (overflow) {
+      throw new ServiceError(
+        `${overflow.field} sum (${overflow.total}) exceeds 1000`,
+        422
+      );
+    }
+  }
+
   (building as any).updatedDate = new Date();
   await building!.save();
 
@@ -942,9 +1222,22 @@ export async function addMonthlyCharge(req: Req, res: Res) {
   const realm = req.realm;
   const { id, unitId } = req.params;
 
-  if (req.body.amount == null) {
-    throw new ServiceError('Charge amount is required', 422);
+  // Pre-validate inputs before save() — without this a missing/bad term
+  // surfaces as a Mongoose ValidationError (HTTP 500 with raw schema text).
+  if (req.body.term == null || !/^\d{10}$/.test(String(req.body.term))) {
+    throw new ServiceError('Invalid term format', 422);
   }
+  validateTerm(req.body.term, 'term');
+  validateFiniteNumber(req.body.amount, 'amount', {
+    min: 0,
+    max: 10000000,
+    required: true
+  });
+  validateStringField(req.body.description, 'description', {
+    min: 1,
+    max: 200,
+    required: true
+  });
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -973,6 +1266,27 @@ export async function addMonthlyCharge(req: Req, res: Res) {
 export async function updateMonthlyCharge(req: Req, res: Res) {
   const realm = req.realm;
   const { id, unitId, chargeId } = req.params;
+
+  // Mirror addMonthlyCharge validation so partial updates can't smuggle a
+  // bad term/amount/description and trigger a Mongoose 500 on save.
+  if (req.body.term !== undefined) {
+    if (!/^\d{10}$/.test(String(req.body.term))) {
+      throw new ServiceError('Invalid term format', 422);
+    }
+    validateTerm(req.body.term, 'term');
+  }
+  if (req.body.amount !== undefined) {
+    validateFiniteNumber(req.body.amount, 'amount', {
+      min: 0,
+      max: 10000000
+    });
+  }
+  if (req.body.description !== undefined) {
+    validateStringField(req.body.description, 'description', {
+      min: 1,
+      max: 200
+    });
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1072,6 +1386,35 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     throw new ServiceError('Building has no units', 422);
   }
 
+  // Validate every referenced expenseId exists on the building before we
+  // mutate any unit. Silently accepting unknown ids leaves orphan charges.
+  if (expensesProvided) {
+    for (const entry of expenseEntries || []) {
+      if (entry?.expenseId) {
+        const exp = (building as any).expenses.id(entry.expenseId);
+        if (!exp) {
+          throw new ServiceError(
+            `Unknown expenseId: ${entry.expenseId}`,
+            422
+          );
+        }
+      }
+    }
+  }
+  if (ownerExpensesProvided) {
+    for (const entry of ownerExpenses || []) {
+      if (entry?.expenseId) {
+        const exp = (building as any).expenses.id(entry.expenseId);
+        if (!exp) {
+          throw new ServiceError(
+            `Unknown expenseId: ${entry.expenseId}`,
+            422
+          );
+        }
+      }
+    }
+  }
+
   // For each unit, remove existing monthly charges for this term, then add new ones
   for (const unit of units) {
     if (!unit.propertyId) continue;
@@ -1106,7 +1449,8 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
             ...(buildingExpense?.toObject?.() || {}),
             amount: entry.amount,
             allocationMethod
-          }
+          },
+          Number(term)
         );
 
         if (share > 0) {
@@ -1165,6 +1509,33 @@ export async function addExpense(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
 
+  // Normalize alternate field name from older UI builds: `recurring` →
+  // `isRecurring`. Without this, the schema default (true) silently kicks
+  // in and a one-off expense becomes recurring forever.
+  if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
+    req.body.isRecurring = req.body.recurring;
+    delete req.body.recurring;
+  }
+
+  // A non-recurring expense MUST be anchored to a specific term — otherwise
+  // it has no meaning in the rent pipeline (it would never fire).
+  if (req.body.isRecurring === false && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for non-recurring expenses',
+      422
+    );
+  }
+
+  // Wave-18 B6: a recurring expense without a startTerm bills every tenant
+  // back to epoch (the rent pipeline treats undefined startTerm as "always
+  // active"). Require an explicit anchor.
+  if (req.body.isRecurring !== false && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for recurring expenses',
+      422
+    );
+  }
+
   if (!req.body.name?.trim()) {
     throw new ServiceError('Expense name is required', 422);
   }
@@ -1193,6 +1564,16 @@ export async function addExpense(req: Req, res: Res) {
   ) {
     throw new ServiceError('startTerm must be before endTerm', 422);
   }
+
+  // Wave-18 B1: normalize one-time startTerm to YYYYMM0100 so historical
+  // data stays consistent with the YYYYMM-based active-term comparison.
+  if (req.body.isRecurring === false && req.body.startTerm) {
+    const st = Number(req.body.startTerm);
+    const normalized = Math.floor(st / 10000) * 10000 + 100;
+    req.body.startTerm = normalized;
+    if (req.body.endTerm) req.body.endTerm = normalized;
+  }
+
   validateAllocationValues(req.body.customAllocations);
   validatePercentageAllocations(
     req.body.customAllocations,
@@ -1211,17 +1592,22 @@ export async function addExpense(req: Req, res: Res) {
 
   _findBuilding(building, id);
 
+  // Wave-18 B5: customAllocations entries must reference units that actually
+  // belong to this building. Without this guard, a typo'd / spoofed
+  // propertyId silently produces an expense that never bills anyone (or
+  // worse, bills a unit in a different building).
+  _assertCustomAllocationPropertyIds(
+    building,
+    req.body.customAllocations,
+    req.body.allocationMethod
+  );
+
   (building as any).expenses.push(req.body);
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  // Recompute rents for all tenants linked to this building
-  const propertyIds = (building as any).units
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
-  }
+  // Wave-14 F6: recompute every tenant linked to the building exactly once.
+  await _recomputeTenantsForBuilding(realm!._id, building);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -1230,6 +1616,30 @@ export async function addExpense(req: Req, res: Res) {
 export async function updateExpense(req: Req, res: Res) {
   const realm = req.realm;
   const { id, expenseId } = req.params;
+
+  // Normalize alternate field name from older UI builds: `recurring` →
+  // `isRecurring`. See note in addExpense.
+  if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
+    req.body.isRecurring = req.body.recurring;
+    delete req.body.recurring;
+  }
+
+  // A non-recurring expense MUST be anchored to a specific term — same
+  // invariant as addExpense; updates that flip recurring → false without a
+  // startTerm would silently produce dead expenses.
+  if (req.body.isRecurring === false && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for non-recurring expenses',
+      422
+    );
+  }
+  // Wave-18 B6: same invariant for recurring expenses (mirror addExpense).
+  if (req.body.isRecurring === true && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for recurring expenses',
+      422
+    );
+  }
 
   if (req.body.type) {
     validateEnum(req.body.type, EXPENSE_TYPES, 'type');
@@ -1264,6 +1674,14 @@ export async function updateExpense(req: Req, res: Res) {
     );
   }
 
+  // Wave-18 B1: keep one-time updates aligned to YYYYMM0100 (mirror addExpense).
+  if (req.body.isRecurring === false && req.body.startTerm) {
+    const st = Number(req.body.startTerm);
+    const normalized = Math.floor(st / 10000) * 10000 + 100;
+    req.body.startTerm = normalized;
+    if (req.body.endTerm) req.body.endTerm = normalized;
+  }
+
   const building = await Collections.Building.findOne({
     _id: id,
     realmId: realm!._id
@@ -1276,17 +1694,25 @@ export async function updateExpense(req: Req, res: Res) {
     throw new ServiceError('Expense does not exist', 404);
   }
 
+  // Wave-18 B5: validate customAllocations propertyIds against the
+  // building's units. Use the merged allocation method so partial updates
+  // (allocationMethod unchanged) still validate against the right rule.
+  const effectiveAllocationMethod =
+    req.body.allocationMethod || (expense as any).allocationMethod;
+  if (req.body.customAllocations !== undefined) {
+    _assertCustomAllocationPropertyIds(
+      building,
+      req.body.customAllocations,
+      effectiveAllocationMethod
+    );
+  }
+
   expense.set(req.body);
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  // Recompute rents for all tenants linked to this building
-  const propertyIds = (building as any).units
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
-  }
+  // Wave-14 F6: recompute every tenant linked to the building exactly once.
+  await _recomputeTenantsForBuilding(realm!._id, building);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -1336,18 +1762,21 @@ export async function removeExpense(req: Req, res: Res) {
       (building as any).ownerMonthlyExpenses.pull(eid);
     }
     (building as any).expenses.pull(expense._id);
+
+    // Delete linked Bill records — they reference this expense and would
+    // become orphans otherwise.
+    await Collections.Bill.deleteMany({
+      realmId: realm!._id,
+      buildingId: id,
+      expenseId: expId
+    });
   }
 
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  // Recompute rents for all tenants linked to this building
-  const propertyIds = (building as any).units
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
-  }
+  // Wave-14 F6: recompute every tenant linked to the building exactly once.
+  await _recomputeTenantsForBuilding(realm!._id, building);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -1357,9 +1786,35 @@ export async function removeExpense(req: Req, res: Res) {
 // Contractors
 // ---------------------------------------------------------------------------
 
+const VALID_CONTRACTOR_SPECIALTIES = [
+  'plumbing',
+  'electrical',
+  'plumber',
+  'electrician',
+  'painter',
+  'carpenter',
+  'mason',
+  'gardener',
+  'cleaner',
+  'elevator',
+  'locksmith',
+  'hvac',
+  'general',
+  'other'
+];
+
 export async function addContractor(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
+
+  // Validate required fields up-front. Without this, a missing/invalid
+  // specialty becomes a Mongoose ValidationError that surfaces as 500.
+  if (!req.body.specialty) {
+    throw new ServiceError('contractor specialty is required', 422);
+  }
+  if (!VALID_CONTRACTOR_SPECIALTIES.includes(req.body.specialty)) {
+    throw new ServiceError(`invalid specialty: ${req.body.specialty}`, 422);
+  }
 
   if (!req.body.name?.trim()) {
     throw new ServiceError('Contractor name is required', 422);
@@ -1383,6 +1838,17 @@ export async function addContractor(req: Req, res: Res) {
 export async function updateContractor(req: Req, res: Res) {
   const realm = req.realm;
   const { id, contractorId } = req.params;
+
+  // If specialty is being set, validate it before save() — a bad value would
+  // otherwise surface as a Mongoose ValidationError 500.
+  if (req.body.specialty !== undefined) {
+    if (!req.body.specialty) {
+      throw new ServiceError('contractor specialty is required', 422);
+    }
+    if (!VALID_CONTRACTOR_SPECIALTIES.includes(req.body.specialty)) {
+      throw new ServiceError(`invalid specialty: ${req.body.specialty}`, 422);
+    }
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -1443,24 +1909,86 @@ export async function removeContractor(req: Req, res: Res) {
 // Repairs
 // ---------------------------------------------------------------------------
 
+// Mirrors the Repair schema's `category` enum in
+// services/common/src/collections/building.ts. Validating up-front keeps a
+// missing/invalid category from surfacing as a Mongoose ValidationError 500.
+const VALID_REPAIR_CATEGORIES = [
+  'plumbing',
+  'electrical',
+  'elevator',
+  'roof',
+  'facade',
+  'heating',
+  'doors_windows',
+  'painting',
+  'flooring',
+  'general',
+  'other'
+];
+
+async function _removeRepairCharges(building: any, repair: any): Promise<void> {
+  const repairIdStr = String(repair._id);
+  for (const unit of building.units) {
+    // Prefer scoping by repairId (handles renames). Fall back to legacy
+    // description match for charges created before repairId was introduced.
+    const legacyDescription = `Repair: ${repair.title}`;
+    const toRemove = unit.monthlyCharges.filter(
+      (c: any) =>
+        (c.repairId && String(c.repairId) === repairIdStr) ||
+        (!c.repairId && c.description === legacyDescription)
+    );
+    for (const charge of toRemove) {
+      unit.monthlyCharges.pull(charge._id);
+    }
+  }
+}
+
 async function _distributeRepairCharge(
   building: any,
   repair: any,
   realmId: string
 ): Promise<void> {
+  // Cancelled repairs must not retain monthly charges. Wipe any prior
+  // distribution for this repair and bail out before re-creating.
+  if (repair.status === 'cancelled') {
+    await _removeRepairCharges(building, repair);
+    building.updatedDate = new Date();
+    await building.save();
+
+    const propertyIds = building.units
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    for (const propId of propertyIds) {
+      await _recomputeTenantsForProperty(realmId, propId);
+    }
+    return;
+  }
+
   if (!repair.chargeableTo || repair.chargeableTo === 'owners') return;
   if (!repair.chargeTerm) return;
 
   const cost = repair.actualCost || repair.estimatedCost || 0;
   if (cost <= 0) return;
 
-  const sharePercentage =
-    repair.chargeableTo === 'tenants' ? 100 : repair.tenantSharePercentage || 0;
+  // Respect explicit tenantSharePercentage when provided. Default depends on
+  // chargeableTo: 'tenants' implies 100% to tenants, 'split' implies 0%
+  // unless a percentage was set explicitly.
+  const sharePercentage = (() => {
+    if (repair.chargeableTo === 'owners') return 0;
+    if (
+      typeof repair.tenantSharePercentage === 'number' &&
+      Number.isFinite(repair.tenantSharePercentage)
+    ) {
+      return Math.max(0, Math.min(100, repair.tenantSharePercentage));
+    }
+    return repair.chargeableTo === 'tenants' ? 100 : 0;
+  })();
   if (sharePercentage <= 0) return;
 
   const effectiveAmount = cost * (sharePercentage / 100);
   const allocationMethod = repair.allocationMethod || 'general_thousandths';
   const term = Number(repair.chargeTerm);
+  const repairIdStr = String(repair._id);
 
   const buildingObj = building.toObject ? building.toObject() : building;
 
@@ -1470,23 +1998,30 @@ async function _distributeRepairCharge(
     const share = computeBuildingChargeForProperty(
       buildingObj,
       String(unit.propertyId),
-      { amount: effectiveAmount, allocationMethod, name: repair.title } as any
+      { amount: effectiveAmount, allocationMethod, name: repair.title } as any,
+      term
     );
 
-    if (share > 0) {
-      // Remove any existing charge for this repair+term combo
-      const existingIdx = unit.monthlyCharges.findIndex(
-        (c: any) =>
-          c.term === term && c.description === `Repair: ${repair.title}`
-      );
-      if (existingIdx >= 0) {
-        unit.monthlyCharges.pull(unit.monthlyCharges[existingIdx]._id);
-      }
+    // Remove existing charges for THIS repair (regardless of title), so
+    // renaming a repair doesn't double-count via description-based de-dup.
+    const legacyDescription = `Repair: ${repair.title}`;
+    const toRemove = unit.monthlyCharges.filter(
+      (c: any) =>
+        (c.repairId && String(c.repairId) === repairIdStr) ||
+        (!c.repairId &&
+          c.term === term &&
+          c.description === legacyDescription)
+    );
+    for (const charge of toRemove) {
+      unit.monthlyCharges.pull(charge._id);
+    }
 
+    if (share > 0) {
       unit.monthlyCharges.push({
         term,
         amount: Math.round(share * 100) / 100,
-        description: `Repair: ${repair.title}`
+        description: `Repair: ${repair.title}`,
+        repairId: repairIdStr
       });
     }
   }
@@ -1509,6 +2044,14 @@ export async function addRepair(req: Req, res: Res) {
 
   if (!req.body.title?.trim()) {
     throw new ServiceError('Repair title is required', 422);
+  }
+  // Validate category up-front. Without this, a missing/invalid category
+  // becomes a Mongoose ValidationError that surfaces as 500.
+  if (!req.body.category) {
+    throw new ServiceError('Repair category is required', 422);
+  }
+  if (!VALID_REPAIR_CATEGORIES.includes(req.body.category)) {
+    throw new ServiceError(`Invalid category: ${req.body.category}`, 422);
   }
   validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', {
     min: 0,
@@ -1560,6 +2103,18 @@ export async function addRepair(req: Req, res: Res) {
 export async function updateRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id, repairId } = req.params;
+
+  // PATCH semantics: only validate category when it is being changed.
+  // undefined means "don't touch"; null/empty/other-value triggers 422
+  // before save() so a Mongoose ValidationError can't surface as 500.
+  if (req.body.category !== undefined) {
+    if (!req.body.category) {
+      throw new ServiceError('Repair category is required', 422);
+    }
+    if (!VALID_REPAIR_CATEGORIES.includes(req.body.category)) {
+      throw new ServiceError(`Invalid category: ${req.body.category}`, 422);
+    }
+  }
 
   validateFiniteNumber(req.body.estimatedCost, 'estimatedCost', {
     min: 0,
@@ -1630,16 +2185,9 @@ export async function removeRepair(req: Req, res: Res) {
     throw new ServiceError('Repair does not exist', 404);
   }
 
-  // Clean up monthlyCharges created by _distributeRepairCharge
-  const chargeDescription = `Repair: ${repair.title}`;
-  for (const unit of (building as any).units) {
-    const toRemove = unit.monthlyCharges.filter(
-      (c: any) => c.description === chargeDescription
-    );
-    for (const charge of toRemove) {
-      unit.monthlyCharges.pull(charge._id);
-    }
-  }
+  // Clean up monthlyCharges created by _distributeRepairCharge — scope by
+  // repairId (with legacy description fallback) so renames don't leak.
+  await _removeRepairCharges(building, repair);
 
   (building as any).repairs.pull(repair._id);
   (building as any).updatedDate = new Date();

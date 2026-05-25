@@ -2,11 +2,25 @@ import { Collections, logger } from '@microrealestate/common';
 import moment from 'moment';
 
 export async function getRentsData(params) {
-  const { id: tenantId, term } = params;
+  const { id: tenantId, term, realmId } = params;
+
+  // Realm-scope the query: callers MUST supply the realmId of the requester
+  // so a session in one organization can never read a tenant from another.
+  // We accept calls without realmId only for backward compat with callers
+  // that have not been updated yet, but log loudly so missing call sites
+  // surface in production logs.
+  const filter = { _id: tenantId };
+  if (realmId) {
+    filter.realmId = realmId;
+  } else {
+    logger.warn(
+      `getRentsData called without realmId for tenant ${tenantId} — cross-tenant access not enforced`
+    );
+  }
 
   let dbTenant;
   try {
-    dbTenant = await Collections.Tenant.findOne({ _id: tenantId })
+    dbTenant = await Collections.Tenant.findOne(filter)
       .populate('realmId')
       .populate('leaseId')
       .populate('properties.propertyId');
@@ -86,8 +100,20 @@ export async function getRentsData(params) {
     tenant.contract.terminationDate = dbTenant.terminationDate;
   }
 
+  // Sanitize fileName before it becomes a filesystem path. dbTenant.name
+  // is user-controlled and previously flowed straight into file IO,
+  // which crashed on names containing `/`, `..`, or quotes — and worse,
+  // could escape the output directory. Allow ASCII alphanum, dot,
+  // dash, underscore plus the Greek code blocks to keep Greek tenant
+  // names intact. Same shape as the emailer attachments sanitize().
+  const sanitize = (s) =>
+    String(s || 'tenant')
+      .replace(/[^A-Za-z0-9._\-Ͱ-Ͽἀ-῿]/g, '_')
+      .slice(0, 100);
+  const fileName = `${sanitize(dbTenant.name)}-${term}`;
+
   return {
-    fileName: `${dbTenant.name}-${term}`,
+    fileName,
     tenant,
     landlord
   };

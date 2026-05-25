@@ -26,7 +26,60 @@ const CHARGEABLE_TO = ['owners', 'tenants', 'split'] as const;
 
 const TIME_RANGES = ['months', 'weeks', 'days', 'years'] as const;
 
-const LOCALES = ['en', 'fr-FR', 'de-DE', 'el', 'es-CO', 'pt-BR'] as const;
+// Accept both short forms and IETF tags. Frontend may emit either ('en-US'
+// vs 'en', 'el-GR' vs 'el'). Aliases are normalized in the manager layer
+// when persisted; downstream locale resolution (PDF/CSV/i18n) keys on the
+// short form so e.g. 'el-GR' resolves to the same Greek translations as
+// 'el'.
+const LOCALES = [
+  'en',
+  'en-US',
+  'fr-FR',
+  'de-DE',
+  'el',
+  'el-GR',
+  'es-CO',
+  'pt-BR'
+] as const;
+
+// Wave-21 C29-B1: ISO-4217 subset accepted on realm.currency. Without this
+// guard, a malformed currency code (e.g. "NOTACURRENCY") was accepted at
+// PATCH time and later crashed Intl.NumberFormat in the accounting CSV
+// pipeline with a 500. Add new codes here as needed; the list intentionally
+// stays narrow to keep the surface area small.
+const CURRENCIES = [
+  'EUR',
+  'USD',
+  'GBP',
+  'BRL',
+  'COP',
+  'AUD',
+  'CAD',
+  'CHF',
+  'JPY',
+  'CNY',
+  'INR',
+  'NOK',
+  'SEK',
+  'DKK'
+] as const;
+
+const PROPERTY_TYPES = [
+  'store',
+  'building',
+  'apartment',
+  'room',
+  'office',
+  'garage',
+  'parking',
+  'letterbox',
+  // Wave-17 B8: 'storage' (αποθήκη) is a common Greek property type for
+  // cellars / storage rooms attached to buildings. We expose ONE canonical
+  // type (not 'cellar' as a separate id) — the i18n label is per-locale.
+  // Surface lower-bound for 'storage' follows the parking/letterbox path
+  // (allow 0) since basements may be declared with no usable surface.
+  'storage'
+] as const;
 
 export function validateObjectId(
   id: unknown,
@@ -149,6 +202,97 @@ export function validateStringLength(
 }
 
 /**
+ * Strict version of validateStringLength: validates name-style fields with
+ * a {min, max, required} options shape. Trims whitespace before checking
+ * minimum length and rejects pure whitespace strings.
+ */
+export function validateStringField(
+  value: unknown,
+  fieldName: string,
+  opts: { min?: number; max?: number; required?: boolean } = {}
+): string | undefined {
+  const { min, max, required = false } = opts;
+  if (value == null || value === '') {
+    if (required) {
+      throw new ServiceError(`${fieldName} is required`, 422);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new ServiceError(`${fieldName} must be a string`, 422);
+  }
+  const trimmed = value.trim();
+  if (required && trimmed.length === 0) {
+    throw new ServiceError(`${fieldName} is required`, 422);
+  }
+  if (min != null && trimmed.length < min) {
+    throw new ServiceError(
+      `${fieldName} must be at least ${min} character${min === 1 ? '' : 's'}`,
+      422
+    );
+  }
+  if (max != null && value.length > max) {
+    throw new ServiceError(
+      `${fieldName} must be at most ${max} characters`,
+      422
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Validate a date string in DD/MM/YYYY format. Rejects empty strings (when
+ * required) and structurally invalid dates (e.g. 31/02/2024). Returns the
+ * trimmed string when valid, or undefined when empty and not required.
+ */
+export function validateDateString(
+  value: unknown,
+  fieldName: string,
+  opts: { required?: boolean } = {}
+): string | undefined {
+  const { required = false } = opts;
+  if (value == null || value === '') {
+    if (required) {
+      throw new ServiceError(`${fieldName} is required`, 422);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new ServiceError(`${fieldName} must be a string`, 422);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    if (required) {
+      throw new ServiceError(`${fieldName} is required`, 422);
+    }
+    return undefined;
+  }
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  if (!m) {
+    throw new ServiceError(
+      `${fieldName} must be in DD/MM/YYYY format`,
+      422
+    );
+  }
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  if (year < 1900 || year > 2999 || month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new ServiceError(`${fieldName} is not a valid date`, 422);
+  }
+  // Cross-check using Date — catches 31/02 etc.
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    throw new ServiceError(`${fieldName} is not a valid date`, 422);
+  }
+  return trimmed;
+}
+
+/**
  * Validate custom_percentage allocations sum to 100
  */
 export function validatePercentageAllocations(
@@ -215,18 +359,35 @@ export function validateAllocationValues(
 }
 
 /**
- * Strip MongoDB operators from an object (prevent injection)
+ * Strip MongoDB operators from an object (prevent injection).
+ * Walks nested objects and arrays, dropping any `$`-prefixed key at any depth.
+ * Dates, ObjectIds, Buffers and other non-plain objects are returned as-is.
  */
+function _isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function _sanitizeRecursive(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(_sanitizeRecursive);
+  }
+  if (_isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (k.startsWith('$')) continue;
+      out[k] = _sanitizeRecursive(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function sanitizeMongoObject(
   obj: Record<string, unknown>
 ): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (!key.startsWith('$')) {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
+  return _sanitizeRecursive(obj) as Record<string, unknown>;
 }
 
 // Re-export constants for use in managers
@@ -236,5 +397,7 @@ export {
   REPAIR_STATUSES,
   CHARGEABLE_TO,
   TIME_RANGES,
-  LOCALES
+  LOCALES,
+  PROPERTY_TYPES,
+  CURRENCIES
 };

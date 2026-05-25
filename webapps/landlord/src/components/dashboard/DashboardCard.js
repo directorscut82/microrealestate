@@ -8,6 +8,7 @@ import {
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import { LuArrowRightCircle } from 'react-icons/lu';
+import useTranslation from 'next-translate/useTranslation';
 
 /*
  * DashboardCard — DESIGN.md panel composition.
@@ -26,6 +27,7 @@ export function DashboardCard({
   onClick,
   className
 }) {
+  const { t } = useTranslation('common');
   return (
     <Card className={cn('flex flex-col', className)}>
       {(title || Icon) && (
@@ -56,7 +58,7 @@ export function DashboardCard({
             variant="ghost"
             size="icon"
             onClick={onClick}
-            aria-label="Open"
+            aria-label={t('Open')}
           >
             <LuArrowRightCircle className="size-5" />
           </Button>

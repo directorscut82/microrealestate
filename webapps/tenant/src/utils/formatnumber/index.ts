@@ -16,7 +16,7 @@ export function formatNumber(
       minimumFractionDigits
     });
   } else {
-    return Intl.NumberFormat(locale, {
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: currency,
       minimumFractionDigits

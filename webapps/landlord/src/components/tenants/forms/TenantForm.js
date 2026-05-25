@@ -9,33 +9,47 @@ import { Separator } from '../../ui/separator';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import useTranslation from 'next-translate/useTranslation';
 
+const PHONE_REGEX = /^[+0-9\s()-]{6,30}$/;
+const optionalPhone = z
+  .string()
+  .trim()
+  .max(30)
+  .refine((v) => !v || PHONE_REGEX.test(v), { message: 'Invalid phone number' })
+  .optional();
+
 const contactSchema = z.object({
-  contact: z.string().min(1),
-  email: z.string().email().min(1),
-  phone1: z.string().optional(),
-  phone2: z.string().optional()
+  contact: z.string().trim().min(1).max(200),
+  email: z.string().trim().email().min(1).max(200),
+  phone1: optionalPhone,
+  phone2: optionalPhone
 });
 
 const schema = z.object({
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
-  taxId: z.string().optional(),
-  phone: z.string().optional(),
-  email: z.string().email().or(z.literal('')).optional(),
+  firstName: z.string().trim().min(1).max(120),
+  lastName: z.string().trim().min(1).max(120),
+  taxId: z.string().trim().max(60).optional(),
+  phone: optionalPhone,
+  email: z
+    .string()
+    .trim()
+    .email()
+    .max(200)
+    .or(z.literal(''))
+    .optional(),
   isCompany: z.string().min(1),
-  legalRepresentative: z.string().optional(),
-  legalStructure: z.string().optional(),
-  ein: z.string().optional(),
-  dos: z.string().optional(),
-  capital: z.string().optional(),
+  legalRepresentative: z.string().trim().max(200).optional(),
+  legalStructure: z.string().trim().max(120).optional(),
+  ein: z.string().trim().max(60).optional(),
+  dos: z.string().trim().max(120).optional(),
+  capital: z.string().trim().max(60).optional(),
   contacts: z.array(contactSchema),
   address: z.object({
-    street1: z.string().optional(),
-    street2: z.string().optional(),
-    city: z.string().optional(),
-    zipCode: z.string().optional(),
-    state: z.string().optional(),
-    country: z.string().optional()
+    street1: z.string().trim().max(200).optional(),
+    street2: z.string().trim().max(200).optional(),
+    city: z.string().trim().max(120).optional(),
+    zipCode: z.string().trim().max(30).optional(),
+    state: z.string().trim().max(120).optional(),
+    country: z.string().trim().max(120).optional()
   })
 });
 

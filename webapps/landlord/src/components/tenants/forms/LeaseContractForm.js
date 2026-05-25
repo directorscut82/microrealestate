@@ -41,16 +41,34 @@ const propertySchema = z.object({
   exitDate: z.string().min(1)
 });
 
-const schema = z.object({
-  leaseId: z.string().min(1),
-  beginDate: z.string().min(1),
-  endDate: z.string().min(1),
-  terminated: z.boolean().optional(),
-  terminationDate: z.string().optional(),
-  properties: z.array(propertySchema).min(1),
-  guaranty: z.coerce.number().min(0),
-  guarantyPayback: z.coerce.number().min(0).optional()
-});
+const schema = z
+  .object({
+    leaseId: z.string().min(1),
+    beginDate: z.string().min(1),
+    endDate: z.string().min(1),
+    terminated: z.boolean().optional(),
+    terminationDate: z.string().optional(),
+    properties: z.array(propertySchema).min(1),
+    guaranty: z.coerce.number().min(0).max(10000000).finite(),
+    guarantyPayback: z.coerce.number().min(0).max(10000000).optional()
+  })
+  .refine(
+    ({ beginDate, endDate }) => {
+      if (!beginDate || !endDate) return true;
+      return moment(endDate).isAfter(moment(beginDate));
+    },
+    { message: 'End date must be after start date', path: ['endDate'] }
+  )
+  .refine(
+    ({ terminated, terminationDate }) => {
+      if (!terminated) return true;
+      return !!(terminationDate && terminationDate.length > 0);
+    },
+    {
+      message: 'Termination date is required',
+      path: ['terminationDate']
+    }
+  );
 
 const emptyExpense = () => ({
   key: nanoid(),

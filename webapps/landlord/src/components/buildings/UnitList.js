@@ -27,16 +27,26 @@ import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
+const optionalNumber = (min, max) =>
+  z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.coerce.number().min(min).max(max).optional()
+  );
+
 const unitSchema = z.object({
-  atakNumber: z.string().min(1),
-  floor: z.union([z.string(), z.number()]).optional(),
-  unitLabel: z.string().optional(),
-  surface: z.union([z.string(), z.number()]).optional(),
-  generalThousandths: z.union([z.string(), z.number()]).optional(),
-  heatingThousandths: z.union([z.string(), z.number()]).optional(),
-  elevatorThousandths: z.union([z.string(), z.number()]).optional(),
+  atakNumber: z.string().trim().min(1).max(60),
+  // Negative integers allowed for basements (-1 .. -10).
+  floor: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.coerce.number().int().min(-10).max(50).optional()
+  ),
+  unitLabel: z.string().trim().max(120).optional(),
+  surface: optionalNumber(0, 1000000),
+  generalThousandths: optionalNumber(0, 1000),
+  heatingThousandths: optionalNumber(0, 1000),
+  elevatorThousandths: optionalNumber(0, 1000),
   isManaged: z.boolean(),
-  propertyId: z.string().optional()
+  propertyId: z.string().trim().max(60).optional()
 });
 
 function UnitFormDialog({ open, setOpen, unit, buildingId }) {

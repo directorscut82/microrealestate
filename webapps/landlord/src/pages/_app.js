@@ -12,6 +12,7 @@ import '../components/RichTextEditor/richtexteditor.css';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Application from '../components/Application';
+import { applyZodTranslator } from '../utils/zodErrorMap';
 import config from '../config';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Head from 'next/head';
@@ -19,6 +20,8 @@ import { InjectStoreContext } from '../store';
 import moment from 'moment';
 import { IBM_Plex_Mono, Manrope } from 'next/font/google';
 import { ThemeProvider } from 'next-themes';
+import { useEffect } from 'react';
+import useTranslation from 'next-translate/useTranslation';
 
 const queryClient = new QueryClient();
 
@@ -56,6 +59,8 @@ const fontVariables = `${manrope.variable} ${plexMono.variable}`;
 
 function MyApp(props) {
   const { Component, pageProps } = props;
+  const { t } = useTranslation('common');
+  applyZodTranslator(t);
   moment.locale(pageProps?.__lang ?? 'en');
 
   // Apply font CSS variables to <html> so Radix portals inherit them.
@@ -65,6 +70,24 @@ function MyApp(props) {
       plexMono.variable
     );
   }
+
+  // Reset retired theme values from localStorage to 'system'.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem('theme');
+      if (stored && !['light', 'dark', 'system'].includes(stored)) {
+        window.localStorage.setItem('theme', 'system');
+        // Strip stale theme class names from <html>.
+        const root = document.documentElement;
+        ['midnight', 'forest', 'sunset'].forEach((cls) =>
+          root.classList.remove(cls)
+        );
+      }
+    } catch {
+      // localStorage may be unavailable (private mode, SSR boundary).
+    }
+  }, []);
 
   return (
     <>
@@ -81,7 +104,7 @@ function MyApp(props) {
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-2 focus:bg-primary focus:text-primary-foreground"
       >
-        Skip to content
+        {t('Skip to content')}
       </a>
       <main id="main-content" className={`${fontVariables} font-sans`}>
         <ThemeProvider

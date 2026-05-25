@@ -18,7 +18,7 @@ export async function fetchOneTenant(tenantId: string): Promise<Lease | null> {
 
   if (data.error) {
     console.error(data.error);
-    throw new Error(data.error);
+    throw new Error('Failed to fetch tenant data');
   }
 
   if (!data.results?.length) {
@@ -42,7 +42,7 @@ export async function fetchAllTenants(): Promise<Lease[]> {
 
   if (data.error) {
     console.error(data.error);
-    throw new Error(data.error);
+    throw new Error('Failed to fetch tenant data');
   }
 
   if (!data.results) {
