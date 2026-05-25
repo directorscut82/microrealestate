@@ -12,8 +12,40 @@ import express from 'express';
 import fs from 'fs-extra';
 import Handlebars from 'handlebars';
 import moment from 'moment';
+import multer from 'multer';
 import path from 'path';
 import uploadMiddleware from '../utils/uploadmiddelware.js';
+
+// MongoDB ObjectIds are 24-character lowercase hex strings. Validating
+// before the Mongoose query prevents Mongoose's CastError from bubbling
+// up as a 500 — and short-circuits any URL-encoded path-traversal in
+// the :id slot.
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/;
+function assertValidObjectId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !OBJECT_ID_RE.test(value)) {
+    throw new ServiceError(`invalid ${name}`, 422);
+  }
+  return value;
+}
+
+// Translate multer's MulterError class into a clean HTTP response. The
+// previous handler bubbled the raw error to the express default 500
+// handler, leaking the stack and using the wrong status code (413 is
+// the correct response for a payload-too-large upload).
+function handleUploadError(
+  err: any,
+  // express requires the 4-arg signature for error middlewares; req is unused
+  // here but must remain in the signature for express to pick this handler up.
+  _req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (err instanceof multer.MulterError) {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 422;
+    return res.status(status).json({ status, message: err.message });
+  }
+  return next(err);
+}
 
 async function _getTempate(organization: any, templateId: string) {
   const template = await Collections.Template.findOne({
@@ -207,6 +239,24 @@ async function _getTemplateValues(organization: any, tenantId: string, leaseId: 
   return templateValues;
 }
 
+// Substitute `{{path.to.field}}` markers in plain-text nodes with values
+// from the template-values context. Missing fields render as empty strings
+// (no crash) so authors can use optional fields safely. This complements
+// the richtext template-node substitution below — without it, plain-text
+// Handlebars markers typed directly into a paragraph were emitted verbatim.
+function _resolveString(s: string, ctx: any): string {
+  return s.replace(/\{\{([\w.[\]]+)\}\}/g, (_m, path: string) => {
+    try {
+      const segments = path.match(/[^.[\]]+/g) || [];
+      let v: any = ctx;
+      for (const seg of segments) v = v?.[seg];
+      return v == null ? '' : String(v);
+    } catch {
+      return '';
+    }
+  });
+}
+
 function _resolveTemplates(element: any, templateValues: any): any {
   if (element.content) {
     element.content = element.content.map((childElement: any) =>
@@ -214,11 +264,17 @@ function _resolveTemplates(element: any, templateValues: any): any {
     );
   }
 
+  // Plain text nodes — substitute any `{{...}}` markers in-place.
+  if (element.type === 'text' && typeof element.text === 'string') {
+    element.text = _resolveString(element.text, templateValues);
+  }
+
   if (element.type === 'template') {
     element.type = 'text';
     element.text = Handlebars.compile(element.attrs.id)(templateValues) || ' ';
-    // TODO check if this doesn't open XSS issues
-    element.text = element.text.replace(/&#x27;/g, "'");
+    // Keep HTML entities escaped — un-escaping &#x27; back to ' is a textbook
+    // way to reintroduce XSS by allowing user-controlled apostrophes through
+    // an attribute boundary in downstream renderers.
     delete element.attrs;
   }
   return element;
@@ -246,9 +302,63 @@ export default function () {
     Middlewares.asyncWrapper(async (req, res) => {
       try {
         logger.debug(`generate pdf file for ${JSON.stringify(req.params)}`);
-        const pdfFile = await pdf.generate(req.params.document, req.params);
+        const realm = (req as any).realm;
+        if (!realm?._id) {
+          throw new ServiceError('organization required', 404);
+        }
+
+        // Pre-flight: confirm the tenant exists in this realm AND has a
+        // rent entry for the requested term. Without this, the renderer
+        // happily produces a ~1KB blank PDF for terms outside the
+        // contract window — a silent data integrity bug.
+        const tenantId = req.params.id;
+        const term = req.params.term;
+        if (!OBJECT_ID_RE.test(String(tenantId))) {
+          throw new ServiceError('invalid tenant id', 422);
+        }
+        if (!/^\d{10}$/.test(String(term))) {
+          throw new ServiceError('invalid term format', 422);
+        }
+        const tenant = await Collections.Tenant.findOne({
+          _id: tenantId,
+          realmId: String(realm._id)
+        }).lean();
+        if (!tenant) {
+          throw new ServiceError('tenant not found', 404);
+        }
+        const termNumber = Number(term);
+        const rents = (tenant as any).rents || [];
+        const hasTerm = rents.some((r: any) => Number(r.term) === termNumber);
+        if (!hasTerm) {
+          throw new ServiceError('rent not found for term', 404);
+        }
+
+        // Pass the caller's realmId into the data picker so the underlying
+        // Tenant.findOne is realm-scoped — without this, anyone with a valid
+        // session in any org could fetch any tenant's PDF by id.
+        const pdfFile = await pdf.generate(req.params.document, {
+          ...req.params,
+          realmId: String(realm._id)
+        });
         return res.download(pdfFile);
       } catch (error) {
+        // Preserve explicit ServiceError status codes; only fall back to 404
+        // for unexpected errors from the PDF pipeline.
+        if (error instanceof ServiceError) {
+          throw error;
+        }
+        // Wave-20 F4: filesystem permission/missing errors are infra
+        // failures (500), not "not found" (404). Treating EACCES/ENOENT
+        // as 404 misled the user into thinking their data was missing
+        // when the container couldn't write the PDF. Strip the absolute
+        // path from the message so we don't leak internal layout.
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === 'EACCES' || code === 'ENOENT' || code === 'EROFS') {
+          logger.error(
+            `PDF generation filesystem error (${code}): ${(error as Error).message}`
+          );
+          throw new ServiceError('PDF generation failed', 500);
+        }
         throw new ServiceError(error as Error, 404);
       }
     })
@@ -273,12 +383,10 @@ export default function () {
   documentsApi.get(
     '/:id',
     Middlewares.asyncWrapper(async (req, res) => {
-      const documentId = req.params.id;
-
-      if (!documentId) {
-        logger.error('missing document id');
-        throw new ServiceError('missing fields', 422);
-      }
+      // Validate the id BEFORE the Mongoose query. URL-encoded `..`
+      // sequences would otherwise reach Mongoose, throw CastError, and
+      // bubble out as an opaque 500 with a stack trace.
+      const documentId = assertValidObjectId(req.params.id, 'document id');
 
       const documentFound = await Collections.Document.findOne({
         _id: documentId,
@@ -300,19 +408,49 @@ export default function () {
           throw new ServiceError('missing fields', 422);
         }
 
-        if ((documentFound as any).url.indexOf('..') !== -1) {
-          logger.error('document url invalid containing ".."');
-          throw new ServiceError('missing fields', 422);
+        const url: string = (documentFound as any).url;
+
+        // Robust path traversal check: resolve the absolute path and confirm
+        // it stays inside UPLOADS_DIRECTORY. The previous `indexOf('..')`
+        // string match missed URL-encoded variants like `%2e%2e` and
+        // mixed-separator attempts. `path.resolve` decodes `..` segments
+        // so any escape attempt resolves outside the uploads root.
+        const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
+        const filePath = path.resolve(uploadsRoot, url);
+        if (
+          filePath !== uploadsRoot &&
+          !filePath.startsWith(uploadsRoot + path.sep)
+        ) {
+          logger.error(`document url ${url} escapes uploads root`);
+          throw new ServiceError('forbidden', 403);
         }
 
+        // figure out mime + filename for safe download response
+        const mimeType =
+          (documentFound as any).mimeType || 'application/octet-stream';
+        // Preserve the original (possibly non-ASCII) filename for the user
+        // via RFC 5987 `filename*=UTF-8''<encoded>`, while keeping a sanitized
+        // ASCII fallback in `filename=` for legacy clients. Strip CR/LF/quotes
+        // from both to prevent header-injection.
+        const originalName = (
+          (documentFound as any).name || path.basename(url)
+        )
+          .toString()
+          .replace(/[\r\n"]/g, '');
+        const asciiFallback = originalName.replace(/[^A-Za-z0-9._-]/g, '_');
+        const utf8Encoded = encodeURIComponent(originalName);
+        const contentDisposition = `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
+
         // first try to download from file system
-        const filePath = path.join(UPLOADS_DIRECTORY as string, (documentFound as any).url);
         if (fs.existsSync(filePath)) {
           try {
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Disposition', contentDisposition);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
             return fs.createReadStream(filePath).pipe(res);
           } catch (error) {
             logger.error(
-              `cannot download file ${(documentFound as any).url} from file system`,
+              `cannot download file ${url} from file system`,
               error
             );
             throw new ServiceError('cannot download file', 404);
@@ -320,16 +458,16 @@ export default function () {
         }
 
         // otherwise download from s3
-        if (s3.isEnabled((req as any).realm.thirdParties.b2)) {
+        if (s3.isEnabled((req as any).realm?.thirdParties?.b2)) {
           try {
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Disposition', contentDisposition);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
             return s3
-              .downloadFile((req as any).realm.thirdParties.b2, (documentFound as any).url)
+              .downloadFile((req as any).realm.thirdParties.b2, url)
               .pipe(res);
           } catch (error) {
-            logger.error(
-              `cannot download file ${(documentFound as any).url} from s3`,
-              error
-            );
+            logger.error(`cannot download file ${url} from s3`, error);
             throw new ServiceError('cannot download file', 404);
           }
         }
@@ -343,30 +481,93 @@ export default function () {
   documentsApi.post(
     '/upload',
     uploadMiddleware(),
+    handleUploadError,
     Middlewares.asyncWrapper(async (req, res) => {
-      const key = [req.body.s3Dir, req.body.fileName].join('/');
-      if (s3.isEnabled((req as any).realm.thirdParties.b2)) {
-        try {
-          const data = await s3.uploadFile((req as any).realm.thirdParties.b2, {
-            file: (req as any).file!,
-            fileName: req.body.fileName,
-            url: key
-          });
-          return res.status(201).send(data);
-        } catch (error) {
-          throw new ServiceError(error as Error, 500);
-        } finally {
+      // Build the storage key without a leading slash — joining ['', 'file']
+      // produced '/file', which path.resolve later treats as an absolute path
+      // and resolves OUTSIDE UPLOADS_DIRECTORY, breaking both file lookup and
+      // the cleanup sweep's "is this referenced?" check.
+      const dirPart = String(req.body.s3Dir || '').replace(/^\/+|\/+$/g, '');
+      const filePart = String(req.body.fileName || '').replace(/^\/+/, '');
+      const key = dirPart ? `${dirPart}/${filePart}` : filePart;
+      // Optional-chain so a realm without thirdParties (or without b2) does
+      // not crash the route — previously this threw on `.b2` of undefined.
+      const b2Config = (req as any).realm?.thirdParties?.b2;
+      // Always clean up the temp upload, regardless of which storage path
+      // we take or whether it errored. The previous code only removed the
+      // file inside the s3 branch which leaked uploads when s3 was disabled
+      // and on uncaught failures.
+      //
+      // Edge case for local-disk uploads: multer.diskStorage already writes
+      // the file directly into UPLOADS_DIRECTORY (see uploadmiddelware.ts),
+      // so the "temp" path IS the final destination. The earlier code did
+      // a self-copy with fs.copyFileSync(src, src) and then removed it in
+      // the finally block — i.e. it deleted the just-uploaded file. Track
+      // whether the file is already at its destination to skip both the
+      // copy and the cleanup in that case.
+      let isAlreadyAtDestination = false;
+      try {
+        if (s3.isEnabled(b2Config)) {
           try {
-            fs.removeSync((req as any).file!.path);
-          } catch (err) {
-            // catch error and do nothing
+            const data = await s3.uploadFile(b2Config, {
+              file: (req as any).file!,
+              fileName: req.body.fileName,
+              url: key
+            });
+            return res.status(201).send(data);
+          } catch (error) {
+            throw new ServiceError(error as Error, 500);
           }
+        } else {
+          // Local-disk fallback: when S3/B2 is not configured, persist the
+          // upload to UPLOADS_DIRECTORY so the document is actually
+          // retrievable later. The previous code returned 201 with the key
+          // but threw the temp file away in the finally block — a silent
+          // data-loss bug for self-hosted deployments without object
+          // storage.
+          const file = (req as any).file;
+          if (file?.path) {
+            const orgPath = String(req.body.s3Dir || '');
+            const targetPath = path.join(
+              UPLOADS_DIRECTORY as string,
+              orgPath,
+              req.body.fileName
+            );
+            // Defense-in-depth: confirm the resolved target stays inside
+            // UPLOADS_DIRECTORY. sanitizePath in uploadmiddelware already
+            // strips traversal but a double-check costs nothing.
+            const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
+            const resolvedTarget = path.resolve(targetPath);
+            if (
+              resolvedTarget !== uploadsRoot &&
+              !resolvedTarget.startsWith(uploadsRoot + path.sep)
+            ) {
+              throw new ServiceError('invalid upload path', 422);
+            }
+            isAlreadyAtDestination =
+              path.resolve(file.path) === resolvedTarget;
+            if (!isAlreadyAtDestination) {
+              fs.mkdirSync(path.dirname(resolvedTarget), { recursive: true });
+              fs.copyFileSync(file.path, resolvedTarget);
+            }
+          }
+          return res.status(201).send({
+            fileName: req.body.fileName,
+            key
+          });
         }
-      } else {
-        return res.status(201).send({
-          fileName: req.body.fileName,
-          key
-        });
+      } finally {
+        try {
+          if (
+            !isAlreadyAtDestination &&
+            (req as any).file?.path &&
+            fs.existsSync((req as any).file.path)
+          ) {
+            fs.removeSync((req as any).file.path);
+          }
+        } catch (err) {
+          // best-effort cleanup
+        }
       }
     })
   );
@@ -392,6 +593,18 @@ export default function () {
         if (!template) {
           throw new ServiceError('template not found', 404);
         }
+      }
+
+      // Documents of type='file' do not need a template — they are direct
+      // uploads (PDFs, images, etc). Only require type or templateId for
+      // non-file documents. Without this branch the schema's required:true
+      // on templateId would 500 every legitimate file upload.
+      const incomingType = dataSet.type || template?.type;
+      if (!incomingType) {
+        throw new ServiceError('type or templateId required', 422);
+      }
+      if (incomingType !== 'file' && !dataSet.templateId && !template) {
+        throw new ServiceError('templateId required for non-file documents', 422);
       }
 
       const documentToCreate: any = {
@@ -445,23 +658,37 @@ export default function () {
         throw new ServiceError('missing fields', 422);
       }
 
-      const doc = req.body || {};
+      const incoming = req.body || {};
 
-      if (!['text'].includes(doc.type)) {
+      // Trust the STORED type, not the incoming payload — otherwise a caller
+      // can claim type='text' and slip through this guard while updating a
+      // 'file' document. Fetch the doc first, scoped to the caller's realm.
+      const stored = await Collections.Document.findOne({
+        _id: incoming._id,
+        realmId: organizationId
+      });
+      if (!stored) {
+        throw new ServiceError('document not found', 404);
+      }
+      if ((stored as any).type !== 'text') {
         throw new ServiceError('document cannot be modified', 405);
+      }
+
+      // Allowlist editable fields explicitly. Spreading the entire body let
+      // a client overwrite realmId, type, tenantId, etc.
+      const update: Record<string, unknown> = {};
+      for (const field of ['name', 'description', 'contents', 'html'] as const) {
+        if (Object.prototype.hasOwnProperty.call(incoming, field)) {
+          update[field] = incoming[field];
+        }
       }
 
       const updatedDocument = await Collections.Document.findOneAndUpdate(
         {
-          _id: doc._id,
+          _id: incoming._id,
           realmId: organizationId
         },
-        {
-          $set: {
-            ...doc,
-            realmId: organizationId
-          }
-        },
+        { $set: update },
         { new: true }
       );
 
@@ -479,6 +706,10 @@ export default function () {
       const organizationId = req.headers.organizationid;
       const documentIds = req.params.ids.split(',');
 
+      // Validate every id BEFORE the Mongoose query — without this a malformed
+      // id (or a NoSQL probe) would surface as a CastError 500 inside $in.
+      documentIds.forEach((id) => assertValidObjectId(id, 'document id'));
+
       // fetch documents
       const documents = await Collections.Document.find({
         _id: { $in: documentIds },
@@ -486,13 +717,31 @@ export default function () {
       });
 
       // delete documents from file systems
+      // The previous `indexOf('..')` check missed URL-encoded variants
+      // (`%2e%2e`) and mixed-separator escapes. Use the same path.resolve
+      // guard the GET handler uses: resolve to absolute, then verify the
+      // result stays inside UPLOADS_DIRECTORY. Drop anything that escapes.
+      const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
       documents.forEach((doc: any) => {
-        if (doc.type !== 'file' || doc.url.indexOf('..') !== -1) {
+        if (doc.type !== 'file') {
           return;
         }
-        const filePath = path.join(UPLOADS_DIRECTORY as string, doc.url);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        // Match the cleanup sweep — strip leading slash so a stored URL like
+        // '/orgid/file.pdf' resolves under uploadsRoot rather than at the
+        // filesystem root.
+        const cleanUrl = String(doc.url || '').replace(/^\/+/, '');
+        const resolved = path.resolve(uploadsRoot, cleanUrl);
+        if (
+          resolved !== uploadsRoot &&
+          !resolved.startsWith(uploadsRoot + path.sep)
+        ) {
+          logger.warn(
+            `refusing to delete file outside uploads root: ${doc.url}`
+          );
+          return;
+        }
+        if (fs.existsSync(resolved)) {
+          fs.unlinkSync(resolved);
         }
       });
 

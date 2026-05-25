@@ -17,6 +17,7 @@ import BuildingForm from '../../../components/buildings/BuildingForm';
 import BuildingDashboard from '../../../components/buildings/BuildingDashboard';
 import { Card } from '../../../components/ui/card';
 import ConfirmDialog from '../../../components/ConfirmDialog';
+import ErrorPage from 'next/error';
 import ContractorList from '../../../components/buildings/ContractorList';
 import ExpenseList from '../../../components/buildings/ExpenseList';
 import Page from '../../../components/Page';
@@ -43,8 +44,11 @@ function Building() {
   const { data: building, isLoading } = useQuery({
     queryKey: [QueryKeys.BUILDINGS, buildingId],
     queryFn: () => fetchBuilding(buildingId),
-    enabled: !!buildingId
+    enabled: !!buildingId && buildingId !== 'new'
   });
+
+  const buildingNotFound =
+    buildingId && buildingId !== 'new' && !isLoading && !building;
 
   const saveMutation = useMutation({
     mutationFn: (data) => updateBuilding(data),
@@ -111,6 +115,10 @@ function Building() {
     },
     [building, saveMutation, t]
   );
+
+  if (buildingNotFound) {
+    return <ErrorPage statusCode={404} />;
+  }
 
   return (
     <Page

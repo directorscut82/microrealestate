@@ -16,6 +16,18 @@ export function DownLoadButton({
   const apiFetcher = useApiFetcher();
   const { t } = useTranslation();
 
+  const sanitizeForFilename = (value: string, fallback: string) => {
+    // Strip path separators, control chars, and characters that are unsafe on
+    // common filesystems. Collapse whitespace, trim, and clamp to 64 chars.
+    const cleaned = String(value || '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\\/:*?"<>|\x00-\x1f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 64);
+    return cleaned || fallback;
+  };
+
   const handleClick = async () => {
     const response = await apiFetcher.get(
       `/api/v2/documents/invoice/${tenant.id}/${invoice.term}`,
@@ -23,9 +35,11 @@ export function DownLoadButton({
         responseType: 'blob'
       }
     );
+    const safeTenant = sanitizeForFilename(tenant.name, 'tenant');
+    const safeLabel = sanitizeForFilename(t('invoice'), 'invoice');
     fileDownload(
       response.data,
-      `${tenant.name}-${invoice.term}-${t('invoice')}.pdf`
+      `${safeTenant}-${invoice.term}-${safeLabel}.pdf`
     );
   };
 

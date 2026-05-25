@@ -9,12 +9,16 @@ export const transports = [
       }),
       winston.format.errors({ stack: true }),
       winston.format.printf((info) => {
-        let message = info.message;
-        if (info.stack) {
-          message = `${info.message}${info.stack}`;
-        }
-
-        return `${info.timestamp} <${info.level.toUpperCase()[0]}> ${message}`;
+        const ts = info.timestamp || new Date().toISOString();
+        const lvl = (info.level || 'info').toString();
+        // When format.errors() is given an Error object, it moves the message
+        // onto info.stack and may leave info.message undefined. Fall back
+        // through stack -> JSON so we never log "<E> undefined".
+        const msg =
+          info.message !== undefined && info.message !== null
+            ? info.message
+            : info.stack || JSON.stringify(info);
+        return `${ts} <${lvl.toUpperCase()[0]}> ${msg}`;
       })
     )
   })

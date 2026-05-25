@@ -103,6 +103,7 @@ function Shortcuts({
             label={isDesktop ? t('Pay a rent') : t('Pay')}
             disabled={!dashboardData?.overview?.tenantCount}
             onClick={handlePayment}
+            className="md:flex md:flex-col md:items-center md:justify-start"
             dataCy="shortcutSettleRent"
           />
 
@@ -110,6 +111,7 @@ function Shortcuts({
             Icon={LuStopCircle}
             label={isDesktop ? t('Terminate a lease') : t('Terminate')}
             onClick={handleTerminateLease}
+            className="md:flex md:flex-col md:items-center md:justify-start"
             dataCy="shortcutTerminateLease"
           />
 
@@ -117,6 +119,7 @@ function Shortcuts({
             Icon={LuKeyRound}
             label={isDesktop ? t('Add a property') : t('Add')}
             onClick={handleAddProperty}
+            className="md:flex md:flex-col md:items-center md:justify-start"
             dataCy="shortcutAddProperty"
           />
 
@@ -124,6 +127,7 @@ function Shortcuts({
             Icon={LuUserCircle}
             label={isDesktop ? t('Add a tenant') : t('Add')}
             onClick={handleAddTenant}
+            className="md:flex md:flex-col md:items-center md:justify-start"
             dataCy="shortcutAddTenant"
           />
 
@@ -132,6 +136,7 @@ function Shortcuts({
               Icon={RiContractLine}
               label={isDesktop ? t('Create a contract') : t('Create')}
               onClick={handleCreateContract}
+              className="md:flex md:flex-col md:items-center md:justify-start"
               dataCy="shortcutCreateContract"
             />
           )}

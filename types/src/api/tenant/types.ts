@@ -51,13 +51,6 @@ export type TenantDataType = {
       description: string;
       type: string;
     }[];
-    documents:
-      | {
-          name: string;
-          description: string;
-          url: string;
-        }[]
-      | [];
     invoices:
       | {
           id: string;

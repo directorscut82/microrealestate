@@ -189,8 +189,30 @@ if [[ "$redeploy" == "yes" ]]; then
   fi
   ok "Found stack id=$stack_id"
 
-  # Update the stack with local compose content + pull new images
-  info "Pushing updated compose content to Portainer (and pulling images)..."
+  # ---- explicit image pulls ----
+  # Portainer's PullImage:true flag is unreliable with mutable tags like :nas.
+  # The local Docker daemon may consider an existing :nas image "up to date"
+  # even when the remote SHA has changed, leaving the stack on a stale image.
+  # We pull each image explicitly via the Docker API to guarantee freshness.
+  info "Force-pulling all :nas images via Docker API..."
+  IMAGES=(authenticator api gateway emailer pdfgenerator tenantapi landlord-frontend tenant-frontend resetservice)
+  for img in "${IMAGES[@]}"; do
+    pull_status=$(curl -sS -X POST \
+      -H "X-API-Key: $PORTAINER_TOKEN" \
+      "$PORTAINER_URL/api/endpoints/$PORTAINER_ENDPOINT_ID/docker/images/create?fromImage=ghcr.io/${FORK}/${img}&tag=nas" \
+      --max-time 180 2>&1 | tail -1)
+    if echo "$pull_status" | grep -qE 'Downloaded newer image|Image is up to date'; then
+      printf "  %-20s ✓\n" "$img"
+    else
+      err "Failed to pull $img:nas"
+      echo "$pull_status"
+      exit 1
+    fi
+  done
+  ok "All 9 images pulled"
+
+  # ---- Update the stack — Portainer will recreate containers using the pulled images ----
+  info "Updating stack (recreates containers)..."
   compose_content=$(jq -Rs . < "$COMPOSE_FILE")
   update_payload=$(jq -n --argjson content "$compose_content" \
     '{StackFileContent: $content, Env: [], Prune: false, PullImage: true}')
@@ -199,13 +221,13 @@ if [[ "$redeploy" == "yes" ]]; then
     -H "X-API-Key: $PORTAINER_TOKEN" \
     -H "Content-Type: application/json" \
     "$PORTAINER_URL/api/stacks/${stack_id}?endpointId=$PORTAINER_ENDPOINT_ID" \
-    -d "$update_payload")
+    -d "$update_payload" --max-time 240)
   if [[ "$http_code" != "200" ]]; then
     err "Portainer update failed (HTTP $http_code)"
     cat /tmp/portainer-update.json 2>/dev/null
     exit 1
   fi
-  ok "Stack updated and images pulled"
+  ok "Stack updated"
 
   # Poll container status
   info "Waiting for containers to be running..."
@@ -216,15 +238,48 @@ if [[ "$redeploy" == "yes" ]]; then
     total=$(echo "$containers" | jq -r '[.[] | select(.Names[] | test("mre-"))] | length')
     running=$(echo "$containers" | jq -r '[.[] | select(.Names[] | test("mre-")) | select(.State == "running")] | length')
     printf "\r  %d/%d containers running (try %d/30)...      " "$running" "$total" "$i"
-    if [[ "$running" -eq 9 ]]; then
+    if [[ "$running" -eq 10 ]]; then
       echo
-      ok "All 9 containers running"
+      ok "All 10 containers running"
       break
     fi
   done
   echo
 
-  # Final sanity check
+  # ---- VERIFY: containers are actually running the new revision ----
+  # Without this check, Portainer happily reports "9 running" even when the
+  # containers are running stale images. Compare each app container's image
+  # revision label to $NEW_SHA — fail loudly if any don't match.
+  info "Verifying running containers match revision $NEW_SHA..."
+  containers=$(curl -sS -H "X-API-Key: $PORTAINER_TOKEN" \
+    "$PORTAINER_URL/api/endpoints/$PORTAINER_ENDPOINT_ID/docker/containers/json?all=true")
+  mismatch=0
+  for cname in mre-authenticator-1 mre-api-1 mre-gateway-1 mre-emailer-1 mre-pdfgenerator-1 mre-tenantapi-1 mre-landlord-frontend-1 mre-tenant-frontend-1 mre-resetservice-1; do
+    imgid=$(echo "$containers" | jq -r ".[] | select(.Names[] | test(\"$cname\")) | .ImageID" | head -1)
+    if [[ -z "$imgid" || "$imgid" == "null" ]]; then
+      err "  $cname: not found"
+      mismatch=$((mismatch + 1))
+      continue
+    fi
+    revision=$(curl -sS -H "X-API-Key: $PORTAINER_TOKEN" \
+      "$PORTAINER_URL/api/endpoints/$PORTAINER_ENDPOINT_ID/docker/images/${imgid}/json" \
+      | jq -r '.Config.Labels."org.opencontainers.image.revision" // "unknown"')
+    if [[ "$revision" == "$NEW_SHA" ]]; then
+      printf "  %-30s ✓ %s\n" "$cname" "${revision:0:8}"
+    else
+      err "  $cname: running revision ${revision:0:8}, expected ${NEW_SHA:0:8}"
+      mismatch=$((mismatch + 1))
+    fi
+  done
+  if (( mismatch > 0 )); then
+    err "$mismatch container(s) are running the wrong revision."
+    err "This usually means the local Docker image cache is stale despite a successful pull."
+    err "To recover, force-recreate the affected containers in Portainer UI, or re-run this script."
+    exit 1
+  fi
+  ok "All 9 app containers run revision ${NEW_SHA:0:8}"
+
+  # Final sanity check: landlord HTTP responds + serves expected content
   info "Checking landlord app responds..."
   for i in {1..10}; do
     code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "http://${NAS_IP}:1350/landlord/en/signin" || true)
@@ -241,6 +296,9 @@ if [[ "$redeploy" == "yes" ]]; then
   ok "Deploy complete!"
   echo "  LAN:       http://${NAS_IP}:1350/landlord"
   echo "  Tailscale: http://100.121.85.7:1350/landlord"
+  echo
+  warn "Remind users to hard-reload (Ctrl+Shift+R) — Next.js chunks are cached"
+  warn "for 1 year. Browsers may show old design until then."
 else
   warn "Skipping NAS redeploy. Go to Portainer and 'Pull and redeploy' manually when ready."
 fi

@@ -23,6 +23,7 @@ import { Separator } from '../ui/separator';
 import SideMenuButton from '../SideMenuButton';
 import { StoreContext } from '../../store';
 import UserAvatar from '../UserAvatar';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -86,6 +87,7 @@ export default function OrganizationMenu({ className }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [selectedMenu, setSelectedMenu] = useState();
 
   useEffect(() => {
@@ -102,12 +104,15 @@ export default function OrganizationMenu({ className }) {
   const handleSignOut = useCallback(
     async (event) => {
       event.preventDefault();
+      // Wipe React Query cache before signing out so no in-flight render uses
+      // stale tenant/organization data while the sign-out request is racing.
+      queryClient.clear();
       await store.user.signOut();
       window.sessionStorage.clear();
       window.localStorage.clear();
       window.location.assign(config.BASE_PATH); // will be redirected to /signin
     },
-    [store.user]
+    [store.user, queryClient]
   );
 
   const handleMenuClick = useCallback(
@@ -131,7 +136,7 @@ export default function OrganizationMenu({ className }) {
     <Sheet>
       <SheetTrigger asChild>
         <div className={className}>
-          <Button variant="icon" data-cy="orgMenu">
+          <Button variant="ghost" size="icon" data-cy="orgMenu">
             <UserAvatar className="cursor-pointer" />
           </Button>
         </div>

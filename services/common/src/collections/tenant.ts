@@ -50,6 +50,14 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   beginDate: Date,
   endDate: Date,
   terminationDate: Date,
+  // Rent term frequency for the contract math. Without this field, payloads
+  // setting frequency = 'weeks'/'days'/etc. were silently lost on save and
+  // every reload computed terms as months.
+  frequency: {
+    type: String,
+    enum: ['days', 'weeks', 'months', 'years', 'hours'],
+    default: 'months'
+  },
   properties: [
     {
       _id: false,
@@ -125,7 +133,7 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   //     }
   //   }
   // ],
-  rents: {},
+  rents: [mongoose.Schema.Types.Mixed],
 
   // billing
   isVat: Boolean,
@@ -157,5 +165,35 @@ TenantSchema.index({ realmId: 1 });
 TenantSchema.index({ realmId: 1, name: 1 });
 TenantSchema.index({ leaseId: 1 });
 TenantSchema.index({ 'properties.propertyId': 1 });
+
+// Embedding `Property.schema` inside `properties[].property` causes Mongoose
+// to inherit Property's unique compound index on (realmId, atakNumber). On
+// the embedded path that becomes
+// `properties.property.realmId_1_properties.property.atakNumber_1` and
+// without a partialFilterExpression it throws E11000 the moment two tenants
+// have null atakNumbers (any two tenants with no Greek property data).
+// Re-declare the index here with the same partial filter as Property so the
+// uniqueness constraint only applies to real ATAK strings.
+//
+// NOTE: drop the broken index manually before this file's index definition
+// can take effect:
+//   finch exec microrealestate-mongo-1 mongo mredb --quiet --eval \
+//     'db.occupants.dropIndex("properties.property.realmId_1_properties.property.atakNumber_1")'
+TenantSchema.index(
+  {
+    'properties.property.realmId': 1,
+    'properties.property.atakNumber': 1
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      'properties.property.atakNumber': {
+        $exists: true,
+        $type: 'string',
+        $gt: ''
+      }
+    }
+  }
+);
 
 export default mongoose.model<CollectionTypes.Tenant>('Occupant', TenantSchema);

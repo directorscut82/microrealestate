@@ -1,7 +1,9 @@
 import { CollectionTypes } from '@microrealestate/types';
 import mongoose from 'mongoose';
+import Realm from './realm.js';
 
 const EmailSchema = new mongoose.Schema<CollectionTypes.Email>({
+  realmId: { type: String, ref: Realm, required: true, index: true },
   templateName: String,
   recordId: String,
   params: {},
@@ -13,5 +15,6 @@ const EmailSchema = new mongoose.Schema<CollectionTypes.Email>({
 
 EmailSchema.index({ recordId: 1 });
 EmailSchema.index({ templateName: 1, recordId: 1 });
+EmailSchema.index({ realmId: 1, recordId: 1 });
 
 export default mongoose.model<CollectionTypes.Email>('Email', EmailSchema);

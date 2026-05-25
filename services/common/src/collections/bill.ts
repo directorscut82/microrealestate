@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import Realm from './realm.js';
 
 const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
-  realmId: { type: String, ref: Realm },
+  realmId: { type: String, ref: Realm, required: true },
   buildingId: { type: String, required: true },
   expenseId: { type: String, required: true },
   provider: {

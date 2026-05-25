@@ -101,7 +101,7 @@ export default function YearFigures({ className, dashboardData }) {
           <span style={{ color: CHART_PAID_LIGHT }}>{t('Collected')}</span>
           <span className="text-ink">{formatNumber(data.paid)}</span>
         </div>
-        {data.notPaid < 0 && (
+        {data.notPaid > 0 && (
           <div className="flex justify-between gap-3 mb-0.5 font-mono tabular-nums text-label">
             <span className="text-ink-muted">{t('Owed')}</span>
             <span className="text-ink">{formatNumber(data.notPaid)}</span>
@@ -191,7 +191,7 @@ export default function YearFigures({ className, dashboardData }) {
                       style={{ background: CHART_UNPAID }}
                       aria-hidden="true"
                     />
-                    <span>{t('Owed')}</span>
+                    <span>{t('Cumulative balance')}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span
@@ -220,7 +220,7 @@ export default function YearFigures({ className, dashboardData }) {
                 className: 'tracking-tight text-[10px] md:text-[11px] font-mono'
               }}
               stroke={CHART_UNPAID_BORDER}
-              radius={[0, 4, 4, 0]}
+              radius={[4, 0, 0, 4]}
               barSize={20}
               onClick={handleClick('notPaid')}
             />

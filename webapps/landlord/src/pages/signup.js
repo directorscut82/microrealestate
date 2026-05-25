@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React, { useContext, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -35,6 +35,12 @@ export default function SignUp() {
     defaultValues: { firstName: '', lastName: '', email: '', password: '' }
   });
 
+  useEffect(() => {
+    if (store.organization.selected?.name) {
+      router.push(`/${store.organization.selected.name}/dashboard`);
+    }
+  }, [store.organization.selected?.name, router]);
+
   if (!config.SIGNUP) {
     return <ErrorPage statusCode={404} />;
   }
@@ -68,7 +74,6 @@ export default function SignUp() {
   };
 
   if (store.organization.selected?.name) {
-    router.push(`/${store.organization.selected.name}/dashboard`);
     return null;
   }
 
@@ -105,7 +110,12 @@ export default function SignUp() {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="email">{t('Email Address')}</Label>
-          <Input id="email" {...register('email')} />
+          <Input
+            id="email"
+            type="email"
+            autoComplete="username"
+            {...register('email')}
+          />
           {errors.email && (
             <p className="text-label text-oxide">{errors.email.message}</p>
           )}
@@ -115,7 +125,7 @@ export default function SignUp() {
           <Input
             id="password"
             type="password"
-            autoComplete="current-password"
+            autoComplete="new-password"
             {...register('password')}
           />
           {errors.password && (

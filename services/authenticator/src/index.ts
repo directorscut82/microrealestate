@@ -5,12 +5,17 @@ import routes from './routes/index.js';
 Main();
 
 async function onStartUp(express: Express.Application): Promise<void> {
+  // Trust the proxy (gateway) so req.ip reflects the real client via
+  // X-Forwarded-For — required for the per-IP rate limiter to be meaningful.
+  express.set('trust proxy', 1);
+
   // Validate critical secrets at startup (fail fast instead of runtime errors)
   const config = Service.getInstance().envConfig.getValues();
   const requiredSecrets = [
     'ACCESS_TOKEN_SECRET',
     'REFRESH_TOKEN_SECRET',
-    'RESET_TOKEN_SECRET'
+    'RESET_TOKEN_SECRET',
+    'APPCREDZ_TOKEN_SECRET'
   ] as const;
   for (const key of requiredSecrets) {
     const value = config[key];
@@ -19,6 +24,15 @@ async function onStartUp(express: Express.Application): Promise<void> {
         `${key} is missing or too short (min 16 chars). Set it in your environment.`
       );
     }
+  }
+
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.APP_PROTOCOL !== 'https'
+  ) {
+    logger.warn(
+      'NODE_ENV=production but APP_PROTOCOL is not https — auth cookies will not be flagged Secure'
+    );
   }
 
   express.use(routes());
@@ -37,6 +51,11 @@ async function Main(): Promise<void> {
       tokenCookieSecure = DOMAIN_URL.protocol === 'https:';
     }
 
+    // Do NOT set the cookie `domain` attribute. APP_DOMAIN may be a
+    // comma-separated list of hosts (multi-origin NAS), and even a single
+    // value tied to a specific host breaks browsers when the user reaches
+    // the app via a different alias. Leaving `domain` undefined produces
+    // host-only cookies, which work for every origin the gateway serves.
     service = Service.getInstance(
       new EnvironmentConfig({
         PORT: Number(process.env.PORT || 8083),

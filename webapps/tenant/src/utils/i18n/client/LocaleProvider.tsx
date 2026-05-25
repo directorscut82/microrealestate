@@ -27,9 +27,13 @@ export default function LocaleProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function fetch() {
       try {
-        setMessages(await fetchMessages(locale));
+        const loaded = await fetchMessages(locale);
+        setMessages(loaded || {});
       } catch (e) {
         console.error(e);
+        // Stop retrying: install an empty bag so the provider renders and
+        // useTranslation falls back to keys instead of looping forever.
+        setMessages({});
       }
     }
     if (!messages) {

@@ -32,6 +32,10 @@ routes.delete(
     async (req: Express.Request, res: Express.Response<string>) => {
       const db = Service.getInstance().mongoClient?.connection?.db;
       if (!assertTestDatabase(req, res)) return;
+      if (!db) {
+        logger.error('reset: mongo connection unavailable');
+        return res.status(500).send('mongo connection unavailable');
+      }
 
       await Promise.all(
         [
@@ -47,7 +51,7 @@ routes.delete(
           'templates'
         ].map(async (collection) => {
           try {
-            await db?.collection(collection).deleteMany({});
+            await db.collection(collection).deleteMany({});
           } catch (e) {
             logger.error(String(e));
           }
@@ -72,7 +76,14 @@ routes.post(
     async (req: Express.Request, res: Express.Response) => {
       if (!assertTestDatabase(req, res)) return;
 
-      const { user, org, leases = [], properties = [], buildings = [], tenants = [] } = req.body;
+      const { user, org, leases = [], properties = [], buildings = [], tenants = [] } = req.body || {};
+
+      if (!user?.firstName || !user?.email || !org?.name) {
+        return res.status(422).json({
+          error:
+            'Missing required seed fields: user.firstName, user.email, org.name'
+        });
+      }
 
       // Create account
       const account = await new Collections.Account({
@@ -275,7 +286,15 @@ routes.post(
         { EX: 300 }
       );
 
-      return res.json({ otp, email });
+      // Avoid leaking the OTP plaintext over the wire in any non-development
+      // environment. The dev/CI E2E suite still needs it to drive the flow.
+      const isDev =
+        process.env.NODE_ENV === 'development' ||
+        process.env.NODE_ENV === 'test';
+      if (isDev) {
+        return res.json({ success: true, otp, email });
+      }
+      return res.json({ success: true });
     }
   )
 );
@@ -288,7 +307,9 @@ routes.get(
     async (req: Express.Request, res: Express.Response) => {
       const db = Service.getInstance().mongoClient?.connection?.db;
       const dbName = db?.databaseName || 'unknown';
-      return res.json({ status: 'ok', database: dbName, protected: dbName === PROTECTED_DB });
+      // Do NOT include the database name in the public response — it's
+      // operational metadata we don't want to leak to unauthenticated callers.
+      return res.json({ status: 'ok', protected: dbName === PROTECTED_DB });
     }
   )
 );

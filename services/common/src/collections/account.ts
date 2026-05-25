@@ -25,7 +25,7 @@ const AccountSchema = new mongoose.Schema<CollectionTypes.Account>({
     trim: true,
     required: true
   },
-  createdDate: Date
+  createdDate: { type: Date, default: () => new Date(), required: true }
 });
 
 AccountSchema.index({ email: 1 }, { unique: true });

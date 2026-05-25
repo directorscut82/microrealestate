@@ -49,7 +49,6 @@ export default async function RootLayout({
             NEXT_PUBLIC_BASE_PATH: process.env.BASE_PATH,
             NEXT_PUBLIC_CORS_ENABLED: process.env.CORS_ENABLED,
             NEXT_PUBLIC_DEMO_MODE: process.env.DEMO_MODE,
-            DOCKER_GATEWAY_URL: process.env.DOCKER_GATEWAY_URL,
             NEXT_PUBLIC_GATEWAY_URL: process.env.GATEWAY_URL,
             NEXT_PUBLIC_NODE_ENV: process.env.NODE_ENV
           }}

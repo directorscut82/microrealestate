@@ -1,5 +1,6 @@
 import * as Contract from './contract.js';
 import * as FD from './frontdata.js';
+import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
   Collections,
   logger,
@@ -13,7 +14,8 @@ import type { CollectionTypes } from '@microrealestate/types';
 import {
   validateObjectId,
   validateFiniteNumber,
-  validateArrayMaxLength
+  validateArrayMaxLength,
+  validateDateString
 } from '../validators.js';
 
 type AnyRecord = Record<string, any>;
@@ -135,13 +137,22 @@ async function _getRentsDataByTerm(
 
   const rents = (dbOccupants as AnyRecord[]).reduce(
     (acc: AnyRecord[], occupant: AnyRecord) => {
+      // Wave-17 B3: pass the full ledger so a past partiallypaid rent gets
+      // promoted to 'paid' on the dashboard once a later overpayment has
+      // cleared the running deficit.
+      const allRents = occupant._allRents || occupant.rents;
       acc.push(
         ...occupant.rents
           .filter(
             (rent: AnyRecord) => rent.term >= startTerm && rent.term <= endTerm
           )
           .map((rent: AnyRecord) =>
-            FD.toRentData(rent, occupant, (emailStatus as AnyRecord)?.[occupant._id])
+            FD.toRentData(
+              rent,
+              occupant,
+              (emailStatus as AnyRecord)?.[occupant._id],
+              allRents
+            )
           )
       );
       return acc;
@@ -189,7 +200,7 @@ export async function update(req: ReqNoParams, res: Res) {
   validateFiniteNumber(paymentData.extracharge, 'extracharge', { min: 0, max: 10000000 });
   validateArrayMaxLength(paymentData.payments, 20, 'payments');
 
-  const term = `${paymentData.year}${paymentData.month}0100`;
+  const term = `${paymentData.year}${String(paymentData.month).padStart(2, '0')}0100`;
 
   res.json(
     await _updateByTerm(authorizationHeader, locale, realm, term, paymentData)
@@ -199,11 +210,24 @@ export async function update(req: ReqNoParams, res: Res) {
 export async function updateByTerm(req: ReqWithIdTerm, res: Res) {
   const realm = req.realm;
   const term = req.params.term;
+  const urlTenantId = req.params.id;
   const authorizationHeader = req.headers.authorization;
   const locale = req.headers['accept-language'] as string | undefined;
   const paymentData = req.body;
 
+  // Wave-20 F10: URL :id is authoritative. Without this guard, the route
+  // ignored req.params.id and used paymentData._id from the body for the
+  // tenant lookup — which let a caller PATCH /rents/payment/{realA}/{term}
+  // with body {_id: realB} and silently mutate B's rent. Validate both
+  // ids and require them to match.
+  validateObjectId(urlTenantId, 'URL tenant id');
   validateObjectId(paymentData._id, 'tenant id');
+  if (String(urlTenantId) !== String(paymentData._id)) {
+    throw new ServiceError(
+      'URL tenant id does not match body tenant id',
+      422
+    );
+  }
   if (!/^\d{10}$/.test(term)) {
     throw new ServiceError('Invalid term format', 422);
   }
@@ -216,6 +240,13 @@ export async function updateByTerm(req: ReqWithIdTerm, res: Res) {
   );
 }
 
+// NOTE: payments array is REPLACED, not appended. Callers must include
+// all existing payments + new ones in the request body. Stale-state writes
+// (a tab that read the rent before another tab added a payment) will
+// silently lose prior payments. The optimistic __v lock catches concurrent
+// writes against the same baseline but not stale single-tab writes.
+// This is intentional PUT semantics — confirm with product before changing
+// to merge/append behavior.
 async function _updateByTerm(
   authorizationHeader: string | undefined,
   locale: string | undefined,
@@ -245,6 +276,25 @@ async function _updateByTerm(
   const occupant = occupantDoc;
   const documentVersion = occupant.__v;
 
+  // Fetch buildings for the tenant's properties so building charges (and
+  // their VATs) are recomputed when the rent is repaid. Without this,
+  // Contract.payTerm rebuilds rents using contract.buildings = undefined
+  // and silently drops the buildingCharges line items.
+  const propertyIds = (occupant.properties || [])
+    .map((p: AnyRecord) => p.propertyId)
+    .filter(Boolean);
+  const buildings = propertyIds.length
+    ? ((await Collections.Building.find({
+        realmId: realm!._id,
+        'units.propertyId': { $in: propertyIds }
+      }).lean()) as any[])
+    : [];
+  // Wave-17 B1: attach tenant groups so "equal" allocation divides by
+  // unique tenants when payTerm rebuilds rents.
+  if (buildings.length) {
+    await _attachTenantGroupsToBuildings(String(realm!._id), buildings);
+  }
+
   const contract: AnyRecord = {
     frequency: occupant.frequency || 'months',
     begin: occupant.beginDate,
@@ -252,6 +302,7 @@ async function _updateByTerm(
     discount: occupant.discount || 0,
     vatRate: occupant.vatRatio,
     properties: occupant.properties,
+    buildings,
     rents: occupant.rents
   };
 
@@ -264,8 +315,38 @@ async function _updateByTerm(
 
   if (paymentData) {
     if (paymentData.payments && paymentData.payments.length) {
+      // Validate every payment amount BEFORE the filter so a malformed
+      // value surfaces as 422 instead of silently disappearing.
+      paymentData.payments.forEach((p: AnyRecord, idx: number) => {
+        if (p?.amount !== undefined && p.amount !== null && p.amount !== '') {
+          validateFiniteNumber(p.amount, `payments[${idx}].amount`, {
+            min: 0,
+            max: 10000000
+          });
+        }
+        // Validate optional payment.date in DD/MM/YYYY when present.
+        // Empty string and missing are tolerated (legacy callers); but a
+        // non-empty malformed value must surface as 422 instead of being
+        // stored verbatim and breaking downstream date parsing.
+        if (p?.date !== undefined && p.date !== null && p.date !== '') {
+          validateDateString(p.date, `payments[${idx}].date`);
+          // Wave-14 F3: reject payment dates more than 7 days in the future.
+          // A typo like 31/12/2099 is otherwise persisted verbatim and
+          // inflates the dashboard for that future year forever. The 7-day
+          // cushion accommodates cheque-clearing/post-dated entries.
+          const parsed = moment.utc(p.date, 'DD/MM/YYYY', true);
+          if (parsed.isValid() && parsed.isAfter(moment.utc().add(7, 'days'))) {
+            throw new ServiceError(
+              `payments[${idx}].date too far in the future`,
+              422
+            );
+          }
+        }
+      });
       settlements.payments = paymentData.payments
-        .filter(({ amount }: AnyRecord) => amount && Number(amount) > 0)
+        .filter(({ amount }: AnyRecord) =>
+          Number.isFinite(Number(amount)) && Number(amount) >= 0.01
+        )
         .map((payment: AnyRecord) => ({
           date: payment.date || '',
           amount: Number(payment.amount),
@@ -276,20 +357,50 @@ async function _updateByTerm(
     }
 
     if (paymentData.promo) {
+      // Wave-20 F6: cap the promo against the rent's pre-promo grand total
+      // so we never produce a negative invoice. Without this guard, a
+      // €1000 promo on €600 rent silently emits totalAmount=-100, which
+      // then poisons accounting/dashboard/CSV reports. Look up the rent
+      // for the requested term in the input contract; the user-facing
+      // grand total is the pre-promo value (settlement discounts have
+      // not yet been added at this point).
+      const targetTerm = Number(term);
+      const targetRent = (occupant.rents || []).find(
+        (r: AnyRecord) => Number(r.term) === targetTerm
+      );
+      const grandTotalPrePromo = Number(targetRent?.total?.grandTotal) || 0;
+      const promoGross = Number(paymentData.promo);
+      if (grandTotalPrePromo > 0 && promoGross > grandTotalPrePromo + 0.005) {
+        throw new ServiceError(
+          `Promo (${promoGross}) cannot exceed rent grand total of ${grandTotalPrePromo}`,
+          422
+        );
+      }
+      // The user enters a VAT-inclusive amount. We store the net-of-VAT
+      // amount: task 4 (4_vats.ts) adds a VAT line for settlement
+      // discounts, and frontdata.ts:toRentData multiplies the net back to
+      // gross for display. Net effect on grandTotal: -original_promo.
       settlements.discounts.push({
         origin: 'settlement',
         description: paymentData.notepromo || '',
         amount:
-          paymentData.promo *
+          Number(paymentData.promo) *
           (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
       });
     }
 
     if (paymentData.extracharge) {
+      // Same net-of-VAT storage as promo. KNOWN ISSUE: task 4 does NOT
+      // apply VAT to debts (they are treated as carried-forward
+      // grandTotal amounts), so the actual grandTotal increment is
+      // extra/(1+vat) while the UI displays `extra`. Net under-bill of
+      // ~vat% on the displayed extracharge. Out of scope for this fix
+      // wave — would require either applying VAT to debts in task 4 OR
+      // changing the storage convention. See bug-hunt notes H7.
       settlements.debts.push({
         description: paymentData.noteextracharge || '',
         amount:
-          paymentData.extracharge *
+          Number(paymentData.extracharge) *
           (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
       });
     }
@@ -299,7 +410,16 @@ async function _updateByTerm(
     }
   }
 
-  occupant.rents = Contract.payTerm(contract as any, term, settlements).rents;
+  // Contract.payTerm throws plain Errors for business-rule failures (e.g.
+  // payment term outside contract frame, payments lost). Surface those as
+  // 422 so the client gets an actionable error instead of a generic 500.
+  try {
+    occupant.rents = Contract.payTerm(contract as any, term, settlements).rents;
+  } catch (e: any) {
+    const msg = (e && e.message) || String(e);
+    if (e instanceof ServiceError) throw e;
+    throw new ServiceError(msg, 422);
+  }
 
   const emailStatus =
     (await _getEmailStatus(
@@ -333,7 +453,11 @@ async function _updateByTerm(
   return FD.toRentData(
     rent,
     savedOccupant,
-    (emailStatus as AnyRecord)?.[String(savedOccupant._id)]
+    (emailStatus as AnyRecord)?.[String(savedOccupant._id)],
+    // Wave-17 B3: savedOccupant.rents contains the full ledger here (no
+    // term filter has been applied), so the running-balance check sees
+    // every prior/later rent including the just-saved settlement.
+    savedOccupant.rents
   );
 }
 
@@ -348,8 +472,14 @@ export async function rentsOfOccupant(req: ReqWithId, res: Res) {
   }
 
   const dbOccupant = dbOccupants[0];
+  // Wave-17 B3: precompute "running deficit cleared by/at term X" so a past
+  // partiallypaid rent gets promoted to 'paid' when a later overpayment
+  // covers the carried balance. Passing _allRents lets toRentData detect a
+  // future rent whose own newBalance returns to >= 0 — that rent is the
+  // catch-up that retroactively closes prior deficits.
+  const allRents = dbOccupant._allRents || dbOccupant.rents;
   const rentsToReturn = dbOccupant.rents.map((currentRent: AnyRecord) => {
-    const rent: AnyRecord = FD.toRentData(currentRent);
+    const rent: AnyRecord = FD.toRentData(currentRent, undefined, undefined, allRents);
     if (currentRent.term === term) {
       rent.active = 'active';
     }
@@ -404,10 +534,14 @@ async function _rentOfOccupant(
   if (!dbOccupant.rents.length) {
     throw new ServiceError('rent not found', 404);
   }
+  // Wave-17 B3: pass the full unfiltered ledger (_allRents) so the running
+  // balance through this term reflects later catch-up payments.
+  const allRents = dbOccupant._allRents || dbOccupant.rents;
   const rent: AnyRecord = FD.toRentData(
     dbOccupant.rents[0],
     dbOccupant,
-    (emailStatus as AnyRecord)?.[dbOccupant._id]
+    (emailStatus as AnyRecord)?.[dbOccupant._id],
+    allRents
   );
   if (rent.term === Number(moment.utc().format('YYYYMMDDHH'))) {
     rent.active = 'active';

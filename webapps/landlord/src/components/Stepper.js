@@ -46,7 +46,7 @@ export function Step({
           />
         ) : null}
       </div>
-      <div className={cn('flex flex-col flex-1 pb-6', isLast ? 'pb-0' : '')}>
+      <div className={cn('flex flex-col flex-1', isLast ? 'pb-0' : 'pb-6')}>
         <div className="text-body text-ink leading-snug">{stepLabel}</div>
         {!isDone && children ? (
           <div className={cn('mt-3 flex gap-2', className)}>{children}</div>

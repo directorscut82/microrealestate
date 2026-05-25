@@ -99,13 +99,23 @@ happens. Highlights:
 - Gateway exposes port 1350 to host
 - No `resetservice` container (dev/CI only)
 - No Node debug ports exposed
-- All 9 expected services present
+- All 10 expected services present (now includes `tenant-frontend`)
 - `mem_limit` on every service
 - `restart: unless-stopped` on every service
 - No placeholder `change_this_*` secrets
 - Volumes use `/volume1/docker/mre/` paths
 
 If any check fails, the script aborts with a clear error.
+
+## Environment variables of note
+
+A few env vars caused us pain over time and are worth calling out:
+
+| Var | Purpose | Notes |
+|-----|---------|-------|
+| `APP_DOMAIN` | Host (and optional `:port`) seen by the browser. Used by the gateway to compute allowed CORS origins and by the authenticator to scope cookies. | Now defaulted in `base.env` to `localhost:8080`. Pass it explicitly in production compose so it includes the public hostname (and Tailscale IP if applicable). |
+| `AUTHENTICATOR_APPCREDZ_TOKEN_SECRET` | JWT secret for application credential tokens (M2M / API access). Distinct from access/refresh/reset secrets. | Now persisted by the CLI's `writeDotEnv()` (it used to be silently dropped between runs, which caused signed app tokens to be rejected after every config rewrite). Default placeholder added to `base.env`. |
+| `RESETSERVICE` OTP behaviour | The reset service no longer returns the OTP in its HTTP response — it logs it and emails it like the production flow. E2E/test code that scraped OTPs from the response must read them from logs or from the test mailbox instead. | Behaviour change only affects test/dev environments — `resetservice` is never deployed to the NAS. |
 
 ## Rolling back a bad deploy
 
@@ -136,6 +146,9 @@ Find previous SHAs at https://github.com/directorscut82/microrealestate/actions.
 | `Connection timed out` calling Portainer | NAS is asleep or you're off LAN | Wake the NAS (open `http://<nas-ip>:5000`), or connect to the LAN Wi-Fi, or use Tailscale |
 | Dev gateway crashes with `[HPM] Missing "target" option` | `API_URL` missing from `.env` | Already fixed in `cli/src/commands.js` on master. If it ever comes back: `echo 'API_URL=http://api:8200/api/v2' >> .env` |
 | Sign-in works on LAN but fails from phone via Tailscale | `APP_DOMAIN` in compose doesn't include the Tailscale IP | Edit `docker-compose.nas.yml`, add the IP to the comma-list in both gateway and authenticator services, redeploy |
+| NAS CI fails on a single image with `ERROR: failed to build: unknown blob` while pushing to GHCR | Transient registry/CDN error on GitHub's side. The blob was uploaded but not yet visible when the manifest write looked it up. Fail-fast cancels the other 7 image builds. | Push an empty commit and the next CI run usually succeeds: `git commit --allow-empty -m "ci: retry NAS image build (transient GHCR unknown blob)" && git push origin nas`. No code change required. |
+| After a NAS redeploy, browsers show the old design (Incognito too) | **Stale Docker image cache on the NAS.** Portainer's `PullImage: true` flag is unreliable with mutable tags like `:nas` — the Synology Docker daemon may consider the existing local image "up to date" even when GHCR has a new digest, leaving the stack on the previous image. Containers report "Up X minutes" but are running stale code. | The deploy script (since `<this commit>`) now force-pulls each `:nas` image explicitly via the Docker API and verifies each container's `org.opencontainers.image.revision` label matches the just-pushed `$NEW_SHA` before declaring success. If you ever see this manually: `curl -X POST -H "X-API-Key: $TOKEN" "$PORTAINER/api/endpoints/3/docker/images/create?fromImage=ghcr.io/.../landlord-frontend&tag=nas"` for each image, then trigger a stack update. |
+| Even after a verified-fresh redeploy, browsers still show old design | Stale browser cache. The landlord HTML uses `cache-control: s-maxage=31536000, stale-while-revalidate`; `_next/static/*` chunks are `immutable, max-age=31536000` (1 year). | Hard reload (`Ctrl+Shift+R` / `Cmd+Shift+R`), or open the URL in an Incognito/Private window. The deploy script prints a reminder at the end of every redeploy. |
 
 ## Historical gotchas (already fixed, here for context)
 

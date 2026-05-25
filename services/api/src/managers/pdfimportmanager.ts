@@ -1,3 +1,4 @@
+import { logger, ServiceError } from '@microrealestate/common';
 import { Request, Response } from 'express';
 import { parseGreekLease } from './greekleaseparser.js';
 
@@ -26,7 +27,20 @@ export async function parseImportedPdf(
     return;
   }
 
-  const text = await extractTextFromPdf(file.buffer);
-  const parsed = parseGreekLease(text);
-  res.json(parsed);
+  // pdfjs-dist throws "Invalid PDF structure" / "InvalidPDFException" on
+  // corrupted or non-PDF input. Without this guard the rejection bubbles
+  // up to the global error handler as an opaque 500. Translate to 422 so
+  // the client knows the file is unprocessable rather than the server is
+  // broken. Any ServiceError already raised inside parsing is rethrown
+  // unchanged.
+  try {
+    const text = await extractTextFromPdf(file.buffer);
+    const parsed = parseGreekLease(text);
+    res.json(parsed);
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`PDF parse failed: ${message}`);
+    throw new ServiceError(`Could not parse PDF: ${message}`, 422);
+  }
 }

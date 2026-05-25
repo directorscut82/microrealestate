@@ -14,6 +14,13 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 Main();
 
 async function onStartUp(application: Express.Application) {
+  // The gateway IS the edge proxy — there is no upstream proxy in front of
+  // it that we trust to set X-Forwarded-For correctly. Disabling
+  // trust-proxy makes Express ignore client-supplied X-F-F headers and
+  // exposes the real connecting peer through req.socket.remoteAddress.
+  // Combined with the rate limiter keying on req.socket.remoteAddress (not
+  // req.ip), this kills the X-F-F-spoofed-rate-limit-bypass path.
+  application.set('trust proxy', false);
   exposeHealthCheck(application);
   exposeFrontends(application);
   configureCORS(application);
@@ -58,37 +65,48 @@ async function Main() {
 function configureCORS(application: Express.Application) {
   const config = Service.getInstance().envConfig.getValues();
   if (config.CORS_ENABLED && (config.DOMAIN_URL || config.APP_DOMAIN)) {
-    // APP_DOMAIN may be a comma-separated list of domains to support
-    // multi-origin deployments (e.g. LAN IP + Tailscale IP + domain name).
-    // Prefer APP_DOMAIN over DOMAIN_URL — DOMAIN_URL is the deprecated path
-    // and has a 'http://localhost' fallback that would otherwise mask APP_DOMAIN.
-    const domainsInput = config.APP_DOMAIN
-      ? String(config.APP_DOMAIN)
-      : URLUtils.destructUrl(String(config.DOMAIN_URL || '')).domain || '';
-    const allowedDomains = domainsInput
-      .split(',')
-      .map((d) => d.trim())
-      .filter(Boolean);
-    logger.info(
-      `CORS allowed origins: ${allowedDomains
-        .map((d) => `http(s)://*${d}`)
-        .join(', ')}`
+    // Build the list of allowed origin domains (with optional port).
+    // APP_DOMAIN may be a comma-separated list (multi-origin NAS deployments,
+    // e.g. "localhost:8080,192.168.0.96:1350,100.121.85.7:1350").
+    const rawDomains: string[] = [];
+    if (config.APP_DOMAIN) {
+      rawDomains.push(
+        ...String(config.APP_DOMAIN)
+          .split(',')
+          .map((d) => d.trim())
+          .filter(Boolean)
+      );
+    }
+    if (config.DOMAIN_URL) {
+      rawDomains.push(URLUtils.destructUrl(config.DOMAIN_URL).domain);
+    }
+
+    // Escape regex meta-chars in each domain literal (dots, ports, etc.) and
+    // require an exact match (no leading subdomain capture). Without this,
+    // an origin like `attacker.com.example.com` would slip past
+    // `^https?://(.*\.)?example.com$`.
+    const escapedDomains = rawDomains.map((d) =>
+      d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     );
+
+    const allowedOriginRegexes = escapedDomains.map(
+      (d) => new RegExp(`^https?://${d}$`)
+    );
+
+    logger.info(
+      `CORS allowed origins: ${rawDomains.map((d) => `http(s)://${d}`).join(', ')}`
+    );
+
     const corsOptions = {
       origin: (
         origin: string | undefined,
-        cb: (err: Error | null, allow?: boolean) => void
+        callback: (err: Error | null, allow?: boolean) => void
       ) => {
-        // Allow non-browser clients (no Origin header) like server-to-server.
-        if (!origin) return cb(null, true);
-        const ok = allowedDomains.some((d) =>
-          new RegExp(`^https?://(.*\\.)?${d.replace(/\./g, '\\.')}$`).test(
-            origin
-          )
-        );
-        if (ok) return cb(null, true);
-        logger.warn(`CORS blocked origin: ${origin}`);
-        cb(new Error(`Origin ${origin} not allowed by CORS`));
+        // Allow same-origin / non-browser callers (no Origin header)
+        if (!origin) return callback(null, true);
+        const allowed = allowedOriginRegexes.some((re) => re.test(origin));
+        if (!allowed) logger.warn(`CORS blocked origin: ${origin}`);
+        return callback(null, allowed);
       },
       methods: 'GET,POST,PUT,PATCH,DELETE',
       allowedHeaders:
@@ -218,20 +236,10 @@ function exposeHealthCheck(application: Express.Application) {
         return `${url.origin}/health`;
       });
 
-      if (config.EXPOSE_FRONTENDS) {
-        if (!config.LANDLORD_BASE_PATH || !config.TENANT_BASE_PATH) {
-          throw new ServiceError(
-            'LANDLORD_BASE_PATH or TENANT_BASE_PATH env is not defined',
-            500
-          );
-        }
-        endpoints.push(
-          `${config.LANDLORD_FRONTEND_URL}${config.LANDLORD_BASE_PATH}/health`
-        );
-        endpoints.push(
-          `${config.TENANT_FRONTEND_URL}${config.TENANT_BASE_PATH}/health`
-        );
-      }
+      // Note: deliberately NOT probing the landlord / tenant Next.js
+      // frontends. They do not expose a /health endpoint, so the previous
+      // probe always 404'd which the aggregator treated as 500. Backend
+      // service health (each /health below) is what matters for routing.
 
       const results = await Promise.all(
         endpoints.map(async (endpoint) => {

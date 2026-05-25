@@ -9,6 +9,12 @@ type Req = ServiceRequest<any, any, any>;
 type Res = ServiceResponse;
 type AnyRecord = Record<string, any>;
 
+// Avoid floating-point drift on aggregated sums (e.g. 6624.399999999999).
+// Round every aggregate result before returning to API consumers.
+function _round(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 async function _fetchData(realmId: string, year: number): Promise<AnyRecord[]> {
   return await Collections.Tenant.aggregate([
     {
@@ -53,25 +59,21 @@ async function _fetchData(realmId: string, year: number): Promise<AnyRecord[]> {
             { $lt: ['$beginDate', new Date(`${year + 1}-01-01T00:00:00`)] }
           ]
         },
+        // Wave-17 B6: "outgoing" means the tenant ACTUALLY left during the
+        // year, i.e. terminationDate set and falling in [year]. A bare
+        // endDate match is not a departure event — many active leases run
+        // through year-end and renew automatically; including them here
+        // pollutes the outgoing CSV with still-active tenants.
         outgoing: {
-          $or: [
+          $and: [
+            { $ne: ['$terminationDate', null] },
             {
-              $and: [
-                {
-                  $gte: ['$terminationDate', new Date(`${year}-01-01T00:00:00`)]
-                },
-                {
-                  $lt: [
-                    '$terminationDate',
-                    new Date(`${year + 1}-01-01T00:00:00`)
-                  ]
-                }
-              ]
+              $gte: ['$terminationDate', new Date(`${year}-01-01T00:00:00`)]
             },
             {
-              $and: [
-                { $gte: ['$endDate', new Date(`${year}-01-01T00:00:00`)] },
-                { $lt: ['$endDate', new Date(`${year + 1}-01-01T00:00:00`)] }
+              $lt: [
+                '$terminationDate',
+                new Date(`${year + 1}-01-01T00:00:00`)
               ]
             }
           ]
@@ -140,16 +142,19 @@ function _incomingTenants(
   return tenants
     .filter(({ incoming }: AnyRecord) => incoming)
     .map((tenant: AnyRecord) => {
+      // Pin CSV dates to ISO (YYYY-MM-DD) so the same column doesn't
+      // alternate between DD/MM/YYYY (fr/de/...) and MM/DD/YYYY (en) in
+      // the same export. Raw API responses keep Date objects.
       const beginDate = rawData
         ? tenant.beginDate
-        : moment(tenant.beginDate).locale(locale!).format('L');
+        : moment.utc(tenant.beginDate).format('YYYY-MM-DD');
       const endDate = rawData
         ? tenant.endDate
-        : moment(tenant.endDate).locale(locale!).format('L');
+        : moment.utc(tenant.endDate).format('YYYY-MM-DD');
       const terminationDate = rawData
         ? tenant.terminationDate
         : tenant.terminationDate
-          ? moment(tenant.terminationDate).locale(locale!).format('L')
+          ? moment.utc(tenant.terminationDate).format('YYYY-MM-DD')
           : '';
 
       return {
@@ -160,7 +165,7 @@ function _incomingTenants(
         beginDate,
         endDate,
         terminationDate,
-        guaranty: NumberFormat.format(tenant.guaranty || 0)
+        guaranty: NumberFormat.format(_round(tenant.guaranty || 0))
       };
     });
 }
@@ -182,22 +187,37 @@ function _outgoingTenants(
   return tenants
     .filter(({ outgoing }: AnyRecord) => outgoing)
     .map((tenant: AnyRecord) => {
+      // Pin CSV dates to ISO (YYYY-MM-DD) for consistency across locales
+      // (see _incomingTenants). Raw API responses keep Date objects.
       const beginDate = rawData
         ? tenant.beginDate
-        : moment(tenant.beginDate).locale(locale!).format('L');
+        : moment.utc(tenant.beginDate).format('YYYY-MM-DD');
       const endDate = rawData
         ? tenant.endDate
-        : moment(tenant.endDate).locale(locale!).format('L');
+        : moment.utc(tenant.endDate).format('YYYY-MM-DD');
       const terminationDate = rawData
         ? tenant.terminationDate
         : tenant.terminationDate
-          ? moment(tenant.terminationDate).locale(locale!).format('L')
+          ? moment.utc(tenant.terminationDate).format('YYYY-MM-DD')
           : '';
       const lastRent = tenant.rents?.length
         ? tenant.rents[tenant.rents.length - 1]
         : {
             total: { grandTotal: 0 }
           };
+
+      // Round aggregated currency values to 2dp before formatting so we
+      // never emit 6624.399999999999 in raw API responses or CSV exports.
+      const balance = _round(
+        (lastRent.total.payment ? lastRent.total.payment : 0) -
+          lastRent.total.grandTotal
+      );
+      const finalBalance = _round(
+        (lastRent.total.payment ? lastRent.total.payment : 0) +
+          (tenant.guaranty ? tenant.guaranty : 0) -
+          (tenant.guarantyPayback ? tenant.guarantyPayback : 0) -
+          lastRent.total.grandTotal
+      );
 
       return {
         _id: tenant._id,
@@ -207,18 +227,10 @@ function _outgoingTenants(
         beginDate,
         endDate,
         terminationDate,
-        guaranty: NumberFormat.format(tenant.guaranty || 0),
-        guarantyPayback: NumberFormat.format(tenant.guarantyPayback || 0),
-        balance: NumberFormat.format(
-          (lastRent.total.payment ? lastRent.total.payment : 0) -
-            lastRent.total.grandTotal
-        ),
-        finalBalance: NumberFormat.format(
-          (lastRent.total.payment ? lastRent.total.payment : 0) +
-            (tenant.guaranty ? tenant.guaranty : 0) -
-            (tenant.guarantyPayback ? tenant.guarantyPayback : 0) -
-            lastRent.total.grandTotal
-        )
+        guaranty: NumberFormat.format(_round(tenant.guaranty || 0)),
+        guarantyPayback: NumberFormat.format(_round(tenant.guarantyPayback || 0)),
+        balance: NumberFormat.format(balance),
+        finalBalance: NumberFormat.format(finalBalance)
       };
     });
 }
@@ -238,14 +250,15 @@ function _settlements(
   const months = moment.localeData(locale).months();
 
   return tenants.map((tenant: AnyRecord) => {
+    // Pin CSV dates to ISO (YYYY-MM-DD); see _incomingTenants for rationale.
     const beginDate = rawData
       ? tenant.beginDate
-      : moment(tenant.beginDate).locale(locale).format('L');
+      : moment.utc(tenant.beginDate).format('YYYY-MM-DD');
     const endDate = rawData
       ? tenant.terminationDate || tenant.endDate
-      : moment(tenant.terminationDate || tenant.endDate)
-          .locale(locale)
-          .format('L');
+      : moment.utc(tenant.terminationDate || tenant.endDate).format(
+          'YYYY-MM-DD'
+        );
     const settlements: AnyRecord = rawData
       ? (months as unknown as string[]).map(() => null)
       : (months as unknown as string[]).reduce((acc: AnyRecord, m: string) => {
@@ -257,7 +270,10 @@ function _settlements(
       if (rawData) {
         settlements[month - 1] = payments.map(
           ({ date, type, amount, reference }: AnyRecord) => ({
-            date: moment(date, 'DD/MM/YYYY').toDate(),
+            // moment(date, 'DD/MM/YYYY') uses local TZ; for serialised
+            // payment dates we always want UTC so a row exported from
+            // CET and re-imported in UTC doesn't shift by a day.
+            date: moment.utc(date, 'DD/MM/YYYY', true).toDate(),
             type,
             amount,
             reference
@@ -266,7 +282,14 @@ function _settlements(
       } else {
         settlements[(months as unknown as string[])[month - 1]] = payments
           .map(({ date, type, amount, reference }: AnyRecord) => {
-            return `${date} ${i18n.__(
+            // Pin CSV date format to ISO (YYYY-MM-DD). The input is stored
+            // as DD/MM/YYYY; rendering with moment().format('L') would mix
+            // DD/MM/YYYY and MM/DD/YYYY in the same row depending on the
+            // realm locale, breaking downstream tooling that imports the CSV.
+            const isoDate = moment
+              .utc(date, 'DD/MM/YYYY', true)
+              .format('YYYY-MM-DD');
+            return `${isoDate} ${i18n.__(
               type
             )} ${reference}\n${NumberFormat.format(amount)}`;
           })
@@ -289,7 +312,7 @@ function _settlements(
             : `${tenant.name}\n${
                 tenant.reference
               }\n${beginDate} - ${endDate}\n${i18n.__('Deposit: {{deposit}}', {
-                deposit: NumberFormat.format(tenant.guaranty)
+                deposit: NumberFormat.format(_round(tenant.guaranty || 0))
               })}\n${tenant.properties.map(({ name }: AnyRecord) => name).join('\n')}`,
           ...settlements
         };

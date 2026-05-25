@@ -62,7 +62,7 @@ async function _sendWithSmtp(config: any, email: EmailMessage): Promise<EmailRes
 
   const transporter = nodemailer.createTransport({
     host: config.server,
-    port: config.ports,
+    port: config.port,
     secure: config.secure,
     auth
   });

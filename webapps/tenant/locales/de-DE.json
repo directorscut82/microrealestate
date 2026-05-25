@@ -1,14 +1,14 @@
 {
   "{{days}} days left before termination": {
-    "one": "{{days}} day left before termination",
-    "other": "{{days}} days left before termination"
+    "one": "{{days}} Tag bis zur Beendigung",
+    "other": "{{days}} Tage bis zur Beendigung"
   },
   "All months": "Alle Monate",
   "Balance": "Saldo",
   "Back to Sign in page": "Zurück zur Anmeldeseite",
   "Cancel": "Stornieren",
   "cash": "bar",
-  "check": "check",
+  "check": "Scheck",
   "credit-card": "Kreditkarte",
   "Deposit": "Einzahlung",
   "Demonstration mode": "Demonstrationsmodus",
@@ -22,7 +22,7 @@
   "In progress": "In Arbeit",
   "invoice": "rechnung",
   "Invoices": "Rechnungen",
-  "Invalid code": "Invalid code",
+  "Invalid code": "Ungültiger Code",
   "Landlord": "Vermieter",
   "Method": "Methode",
   "overdue": "überfällig",
@@ -35,8 +35,8 @@
   "Please try again later.": "Bitte versuchen Sie es später noch einmal.",
   "Processing...": "Verarbeitung...",
   "Properties": {
-    "one": "Property",
-    "other": "Eigenschaften"
+    "one": "Objekt",
+    "other": "Objekte"
   },
   "Rent": "Miete",
   "Show more": "Mehr anzeigen",

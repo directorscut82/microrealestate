@@ -155,6 +155,16 @@ TypeScript services build chain: types → common → service (in that order).
 - `organizationId` header validated as valid MongoDB ObjectId format before query
 - Input validation: percentage sums, enum/range checks, NaN guards on financial fields
 
+### CORS allowlist gotcha — `DOMAIN_URL` strips the port
+
+The gateway's `configureCORS()` (in `services/gateway/src/index.ts`) builds its allowlist regex from `APP_DOMAIN` first, falling back to `DOMAIN_URL` parsed via `URLUtils.destructUrl()`. The fallback path silently drops the port: `destructUrl('http://localhost:8080').domain === 'localhost'`, so the resulting regex `^https?://(.*\.)?localhost$` rejects browser origins like `http://localhost:8080` with HTTP 500 and the log line `CORS blocked origin: http://localhost:8080`. The signin POST never reaches the authenticator.
+
+**Fix for any non-default port:** set `APP_DOMAIN` to the full `host:port` string (e.g., `APP_DOMAIN=localhost:8080`). `APP_DOMAIN` is used as-is in the regex — no parsing — and supports comma-separated lists for multi-origin deploys (LAN + Tailscale).
+
+**Required plumbing:** `docker-compose.microservices.base.yml` must export `- APP_DOMAIN` in the gateway service environment. This was missing for a long time even though the gateway code referenced it; fixed in commit `e77d3e3`. NAS deployment uses a standalone `docker-compose.nas.yml` and was never affected.
+
+**Note:** `finch restart` does NOT reload env vars — you must `finch rm -f` and `finch compose ... up -d <service>` to pick up `.env` changes.
+
 ## Pagination
 
 - List endpoints (tenants, properties, leases) support `?page=N&limit=M` query params

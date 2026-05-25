@@ -3,25 +3,25 @@
     <u><%- _.t('By bank transfer') %></u><br />
     <%- _.t('Bank details') %><br />
     <% if (landlord.hasBankInfo) { -%>
-        <%- landlord.bankInfo.name %><br />
+        <%= landlord.bankInfo.name %><br />
         <%- _.t('IBAN: {{iban}}', { iban: landlord.bankInfo.iban }) %>
     <%}-%>
 </p>
 <p class="payment-method">
     <u><%- _.t('By check') %></u><br />
     <%- _.t('Write your check to the order of {{name}} and send it to the following address:', { name: landlord.name }) %><br />
-    <%-landlord.name%><br />
+    <%= landlord.name %><br />
     <% if (landlord.hasAddress) { -%>
-        <%-landlord.addresses[0].street1%><br />
+        <%= landlord.addresses[0].street1 %><br />
         <%if (landlord.addresses[0].street2) {-%>
-            <%-landlord.addresses[0].street2%><br />
+            <%= landlord.addresses[0].street2 %><br />
         <%}-%>
-        <%-landlord.addresses[0].zipCode%> <%-landlord.addresses[0].city%><br />
+        <%= landlord.addresses[0].zipCode %> <%= landlord.addresses[0].city %><br />
         <%if (landlord.addresses[0].state) {-%>
-            <%-landlord.addresses[0].state%><br />
+            <%= landlord.addresses[0].state %><br />
         <%}-%>
         <%if (landlord.addresses[0].country) {-%>
-            <%-landlord.addresses[0].country%>
+            <%= landlord.addresses[0].country %>
         <%}-%>
     <%}-%>
 </p>

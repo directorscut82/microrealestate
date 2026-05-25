@@ -181,19 +181,33 @@ export default function MonthlyStatement({ building }) {
     }
 
     const expenseEntries = tenantExpenses
-      .map((expense) => ({
-        expenseId: expense._id,
-        amount: Number(amounts[expense._id]) || 0,
-        description: expense.name,
-        allocationMethod: expense.allocationMethod
-      }));
+      .map((expense) => {
+        const raw = amounts[expense._id];
+        const amount =
+          raw === '' || raw == null || Number.isNaN(Number(raw))
+            ? 0
+            : Number(raw);
+        return {
+          expenseId: expense._id,
+          amount,
+          description: expense.name,
+          allocationMethod: expense.allocationMethod
+        };
+      });
 
     const ownerEntries = ownerExpenses
-      .map((expense) => ({
-        expenseId: expense._id,
-        amount: Number(ownerAmounts[expense._id]) || 0,
-        description: expense.name
-      }));
+      .map((expense) => {
+        const raw = ownerAmounts[expense._id];
+        const amount =
+          raw === '' || raw == null || Number.isNaN(Number(raw))
+            ? 0
+            : Number(raw);
+        return {
+          expenseId: expense._id,
+          amount,
+          description: expense.name
+        };
+      });
 
     const hasAnyAmount =
       expenseEntries.some((e) => e.amount > 0) ||

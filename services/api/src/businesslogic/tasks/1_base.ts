@@ -1,4 +1,5 @@
 import type { CollectionTypes } from '@microrealestate/types';
+import { logger } from '@microrealestate/common';
 import moment from 'moment';
 
 export interface Contract {
@@ -59,15 +60,52 @@ export type RentTask = (
 export function computeBuildingChargeForProperty(
   building: CollectionTypes.Building,
   propertyId: string,
-  expense: CollectionTypes.BuildingExpense
+  expense: CollectionTypes.BuildingExpense,
+  term?: number
 ): number {
-  return Math.round(_computeBuildingChargeRaw(building, propertyId, expense) * 100) / 100;
+  return Math.round(_computeBuildingChargeRaw(building, propertyId, expense, term) * 100) / 100;
+}
+
+// Wave-18 B4: group is "active" for `term` when the tenant's lease window
+// (clamped by terminationDate) AND the per-property entry/exit window both
+// cover the rent term. Term is YYYYMMDDHH; we compare in YYYYMM granularity
+// (one expense line per rent month) by stripping day+hour. A group with
+// no dates at all (legacy / test fixtures) is treated as always active.
+function _isGroupActiveForTerm(group: any, term: number, propertyId: string): boolean {
+  if (!group) return false;
+  if (!term) return true;
+  const ym = Math.floor(term / 10000); // YYYYMM
+  const toYM = (d: any): number | null => {
+    if (!d) return null;
+    const m = moment.utc(d);
+    if (!m.isValid()) return null;
+    return m.year() * 100 + (m.month() + 1);
+  };
+
+  const begin = toYM(group.beginDate);
+  const end = toYM(group.endDate);
+  const termination = toYM(group.terminationDate);
+  if (begin !== null && ym < begin) return false;
+  if (end !== null && ym > end) return false;
+  if (termination !== null && ym > termination) return false;
+
+  // per-property window for this exact propertyId within the group
+  const props = (group.properties || []) as any[];
+  const myProp = props.find((p) => String(p.propertyId) === String(propertyId));
+  if (myProp) {
+    const entry = toYM(myProp.entryDate);
+    const exit = toYM(myProp.exitDate);
+    if (entry !== null && ym < entry) return false;
+    if (exit !== null && ym > exit) return false;
+  }
+  return true;
 }
 
 function _computeBuildingChargeRaw(
   building: CollectionTypes.Building,
   propertyId: string,
-  expense: CollectionTypes.BuildingExpense
+  expense: CollectionTypes.BuildingExpense,
+  term?: number
 ): number {
   if (!building?.units || !Array.isArray(building.units)) return 0;
 
@@ -80,29 +118,105 @@ function _computeBuildingChargeRaw(
   // For non-fixed methods, amount must be a valid positive number
   if (allocationMethod !== 'fixed' && (!Number.isFinite(amount) || amount <= 0)) return 0;
 
+  // Many allocation methods must only count "managed" units (those with a
+  // linked propertyId). Unmanaged units inflate the denominator and silently
+  // shrink every managed unit's share, leaking money out of the building's
+  // recoverable charges.
+  const managedUnits = building.units.filter((u) => u.propertyId);
+
   switch (allocationMethod) {
     case 'general_thousandths': {
+      // Wave-14 F2: use the FULL building denominator (sum across ALL units,
+      // including vacant) so each tenant pays exactly their pro-rata share.
+      // The vacant unit's share is implicitly absorbed by the owner — it is
+      // never associated with a tenant property, so it never lands on a bill.
       const generalTotal = building.units.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
       if (generalTotal === 0) return 0;
       return (amount * (Number(unit.generalThousandths) || 0)) / generalTotal;
     }
 
     case 'heating_thousandths': {
+      // Wave-14 F2: see general_thousandths note.
       const heatingTotal = building.units.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
       if (heatingTotal === 0) return 0;
       return (amount * (Number(unit.heatingThousandths) || 0)) / heatingTotal;
     }
 
     case 'elevator_thousandths': {
+      // Wave-14 F2: see general_thousandths note.
       const elevatorTotal = building.units.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
       if (elevatorTotal === 0) return 0;
       return (amount * (Number(unit.elevatorThousandths) || 0)) / elevatorTotal;
     }
 
     case 'equal': {
-      const totalUnits = building.units.length;
+      // Wave-17 B1: "equal" must split per-tenant, not per-managed-unit.
+      // A tenant occupying multiple units in the same building (e.g.
+      // apartment + storage) was previously billed once per unit, so
+      // their cleaning/management charge appeared twice on the rent.
+      // _tenantGroups (attached by occupantmanager._attachTenantGroupsToBuildings)
+      // exposes the unique-tenant grouping; if present, divide by group
+      // count and emit the line on only ONE propertyId per group (the
+      // sorted-min, deterministic carrier).
+      //
+      // Wave-18 B4: groups now carry tenant-window metadata. Filter to the
+      // tenants whose lease + per-property windows actually cover the rent
+      // `term` being computed. Without this filter, expenses split across
+      // the LIFETIME tenant universe of the building (e.g. 320/4) instead
+      // of the active-this-term tenants (e.g. 320/2 in 2027/3 when only
+      // two of four historical tenants are still active).
+      const rawGroups = (building as any)._tenantGroups as any[] | undefined;
+      if (rawGroups && rawGroups.length > 0) {
+        // New shape: [{ propertyIds, properties, beginDate, endDate, terminationDate }]
+        // Legacy shape: string[][] (kept for back-compat with any caller
+        // that hasn't been refreshed via _attachTenantGroupsToBuildings).
+        const isNewShape = !Array.isArray(rawGroups[0]);
+        const normalized = isNewShape
+          ? rawGroups
+          : (rawGroups as unknown as string[][]).map((ids) => ({
+              propertyIds: ids,
+              properties: ids.map((id) => ({ propertyId: id })),
+              beginDate: null,
+              endDate: null,
+              terminationDate: null
+            }));
+
+        const activeGroups = term
+          ? normalized.filter((g: any) =>
+              (g.propertyIds || []).some((pid: string) =>
+                _isGroupActiveForTerm(g, term, pid)
+              )
+            )
+          : normalized;
+
+        const myGroup = activeGroups.find((g: any) =>
+          (g.propertyIds || []).includes(String(propertyId))
+        );
+        if (!myGroup) return 0;
+        const carrier = (myGroup.propertyIds || [])[0];
+        if (String(propertyId) !== carrier) return 0;
+        const totalGroups = activeGroups.length;
+        if (totalGroups === 0) return 0;
+        const base = Math.round((amount / totalGroups) * 100) / 100;
+        // Push rounding remainder onto the LAST group (lex-max by carrier
+        // id) so totals reconcile (100/3 → 33.33+33.33+33.34 = 100.00).
+        const carriers = activeGroups.map((g: any) => g.propertyIds[0]).sort();
+        if (carrier === carriers[carriers.length - 1]) {
+          return Math.round((amount - base * (totalGroups - 1)) * 100) / 100;
+        }
+        return base;
+      }
+      // Fallback (legacy / tests without _tenantGroups): per-managed-unit.
+      const totalUnits = managedUnits.length;
       if (totalUnits === 0) return 0;
-      return amount / totalUnits;
+      const base = Math.round((amount / totalUnits) * 100) / 100;
+      const sortedIds = managedUnits
+        .map((u) => String(u.propertyId))
+        .sort();
+      if (String(propertyId) === sortedIds[sortedIds.length - 1]) {
+        return Math.round((amount - base * (totalUnits - 1)) * 100) / 100;
+      }
+      return base;
     }
 
     case 'by_surface': {
@@ -112,19 +226,37 @@ function _computeBuildingChargeRaw(
     }
 
     case 'fixed': {
-      // Fixed allocation per unit
+      // Fixed allocation per unit. Negative values are misconfiguration
+      // (a "negative fixed share") — log and clamp to 0 instead of silently
+      // accepting them or letting them bubble into the rent total.
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
       const v = Number(allocation?.value);
-      return Number.isFinite(v) && v > 0 ? v : 0;
+      if (Number.isFinite(v) && v < 0) {
+        logger.warn(
+          `Fixed allocation has negative value (${v}) for property ${propertyId} ` +
+            `in building ${building._id}; clamping to 0.`
+        );
+      }
+      return Math.max(0, Number.isFinite(v) ? v : 0);
     }
 
     case 'custom_ratio': {
-      // Custom ratio - normalize to sum
+      // Custom ratio — normalize to sum.
+      // Single-unit fallback: if NO ratios are configured but the building
+      // has exactly one unit, that unit takes the full amount. With more
+      // than one unit and no ratios we cannot infer a split, so we return
+      // 0 and surface the misconfiguration in logs for the operator.
       const unitsWithProperty = building.units.filter((u) => u.propertyId);
       const totalRatio = customAllocations?.reduce((sum, a) => sum + (Number(a.value) || 0), 0) || 0;
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
-      // Single-unit fallback: if no ratios set and only 1 unit, give full amount
-      if (totalRatio === 0) return unitsWithProperty.length === 1 ? amount : 0;
+      if (totalRatio === 0) {
+        if (unitsWithProperty.length === 1) return amount;
+        logger.warn(
+          `custom_ratio allocation has no ratios set for building ${building._id} ` +
+            `(${unitsWithProperty.length} units). Returning 0 share for property ${propertyId}.`
+        );
+        return 0;
+      }
       if (!allocation) return 0;
       const av = Number(allocation.value) || 0;
       return (amount * av) / totalRatio;
@@ -145,8 +277,23 @@ function _computeBuildingChargeRaw(
 
 // Check if expense is active for the given term
 function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: number): boolean {
-  // Non-recurring expenses only apply to their start term
-  if (!(expense as any).isRecurring && expense.startTerm && expense.startTerm !== term) return false;
+  // Non-recurring expenses MUST have an explicit startTerm — without one
+  // they would otherwise be treated as "active forever" by the date-range
+  // checks below, which is the opposite of the intended behavior. Reject
+  // them so misconfigured one-shot expenses don't silently bill every
+  // term until end of time.
+  //
+  // Wave-18 B1: compare at YYYYMM granularity, not exact YYYYMMDDHH. A
+  // one-time expense saved at term 2026061500 (mid-June) was silently
+  // dropped because June rents normalize to 2026060100 and the equality
+  // check failed. Both are "June" — match the month.
+  if (!(expense as any).isRecurring) {
+    if (!expense.startTerm) return false;
+    if (Math.floor(expense.startTerm / 10000) !== Math.floor(term / 10000)) {
+      return false;
+    }
+    return true;
+  }
   if (expense.startTerm && term < expense.startTerm) return false;
   if (expense.endTerm && term > expense.endTerm) return false;
   return true;
@@ -155,7 +302,8 @@ function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: 
 export default function taskBase(
   contract: Contract,
   rentDate: string,
-  previousRent: Rent | null,
+  // Unused here — kept for RentTask signature compatibility (used by 5_balance).
+  _previousRent: Rent | null,
   settlements: Settlements | undefined,
   rent: Rent
 ): Rent {
@@ -164,6 +312,12 @@ export default function taskBase(
 
   rent.term = Number(currentMoment.format('YYYYMMDDHH'));
   if (contract.frequency === 'months') {
+    // NOTE: contract.ts uses startOf('month') so mid-month begin/end dates
+    // produce a full-month rent (a tenant who moves in on the 20th is
+    // billed the full month for that month). If proration is required,
+    // change here to compute partial-month rent based on
+    // day-of-month / daysInMonth — and apply the same scaling in
+    // 2_amount.ts where preTaxAmount is computed.
     rent.term = Number(
       moment.utc(currentMoment).startOf('month').format('YYYYMMDDHH')
     );
@@ -285,7 +439,8 @@ export default function taskBase(
             const share = computeBuildingChargeForProperty(
               building,
               String(property.propertyId),
-              expense
+              expense,
+              rent.term
             );
 
             if (share > 0) {

@@ -52,7 +52,7 @@ export default function SignIn() {
             email: values.email
           }
         );
-        if (response.status >= 200 && response.status < 300) {
+        if (response.status === 200 || response.status === 201) {
           return router.replace(`/otp/${encodeURIComponent(values.email)}`);
         }
       } catch (error) {

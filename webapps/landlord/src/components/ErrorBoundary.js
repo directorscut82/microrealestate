@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import { Button } from './ui/button';
+import config from '../config';
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
@@ -16,11 +17,12 @@ export default class ErrorBoundary extends Component {
   }
 
   handleReload = () => {
-    window.location.reload();
+    if (typeof window !== 'undefined') window.location.reload();
   };
 
   handleGoHome = () => {
-    window.location.assign('/');
+    if (typeof window !== 'undefined')
+      window.location.assign(`${config.BASE_PATH}`);
   };
 
   render() {

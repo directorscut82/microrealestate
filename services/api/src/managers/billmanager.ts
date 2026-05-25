@@ -5,6 +5,7 @@ import {
   generateIrisQr,
   normalizeBillingId
 } from './billparser/index.js';
+import { validateObjectId } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -29,9 +30,19 @@ async function findExpenseByBillingId(
 } | null> {
   const buildings = await Collections.Building.find({ realmId }).lean();
 
+  // Compute the current YYYYMMDDHH term — soft-deleted expenses carry
+  // endTerm < current and must be skipped so a freshly imported bill does
+  // not auto-link to a retired expense.
+  const now = new Date();
+  const currentTerm = Number(
+    `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}0100`
+  );
+
   for (const building of buildings) {
     for (const expense of building.expenses || []) {
       if (!expense.billingId) continue;
+      // Skip soft-deleted (endTerm < current) expenses.
+      if (expense.endTerm && Number(expense.endTerm) < currentTerm) continue;
       const expenseNormalized = normalizeBillingId(expense.billingId);
       if (expenseNormalized === normalizedBillingId) {
         return { building, expense };
@@ -184,6 +195,7 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       dueDate,
       term,
       rfCode,
+      paymentCode,
       irisCodeBase64,
       replaceExisting
     } = billData;
@@ -226,26 +238,54 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       ? `data:image/png;base64,${irisCodeBase64}`
       : undefined;
 
-    const bill = new Collections.Bill({
-      realmId,
-      buildingId,
-      expenseId,
-      provider,
-      billingId,
-      totalAmount,
-      periodStart: new Date(periodStart),
-      periodEnd: new Date(periodEnd),
-      issueDate: issueDate ? new Date(issueDate) : undefined,
-      dueDate: dueDate ? new Date(dueDate) : undefined,
-      term,
-      rfCode,
-      irisCodeUrl,
-      status: 'pending',
-      createdDate: new Date(),
-      updatedDate: new Date()
-    });
+    const buildBill = () =>
+      new Collections.Bill({
+        realmId,
+        buildingId,
+        expenseId,
+        provider,
+        billingId,
+        totalAmount,
+        periodStart: new Date(periodStart),
+        periodEnd: new Date(periodEnd),
+        issueDate: issueDate ? new Date(issueDate) : undefined,
+        dueDate: dueDate ? new Date(dueDate) : undefined,
+        term,
+        rfCode,
+        paymentCode: paymentCode || null,
+        irisCodeUrl,
+        status: 'pending',
+        createdDate: new Date(),
+        updatedDate: new Date()
+      });
 
-    await bill.save();
+    let bill = buildBill();
+    try {
+      await bill.save();
+    } catch (err: any) {
+      // Duplicate-key on the (realmId, buildingId, expenseId, term) unique
+      // index — translate into a proper 409 unless the caller asked to
+      // replace, in which case delete-and-retry once.
+      if (err && err.code === 11000) {
+        if (replaceExisting) {
+          await Collections.Bill.deleteOne({
+            realmId,
+            buildingId,
+            expenseId,
+            term
+          });
+          bill = buildBill();
+          await bill.save();
+        } else {
+          throw new ServiceError(
+            'A bill already exists for this period. Use replaceExisting:true to overwrite.',
+            409
+          );
+        }
+      } else {
+        throw err;
+      }
+    }
     saved.push(bill.toObject());
   }
 
@@ -392,10 +432,16 @@ export async function list(req: Req, res: Res): Promise<void> {
 
   const { buildingId, status, term, expenseId } = req.query as any;
   const filter: any = { realmId };
-  if (buildingId) filter.buildingId = buildingId;
+  if (buildingId) {
+    validateObjectId(buildingId, 'buildingId');
+    filter.buildingId = buildingId;
+  }
   if (status) filter.status = status;
   if (term) filter.term = Number(term);
-  if (expenseId) filter.expenseId = expenseId;
+  if (expenseId) {
+    validateObjectId(expenseId, 'expenseId');
+    filter.expenseId = expenseId;
+  }
 
   const bills = await Collections.Bill.find(filter)
     .sort({ createdDate: -1 })
@@ -424,4 +470,25 @@ export async function one(req: Req, res: Res): Promise<void> {
   }
 
   res.json(bill);
+}
+
+/**
+ * DELETE /bills/:id
+ * Delete a bill scoped to the caller's realm.
+ */
+export async function remove(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+
+  validateObjectId(req.params.id, 'bill id');
+  const result = await Collections.Bill.deleteOne({
+    _id: req.params.id,
+    realmId
+  });
+  if (result.deletedCount === 0) {
+    throw new ServiceError('Bill not found', 404);
+  }
+  res.sendStatus(200);
 }

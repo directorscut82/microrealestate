@@ -5,7 +5,13 @@ import {
   ServiceError
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
-import { validateEnum, validateArrayMaxLength, LOCALES } from '../validators.js';
+import {
+  validateEnum,
+  validateArrayMaxLength,
+  validateStringField,
+  LOCALES,
+  CURRENCIES
+} from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -13,6 +19,20 @@ type Res = ServiceResponse;
 type AnyRecord = Record<string, any>;
 
 const SECRET_PLACEHOLDER = '**********';
+
+// Map regional IETF tags accepted by the API onto the canonical short form
+// downstream code keys on (i18n catalogues, moment.locale, accounting CSV).
+// Without this, a realm saved with locale 'el-GR' would later fail i18n
+// lookups that key on 'el'. 'en-US' / 'fr-FR' / 'pt-BR' / 'de-DE' / 'es-CO'
+// already match catalogue keys exactly, so no remap is needed.
+const LOCALE_ALIASES: Record<string, string> = {
+  'el-GR': 'el'
+};
+
+function _normalizeLocale<T>(input: T): T {
+  if (typeof input !== 'string') return input;
+  return (LOCALE_ALIASES[input] ?? input) as T;
+}
 
 function _hasRequiredFields(realm: AnyRecord): void {
   [
@@ -33,11 +53,17 @@ function _hasRequiredFields(realm: AnyRecord): void {
 }
 
 function _isNameAlreadyTaken(realm: AnyRecord, realms: AnyRecord[] = []): void {
-  if (
-    realms
-      .map(({ name }: AnyRecord) => name.trim().toLowerCase())
-      .includes(realm.name.trim().toLowerCase())
-  ) {
+  // Exclude the realm under edit from the duplicate check — comparing
+  // against itself by name was producing false 409s when an admin renamed
+  // the realm but kept the casing close to the original (or used the same
+  // exact name). The check should only fire for OTHER realms.
+  const candidate = String(realm.name || '').trim().toLowerCase();
+  const selfId = realm._id ? String(realm._id) : null;
+  const collision = realms.some((r: AnyRecord) => {
+    if (selfId && String(r._id) === selfId) return false;
+    return String(r.name || '').trim().toLowerCase() === candidate;
+  });
+  if (collision) {
     throw new ServiceError('landlord name already taken', 409);
   }
 }
@@ -68,6 +94,36 @@ function _escapeSecrets(realm: AnyRecord): AnyRecord {
 }
 
 export async function add(req: Req, res: Res) {
+  // Force-inject the caller as the sole administrator member. Without this,
+  // an authenticated user could POST { members: [{ email: 'victim@x' }] }
+  // and create a "phantom" realm owned by someone else (or themselves +
+  // unwanted observers).
+  const callerEmail = (req.user as AnyRecord)?.email;
+  if (!callerEmail) {
+    throw new ServiceError('authenticated user required to create realm', 401);
+  }
+  req.body.members = [
+    {
+      email: callerEmail,
+      role: 'administrator',
+      registered: true
+    }
+  ];
+
+  // Name validation (trim, length cap, non-empty) — mirror update().
+  req.body.name = validateStringField(req.body.name, 'name', {
+    min: 1,
+    max: 200,
+    required: true
+  });
+
+  // Locale validation — update() already does this; add() previously only
+  // failed via Mongoose schema validation as a generic 500.
+  if (req.body.locale !== undefined) {
+    validateEnum(req.body.locale, LOCALES, 'locale');
+    req.body.locale = _normalizeLocale(req.body.locale);
+  }
+
   const newRealm: any = new Collections.Realm(req.body);
 
   _hasRequiredFields(newRealm);
@@ -116,7 +172,65 @@ export async function update(req: Req, res: Res) {
   const gmailAppPasswordUpdated =
     !!req.body.thirdParties?.gmail?.appPasswordUpdated;
   validateEnum(req.body.locale, LOCALES, 'locale');
+  req.body.locale = _normalizeLocale(req.body.locale);
+  // Wave-21 C29-B1: validate currency against ISO-4217 subset. Letting an
+  // arbitrary string through here causes Intl.NumberFormat to throw a
+  // RangeError when the accounting CSV tries to format amounts with it,
+  // surfacing as a generic 500 to the user.
+  if (req.body.currency !== undefined) {
+    validateEnum(req.body.currency, CURRENCIES, 'currency');
+  }
   validateArrayMaxLength(req.body.members, 50, 'members');
+  // Wave-21 C29-B2: dedupe members by email (case-insensitive). Without
+  // this, a payload [{X,admin},{X,admin}] persists both rows, polluting
+  // the access list. Conflicting roles resolve to administrator > renter.
+  if (Array.isArray(req.body.members)) {
+    const ROLE_RANK: Record<string, number> = {
+      administrator: 2,
+      renter: 1,
+      tenant: 0
+    };
+    const byEmail = new Map<string, AnyRecord>();
+    for (const member of req.body.members as AnyRecord[]) {
+      if (!member?.email || typeof member.email !== 'string') continue;
+      const key = member.email.trim().toLowerCase();
+      if (!key) continue;
+      const existing = byEmail.get(key);
+      if (!existing) {
+        byEmail.set(key, { ...member, email: member.email.trim() });
+        continue;
+      }
+      const existingRank = ROLE_RANK[String(existing.role || '')] ?? -1;
+      const incomingRank = ROLE_RANK[String(member.role || '')] ?? -1;
+      if (incomingRank > existingRank) {
+        byEmail.set(key, { ...member, email: member.email.trim() });
+      }
+    }
+    req.body.members = Array.from(byEmail.values());
+  }
+  if (req.body.name !== undefined) {
+    req.body.name = validateStringField(req.body.name, 'name', {
+      min: 1,
+      max: 200,
+      required: true
+    });
+  }
+
+  // Type-guard the `selected` flag on every third-party provider before the
+  // deep-merge below. Without this a payload like
+  // `thirdParties.smsGateway.selected = "true"` (string) or {$ne:false} would
+  // be persisted verbatim and downstream `if (selected)` checks would behave
+  // unexpectedly across services that read this config.
+  const PROVIDERS = ['gmail', 'smtp', 'mailgun', 'b2', 'smsGateway'] as const;
+  for (const p of PROVIDERS) {
+    const sel = req.body.thirdParties?.[p]?.selected;
+    if (sel !== undefined && typeof sel !== 'boolean') {
+      throw new ServiceError(
+        `thirdParties.${p}.selected must be a boolean`,
+        422
+      );
+    }
+  }
 
   const smtpPasswordUpdated = !!req.body.thirdParties?.smtp?.passwordUpdated;
   const mailgunApiKeyUpdated = !!req.body.thirdParties?.mailgun?.apiKeyUpdated;
@@ -146,7 +260,18 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('organization not found', 404);
   }
 
-  const updatedRealm: AnyRecord = { ...previousRealm.toObject(), ...req.body };
+  // Deep-merge thirdParties so a PATCH that touches a single provider does
+  // not wipe configuration for the others. Previously a body containing
+  // only `thirdParties.gmail = {...}` would replace the whole subtree and
+  // erase smtp/mailgun/b2/smsGateway settings that the user never touched.
+  const previousObj = previousRealm.toObject();
+  const updatedRealm: AnyRecord = {
+    ...previousObj,
+    ...req.body,
+    thirdParties: req.body.thirdParties
+      ? { ...(previousObj.thirdParties || {}), ...req.body.thirdParties }
+      : previousObj.thirdParties
+  };
 
   _hasRequiredFields(updatedRealm);
   if (
@@ -256,7 +381,20 @@ export async function update(req: Req, res: Res) {
   });
 
   previousRealm.set(updatedRealm);
-  res.json(_escapeSecrets(await previousRealm.save()));
+  // Mongoose throws VersionError when the document was modified between
+  // findOne and save (optimistic concurrency control on __v). Surface that
+  // as a 409 instead of leaking it as a generic 500.
+  try {
+    res.json(_escapeSecrets(await previousRealm.save()));
+  } catch (err: any) {
+    if (err && err.name === 'VersionError') {
+      throw new ServiceError(
+        'Realm was modified concurrently. Please retry.',
+        409
+      );
+    }
+    throw err;
+  }
 }
 
 export function one(req: Req, res: Res) {
@@ -278,7 +416,66 @@ export function all(req: Req, res: Res) {
   res.json(req.realms.map((realm: AnyRecord) => _escapeSecrets(realm)));
 }
 
+export async function leaveRealm(req: Req, res: Res) {
+  const realm = req.realm;
+  if (!realm) {
+    throw new ServiceError('organization not found', 404);
+  }
+  const email = (req.user as AnyRecord)?.email;
+  if (!email) {
+    throw new ServiceError('authenticated user required', 401);
+  }
+
+  // Pull the caller from the realm's members list.
+  const updated: any = await Collections.Realm.findOneAndUpdate(
+    { _id: realm._id, 'members.email': email },
+    { $pull: { members: { email } } },
+    { new: true }
+  );
+
+  if (!updated) {
+    // Either the realm vanished or the caller wasn't a member of it.
+    throw new ServiceError('not a member of this organization', 404);
+  }
+
+  // If pulling the caller would leave the realm without any administrators,
+  // refuse and restore the membership. The check happens AFTER the pull so
+  // we can read `updated.members` directly — the alternative (read first,
+  // then pull) opens a TOCTOU race.
+  const remainingAdmins = (updated.members || []).filter(
+    (m: AnyRecord) => m.role === 'administrator'
+  );
+  if (remainingAdmins.length === 0) {
+    await Collections.Realm.updateOne(
+      { _id: realm._id },
+      {
+        $push: {
+          members: {
+            email,
+            role: 'administrator',
+            registered: true
+          }
+        }
+      }
+    );
+    throw new ServiceError(
+      'Cannot leave: you are the only administrator. Promote another member first.',
+      422
+    );
+  }
+
+  logger.info(`User ${email} left realm ${realm._id} (${realm.name})`);
+  res.sendStatus(204);
+}
+
 export async function remove(req: Req, res: Res) {
+  // Only an administrator may delete a realm. Without this check, any
+  // authenticated user (including a renter on another realm) can call
+  // DELETE /realms/:id and erase data.
+  if ((req.user as AnyRecord)?.role !== 'administrator') {
+    throw new ServiceError('forbidden', 403);
+  }
+
   const realmId = req.params.id;
   if (!realmId) {
     throw new ServiceError('missing realm id', 422);
@@ -312,6 +509,9 @@ export async function remove(req: Req, res: Res) {
   await Collections.Template.deleteMany({ realmId });
   await Collections.Document.deleteMany({ realmId });
   await Collections.Email.deleteMany({ realmId });
+  // Bills outlive tenants/properties (they may exist before any tenant is
+  // attached), so we cascade-delete them here before the realm itself.
+  await Collections.Bill.deleteMany({ realmId });
   await Collections.Realm.deleteOne({ _id: realmId });
 
   logger.info(`Realm ${realmId} (${realm.name}) deleted by ${(req.user as AnyRecord)?.email}`);

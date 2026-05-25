@@ -61,10 +61,12 @@ describe('utils', () => {
   });
 
   it('can destruct url containing localhost', () => {
+    // domain now includes the port (uses url.host instead of url.hostname)
+    // so CORS regexes match the browser's Origin header byte-for-byte.
     let destructedUrl = URL.destructUrl('http://localhost:8080');
     expect(destructedUrl.protocol).toBe('http:');
     expect(destructedUrl.subDomain).toBeUndefined();
-    expect(destructedUrl.domain).toBe('localhost');
+    expect(destructedUrl.domain).toBe('localhost:8080');
     expect(destructedUrl.port).toBe('8080');
     expect(destructedUrl.basePath).toBeUndefined();
 
@@ -87,7 +89,7 @@ describe('utils', () => {
     let destructedUrl = URL.destructUrl('http://example.com:8080');
     expect(destructedUrl.protocol).toBe('http:');
     expect(destructedUrl.subDomain).toBeUndefined();
-    expect(destructedUrl.domain).toBe('example.com');
+    expect(destructedUrl.domain).toBe('example.com:8080');
     expect(destructedUrl.port).toBe('8080');
     expect(destructedUrl.basePath).toBeUndefined();
 
@@ -124,7 +126,7 @@ describe('utils', () => {
     let destructedUrl = URL.destructUrl('http://10.1.1.5:8080');
     expect(destructedUrl.protocol).toBe('http:');
     expect(destructedUrl.subDomain).toBeUndefined();
-    expect(destructedUrl.domain).toBe('10.1.1.5');
+    expect(destructedUrl.domain).toBe('10.1.1.5:8080');
     expect(destructedUrl.port).toBe('8080');
     expect(destructedUrl.basePath).toBeUndefined();
 

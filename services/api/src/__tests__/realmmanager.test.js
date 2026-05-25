@@ -14,6 +14,7 @@ jest.mock('@microrealestate/common', () => {
     templateDelete: jest.fn(),
     documentDelete: jest.fn(),
     emailDelete: jest.fn(),
+    billDelete: jest.fn(),
     realmDelete: jest.fn()
   };
 
@@ -27,6 +28,7 @@ jest.mock('@microrealestate/common', () => {
       Template: { deleteMany: (...args) => m.templateDelete(...args) },
       Document: { deleteMany: (...args) => m.documentDelete(...args) },
       Email: { deleteMany: (...args) => m.emailDelete(...args) },
+      Bill: { deleteMany: (...args) => m.billDelete(...args) },
       Realm: { deleteOne: (...args) => m.realmDelete(...args) }
     },
     ServiceError,
@@ -50,7 +52,7 @@ function makeReq(overrides = {}) {
   return {
     params: { id: 'realm123' },
     realms: [{ _id: { toString: () => 'realm123' }, name: 'Test Org' }],
-    user: { email: 'admin@test.com' },
+    user: { email: 'admin@test.com', role: 'administrator' },
     ...overrides
   };
 }
@@ -71,6 +73,7 @@ describe('realmmanager.remove', () => {
     m.templateDelete.mockResolvedValue({});
     m.documentDelete.mockResolvedValue({});
     m.emailDelete.mockResolvedValue({});
+    m.billDelete.mockResolvedValue({});
     m.realmDelete.mockResolvedValue({});
   });
 

@@ -11,11 +11,18 @@ import {
 } from '@microrealestate/common';
 
 export async function status(
+  realmId: string,
   recordId: string | null,
   startTerm: number,
   endTerm: number | null
 ) {
-  const query: Record<string, any> = {};
+  // Multi-tenant guard: every status query MUST be realm-scoped, otherwise
+  // a caller in org A can read the email audit trail of org B by looking
+  // up a recordId (e.g. tenant id or term) that happens to collide.
+  if (!realmId) {
+    throw new ServiceError('realmId required', 422);
+  }
+  const query: Record<string, any> = { realmId };
   if (recordId) {
     query.recordId = recordId;
   }
@@ -138,7 +145,10 @@ export async function send(
     throw new ServiceError(`missing content for ${templateName}`, 422);
   }
 
-  return await Promise.all(
+  // Use allSettled so a single bad recipient doesn't sink the whole batch.
+  // Each entry surfaces per-recipient success or failure, with the same
+  // shape callers used to receive on success.
+  const settled = await Promise.allSettled(
     recipientsList.map(async (recipients) => {
       const email = {
         ...recipients,
@@ -148,11 +158,11 @@ export async function send(
       logger.debug(`recipients:
 ${email.to}
 subject:
-${email.subject} 
+${email.subject}
 text:
 ${email.text}
 html:
-${email.html} 
+${email.html}
 attachments:
 ${email.attachment
   .map((a: any) => `${a.filename} size: ${a.data?.length || 0}`)
@@ -161,15 +171,35 @@ ${email.attachment
       let status: any;
       if (ALLOW_SENDING_EMAILS) {
         status = await EmailEngine.sendEmail(email, data);
-        new Collections.Email({
-          templateName,
-          recordId,
-          params,
-          sentTo: recipients.to,
-          sentDate: new Date(),
-          emailId: status.id,
-          status: 'queued'
-        }).save();
+        // Persist the audit trail before returning so callers see a
+        // consistent state on success. realmId is now required by the
+        // Email schema. Resolve it in priority order:
+        //   1. organizationId from the route caller (the normal case for
+        //      invoice / rentcall flows that go through checkOrganization)
+        //   2. data.landlord._id (otp flow — derived from the tenant's
+        //      realm in emailparts/data/otp)
+        // If neither is available (e.g. reset_password is a system-level
+        // email with no realm context), skip audit persistence — the
+        // audit row is realm-scoped by design and a global "no realm"
+        // bucket would break the multi-tenant query model.
+        const auditRealmId =
+          organizationId || (data && data.landlord && data.landlord._id);
+        if (auditRealmId) {
+          await new Collections.Email({
+            realmId: auditRealmId,
+            templateName,
+            recordId,
+            params,
+            sentTo: recipients.to,
+            sentDate: new Date(),
+            emailId: status.id,
+            status: 'queued'
+          }).save();
+        } else {
+          logger.debug(
+            `skipping email audit row for ${templateName} (no realm context)`
+          );
+        }
         logger.info(`${templateName} sent to ${recordId} at ${recipients.to}`);
       } else {
         const message = `ALLOW_SENDING_EMAILS set to "false", ${templateName} not sent to ${recordId} at ${recipients.to}`;
@@ -189,4 +219,24 @@ ${email.attachment
       };
     })
   );
+
+  return settled.map((outcome, index) => {
+    const recipientEmail = recipientsList[index]?.to;
+    if (outcome.status === 'fulfilled') {
+      return outcome.value;
+    }
+    const reason: any = outcome.reason;
+    logger.error(
+      `failed to send ${templateName} to ${recipientEmail}: ${reason?.message || reason}`
+    );
+    return {
+      ...result,
+      email: recipientEmail,
+      status: {
+        id: null,
+        to: recipientEmail,
+        error: reason?.message || String(reason)
+      }
+    };
+  });
 }

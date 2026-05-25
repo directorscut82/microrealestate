@@ -44,7 +44,7 @@ async function Main() {
         UPLOADS_DIRECTORY:
           process.env.UPLOADS_DIRECTORY || path.join(root_dir, '/uploads'),
         UPLOAD_MAX_SIZE: Number(
-          process.env.UPLOAD_MAX_SIZE || 2_000_000_000 /* 2Gb */
+          process.env.UPLOAD_MAX_SIZE || 25 * 1024 * 1024 /* 25 MB */
         )
       })
     );

@@ -15,6 +15,7 @@ import {
 } from '../../../utils/restcalls';
 import { Card } from '../../../components/ui/card';
 import ConfirmDialog from '../../../components/ConfirmDialog';
+import ErrorPage from 'next/error';
 import { DashboardCard } from '../../../components/dashboard/DashboardCard';
 import Map from '../../../components/Map';
 import moment from 'moment';
@@ -94,8 +95,13 @@ function Property() {
   const { data: property, isLoading } = useQuery({
     queryKey: [QueryKeys.PROPERTIES, propertyId],
     queryFn: () => fetchProperty(propertyId),
-    enabled: !!propertyId
+    enabled: !!propertyId && propertyId !== 'new'
   });
+
+  // The /new route never fetches — only return 404 once a fetch completed
+  // for an existing id and produced nothing.
+  const notFound =
+    propertyId && propertyId !== 'new' && !isLoading && !property;
 
   const saveMutation = useMutation({
     mutationFn: (data) =>
@@ -167,6 +173,10 @@ function Property() {
     },
     [property, saveMutation, t, router]
   );
+
+  if (notFound) {
+    return <ErrorPage statusCode={404} />;
+  }
 
   return (
     <Page

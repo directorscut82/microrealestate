@@ -1,7 +1,7 @@
 import type { LocaleMap, LocalizedMessages, TFunction } from '@/types';
 import { Locale } from '@microrealestate/types';
 
-export const LOCALES = ['de-DE', 'el', 'en', 'es-CO', 'fr', 'pt-BR'] as const;
+export const LOCALES = ['de-DE', 'el', 'en', 'es-CO', 'fr-FR', 'pt-BR'] as const;
 export const DEFAULT_LOCALE = 'en' as const;
 const MESSAGES_CACHE = new Map() as LocaleMap;
 
@@ -68,10 +68,20 @@ export function getT(locale: Locale, messages: LocalizedMessages): TFunction {
         type: plural.type
       }).select(plural.count);
       message = messageObj[pluralKey];
+      if (typeof message !== 'string') {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn(
+            `localized plural form "${pluralKey}" missing for key: ${key}`
+          );
+        }
+        return replaceData(key, data);
+      }
       return replaceData(message, data);
     }
 
-    console.warn(`localized message not found for key: ${key}`);
-    return `### ${key} ###`;
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`localized message not found for key: ${key}`);
+    }
+    return key;
   };
 }
