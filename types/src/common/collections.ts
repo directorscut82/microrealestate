@@ -365,6 +365,7 @@ export namespace CollectionTypes {
 
   export type BuildingUnit = {
     _id: string;
+    name?: string;
     atakNumber: string;
     altAtakNumbers?: string[];
     floor?: number;

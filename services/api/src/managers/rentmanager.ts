@@ -210,11 +210,24 @@ export async function update(req: ReqNoParams, res: Res) {
 export async function updateByTerm(req: ReqWithIdTerm, res: Res) {
   const realm = req.realm;
   const term = req.params.term;
+  const urlTenantId = req.params.id;
   const authorizationHeader = req.headers.authorization;
   const locale = req.headers['accept-language'] as string | undefined;
   const paymentData = req.body;
 
+  // Wave-20 F10: URL :id is authoritative. Without this guard, the route
+  // ignored req.params.id and used paymentData._id from the body for the
+  // tenant lookup — which let a caller PATCH /rents/payment/{realA}/{term}
+  // with body {_id: realB} and silently mutate B's rent. Validate both
+  // ids and require them to match.
+  validateObjectId(urlTenantId, 'URL tenant id');
   validateObjectId(paymentData._id, 'tenant id');
+  if (String(urlTenantId) !== String(paymentData._id)) {
+    throw new ServiceError(
+      'URL tenant id does not match body tenant id',
+      422
+    );
+  }
   if (!/^\d{10}$/.test(term)) {
     throw new ServiceError('Invalid term format', 422);
   }
@@ -344,6 +357,25 @@ async function _updateByTerm(
     }
 
     if (paymentData.promo) {
+      // Wave-20 F6: cap the promo against the rent's pre-promo grand total
+      // so we never produce a negative invoice. Without this guard, a
+      // €1000 promo on €600 rent silently emits totalAmount=-100, which
+      // then poisons accounting/dashboard/CSV reports. Look up the rent
+      // for the requested term in the input contract; the user-facing
+      // grand total is the pre-promo value (settlement discounts have
+      // not yet been added at this point).
+      const targetTerm = Number(term);
+      const targetRent = (occupant.rents || []).find(
+        (r: AnyRecord) => Number(r.term) === targetTerm
+      );
+      const grandTotalPrePromo = Number(targetRent?.total?.grandTotal) || 0;
+      const promoGross = Number(paymentData.promo);
+      if (grandTotalPrePromo > 0 && promoGross > grandTotalPrePromo + 0.005) {
+        throw new ServiceError(
+          `Promo (${promoGross}) cannot exceed rent grand total of ${grandTotalPrePromo}`,
+          422
+        );
+      }
       // The user enters a VAT-inclusive amount. We store the net-of-VAT
       // amount: task 4 (4_vats.ts) adds a VAT line for settlement
       // discounts, and frontdata.ts:toRentData multiplies the net back to

@@ -67,8 +67,12 @@ export async function all(req: Req, res: Res) {
   );
   const tenantCount = activeTenants.length;
 
+  // Wave-20 F9: exclude building shells from the rentable count. A
+  // type='building' Property is a building wrapper, not a rentable unit;
+  // including it inflates propertyCount and dilutes occupancyRate.
   const propertyCount = await Collections.Property.countDocuments({
-    realmId
+    realmId,
+    type: { $ne: 'building' }
   });
 
   // Compute occupancy rate excluding owner_occupied and parking units
