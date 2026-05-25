@@ -260,6 +260,7 @@
   "Error updating lease": "Erreur lors de la mise à jour du bail",
   "Error updating organization": "Erreur lors de la mise à jour de l'organisation",
   "Estimated Cost": "Coût estimé",
+  "estimate": "estimation",
   "Existing property found": "Existing property found",
   "Existing tenant found": "Existing tenant found",
   "Exit date": "Date de sortie",

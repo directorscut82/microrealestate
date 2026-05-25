@@ -8,7 +8,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '../ui/drawer';
 import { LuChevronDown, LuChevronsUpDown, LuPencil } from 'react-icons/lu';
 import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { Button } from '../ui/button';
-import { getPeriod } from '../../utils';
+import { cn, getPeriod } from '../../utils';
 import { fetchTenantRents } from '../../utils/restcalls';
 import Loading from '../Loading';
 import moment from 'moment';
@@ -17,8 +17,26 @@ import RentDetails from './RentDetails';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
+function _termRelation(term) {
+  // Compares a YYYYMMDDHH term to the current month.
+  // Returns 'past' / 'current' / 'future'.
+  const currentTerm = Number(moment.utc().startOf('month').format('YYYYMMDDHH'));
+  const t = Number(term);
+  if (t < currentTerm) return 'past';
+  if (t > currentTerm) return 'future';
+  return 'current';
+}
+
 function RentListItem({ rent, tenant, onClick }) {
   const { t } = useTranslation('common');
+  const relation = _termRelation(rent.term);
+  // Past months: muted card background so completed history reads as
+  // "settled". Future months: subtle indication these are projections.
+  const cardClass = cn(
+    'p-2 cursor-pointer',
+    relation === 'past' && 'bg-marble-tint/40 border-stone-line',
+    relation === 'future' && 'border-dashed border-stone-line/70'
+  );
 
   const handleClick = useCallback(
     (event) => {
@@ -29,10 +47,15 @@ function RentListItem({ rent, tenant, onClick }) {
   );
 
   return (
-    <Card className="p-2 cursor-pointer" onClick={handleClick}>
+    <Card className={cardClass} onClick={handleClick}>
       <CardHeader className="flex flex-row justify-between items-center">
-        <div className="text-xl">
-          {getPeriod(t, rent.term, tenant.occupant.frequency)}
+        <div className="text-xl flex items-baseline gap-2">
+          <span>{getPeriod(t, rent.term, tenant.occupant.frequency)}</span>
+          {relation === 'future' && (
+            <span className="text-label text-ink-muted italic">
+              ({t('estimate')})
+            </span>
+          )}
         </div>
         <div>
           <Button variant="ghost" size="icon" onClick={handleClick}>

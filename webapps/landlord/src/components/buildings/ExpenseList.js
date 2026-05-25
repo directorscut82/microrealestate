@@ -267,23 +267,29 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
     return map;
   }, [tenants]);
 
+  // Building expense changes flow into tenant rent computation (recurring
+  // expenses are computed live), so a payment dialog opened after a koino
+  // edit must see fresh amounts. Invalidate RENTS/DASHBOARD/TENANTS in
+  // addition to the building cache. Mirrors the delete-mutation pattern.
+  const _invalidateAllExpenseDependents = () => {
+    queryClient.invalidateQueries({
+      queryKey: [QueryKeys.BUILDINGS, buildingId]
+    });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingExpense(buildingId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, buildingId]
-      });
-    }
+    onSuccess: _invalidateAllExpenseDependents
   });
 
   const updateMutation = useMutation({
     mutationFn: (data) =>
       updateBuildingExpense(buildingId, { ...data, _id: expense._id }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, buildingId]
-      });
-    }
+    onSuccess: _invalidateAllExpenseDependents
   });
 
   const buildDefaultAllocations = useCallback(

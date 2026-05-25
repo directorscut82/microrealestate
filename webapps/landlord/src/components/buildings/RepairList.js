@@ -160,12 +160,23 @@ export default function RepairList({ building }) {
   const contractors = building?.contractors || [];
   const termOptions = useMemo(() => generateTermOptions(), []);
 
+  // Repairs that distribute charges to tenant rents change rent ledgers
+  // — the next payment dialog or rent listing must see the updated state.
+  // Invalidate building + RENTS + DASHBOARD + TENANTS like ExpenseList.
+  const _invalidateAllRepairDependents = () => {
+    queryClient.invalidateQueries({
+      queryKey: [QueryKeys.BUILDINGS, building._id]
+    });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingRepair(building._id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
+      _invalidateAllRepairDependents();
       toast.success(t('Repair added'));
     }
   });
@@ -173,9 +184,7 @@ export default function RepairList({ building }) {
   const updateMutation = useMutation({
     mutationFn: (data) => updateBuildingRepair(building._id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
+      _invalidateAllRepairDependents();
       toast.success(t('Repair updated'));
     }
   });
@@ -183,9 +192,7 @@ export default function RepairList({ building }) {
   const removeMutation = useMutation({
     mutationFn: (repairId) => removeBuildingRepair(building._id, repairId),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
+      _invalidateAllRepairDependents();
       toast.success(t('Repair removed'));
     }
   });
@@ -643,14 +650,21 @@ export default function RepairList({ building }) {
                 </div>
               )}
 
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={isPaidFromRepairsFund}
-                  onCheckedChange={(val) =>
-                    setValue('isPaidFromRepairsFund', val)
-                  }
-                />
-                <Label>{t('Paid from repairs fund')}</Label>
+              <div className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={isPaidFromRepairsFund}
+                    onCheckedChange={(val) =>
+                      setValue('isPaidFromRepairsFund', val)
+                    }
+                  />
+                  <Label>{t('Paid from repairs fund')}</Label>
+                </div>
+                <p className="text-label text-ink-muted">
+                  {t(
+                    'Informational only — marks the repair as covered by an accumulated reserve outside this app. Does not affect tenant bills or building totals.'
+                  )}
+                </p>
               </div>
 
               <div className="space-y-2">

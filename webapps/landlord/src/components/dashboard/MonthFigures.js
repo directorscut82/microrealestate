@@ -28,7 +28,7 @@ const CATEGORY_COLORS = {
   // Charts use a quiet earth-tone palette built around petrol. Each
   // category is muted (chroma 0.04–0.08 for paid, 0.018–0.028 for unpaid)
   // so the dashboard reads as a ledger, not a marketing slide.
-  rent: { bold: 'oklch(94% 0.038 140)', faded: 'oklch(92% 0.022 22)' }, // mint / pink
+  rent: { bold: 'oklch(45% 0.080 220)', faded: 'oklch(86% 0.024 220)' }, // sea/petrol — matches system palette
   charges: { bold: 'oklch(40% 0.020 240)', faded: 'oklch(85% 0.012 240)' }, // slate
   heating: { bold: 'oklch(50% 0.080 35)', faded: 'oklch(86% 0.024 35)' }, // terracotta
   elevator: { bold: 'oklch(45% 0.040 200)', faded: 'oklch(86% 0.016 200)' }, // dim teal
