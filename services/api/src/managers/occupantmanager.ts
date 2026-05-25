@@ -15,7 +15,8 @@ import moment from 'moment';
 import {
   validateObjectId,
   validateFiniteNumber,
-  validateStringField
+  validateStringField,
+  validateArrayMaxLength
 } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -681,6 +682,13 @@ async function _assertNoDoubleOccupancy(
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
 
+  // Wave-21 C30-B5: strip server-owned identity fields from the payload.
+  // _id is also destructured later via _formatTenant, but stripping here
+  // prevents accidental retention of __v/realmId from a round-tripped GET.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = (req.body || {}) as any;
+  req.body = rest;
+
   // Strict type guard for `name` — hits .trim() later. Mongoose string casts
   // would otherwise turn a non-string (e.g. {$ne: ''} NoSQL injection probe)
   // into a generic 500.
@@ -960,6 +968,17 @@ export async function update(req: Req, res: Res) {
   }
   validateFiniteNumber(newOccupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
   validateFiniteNumber(newOccupant.discount, 'discount', { min: 0, max: 10000000 });
+  // Wave-21 C28-B1/B2: deposit field validators. Without these, negative
+  // values for guaranty / guarantyPayback are silently persisted and break
+  // accounting aggregations downstream.
+  validateFiniteNumber(newOccupant.guaranty, 'guaranty', {
+    min: 0,
+    max: 10000000
+  });
+  validateFiniteNumber(newOccupant.guarantyPayback, 'guarantyPayback', {
+    min: 0,
+    max: 10000000
+  });
   // Use isSameOrBefore so equal begin/end dates surface here as 422 rather
   // than later inside Contract.update/create as a 409.
   if (
@@ -979,6 +998,42 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('tenant not found', 404);
   }
   const originalOccupant = originalOccupantDoc;
+
+  // Wave-21 C28-B3: guarantyPayback may not exceed guaranty. The "effective"
+  // guaranty is the new value if supplied else the persisted one.
+  const effGuaranty =
+    newOccupant.guaranty != null
+      ? Number(newOccupant.guaranty)
+      : Number(originalOccupant.guaranty || 0);
+  const effPayback =
+    newOccupant.guarantyPayback != null
+      ? Number(newOccupant.guarantyPayback)
+      : Number(originalOccupant.guarantyPayback || 0);
+  if (
+    Number.isFinite(effGuaranty) &&
+    Number.isFinite(effPayback) &&
+    effPayback > effGuaranty
+  ) {
+    throw new ServiceError(
+      `guarantyPayback (${effPayback}) cannot exceed guaranty (${effGuaranty})`,
+      422
+    );
+  }
+
+  // Wave-21 C28-B4: guaranty itself is locked once a terminationDate is on
+  // file. The post-termination workflow expects guaranty to be the agreed
+  // deposit amount; refunding (guarantyPayback) is the only thing that
+  // changes after termination.
+  if (
+    newOccupant.guaranty !== undefined &&
+    originalOccupant.terminationDate &&
+    Number(newOccupant.guaranty) !== Number(originalOccupant.guaranty || 0)
+  ) {
+    throw new ServiceError(
+      'guaranty cannot be changed after the tenant lease has been terminated',
+      422
+    );
+  }
   // Optimistic lock: prefer the __v the client read with, falling back to
   // the fresh value only if the client didn't send one. This catches the
   // case where two concurrent edits started from the same GET response —
@@ -994,6 +1049,41 @@ export async function update(req: Req, res: Res) {
 
   // Wave-20 F7+F8: per-property date windows + duplicate propertyId guard.
   _validatePropertyWindows(newOccupant);
+
+  // Wave-21 C26-B5: refuse endDate shrinks that would orphan PAID rents.
+  // A landlord may legitimately shrink the lease (lease was actually
+  // shorter than registered), so we don't block unpaid orphans — but
+  // discarding a rent that was already paid corrupts the audit trail.
+  if (
+    newOccupant.endDate &&
+    originalOccupantDoc.endDate &&
+    moment.utc(newOccupant.endDate).isBefore(moment.utc(originalOccupantDoc.endDate))
+  ) {
+    const newEndTerm = Number(
+      moment.utc(newOccupant.endDate).format('YYYYMMDDHH')
+    );
+    const orphanPaid = ((originalOccupantDoc.rents || []) as AnyRecord[]).filter(
+      (rent: AnyRecord) => {
+        if (!Number.isFinite(Number(rent.term))) return false;
+        if (Number(rent.term) <= newEndTerm) return false;
+        const paidByPayments =
+          rent.payments &&
+          rent.payments.some(
+            (payment: AnyRecord) => Number(payment.amount) > 0
+          );
+        const paidBySettlement = (rent.discounts || []).some(
+          (discount: AnyRecord) => discount.origin === 'settlement'
+        );
+        return !!(paidByPayments || paidBySettlement);
+      }
+    );
+    if (orphanPaid.length) {
+      throw new ServiceError(
+        `Cannot shrink endDate: ${orphanPaid.length} paid rent term(s) would be orphaned. Reverse those payments first.`,
+        422
+      );
+    }
+  }
 
   // Cross-tenant overlap guard for edits — exclude this tenant's own _id so
   // extending dates doesn't conflict with itself.
@@ -1206,6 +1296,11 @@ export async function remove(req: Req, res: Res) {
     throw new ServiceError('tenant not found', 404);
   }
 
+  // Wave-21 cycle-25-1 follow-up: cap bulk delete to 50 ids. Mirrors
+  // leasemanager.remove. Without this, a runaway client (or buggy script)
+  // can issue an unbounded $in query.
+  validateArrayMaxLength(occupantIds, 50, 'tenant ids');
+
   // Validate each id before using $in — prevents NoSQL injection /
   // CastError 500s when the URL contains a malformed id.
   occupantIds.forEach((id: string) => validateObjectId(id, 'tenant id'));
@@ -1219,35 +1314,68 @@ export async function remove(req: Req, res: Res) {
     throw new ServiceError('tenant not found', 404);
   }
 
-  // Admin escape hatch: ?force=true skips the paid-rents guard so realm
-  // owners can clean up demo / mistakenly-imported tenants. The frontend
-  // does not surface this query param — it is intentionally CLI/curl-only.
+  // Admin escape hatch: ?force=true ARCHIVES tenants with paid rents
+  // instead of physically deleting them — preserves the financial audit
+  // trail (rents[]) while removing them from active counters/lists.
   const force = req.query?.force === 'true';
 
-  if (!force) {
-    const occupantsWithPaidRents = occupants.filter((occupant: AnyRecord) => {
-      return (occupant.rents || []).some(
-        (rent: AnyRecord) =>
-          (rent.payments &&
-            rent.payments.some(
-              (payment: AnyRecord) => Number(payment.amount) > 0
-            )) ||
-          (rent.discounts || []).some(
-            (discount: AnyRecord) => discount.origin === 'settlement'
-          )
-      );
-    });
+  // Identify tenants with paid rent history. These are NEVER physically
+  // deleted; with force=true they are archived (terminationDate set to
+  // today or last rent term, archived=true). Without force, hard-block.
+  const occupantsWithPaidRents = occupants.filter((occupant: AnyRecord) => {
+    return (occupant.rents || []).some(
+      (rent: AnyRecord) =>
+        (rent.payments &&
+          rent.payments.some(
+            (payment: AnyRecord) => Number(payment.amount) > 0
+          )) ||
+        (rent.discounts || []).some(
+          (discount: AnyRecord) => discount.origin === 'settlement'
+        )
+    );
+  });
 
-    if (occupantsWithPaidRents.length) {
-      throw new ServiceError(
-        `impossible to remove ${occupantsWithPaidRents[0].name} some rents have been paid`,
-        422
+  if (!force && occupantsWithPaidRents.length) {
+    throw new ServiceError(
+      `impossible to remove ${occupantsWithPaidRents[0].name} some rents have been paid`,
+      422
+    );
+  }
+
+  // Wave-21 C30-B7: force-delete archives tenants with paid rents instead
+  // of physically deleting them. The CSV/dashboard counters then drop them
+  // (filter on archived) while the rents[] history stays intact.
+  const idsToArchive = new Set<string>(
+    occupantsWithPaidRents.map((o: any) => String(o._id))
+  );
+  if (force && idsToArchive.size) {
+    logger.warn(
+      `force-archive tenant(s) ${Array.from(idsToArchive).join(',')} (paid rents preserved)`
+    );
+    for (const o of occupantsWithPaidRents as any[]) {
+      // Pick the most recent rent term as the termination date when no
+      // explicit termination is on the document yet. Falls back to today.
+      let terminationDate: Date = o.terminationDate || null;
+      if (!terminationDate) {
+        const terms = ((o.rents || []) as any[])
+          .map((r: any) => Number(r.term))
+          .filter((n: number) => Number.isFinite(n))
+          .sort((a: number, b: number) => b - a);
+        if (terms.length) {
+          // YYYYMMDDHH → first day of that month UTC
+          const t = String(terms[0]).padStart(10, '0');
+          const yr = Number(t.slice(0, 4));
+          const mo = Number(t.slice(4, 6));
+          terminationDate = new Date(Date.UTC(yr, mo - 1, 1));
+        } else {
+          terminationDate = new Date();
+        }
+      }
+      await Collections.Tenant.updateOne(
+        { _id: o._id, realmId: realm!._id },
+        { $set: { archived: true, terminationDate } }
       );
     }
-  } else {
-    logger.warn(
-      `force-delete tenant(s) ${occupantIds.join(',')} bypassing paid-rents guard`
-    );
   }
 
   // Note: active lease and unpaid balance are warned in the frontend,
@@ -1313,12 +1441,23 @@ export async function remove(req: Req, res: Res) {
     // reflects the post-delete state.
   }
 
-  const tenantDeleteResult = await Collections.Tenant.deleteMany({
-    realmId: realm!._id,
-    _id: { $in: occupantIds }
-  });
+  // Wave-21 C30-B7: only physically delete tenants WITHOUT paid history.
+  // Archived (paid-history) tenants are kept so the rents[] audit trail and
+  // outgoing CSV reports stay correct.
+  const idsToDelete = occupantIds.filter(
+    (id: string) => !idsToArchive.has(String(id))
+  );
+  const tenantDeleteResult = idsToDelete.length
+    ? await Collections.Tenant.deleteMany({
+        realmId: realm!._id,
+        _id: { $in: idsToDelete }
+      })
+    : { deletedCount: 0 };
 
-  if ((tenantDeleteResult?.deletedCount ?? 0) === 0) {
+  if (
+    (tenantDeleteResult?.deletedCount ?? 0) === 0 &&
+    idsToArchive.size === 0
+  ) {
     throw new ServiceError(
       'No records deleted (none of the ids matched)',
       404
@@ -1338,11 +1477,14 @@ export async function remove(req: Req, res: Res) {
   }
 
   // Partial-success path: report counts so the client can detect drift.
-  // Note: only the tenant delete count is reported — cascade deletes of
-  // documents/payments are not part of the requested vs deleted contract.
-  if ((tenantDeleteResult.deletedCount ?? 0) < occupantIds.length) {
+  // Wave-21 C30-B7: include archived count (force-archived tenants are not
+  // "deleted" but the operation succeeded; surface them separately).
+  const totalProcessed =
+    (tenantDeleteResult.deletedCount ?? 0) + idsToArchive.size;
+  if (totalProcessed < occupantIds.length || idsToArchive.size > 0) {
     return res.status(200).json({
-      deleted: tenantDeleteResult.deletedCount,
+      deleted: tenantDeleteResult.deletedCount ?? 0,
+      archived: idsToArchive.size,
       requested: occupantIds.length
     });
   }

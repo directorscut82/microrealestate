@@ -72,6 +72,14 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
 
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
+  // Wave-21 C30-B5: never trust client-supplied identity on POST. The body
+  // is the document the caller wants to create, but _id / __v / realmId are
+  // server-owned. Strip them up-front so a malicious payload can't smuggle
+  // a chosen ObjectId (which then collides with another realm's id and
+  // surfaces as a raw E11000 500 on retry).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = req.body || {};
+  req.body = rest;
   // Strict type guard — name is .trim()'d below
   if (req.body?.name !== undefined && typeof req.body.name !== 'string') {
     throw new ServiceError('name must be a string', 422);
@@ -238,6 +246,28 @@ export async function remove(req: Req, res: Res) {
     );
   }
 
+  // Wave-21 C30-B2: refuse delete if any building unit still references the
+  // property. Symmetric with the building delete guard. Forces the caller
+  // to detach the unit first (PATCH the unit's propertyId or remove it),
+  // otherwise unit.propertyId would become a stale pointer that breaks
+  // allocation and surfaces as null in _toBuildingData.
+  const buildingsLinking = await Collections.Building.find(
+    {
+      realmId: realm!._id,
+      'units.propertyId': { $in: ids }
+    },
+    { name: 1, units: 1 }
+  ).lean();
+  if ((buildingsLinking as any[]).length) {
+    const names = (buildingsLinking as any[])
+      .map(({ name }: any) => name)
+      .join(', ');
+    throw new ServiceError(
+      `Property cannot be deleted because it is still linked to a unit in building(s): ${names}. Detach the unit first.`,
+      422
+    );
+  }
+
   const result = await Collections.Property.deleteMany({
     _id: { $in: ids },
     realmId: realm!._id
@@ -247,14 +277,10 @@ export async function remove(req: Req, res: Res) {
     throw new ServiceError('Property not found', 404);
   }
 
-  // Clean up dangling building.units[].propertyId references — otherwise a
-  // building keeps a unit pointing at a deleted property which then
-  // surfaces as a null property in _toBuildingData.
-  await Collections.Building.updateMany(
-    { realmId: realm!._id, 'units.propertyId': { $in: ids } },
-    { $set: { 'units.$[elem].propertyId': null } },
-    { arrayFilters: [{ 'elem.propertyId': { $in: ids } }] }
-  );
+  // Wave-21 C30-B2: dangling-unit cleanup is no longer needed — the new
+  // pre-delete guard above refuses the delete when any building unit still
+  // references the property. The block forces the caller to detach the
+  // unit first, which keeps building.units[].propertyId in sync.
 
   // Partial-success path: some ids didn't match (likely cross-realm or
   // already deleted). Surface the count so callers can detect drift instead
