@@ -89,19 +89,25 @@ function _computeBuildingChargeRaw(
 
   switch (allocationMethod) {
     case 'general_thousandths': {
-      const generalTotal = managedUnits.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
+      // Wave-14 F2: use the FULL building denominator (sum across ALL units,
+      // including vacant) so each tenant pays exactly their pro-rata share.
+      // The vacant unit's share is implicitly absorbed by the owner — it is
+      // never associated with a tenant property, so it never lands on a bill.
+      const generalTotal = building.units.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
       if (generalTotal === 0) return 0;
       return (amount * (Number(unit.generalThousandths) || 0)) / generalTotal;
     }
 
     case 'heating_thousandths': {
-      const heatingTotal = managedUnits.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
+      // Wave-14 F2: see general_thousandths note.
+      const heatingTotal = building.units.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
       if (heatingTotal === 0) return 0;
       return (amount * (Number(unit.heatingThousandths) || 0)) / heatingTotal;
     }
 
     case 'elevator_thousandths': {
-      const elevatorTotal = managedUnits.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
+      // Wave-14 F2: see general_thousandths note.
+      const elevatorTotal = building.units.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
       if (elevatorTotal === 0) return 0;
       return (amount * (Number(unit.elevatorThousandths) || 0)) / elevatorTotal;
     }
@@ -109,7 +115,19 @@ function _computeBuildingChargeRaw(
     case 'equal': {
       const totalUnits = managedUnits.length;
       if (totalUnits === 0) return 0;
-      return amount / totalUnits;
+      // Wave-14 F1: the per-unit share is round2(amount/n), but n equal
+      // shares of round2(amount/n) under-recover the original amount when
+      // it doesn't divide cleanly. Push the rounding remainder onto the
+      // LAST managed unit (deterministic by sorted propertyId) so the
+      // total reconciles. Example: 100/3 → 33.33+33.33+33.34 = 100.00.
+      const base = Math.round((amount / totalUnits) * 100) / 100;
+      const sortedIds = managedUnits
+        .map((u) => String(u.propertyId))
+        .sort();
+      if (String(propertyId) === sortedIds[sortedIds.length - 1]) {
+        return Math.round((amount - base * (totalUnits - 1)) * 100) / 100;
+      }
+      return base;
     }
 
     case 'by_surface': {

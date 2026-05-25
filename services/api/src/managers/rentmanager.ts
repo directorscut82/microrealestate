@@ -302,6 +302,17 @@ async function _updateByTerm(
         // stored verbatim and breaking downstream date parsing.
         if (p?.date !== undefined && p.date !== null && p.date !== '') {
           validateDateString(p.date, `payments[${idx}].date`);
+          // Wave-14 F3: reject payment dates more than 7 days in the future.
+          // A typo like 31/12/2099 is otherwise persisted verbatim and
+          // inflates the dashboard for that future year forever. The 7-day
+          // cushion accommodates cheque-clearing/post-dated entries.
+          const parsed = moment.utc(p.date, 'DD/MM/YYYY', true);
+          if (parsed.isValid() && parsed.isAfter(moment.utc().add(7, 'days'))) {
+            throw new ServiceError(
+              `payments[${idx}].date too far in the future`,
+              422
+            );
+          }
         }
       });
       settlements.payments = paymentData.payments
