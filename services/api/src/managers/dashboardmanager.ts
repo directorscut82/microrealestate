@@ -254,11 +254,15 @@ export async function all(req: Req, res: Res) {
         }
 
         acc[key].paid += tenantPaid;
-        // notPaid is the unsigned shortfall (due − paid), only when paid <
-        // due. Stored as a positive amount so dashboards/CSVs don't have to
-        // re-flip the sign on the client.
+        // Wave-14 F5: notPaid is the unsigned shortfall on THIS MONTH'S bill
+        // only — exclude balance carry-forward so summing the column doesn't
+        // double-count prior months. The internal cumulative ledger
+        // (rent.total.balance) is unchanged; only this aggregator output
+        // is per-month.
+        const tenantBalance = rent.total?.balance || 0;
+        const tenantMonthDue = tenantDue - tenantBalance;
         acc[key].notPaid +=
-          tenantPaid - tenantDue < 0 ? tenantDue - tenantPaid : 0;
+          tenantPaid < tenantMonthDue ? tenantMonthDue - tenantPaid : 0;
         acc[key].baseRent += tenantBaseRent;
         acc[key].charges += tenantCharges;
         acc[key].buildingCharges += tenantBuildingCharges;

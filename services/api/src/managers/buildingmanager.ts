@@ -195,6 +195,102 @@ async function _recomputeTenantsForProperty(
   await Promise.all(tenants.map(recomputeOne));
 }
 
+// Wave-14 F6: recompute rents for every tenant linked to ANY managed unit
+// of a building, deduped. Building-expense edits (add/update/remove) must
+// produce a deterministic forward-looking recompute for all tenants — the
+// per-property loop previously used here ran once per propertyId and
+// could leave some tenants out-of-sync when the in-memory building state
+// drifted between sequential calls. The freeze logic in contract.ts
+// protects already-paid historical rents.
+async function _recomputeTenantsForBuilding(
+  realmId: string,
+  building: any
+): Promise<void> {
+  const propertyIds = ((building as any)?.units || [])
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  if (!propertyIds.length) return;
+
+  const tenants = await Collections.Tenant.find({
+    realmId,
+    'properties.propertyId': { $in: propertyIds }
+  }).lean();
+  if (!tenants.length) return;
+
+  // Dedupe by tenant _id so a tenant linked to multiple managed units of
+  // this building is recomputed exactly once.
+  const seen = new Set<string>();
+  const unique: any[] = [];
+  for (const t of tenants) {
+    const id = String(t._id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(t);
+  }
+
+  for (const tenantObj of unique) {
+    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
+    if (!tenantObj.properties?.length) continue;
+    const tenantPropIds = tenantObj.properties
+      .map((p: any) => p.propertyId)
+      .filter(Boolean);
+    const properties = await Collections.Property.find({
+      realmId,
+      _id: { $in: tenantPropIds }
+    }).lean();
+    const propMap = properties.reduce((acc: any, p: any) => {
+      acc[String(p._id)] = p;
+      return acc;
+    }, {});
+    tenantObj.properties.forEach((p: any) => {
+      p.property = propMap[String(p.propertyId)] || p.property;
+    });
+    const buildings: CollectionTypes.Building[] =
+      (await Collections.Building.find({
+        realmId,
+        'units.propertyId': { $in: tenantPropIds }
+      }).lean()) as CollectionTypes.Building[];
+    try {
+      const termFrequency = tenantObj.frequency || 'months';
+      const contract = {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        frequency: termFrequency,
+        terms: Math.ceil(
+          moment(tenantObj.endDate).diff(
+            moment(tenantObj.beginDate),
+            termFrequency as moment.unitOfTime.Diff,
+            true
+          )
+        ),
+        properties: tenantObj.properties,
+        buildings,
+        vatRate: tenantObj.vatRatio,
+        discount: tenantObj.discount,
+        rents: tenantObj.rents || []
+      };
+      const updated = Contract.update(contract, {
+        begin: tenantObj.beginDate,
+        end: tenantObj.endDate,
+        termination: tenantObj.terminationDate,
+        properties: tenantObj.properties,
+        frequency: termFrequency
+      });
+      await Collections.Tenant.updateOne(
+        { _id: tenantObj._id },
+        { rents: updated.rents }
+      );
+      logger.info(
+        `Recomputed rents for tenant ${tenantObj.name} (building ${building._id})`
+      );
+    } catch (error) {
+      logger.error(
+        `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+      );
+    }
+  }
+}
+
 // Recompute rents for all tenants that use a specific property
 
 // ---------------------------------------------------------------------------
@@ -1408,13 +1504,8 @@ export async function addExpense(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  // Recompute rents for all tenants linked to this building
-  const propertyIds = (building as any).units
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
-  }
+  // Wave-14 F6: recompute every tenant linked to the building exactly once.
+  await _recomputeTenantsForBuilding(realm!._id, building);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -1490,13 +1581,8 @@ export async function updateExpense(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  // Recompute rents for all tenants linked to this building
-  const propertyIds = (building as any).units
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
-  }
+  // Wave-14 F6: recompute every tenant linked to the building exactly once.
+  await _recomputeTenantsForBuilding(realm!._id, building);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -1559,13 +1645,8 @@ export async function removeExpense(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await building!.save();
 
-  // Recompute rents for all tenants linked to this building
-  const propertyIds = (building as any).units
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
-  }
+  // Wave-14 F6: recompute every tenant linked to the building exactly once.
+  await _recomputeTenantsForBuilding(realm!._id, building);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
