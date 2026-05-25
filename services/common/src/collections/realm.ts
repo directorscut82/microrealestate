@@ -2,20 +2,36 @@ import * as bcrypt from 'bcrypt';
 import { CollectionTypes } from '@microrealestate/types';
 import mongoose from 'mongoose';
 
+// Valid roles for realm members and applications. Mongoose String fields
+// without an enum accept anything (including arbitrary strings from a
+// payload manipulation), which can silently bypass the role checks in
+// middlewares.ts. Pin to the canonical set documented in CLAUDE.md.
+const REALM_ROLES = ['administrator', 'renter', 'tenant'] as const;
+
 const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
   name: String,
   members: [
     {
       name: String,
       email: String,
-      role: String,
+      role: {
+        type: String,
+        enum: REALM_ROLES,
+        required: true,
+        default: 'renter'
+      },
       registered: Boolean
     }
   ],
   applications: [
     {
       name: String,
-      role: String,
+      role: {
+        type: String,
+        enum: REALM_ROLES,
+        required: true,
+        default: 'renter'
+      },
       clientId: String,
       clientSecret: String,
       createdDate: Date,
