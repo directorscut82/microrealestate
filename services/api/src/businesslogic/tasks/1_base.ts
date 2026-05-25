@@ -60,15 +60,52 @@ export type RentTask = (
 export function computeBuildingChargeForProperty(
   building: CollectionTypes.Building,
   propertyId: string,
-  expense: CollectionTypes.BuildingExpense
+  expense: CollectionTypes.BuildingExpense,
+  term?: number
 ): number {
-  return Math.round(_computeBuildingChargeRaw(building, propertyId, expense) * 100) / 100;
+  return Math.round(_computeBuildingChargeRaw(building, propertyId, expense, term) * 100) / 100;
+}
+
+// Wave-18 B4: group is "active" for `term` when the tenant's lease window
+// (clamped by terminationDate) AND the per-property entry/exit window both
+// cover the rent term. Term is YYYYMMDDHH; we compare in YYYYMM granularity
+// (one expense line per rent month) by stripping day+hour. A group with
+// no dates at all (legacy / test fixtures) is treated as always active.
+function _isGroupActiveForTerm(group: any, term: number, propertyId: string): boolean {
+  if (!group) return false;
+  if (!term) return true;
+  const ym = Math.floor(term / 10000); // YYYYMM
+  const toYM = (d: any): number | null => {
+    if (!d) return null;
+    const m = moment.utc(d);
+    if (!m.isValid()) return null;
+    return m.year() * 100 + (m.month() + 1);
+  };
+
+  const begin = toYM(group.beginDate);
+  const end = toYM(group.endDate);
+  const termination = toYM(group.terminationDate);
+  if (begin !== null && ym < begin) return false;
+  if (end !== null && ym > end) return false;
+  if (termination !== null && ym > termination) return false;
+
+  // per-property window for this exact propertyId within the group
+  const props = (group.properties || []) as any[];
+  const myProp = props.find((p) => String(p.propertyId) === String(propertyId));
+  if (myProp) {
+    const entry = toYM(myProp.entryDate);
+    const exit = toYM(myProp.exitDate);
+    if (entry !== null && ym < entry) return false;
+    if (exit !== null && ym > exit) return false;
+  }
+  return true;
 }
 
 function _computeBuildingChargeRaw(
   building: CollectionTypes.Building,
   propertyId: string,
-  expense: CollectionTypes.BuildingExpense
+  expense: CollectionTypes.BuildingExpense,
+  term?: number
 ): number {
   if (!building?.units || !Array.isArray(building.units)) return 0;
 
@@ -121,21 +158,50 @@ function _computeBuildingChargeRaw(
       // exposes the unique-tenant grouping; if present, divide by group
       // count and emit the line on only ONE propertyId per group (the
       // sorted-min, deterministic carrier).
-      const groups = (building as any)._tenantGroups as
-        | string[][]
-        | undefined;
-      if (groups && groups.length > 0) {
-        const myGroup = groups.find((g) =>
-          g.includes(String(propertyId))
+      //
+      // Wave-18 B4: groups now carry tenant-window metadata. Filter to the
+      // tenants whose lease + per-property windows actually cover the rent
+      // `term` being computed. Without this filter, expenses split across
+      // the LIFETIME tenant universe of the building (e.g. 320/4) instead
+      // of the active-this-term tenants (e.g. 320/2 in 2027/3 when only
+      // two of four historical tenants are still active).
+      const rawGroups = (building as any)._tenantGroups as any[] | undefined;
+      if (rawGroups && rawGroups.length > 0) {
+        // New shape: [{ propertyIds, properties, beginDate, endDate, terminationDate }]
+        // Legacy shape: string[][] (kept for back-compat with any caller
+        // that hasn't been refreshed via _attachTenantGroupsToBuildings).
+        const isNewShape = !Array.isArray(rawGroups[0]);
+        const normalized = isNewShape
+          ? rawGroups
+          : (rawGroups as unknown as string[][]).map((ids) => ({
+              propertyIds: ids,
+              properties: ids.map((id) => ({ propertyId: id })),
+              beginDate: null,
+              endDate: null,
+              terminationDate: null
+            }));
+
+        const activeGroups = term
+          ? normalized.filter((g: any) =>
+              (g.propertyIds || []).some((pid: string) =>
+                _isGroupActiveForTerm(g, term, pid)
+              )
+            )
+          : normalized;
+
+        const myGroup = activeGroups.find((g: any) =>
+          (g.propertyIds || []).includes(String(propertyId))
         );
         if (!myGroup) return 0;
-        if (String(propertyId) !== myGroup[0]) return 0;
-        const totalGroups = groups.length;
+        const carrier = (myGroup.propertyIds || [])[0];
+        if (String(propertyId) !== carrier) return 0;
+        const totalGroups = activeGroups.length;
+        if (totalGroups === 0) return 0;
         const base = Math.round((amount / totalGroups) * 100) / 100;
         // Push rounding remainder onto the LAST group (lex-max by carrier
         // id) so totals reconcile (100/3 → 33.33+33.33+33.34 = 100.00).
-        const carriers = groups.map((g) => g[0]).sort();
-        if (myGroup[0] === carriers[carriers.length - 1]) {
+        const carriers = activeGroups.map((g: any) => g.propertyIds[0]).sort();
+        if (carrier === carriers[carriers.length - 1]) {
           return Math.round((amount - base * (totalGroups - 1)) * 100) / 100;
         }
         return base;
@@ -216,9 +282,17 @@ function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: 
   // checks below, which is the opposite of the intended behavior. Reject
   // them so misconfigured one-shot expenses don't silently bill every
   // term until end of time.
+  //
+  // Wave-18 B1: compare at YYYYMM granularity, not exact YYYYMMDDHH. A
+  // one-time expense saved at term 2026061500 (mid-June) was silently
+  // dropped because June rents normalize to 2026060100 and the equality
+  // check failed. Both are "June" — match the month.
   if (!(expense as any).isRecurring) {
     if (!expense.startTerm) return false;
-    if (expense.startTerm !== term) return false;
+    if (Math.floor(expense.startTerm / 10000) !== Math.floor(term / 10000)) {
+      return false;
+    }
+    return true;
   }
   if (expense.startTerm && term < expense.startTerm) return false;
   if (expense.endTerm && term > expense.endTerm) return false;
@@ -365,7 +439,8 @@ export default function taskBase(
             const share = computeBuildingChargeForProperty(
               building,
               String(property.propertyId),
-              expense
+              expense,
+              rent.term
             );
 
             if (share > 0) {

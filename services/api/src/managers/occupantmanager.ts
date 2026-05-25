@@ -149,13 +149,22 @@ export async function _attachTenantGroupsToBuildings(
   }
 
   // Find every tenant in this realm that occupies at least one of these
-  // propertyIds. We only need the {_id, properties.propertyId} projection.
+  // propertyIds. Project tenant- and property-level date fields so the
+  // allocation tasks (1_base) can filter to tenants whose lease window
+  // actually covers the rent term being computed (Wave-18 B4 fix).
   let tenants: any[] = await Collections.Tenant.find(
     {
       realmId,
       'properties.propertyId': { $in: allUnitPropIds }
     },
-    { properties: { propertyId: 1 } }
+    {
+      beginDate: 1,
+      endDate: 1,
+      terminationDate: 1,
+      'properties.propertyId': 1,
+      'properties.entryDate': 1,
+      'properties.exitDate': 1
+    }
   ).lean();
 
   // Splice in the in-flight tenant so the equal-allocation grouping reflects
@@ -170,6 +179,9 @@ export async function _attachTenantGroupsToBuildings(
     }
     tenants.push({
       _id: inFlightId || '__inflight__',
+      beginDate: (inFlightTenant as AnyRecord).beginDate,
+      endDate: (inFlightTenant as AnyRecord).endDate,
+      terminationDate: (inFlightTenant as AnyRecord).terminationDate,
       properties: inFlightTenant.properties
     });
   }
@@ -181,18 +193,30 @@ export async function _attachTenantGroupsToBuildings(
         .filter(Boolean)
         .map((id: string) => String(id))
     );
-    const groups: string[][] = [];
+    // Wave-18 B4: each group now carries the tenant's lease + per-property
+    // windows so 1_base can drop tenants whose lease doesn't cover the
+    // rent term currently being computed. Without this, equal-allocation
+    // splits across the LIFETIME tenant universe of the building (e.g.
+    // four ever-tenants), even when only two were active in the queried
+    // month — silently shrinking each active tenant's share.
+    const groups: AnyRecord[] = [];
     for (const t of tenants) {
       const owned = ((t.properties || []) as AnyRecord[])
-        .map((p) => p.propertyId)
-        .filter(Boolean)
-        .map((id: string) => String(id))
-        .filter((id: string) => buildingPropIds.has(id));
+        .filter((p) => p.propertyId && buildingPropIds.has(String(p.propertyId)))
+        .map((p) => ({
+          propertyId: String(p.propertyId),
+          entryDate: p.entryDate || null,
+          exitDate: p.exitDate || null
+        }));
       if (owned.length === 0) continue;
-      // Sort within-group so the "carrier" propertyId (first in the
-      // sorted list) is deterministic.
-      owned.sort();
-      groups.push(owned);
+      owned.sort((a, b) => a.propertyId.localeCompare(b.propertyId));
+      groups.push({
+        propertyIds: owned.map((o) => o.propertyId),
+        properties: owned,
+        beginDate: t.beginDate || null,
+        endDate: t.endDate || null,
+        terminationDate: t.terminationDate || null
+      });
     }
     building._tenantGroups = groups;
   }
@@ -385,9 +409,16 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
 
 // Cross-tenant double-occupancy guard. For every propertyId in the incoming
 // tenant's properties[], reject if another active tenant in the same realm
-// occupies that property during an overlapping date window. Excludes the
-// current tenant's own _id (so editing your own tenant doesn't fail) and
-// tenants who have already terminated by their effective end date.
+// occupies that SAME propertyId during an overlapping per-property date
+// window. Compares PER-PROPERTY entryDate/exitDate (with tenant-level
+// beginDate/endDate as fallback) instead of tenant-level windows — so a
+// mid-year handover (T_OLD vacates apt2 30/06, T_NEW takes apt2 from 01/08)
+// is correctly accepted even when both tenants' tenant-level windows still
+// span the full year. The terminationDate further clamps the upper bound.
+//
+// Excludes the current tenant's own _id (so editing your own tenant doesn't
+// fail) and tenants whose effective per-property window doesn't actually
+// overlap the new assignment.
 async function _assertNoDoubleOccupancy(
   realmId: string,
   incoming: AnyRecord,
@@ -398,17 +429,39 @@ async function _assertNoDoubleOccupancy(
   const incomingBegin = incoming.beginDate
     ? moment.utc(incoming.beginDate)
     : null;
-  const incomingEnd = incoming.terminationDate
+  const incomingTermination = incoming.terminationDate
     ? moment.utc(incoming.terminationDate)
-    : incoming.endDate
+    : null;
+  const incomingTenantEnd = incoming.endDate
     ? moment.utc(incoming.endDate)
     : null;
-  if (!incomingBegin || !incomingEnd) return;
+  if (!incomingBegin || (!incomingTenantEnd && !incomingTermination)) return;
 
-  const propertyIds = incoming.properties
-    .map((p: AnyRecord) => p.propertyId)
-    .filter(Boolean);
-  if (!propertyIds.length) return;
+  // Build the per-property effective window for each propertyId in payload:
+  //   from = max(tenant.beginDate, property.entryDate)
+  //   to   = min(tenant.endDate, property.exitDate, terminationDate)
+  type Window = { propertyId: string; from: moment.Moment; to: moment.Moment };
+  const incomingWindows: Window[] = [];
+  for (const p of incoming.properties as AnyRecord[]) {
+    if (!p.propertyId) continue;
+    const entry = p.entryDate ? moment.utc(p.entryDate) : null;
+    const exit = p.exitDate ? moment.utc(p.exitDate) : null;
+    // from = max(tenantBegin, propertyEntry || tenantBegin)
+    const from = entry && entry.isAfter(incomingBegin) ? entry : incomingBegin;
+    // candidate upper bounds: tenantEnd, propertyExit, termination
+    const candidates: moment.Moment[] = [];
+    if (incomingTenantEnd) candidates.push(incomingTenantEnd);
+    if (exit) candidates.push(exit);
+    if (incomingTermination) candidates.push(incomingTermination);
+    if (!candidates.length) continue;
+    let to = candidates[0];
+    for (const c of candidates) if (c.isBefore(to)) to = c;
+    if (!from.isSameOrBefore(to)) continue; // empty window
+    incomingWindows.push({ propertyId: String(p.propertyId), from, to });
+  }
+  if (!incomingWindows.length) return;
+
+  const propertyIds = incomingWindows.map((w) => w.propertyId);
 
   const filter: AnyRecord = {
     realmId,
@@ -421,30 +474,40 @@ async function _assertNoDoubleOccupancy(
   const others: AnyRecord[] = await Collections.Tenant.find(filter).lean();
   for (const other of others) {
     const otherBegin = other.beginDate ? moment.utc(other.beginDate) : null;
-    const otherEnd = other.terminationDate
+    const otherTermination = other.terminationDate
       ? moment.utc(other.terminationDate)
-      : other.endDate
-      ? moment.utc(other.endDate)
       : null;
-    if (!otherBegin || !otherEnd) continue;
+    const otherTenantEnd = other.endDate ? moment.utc(other.endDate) : null;
+    if (!otherBegin || (!otherTenantEnd && !otherTermination)) continue;
 
-    // Date-range overlap: (otherBegin <= incomingEnd) AND (otherEnd >= incomingBegin)
-    const overlaps =
-      otherBegin.isSameOrBefore(incomingEnd) &&
-      otherEnd.isSameOrAfter(incomingBegin);
-    if (!overlaps) continue;
+    for (const otherProp of (other.properties || []) as AnyRecord[]) {
+      const otherPropId = String(otherProp.propertyId || '');
+      if (!otherPropId) continue;
+      const incomingW = incomingWindows.find((w) => w.propertyId === otherPropId);
+      if (!incomingW) continue;
 
-    const otherPropIds = (other.properties || [])
-      .map((p: AnyRecord) => String(p.propertyId))
-      .filter(Boolean);
-    const conflictId = propertyIds.find((id: string) =>
-      otherPropIds.includes(String(id))
-    );
-    if (conflictId) {
-      throw new ServiceError(
-        `Property is already assigned to another tenant during this period: ${other.name}`,
-        422
-      );
+      const oEntry = otherProp.entryDate ? moment.utc(otherProp.entryDate) : null;
+      const oExit = otherProp.exitDate ? moment.utc(otherProp.exitDate) : null;
+
+      const oFrom = oEntry && oEntry.isAfter(otherBegin) ? oEntry : otherBegin;
+      const oCandidates: moment.Moment[] = [];
+      if (otherTenantEnd) oCandidates.push(otherTenantEnd);
+      if (oExit) oCandidates.push(oExit);
+      if (otherTermination) oCandidates.push(otherTermination);
+      if (!oCandidates.length) continue;
+      let oTo = oCandidates[0];
+      for (const c of oCandidates) if (c.isBefore(oTo)) oTo = c;
+      if (!oFrom.isSameOrBefore(oTo)) continue;
+
+      // Per-property window overlap.
+      const overlaps =
+        oFrom.isSameOrBefore(incomingW.to) && oTo.isSameOrAfter(incomingW.from);
+      if (overlaps) {
+        throw new ServiceError(
+          `Property is already assigned to another tenant during this period: ${other.name}`,
+          422
+        );
+      }
     }
   }
 }

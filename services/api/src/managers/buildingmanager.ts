@@ -99,6 +99,41 @@ function _findBuilding(building: any, _id: string) {
   return building;
 }
 
+// Wave-18 B5: validate that every customAllocations[].propertyId references
+// a unit that belongs to this building, and that custom_percentage shares
+// sum to 100 (±0.01 tolerance). Without this guard, an expense saved with
+// a foreign / non-existent propertyId silently produces a dead allocation
+// that never bills anyone.
+function _assertCustomAllocationPropertyIds(
+  building: any,
+  customAllocations: any,
+  allocationMethod: string | undefined
+): void {
+  if (!Array.isArray(customAllocations) || customAllocations.length === 0) return;
+  const allocationKinds = new Set([
+    'custom_percentage',
+    'custom_ratio',
+    'fixed'
+  ]);
+  if (!allocationMethod || !allocationKinds.has(allocationMethod)) return;
+
+  const validPropIds = new Set(
+    ((building?.units || []) as any[])
+      .map((u) => (u.propertyId ? String(u.propertyId) : ''))
+      .filter(Boolean)
+  );
+
+  customAllocations.forEach((a: any, i: number) => {
+    if (!a?.propertyId) return;
+    if (!validPropIds.has(String(a.propertyId))) {
+      throw new ServiceError(
+        `customAllocations[${i}].propertyId is not in this building`,
+        422
+      );
+    }
+  });
+}
+
 // Infer property type from E9 parsed unit data
 function _inferPropertyType(unit: ParsedE9Unit): string {
   // Category from E9: 1=apartment, 2=store, 51=parking/storage
@@ -1385,7 +1420,8 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
             ...(buildingExpense?.toObject?.() || {}),
             amount: entry.amount,
             allocationMethod
-          }
+          },
+          Number(term)
         );
 
         if (share > 0) {
@@ -1461,6 +1497,16 @@ export async function addExpense(req: Req, res: Res) {
     );
   }
 
+  // Wave-18 B6: a recurring expense without a startTerm bills every tenant
+  // back to epoch (the rent pipeline treats undefined startTerm as "always
+  // active"). Require an explicit anchor.
+  if (req.body.isRecurring !== false && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for recurring expenses',
+      422
+    );
+  }
+
   if (!req.body.name?.trim()) {
     throw new ServiceError('Expense name is required', 422);
   }
@@ -1489,6 +1535,16 @@ export async function addExpense(req: Req, res: Res) {
   ) {
     throw new ServiceError('startTerm must be before endTerm', 422);
   }
+
+  // Wave-18 B1: normalize one-time startTerm to YYYYMM0100 so historical
+  // data stays consistent with the YYYYMM-based active-term comparison.
+  if (req.body.isRecurring === false && req.body.startTerm) {
+    const st = Number(req.body.startTerm);
+    const normalized = Math.floor(st / 10000) * 10000 + 100;
+    req.body.startTerm = normalized;
+    if (req.body.endTerm) req.body.endTerm = normalized;
+  }
+
   validateAllocationValues(req.body.customAllocations);
   validatePercentageAllocations(
     req.body.customAllocations,
@@ -1506,6 +1562,16 @@ export async function addExpense(req: Req, res: Res) {
   });
 
   _findBuilding(building, id);
+
+  // Wave-18 B5: customAllocations entries must reference units that actually
+  // belong to this building. Without this guard, a typo'd / spoofed
+  // propertyId silently produces an expense that never bills anyone (or
+  // worse, bills a unit in a different building).
+  _assertCustomAllocationPropertyIds(
+    building,
+    req.body.customAllocations,
+    req.body.allocationMethod
+  );
 
   (building as any).expenses.push(req.body);
   (building as any).updatedDate = new Date();
@@ -1535,6 +1601,13 @@ export async function updateExpense(req: Req, res: Res) {
   if (req.body.isRecurring === false && !req.body.startTerm) {
     throw new ServiceError(
       'startTerm is required for non-recurring expenses',
+      422
+    );
+  }
+  // Wave-18 B6: same invariant for recurring expenses (mirror addExpense).
+  if (req.body.isRecurring === true && !req.body.startTerm) {
+    throw new ServiceError(
+      'startTerm is required for recurring expenses',
       422
     );
   }
@@ -1572,6 +1645,14 @@ export async function updateExpense(req: Req, res: Res) {
     );
   }
 
+  // Wave-18 B1: keep one-time updates aligned to YYYYMM0100 (mirror addExpense).
+  if (req.body.isRecurring === false && req.body.startTerm) {
+    const st = Number(req.body.startTerm);
+    const normalized = Math.floor(st / 10000) * 10000 + 100;
+    req.body.startTerm = normalized;
+    if (req.body.endTerm) req.body.endTerm = normalized;
+  }
+
   const building = await Collections.Building.findOne({
     _id: id,
     realmId: realm!._id
@@ -1582,6 +1663,19 @@ export async function updateExpense(req: Req, res: Res) {
   const expense = (building as any).expenses.id(expenseId);
   if (!expense) {
     throw new ServiceError('Expense does not exist', 404);
+  }
+
+  // Wave-18 B5: validate customAllocations propertyIds against the
+  // building's units. Use the merged allocation method so partial updates
+  // (allocationMethod unchanged) still validate against the right rule.
+  const effectiveAllocationMethod =
+    req.body.allocationMethod || (expense as any).allocationMethod;
+  if (req.body.customAllocations !== undefined) {
+    _assertCustomAllocationPropertyIds(
+      building,
+      req.body.customAllocations,
+      effectiveAllocationMethod
+    );
   }
 
   expense.set(req.body);
@@ -1858,7 +1952,8 @@ async function _distributeRepairCharge(
     const share = computeBuildingChargeForProperty(
       buildingObj,
       String(unit.propertyId),
-      { amount: effectiveAmount, allocationMethod, name: repair.title } as any
+      { amount: effectiveAmount, allocationMethod, name: repair.title } as any,
+      term
     );
 
     // Remove existing charges for THIS repair (regardless of title), so
