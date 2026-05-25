@@ -85,7 +85,8 @@ async function _buildPropertyMap(realm: Req['realm']): Promise<AnyRecord> {
 
 async function _fetchBuildingsForProperties(
   realmId: string,
-  properties: AnyRecord[]
+  properties: AnyRecord[],
+  inFlightTenant?: { _id?: string; properties: AnyRecord[] }
 ): Promise<CollectionTypes.Building[]> {
   const propertyIds = properties
     .map((p) => p.propertyId)
@@ -98,7 +99,103 @@ async function _fetchBuildingsForProperties(
     'units.propertyId': { $in: propertyIds }
   }).lean();
 
+  // Pass the in-flight tenant so add()/update() (where the tenant is not yet
+  // persisted, or persisted with stale property assignments) sees the
+  // current property list rather than what's already in the DB. Without
+  // this, the FIRST tenant created in a building falls into the per-unit
+  // fallback (zero groups), and a multi-unit tenant on a fresh building
+  // gets double-billed for "equal" allocation.
+  await _attachTenantGroupsToBuildings(
+    realmId,
+    buildings as any[],
+    inFlightTenant
+  );
+
   return buildings as CollectionTypes.Building[];
+}
+
+// Wave-17 B1: attach `_tenantGroups` to every building so per-tenant
+// allocation methods ("equal") can divide by the number of UNIQUE tenants
+// occupying the building rather than by the number of managed units.
+//
+// Each entry in _tenantGroups is the sorted list of propertyIds owned by
+// ONE tenant within that building. A tenant occupying parking + storage
+// in the same building appears as a single group of two propertyIds and
+// is counted once in the denominator.
+//
+// Without this metadata, "equal" allocation double-bills any tenant that
+// holds more than one unit (the allocator runs once per property and
+// emits a line for each), which silently inflates the koinochrista their
+// rent statement carries.
+export async function _attachTenantGroupsToBuildings(
+  realmId: string,
+  buildings: any[],
+  inFlightTenant?: { _id?: string; properties: AnyRecord[] }
+): Promise<void> {
+  if (!buildings.length) return;
+
+  const allUnitPropIds = Array.from(
+    new Set(
+      buildings
+        .flatMap((b) => (b.units || []) as AnyRecord[])
+        .map((u) => u.propertyId)
+        .filter(Boolean)
+        .map((id) => String(id))
+    )
+  );
+  if (!allUnitPropIds.length) {
+    buildings.forEach((b) => (b._tenantGroups = []));
+    return;
+  }
+
+  // Find every tenant in this realm that occupies at least one of these
+  // propertyIds. We only need the {_id, properties.propertyId} projection.
+  let tenants: any[] = await Collections.Tenant.find(
+    {
+      realmId,
+      'properties.propertyId': { $in: allUnitPropIds }
+    },
+    { properties: { propertyId: 1 } }
+  ).lean();
+
+  // Splice in the in-flight tenant so the equal-allocation grouping reflects
+  // the create/update we're currently processing — not the stale persisted
+  // state. Without this, a tenant being created sees its OWN units left out
+  // of every group and ends up with no buildingCharges line at all (carrier
+  // logic returns 0 because no group contains the queried propertyId).
+  if (inFlightTenant && Array.isArray(inFlightTenant.properties)) {
+    const inFlightId = inFlightTenant._id ? String(inFlightTenant._id) : null;
+    if (inFlightId) {
+      tenants = tenants.filter((t) => String(t._id) !== inFlightId);
+    }
+    tenants.push({
+      _id: inFlightId || '__inflight__',
+      properties: inFlightTenant.properties
+    });
+  }
+
+  for (const building of buildings) {
+    const buildingPropIds = new Set(
+      ((building.units || []) as AnyRecord[])
+        .map((u) => u.propertyId)
+        .filter(Boolean)
+        .map((id: string) => String(id))
+    );
+    const groups: string[][] = [];
+    for (const t of tenants) {
+      const owned = ((t.properties || []) as AnyRecord[])
+        .map((p) => p.propertyId)
+        .filter(Boolean)
+        .map((id: string) => String(id))
+        .filter((id: string) => buildingPropIds.has(id));
+      if (owned.length === 0) continue;
+      // Sort within-group so the "carrier" propertyId (first in the
+      // sorted list) is deterministic.
+      owned.sort();
+      groups.push(owned);
+    }
+    building._tenantGroups = groups;
+  }
 }
 
 // Update building unit occupancyType based on tenant assignments.
@@ -498,7 +595,10 @@ export async function add(req: Req, res: Res) {
 
       const buildings = await _fetchBuildingsForProperties(
         realm!._id,
-        occupant.properties
+        occupant.properties,
+        // Wave-17 B1: include the in-flight tenant so equal-allocation
+        // tenant groups already reflect this NEW tenant on first save.
+        { properties: occupant.properties }
       );
 
       // Schema default ('months') applies at persistence time. Fall back
@@ -711,7 +811,11 @@ export async function update(req: Req, res: Res) {
       ])];
       const buildings = await _fetchBuildingsForProperties(
         realm!._id,
-        allPropertyIds.map((id: string) => ({ propertyId: id }))
+        allPropertyIds.map((id: string) => ({ propertyId: id })),
+        // Wave-17 B1: include the in-flight tenant (with its CURRENT
+        // properties[]) so the grouping reflects this UPDATE, not the
+        // persisted stale state.
+        { _id: occupantId, properties: newOccupant.properties }
       );
 
       const contract = {

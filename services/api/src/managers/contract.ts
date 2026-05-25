@@ -218,16 +218,40 @@ export function payTerm(
   return contract;
 }
 
-// "Frozen" = a past-term rent that has at least one settlement (payment,
-// settlement-origin discount, debt, or description). Frozen rents must NOT
-// be re-priced when expenses, properties, or building charges change —
-// historical bills are immutable once any settlement has been recorded
-// against them. Future-dated paid rents and unpaid past rents stay
-// editable so a landlord can correct mistakes before they're paid.
+// "Frozen" = a rent that must NOT be re-priced when expenses, properties,
+// or building charges change. Three regimes:
+//   - Future term: never frozen — landlord may still adjust pricing.
+//   - Past term with any settlement: frozen — historical bills are
+//     immutable once any settlement has been recorded against them.
+//   - Current term (Wave-17 B2): frozen ONLY if fully paid. The previous
+//     `<` check thawed the in-progress month even when the tenant had
+//     already paid in full, so editing a building expense after payment
+//     would re-price the bill and create a phantom debt (€505.6 paid →
+//     €508.20 totalToPay → −€2.60 newBalance, status flips to
+//     'partiallypaid'). Unpaid current-month rents stay thawed so a
+//     mid-month expense edit takes effect before the tenant pays.
 function _isFrozen(rent: Rent, currentTerm: number): boolean {
   if (!rent || typeof rent.term !== 'number') return false;
-  if (rent.term >= currentTerm) return false;
-  return _isPayment(rent);
+  if (rent.term > currentTerm) return false;
+  if (rent.term < currentTerm) return _isPayment(rent);
+  return _isFullyPaid(rent);
+}
+
+// Sum payments[].amount and compare to totalToPay/totalAmount. Tolerate a
+// 1-cent rounding gap so 505.6 + 0 + 0 == 505.60001 still counts as paid.
+function _isFullyPaid(rent: Rent): boolean {
+  const totalDue = Number(
+    (rent as any)?.total?.grandTotal ??
+      (rent as any)?.totalToPay ??
+      (rent as any)?.totalAmount ??
+      0
+  );
+  if (!Number.isFinite(totalDue) || totalDue <= 0) return false;
+  const paid = (rent.payments || []).reduce(
+    (s, p) => s + (Number(p.amount) || 0),
+    0
+  );
+  return paid >= totalDue - 0.01;
 }
 
 // Compute the current term (YYYYMMDDHH) using the contract's frequency.

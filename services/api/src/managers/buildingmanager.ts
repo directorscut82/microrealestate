@@ -4,6 +4,7 @@ import type { CollectionTypes } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
 import type { ParsedE9Unit } from './e9parser.js';
 import * as Contract from './contract.js';
+import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
   validateObjectId,
   validateTerm,
@@ -152,6 +153,9 @@ async function _recomputeTenantsForProperty(
         realmId,
         'units.propertyId': { $in: propertyIds }
       }).lean()) as CollectionTypes.Building[];
+    // Wave-17 B1: attach tenant groups so "equal" allocation divides by
+    // unique tenants (not units) and emits one line per tenant/expense.
+    await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
     try {
       const termFrequency = tenantObj.frequency || 'months';
       const contract = {
@@ -250,6 +254,9 @@ async function _recomputeTenantsForBuilding(
         realmId,
         'units.propertyId': { $in: tenantPropIds }
       }).lean()) as CollectionTypes.Building[];
+    // Wave-17 B1: attach tenant groups so "equal" allocation divides by
+    // unique tenants (not units) and emits one line per tenant/expense.
+    await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
     try {
       const termFrequency = tenantObj.frequency || 'months';
       const contract = {
