@@ -182,7 +182,7 @@ export async function remove(req: ReqWithIds, res: Res) {
   // Failure mode: if one delete succeeds and another fails, we get partial
   // cleanup. Acceptable for now — the realmId filter prevents cross-realm
   // damage and a retry will re-converge.
-  await Promise.all([
+  const [leaseDeleteResult] = await Promise.all([
     Collections.Lease.deleteMany({
       _id: { $in: leaseIds },
       realmId: realm!._id
@@ -201,6 +201,22 @@ export async function remove(req: ReqWithIds, res: Res) {
       }
     )
   ]);
+
+  if ((leaseDeleteResult?.deletedCount ?? 0) === 0) {
+    throw new ServiceError(
+      'No records deleted (none of the ids matched)',
+      404
+    );
+  }
+
+  // Partial-success path: report counts so the client can detect drift.
+  if ((leaseDeleteResult.deletedCount ?? 0) < leaseIds.length) {
+    return res.status(200).json({
+      deleted: leaseDeleteResult.deletedCount,
+      requested: leaseIds.length
+    });
+  }
+
   res.sendStatus(200);
 }
 

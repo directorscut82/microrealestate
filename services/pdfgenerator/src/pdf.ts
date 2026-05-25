@@ -65,7 +65,12 @@ async function _collectReferencedUploadUrls(
     ).lean();
     for (const doc of docs) {
       if (!doc?.url || typeof doc.url !== 'string') continue;
-      const resolved = path.resolve(uploadsRoot, doc.url);
+      // Strip leading slash(es) — path.resolve treats absolute-looking inputs
+      // as roots and would compute a path OUTSIDE uploadsRoot, so the live
+      // attachment would not get added to the referenced set and the cleanup
+      // sweep would happily delete it.
+      const cleanUrl = String(doc.url || '').replace(/^\/+/, '');
+      const resolved = path.resolve(uploadsRoot, cleanUrl);
       referenced.add(resolved);
     }
   } catch (err) {
