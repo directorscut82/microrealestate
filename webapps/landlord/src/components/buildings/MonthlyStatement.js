@@ -139,9 +139,16 @@ export default function MonthlyStatement({ building }) {
   const mutation = useMutation({
     mutationFn: (data) => saveMonthlyStatement(building._id, data),
     onSuccess: () => {
+      // Saving a monthly statement writes per-unit charges that flow into
+      // tenant rent computation. Invalidate RENTS/DASHBOARD/TENANTS so any
+      // open payment dialog or dashboard sees the new amounts immediately.
       queryClient.invalidateQueries({
         queryKey: [QueryKeys.BUILDINGS, building._id]
       });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
     }
   });
 

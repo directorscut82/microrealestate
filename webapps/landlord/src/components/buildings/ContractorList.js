@@ -70,12 +70,24 @@ export default function ContractorList({ building }) {
 
   const contractors = building?.contractors || [];
 
+  // Contractors are linked to repairs, which can roll into the building's
+  // recurring expense ledger (e.g. repairs_fund). Invalidate the rent stack
+  // so any payment dialog reflects updated allocations after a contractor
+  // edit. Mirrors the building / repair / expense pattern.
+  const _invalidateAllContractorDependents = () => {
+    queryClient.invalidateQueries({
+      queryKey: [QueryKeys.BUILDINGS, building._id]
+    });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const addMutation = useMutation({
     mutationFn: (data) => addBuildingContractor(building._id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
+      _invalidateAllContractorDependents();
       toast.success(t('Contractor added'));
     }
   });
@@ -83,9 +95,7 @@ export default function ContractorList({ building }) {
   const updateMutation = useMutation({
     mutationFn: (data) => updateBuildingContractor(building._id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
+      _invalidateAllContractorDependents();
       toast.success(t('Contractor updated'));
     }
   });
@@ -94,9 +104,7 @@ export default function ContractorList({ building }) {
     mutationFn: (contractorId) =>
       removeBuildingContractor(building._id, contractorId),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
+      _invalidateAllContractorDependents();
       toast.success(t('Contractor removed'));
     }
   });

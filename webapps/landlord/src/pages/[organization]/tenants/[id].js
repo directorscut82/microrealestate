@@ -76,18 +76,25 @@ function Tenant() {
     queryFn: fetchLeases
   });
 
+  // Tenant create/update can change property assignments, rent base, lease,
+  // begin/end dates and discounts — all of which feed rent computation and
+  // dashboard counters. PROPERTIES is invalidated because property occupancy
+  // status flips when a tenant is added/removed/reassigned.
+  const _invalidateAllTenantDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (data) => (data._id ? updateTenant(data) : createTenant(data)),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
-    }
+    onSuccess: _invalidateAllTenantDependents
   });
 
   const removeMutation = useMutation({
     mutationFn: (ids) => deleteTenant(ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
-    }
+    onSuccess: _invalidateAllTenantDependents
   });
 
   const [openRentHistoryDialog, setOpenRentHistoryDialog] = useState(false);
@@ -191,12 +198,16 @@ function Tenant() {
         await archiveTenant(selected._id);
         toast.success(t('Tenant archived'));
       }
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      // Archive/unarchive flips tenant visibility everywhere it's listed
+      // (rent rolls, dashboard, property occupancy). Reuse the helper.
+      _invalidateAllTenantDependents();
       router.back();
     } catch {
       toast.error(t('Something went wrong'));
     }
-  }, [selected._id, selected.archived, queryClient, router, t]);
+    // queryClient is stable across renders so we don't list the helper.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected._id, selected.archived, router, t]);
 
   const showTerminateLeaseButton = useMemo(
     () =>

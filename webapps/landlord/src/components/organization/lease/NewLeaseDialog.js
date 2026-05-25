@@ -26,7 +26,14 @@ export default function NewLeaseDialog({ open, setOpen }) {
 
   const createMutation = useMutation({
     mutationFn: createLease,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] })
+    onSuccess: () => {
+      // New leases will be picked up by tenant flows; rent computation reads
+      // lease config (numberOfTerms, timeRange, fees). Keep TENANTS+RENTS in
+      // sync per the lease-mutation rule.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    }
   });
 
   const {

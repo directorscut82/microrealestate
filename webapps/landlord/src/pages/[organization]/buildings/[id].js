@@ -50,19 +50,27 @@ function Building() {
   const buildingNotFound =
     buildingId && buildingId !== 'new' && !isLoading && !building;
 
+  // Building updates change unit configs, expenses, and ATAK metadata that
+  // feed rent computation. Building delete removes downstream entities too.
+  // Invalidate RENTS/DASHBOARD/TENANTS alongside the building cache.
+  const _invalidateAllBuildingDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (data) => updateBuilding(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      _invalidateAllBuildingDependents();
       toast.success(t('Building updated'));
     }
   });
 
   const removeMutation = useMutation({
     mutationFn: (ids) => deleteBuilding(ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
-    }
+    onSuccess: _invalidateAllBuildingDependents
   });
 
   const handleBack = useCallback(() => {

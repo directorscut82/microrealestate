@@ -46,19 +46,24 @@ function Contract() {
     queryFn: fetchLeases
   });
 
+  // Leases drive rent computation (term count, time range, fees). Editing
+  // a lease can re-price all linked tenants, so invalidate RENTS + TENANTS
+  // alongside the LEASES cache per the lease-mutation rule.
+  const _invalidateAllLeaseDependents = () => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (data) =>
       data._id ? updateLease(data) : createLease(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
-    }
+    onSuccess: _invalidateAllLeaseDependents
   });
 
   const removeMutation = useMutation({
     mutationFn: (ids) => deleteLease(ids),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.LEASES] });
-    }
+    onSuccess: _invalidateAllLeaseDependents
   });
 
   const onLeaseAddUpdate = useCallback(
