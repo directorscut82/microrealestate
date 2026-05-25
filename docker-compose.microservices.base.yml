@@ -192,6 +192,8 @@ services:
       - LOGGER_LEVEL
       - MONGO_URL
       - DEMO_MODE
+      - REDIS_URL
+      - REDIS_PASSWORD
       - ACCESS_TOKEN_SECRET=$AUTHENTICATOR_ACCESS_TOKEN_SECRET
     expose:
       - '$TENANTAPI_PORT'
@@ -199,6 +201,7 @@ services:
       - net
     depends_on:
       - mongo
+      - redis
   ###############################################################################
   # Landlord frontend
   ###############################################################################

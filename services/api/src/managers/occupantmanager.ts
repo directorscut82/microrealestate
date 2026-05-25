@@ -808,10 +808,27 @@ export async function remove(req: Req, res: Res) {
     await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
   }
 
-  await Collections.Tenant.deleteMany({
+  const tenantDeleteResult = await Collections.Tenant.deleteMany({
     realmId: realm!._id,
     _id: { $in: occupantIds }
   });
+
+  if ((tenantDeleteResult?.deletedCount ?? 0) === 0) {
+    throw new ServiceError(
+      'No records deleted (none of the ids matched)',
+      404
+    );
+  }
+
+  // Partial-success path: report counts so the client can detect drift.
+  // Note: only the tenant delete count is reported — cascade deletes of
+  // documents/payments are not part of the requested vs deleted contract.
+  if ((tenantDeleteResult.deletedCount ?? 0) < occupantIds.length) {
+    return res.status(200).json({
+      deleted: tenantDeleteResult.deletedCount,
+      requested: occupantIds.length
+    });
+  }
 
   res.sendStatus(200);
 }

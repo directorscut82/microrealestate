@@ -412,7 +412,13 @@ export default function () {
     uploadMiddleware(),
     handleUploadError,
     Middlewares.asyncWrapper(async (req, res) => {
-      const key = [req.body.s3Dir, req.body.fileName].join('/');
+      // Build the storage key without a leading slash — joining ['', 'file']
+      // produced '/file', which path.resolve later treats as an absolute path
+      // and resolves OUTSIDE UPLOADS_DIRECTORY, breaking both file lookup and
+      // the cleanup sweep's "is this referenced?" check.
+      const dirPart = String(req.body.s3Dir || '').replace(/^\/+|\/+$/g, '');
+      const filePart = String(req.body.fileName || '').replace(/^\/+/, '');
+      const key = dirPart ? `${dirPart}/${filePart}` : filePart;
       // Optional-chain so a realm without thirdParties (or without b2) does
       // not crash the route — previously this threw on `.b2` of undefined.
       const b2Config = (req as any).realm?.thirdParties?.b2;
@@ -649,7 +655,11 @@ export default function () {
         if (doc.type !== 'file') {
           return;
         }
-        const resolved = path.resolve(uploadsRoot, doc.url);
+        // Match the cleanup sweep — strip leading slash so a stored URL like
+        // '/orgid/file.pdf' resolves under uploadsRoot rather than at the
+        // filesystem root.
+        const cleanUrl = String(doc.url || '').replace(/^\/+/, '');
+        const resolved = path.resolve(uploadsRoot, cleanUrl);
         if (
           resolved !== uploadsRoot &&
           !resolved.startsWith(uploadsRoot + path.sep)

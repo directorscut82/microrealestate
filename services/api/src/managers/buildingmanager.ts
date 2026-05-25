@@ -1522,9 +1522,35 @@ export async function removeExpense(req: Req, res: Res) {
 // Contractors
 // ---------------------------------------------------------------------------
 
+const VALID_CONTRACTOR_SPECIALTIES = [
+  'plumbing',
+  'electrical',
+  'plumber',
+  'electrician',
+  'painter',
+  'carpenter',
+  'mason',
+  'gardener',
+  'cleaner',
+  'elevator',
+  'locksmith',
+  'hvac',
+  'general',
+  'other'
+];
+
 export async function addContractor(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
+
+  // Validate required fields up-front. Without this, a missing/invalid
+  // specialty becomes a Mongoose ValidationError that surfaces as 500.
+  if (!req.body.specialty) {
+    throw new ServiceError('contractor specialty is required', 422);
+  }
+  if (!VALID_CONTRACTOR_SPECIALTIES.includes(req.body.specialty)) {
+    throw new ServiceError(`invalid specialty: ${req.body.specialty}`, 422);
+  }
 
   if (!req.body.name?.trim()) {
     throw new ServiceError('Contractor name is required', 422);
@@ -1548,6 +1574,17 @@ export async function addContractor(req: Req, res: Res) {
 export async function updateContractor(req: Req, res: Res) {
   const realm = req.realm;
   const { id, contractorId } = req.params;
+
+  // If specialty is being set, validate it before save() — a bad value would
+  // otherwise surface as a Mongoose ValidationError 500.
+  if (req.body.specialty !== undefined) {
+    if (!req.body.specialty) {
+      throw new ServiceError('contractor specialty is required', 422);
+    }
+    if (!VALID_CONTRACTOR_SPECIALTIES.includes(req.body.specialty)) {
+      throw new ServiceError(`invalid specialty: ${req.body.specialty}`, 422);
+    }
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,

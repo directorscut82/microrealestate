@@ -173,6 +173,16 @@ export async function remove(req: Req, res: Res) {
     { arrayFilters: [{ 'elem.propertyId': { $in: ids } }] }
   );
 
+  // Partial-success path: some ids didn't match (likely cross-realm or
+  // already deleted). Surface the count so callers can detect drift instead
+  // of silently dropping.
+  if ((result.deletedCount ?? 0) < ids.length) {
+    return res.status(200).json({
+      deleted: result.deletedCount,
+      requested: ids.length
+    });
+  }
+
   res.sendStatus(200);
 }
 
