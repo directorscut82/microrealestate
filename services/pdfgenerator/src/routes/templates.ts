@@ -163,7 +163,7 @@ export default function () {
       // Switch to findOneAndUpdate({$set: ...}) and strip server-owned
       // identity fields from the $set payload to avoid Mongo's "Updating
       // the path '_id' would create a conflict" error.
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      // eslint-disable-next-line no-unused-vars
       const { _id, __v, realmId: _realmId, ...rest } = template as any;
       const updatedTemplate = await Collections.Template.findOneAndUpdate(
         {
