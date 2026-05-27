@@ -40,15 +40,13 @@ import { ensureSeedTenant, getAccessToken } from './lib/api';
  * The actual `me` resolution body-shape assertion is left as test.fixme so
  * a future run with OTP plumbing can flip it on without rewriting the spec.
  *
- * Live-NAS state at the time this spec was authored
- * --------------------------------------------------
- * The 4 active tests below currently FAIL on NAS with HTTP 504, NOT because
- * the assertions are wrong but because the tenantapi container is in a
- * crash-reconnect loop against Redis: the docker-compose.nas.yml service
- * block was missing both REDIS_URL and depends_on:redis (since fixed locally;
- * deploys on next yarn deploy:nas). Once the container can reach Redis, all
- * four assertions should flip to green — they assert auth-chain failure
- * modes, not server-up status.
+ * History note: when this spec was first authored, the 4 auth-chain tests
+ * below were initially fixme'd because the live NAS tenantapi container was
+ * in a 41-hour Redis-reconnect loop — the docker-compose.nas.yml block was
+ * missing REDIS_URL and depends_on:redis. The harness surfaced that real
+ * production bug while running this spec. The compose was patched and the
+ * stack redeployed on 2026-05-27; all four assertions are now active and
+ * passing.
  */
 
 const GATEWAY = process.env.NAS_GATEWAY_URL || 'http://192.168.0.96:1350';
@@ -66,7 +64,7 @@ test.beforeAll(() => {
   }
 });
 
-test.fixme('tenantapi /tenant/me requires auth (route exists, no CastError leak)', async () => {
+test('tenantapi /tenant/me requires auth (route exists, no CastError leak)', async () => {
   const apiCtx = await request.newContext();
   try {
     const r = await apiCtx.get(`${GATEWAY}/tenantapi/tenant/me`);
@@ -84,7 +82,7 @@ test.fixme('tenantapi /tenant/me requires auth (route exists, no CastError leak)
   }
 });
 
-test.fixme('tenantapi /tenant/<objectid> requires auth (parity with /me path)', async () => {
+test('tenantapi /tenant/<objectid> requires auth (parity with /me path)', async () => {
   const apiCtx = await request.newContext();
   try {
     const r = await apiCtx.get(`${GATEWAY}/tenantapi/tenant/${FAKE_OBJECT_ID}`);
@@ -97,7 +95,7 @@ test.fixme('tenantapi /tenant/<objectid> requires auth (parity with /me path)', 
   }
 });
 
-test.fixme('tenantapi /tenants list endpoint requires auth', async () => {
+test('tenantapi /tenants list endpoint requires auth', async () => {
   const apiCtx = await request.newContext();
   try {
     const r = await apiCtx.get(`${GATEWAY}/tenantapi/tenants`);
@@ -110,7 +108,7 @@ test.fixme('tenantapi /tenants list endpoint requires auth', async () => {
   }
 });
 
-test.fixme('landlord JWT cannot read tenantapi /tenant/me (onlyRoles guard)', async () => {
+test('landlord JWT cannot read tenantapi /tenant/me (onlyRoles guard)', async () => {
   // Seed first so a tenant exists for the realm — proves the seed path is
   // healthy and gives us a known email to (eventually, with OTP) sign in as.
   const apiCtx = await request.newContext();
