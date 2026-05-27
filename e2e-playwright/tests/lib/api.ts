@@ -141,3 +141,54 @@ export async function ensureSeed(request: APIRequestContext): Promise<SeedHandle
 
   return { token, realmId, realmName: realm.name, buildingId, expenseId: expense._id };
 }
+
+export interface UnitSeed extends SeedHandles {
+  unitId: string;
+}
+
+/**
+ * Extends ensureSeed with a unit on the seeded building. Used by specs that
+ * exercise unit-level UI (occupancy type, propertyId linking, etc).
+ */
+export async function ensureSeedWithUnit(
+  request: APIRequestContext
+): Promise<UnitSeed> {
+  const seed = await ensureSeed(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+  const buildingResp = await request.get(`${GATEWAY}/api/v2/buildings/${seed.buildingId}`, {
+    headers: auth
+  });
+  expect(buildingResp.status(), 'fetch building for unit seed').toBe(200);
+  const fullBuilding = (await buildingResp.json()) as {
+    _id: string;
+    units?: Array<{ _id: string; atakNumber: string }>;
+  };
+  let unit = fullBuilding.units?.find((u) => u.atakNumber === 'E2E-Unit');
+  if (!unit) {
+    const created = await request.post(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units`,
+      {
+        headers: auth,
+        data: {
+          atakNumber: 'E2E-Unit',
+          isManaged: true,
+          occupancyType: 'vacant'
+        }
+      }
+    );
+    expect(
+      [200, 201],
+      `create unit (status=${created.status()}, body: ${await created.text().catch(() => '')})`
+    ).toContain(created.status());
+    const updated = (await created.json()) as {
+      units: Array<{ _id: string; atakNumber: string }>;
+    };
+    unit = updated.units.find((u) => u.atakNumber === 'E2E-Unit');
+    if (!unit) throw new Error('Created unit not present in response');
+  }
+  return { ...seed, unitId: unit._id };
+}
