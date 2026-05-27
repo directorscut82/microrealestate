@@ -281,6 +281,119 @@ export interface TenantSeed extends SeedHandles {
   tenantPhone1: string;
 }
 
+export interface LeasedTenantSeed extends SeedHandles {
+  tenantId: string;
+  tenantName: string;
+  propertyId: string;
+  leaseId: string;
+  /** YYYY-MM-DD, six months in the past. */
+  beginDate: string;
+  /** YYYY-MM-DD, six months in the future. */
+  endDate: string;
+}
+
+/**
+ * Heaviest seed: a tenant with a property assignment and a lease whose date
+ * range straddles the current month — six months in the past, six months in
+ * the future. The rent computation pipeline produces a rents[] array
+ * covering past, current, and future terms, which is exactly what
+ * specs 04, 05 and the repair past-term spec exercise.
+ *
+ * Idempotent. The fixture tenant is named E2E-LeasedTenant so it survives
+ * across runs and rapid re-seeds don't churn the realm.
+ */
+export async function ensureSeedLeasedTenant(
+  request: APIRequestContext
+): Promise<LeasedTenantSeed> {
+  const seedLease = await ensureSeedLease(request);
+  const seedProperty = await ensureSeedProperty(request);
+
+  const auth = {
+    Authorization: `Bearer ${seedLease.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seedLease.realmId
+  };
+
+  // Fixed deterministic date window so re-runs don't shift the rent ledger.
+  // begin = first of the month six months ago; end = last day of the month
+  // six months from now. Use Date.UTC so positive-offset timezones don't
+  // slip a day backwards. The API's _stringToDate parser is strict on
+  // 'DD/MM/YYYY' (see occupantmanager.ts:34), so we format that way for the
+  // request even though we surface ISO YYYY-MM-DD on the LeasedTenantSeed
+  // for callers that need to compare to JS Date arithmetic.
+  const today = new Date();
+  const beginUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 6, 1));
+  const endUtc = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 7, 0));
+  const beginDate = beginUtc.toISOString().substring(0, 10); // YYYY-MM-DD
+  const endDate = endUtc.toISOString().substring(0, 10);
+  const toDDMMYYYY = (iso: string) => {
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  };
+  const beginDateApi = toDDMMYYYY(beginDate);
+  const endDateApi = toDDMMYYYY(endDate);
+
+  // Find or create the leased tenant.
+  const tenantsResp = await request.get(`${GATEWAY}/api/v2/tenants`, { headers: auth });
+  expect(tenantsResp.status(), 'list tenants').toBe(200);
+  const tenants = (await tenantsResp.json()) as Array<{ _id: string; name: string }>;
+  let tenant = tenants.find((t) => t.name === 'E2E-LeasedTenant');
+
+  if (!tenant) {
+    const created = await request.post(`${GATEWAY}/api/v2/tenants`, {
+      headers: auth,
+      data: {
+        name: 'E2E-LeasedTenant',
+        isCompany: false,
+        manager: 'E2E-LeasedTenant',
+        contacts: [{ contact: 'E2E-LeasedTenant', email: '', phone1: '6900000000', phone: '', phone2: '' }],
+        leaseId: seedLease.leaseId,
+        beginDate: beginDateApi,
+        endDate: endDateApi,
+        properties: [{ propertyId: seedProperty.propertyId, rent: 500, expenses: [] }]
+      }
+    });
+    expect(
+      [200, 201],
+      `create leased tenant (status=${created.status()}, body: ${await created.text().catch(() => '')})`
+    ).toContain(created.status());
+    tenant = (await created.json()) as { _id: string; name: string };
+  } else {
+    // PATCH to make sure the lease + property assignment + dates are current
+    // (a previous failed run might have left the tenant in a partial state).
+    const patched = await request.patch(`${GATEWAY}/api/v2/tenants/${tenant._id}`, {
+      headers: auth,
+      data: {
+        leaseId: seedLease.leaseId,
+        beginDate: beginDateApi,
+        endDate: endDateApi,
+        properties: [{ propertyId: seedProperty.propertyId, rent: 500, expenses: [] }]
+      }
+    });
+    // PATCH may 200 or no-op depending on diff; both are fine, only fail loud
+    // on a 4xx/5xx that isn't 422 "no rents to recompute" or similar.
+    if (patched.status() >= 400 && patched.status() !== 422) {
+      throw new Error(
+        `failed to refresh leased tenant: HTTP ${patched.status()} ${await patched.text().catch(() => '')}`
+      );
+    }
+  }
+
+  return {
+    token: seedLease.token,
+    realmId: seedLease.realmId,
+    realmName: seedLease.realmName,
+    buildingId: seedLease.buildingId,
+    expenseId: seedLease.expenseId,
+    tenantId: tenant._id,
+    tenantName: tenant.name,
+    propertyId: seedProperty.propertyId,
+    leaseId: seedLease.leaseId,
+    beginDate,
+    endDate
+  };
+}
+
 /**
  * Seeds a tenant under the test realm with a known phone1. Used by the
  * tenant-search spec (wave-24) which verifies the search-by-phone1 fix.
