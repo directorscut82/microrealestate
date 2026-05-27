@@ -1,0 +1,20 @@
+{
+  "name": "@microrealestate/e2e-playwright",
+  "version": "1.0.0",
+  "description": "MicroRealEstate E2E tests (Playwright). NAS-targeted by design.",
+  "private": true,
+  "scripts": {
+    "test:nas": "bash ./backup-nas-before-tests.sh && playwright test",
+    "test:nas:ui": "bash ./backup-nas-before-tests.sh && playwright test --ui",
+    "test:nas:headed": "bash ./backup-nas-before-tests.sh && playwright test --headed",
+    "smoke": "bash ./backup-nas-before-tests.sh && playwright test --project=chromium tests/00_nas_smoke.spec.ts",
+    "format": "prettier --write '**/*.{js,jsx,ts,tsx,json}'",
+    "lint": "eslint . --ext .ts,.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "@types/node": "20.14.0",
+    "dotenv": "16.0.1",
+    "typescript": "5.5.4"
+  }
+}
