@@ -77,7 +77,7 @@ microrealestate/
 │   ├── tenant/          # Next.js 14 App Router (TypeScript)
 │   └── commonui/        # Shared utilities, locales, runtime scripts
 ├── types/               # Shared TypeScript types (CollectionTypes namespace)
-├── e2e/                 # Cypress 14 E2E tests
+├── e2e-playwright/      # Playwright E2E tests (NAS-targeted)
 ├── cli/                 # CLI tool (dev/build/start/stop)
 ├── base.env             # Default env vars (versioned)
 └── .env                 # Local secrets (not versioned)
@@ -186,7 +186,7 @@ For the complete endpoint reference, read `services/api/src/routes.ts` and the m
 - `docker-compose.microservices.test.yml` — adds resetservice
 - `docker-compose.yml` — standalone with Caddy (auto HTTPS)
 
-**CI** (`.github/workflows/ci.yml`): push to `master` → lint → build & push 8 Docker images to GHCR (parallel). The fork strips upstream's deploy and e2e jobs; the canonical upstream pipeline (9 images including tenant-frontend, plus deploy → health check → Cypress E2E) is preserved on `microrealestate/microrealestate`.
+**CI** (`.github/workflows/ci.yml`): push to `master` → lint → build & push 8 Docker images to GHCR (parallel). The fork strips upstream's deploy and e2e jobs; the canonical upstream pipeline (9 images including tenant-frontend, plus deploy → health check → Cypress E2E) is preserved on `microrealestate/microrealestate`. **E2E on this fork** is Playwright at `e2e-playwright/`, runs against the live NAS (not CI) — see [`documentation/E2E_TESTING.md`](documentation/E2E_TESTING.md).
 
 For NAS deployment specifics, see `documentation/DEV_AND_DEPLOY.md`.
 
@@ -206,11 +206,12 @@ For deep dives, the maintained source of truth lives under `.kiro/steering/` and
 | [`.kiro/steering/architecture-diagrams.md`](.kiro/steering/architecture-diagrams.md) | Mermaid diagrams: system, dependencies, auth flow, ER, CI |
 | [`.kiro/steering/frontend-patterns.md`](.kiro/steering/frontend-patterns.md) | UI/state/forms patterns + SSR gotchas for the landlord app |
 | [`.kiro/steering/roadmap-hardening.md`](.kiro/steering/roadmap-hardening.md) | Phase status, completed and pending items |
-| [`.kiro/steering/test-running-guide.md`](.kiro/steering/test-running-guide.md) | Cypress + jest commands, container management, Finch cleanup |
+| [`.kiro/steering/test-running-guide.md`](.kiro/steering/test-running-guide.md) | Playwright + jest commands, discipline rules, container management |
+| [`documentation/E2E_TESTING.md`](documentation/E2E_TESTING.md) | Canonical E2E reference: harness layout, discipline rules, common gotchas |
 | [`documentation/DEV_AND_DEPLOY.md`](documentation/DEV_AND_DEPLOY.md) | Two-branch dev/NAS workflow, deploy script, troubleshooting |
 | [`documentation/FINCH_SETUP.md`](documentation/FINCH_SETUP.md) | Finch installation, env config, disk-space reclaim |
 | [`documentation/LINT_DEBT.md`](documentation/LINT_DEBT.md) | Open lint debt with concrete fix plan |
-| [`documentation/DEVELOPER.md`](documentation/DEVELOPER.md) | Upstream-style developer guide (Docker, debug, e2e) |
+| [`documentation/DEVELOPER.md`](documentation/DEVELOPER.md) | Upstream-style developer guide (Docker, debug). E2E sections in this doc are stale (refer to upstream Cypress); use `documentation/E2E_TESTING.md` for the actual harness. |
 
 ## Custom Instructions
 

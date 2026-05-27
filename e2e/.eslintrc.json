@@ -1,8 +1,0 @@
-{
-  "extends": ["plugin:cypress/recommended"],
-  "env": {
-    "commonjs": true,
-    "node": true,
-    "jest": true
-  }
-}

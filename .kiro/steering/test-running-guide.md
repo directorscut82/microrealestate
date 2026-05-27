@@ -3,271 +3,128 @@ inclusion: always
 ---
 # MRE — Test Running Guide
 
-## Rules
+## Two test surfaces
 
-1. **NEVER run tests without guardrails.** Use `--config defaultCommandTimeout=15000,pageLoadTimeout=30000` to fail fast.
-2. **Read the test file before running it.** Identify obvious issues first.
-3. **Fix root causes before running.** If multiple suites share a broken command, fix the command first.
-4. **Lower timeouts for debugging.** Don't wait 60s for something that should appear in 5s.
-5. **NEVER use `DELETE /api/reset` as a smoke test.** It wipes the entire database. Use `curl http://localhost:8080/landlord/signin | head -1` instead.
+1. **Unit tests** — `services/<svc>/jest` per service. Run on local Node, no containers needed.
+2. **E2E tests** — Playwright at `e2e-playwright/`, runs against the **live NAS** (not a local stack).
 
-## Environment Setup
+The old Cypress suite at `e2e/` was deleted in commit `e478a59` (May 2026). Don't look for it. The historic context is captured in [`documentation/E2E_TESTING.md`](../../documentation/E2E_TESTING.md).
 
-Before running any E2E tests:
+## Rules (non-negotiable)
 
-```bash
-# Verify all 11 containers are up
-finch ps -a --format '{{.Names}} {{.Status}}'
+1. **Never weaken assertions to make a test pass.** If a test fails, decide whether it's a real app bug or a real test-shape problem before touching anything. Both fix paths exist; "delete the assertion" is not one of them.
+2. **Never call `cy.resetAppData()` or `DELETE /api/reset` against NAS.** The endpoint doesn't exist on NAS (resetservice isn't deployed) but if it did, it would wipe production data.
+3. **The mandatory mongodump backup must run before every Playwright invocation.** The backup script (`e2e-playwright/backup-nas-before-tests.sh`) exits non-zero on any failure; the runner refuses to start if a valid archive isn't on disk in `e2e-playwright/backup/`.
+4. **Test data lives in a dedicated realm** (`CYPRESS-TEST-DO-NOT-USE`) under a bot account. Credentials are in `.secrets/cypress-test-account` (gitignored). Specs scope all writes by `realmId`.
+5. **Status assertions on every awaited HTTP response.** `expect(resp.status(), 'descriptive label').toBe(200)` — never `toBeTruthy()` on a status. A 422 silently passing `cy.wait('@alias')` is what made the old Cypress suite useless.
+6. **Round-trip read-back after every write.** Edit → submit → re-open the dialog or re-GET the resource → assert the value is what you submitted. Saving and rendering are two failure modes; assert both.
+7. **No arbitrary `waitForTimeout(N)`.** Wait on `page.waitForResponse(...)`, locator visibility, or `expect.poll()`. If you need a wall-clock wait, you have a real race condition in the app — surface it, don't paper over it.
 
-# Verify gateway is healthy
-finch logs microrealestate-gateway-1 2>&1 | tail -3
-# Must show: "Gateway ready and listening on port 8080"
+## Running E2E tests
 
-# Smoke test
-curl -s http://localhost:8080/landlord/signin | head -c 50
-```
+### Prereqs (one-time)
 
-## Running Tests
+- `~/Development/microrealestate/.secrets/portainer-token` — Portainer API token used by the backup script.
+- `~/Development/microrealestate/.secrets/cypress-test-account` — bot account credentials. Created by the harness; if missing, ask before regenerating.
+- The NAS must be reachable on LAN (`http://192.168.0.96:1350`).
 
-### Single suite with guardrails
-
-```bash
-cd /Users/epitrogi/Development/microrealestate/e2e
-npx cypress run \
-  --spec "cypress/e2e/XX_suite_name.cy.js" \
-  --config defaultCommandTimeout=15000,pageLoadTimeout=30000 \
-  2>&1 | tail -40
-```
-
-- `defaultCommandTimeout=15000` — fail assertions after 15s, not 60s
-- `pageLoadTimeout=30000` — fail page loads after 30s
-
-### Incremental testing within a suite
-
-When debugging a suite with sequential tests (testIsolation: false):
-
-**Important:** `.only` on test N runs ONLY test N, skipping all others. With sequential tests this breaks dependencies. Instead:
-
-1. Temporarily add `it.skip()` to all tests AFTER the first one — run just before hook + test 1
-2. Remove `skip` from test 2 (now tests 1+2 run in order) — verify
-3. Continue removing `skip` one test at a time until you find the failure
-4. Remove all `skip` when done
-
-### Batch run (verified suites only)
+### Backup + run the full suite
 
 ```bash
-cd /Users/epitrogi/Development/microrealestate/e2e
-npx cypress run \
-  --spec "cypress/e2e/01_authentication.cy.js,cypress/e2e/02_first_access.cy.js,..." \
-  --config defaultCommandTimeout=15000,pageLoadTimeout=30000 \
-  2>&1 | tail -40
+cd /Users/epitrogi/Development/microrealestate/e2e-playwright
+yarn test:nas
+# script chains: backup-nas-before-tests.sh && playwright test
+# typical runtime: ~17s, 17 passed + 1 fixme as of June 2026
 ```
 
-- Only batch suites that are already verified passing
+### Run a single spec
 
-### Using --bail
-
-Not available as a CLI flag in Cypress 14. Use the `cypress-fail-fast` plugin or check results after each suite.
-
-## Debugging Failures
-
-1. Read the error message — is it a timeout? Wrong selector? Missing element?
-2. Read the test code — what does it expect?
-3. Read the app code — does the app actually do what the test expects?
-4. Determine: **code bug** or **test bug**
-5. If code bug → fix the app, re-run
-6. If test bug → fix the test, re-run
-7. **Never weaken assertions to make tests pass**
-8. **Check backend logs** when failures are unexpected:
-   ```bash
-   finch logs microrealestate-api-1 2>&1 | tail -20
-   finch logs microrealestate-gateway-1 2>&1 | tail -20
-   finch logs microrealestate-authenticator-1 2>&1 | tail -20
-   ```
-
-## HTTP 500 from gateway — general debug path
-
-Before pattern-matching on a known failure in the table below, walk this checklist. It catches ~95% of "gateway returned 500" symptoms in dev.
-
-1. **Are all 11 containers up?** `finch ps -a --format '{{.Names}} {{.Status}}'` — every line must say `Up`. Anything `Exited` or missing is the prime suspect.
-2. **Did the gateway log a CORS rejection?** `finch logs microrealestate-gateway-1 2>&1 | grep -i cors | tail -5`. If yes → set `APP_DOMAIN=localhost:8080` in `.env` and recreate the gateway (see Common Issues below).
-3. **Did the gateway log "Missing target option"?** That's the proxy crashing because `API_URL` (or another `*_URL`) is unset. Check `.env`.
-4. **Is the downstream service alive?** The gateway is a proxy — most 500s come from the service it proxies to (api, authenticator, etc.). For a signin failure, look at: `finch logs microrealestate-authenticator-1 2>&1 | tail -20`. For tenant data: `finch logs microrealestate-api-1 2>&1 | tail -20`.
-5. **Did the request body get rejected by `express-mongo-sanitize`?** Look for `$` characters in the request body — they get stripped silently. Unusual but possible.
-6. **Read the code that emits the error** before guessing. The stack trace in the gateway log tells you exactly which file and line; open it before proposing a fix.
-
-The signin-specific quick-triage lives in `AGENTS.md` (top of file) so an agent dispatched cold has it in their first read.
-
-## Common Issues
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `shortcutAddProperty` not found | Dashboard not in first-connection mode | Use page buttons instead of dashboard shortcuts |
-| `cy.contains(text)` fails on form page | Text is in an input value, not visible text | Use `cy.get('input').should('have.value', text)` |
-| `ol.toaster > li` not found | Toast didn't appear or wrong selector | Check if the API actually returns an error |
-| `[data-cy=orgMenu]` not found after reload | Store reactivity issue | Verify InjectStoreContext uses useSyncExternalStore |
-| Page redirects to firstaccess after reload | Auth flow race condition | Verify Authentication.js uses getStoreInstance() |
-| Next.js serves stale code | Dev server compilation cache | Restart landlord-frontend container |
-| Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
-| Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
-| `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
-| Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
-| Gateway logs `CORS blocked origin: http://localhost:8080` and signin returns 500 | `DOMAIN_URL` parsing strips the port (`destructUrl()` returns hostname only) | Add `APP_DOMAIN=localhost:8080` to `.env`. Ensure `docker-compose.microservices.base.yml` exports `- APP_DOMAIN` to the gateway. Recreate the container (`finch rm -f microrealestate-gateway-1 && finch compose ... up -d gateway`) — `restart` does NOT reload env. |
-
-## How to Run Tests (without getting stuck)
-
-### Prerequisites — MUST verify before running E2E
-1. **Container runtime is `finch`** (not docker). All commands use `finch compose`.
-2. **`.env` must contain `API_URL=http://api:8200/api/v2`** — docker compose does NOT read `base.env` for variable substitution. If `API_URL` is missing, the gateway crashes silently with `Missing "target" option`.
-3. **`.env` must have `MONGO_URL=mongodb://mongo/mredb`** — base.env defaults to `demodb` which is wrong. All real data is in `mredb`.
-4. **`.env` must have `APP_DOMAIN=localhost:8080`** — without it the gateway's CORS allowlist is built from `DOMAIN_URL=http://localhost`, whose port gets stripped by `destructUrl()`. The browser origin `http://localhost:8080` then fails CORS with HTTP 500 and the signin POST never reaches the authenticator.
-5. **Dev mode required for code changes** — GHCR images don't pick up local changes. Always start with dev compose overlay.
-
-### Start services (dev mode)
 ```bash
-cd /Users/epitrogi/Development/microrealestate
-finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml up -d
+cd /Users/epitrogi/Development/microrealestate/e2e-playwright
+bash ./backup-nas-before-tests.sh
+yarn playwright test tests/01_expense_edit.spec.ts --reporter=list
 ```
 
-### Verify before running tests
+The backup is required even for a single spec. Don't skip it.
+
+### Open the Playwright UI
+
 ```bash
-# All 11 containers must be "Up" (not "Exited")
-finch ps -a --format '{{.Names}} {{.Status}}'
-
-# Gateway must NOT have errors in logs
-finch logs microrealestate-gateway-1 2>&1 | tail -5
-# Should end with: "Gateway ready and listening on port 8080"
-
-# Quick smoke test — SAFE, does NOT modify data
-curl -s http://localhost:8080/landlord/signin | head -1   # Should return HTML
+cd /Users/epitrogi/Development/microrealestate/e2e-playwright
+yarn test:nas:ui
 ```
 
-### Run unit tests (no Docker needed)
+Useful for selector-debugging. Same backup gate.
+
+### Open a failure trace
+
+When a spec fails, Playwright drops a trace at `e2e-playwright/test-results/<spec>/trace.zip`.
+
 ```bash
-cd services/api && npx jest --no-coverage
-# Expects: 14 suites, 319 tests (309 passing, 10 failing as of May 2026)
+cd /Users/epitrogi/Development/microrealestate/e2e-playwright
+yarn playwright show-trace test-results/01_expense_edit.../trace.zip
 ```
 
-### Run E2E tests
-```bash
-cd e2e && npx cypress run
-# Full run: 67 suites, 583 tests (~523-551 pass per run)
-# Runtime: ~15-20 minutes in dev mode
-```
+Trace UI shows DOM at every step + network + console — usually enough to identify the failure mode in 30 seconds.
 
-### Run single E2E suite (for debugging)
-```bash
-cd e2e && npx cypress run --spec cypress/e2e/04_contracts.cy.js
-```
+## Writing a new spec
 
-### Common failures and fixes
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Gateway container "Exited" | `API_URL` missing from `.env` | Add `API_URL=http://api:8200/api/v2` to `.env` |
-| App shows signup page but user exists | `MONGO_URL` pointing to wrong database | Verify `.env` has `MONGO_URL=mongodb://mongo/mredb` |
-| Signin POST returns HTTP 500, gateway logs `CORS blocked origin: http://localhost:8080` | `APP_DOMAIN` not set or not exported to gateway container | Add `APP_DOMAIN=localhost:8080` to `.env`. Recreate the gateway container (`restart` does NOT reload env vars). |
-| Tests pass locally but code changes not reflected | Running from GHCR images (prod mode) | Stop all, restart with dev compose overlay |
-| `finch: command not found` | Wrong shell or PATH | Use `/usr/local/bin/finch` |
-| Next.js serves stale code after file changes | Dev server compilation cache | Restart landlord-frontend container |
+Use the canonical example: `e2e-playwright/tests/01_expense_edit.spec.ts`. The pattern is:
 
-### Stop everything
-```bash
-finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
-```
+1. **Arrange** — call an `ensureSeedX` helper from `tests/lib/api.ts` to set up test data idempotently. Add a new helper if no existing one fits; don't inline 50 lines of seed code per spec.
+2. **Act** — sign in via UI (or call `getAccessToken` for API-only specs), navigate, perform the user action.
+3. **Assert** — status code on the response, then a round-trip read-back of the persisted state.
 
----
+### Test categories — UI vs API-only
 
-## Production Database Protection (Triple-Layer)
+- **UI specs** drive the browser: `await page.goto(...)`, `page.locator(...)`, `page.waitForResponse(...)`. Use when the bug is in the form-to-API wiring (e.g., RHF dropping a field).
+- **API specs** call `request.newContext()` then `apiCtx.post/patch/get(...)`. Use when the bug is purely server-side (validators, auth guards, response shape). Same harness, no browser, ~10× faster per spec.
 
-The test infrastructure has three layers preventing accidental production data loss:
+### Common URL gotcha
 
-1. **Layer 1 — resetservice `assertTestDatabase` guard**: The resetservice checks its own `MONGO_URL` and returns 403 if connected to `mredb` (production). Tests use `mredb_test`. This is enforced at the application level regardless of which compose overlay is active.
+The Playwright `baseURL` ends with `/landlord/` (trailing slash matters — without it, `goto('signin')` would replace the `/landlord` segment instead of appending). The `[organization]` URL segment is the realm **name** (not its `_id`); use `encodeURIComponent(realmName)` because the test realm name contains dashes.
 
-2. **Layer 2 — Cypress `before()` hook**: The `resetAppData` command verifies the reset endpoint URL points to the expected test database before wiping.
+### Common API gotcha
 
-3. **Layer 3 — Pre-test backup script** (`backup-before-tests.sh`): Takes a mongodump before E2E runs as a safety net.
+The API's `_stringToDate` parser is strict on `DD/MM/YYYY`. ISO `YYYY-MM-DD` will return 422 with `Invalid date: ...`. Use the `toDDMMYYYY` shim in `lib/api.ts` for any date field on tenant/lease/property POSTs.
 
-**Key behavior:**
-- E2E tests wipe `mredb_test` (NOT `mredb`)
-- Production data in `mredb` is NEVER touched by tests
-- If resetservice is accidentally pointed at `mredb`, it refuses with HTTP 403
-- The `docker-compose.microservices.test.yml` sets `MONGO_URL=mongodb://mongo/mredb_test`
-- Dev mode (`docker-compose.microservices.dev.yml`) uses `mredb` for the app but `mredb_test` for resetservice
-
----
-
-## Running Unit Tests (no Docker needed)
+## Running unit tests
 
 ```bash
 cd services/api && npx jest --no-coverage
-# Expects: 14 suites, 319 tests (309 passing, 10 failing as of May 2026)
 ```
 
-## Container Management
+Per-service jest, no Docker. Run from the service directory.
 
-### Start services (dev mode)
-```bash
-cd /Users/epitrogi/Development/microrealestate
-finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml up -d
-```
+## Production database protection
 
-### Stop everything
-```bash
-finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
-```
+E2E tests target the **live NAS**, but writes are scoped to a dedicated test realm. Three independent layers prevent collateral damage to your real data:
 
-### Restart landlord frontend (after code changes)
-```bash
-finch restart microrealestate-landlord-frontend-1
-```
+1. **Pre-test mongodump backup** — runs before every spec invocation; archive saved to `e2e-playwright/backup/mredb_pre_test_<ts>.archive`. Backups are local-only (gitignored).
+2. **Realm scoping** — every API call from a spec carries `organizationid: <test_realm_id>`. The test account is the only admin of that realm and has zero membership in your real org.
+3. **Discipline** — never POST `DELETE /api/reset` from a spec. The endpoint isn't deployed on NAS, but the harness has no business calling it regardless.
 
-### Reclaim Finch disk space (run periodically)
-The Finch VM uses a 50GB raw disk image at `~/.finch/.disks/`. Pulling/rebuilding accumulates layer data that macOS doesn't auto-reclaim. If `du -sh ~/.finch` is in the tens of gigabytes:
+If a spec ever appears to write to your real data: **stop, restore from the most recent backup**:
 
 ```bash
-# Stop the dev stack first
-finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml down
-
-# Remove unused images/containers/build cache + all unused volumes
-finch system prune -a -f
-finch volume prune -a -f
-
-# Tell macOS to reclaim freed blocks (this is the step that actually shrinks the file)
-export LIMA_HOME=/Applications/Finch/lima/data
-/Applications/Finch/lima/bin/limactl shell finch sudo fstrim -v /mnt/lima-finch
+finch cp e2e-playwright/backup/<archive> mongo-container:/tmp/restore.archive
+finch exec mongo-container mongorestore --archive=/tmp/restore.archive --drop
 ```
 
-A typical reclaim after months of dev use is 30+ GB. `finch vm disk resize` can only grow, not shrink, so trimming is the correct approach. See `documentation/FINCH_SETUP.md` for full details.
+(On NAS, replace `finch exec` with the Portainer container-exec API or SSH.)
 
----
+## Discipline rule audit (when reviewing a spec)
 
-## Test Suite Status
+Before merging a new spec, grep it for:
 
-| Suite | Tests | Status |
-|-------|-------|--------|
-| 01-09 | 100 | ✅ Verified passing |
-| 10-17 | 57 | ✅ Verified passing |
-| 20 | 22 | ✅ Passes, occasionally fails (selectByLabel timing) |
-| 21 | 19 | ✅ Verified passing (fixed: data-cy for Customize dates) |
-| 22-23 | 31 | ✅ Passes, 22 occasionally fails (selectByLabel timing) |
-| 24 | 7 | ✅ Verified passing (fixed: firstName field) |
-| 25 | 22 | ⚠️ 20/22 — "Copie de" name check fails when before hook has selectByLabel timing issue |
-| 26-27 | 42 | ✅ Verified passing |
-| 28 | 15 | ⚠️ Occasionally fails in before hook (selectByLabel timing) |
-| 30-42 | 129 | ✅ Verified passing |
-| 50-57 | 61 | ✅ Verified passing |
-| 58 | 14 | ✅ Verified passing |
-| 59 | 5 | ❌ 2/5 — pre-existing React hydration error #418 (not related to feature branch) |
-| 60-62 | 26 | ✅ Verified passing |
-| 63-68 | 30 | ✅ Verified passing |
-| 70 | 6 | ✅ Verified passing (archive feature) |
+- `cy.wait(` — should be 0 occurrences (Cypress-ism, the file should use Playwright APIs).
+- `waitForTimeout(` — should be 0; if present, the author is papering over a race.
+- `\.toBeTruthy\(\)` on a `.status()` — should be 0; demand a numeric status.
+- A `page.waitForResponse(...)` that isn't followed by an `expect(resp.status(), ...).toBe(...)` — that's a toothless test, the old Cypress trap.
+- `force: true` on a click — should be 0; if a click is unstable, find the real cause (viewport, hidden parent, animation).
 
-### Non-deterministic selectByLabel failures
-Some suites (20, 22, 25, 27, 28) occasionally fail because the Radix Select dropdown opens before React Query data loads. The `selectByLabel` command retries up to 5 times (close/reopen), which helps but doesn't eliminate the issue. These suites pass on re-run.
+## Test inventory
 
-## Before Running Suites 20-28
+See `e2e-playwright/tests/`. Every spec file's leading comment names the wave-24 bug it covers and the trigger condition. The PR description on master (search PR title "Add Playwright E2E harness") summarizes coverage.
 
-1. Read ALL 9 test files first
-2. Fix the `addPropertyFromStepper` / `addTenantFromStepper` commands to work outside first-connection mode
-3. Check each suite's `before` hook for the same issue
-4. Run incrementally with guardrails
+When the count grows past ~30 specs, consider extracting Page Object classes (one per landlord screen) — until then the duplication is cheaper than the abstraction.
