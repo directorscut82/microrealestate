@@ -42,7 +42,11 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] }
+      // Larger-than-default viewport — the landlord app's edit dialogs are
+      // tall (unit form has ~12 inputs) and at the default 1280x720 the
+      // submit button falls below the dialog's internal scroll container.
+      // Match what a realistic landlord workstation would see.
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1200 } }
     }
   ]
 });
