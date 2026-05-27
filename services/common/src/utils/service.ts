@@ -17,13 +17,22 @@ import mongoSanitize from 'express-mongo-sanitize';
 import RedisClient from './redisclient.js';
 import winston from 'winston';
 
-process.on('SIGINT', async () => {
+// Docker sends SIGTERM on `docker stop` / Portainer stack recreation. Without
+// a SIGTERM handler the process gets the default action (terminate) and
+// containers exit abruptly after the 10s grace period via SIGKILL — leaving
+// redis/mongo with un-flushed client connections and surfacing as
+// "stopped unexpectedly" alerts in container managers. SIGINT is what we get
+// from Ctrl-C in dev. Both should drain the same way.
+const _gracefulShutdown = async (signal: string) => {
   try {
+    Logger.default.info(`received ${signal}, shutting down`);
     await Service.getInstance()?.shutDown(0);
   } catch (error) {
     Logger.default.error(String(error));
   }
-});
+};
+process.on('SIGINT', () => _gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => _gracefulShutdown('SIGTERM'));
 
 export default class Service {
   static cookieParser = _cookieParser;
