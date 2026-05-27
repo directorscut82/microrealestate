@@ -192,3 +192,90 @@ export async function ensureSeedWithUnit(
   }
   return { ...seed, unitId: unit._id };
 }
+
+export interface PropertySeed extends SeedHandles {
+  propertyId: string;
+}
+
+/**
+ * Ensures a property exists under the test realm. Property edits are
+ * exercised by spec 06 (energy certificate fields).
+ */
+export async function ensureSeedProperty(
+  request: APIRequestContext
+): Promise<PropertySeed> {
+  const seed = await ensureSeed(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+  const propsResp = await request.get(`${GATEWAY}/api/v2/properties`, { headers: auth });
+  expect(propsResp.status(), 'list properties').toBe(200);
+  const props = (await propsResp.json()) as Array<{ _id: string; name: string }>;
+  let prop = props.find((p) => p.name === 'E2E-Property');
+  if (!prop) {
+    const created = await request.post(`${GATEWAY}/api/v2/properties`, {
+      headers: auth,
+      data: {
+        name: 'E2E-Property',
+        type: 'apartment',
+        rent: 0,
+        surface: 50,
+        address: { street1: 'Test', city: 'Test', zipCode: '00000' }
+      }
+    });
+    expect(
+      [200, 201],
+      `create property (status=${created.status()}, body: ${await created.text().catch(() => '')})`
+    ).toContain(created.status());
+    prop = (await created.json()) as { _id: string; name: string };
+  }
+  return { ...seed, propertyId: prop._id };
+}
+
+export interface TenantSeed extends SeedHandles {
+  tenantId: string;
+  tenantName: string;
+  tenantPhone1: string;
+}
+
+/**
+ * Seeds a tenant under the test realm with a known phone1. Used by the
+ * tenant-search spec (wave-24) which verifies the search-by-phone1 fix.
+ *
+ * The phone1 is randomized per run so a stale tenant from a prior failed
+ * run cannot accidentally satisfy the assertion.
+ */
+export async function ensureSeedTenant(
+  request: APIRequestContext
+): Promise<TenantSeed> {
+  const seed = await ensureSeed(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+
+  // Random phone1 so this run's assertion can't pass on a stale tenant from
+  // a previous run. Use a 9-digit number prefixed with 6 (Greek mobile range).
+  const phone1 = `69${Math.floor(10000000 + Math.random() * 89999999)}`;
+  const tenantName = `E2E-Tenant-${Date.now()}`;
+
+  const created = await request.post(`${GATEWAY}/api/v2/tenants`, {
+    headers: auth,
+    data: {
+      name: tenantName,
+      isCompany: false,
+      manager: tenantName,
+      contacts: [{ contact: tenantName, phone1, email: '', phone: '', phone2: '' }]
+    }
+  });
+  expect(
+    [200, 201],
+    `create tenant (status=${created.status()}, body: ${await created.text().catch(() => '')})`
+  ).toContain(created.status());
+  const tenant = (await created.json()) as { _id: string; name: string };
+
+  return { ...seed, tenantId: tenant._id, tenantName: tenant.name, tenantPhone1: phone1 };
+}
