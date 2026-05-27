@@ -193,6 +193,47 @@ export async function ensureSeedWithUnit(
   return { ...seed, unitId: unit._id };
 }
 
+export interface LeaseSeed extends SeedHandles {
+  leaseId: string;
+}
+
+/**
+ * Ensures a lease ("contract" in UI) exists under the test realm. Used by
+ * spec 09 which verifies that PATCH /leases/:id treats the URL :id as
+ * authoritative even when the body claims a different _id.
+ */
+export async function ensureSeedLease(
+  request: APIRequestContext
+): Promise<LeaseSeed> {
+  const seed = await ensureSeed(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+  const leasesResp = await request.get(`${GATEWAY}/api/v2/leases`, { headers: auth });
+  expect(leasesResp.status(), 'list leases').toBe(200);
+  const leases = (await leasesResp.json()) as Array<{ _id: string; name: string }>;
+  let lease = leases.find((l) => l.name === 'E2E-Lease');
+  if (!lease) {
+    const created = await request.post(`${GATEWAY}/api/v2/leases`, {
+      headers: auth,
+      data: {
+        name: 'E2E-Lease',
+        description: 'E2E lease',
+        timeRange: 'years',
+        numberOfTerms: 1
+      }
+    });
+    expect(
+      [200, 201],
+      `create lease (status=${created.status()}, body: ${await created.text().catch(() => '')})`
+    ).toContain(created.status());
+    lease = (await created.json()) as { _id: string; name: string };
+  }
+  return { ...seed, leaseId: lease._id };
+}
+
 export interface PropertySeed extends SeedHandles {
   propertyId: string;
 }
