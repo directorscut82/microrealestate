@@ -25,7 +25,7 @@ microrealestate/
 │   ├── landlord/         # Landlord web app — Next.js 14 Pages Router (JavaScript)
 │   └── tenant/           # Tenant web app — Next.js 14 App Router (TypeScript)
 ├── types/                # Shared TypeScript type definitions
-├── e2e/                  # End-to-end tests (Cypress 14)
+├── e2e-playwright/       # End-to-end tests (Playwright, NAS-targeted)
 ├── docker-compose*.yml   # Docker Compose configs for dev/prod/test/CI
 ├── base.env              # Default environment variables (versioned)
 └── .env                  # Local overrides with secrets (not versioned)
@@ -38,7 +38,7 @@ All packages are scoped under `@microrealestate/*`:
 - `@microrealestate/common` — shared backend library
 - `@microrealestate/gateway`, `api`, `tenantapi`, `authenticator`, `emailer`, `pdfgenerator`, `resetservice` — services
 - `@microrealestate/commonui`, `landlord`, `tenant` — frontend apps
-- `@microrealestate/e2e` — end-to-end tests
+- `@microrealestate/e2e-playwright` — end-to-end tests (Playwright, NAS-targeted)
 - `@microrealestate/cli` — CLI tool (not published, used internally)
 
 ## Key Commands
@@ -50,7 +50,7 @@ All packages are scoped under `@microrealestate/*`:
 - `yarn ci` — Start in CI mode (for automated testing)
 - `yarn lint` — Lint all workspaces
 - `yarn format` — Format all workspaces with Prettier
-- `yarn e2e:ci` / `yarn e2e:run` / `yarn e2e:open` — Run Cypress e2e tests
+- `yarn e2e:nas` — Backup NAS Mongo + run Playwright suite against the live NAS (see `documentation/E2E_TESTING.md`)
 - `yarn deploy:nas` — Merge master → nas, push (GHCR builds `:nas` images), optionally trigger Portainer redeploy on the Synology NAS (self-hosted fork only)
 
 ## Branches
@@ -82,7 +82,7 @@ The other steering files (loaded automatically alongside this one) cover:
 - `architecture-diagrams.md` — Mermaid diagrams of system, service dependencies, auth flow, ER, CI
 - `frontend-patterns.md` — UI/state/forms patterns + SSR gotchas for the landlord app
 - `roadmap-hardening.md` — what's done, what's pending, in what order
-- `test-running-guide.md` — `finch` commands, running unit + Cypress tests, container management, disk reclaim
+- `test-running-guide.md` — Playwright + jest commands, discipline rules, container management, disk reclaim
 
 Non-steering documentation (read on-demand):
 - `AGENTS.md` (repo root) — first-read reference for new agents/contributors
@@ -90,5 +90,6 @@ Non-steering documentation (read on-demand):
 - `documentation/DEV_AND_DEPLOY.md` — two-branch dev/NAS workflow, deploy script, troubleshooting, historical gotchas
 - `documentation/FINCH_SETUP.md` — Finch installation, env config, disk-space reclaim
 - `documentation/LINT_DEBT.md` — open lint debt with concrete fix plan (must be paid down before new feature merges)
-- `documentation/DEVELOPER.md` — upstream-style dev guide (Docker, debugging, e2e)
+- `documentation/DEVELOPER.md` — upstream-style dev guide (Docker, debugging). E2E sections are stale (refer to upstream Cypress); use `documentation/E2E_TESTING.md` instead.
+- `documentation/E2E_TESTING.md` — canonical Playwright E2E reference: harness layout, discipline rules, common gotchas
 - `documentation/NAS_DEPLOYMENT_PLAN.archive.md` — historical execution plan, archived
