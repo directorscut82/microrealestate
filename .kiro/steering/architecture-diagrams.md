@@ -303,18 +303,20 @@ erDiagram
 
 ## 5. CI/CD Pipeline
 
+This diagram represents the **upstream canonical** pipeline. The directorscut82 NAS fork strips Deploy + E2E from CI and replaces them with `yarn deploy:nas` (manual on-Mac) plus Playwright run on the developer Mac against the live NAS. See `documentation/E2E_TESTING.md`.
+
 ```mermaid
 graph LR
     subgraph Trigger
         Push["Push to master"]
     end
 
-    subgraph Pipeline
+    subgraph "Pipeline (upstream)"
         Lint["Lint<br/>(all workspaces)"]
         Build["Build & Push<br/>Docker Images<br/>(9 images in parallel)"]
         Deploy["Deploy to<br/>CI Server"]
         Health["Health Check"]
-        E2E["Cypress E2E<br/>Tests"]
+        E2E["Cypress E2E<br/>(legacy, upstream only)"]
     end
 
     subgraph Registry
@@ -327,6 +329,8 @@ graph LR
 ```
 
 Images built: gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice, landlord-frontend, tenant-frontend.
+
+On this fork, E2E uses Playwright at `e2e-playwright/` and runs out-of-band against the deployed NAS, not in CI.
 
 ## 6. Docker Compose Overlay Strategy
 

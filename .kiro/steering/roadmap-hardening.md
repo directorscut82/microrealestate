@@ -104,10 +104,11 @@ Changes are grouped into phases. Each phase should be completed before the next.
 ### 4.7 Database Backup/Restore ✅ COMPLETE (added May 2026)
 - Full MongoDB backup of all 10 collections to JSON (with type markers for ObjectId, Date, Binary)
 - Restore with atomic wipe-and-replace per collection
-- Triple-layer production protection:
+- Triple-layer production protection (legacy Cypress era):
   1. resetservice `assertTestDatabase` guard (403 if connected to mredb)
-  2. Cypress `before()` hook URL verification
+  2. Cypress `before()` hook URL verification (no longer applicable — Cypress suite was removed in May 2026)
   3. Pre-test backup shell script
+- **Current Playwright equivalent**: `e2e-playwright/backup-nas-before-tests.sh` runs `mongodump` via the Portainer exec API before every E2E run. Realm-scoping (CYPRESS-TEST-DO-NOT-USE) replaces the test-database guard since NAS doesn't deploy resetservice. See `documentation/E2E_TESTING.md`.
 - 50MB body parser limit for large restores
 - Settings UI panel with download/upload
 
@@ -154,10 +155,12 @@ Changes are grouped into phases. Each phase should be completed before the next.
 - **Frontend tests:** 4 test files in webapps/landlord/src/__tests__/
 - **Remaining:** Auth flows (JWT refresh full cycle, OTP, M2M)
 
-### 5.2 E2E test coverage — EXTENSIVE
-- **Current state:** 67 suites, 583 tests (~523-551 pass per run)
-- **Known non-deterministic:** selectByLabel timing in suites 20, 22, 25, 27, 28
-- **Known pre-existing:** React hydration error in suite 59
+### 5.2 E2E test coverage — REBUILT (May–June 2026)
+- **Current state:** 17 Playwright specs (UI + API), `e2e-playwright/`, 17 passed + 1 fixme, ~17s against live NAS
+- **Replaced** the 68-spec Cypress 14 suite, which was structurally incapable of catching API failures (only 3% asserted HTTP status codes; pattern of weakening tests rather than fixing them — see `documentation/E2E_TESTING.md` § "Why Playwright?").
+- **Coverage so far:** signin, expense edit (bug 1), unit occupancy (bug 9), tenant phone search, property energy cert, rent tile dimming (bug 8), dashboard finance card (bug 10), repair past-term guard (bug 4), lease URL :id authoritative, last-admin guard, tenantapi auth chain, validators (capital/email/year).
+- **Known fixme:** `tenantapi/tenant/me` body-shape test — needs OTP plumbing not currently reachable from NAS.
+- **Roadmap:** ~20–30 more specs before Page-Object extraction. CI integration deferred until ≥50 specs (would need self-hosted runner with LAN access to NAS).
 
 ### 5.3 API documentation — NOT STARTED
 - **Tool:** OpenAPI/Swagger
