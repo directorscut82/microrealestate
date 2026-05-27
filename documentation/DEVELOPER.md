@@ -50,6 +50,8 @@ yarn dev
 
 The logs of the different services will be visible in the console during the exection of the application.
 
+> **Note for the directorscut82 fork:** The 68-spec Cypress suite at `e2e/` was deleted in May 2026 and replaced with Playwright at `e2e-playwright/`. The Playwright suite targets the live NAS, not a local stack. **For E2E on this fork, use `documentation/E2E_TESTING.md` — the Cypress instructions in this section are upstream-only.**
+
 Also, end to end tests (Cypress tests) can be executed while the application runs in DEV mode. See the next section to knwow how to run the e2e command.
 
 **Debug**
@@ -87,7 +89,9 @@ yarn ci
 No logs will be shown in the terminal during the execution. You can use the [docker logs](https://docs.docker.com/reference/cli/docker/container/logs) command to get the container logs.
 Any changes in the source code requires to rebuild the application.
 
-**Execute the end to end tests (Cypress tests)**
+**Execute the end to end tests (Cypress tests — UPSTREAM ONLY)**
+
+> ⚠️ The directorscut82 fork no longer has Cypress. These commands fail. Use `yarn e2e:nas` (Playwright against the live NAS) instead. See `documentation/E2E_TESTING.md`.
 
 - Like in the CI/CD workflow
 

@@ -92,8 +92,9 @@ inclusion: always
 - Jest 29.7 — unit tests (api service, common library, landlord frontend)
   - 14 suites, 319 tests (as of May 2026)
   - Frontend: 4 test files (ErrorBoundary, token refresh, payment double-submit, fetch errors)
-- Cypress 14.4 — end-to-end tests
-  - 67 suites, 583 tests (as of May 2026)
+- Playwright 1.60 — end-to-end tests, NAS-targeted
+  - 17 specs (UI + API), `e2e-playwright/` workspace
+  - Replaced the 68-spec Cypress 14 suite in May 2026 — see `documentation/E2E_TESTING.md`
 - supertest — HTTP assertion testing (api service unit tests)
 
 ## DevOps & Infrastructure
@@ -107,7 +108,7 @@ inclusion: always
   - `docker-compose.microservices.test.yml` — CI overrides (adds resetservice)
   - `docker-compose.yml` — standalone production deployment
 - Caddy — reverse proxy for standalone deployment (auto HTTPS)
-- GitHub Actions CI/CD pipeline: lint → build & push images to GHCR → deploy → healthcheck → e2e tests
+- GitHub Actions CI/CD pipeline (this fork): lint → build & push :nas images to GHCR. E2E does NOT run in CI on this fork — Playwright specs are run on the developer Mac against the live NAS.
 - GitHub Container Registry (ghcr.io) for Docker images
 
 ## Code Quality

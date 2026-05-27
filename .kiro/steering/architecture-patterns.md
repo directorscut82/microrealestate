@@ -109,10 +109,12 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 - **Duplicate names**: API allows duplicate property and lease names (no unique constraint).
 
 #### Test Infrastructure (resetservice extensions)
-- `POST /api/reset/seed` — creates user + org + leases + properties + tenants in one API call. Bypasses rent pipeline — use `seedAndComputeRents` Cypress command to trigger rent computation via PATCH.
-- `POST /api/reset/otp` — generates OTP for tenant email, returns it directly (bypasses email delivery).
-- **Limitation**: Seeded tenants don't have `usedByTenants` flag computed (frontdata manager not triggered). Seeded data may skip stepper steps if billing/lease data is pre-populated.
-- **Limitation**: Payment form requires a date field — without it, the form validates but doesn't submit to the API.
+
+**On this fork the resetservice is NOT deployed to NAS** (see `scripts/deploy-nas.sh`). The endpoints below exist in the codebase for local Finch dev/CI but Playwright E2E specs (which target the live NAS) cannot rely on them. E2E specs use idempotent API-driven seeds in `e2e-playwright/tests/lib/api.ts` instead.
+
+Local-dev only:
+- `POST /api/reset/seed` — creates user + org + leases + properties + tenants in one API call. Bypasses rent pipeline.
+- `POST /api/reset/otp` — generates OTP for tenant email, returns it directly (bypasses email delivery). The OTP-driven `tenant/me` resolution test in `11_tenantapi_me.spec.ts` is fixme'd because this endpoint is unreachable from NAS.
 
 ### Tenant App (App Router)
 
