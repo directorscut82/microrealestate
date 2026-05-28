@@ -795,5 +795,21 @@
   "unpaid": "απλήρωτο",
   "Utility bills awaiting payment": "Λογαριασμοί κοινής ωφέλειας σε αναμονή πληρωμής",
   "Vacant / Parking": "Κενά / Στάθμευση",
-  "Water": "Ύδρευση"
+  "Water": "Ύδρευση",
+  "Apply to": "Εφαρμογή σε",
+  "Auto-spread (oldest first)": "Αυτόματη κατανομή (παλαιότερα πρώτα)",
+  "Specific category": "Συγκεκριμένη κατηγορία",
+  "Custom split": "Προσαρμοσμένη κατανομή",
+  "Payment fills the oldest unpaid category first, then the next.": "Η πληρωμή καλύπτει πρώτα την παλαιότερη οφειλή και μετά την επόμενη.",
+  "Select a category": "Επιλέξτε κατηγορία",
+  "Allocated": "Κατανεμήθηκε",
+  "{{amount}} unallocated": "{{amount}} αδιάθετα",
+  "{{amount}} over": "{{amount}} επιπλέον",
+  "Preview after this {{amount}} payment": "Προεπισκόπηση μετά την πληρωμή των {{amount}}",
+  "Nothing currently owed.": "Δεν υπάρχει τρέχουσα οφειλή.",
+  "Before": "Πριν",
+  "After": "Μετά",
+  "Credit to next month": "Πίστωση επόμενου μήνα",
+  "Building expenses": "Κοινόχρηστα",
+  "Extra charge": "Πρόσθετη χρέωση"
 }

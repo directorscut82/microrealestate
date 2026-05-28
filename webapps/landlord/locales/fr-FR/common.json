@@ -730,5 +730,21 @@
   "Your account information": "Informations sur votre compte",
   "Your organizations": "Vos organisations",
   "Zip code": "Code postal",
-  "Sponsor this project": "Parrainer ce projet"
+  "Sponsor this project": "Parrainer ce projet",
+  "Apply to": "Affecter à",
+  "Auto-spread (oldest first)": "Auto-répartir (plus ancien d'abord)",
+  "Specific category": "Catégorie spécifique",
+  "Custom split": "Répartition personnalisée",
+  "Payment fills the oldest unpaid category first, then the next.": "Le paiement comble d'abord la catégorie impayée la plus ancienne, puis la suivante.",
+  "Select a category": "Sélectionner une catégorie",
+  "Allocated": "Alloué",
+  "{{amount}} unallocated": "{{amount}} non alloué",
+  "{{amount}} over": "{{amount}} en trop",
+  "Preview after this {{amount}} payment": "Aperçu après ce paiement de {{amount}}",
+  "Nothing currently owed.": "Rien à payer pour le moment.",
+  "Before": "Avant",
+  "After": "Après",
+  "Credit to next month": "Crédit reporté au mois suivant",
+  "Building expenses": "Charges d'immeuble",
+  "Extra charge": "Frais supplémentaires"
 }
