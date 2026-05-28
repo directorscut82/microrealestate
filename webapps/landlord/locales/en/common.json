@@ -743,5 +743,21 @@
   "Your account": "Your account",
   "Your account information": "Your account information",
   "Your organizations": "Your organizations",
-  "Zip code": "Zip code"
+  "Zip code": "Zip code",
+  "Apply to": "Apply to",
+  "Auto-spread (oldest first)": "Auto-spread (oldest first)",
+  "Specific category": "Specific category",
+  "Custom split": "Custom split",
+  "Payment fills the oldest unpaid category first, then the next.": "Payment fills the oldest unpaid category first, then the next.",
+  "Select a category": "Select a category",
+  "Allocated": "Allocated",
+  "{{amount}} unallocated": "{{amount}} unallocated",
+  "{{amount}} over": "{{amount}} over",
+  "Preview after this {{amount}} payment": "Preview after this {{amount}} payment",
+  "Nothing currently owed.": "Nothing currently owed.",
+  "Before": "Before",
+  "After": "After",
+  "Credit to next month": "Credit to next month",
+  "Building expenses": "Building expenses",
+  "Extra charge": "Extra charge"
 }
