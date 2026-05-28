@@ -25,6 +25,20 @@ import {
 // the canonical set the UI offers.
 const PAYMENT_TYPES = ['cash', 'transfer', 'levy', 'cheque', ''] as const;
 
+// Wave-25: payment-by-category allocation. Categories map to the rent
+// breakdown the landlord sees in the UI (Ενοίκιο / Κοινόχρηστα / etc.).
+// `payment.allocation` is optional — when omitted, the server treats the
+// payment as auto-spread (today's behavior). When present, sum(allocation
+// amounts) must equal payment.amount; categories must be in this set.
+const PAYMENT_CATEGORIES = [
+  'rent',
+  'expenses',
+  'repairs',
+  'vat',
+  'previousBalance',
+  'extracharge'
+] as const;
+
 type AnyRecord = Record<string, any>;
 
 async function _findOccupants(
@@ -359,6 +373,49 @@ async function _updateByTerm(
             `payments[${idx}].description`
           );
         }
+        // Wave-25: payment-by-category allocation validation. The field is
+        // optional (legacy/auto-spread callers send no allocation), but when
+        // present every entry must reference a known category, every amount
+        // must be a valid non-negative number, and the sum must not exceed
+        // the payment amount. Surplus (sum < amount) is allowed — the
+        // overflow becomes a credit carried into the next term via the
+        // existing balance logic in 5_balance.ts.
+        if (p?.allocation !== undefined && p.allocation !== null) {
+          if (!Array.isArray(p.allocation)) {
+            throw new ServiceError(
+              `payments[${idx}].allocation must be an array`,
+              422
+            );
+          }
+          let allocSum = 0;
+          p.allocation.forEach((entry: AnyRecord, allocIdx: number) => {
+            if (!entry || typeof entry !== 'object') {
+              throw new ServiceError(
+                `payments[${idx}].allocation[${allocIdx}] must be an object`,
+                422
+              );
+            }
+            validateEnum(
+              entry.category,
+              PAYMENT_CATEGORIES,
+              `payments[${idx}].allocation[${allocIdx}].category`
+            );
+            validateFiniteNumber(
+              entry.amount,
+              `payments[${idx}].allocation[${allocIdx}].amount`,
+              { min: 0, max: 10000000 }
+            );
+            allocSum += Number(entry.amount) || 0;
+          });
+          const paymentAmount = Number(p.amount) || 0;
+          // Allow a tiny epsilon for floating-point sums (e.g., 99.99 + 0.01).
+          if (allocSum > paymentAmount + 0.005) {
+            throw new ServiceError(
+              `payments[${idx}].allocation total ${allocSum.toFixed(2)} exceeds payment amount ${paymentAmount.toFixed(2)}`,
+              422
+            );
+          }
+        }
         // Validate optional payment.date in DD/MM/YYYY when present.
         // Empty string and missing are tolerated (legacy callers); but a
         // non-empty malformed value must surface as 422 instead of being
@@ -387,7 +444,17 @@ async function _updateByTerm(
           amount: Number(payment.amount),
           type: payment.type || '',
           reference: payment.reference || '',
-          description: payment.description || ''
+          description: payment.description || '',
+          // Wave-25: optional allocation, normalised. Empty array is dropped
+          // so legacy reads that key off "allocation present" don't trip.
+          ...(Array.isArray(payment.allocation) && payment.allocation.length
+            ? {
+                allocation: payment.allocation.map((a: AnyRecord) => ({
+                  category: String(a.category),
+                  amount: Number(a.amount)
+                }))
+              }
+            : {})
         }));
     }
 

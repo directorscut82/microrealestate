@@ -730,5 +730,21 @@
   "Your account information": "Ihre Kontoinformationen",
   "Your organizations": "Ihre Organisationen",
   "Zip code": "Postleitzahl",
-  "Sponsor this project": "Fördern Sie dieses Projekt"
+  "Sponsor this project": "Fördern Sie dieses Projekt",
+  "Apply to": "Verteilen auf",
+  "Auto-spread (oldest first)": "Automatisch (älteste zuerst)",
+  "Specific category": "Bestimmte Kategorie",
+  "Custom split": "Manuelle Aufteilung",
+  "Payment fills the oldest unpaid category first, then the next.": "Die Zahlung deckt zuerst die älteste offene Kategorie, dann die nächste.",
+  "Select a category": "Kategorie auswählen",
+  "Allocated": "Zugewiesen",
+  "{{amount}} unallocated": "{{amount}} nicht zugewiesen",
+  "{{amount}} over": "{{amount}} zu viel",
+  "Preview after this {{amount}} payment": "Vorschau nach dieser Zahlung von {{amount}}",
+  "Nothing currently owed.": "Aktuell nichts offen.",
+  "Before": "Vorher",
+  "After": "Nachher",
+  "Credit to next month": "Guthaben für den Folgemonat",
+  "Building expenses": "Hausgeld",
+  "Extra charge": "Zusatzbelastung"
 }
