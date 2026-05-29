@@ -529,7 +529,6 @@
   "Property not rented so far": "Property not rented so far",
   "Property Type": "Property Type",
   "ratio shares": "ratio shares",
-  "Recurring": "Recurring",
   "Recurring Expense": "Recurring Expense",
   "Recurring expenses are automatically included in rent calculations every month. Non-recurring are one-time charges.": "Recurring expenses are automatically included in rent calculations every month. Non-recurring are one-time charges.",
   "Reference": "Reference",
@@ -550,7 +549,6 @@
   "Repair added": "Repair added",
   "Repair removed": "Repair removed",
   "Repair updated": "Repair updated",
-  "Repairs": "Repairs",
   "Repairs & Contractors": "Repairs & Contractors",
   "Repairs Fund": "Repairs Fund",
   "Reply to email": "Reply to email",
@@ -771,7 +769,6 @@
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet": "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet",
   "Contact details": "Contact details",
-  "Notes": "Notes",
   "Alternative address, preferred contact times, language, etc.": "Alternative address, preferred contact times, language, etc.",
   "Invoicing settings": "Invoicing settings",
   "Monthly": "Monthly",
@@ -810,5 +807,7 @@
   "This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked to avoid accidental writes.": "This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked to avoid accidental writes.",
   "This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked.": "This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked.",
   "Payment of {{amount}}€ recorded": "Payment of {{amount}}€ recorded",
-  "Record": "Record"
+  "Record": "Record",
+  "Please complete required fields": "Please complete required fields",
+  "Date required when amount > 0": "Date required when amount > 0"
 }
