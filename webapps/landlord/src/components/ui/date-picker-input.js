@@ -40,7 +40,16 @@ export function DatePickerInput({
   const [open, setOpen] = React.useState(false);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    // `modal` is required when this DatePickerInput lives inside a Vaul
+    // Drawer (e.g., the payment-recording dialog). Vaul sets
+    // `pointer-events: none` on <body> while the drawer is open, and
+    // because Radix portals the popover to document.body the calendar
+    // inherits that and clicks fall through to the drawer's dialog
+    // layer beneath. `modal=true` makes Radix render its own focus
+    // layer with its own pointer-event context, so calendar day clicks
+    // land on the actual day. Outside this case `modal` is harmless.
+    // Refs: shadcn-ui/ui#7652, vaul#482.
+    <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           id={id}
