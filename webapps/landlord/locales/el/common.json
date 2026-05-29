@@ -843,5 +843,8 @@
   "Documents from templates": "Έγγραφα από πρότυπα",
   "No document templates yet": "Δεν υπάρχουν ακόμα πρότυπα εγγράφων",
   "Templates let you generate documents like rent receipts, demand letters, lease renewals, and rent-increase notifications for any tenant. Set them up once under Settings → Contracts → Templates, then they appear here ready to fill in.": "Τα πρότυπα σας επιτρέπουν να δημιουργείτε έγγραφα όπως αποδείξεις ενοικίου, οχλήσεις, ανανεώσεις μισθωτηρίων και ειδοποιήσεις αναπροσαρμογής ενοικίου για οποιονδήποτε ενοικιαστή. Φτιάξτε τα μία φορά από Ρυθμίσεις → Συμβόλαια → Πρότυπα και θα εμφανίζονται εδώ έτοιμα προς συμπλήρωση.",
-  "You can also start from a blank document below.": "Μπορείτε επίσης να ξεκινήσετε από ένα κενό έγγραφο παρακάτω."
+  "You can also start from a blank document below.": "Μπορείτε επίσης να ξεκινήσετε από ένα κενό έγγραφο παρακάτω.",
+  "An unexpected error occurred. Please try reloading the page.": "Παρουσιάστηκε ένα μη αναμενόμενο σφάλμα. Δοκιμάστε να επαναφορτώσετε τη σελίδα.",
+  "Go Home": "Αρχική",
+  "Reload Page": "Επαναφόρτωση σελίδας"
 }

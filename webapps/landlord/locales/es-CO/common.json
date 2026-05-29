@@ -778,5 +778,8 @@
   "Documents from templates": "Documentos a partir de plantillas",
   "No document templates yet": "Aún no hay plantillas de documentos",
   "Templates let you generate documents like rent receipts, demand letters, lease renewals, and rent-increase notifications for any tenant. Set them up once under Settings → Contracts → Templates, then they appear here ready to fill in.": "Las plantillas te permiten generar documentos como recibos de alquiler, requerimientos, renovaciones de contrato o notificaciones de aumento para cualquier inquilino. Configúralas una vez en Configuración → Contratos → Plantillas y aparecerán aquí listas para completar.",
-  "You can also start from a blank document below.": "También puedes empezar desde un documento en blanco abajo."
+  "You can also start from a blank document below.": "También puedes empezar desde un documento en blanco abajo.",
+  "An unexpected error occurred. Please try reloading the page.": "Ocurrió un error inesperado. Intenta recargar la página.",
+  "Go Home": "Inicio",
+  "Reload Page": "Recargar la página"
 }

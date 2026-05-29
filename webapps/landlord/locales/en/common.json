@@ -792,5 +792,8 @@
   "Documents from templates": "Documents from templates",
   "No document templates yet": "No document templates yet",
   "Templates let you generate documents like rent receipts, demand letters, lease renewals, and rent-increase notifications for any tenant. Set them up once under Settings → Contracts → Templates, then they appear here ready to fill in.": "Templates let you generate documents like rent receipts, demand letters, lease renewals, and rent-increase notifications for any tenant. Set them up once under Settings → Contracts → Templates, then they appear here ready to fill in.",
-  "You can also start from a blank document below.": "You can also start from a blank document below."
+  "You can also start from a blank document below.": "You can also start from a blank document below.",
+  "An unexpected error occurred. Please try reloading the page.": "An unexpected error occurred. Please try reloading the page.",
+  "Go Home": "Go Home",
+  "Reload Page": "Reload Page"
 }
