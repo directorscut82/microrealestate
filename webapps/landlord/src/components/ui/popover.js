@@ -21,6 +21,14 @@ const PopoverContent = React.forwardRef(
         ref={ref}
         align={align}
         sideOffset={sideOffset}
+        // Wave-26 round-3b: when a Popover lives inside a Vaul Drawer (e.g.
+        // the date-picker inside the payment-recording dialog), Vaul's
+        // pointerdown drag handler intercepts clicks on portaled-popover
+        // contents and the click registers on whatever sits underneath
+        // instead of on the calendar day. `data-vaul-no-drag` opts the
+        // popover subtree out of Vaul's drag interaction, restoring normal
+        // click handling for date cells, buttons, etc.
+        data-vaul-no-drag
         className={cn(
           'z-50 w-72 rounded-lg border border-stone-line bg-bone p-4 text-ink shadow-floating outline-none',
           'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
