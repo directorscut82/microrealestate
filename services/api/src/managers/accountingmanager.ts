@@ -270,7 +270,15 @@ function _settlements(
           return acc;
         }, {});
 
-    tenant.rents.forEach(({ month, payments }: AnyRecord) => {
+    // Wave-26: parallel array of rent-level note fields per month. UI
+    // consumes this to render a "Notes" surface alongside payments.
+    // Indexed identically to settlements (0=Jan, 11=Dec). null means no rent
+    // for that month or no notes.
+    const notesByMonth: (AnyRecord | null)[] = (months as unknown as string[]).map(
+      () => null
+    );
+
+    tenant.rents.forEach(({ month, payments, description, notepromo, noteextracharge }: AnyRecord) => {
       if (rawData) {
         settlements[month - 1] = payments.map(
           ({ date, type, amount, reference }: AnyRecord) => ({
@@ -283,6 +291,16 @@ function _settlements(
             reference
           })
         );
+        const desc = (description || '').trim();
+        const np = (notepromo || '').trim();
+        const ne = (noteextracharge || '').trim();
+        if (desc || np || ne) {
+          notesByMonth[month - 1] = {
+            description: desc,
+            notepromo: np,
+            noteextracharge: ne
+          };
+        }
       } else {
         settlements[(months as unknown as string[])[month - 1]] = payments
           .map(({ date, type, amount, reference }: AnyRecord) => {
@@ -307,7 +325,8 @@ function _settlements(
           tenant: tenant.name,
           beginDate,
           endDate,
-          settlements
+          settlements,
+          notesByMonth
         }
       : {
           tenantId: tenant._id,

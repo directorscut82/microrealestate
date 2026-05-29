@@ -139,6 +139,148 @@ function MonthlyBreakdown({ rentAmounts }) {
   );
 }
 
+// Wave-26: derive a single-glance payment status pill from the server's
+// computed `rent.status` plus the gross/paid amounts. Four states:
+//   - paid          → olive
+//   - partial       → amber, shows remaining
+//   - owed          → oxide-red, shows amount owed
+//   - no charge     → slate (grandTotal === 0 — fully discounted month etc.)
+function _statusPillData(rent, t) {
+  const grandTotal = Number(rent.totalAmount) || 0;
+  const paid = Number(rent.payment) || 0;
+  const remaining = Math.max(0, grandTotal - paid);
+
+  if (Math.abs(grandTotal) < 0.005) {
+    return {
+      key: 'none',
+      label: t('No charge'),
+      className: 'bg-slate-100 text-slate-600 border-slate-200'
+    };
+  }
+  if (rent.status === 'paid') {
+    return {
+      key: 'paid',
+      label: t('Paid'),
+      className: 'bg-olive/15 text-olive border-olive/30'
+    };
+  }
+  if (rent.status === 'partiallypaid') {
+    return {
+      key: 'partial',
+      label: t('Partial · {{amount}}€ left', {
+        amount: remaining.toFixed(2)
+      }),
+      className: 'bg-amber-50 text-amber-700 border-amber-200'
+    };
+  }
+  // 'notpaid'
+  return {
+    key: 'owed',
+    label: t('{{amount}}€ owed', { amount: grandTotal.toFixed(2) }),
+    className: 'bg-oxide/10 text-oxide border-oxide/30'
+  };
+}
+
+// Wave-26: hover on the Payment cell shows "Owed remaining = grandTotal -
+// payment" so the user can see the resulting balance without doing math.
+function PaymentBreakdown({ rent, t }) {
+  const grandTotal = Number(rent.totalAmount) || 0;
+  const paid = Number(rent.payment) || 0;
+  const remaining = grandTotal - paid;
+  return (
+    <div className="text-xs space-y-1 min-w-[200px]">
+      <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">{t('Total due')}</span>
+        <NumberFormat value={grandTotal} showZero />
+      </div>
+      <div className="flex justify-between gap-4">
+        <span className="text-muted-foreground">{t('Paid')}</span>
+        <NumberFormat value={paid} showZero />
+      </div>
+      <div className="flex justify-between gap-4 pt-1 border-t border-border/40 font-medium">
+        <span>{t('Owed remaining')}</span>
+        <NumberFormat value={remaining > 0 ? remaining : 0} showZero />
+      </div>
+      {remaining < 0 && (
+        <div className="flex justify-between gap-4 text-blue-700">
+          <span>{t('Overpayment')}</span>
+          <NumberFormat value={-remaining} showZero />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Wave-26: hover on Previous balance walks back through the tenant's prior
+// rent terms (when the parent passes them) and shows where the carry-in
+// came from. If the parent didn't supply prior rents (e.g. on /rents which
+// only has the current month), we fall back to a one-line origin.
+function PriorBalanceBreakdown({ rent }) {
+  const { t } = useTranslation('common');
+  const balance = Number(rent.balance) || 0;
+  const priorRents = Array.isArray(rent.priorRents) ? rent.priorRents : null;
+
+  if (!priorRents || priorRents.length === 0) {
+    if (Math.abs(balance) < 0.005) {
+      return (
+        <div className="text-xs text-muted-foreground min-w-[200px]">
+          {t('No previous balance carried over.')}
+        </div>
+      );
+    }
+    return (
+      <div className="text-xs space-y-1 min-w-[200px]">
+        <div className="text-muted-foreground">
+          {t('Carried over from previous months')}
+        </div>
+        <div className="flex justify-between gap-4 font-medium pt-1 border-t border-border/40">
+          <span>{t('Total')}</span>
+          <NumberFormat value={balance} showZero />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-xs space-y-1 min-w-[220px]">
+      {priorRents.map((pr) => {
+        const term = String(pr.term);
+        const yyyy = term.slice(0, 4);
+        const mm = term.slice(4, 6);
+        const owed = Number(pr.newBalance) || 0;
+        return (
+          <div key={pr.term} className="flex justify-between gap-4">
+            <span className="text-muted-foreground">
+              {moment(`${yyyy}-${mm}-01`).format('MMM YYYY')}
+            </span>
+            <NumberFormat value={-owed} showZero />
+          </div>
+        );
+      })}
+      <div className="flex justify-between gap-4 pt-1 border-t border-border/40 font-medium">
+        <span>{t('Carried over')}</span>
+        <NumberFormat value={balance} showZero />
+      </div>
+    </div>
+  );
+}
+
+function StatusPill({ rent }) {
+  const { t } = useTranslation('common');
+  const data = _statusPillData(rent, t);
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium whitespace-nowrap',
+        data.className
+      )}
+      data-cy={`status-${data.key}`}
+    >
+      {data.label}
+    </span>
+  );
+}
+
 function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
@@ -172,13 +314,24 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               )
             ) : null}
 
-            <Button
-              variant="link"
-              className="p-0 h-fit text-lg whitespace-normal text-left"
-              onClick={onEdit(rent)}
-            >
+            {/* Wave-26: tenant name is now plain text. The right-side
+                cash-register icon is the single way to open the payment
+                dialog — prevents accidental opens when scanning the row. */}
+            <span className="text-lg font-medium leading-tight">
               {rent.occupant.name}
-            </Button>
+            </span>
+          </div>
+          <div className="ml-8 flex items-center gap-2 flex-wrap">
+            <StatusPill rent={rent} />
+            {/* Wave-26: surface a recurring discount footnote when
+                tenant.discount > 0 so the per-row deduction is visible
+                without expanding the breakdown. */}
+            {rentAmounts.discount < 0 && (
+              <span className="text-xs text-muted-foreground italic">
+                {t('Discount')}:{' '}
+                <NumberFormat value={rentAmounts.discount} showZero />
+              </span>
+            )}
           </div>
           <Reminder rent={rent} className="hidden md:inline-flex ml-8" />
         </div>
@@ -209,12 +362,25 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               className="hidden lg:block text-muted-foreground"
             />
           )}
-          <RentAmount
-            label={t('Previous balance')}
-            amount={rentAmounts.balance}
-            withColor={false}
-            className="hidden lg:block text-muted-foreground"
-          />
+          {/* Wave-26: Previous balance now hovers a per-prior-month
+              breakdown so the carry-in number isn't a mystery. */}
+          <TooltipProvider delayDuration={200}>
+            <SCNTooltip>
+              <TooltipTrigger asChild>
+                <div className="hidden lg:block cursor-default">
+                  <RentAmount
+                    label={t('Previous balance')}
+                    amount={rentAmounts.balance}
+                    withColor={false}
+                    className="text-muted-foreground underline decoration-dotted underline-offset-2"
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-popover/80 backdrop-blur-md border-border/50 shadow-lg p-3">
+                <PriorBalanceBreakdown rent={rent} />
+              </TooltipContent>
+            </SCNTooltip>
+          </TooltipProvider>
           <RentAmount
             label={t('Total due')}
             amount={rentAmounts.totalAmount}
@@ -223,13 +389,27 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
             creditColor={rentAmounts.totalAmount < 0}
             className={rentAmounts.totalAmount !== 0 ? 'font-bold' : ''}
           />
-          <div className="grow">
-            <RentAmount
-              label={t('Payment')}
-              amount={rent.payment}
-              className={rentAmounts.payment > 0 ? 'font-bold' : ''}
-            />
-          </div>
+          {/* Wave-26: Payment column hovers a remaining-owed line so the
+              user can see at a glance "how much is still due." */}
+          <TooltipProvider delayDuration={200}>
+            <SCNTooltip>
+              <TooltipTrigger asChild>
+                <div className="grow cursor-default">
+                  <RentAmount
+                    label={t('Payment')}
+                    amount={rent.payment}
+                    className={cn(
+                      rentAmounts.payment > 0 ? 'font-bold' : '',
+                      'underline decoration-dotted underline-offset-2'
+                    )}
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="bg-popover/80 backdrop-blur-md border-border/50 shadow-lg p-3">
+                <PaymentBreakdown rent={rent} t={t} />
+              </TooltipContent>
+            </SCNTooltip>
+          </TooltipProvider>
           <div className="text-right space-x-2 grow whitespace-nowrap">
             <Button
               variant="ghost"

@@ -418,6 +418,29 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
 
   const _handleSubmit = useCallback(
     async (values) => {
+      // Wave-26 (2): hard-block submission if the term is more than 3 months
+      // in the future. The banner already warned the user; this is the
+      // safety net.
+      const _currentTerm = Number(
+        moment.utc().startOf('month').format('YYYYMMDDHH')
+      );
+      const _rentTerm = Number(rent?.term || 0);
+      if (_rentTerm > _currentTerm) {
+        const _ahead = moment(String(_rentTerm).slice(0, 6) + '01').diff(
+          moment().startOf('month'),
+          'months'
+        );
+        if (_ahead > 3) {
+          toast.error(
+            t(
+              'This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked.',
+              { count: _ahead }
+            )
+          );
+          onError?.();
+          return;
+        }
+      }
       const clonedValues = _.cloneDeep(values);
       clonedValues.payments = clonedValues.payments
         .filter(({ amount }) => amount > 0)
@@ -467,6 +490,23 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
+        // Wave-26 (7): explicit success toast so the save is no longer
+        // silent. The toast amount is the SUM of payments submitted for
+        // this term, not just the first row, so multi-row submits show
+        // the right total.
+        const _sum = (clonedValues.payments || []).reduce(
+          (s, p) => s + (Number(p?.amount) || 0),
+          0
+        );
+        if (_sum > 0) {
+          toast.success(
+            t('Payment of {{amount}}€ recorded', {
+              amount: _sum.toFixed(2)
+            })
+          );
+        } else {
+          toast.success(t('Saved'));
+        }
         onSubmit?.();
       } catch (error) {
         console.error(error);
@@ -490,12 +530,71 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
 
   const payments = watch('payments');
 
+  // Wave-26 (1): tell the user up-front whether the dialog opened with an
+  // existing payment pre-filled vs a fresh entry. Eliminates the "why
+  // is there a number here already?" confusion.
+  const existingPayment = (rent?.payments || []).find(
+    (p) => Number(p?.amount) > 0
+  );
+  const existingPaidTotal = (rent?.payments || []).reduce(
+    (s, p) => s + (Number(p?.amount) || 0),
+    0
+  );
+
+  // Wave-26 (2): future-term safeguard. The data model accepts payments on
+  // any term (Wave-14 F3 only blocks dates >7d future). A typo recording
+  // September's payment in May silently inflates this year's revenue,
+  // poisons the dashboard, and prints a "paid" receipt for September.
+  // We allow up to 3 months ahead (real use case for advance payments)
+  // and block beyond.
+  const currentTerm = Number(
+    moment.utc().startOf('month').format('YYYYMMDDHH')
+  );
+  const rentTerm = Number(rent?.term || 0);
+  const monthsAhead =
+    rentTerm > currentTerm
+      ? moment(String(rentTerm).slice(0, 6) + '01').diff(
+          moment().startOf('month'),
+          'months'
+        )
+      : 0;
+  const isFutureTermAllowed = monthsAhead > 0 && monthsAhead <= 3;
+  const isFutureTermBlocked = monthsAhead > 3;
+
   return (
     <form ref={formRef} onSubmit={handleSubmit(_handleSubmit)} autoComplete="off">
       <div className="space-y-4">
         <Card>
           <CardHeader className="text-lg px-6 pt-3 pb-0">{t('Payment')}</CardHeader>
           <CardContent>
+            {/* Wave-26: status banners — pre-fill source + future-term safeguard. */}
+            {existingPayment ? (
+              <div className="mb-3 p-2 rounded border border-olive/30 bg-olive/10 text-olive text-sm" data-cy="existingPaymentBanner">
+                {t('Editing existing payment of {{amount}}€', {
+                  amount: existingPaidTotal.toFixed(2)
+                })}
+              </div>
+            ) : (
+              <div className="mb-3 p-2 rounded border border-stone-line/40 bg-muted/30 text-muted-foreground text-sm" data-cy="noPaymentBanner">
+                {t('No payment recorded yet for this term.')}
+              </div>
+            )}
+            {isFutureTermAllowed && (
+              <div className="mb-3 p-2 rounded border border-amber-200 bg-amber-50 text-amber-700 text-sm" data-cy="futureTermBanner">
+                {t(
+                  'Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.',
+                  { count: monthsAhead }
+                )}
+              </div>
+            )}
+            {isFutureTermBlocked && (
+              <div className="mb-3 p-2 rounded border border-oxide/40 bg-oxide/10 text-oxide text-sm" data-cy="futureTermBlockedBanner">
+                {t(
+                  'This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked to avoid accidental writes.',
+                  { count: monthsAhead }
+                )}
+              </div>
+            )}
             {fields.map((field, index) => (
               <div key={field.id} className="mb-4 p-3 border rounded-md">
                 <div className="flex justify-between items-center mb-2">
