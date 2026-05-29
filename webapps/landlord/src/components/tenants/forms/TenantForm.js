@@ -19,9 +19,24 @@ const optionalPhone = z
 
 const contactSchema = z.object({
   contact: z.string().trim().min(1).max(200),
-  email: z.string().trim().email().min(1).max(200),
+  // Wave-26: email made optional (empty strings allowed). Co-tenants are now
+  // pre-filled into contacts as placeholders; landlords often only have a
+  // name + ΑΦΜ for the spouse/secondary occupant. The form drops blank
+  // co-tenant placeholders before submit (see _onSubmit), so legitimate
+  // primary contacts are still expected to have emails in practice.
+  email: z
+    .string()
+    .trim()
+    .email()
+    .max(200)
+    .or(z.literal(''))
+    .optional(),
   phone1: optionalPhone,
-  phone2: optionalPhone
+  phone2: optionalPhone,
+  // Free-text note slot per contact. Useful for an alternative residence
+  // ("lives in Athens during winter"), preferred contact times, language
+  // preference, or anything the landlord wants to remember about them.
+  notes: z.string().trim().max(2000).optional()
 });
 
 const schema = z.object({
@@ -42,18 +57,10 @@ const schema = z.object({
   ein: z.string().trim().max(60).optional(),
   dos: z.string().trim().max(120).optional(),
   capital: z.string().trim().max(60).optional(),
-  contacts: z.array(contactSchema),
-  address: z.object({
-    street1: z.string().trim().max(200).optional(),
-    street2: z.string().trim().max(200).optional(),
-    city: z.string().trim().max(120).optional(),
-    zipCode: z.string().trim().max(30).optional(),
-    state: z.string().trim().max(120).optional(),
-    country: z.string().trim().max(120).optional()
-  })
+  contacts: z.array(contactSchema)
 });
 
-const emptyContact = { contact: '', email: '', phone1: '', phone2: '' };
+const emptyContact = { contact: '', email: '', phone1: '', phone2: '', notes: '' };
 
 const initValues = (tenant) => {
   // Parse existing 'name' into firstName/lastName for backward compat
@@ -77,24 +84,47 @@ const initValues = (tenant) => {
     ein: tenant?.siret || '',
     dos: tenant?.rcs || '',
     capital: tenant?.capital || '',
-    contacts: tenant?.contacts?.length
-      ? tenant.contacts.map(({ contact, email, phone, phone1, phone2 }) => ({
-          contact,
-          email,
-          phone1: phone1 || phone || '',
-          phone2: phone2 || ''
-        }))
-      : [emptyContact],
-    address: {
-      street1: tenant?.street1 || '',
-      street2: tenant?.street2 || '',
-      city: tenant?.city || '',
-      zipCode: tenant?.zipCode || '',
-      state: tenant?.state || '',
-      country: tenant?.country || ''
-    }
+    contacts: _buildInitialContacts(tenant)
   };
 };
+
+// Wave-26: build the contacts list with auto-prefilled placeholder rows for
+// every co-tenant that doesn't already have a matching contact entry.
+//   - Contact #1 is always present (existing contact[0], or empty for new).
+//   - Each co-tenant whose name is NOT already in contacts[] gets an empty
+//     placeholder row pre-filled with their name + ΑΦΜ as a hint in `notes`.
+//     If the user leaves all editable fields empty on save, _onSubmit drops
+//     the placeholder so blank rows don't pollute the database.
+function _buildInitialContacts(tenant) {
+  const existing = (tenant?.contacts || []).map(
+    ({ contact, email, phone, phone1, phone2, notes }) => ({
+      contact: contact || '',
+      email: email || '',
+      phone1: phone1 || phone || '',
+      phone2: phone2 || '',
+      notes: notes || ''
+    })
+  );
+  const contacts = existing.length ? existing : [{ ...emptyContact }];
+
+  const existingNames = new Set(
+    contacts.map((c) => (c.contact || '').trim().toLowerCase()).filter(Boolean)
+  );
+  for (const ct of tenant?.coTenants || []) {
+    const name = (ct?.name || '').trim();
+    if (!name) continue;
+    if (existingNames.has(name.toLowerCase())) continue;
+    contacts.push({
+      contact: name,
+      email: '',
+      phone1: '',
+      phone2: '',
+      notes: ct?.taxId ? `ΑΦΜ: ${ct.taxId}` : ''
+    });
+    existingNames.add(name.toLowerCase());
+  }
+  return contacts;
+}
 
 export const validate = (tenant) => schema.parseAsync(initValues(tenant));
 
@@ -143,15 +173,26 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
       siret: data.isCompany === 'true' ? data.ein : '',
       rcs: data.isCompany === 'true' ? data.dos : '',
       capital: data.isCompany === 'true' ? data.capital : '',
-      street1: data.address.street1 || '',
-      street2: data.address.street2 || '',
-      zipCode: data.address.zipCode || '',
-      city: data.address.city || '',
-      state: data.address.state || '',
-      country: data.address.country || '',
+      // Wave-26: Drop placeholder co-tenant contact rows the user never
+      // touched. A row counts as "filled in" if the user added an email,
+      // any phone, or notes beyond the auto-generated ΑΦΜ hint.
       contacts: data.contacts
-        .filter(({ contact }) => !!contact)
-        .map(({ contact, email, phone1, phone2 }) => ({ contact, email, phone1, phone2 }))
+        .filter(({ contact, email, phone1, phone2, notes }) => {
+          if (!contact) return false;
+          // First-class contact (always kept): has email.
+          if (email) return true;
+          // Auto-prefilled co-tenant placeholder: keep only if user filled
+          // any contact channel or wrote a substantive note.
+          const noteIsHint = (notes || '').trim().startsWith('ΑΦΜ:');
+          return !!(phone1 || phone2 || (notes && !noteIsHint));
+        })
+        .map(({ contact, email, phone1, phone2, notes }) => ({
+          contact,
+          email,
+          phone1,
+          phone2,
+          notes: notes || ''
+        }))
     });
   };
 
@@ -227,24 +268,13 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
         )}
       </div>
 
-      <div className="pb-10 mt-6">
-        <div className="text-xl">{t('Address')}</div>
-        <p className="text-sm text-muted-foreground mb-1">{t('Optional')}</p>
-        <Separator className="mt-1 mb-2" />
-        <div className="space-y-2 mb-2"><Label htmlFor="address.street1">{t('Street 1')}</Label><Input id="address.street1" disabled={readOnly} {...register('address.street1')} /></div>
-        <div className="space-y-2 mb-2"><Label htmlFor="address.street2">{t('Street 2')}</Label><Input id="address.street2" disabled={readOnly} {...register('address.street2')} /></div>
-        <div className="sm:flex sm:gap-2 mb-2">
-          <div className="space-y-2 flex-1"><Label htmlFor="address.zipCode">{t('Zip code')}</Label><Input id="address.zipCode" disabled={readOnly} {...register('address.zipCode')} /></div>
-          <div className="space-y-2 flex-1"><Label htmlFor="address.city">{t('City')}</Label><Input id="address.city" disabled={readOnly} {...register('address.city')} /></div>
-        </div>
-        <div className="sm:flex sm:gap-2">
-          <div className="space-y-2 flex-1"><Label htmlFor="address.state">{t('State')}</Label><Input id="address.state" disabled={readOnly} {...register('address.state')} /></div>
-          <div className="space-y-2 flex-1"><Label htmlFor="address.country">{t('Country')}</Label><Input id="address.country" disabled={readOnly} {...register('address.country')} /></div>
-        </div>
-      </div>
+      {/* Wave-26: Address section removed. The tenant's "address" of record
+          is the property they rent — captured on the lease tab. Anything else
+          (alternative residence, summer address, etc.) belongs in the per-
+          contact `notes` field below. */}
 
       <div className="pb-10">
-        <div className="text-xl">{t('Contacts')}</div>
+        <div className="text-xl">{t('Contact details')}</div>
         <div className="text-muted-foreground text-sm">{t("The contacts will receive the invoices and will be able to access the tenant's portal")}</div>
         <Separator className="mt-1 mb-2" />
         {fields.map((field, index) => (
@@ -257,9 +287,20 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
             </div>
             <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.contact`}>{t('Contact')}</Label><Input id={`contacts.${index}.contact`} disabled={readOnly} {...register(`contacts.${index}.contact`)} />{errors.contacts?.[index]?.contact && <p className="text-sm text-destructive">{errors.contacts[index].contact.message}</p>}</div>
             <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.email`}>{t('Email')}</Label><Input id={`contacts.${index}.email`} disabled={readOnly} {...register(`contacts.${index}.email`)} />{errors.contacts?.[index]?.email && <p className="text-sm text-destructive">{errors.contacts[index].email.message}</p>}</div>
-            <div className="sm:flex sm:gap-2">
+            <div className="sm:flex sm:gap-2 mb-2">
               <div className="space-y-2 flex-1"><Label htmlFor={`contacts.${index}.phone1`}>{t('Phone 1')}</Label><Input id={`contacts.${index}.phone1`} disabled={readOnly} {...register(`contacts.${index}.phone1`)} /></div>
               <div className="space-y-2 flex-1"><Label htmlFor={`contacts.${index}.phone2`}>{t('Phone 2')}</Label><Input id={`contacts.${index}.phone2`} disabled={readOnly} {...register(`contacts.${index}.phone2`)} /></div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`contacts.${index}.notes`}>{t('Notes')}</Label>
+              <textarea
+                id={`contacts.${index}.notes`}
+                disabled={readOnly}
+                rows={2}
+                placeholder={t('Alternative address, preferred contact times, language, etc.')}
+                className="flex min-h-[40px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                {...register(`contacts.${index}.notes`)}
+              />
             </div>
           </div>
         ))}

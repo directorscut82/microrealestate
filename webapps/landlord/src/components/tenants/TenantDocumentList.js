@@ -143,14 +143,43 @@ function TenantDocumentList({ tenant, templates = [], documents = [], disabled =
             <DrawerTitle>{t('Create a document')}</DrawerTitle>
             <Button variant="secondary" onClick={() => setOpenDocumentCreatorDialog(false)}>{t('Close')}</Button>
           </DrawerHeader>
-          <div className="flex flex-wrap mx-auto lg:mx-0 gap-4 mt-10">
-            {menuItems.map((item) => (
-              <Card key={item.key} onClick={() => handleClickAddText(item.value)} className="w-96 cursor-pointer" data-cy={`template-${item.label.replace(/\s/g, '')}`}>
-                <CardHeader><CardTitle className="h-12"><Button variant="link" className="text-xl">{item.label}</Button></CardTitle></CardHeader>
-                <CardContent>{item.illustration}</CardContent>
-              </Card>
-            ))}
-          </div>
+
+          {/* Wave-26: when only the Blank document tile exists (i.e. zero
+              text-templates linked to this tenant's lease), show a clear
+              empty-state explaining what templates are for and how to set
+              them up. Without this, the drawer looks unhelpfully empty. */}
+          {menuItems.length === 1 ? (
+            <div className="max-w-2xl mx-auto mt-10 text-center space-y-4">
+              <div className="text-lg font-medium">
+                {t('No document templates yet')}
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {t(
+                  'Templates let you generate documents like rent receipts, demand letters, lease renewals, and rent-increase notifications for any tenant. Set them up once under Settings → Contracts → Templates, then they appear here ready to fill in.'
+                )}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {t('You can also start from a blank document below.')}
+              </p>
+              <div className="flex justify-center mt-6">
+                {menuItems.map((item) => (
+                  <Card key={item.key} onClick={() => handleClickAddText(item.value)} className="w-96 cursor-pointer" data-cy={`template-${item.label.replace(/\s/g, '')}`}>
+                    <CardHeader><CardTitle className="h-12"><Button variant="link" className="text-xl">{item.label}</Button></CardTitle></CardHeader>
+                    <CardContent>{item.illustration}</CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap mx-auto lg:mx-0 gap-4 mt-10">
+              {menuItems.map((item) => (
+                <Card key={item.key} onClick={() => handleClickAddText(item.value)} className="w-96 cursor-pointer" data-cy={`template-${item.label.replace(/\s/g, '')}`}>
+                  <CardHeader><CardTitle className="h-12"><Button variant="link" className="text-xl">{item.label}</Button></CardTitle></CardHeader>
+                  <CardContent>{item.illustration}</CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
           {creatingDocument ? <Loading fullScreen={false} className="absolute top-0 left-0 right-0 bottom-0 bg-secondary/50" /> : null}
         </DrawerContent>
       </Drawer>

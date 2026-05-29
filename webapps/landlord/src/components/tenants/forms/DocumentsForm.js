@@ -40,7 +40,7 @@ export default function DocumentsForm({ tenant, onSubmit, readOnly }) {
         <UploadFileList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} mb={4} />
       </Section>
 
-      <Section label={t('Text documents')}>
+      <Section label={t('Documents from templates')}>
         <TenantDocumentList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} />
       </Section>
 
