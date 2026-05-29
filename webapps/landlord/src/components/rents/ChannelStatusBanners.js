@@ -1,10 +1,10 @@
 import { useCallback, useContext, useMemo, useState } from 'react';
 import {
+  LuAlertTriangle,
   LuCheckCircle2,
   LuMail,
   LuMessageCircle,
   LuPhone,
-  LuTriangleAlert,
   LuX
 } from 'react-icons/lu';
 import { cn } from '../../utils';
@@ -29,7 +29,7 @@ const STATE_CLASSES = {
 };
 
 function Banner({ state, icon: Icon, message, onDismiss }) {
-  const StateIcon = state === 'ready' ? LuCheckCircle2 : LuTriangleAlert;
+  const StateIcon = state === 'ready' ? LuCheckCircle2 : LuAlertTriangle;
   return (
     <div
       role="status"
