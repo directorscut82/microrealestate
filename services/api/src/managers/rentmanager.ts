@@ -70,6 +70,15 @@ async function _findOccupants(
 
   return dbTenants.map((tenant) => {
     tenant._id = String(tenant._id);
+    // Wave-26 round-3e: stash the FULL rent ledger on _allRents BEFORE
+    // we filter `tenant.rents` by date range. The carry-forward status
+    // resolver in frontdata.toRentData walks `allRents` to detect
+    // whether a partial-paid month is later closed by a catch-up
+    // overpayment; if we hand it just the filtered slice (e.g. one
+    // month for /rents/{year}/{month}), the running deficit calculation
+    // sees only that month's bill and spuriously concludes the rent is
+    // settled — flipping a partiallypaid row to "paid" in the UI.
+    tenant._allRents = tenant.rents;
     if (startTerm && endTerm) {
       tenant.rents = tenant.rents.filter(
         (rent: AnyRecord) => rent.term >= startTerm && rent.term <= endTerm
