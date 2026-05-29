@@ -94,7 +94,7 @@ export default function TenantListItem({ tenant }) {
               : null}
           </div>
         </div>
-        <TenantPropertyList tenant={tenant} className="mt-6" />
+        <TenantPropertyList tenant={tenant} className="mt-2" />
       </CardContent>
 
       <CardFooter className="p-0 flex-col">

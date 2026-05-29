@@ -30,35 +30,35 @@ export default function TenantPropertyList({ tenant, className }) {
   if (!tenant.properties?.length) {
     return null;
   }
+  // Wave-26 round-3b: removed the outer bordered container. Multiple
+  // properties are separated only by a subtle bottom-divider on each row
+  // except the last, so the block reads as a flat list. Smaller icon, less
+  // vertical padding to make the section feel tighter against the
+  // contract/progress block above (which TenantListItem now spaces with
+  // `mt-2` instead of `mt-6`).
   return (
-    <div
-      className={cn(
-        'flex flex-col p-3 border rounded divide-y divide-stone-line/40',
-        className
-      )}
-    >
+    <div className={cn('flex flex-col', className)}>
       {tenant.properties.map(({ property }, idx) => (
         <div
           key={property._id}
           className={cn(
-            'flex items-center gap-2.5',
-            idx === 0 ? 'pb-2.5' : 'py-2.5',
-            idx === tenant.properties.length - 1 && idx !== 0 && 'pb-0',
-            tenant.properties.length === 1 && 'pb-0'
+            'flex items-center gap-2 py-1.5',
+            idx < tenant.properties.length - 1 && 'border-b border-stone-line/30'
           )}
         >
-          {/* Icon stays as a Button so a future onClick is a one-line add. */}
+          {/* Icon kept as a Button so a future onClick is a one-line add.
+              Smaller (size-7 with size-4 icon) for a more compact row. */}
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
-            className="shrink-0 size-9 rounded-md"
+            className="shrink-0 size-7 rounded-md text-muted-foreground"
           >
-            <PropertyIcon type={property.type} className="size-5" />
+            <PropertyIcon type={property.type} className="size-4" />
           </Button>
           <div className="min-w-0 flex-1 leading-tight">
             <p className="text-sm font-medium truncate">{property.name}</p>
             {!!property.description && (
-              <p className="text-xs text-muted-foreground truncate">
+              <p className="text-[11px] text-muted-foreground truncate">
                 {property.description}
               </p>
             )}
