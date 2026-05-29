@@ -110,7 +110,7 @@ export default function NewPaymentDialog({
               onClick={handleSave}
               disabled={!selectedRent?.occupant || saving}
             >
-              {saving ? t('Saving') : t('Save')}
+              {saving ? t('Saving') : t('Record')}
             </Button>
           </div>
         </DrawerFooter>
