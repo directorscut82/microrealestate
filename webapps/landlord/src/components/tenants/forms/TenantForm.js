@@ -95,6 +95,21 @@ const initValues = (tenant) => {
 //     placeholder row pre-filled with their name + ΑΦΜ as a hint in `notes`.
 //     If the user leaves all editable fields empty on save, _onSubmit drops
 //     the placeholder so blank rows don't pollute the database.
+// Wave-26: dedup co-tenants against (a) their own ΑΦΜ — most reliable —
+// and (b) a sorted-words name comparison so "ΜΠΙΜΠΙΚΑ ΜΑΡΙΑ" and
+// "ΜΑΡΙΑ ΜΠΙΜΠΙΚΑ" are treated as the same person regardless of how the
+// PDF parser ordered them. Always skip the primary tenant himself
+// (he's typically present in coTenants[] from the import flow).
+function _normalizeName(name) {
+  return (name || '')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(' ');
+}
+
 function _buildInitialContacts(tenant) {
   const existing = (tenant?.contacts || []).map(
     ({ contact, email, phone, phone1, phone2, notes }) => ({
@@ -107,13 +122,30 @@ function _buildInitialContacts(tenant) {
   );
   const contacts = existing.length ? existing : [{ ...emptyContact }];
 
-  const existingNames = new Set(
-    contacts.map((c) => (c.contact || '').trim().toLowerCase()).filter(Boolean)
-  );
+  // Seed the dedup sets with: every existing contact's normalized name +
+  // ΑΦΜ-from-notes; the primary tenant's own name + taxId.
+  const knownNames = new Set();
+  const knownTaxIds = new Set();
+  for (const c of contacts) {
+    const norm = _normalizeName(c.contact);
+    if (norm) knownNames.add(norm);
+    const m = (c.notes || '').match(/ΑΦΜ:\s*([0-9A-Za-z]+)/);
+    if (m) knownTaxIds.add(m[1]);
+  }
+  if (tenant?.name) knownNames.add(_normalizeName(tenant.name));
+  if (tenant?.firstName || tenant?.lastName) {
+    knownNames.add(
+      _normalizeName(`${tenant.firstName || ''} ${tenant.lastName || ''}`)
+    );
+  }
+  if (tenant?.taxId) knownTaxIds.add(tenant.taxId);
+
   for (const ct of tenant?.coTenants || []) {
     const name = (ct?.name || '').trim();
-    if (!name) continue;
-    if (existingNames.has(name.toLowerCase())) continue;
+    const norm = _normalizeName(name);
+    if (!name && !ct?.taxId) continue;
+    if (ct?.taxId && knownTaxIds.has(ct.taxId)) continue;
+    if (norm && knownNames.has(norm)) continue;
     contacts.push({
       contact: name,
       email: '',
@@ -121,7 +153,8 @@ function _buildInitialContacts(tenant) {
       phone2: '',
       notes: ct?.taxId ? `ΑΦΜ: ${ct.taxId}` : ''
     });
-    existingNames.add(name.toLowerCase());
+    if (norm) knownNames.add(norm);
+    if (ct?.taxId) knownTaxIds.add(ct.taxId);
   }
   return contacts;
 }
@@ -273,7 +306,7 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
           (alternative residence, summer address, etc.) belongs in the per-
           contact `notes` field below. */}
 
-      <div className="pb-10">
+      <div className="pb-10 mt-6">
         <div className="text-xl">{t('Contact details')}</div>
         <div className="text-muted-foreground text-sm">{t("The contacts will receive the invoices and will be able to access the tenant's portal")}</div>
         <Separator className="mt-1 mb-2" />
