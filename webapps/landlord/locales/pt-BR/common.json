@@ -797,5 +797,6 @@
   "Payment of {{amount}}€ recorded": "Pagamento de {{amount}}€ registrado",
   "Record": "Registrar",
   "Please complete required fields": "Complete os campos obrigatórios",
-  "Date required when amount > 0": "Data obrigatória quando o valor > 0"
+  "Date required when amount > 0": "Data obrigatória quando o valor > 0",
+  "Partial": "Parcial"
 }
