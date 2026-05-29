@@ -140,15 +140,14 @@ function MonthlyBreakdown({ rentAmounts }) {
 }
 
 // Wave-26: derive a single-glance payment status pill from the server's
-// computed `rent.status` plus the gross/paid amounts. Four states:
+// computed `rent.status`. Four states, label-only (amounts live in the
+// hover tooltip on the Payment column):
 //   - paid          → olive
-//   - partial       → amber, shows remaining
-//   - owed          → oxide-red, shows amount owed
+//   - partial       → amber
+//   - owed          → oxide-red
 //   - no charge     → slate (grandTotal === 0 — fully discounted month etc.)
 function _statusPillData(rent, t) {
   const grandTotal = Number(rent.totalAmount) || 0;
-  const paid = Number(rent.payment) || 0;
-  const remaining = Math.max(0, grandTotal - paid);
 
   if (Math.abs(grandTotal) < 0.005) {
     return {
@@ -167,16 +166,14 @@ function _statusPillData(rent, t) {
   if (rent.status === 'partiallypaid') {
     return {
       key: 'partial',
-      label: t('Partial · {{amount}}€ left', {
-        amount: remaining.toFixed(2)
-      }),
+      label: t('Partial'),
       className: 'bg-amber-50 text-amber-700 border-amber-200'
     };
   }
   // 'notpaid'
   return {
     key: 'owed',
-    label: t('{{amount}}€ owed', { amount: grandTotal.toFixed(2) }),
+    label: t('Owed'),
     className: 'bg-oxide/10 text-oxide border-oxide/30'
   };
 }
@@ -211,16 +208,56 @@ function PaymentBreakdown({ rent, t }) {
   );
 }
 
-// Wave-26: hover on Previous balance walks back through the tenant's prior
-// rent terms (when the parent passes them) and shows where the carry-in
-// came from. If the parent didn't supply prior rents (e.g. on /rents which
-// only has the current month), we fall back to a one-line origin.
+// Wave-26: hover on Previous balance shows where the carry-in came from.
+// When 0–6 contributing prior months: list each. When more, bucket into
+// 3- or 6-month chunks so the tooltip stays compact. The breakdown comes
+// from rent.priorRents (added server-side in rentmanager.ts), which lists
+// ONLY months that contributed a non-zero new-balance.
+function _bucketPriorRents(priorRents) {
+  if (priorRents.length <= 6) {
+    return priorRents.map((pr) => {
+      const term = String(pr.term);
+      return {
+        key: term,
+        label: moment(`${term.slice(0, 4)}-${term.slice(4, 6)}-01`).format(
+          'MMM YYYY'
+        ),
+        amount: -(Number(pr.newBalance) || 0)
+      };
+    });
+  }
+  // > 6 months: pick chunk size. 6 months when we have 7–18 months of
+  // history; 3 months when we have 4 buckets that's ≤6 buckets-rendered.
+  // > 18 months: 6-month chunks (caps at 4 buckets since priorRents is
+  // capped at 24 months on the server).
+  const chunkSize = priorRents.length <= 18 ? 6 : 6;
+  const buckets = [];
+  for (let i = 0; i < priorRents.length; i += chunkSize) {
+    const slice = priorRents.slice(i, i + chunkSize);
+    const sum = slice.reduce((s, pr) => s - (Number(pr.newBalance) || 0), 0);
+    const startTerm = String(slice[0].term);
+    const endTerm = String(slice[slice.length - 1].term);
+    const startLabel = moment(
+      `${startTerm.slice(0, 4)}-${startTerm.slice(4, 6)}-01`
+    ).format('MMM YYYY');
+    const endLabel = moment(
+      `${endTerm.slice(0, 4)}-${endTerm.slice(4, 6)}-01`
+    ).format('MMM YYYY');
+    buckets.push({
+      key: startTerm,
+      label: `${startLabel} – ${endLabel}`,
+      amount: sum
+    });
+  }
+  return buckets;
+}
+
 function PriorBalanceBreakdown({ rent }) {
   const { t } = useTranslation('common');
   const balance = Number(rent.balance) || 0;
-  const priorRents = Array.isArray(rent.priorRents) ? rent.priorRents : null;
+  const priorRents = Array.isArray(rent.priorRents) ? rent.priorRents : [];
 
-  if (!priorRents || priorRents.length === 0) {
+  if (priorRents.length === 0) {
     if (Math.abs(balance) < 0.005) {
       return (
         <div className="text-xs text-muted-foreground min-w-[200px]">
@@ -241,22 +278,15 @@ function PriorBalanceBreakdown({ rent }) {
     );
   }
 
+  const buckets = _bucketPriorRents(priorRents);
   return (
-    <div className="text-xs space-y-1 min-w-[220px]">
-      {priorRents.map((pr) => {
-        const term = String(pr.term);
-        const yyyy = term.slice(0, 4);
-        const mm = term.slice(4, 6);
-        const owed = Number(pr.newBalance) || 0;
-        return (
-          <div key={pr.term} className="flex justify-between gap-4">
-            <span className="text-muted-foreground">
-              {moment(`${yyyy}-${mm}-01`).format('MMM YYYY')}
-            </span>
-            <NumberFormat value={-owed} showZero />
-          </div>
-        );
-      })}
+    <div className="text-xs space-y-1 min-w-[240px]">
+      {buckets.map((b) => (
+        <div key={b.key} className="flex justify-between gap-4">
+          <span className="text-muted-foreground">{b.label}</span>
+          <NumberFormat value={b.amount} showZero />
+        </div>
+      ))}
       <div className="flex justify-between gap-4 pt-1 border-t border-border/40 font-medium">
         <span>{t('Carried over')}</span>
         <NumberFormat value={balance} showZero />
@@ -314,25 +344,21 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               )
             ) : null}
 
-            {/* Wave-26: tenant name is now plain text. The right-side
-                cash-register icon is the single way to open the payment
-                dialog — prevents accidental opens when scanning the row. */}
+            {/* Wave-26: pill goes LEFT of the tenant name (inline, same row)
+                so the status is the first thing the eye lands on. Name is
+                plain text — only the right-side cash-register icon opens
+                the payment dialog. */}
+            <StatusPill rent={rent} />
             <span className="text-lg font-medium leading-tight">
               {rent.occupant.name}
             </span>
           </div>
-          <div className="ml-8 flex items-center gap-2 flex-wrap">
-            <StatusPill rent={rent} />
-            {/* Wave-26: surface a recurring discount footnote when
-                tenant.discount > 0 so the per-row deduction is visible
-                without expanding the breakdown. */}
-            {rentAmounts.discount < 0 && (
-              <span className="text-xs text-muted-foreground italic">
-                {t('Discount')}:{' '}
-                <NumberFormat value={rentAmounts.discount} showZero />
-              </span>
-            )}
-          </div>
+          {rentAmounts.discount < 0 && (
+            <div className="ml-8 text-xs text-muted-foreground italic">
+              {t('Discount')}:{' '}
+              <NumberFormat value={rentAmounts.discount} showZero />
+            </div>
+          )}
           <Reminder rent={rent} className="hidden md:inline-flex ml-8" />
         </div>
         <div className="flex pl-8 md:pl-0 md:grid md:grid-cols-3 lg:grid-cols-5 gap-4 w-full md:w-4/6">

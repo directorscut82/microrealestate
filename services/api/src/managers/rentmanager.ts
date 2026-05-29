@@ -162,19 +162,47 @@ async function _getRentsDataByTerm(
       // promoted to 'paid' on the dashboard once a later overpayment has
       // cleared the running deficit.
       const allRents = occupant._allRents || occupant.rents;
+      // Wave-26: build a lightweight per-rent priorRents summary so the
+      // /rents UI's "Previous balance" tooltip can show a per-month
+      // breakdown of where the carry-in came from. Only includes terms
+      // that have a non-zero new-balance (i.e. months that actually
+      // contributed to the carry-in), capped at 24 months back so the
+      // payload doesn't bloat for long-running tenants.
+      const priorRentsByTerm: Record<string, AnyRecord[]> = {};
+      for (const rent of occupant.rents) {
+        const t = Number(rent.term);
+        if (t < startTerm || t > endTerm) continue;
+        const priors = (allRents as AnyRecord[])
+          .filter((r) => Number(r.term) < t)
+          .slice(-24)
+          .map((r) => {
+            const grandTotal = Number(r.total?.grandTotal) || 0;
+            const paid = Number(r.total?.payment) || 0;
+            return {
+              term: r.term,
+              newBalance: paid - grandTotal
+            };
+          })
+          // Drop fully-settled months so the tooltip only shows the rents
+          // that actually contributed to the carry-in.
+          .filter((r) => Math.abs(r.newBalance) >= 0.005);
+        priorRentsByTerm[String(rent.term)] = priors;
+      }
       acc.push(
         ...occupant.rents
           .filter(
             (rent: AnyRecord) => rent.term >= startTerm && rent.term <= endTerm
           )
-          .map((rent: AnyRecord) =>
-            FD.toRentData(
+          .map((rent: AnyRecord) => {
+            const enriched = FD.toRentData(
               rent,
               occupant,
               (emailStatus as AnyRecord)?.[occupant._id],
               allRents
-            )
-          )
+            );
+            enriched.priorRents = priorRentsByTerm[String(rent.term)] || [];
+            return enriched;
+          })
       );
       return acc;
     },
