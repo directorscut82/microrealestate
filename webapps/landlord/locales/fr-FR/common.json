@@ -758,7 +758,6 @@
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS : non configuré — paramétrez-le dans Réglages → Services tiers pour activer l'envoi de SMS",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet": "Messageries (WhatsApp, Telegram, Viber, Signal) : pas encore implémenté",
   "Contact details": "Coordonnées",
-  "Notes": "Notes",
   "Alternative address, preferred contact times, language, etc.": "Adresse secondaire, créneaux préférés, langue, etc.",
   "Invoicing settings": "Paramètres de facturation",
   "Monthly discount": "Remise mensuelle",
@@ -796,5 +795,7 @@
   "This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked to avoid accidental writes.": "Cette période est à {{count}} mois dans le futur. L'enregistrement de paiements au-delà de 3 mois est bloqué pour éviter les erreurs.",
   "This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked.": "Cette période est à {{count}} mois dans le futur. L'enregistrement de paiements au-delà de 3 mois est bloqué.",
   "Payment of {{amount}}€ recorded": "Paiement de {{amount}}€ enregistré",
-  "Record": "Enregistrer"
+  "Record": "Enregistrer",
+  "Please complete required fields": "Veuillez compléter les champs obligatoires",
+  "Date required when amount > 0": "Date requise lorsque le montant > 0"
 }

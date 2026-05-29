@@ -4,7 +4,6 @@ import {
   useCallback,
   useContext,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState
 } from 'react';
@@ -28,12 +27,6 @@ import {
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
-import {
-  PAYMENT_CATEGORIES,
-  applyAllocation,
-  autoSpreadAllocation,
-  computeCategoryOwed
-} from '../../utils/paymentAllocation';
 import { StoreContext } from '../../store';
 import { toast } from 'sonner';
 import usePaymentTypes from '../../hooks/usePaymentTypes';
@@ -89,273 +82,6 @@ function initialFormValues(rent) {
   };
 }
 
-// Wave-25: human-readable label for each payment category. The values here
-// are the LITERAL English keys that exist in every locale's common.json —
-// next-translate uses string-keyed flat JSON, not dot-notation namespaces.
-const CATEGORY_LABEL_KEY = {
-  rent: 'Rent',
-  expenses: 'Building expenses',
-  repairs: 'Repairs',
-  vat: 'VAT',
-  previousBalance: 'Previous balance',
-  extracharge: 'Extra charge'
-};
-
-/**
- * Wave-25: per-payment allocation block. Three modes:
- *   - auto: payment auto-spreads oldest debt category first (server default)
- *   - specific: pick one category, full amount goes there
- *   - custom: per-category inputs, sum should equal payment amount
- *
- * The preview shows owed-before / owed-after for every category that has
- * a non-zero owed amount. Categories with zero owed are hidden (avoids
- * cluttering the table with rows that don't apply this month).
- *
- * Overpayment surfaces a "Credit to next month" line so the surplus is
- * visible, never silent.
- */
-function AllocationBlock({
-  index,
-  fieldKey,
-  amount,
-  owed,
-  state,
-  onModeChange,
-  onSpecificCategoryChange,
-  onCustomAmountChange,
-  t
-}) {
-  const mode = state.mode || 'auto';
-  const specificCategory = state.specificCategory || '';
-  const custom = state.custom || {};
-
-  // Build the working allocation array based on the active mode. This is
-  // what the preview applies to `owed` to render before/after columns.
-  let allocation = [];
-  if (mode === 'auto') {
-    allocation = autoSpreadAllocation(amount, owed);
-  } else if (mode === 'specific' && specificCategory) {
-    allocation = [{ category: specificCategory, amount }];
-  } else if (mode === 'custom') {
-    allocation = Object.entries(custom)
-      .map(([category, val]) => ({ category, amount: Number(val) || 0 }))
-      .filter((a) => a.amount > 0);
-  }
-
-  const { remaining, creditToNextMonth, remainingTotal } = applyAllocation(
-    owed,
-    allocation
-  );
-
-  // Visible categories: anything with a non-zero owed amount, OR being
-  // explicitly allocated to in custom mode.
-  const visibleCats = PAYMENT_CATEGORIES.filter((c) => {
-    if ((Number(owed?.[c]) || 0) > 0) return true;
-    if (mode === 'custom' && Number(custom[c]) > 0) return true;
-    return false;
-  });
-
-  const customSum = Object.values(custom).reduce(
-    (s, v) => s + (Number(v) || 0),
-    0
-  );
-  const customDelta = amount - customSum; // >0 = under-allocated, <0 = over
-
-  return (
-    <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-3">
-      <div className="text-sm font-medium">{t('Apply to')}</div>
-
-      <div className="space-y-2">
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="radio"
-            name={`alloc-mode-${fieldKey}`}
-            value="auto"
-            checked={mode === 'auto'}
-            onChange={() => onModeChange('auto')}
-            className="mt-1"
-            data-cy={`allocMode-${index}-auto`}
-          />
-          <div className="flex-1">
-            <div>{t('Auto-spread (oldest first)')}</div>
-            <div className="text-xs text-muted-foreground">
-              {t(
-                'Payment fills the oldest unpaid category first, then the next.'
-              )}
-            </div>
-          </div>
-        </label>
-
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="radio"
-            name={`alloc-mode-${fieldKey}`}
-            value="specific"
-            checked={mode === 'specific'}
-            onChange={() => onModeChange('specific')}
-            className="mt-1"
-            data-cy={`allocMode-${index}-specific`}
-          />
-          <div className="flex-1">
-            <div>{t('Specific category')}</div>
-            {mode === 'specific' && (
-              <div className="mt-1">
-                <Select
-                  value={specificCategory}
-                  onValueChange={onSpecificCategoryChange}
-                >
-                  <SelectTrigger
-                    className="max-w-xs"
-                    data-cy={`allocSpecificCategory-${index}`}
-                  >
-                    <SelectValue placeholder={t('Select a category')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_CATEGORIES.filter(
-                      (c) => (Number(owed?.[c]) || 0) > 0
-                    ).map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {t(CATEGORY_LABEL_KEY[c])}
-                        {' '}
-                        ({(Number(owed?.[c]) || 0).toFixed(2)})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        </label>
-
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="radio"
-            name={`alloc-mode-${fieldKey}`}
-            value="custom"
-            checked={mode === 'custom'}
-            onChange={() => onModeChange('custom')}
-            className="mt-1"
-            data-cy={`allocMode-${index}-custom`}
-          />
-          <div className="flex-1">
-            <div>{t('Custom split')}</div>
-            {mode === 'custom' && (
-              <div className="mt-2 space-y-2">
-                {visibleCats.map((c) => (
-                  <div
-                    key={c}
-                    className="grid grid-cols-3 items-center gap-2 text-sm"
-                  >
-                    <div>{t(CATEGORY_LABEL_KEY[c])}</div>
-                    <div className="text-muted-foreground tabular-nums">
-                      {t('owed')}: {(Number(owed?.[c]) || 0).toFixed(2)}
-                    </div>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0.00"
-                      value={custom[c] ?? ''}
-                      onChange={(e) =>
-                        onCustomAmountChange(c, e.target.value)
-                      }
-                      data-cy={`allocCustom-${index}-${c}`}
-                    />
-                  </div>
-                ))}
-                <div
-                  className={`text-xs ${
-                    Math.abs(customDelta) < 0.005
-                      ? 'text-muted-foreground'
-                      : customDelta > 0
-                        ? 'text-amber-600'
-                        : 'text-destructive'
-                  }`}
-                >
-                  {t('Allocated')}: {customSum.toFixed(2)} /{' '}
-                  {amount.toFixed(2)}
-                  {Math.abs(customDelta) >= 0.005 &&
-                    ' — ' +
-                      (customDelta > 0
-                        ? t('{{amount}} unallocated', {
-                            amount: customDelta.toFixed(2)
-                          })
-                        : t('{{amount}} over', {
-                            amount: (-customDelta).toFixed(2)
-                          }))}
-                </div>
-              </div>
-            )}
-          </div>
-        </label>
-      </div>
-
-      {/* Preview: owed before / after for visible (non-zero owed) categories */}
-      <div className="bg-marble-tint/40 rounded-md p-3 space-y-1 text-sm">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">
-          {t('Preview after this {{amount}} payment', {
-            amount: amount.toFixed(2)
-          })}
-        </div>
-        {visibleCats.length === 0 ? (
-          <div className="text-muted-foreground italic">
-            {t('Nothing currently owed.')}
-          </div>
-        ) : (
-          <table className="w-full tabular-nums">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                <th className="text-left font-normal">{t('Category')}</th>
-                <th className="text-right font-normal">{t('Before')}</th>
-                <th className="text-right font-normal">{t('After')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleCats.map((c) => {
-                const before = Number(owed?.[c]) || 0;
-                const after = Number(remaining?.[c]) || 0;
-                const delta = before - after;
-                return (
-                  <tr key={c}>
-                    <td>{t(CATEGORY_LABEL_KEY[c])}</td>
-                    <td className="text-right">{before.toFixed(2)}</td>
-                    <td className="text-right">
-                      {after.toFixed(2)}
-                      {delta > 0.005 && (
-                        <span className="ml-1 text-xs text-olive">
-                          (-{delta.toFixed(2)})
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              <tr className="border-t border-stone-line/60 font-medium">
-                <td>{t('Total')}</td>
-                <td className="text-right">
-                  {(Number(owed?.total) || 0).toFixed(2)}
-                </td>
-                <td className="text-right">
-                  {Number(remainingTotal).toFixed(2)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-        {creditToNextMonth > 0 && (
-          <div
-            className="text-xs text-blue-700 mt-2"
-            data-cy={`allocCredit-${index}`}
-          >
-            {t('Credit to next month')}:{' '}
-            {creditToNextMonth.toFixed(2)}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function PaymentTabs({ rent, onSubmit, onError }, ref) {
   const queryClient = useQueryClient();
   const store = useContext(StoreContext);
@@ -366,33 +92,6 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
   const [expandedDiscount, setExpandedDiscount] = useState(initVals.promo > 0);
   const [expandedAdditionalCost, setExpandedAdditionalCost] = useState(initVals.extracharge > 0);
   const formRef = useRef();
-
-  // Wave-25: per-payment allocation state. Keyed by field id so it survives
-  // useFieldArray reorders. Default mode is 'auto' which sends NO allocation
-  // (server falls through to legacy behavior — no regression risk).
-  // Modes:
-  //   auto     -> no allocation sent
-  //   specific -> single category, full payment amount goes to it
-  //   custom   -> per-line inputs, sum must equal payment amount (or be a
-  //               surplus that becomes carried-forward credit)
-  const [allocState, setAllocState] = useState({});
-  const _setAllocMode = (key, mode) =>
-    setAllocState((s) => ({ ...s, [key]: { ...(s[key] || {}), mode } }));
-  const _setAllocSpecificCategory = (key, category) =>
-    setAllocState((s) => ({
-      ...s,
-      [key]: { ...(s[key] || {}), specificCategory: category }
-    }));
-  const _setAllocCustomAmount = (key, category, amount) =>
-    setAllocState((s) => ({
-      ...s,
-      [key]: {
-        ...(s[key] || {}),
-        custom: { ...((s[key] || {}).custom || {}), [category]: amount }
-      }
-    }));
-
-  const owed = useMemo(() => computeCategoryOwed(rent), [rent]);
 
   const {
     register,
@@ -418,60 +117,14 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
 
   const _handleSubmit = useCallback(
     async (values) => {
-      // Wave-26 (2): hard-block submission if the term is more than 3 months
-      // in the future. The banner already warned the user; this is the
-      // safety net.
-      const _currentTerm = Number(
-        moment.utc().startOf('month').format('YYYYMMDDHH')
-      );
-      const _rentTerm = Number(rent?.term || 0);
-      if (_rentTerm > _currentTerm) {
-        const _ahead = moment(String(_rentTerm).slice(0, 6) + '01').diff(
-          moment().startOf('month'),
-          'months'
-        );
-        if (_ahead > 3) {
-          toast.error(
-            t(
-              'This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked.',
-              { count: _ahead }
-            )
-          );
-          onError?.();
-          return;
-        }
-      }
       const clonedValues = _.cloneDeep(values);
       clonedValues.payments = clonedValues.payments
         .filter(({ amount }) => amount > 0)
-        .map((payment, idx) => {
+        .map((payment) => {
           payment.date = payment.date
             ? moment(payment.date).format('DD/MM/YYYY')
             : '';
           if (payment.type === 'cash') delete payment.reference;
-          // Wave-25: attach allocation if user picked a non-auto mode. The
-          // form-array uses positional keys; allocState is keyed by the
-          // useFieldArray field id which is `fields[idx].id` at render
-          // time. The submit payload sees `values.payments[idx]` without
-          // that id, so we read the matching field id from the closure.
-          const fieldKey = fields[idx]?.id;
-          const aState = (fieldKey && allocState[fieldKey]) || {};
-          const amt = Number(payment.amount) || 0;
-          if (aState.mode === 'specific' && aState.specificCategory && amt > 0) {
-            payment.allocation = [
-              { category: aState.specificCategory, amount: amt }
-            ];
-          } else if (aState.mode === 'custom' && aState.custom) {
-            const allocation = Object.entries(aState.custom)
-              .map(([category, value]) => ({
-                category,
-                amount: Number(value) || 0
-              }))
-              .filter((a) => a.amount > 0);
-            if (allocation.length) payment.allocation = allocation;
-          }
-          // mode === 'auto' (or unset): no allocation sent — server keeps
-          // its legacy behavior. Same as pre-wave-25.
           return payment;
         });
 
@@ -490,23 +143,6 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
-        // Wave-26 (7): explicit success toast so the save is no longer
-        // silent. The toast amount is the SUM of payments submitted for
-        // this term, not just the first row, so multi-row submits show
-        // the right total.
-        const _sum = (clonedValues.payments || []).reduce(
-          (s, p) => s + (Number(p?.amount) || 0),
-          0
-        );
-        if (_sum > 0) {
-          toast.success(
-            t('Payment of {{amount}}€ recorded', {
-              amount: _sum.toFixed(2)
-            })
-          );
-        } else {
-          toast.success(t('Saved'));
-        }
         onSubmit?.();
       } catch (error) {
         console.error(error);
@@ -514,87 +150,34 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         onError?.();
       }
     },
-    [
-      onSubmit,
-      onError,
-      queryClient,
-      rent._id,
-      rent.month,
-      rent.term,
-      rent.year,
-      t,
-      fields,
-      allocState
-    ]
+    [onSubmit, onError, queryClient, rent._id, rent.month, rent.term, rent.year, t]
   );
 
   const payments = watch('payments');
 
-  // Wave-26 (1): tell the user up-front whether the dialog opened with an
-  // existing payment pre-filled vs a fresh entry. Eliminates the "why
-  // is there a number here already?" confusion.
-  const existingPayment = (rent?.payments || []).find(
-    (p) => Number(p?.amount) > 0
-  );
-  const existingPaidTotal = (rent?.payments || []).reduce(
-    (s, p) => s + (Number(p?.amount) || 0),
-    0
-  );
-
-  // Wave-26 (2): future-term safeguard. The data model accepts payments on
-  // any term (Wave-14 F3 only blocks dates >7d future). A typo recording
-  // September's payment in May silently inflates this year's revenue,
-  // poisons the dashboard, and prints a "paid" receipt for September.
-  // We allow up to 3 months ahead (real use case for advance payments)
-  // and block beyond.
-  const currentTerm = Number(
-    moment.utc().startOf('month').format('YYYYMMDDHH')
-  );
-  const rentTerm = Number(rent?.term || 0);
-  const monthsAhead =
-    rentTerm > currentTerm
-      ? moment(String(rentTerm).slice(0, 6) + '01').diff(
-          moment().startOf('month'),
-          'months'
-        )
-      : 0;
-  const isFutureTermAllowed = monthsAhead > 0 && monthsAhead <= 3;
-  const isFutureTermBlocked = monthsAhead > 3;
-
   return (
-    <form ref={formRef} onSubmit={handleSubmit(_handleSubmit)} autoComplete="off">
+    <form
+      ref={formRef}
+      onSubmit={handleSubmit(_handleSubmit, (errs) => {
+        // Wave-26 round-3c: when zod validation fails, surface the
+        // first error as a toast so the user understands why nothing
+        // happened. Previously the failure was silent (and the parent
+        // dialog stuck on "Saving").
+        const firstMsg =
+          errs?.payments?.[0]?.date?.message ||
+          errs?.payments?.[0]?.amount?.message ||
+          errs?.payments?.[0]?.type?.message ||
+          errs?.payments?.message ||
+          Object.values(errs || {})[0]?.message;
+        toast.error(firstMsg ? t(firstMsg) : t('Please complete required fields'));
+        onError?.();
+      })}
+      autoComplete="off"
+    >
       <div className="space-y-4">
         <Card>
           <CardHeader className="text-lg px-6 pt-3 pb-0">{t('Payment')}</CardHeader>
           <CardContent>
-            {/* Wave-26: status banners — pre-fill source + future-term safeguard. */}
-            {existingPayment ? (
-              <div className="mb-3 p-2 rounded border border-olive/30 bg-olive/10 text-olive text-sm" data-cy="existingPaymentBanner">
-                {t('Editing existing payment of {{amount}}€', {
-                  amount: existingPaidTotal.toFixed(2)
-                })}
-              </div>
-            ) : (
-              <div className="mb-3 p-2 rounded border border-stone-line/40 bg-muted/30 text-muted-foreground text-sm" data-cy="noPaymentBanner">
-                {t('No payment recorded yet for this term.')}
-              </div>
-            )}
-            {isFutureTermAllowed && (
-              <div className="mb-3 p-2 rounded border border-amber-200 bg-amber-50 text-amber-700 text-sm" data-cy="futureTermBanner">
-                {t(
-                  'Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.',
-                  { count: monthsAhead }
-                )}
-              </div>
-            )}
-            {isFutureTermBlocked && (
-              <div className="mb-3 p-2 rounded border border-oxide/40 bg-oxide/10 text-oxide text-sm" data-cy="futureTermBlockedBanner">
-                {t(
-                  'This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked to avoid accidental writes.',
-                  { count: monthsAhead }
-                )}
-              </div>
-            )}
             {fields.map((field, index) => (
               <div key={field.id} className="mb-4 p-3 border rounded-md">
                 <div className="flex justify-between items-center mb-2">
@@ -647,26 +230,6 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                     <Input id={`payments.${index}.amount`} type="number" {...register(`payments.${index}.amount`)} />
                   </div>
                 </div>
-                {/* Wave-25: per-payment allocation block. Hidden when no */}
-                {/* amount is entered yet (UX: don't clutter the form before */}
-                {/* the user has typed an amount). */}
-                {Number(payments?.[index]?.amount) > 0 && (
-                  <AllocationBlock
-                    index={index}
-                    fieldKey={field.id}
-                    amount={Number(payments?.[index]?.amount) || 0}
-                    owed={owed}
-                    state={allocState[field.id] || {}}
-                    onModeChange={(mode) => _setAllocMode(field.id, mode)}
-                    onSpecificCategoryChange={(cat) =>
-                      _setAllocSpecificCategory(field.id, cat)
-                    }
-                    onCustomAmountChange={(cat, val) =>
-                      _setAllocCustomAmount(field.id, cat, val)
-                    }
-                    t={t}
-                  />
-                )}
               </div>
             ))}
             <Button type="button" variant="outline" onClick={() => append(emptyPayment)}>
