@@ -1,5 +1,5 @@
 import { fetchRents, QueryKeys, sendRentEmails, sendRentSms } from '../../../../utils/restcalls';
-import { LuAlertTriangle, LuChevronDown, LuMessageSquare, LuSend } from 'react-icons/lu';
+import { LuChevronDown, LuMessageSquare, LuSend } from 'react-icons/lu';
 import {
   Popover,
   PopoverContent,
@@ -7,8 +7,8 @@ import {
 } from '../../../../components/ui/popover';
 import { useCallback, useContext, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert } from '../../../../components/ui/alert';
 import { Button } from '../../../../components/ui/button';
+import ChannelStatusBanners from '../../../../components/rents/ChannelStatusBanners';
 import ConfirmDialog from '../../../../components/ConfirmDialog';
 import ErrorPage from 'next/error';
 import { GrDocumentPdf } from 'react-icons/gr';
@@ -275,22 +275,13 @@ function Rents() {
         <RentOverview data={{ period, ...data?.overview }} />
       </div>
 
-      {!store.organization.canSendEmails ? (
-        <Alert variant="warning" className="mb-4">
-          <LuAlertTriangle className="size-4" />
-          <div className="text-body">
-            {t(
-              'Unable to send documents by email without configuring the mail service in Settings page'
-            )}
-          </div>
-        </Alert>
-      ) : null}
+      <ChannelStatusBanners />
       <List
         data={data}
         filters={[
-          { id: 'notpaid', label: t('Not paid') },
-          { id: 'partiallypaid', label: t('Partially paid') },
-          { id: 'paid', label: t('Paid') }
+          { id: 'notpaid', label: t('Owed this month') },
+          { id: 'partiallypaid', label: t('Partially paid this month') },
+          { id: 'paid', label: t('Paid this month') }
         ]}
         filterFn={_filterData}
         renderActions={() =>

@@ -1,16 +1,23 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '../../ui/button';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
+} from '../../ui/collapsible';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Separator } from '../../ui/separator';
 import { Switch } from '../../ui/switch';
+import { LuChevronDown, LuChevronRight } from 'react-icons/lu';
 import useTranslation from 'next-translate/useTranslation';
 
 const schema = z.object({
-  reference: z.string().min(1),
+  // Empty is allowed — the server fills in a nanoid() when blank.
+  reference: z.string().max(120).optional(),
   isVat: z.boolean(),
   vatRatio: z.coerce.number().min(0).max(100).optional(),
   discount: z.coerce.number().min(0).optional()
@@ -59,26 +66,23 @@ const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
     });
   };
 
+  // The reference field is auto-populated by the server (nanoid()) when
+  // empty. Most landlords never need to edit it, so it lives behind an
+  // Advanced collapsible to declutter the form. Open by default if the
+  // tenant has a non-default reference the user might want to see.
+  const [advancedOpen, setAdvancedOpen] = useState(
+    !!(tenant?.reference && tenant.reference.length > 0)
+  );
+
   return (
     <form onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
       {!stepperMode && (
         <div className="pb-4">
-          <div className="text-xl">{t('Billing information')}</div>
+          <div className="text-xl">{t('Invoicing settings')}</div>
           <Separator className="mt-1 mb-2" />
         </div>
       )}
       <div className="space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="reference">{t('Tenant reference')}</Label>
-          <Input
-            id="reference"
-            disabled={readOnly}
-            {...register('reference')}
-          />
-          {errors.reference && (
-            <p className="text-sm text-destructive">{errors.reference.message}</p>
-          )}
-        </div>
         {organization?.isCompany && (
           <>
             <div className="flex items-center gap-2">
@@ -102,14 +106,55 @@ const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
           </>
         )}
         <div className="space-y-2">
-          <Label htmlFor="discount">{t('Discount')}</Label>
+          <Label htmlFor="discount">{t('Monthly discount')}</Label>
           <Input
             id="discount"
             type="number"
             disabled={readOnly}
             {...register('discount')}
           />
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'A fixed amount in your local currency that is subtracted from this tenant\'s rent every cycle.'
+            )}
+          </p>
         </div>
+
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground -ml-2"
+            >
+              {advancedOpen ? (
+                <LuChevronDown className="size-3 mr-1" />
+              ) : (
+                <LuChevronRight className="size-3 mr-1" />
+              )}
+              {t('Advanced')}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="space-y-2 mt-2">
+              <Label htmlFor="reference">{t('Tenant reference (auto-generated if empty)')}</Label>
+              <Input
+                id="reference"
+                disabled={readOnly}
+                {...register('reference')}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Identifier printed on this tenant\'s invoices. Leave blank to let the system generate one.'
+                )}
+              </p>
+              {errors.reference && (
+                <p className="text-sm text-destructive">{errors.reference.message}</p>
+              )}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
       {!readOnly && (
         <Button type="submit" className="mt-6" disabled={isSubmitting} data-cy="submit">

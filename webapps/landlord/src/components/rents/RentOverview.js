@@ -95,13 +95,13 @@ export function RentOverview({ data }) {
       </div>
       <div className="flex flex-wrap items-end gap-x-12 gap-y-4 pb-4 border-b border-stone-line">
         <Stat
-          label={t('Not paid')}
+          label={t('Owed this month')}
           amount={data.totalNotPaid}
           count={data.countNotPaid}
           color="text-oxide"
         />
         <Stat
-          label={t('Paid')}
+          label={t('Paid this month')}
           amount={data.totalPaid}
           count={
             (data.countPaid ?? 0) + (data.countPartiallyPaid ?? 0)
