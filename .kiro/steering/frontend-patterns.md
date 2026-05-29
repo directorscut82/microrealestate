@@ -199,6 +199,32 @@ Either guard with `typeof window !== 'undefined'` or move the access into a `use
 
 `moment().format(...)` and similar can produce different output on server vs client if locales aren't pinned. Pass `locale` explicitly or do the formatting inside `useEffect`.
 
+### Vaul Drawer + Radix Popover (date-picker click-through)
+
+Symptom: a Radix `Popover` (e.g. `DatePickerInput`'s calendar) opened from inside a Vaul `Drawer` (e.g. the payment-recording dialog) appears to render correctly, but clicks on items inside the popover (calendar day cells, select options, etc.) register on whatever sat underneath in the drawer.
+
+Root cause: Vaul sets `pointer-events: none` on `<body>` while the drawer is open. Radix portals popover content to `document.body`, so the popover subtree inherits `pointer-events: none` and clicks fall through to the drawer's dialog layer.
+
+**Fix**: pass `modal` on the Popover root — NOT on `PopoverContent`, NOT `data-vaul-no-drag` (which only opts out of drag, not pointer capture). `<Popover modal>` makes Radix render its own focus/dismissable layer with its own pointer-event context.
+
+```jsx
+<Popover modal open={open} onOpenChange={setOpen}>
+  <PopoverTrigger>...</PopoverTrigger>
+  <PopoverContent>
+    <Calendar mode="single" ... />
+  </PopoverContent>
+</Popover>
+```
+
+Refs: shadcn-ui/ui#7652, vaul#482. Applied in `webapps/landlord/src/components/ui/date-picker-input.js`.
+
+### Submit button stuck on "Saving" after silent zod failure
+
+When you call `formRef.current.requestSubmit()` from an outer drawer/dialog and the form's `zodResolver` rejects, `_handleSubmit` is never called — so any "saving" state owned by the OUTER dialog never resets. Two fixes used by `NewPaymentDialog`:
+
+1. After triggering submit, schedule a short timeout that resets `saving` if `formRef.current.isSubmitting()` reports false.
+2. Wire a second-arg error callback to `handleSubmit(_handleSubmit, onValidationError)` so failures surface as a toast and call the parent's `onError?.()`.
+
 ## Quick Reference: Legacy → Current
 
 | Legacy (avoid) | Current (use) |

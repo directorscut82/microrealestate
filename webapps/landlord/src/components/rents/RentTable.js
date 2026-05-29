@@ -139,44 +139,28 @@ function MonthlyBreakdown({ rentAmounts }) {
   );
 }
 
-// Wave-26: derive a single-glance payment status pill from the server's
-// computed `rent.status`. Four states, label-only (amounts live in the
-// hover tooltip on the Payment column):
+// Wave-26: derive a single-glance payment status from the server's
+// computed `rent.status`. Four states, rendered as a small colored dot
+// at the start of each row. The legend below the table explains the
+// color codes; per-row labels would only repeat what the legend says.
 //   - paid          → olive
 //   - partial       → amber
 //   - owed          → oxide-red
 //   - no charge     → slate (grandTotal === 0 — fully discounted month etc.)
-function _statusPillData(rent, t) {
+function _statusKey(rent) {
   const grandTotal = Number(rent.totalAmount) || 0;
-
-  if (Math.abs(grandTotal) < 0.005) {
-    return {
-      key: 'none',
-      label: t('No charge'),
-      className: 'bg-slate-100 text-slate-600 border-slate-200'
-    };
-  }
-  if (rent.status === 'paid') {
-    return {
-      key: 'paid',
-      label: t('Paid'),
-      className: 'bg-olive/15 text-olive border-olive/30'
-    };
-  }
-  if (rent.status === 'partiallypaid') {
-    return {
-      key: 'partial',
-      label: t('Partial'),
-      className: 'bg-amber-50 text-amber-700 border-amber-200'
-    };
-  }
-  // 'notpaid'
-  return {
-    key: 'owed',
-    label: t('Owed'),
-    className: 'bg-oxide/10 text-oxide border-oxide/30'
-  };
+  if (Math.abs(grandTotal) < 0.005) return 'none';
+  if (rent.status === 'paid') return 'paid';
+  if (rent.status === 'partiallypaid') return 'partial';
+  return 'owed';
 }
+
+const STATUS_DOT_CLASS = {
+  paid: 'bg-olive',
+  partial: 'bg-amber-500',
+  owed: 'bg-oxide',
+  none: 'bg-slate-400'
+};
 
 // Wave-26: hover on the Payment cell shows "Owed remaining = grandTotal -
 // payment" so the user can see the resulting balance without doing math.
@@ -214,7 +198,11 @@ function PaymentBreakdown({ rent, t }) {
 // from rent.priorRents (added server-side in rentmanager.ts), which lists
 // ONLY months that contributed a non-zero new-balance.
 function _bucketPriorRents(priorRents) {
-  if (priorRents.length <= 6) {
+  // Wave-26 round-3d adaptive chunking:
+  //   ≤3 months → list each month
+  //   4–12 months → 3-month chunks
+  //   >12 months → 6-month chunks
+  if (priorRents.length <= 3) {
     return priorRents.map((pr) => {
       const term = String(pr.term);
       return {
@@ -226,11 +214,7 @@ function _bucketPriorRents(priorRents) {
       };
     });
   }
-  // > 6 months: pick chunk size. 6 months when we have 7–18 months of
-  // history; 3 months when we have 4 buckets that's ≤6 buckets-rendered.
-  // > 18 months: 6-month chunks (caps at 4 buckets since priorRents is
-  // capped at 24 months on the server).
-  const chunkSize = priorRents.length <= 18 ? 6 : 6;
+  const chunkSize = priorRents.length <= 12 ? 3 : 6;
   const buckets = [];
   for (let i = 0; i < priorRents.length; i += chunkSize) {
     const slice = priorRents.slice(i, i + chunkSize);
@@ -295,19 +279,43 @@ function PriorBalanceBreakdown({ rent }) {
   );
 }
 
-function StatusPill({ rent }) {
-  const { t } = useTranslation('common');
-  const data = _statusPillData(rent, t);
+function StatusDot({ rent }) {
+  const key = _statusKey(rent);
   return (
     <span
+      aria-hidden="true"
       className={cn(
-        'inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium whitespace-nowrap',
-        data.className
+        'inline-block size-2.5 rounded-full shrink-0',
+        STATUS_DOT_CLASS[key]
       )}
-      data-cy={`status-${data.key}`}
-    >
-      {data.label}
-    </span>
+      data-cy={`status-${key}`}
+    />
+  );
+}
+
+function StatusLegend() {
+  const { t } = useTranslation('common');
+  const items = [
+    { key: 'paid', label: t('Paid') },
+    { key: 'partial', label: t('Partial') },
+    { key: 'owed', label: t('Owed') },
+    { key: 'none', label: t('No charge') }
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-xs text-muted-foreground">
+      {items.map((it) => (
+        <span key={it.key} className="inline-flex items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className={cn(
+              'inline-block size-2 rounded-full',
+              STATUS_DOT_CLASS[it.key]
+            )}
+          />
+          {it.label}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -344,11 +352,11 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               )
             ) : null}
 
-            {/* Wave-26: pill goes LEFT of the tenant name (inline, same row)
-                so the status is the first thing the eye lands on. Name is
-                plain text — only the right-side cash-register icon opens
-                the payment dialog. */}
-            <StatusPill rent={rent} />
+            {/* Wave-26 round-3d: small colored dot indicates status; the
+                legend below the table explains the colors. Name is plain
+                text — only the right-side cash-register icon opens the
+                payment dialog. */}
+            <StatusDot rent={rent} />
             <span className="text-lg font-medium leading-tight">
               {rent.occupant.name}
             </span>
@@ -563,6 +571,7 @@ function RentTable({ rents = [], selected, setSelected }) {
               </div>
             );
           })}
+          <StatusLegend />
         </Card>
       ) : (
         <EmptyIllustration label={t('No rents found')} />

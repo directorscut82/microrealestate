@@ -133,6 +133,27 @@ Changes are grouped into phases. Each phase should be completed before the next.
 - Transaction atomicity for multi-document updates
 - 20 unit tests for aggregation logic
 
+### 4.12 Payment + Rents UX Wave ✅ COMPLETE (May–June 2026)
+- **Driven by**: real usage feedback from the deployed NAS — landlord couldn't tell at a glance whether a tenant had been paid, payment dialog was confusing, accounting/notes weren't surfaced, calendar inside the payment drawer was uncllickable.
+- **Backend changes**:
+  - `services/api/src/managers/rentmanager.ts`: payment subdocument gained an optional `allocation: [{category, amount}]` field (wave-25). Validators reject unknown categories or sums exceeding payment amount. Categories: `rent`, `expenses`, `repairs`, `vat`, `previousBalance`, `extracharge`. Per-rent `priorRents` summary now included in the `/rents/{year}/{month}` response so the UI's previous-balance hover can render a per-month breakdown.
+  - `services/api/src/managers/accountingmanager.ts`: settlements payload now includes `notesByMonth[]` per tenant so the accounting tab can render rent-level notes (description / notepromo / noteextracharge) per month.
+  - No schema changes; rent docs are `Mixed`.
+- **Frontend changes (landlord)**:
+  - **Payment dialog** (`PaymentTabs.js`, `NewPaymentDialog.js`): 3-mode allocation UI (Auto-spread / Specific category / Custom split) with live before/after preview and overpayment-as-credit visibility. Pre-fill banner ("Editing existing payment of €X" vs "No payment recorded yet"). Future-term safeguard: warn 1–3 months ahead, hard-block beyond. Success toast with the recorded amount. Validation errors now surface as a toast and reset the saving state — no more stuck "Saving" button. Submit button label is **Record / Εκτέλεση** (was "Save").
+  - **/rents row** (`RentTable.js`): 4-state status pill (Paid / Partial / Owed / No charge) inline left of the tenant name. Tenant name no longer clickable — only the right-side cash-register icon opens the dialog. Hover the **Payment** column for "Total due / Paid / Owed remaining / Overpayment". Hover **Previous balance** for a per-prior-month breakdown (auto-bucketed into 6-month chunks when >6 months). Discount footnote when applicable.
+  - **RentHistoryDialog**: current-month tile uses a `bg-primary/10` tint (no ring); auto-scrolls to the current month on open; past tiles muted; future tiles dashed + faded with bold "(estimate)".
+  - **Tenant detail page**: Address section removed (the tenant's address of record is the property they rent — captured on the lease tab). "Contacts" → "Contact details", with a Notes textarea per contact and auto-prefilled placeholder rows for co-tenants the landlord may not have full info on. Property tile rectangle removed; tighter spacing. BillingForm renamed "Invoicing settings"; reference field hidden under Advanced; "Discount" → "Monthly discount" with help text. LeaseContractForm property block redesigned: per-expense **Frequency** dropdown (Monthly | One-time) replacing the silent badge, single source of truth for date pairs, "Mid-lease handover dates" + "Custom date range" collapsibles closed by default.
+  - **Documents tab**: "Text documents" → "Documents from templates"; friendly empty state when no templates exist (the `templates` collection on a fresh realm is empty by default).
+  - **Accounting tab**: per-month Notes column showing `rent.description` (private), `notepromo` (printed on receipts), `noteextracharge` (printed on receipts).
+  - **Channel status banners on /rents** (`ChannelStatusBanners.js`): three thin stacked banners (Email / SMS / Messengers) replacing the single pink Email warning. Olive when configured, amber when not, slate for not-implemented (messengers). Dismissible per-session per-realm via sessionStorage. Backed by `Organization.canSendEmails` / `canSendSms` / `emailProviderName` derived getters.
+  - **ErrorBoundary**: i18n strings + locale-aware Go Home button (preserves the realm's locale instead of dropping to defaultLocale=en).
+- **Renames in 6 locales**: "Additional cost" → "Έκτακτη χρέωση" / "Extraordinary charge" (key unchanged so call sites still work). 30+ new i18n keys added across el / en / fr-FR / de-DE / es-CO / pt-BR.
+- **Out of scope (deferred)**:
+  - Wiring imported TAXIS PDF into "Uploaded documents" — Backblaze B2 storage required first. Document model only stores metadata pointers, not local file blobs.
+  - SMS bulk-send actions on /rents — server-side `_sendSms` exists but no UI surface yet.
+  - Accounting CSV export of notes — only the in-app accounting view shows them.
+
 ### 4.11 Multi-Origin Self-Hosted Deployment ✅ COMPLETE (added May 2026)
 - **Purpose:** Serve the same landlord frontend simultaneously from LAN (`http://192.168.x.x:PORT`) and Tailscale IP (`http://100.x.x.x:PORT`) so family/staff can use the app over a shared Tailnet without DNS setup.
 - **Code changes (applied on `nas` branch only):**

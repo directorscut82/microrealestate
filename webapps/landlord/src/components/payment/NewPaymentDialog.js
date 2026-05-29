@@ -64,13 +64,11 @@ export default function NewPaymentDialog({
     if (saving) return;
     setSaving(true);
     formRef.current.submit();
-    // Wave-26 round-3c safety net: if zod validation fails inside the
-    // PaymentTabs form, _handleSubmit never runs and neither
-    // handleSubmit (success) nor handleError (catch) fires here — the
-    // button stays in "Saving" forever. Watch the form's isSubmitting
-    // ref; if it isn't true on the next tick, the submission was
-    // rejected by validation and we should reset saving so the user
-    // can fix the form and retry.
+    // Wave-26 round-3c: if zod validation fails inside PaymentTabs,
+    // _handleSubmit never runs and neither handleSubmit (success) nor
+    // handleError (catch) fires here — the button stays in "Saving"
+    // forever. Watch the form's isSubmitting flag; if false on the
+    // next tick, validation rejected the submit and we should reset.
     setTimeout(() => {
       if (formRef.current && !formRef.current.isSubmitting?.()) {
         setSaving(false);
@@ -122,7 +120,7 @@ export default function NewPaymentDialog({
               onClick={handleSave}
               disabled={!selectedRent?.occupant || saving}
             >
-              {saving ? t('Saving') : t('Save')}
+              {saving ? t('Saving') : t('Record')}
             </Button>
           </div>
         </DrawerFooter>
