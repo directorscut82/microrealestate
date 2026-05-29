@@ -858,5 +858,6 @@
   "Payment of {{amount}}€ recorded": "Καταγράφηκε καταβολή {{amount}}€",
   "Record": "Εκτέλεση",
   "Please complete required fields": "Παρακαλώ συμπληρώστε τα υποχρεωτικά πεδία",
-  "Date required when amount > 0": "Η ημερομηνία είναι υποχρεωτική όταν το ποσό > 0"
+  "Date required when amount > 0": "Η ημερομηνία είναι υποχρεωτική όταν το ποσό > 0",
+  "Partial": "Μερική"
 }

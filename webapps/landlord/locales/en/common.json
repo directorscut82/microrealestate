@@ -809,5 +809,6 @@
   "Payment of {{amount}}€ recorded": "Payment of {{amount}}€ recorded",
   "Record": "Record",
   "Please complete required fields": "Please complete required fields",
-  "Date required when amount > 0": "Date required when amount > 0"
+  "Date required when amount > 0": "Date required when amount > 0",
+  "Partial": "Partial"
 }
