@@ -6,7 +6,7 @@ import {
 import { Card, CardContent, CardHeader } from '../ui/card';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '../ui/drawer';
 import { LuChevronDown, LuChevronsUpDown, LuPencil } from 'react-icons/lu';
-import React, { useCallback, useContext, useEffect, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { cn, getPeriod } from '../../utils';
 import { fetchTenantRents } from '../../utils/restcalls';
@@ -35,11 +35,13 @@ function RentListItem({ rent, tenant, onClick }) {
   //   - past:    muted bg, normal border (completed)
   //   - current: 2px primary ring + stronger bg + "Current" badge
   //   - future:  reduced opacity + dashed border + bold "(estimate)" label
+  // Wave-26 (4): current month uses a primary tint (subtle but obvious)
+  // instead of the ring outline. Past stays muted, future stays dashed +
+  // faded. The "Τρέχων" badge in the header makes the state explicit too.
   const cardClass = cn(
     'p-2 cursor-pointer transition-shadow',
     relation === 'past' && 'bg-marble-tint/40 border-stone-line',
-    relation === 'current' &&
-      'bg-marble-tint/10 border-primary ring-2 ring-primary/40 shadow-sm',
+    relation === 'current' && 'bg-primary/10 border-primary/40',
     relation === 'future' &&
       'border-dashed border-stone-line/70 opacity-60 hover:opacity-90'
   );
@@ -53,7 +55,11 @@ function RentListItem({ rent, tenant, onClick }) {
   );
 
   return (
-    <Card className={cardClass} onClick={handleClick}>
+    <Card
+      className={cardClass}
+      onClick={handleClick}
+      data-current-tile={relation === 'current' ? 'true' : undefined}
+    >
       <CardHeader className="flex flex-row justify-between items-center">
         <div className="text-xl flex items-baseline gap-2">
           <span>{getPeriod(t, rent.term, tenant.occupant.frequency)}</span>
@@ -146,6 +152,25 @@ function RentHistory({ tenantId }) {
     fetchRents();
   }, [fetchRents]);
 
+  // Wave-26 (3): when the dialog opens (or new rent data loads), scroll
+  // the current-month tile into view so the landlord doesn't have to
+  // hunt for it. The tile carries data-current-tile="true"; we find it
+  // inside the scroll container and center it.
+  const scrollContainerRef = useRef(null);
+  useEffect(() => {
+    if (!tenant || loading) return;
+    // Wait one frame for the rendered DOM to include the marked tile.
+    const id = requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      const target = container.querySelector('[data-current-tile="true"]');
+      if (target && typeof target.scrollIntoView === 'function') {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [tenant, loading]);
+
   const handleAccordionChange = (year) => () => {
     setExpandedYear(expandedYear === year ? false : year);
   };
@@ -191,7 +216,7 @@ function RentHistory({ tenantId }) {
               </div>
             )}
           </div>
-          <div className="overflow-y-auto p-4">
+          <div ref={scrollContainerRef} className="overflow-y-auto p-4">
             {rentYears.map((year) => {
               return (
                 <Collapsible

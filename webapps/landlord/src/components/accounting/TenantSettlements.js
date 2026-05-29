@@ -10,19 +10,34 @@ import useTranslation from 'next-translate/useTranslation';
 
 const months = moment.localeData().months();
 
-function SettlementList({ month, tenantId, settlements }) {
+function SettlementList({ month, tenantId, settlements, notes }) {
   const { t } = useTranslation('common');
 
   const hasSettlements = !!settlements?.length;
   const monthName = months[month][0].toUpperCase() + months[month].slice(1);
+  // Wave-26 (5): rent-level notes for this month — rent.description (private),
+  // notepromo (printed on receipts as discount reason), noteextracharge
+  // (printed as extra-charge reason). Concatenated into a single readable
+  // block. Each line prefixed with its kind so the landlord knows what's
+  // landlord-only vs tenant-facing.
+  const noteLines = [];
+  if (notes?.description) {
+    noteLines.push({ kind: t('Note'), text: notes.description });
+  }
+  if (notes?.notepromo) {
+    noteLines.push({ kind: t('Discount'), text: notes.notepromo });
+  }
+  if (notes?.noteextracharge) {
+    noteLines.push({ kind: t('Extra charge'), text: notes.noteextracharge });
+  }
   return (
-    <div className={cn('grid grid-cols-5 border-b first:border-t')}>
-      <div className="text-muted-foreground md:text-lg border-l border-r col-span-2 md:col-span-2 px-4 py-2">
+    <div className={cn('grid grid-cols-6 border-b first:border-t')}>
+      <div className="text-muted-foreground md:text-lg border-l border-r col-span-2 md:col-span-1 px-4 py-2">
         {monthName}
       </div>
       <div
         className={cn(
-          'flex flex-col gap-2 items-center justify-end col-span-3 px-4 py-2 border-r md:flex-row md:col-span-3 md:gap-8',
+          'flex flex-col gap-2 items-center justify-end col-span-2 px-4 py-2 border-r md:flex-row md:col-span-3 md:gap-8',
           !hasSettlements ? 'bg-muted' : ''
         )}
       >
@@ -41,6 +56,18 @@ function SettlementList({ month, tenantId, settlements }) {
               ) : null;
             })
           : null}
+      </div>
+      <div className="col-span-2 px-4 py-2 border-r text-xs text-muted-foreground space-y-1">
+        {noteLines.length > 0 ? (
+          noteLines.map((n, i) => (
+            <div key={i} className="leading-snug">
+              <span className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground/80 mr-1">
+                {n.kind}
+              </span>
+              <span>{n.text}</span>
+            </div>
+          ))
+        ) : null}
       </div>
     </div>
   );
@@ -94,6 +121,7 @@ export default function TenantSettlements({
                     tenantId={settlement.tenantId}
                     month={index}
                     settlements={settlement.settlements[index]}
+                    notes={settlement.notesByMonth?.[index]}
                   />
                 );
               })}
