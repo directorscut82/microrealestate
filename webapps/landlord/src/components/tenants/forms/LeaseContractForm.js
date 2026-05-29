@@ -136,66 +136,158 @@ function Section({ label, visible = true, children }) {
   );
 }
 
-function hasCustomDates(property, beginDate, endDate) {
-  if (property.entryDate && property.entryDate !== beginDate) return true;
-  if (property.exitDate && property.exitDate !== endDate) return true;
-  for (const exp of property.expenses || []) {
-    if (exp.beginDate && exp.beginDate !== beginDate) return true;
-    if (exp.endDate && exp.endDate !== endDate) return true;
-  }
-  return false;
-}
-
-function PropertyDates({ index, property, beginDate, endDate, readOnly, register, setValue, t }) {
-  const custom = hasCustomDates(property, beginDate, endDate);
-  const [open, setOpen] = useState(custom);
+// Wave-26: simplified property-level handover dates collapsible.
+//   - Renders ONLY the property entry/exit dates (no more duplicate per-
+//     expense inputs — each expense manages its own dates inside its own
+//     card now).
+//   - Closed by default. Auto-opens only when current values differ from
+//     the lease's own begin/end (i.e. there's actually a handover gap).
+function PropertyHandoverDates({ index, property, beginDate, endDate, readOnly, register, t }) {
+  const custom =
+    (property.entryDate && property.entryDate !== beginDate) ||
+    (property.exitDate && property.exitDate !== endDate);
+  const [open, setOpen] = useState(!!custom);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground mt-2 mb-1" data-cy={`customizeDates-${index}`}>
+        <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground -ml-2" data-cy={`customizeDates-${index}`}>
           {open ? <LuChevronDown className="size-3 mr-1" /> : <LuChevronRight className="size-3 mr-1" />}
-          {t('Customize dates')}
+          {t('Mid-lease handover dates')}
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        {/* Expenses */}
-        {property.expenses?.map((expense, ei) => (
-          <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
-            <div className="flex justify-between items-center mb-1">
-              <div className="text-sm font-medium">{t('Expense #{{count}}', { count: ei + 1 })}</div>
-              {!readOnly && property.expenses.length > 1 && (
-                <Button type="button" variant="ghost" size="icon" onClick={() => {
-                  const exps = [...property.expenses];
-                  exps.splice(ei, 1);
-                  setValue(`properties.${index}.expenses`, exps);
-                }}><LuTrash2 className="size-3" /></Button>
-              )}
-            </div>
-            <div className="sm:flex sm:gap-2">
-              <div className="space-y-1 flex-1">
-                <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('Start date')}</Label>
-                <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
-              </div>
-              <div className="space-y-1 flex-1">
-                <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('End date')}</Label>
-                <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
-              </div>
-            </div>
-          </div>
-        ))}
-        <div className="sm:flex sm:gap-2 mt-2">
+        <p className="text-xs text-muted-foreground mb-2 ml-1">
+          {t(
+            "Defaults to the lease's start and end. Set only if this property's occupancy starts later or ends earlier than the lease."
+          )}
+        </p>
+        <div className="sm:flex sm:gap-2">
           <div className="space-y-2 flex-1">
-            <Label htmlFor={`properties.${index}.entryDate`}>{t('Entry date')}</Label>
+            <Label htmlFor={`properties.${index}.entryDate`}>{t('Occupancy starts')}</Label>
             <Input id={`properties.${index}.entryDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.entryDate`)} />
           </div>
           <div className="space-y-2 flex-1">
-            <Label htmlFor={`properties.${index}.exitDate`}>{t('Exit date')}</Label>
+            <Label htmlFor={`properties.${index}.exitDate`}>{t('Occupancy ends')}</Label>
             <Input id={`properties.${index}.exitDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.exitDate`)} />
           </div>
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+// Wave-26: each expense renders as a self-contained card with title /
+// amount / explicit Frequency dropdown, plus a "Custom date range"
+// collapsible (closed by default) for when this expense applies only to a
+// sub-period of the lease. The Frequency dropdown replaces the silent
+// "[One-time]"/"[Monthly]" badge that previously toggled based on whether
+// beginDate equaled endDate without giving the user any control.
+function ExpenseCard({
+  index,
+  ei,
+  expense,
+  property,
+  beginDate,
+  endDate,
+  readOnly,
+  register,
+  setValue,
+  t
+}) {
+  // "One-time" is when begin === end (a single day's charge). "Monthly" is
+  // anything spanning more than a day. We treat empty dates as "Monthly"
+  // and default to the lease range.
+  const isOneTime = !!(
+    expense.beginDate &&
+    expense.endDate &&
+    expense.beginDate === expense.endDate
+  );
+  const customRange =
+    (expense.beginDate && expense.beginDate !== beginDate) ||
+    (expense.endDate && expense.endDate !== endDate);
+  const [rangeOpen, setRangeOpen] = useState(!!customRange);
+
+  const onFrequencyChange = (val) => {
+    if (val === 'one-time') {
+      // Pin both dates to the lease begin so the user only has one date to
+      // think about; they can change it via the custom range collapsible.
+      setValue(`properties.${index}.expenses.${ei}.beginDate`, beginDate || '');
+      setValue(`properties.${index}.expenses.${ei}.endDate`, beginDate || '');
+    } else {
+      // Restore the lease range so the expense applies for the whole lease.
+      setValue(`properties.${index}.expenses.${ei}.beginDate`, beginDate || '');
+      setValue(`properties.${index}.expenses.${ei}.endDate`, endDate || '');
+    }
+  };
+
+  return (
+    <div className="ml-2 mb-2 p-3 border rounded-md bg-muted/30">
+      <div className="flex justify-between items-center mb-2">
+        <div className="text-sm font-medium">
+          {expense.title?.trim() || t('Recurring expense')}
+        </div>
+        {!readOnly && (
+          <Button type="button" variant="ghost" size="icon" onClick={() => {
+            const exps = [...property.expenses];
+            exps.splice(ei, 1);
+            setValue(`properties.${index}.expenses`, exps);
+          }}>
+            <LuTrash2 className="size-3" />
+          </Button>
+        )}
+      </div>
+      <div className="sm:flex sm:gap-2 mb-2">
+        <div className="space-y-1 flex-1">
+          <Label htmlFor={`properties.${index}.expenses.${ei}.title`}>{t('Title')}</Label>
+          <Input id={`properties.${index}.expenses.${ei}.title`} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.title`)} />
+        </div>
+        <div className="space-y-1 sm:w-1/4">
+          <Label htmlFor={`properties.${index}.expenses.${ei}.amount`}>{t('Amount')}</Label>
+          <Input id={`properties.${index}.expenses.${ei}.amount`} type="number" disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.amount`)} />
+        </div>
+        <div className="space-y-1 sm:w-1/4">
+          <Label>{t('Frequency')}</Label>
+          <Select
+            value={isOneTime ? 'one-time' : 'monthly'}
+            onValueChange={onFrequencyChange}
+            disabled={!property._id || readOnly}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="monthly">{t('Monthly')}</SelectItem>
+              <SelectItem value="one-time">{t('One-time')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <Collapsible open={rangeOpen} onOpenChange={setRangeOpen}>
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="text-xs text-muted-foreground -ml-2">
+            {rangeOpen ? <LuChevronDown className="size-3 mr-1" /> : <LuChevronRight className="size-3 mr-1" />}
+            {t('Custom date range')}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <p className="text-xs text-muted-foreground mb-2 ml-1">
+            {t(
+              "Defaults to the lease's range. Set only if this expense applies to a sub-period of the lease."
+            )}
+          </p>
+          <div className="sm:flex sm:gap-2">
+            <div className="space-y-1 flex-1">
+              <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('From')}</Label>
+              <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
+            </div>
+            <div className="space-y-1 flex-1">
+              <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('To')}</Label>
+              <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!property._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
   );
 }
 
@@ -385,65 +477,44 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
               </div>
             </div>
 
-            {/* Expenses - title and amount always visible */}
-            {properties?.[index]?.expenses?.map((expense, ei) => (
-              <div key={ei} className="ml-4 mb-2 p-3 border-l-2">
-                <div className="flex justify-between items-center mb-1">
-                  <div className="text-sm font-medium">
-                    {t('Recurring expense')} #{ei + 1}
-                    {expense.beginDate === expense.endDate && expense.beginDate ? (
-                      <span className="ml-2 text-xs text-muted-foreground bg-muted px-1 rounded">{t('One-time')}</span>
-                    ) : (
-                      <span className="ml-2 text-xs text-muted-foreground bg-muted px-1 rounded">{t('Monthly')}</span>
-                    )}
-                  </div>
-                  {!readOnly && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => {
-                      const exps = [...properties[index].expenses];
-                      exps.splice(ei, 1);
-                      setValue(`properties.${index}.expenses`, exps);
-                    }}><LuTrash2 className="size-3" /></Button>
-                  )}
-                </div>
-                <div className="sm:flex sm:gap-2">
-                  <div className="space-y-1 md:w-1/2">
-                    <Label htmlFor={`properties.${index}.expenses.${ei}.title`}>{t('Expense')}</Label>
-                    <Input id={`properties.${index}.expenses.${ei}.title`} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.title`)} />
-                  </div>
-                  <div className="space-y-1 md:w-1/6">
-                    <Label htmlFor={`properties.${index}.expenses.${ei}.amount`}>{t('Amount')}</Label>
-                    <Input id={`properties.${index}.expenses.${ei}.amount`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.amount`)} />
-                  </div>
-                  <div className="space-y-1 md:w-1/6">
-                    <Label htmlFor={`properties.${index}.expenses.${ei}.beginDate`}>{t('From')}</Label>
-                    <Input id={`properties.${index}.expenses.${ei}.beginDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.beginDate`)} />
-                  </div>
-                  <div className="space-y-1 md:w-1/6">
-                    <Label htmlFor={`properties.${index}.expenses.${ei}.endDate`}>{t('To')}</Label>
-                    <Input id={`properties.${index}.expenses.${ei}.endDate`} type="date" min={beginDate} max={endDate} disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.expenses.${ei}.endDate`)} />
-                  </div>
-                </div>
-              </div>
-            ))}
-            {!readOnly && (
-              <Button type="button" variant="ghost" size="sm" className="ml-4" onClick={() => {
-                const exps = [...(properties?.[index]?.expenses || []), { ...emptyExpense(), beginDate, endDate }];
-                setValue(`properties.${index}.expenses`, exps);
-              }}>
-              <LuPlus className="size-3 mr-1" />{t('Add monthly expense')}
-              </Button>
-            )}
-
-            <PropertyDates
+            <PropertyHandoverDates
               index={index}
               property={properties?.[index] || {}}
               beginDate={beginDate}
               endDate={endDate}
               readOnly={readOnly}
               register={register}
-              setValue={setValue}
               t={t}
             />
+
+            {properties?.[index]?.expenses?.length > 0 && (
+              <div className="text-xs text-muted-foreground mt-3 mb-2 uppercase tracking-wide">
+                {t('Recurring expenses')}
+              </div>
+            )}
+            {properties?.[index]?.expenses?.map((expense, ei) => (
+              <ExpenseCard
+                key={expense.key || ei}
+                index={index}
+                ei={ei}
+                expense={expense}
+                property={properties[index]}
+                beginDate={beginDate}
+                endDate={endDate}
+                readOnly={readOnly}
+                register={register}
+                setValue={setValue}
+                t={t}
+              />
+            ))}
+            {!readOnly && (
+              <Button type="button" variant="outline" size="sm" className="mt-1" onClick={() => {
+                const exps = [...(properties?.[index]?.expenses || []), { ...emptyExpense(), beginDate, endDate }];
+                setValue(`properties.${index}.expenses`, exps);
+              }}>
+              <LuPlus className="size-3 mr-1" />{t('Add expense')}
+              </Button>
+            )}
           </div>
         ))}
         {!readOnly && (
