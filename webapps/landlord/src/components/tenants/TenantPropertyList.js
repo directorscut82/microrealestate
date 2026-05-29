@@ -1,4 +1,3 @@
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import PropertyIcon from '../properties/PropertyIcon';
@@ -9,7 +8,7 @@ function Address({ address }) {
   }
 
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className="text-xs text-muted-foreground leading-snug">
       {address.street1}
       <br />
       {address.street2 ? (
@@ -28,34 +27,31 @@ function Address({ address }) {
 }
 
 export default function TenantPropertyList({ tenant, className }) {
+  if (!tenant.properties?.length) {
+    return null;
+  }
   return (
-    <div className={cn('flex flex-wrap gap-4 p-4 border rounded', className)}>
-      {tenant.properties?.map(({ property }) => (
-        <Popover key={property._id}>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="icon">
-              <PropertyIcon
-                key={property._id}
-                type={property.type}
-                className="size-8"
-              />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="p-4">
-            <div>
-              <p className="text-sm font-medium leading-none">
-                {property.name}
+    <div className={cn('flex flex-col gap-3 p-4 border rounded', className)}>
+      {tenant.properties.map(({ property }) => (
+        <div key={property._id} className="flex items-start gap-3">
+          {/* Icon stays as a Button so a future onClick is a one-line add. */}
+          <Button variant="outline" size="icon" className="shrink-0">
+            <PropertyIcon type={property.type} className="size-8" />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium leading-tight truncate">
+              {property.name}
+            </p>
+            {!!property.description && (
+              <p className="text-xs text-muted-foreground leading-snug mt-0.5">
+                {property.description}
               </p>
-              {!!property.description && (
-                <p className="text-xs text-muted-foreground">
-                  {property.description}
-                </p>
-              )}
-
+            )}
+            <div className="mt-1">
               <Address address={property.address} />
             </div>
-          </PopoverContent>
-        </Popover>
+          </div>
+        </div>
       ))}
     </div>
   );

@@ -30,12 +30,18 @@ function _termRelation(term) {
 function RentListItem({ rent, tenant, onClick }) {
   const { t } = useTranslation('common');
   const relation = _termRelation(rent.term);
-  // Past months: muted card background so completed history reads as
-  // "settled". Future months: subtle indication these are projections.
+  // Three apparent visual states so the landlord can tell at a glance which
+  // months are settled history, which is now, and which are projections:
+  //   - past:    muted bg, normal border (completed)
+  //   - current: 2px primary ring + stronger bg + "Current" badge
+  //   - future:  reduced opacity + dashed border + bold "(estimate)" label
   const cardClass = cn(
-    'p-2 cursor-pointer',
+    'p-2 cursor-pointer transition-shadow',
     relation === 'past' && 'bg-marble-tint/40 border-stone-line',
-    relation === 'future' && 'border-dashed border-stone-line/70'
+    relation === 'current' &&
+      'bg-marble-tint/10 border-primary ring-2 ring-primary/40 shadow-sm',
+    relation === 'future' &&
+      'border-dashed border-stone-line/70 opacity-60 hover:opacity-90'
   );
 
   const handleClick = useCallback(
@@ -51,8 +57,13 @@ function RentListItem({ rent, tenant, onClick }) {
       <CardHeader className="flex flex-row justify-between items-center">
         <div className="text-xl flex items-baseline gap-2">
           <span>{getPeriod(t, rent.term, tenant.occupant.frequency)}</span>
+          {relation === 'current' && (
+            <span className="text-label font-semibold text-primary uppercase tracking-wide">
+              {t('Current')}
+            </span>
+          )}
           {relation === 'future' && (
-            <span className="text-label text-ink-muted italic">
+            <span className="text-label font-semibold text-ink-muted italic">
               ({t('estimate')})
             </span>
           )}

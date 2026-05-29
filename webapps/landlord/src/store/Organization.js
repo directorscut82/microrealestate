@@ -28,6 +28,23 @@ export default class Organization {
     );
   }
 
+  // Wave-26: which email provider is wired (display only — used by the
+  // /rents channel-status banners so the user sees "Gmail" rather than
+  // "configured" alone). Returns null when no email provider is selected.
+  get emailProviderName() {
+    const tp = this.selected?.thirdParties;
+    if (tp?.gmail?.selected) return 'Gmail';
+    if (tp?.smtp?.selected) return 'SMTP';
+    if (tp?.mailgun?.selected) return 'Mailgun';
+    return null;
+  }
+
+  // Wave-26: SMS gateway parity. Backed by `thirdParties.smsGateway.selected`,
+  // populated via the same Settings → Third-party services form.
+  get canSendSms() {
+    return !!this.selected?.thirdParties?.smsGateway?.selected;
+  }
+
   get canUploadDocumentsInCloud() {
     return !!this.selected?.thirdParties?.b2;
   }
