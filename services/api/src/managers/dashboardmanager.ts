@@ -13,6 +13,157 @@ function _round(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/**
+ * Wave-26 round-3i: compute per-bucket paid amount for the dashboard pie
+ * chart's tooltip. The pie's bucket space is:
+ *   - 'rent'                       (rent.preTaxAmount)
+ *   - 'charges'                    (per-property extra charges, sum)
+ *   - 'building:<type>'            (each entry of buildingChargesByType)
+ *
+ * Each payment is applied to the buckets in this priority (oldest debt
+ * class first, matching AUTO_SPREAD_ORDER on the client):
+ *   1. Building charges (repair before non-repair, prorated within group)
+ *   2. Per-property charges
+ *   3. Rent
+ *
+ * If a payment carries `allocation[]` (wave-25), each allocation entry
+ * lands directly on its target bucket(s):
+ *   - allocation { category: 'rent' }      -> 'rent'
+ *   - allocation { category: 'expenses' }  -> per-property + non-repair
+ *                                            building (prorated)
+ *   - allocation { category: 'repairs' }   -> repair buildings (prorated)
+ *   - everything else (vat/previousBalance/extracharge) ignored — pie
+ *     chart doesn't visualise them.
+ *
+ * Returns an object keyed by bucket id with the amount paid against that
+ * bucket. Sum across buckets <= rent.total.payment (residual goes to
+ * non-pie categories).
+ */
+function _computePaidByBucket(rent: AnyRecord): AnyRecord {
+  const buckets: AnyRecord = {};
+  const baseRent = rent.total?.preTaxAmount || 0;
+  const charges = (rent.charges || []).reduce(
+    (s: number, c: AnyRecord) => s + (Number(c.amount) || 0),
+    0
+  );
+  const buildingByType: AnyRecord = {};
+  (rent.buildingCharges || []).forEach((c: AnyRecord) => {
+    const t = c.type || 'other';
+    buildingByType[t] = (buildingByType[t] || 0) + (Number(c.amount) || 0);
+  });
+
+  // Owed copy we'll decrement as we apply payments. Bucket key shape:
+  //   'rent', 'charges', 'building:<type>'
+  const owed: AnyRecord = { rent: baseRent, charges };
+  Object.entries(buildingByType).forEach(([t, v]) => {
+    owed[`building:${t}`] = v;
+  });
+
+  const _apply = (bucketKey: string, amount: number): number => {
+    const due = Number(owed[bucketKey]) || 0;
+    if (due <= 0 || amount <= 0) return 0;
+    const used = Math.min(due, amount);
+    owed[bucketKey] = due - used;
+    buckets[bucketKey] = (buckets[bucketKey] || 0) + used;
+    return used;
+  };
+
+  // Distribute `amount` across a set of bucket keys prorated by their
+  // current owed values. Returns the unused remainder.
+  const _applyProrated = (bucketKeys: string[], amount: number): number => {
+    let remaining = amount;
+    const totalDue = bucketKeys.reduce(
+      (s, k) => s + Math.max(0, Number(owed[k]) || 0),
+      0
+    );
+    if (totalDue <= 0 || remaining <= 0) return remaining;
+    // Multi-pass to consume rounding leftovers — first pass is prorated,
+    // second pass mops up any remainder by spilling oldest-first.
+    bucketKeys.forEach((k) => {
+      const due = Math.max(0, Number(owed[k]) || 0);
+      if (due <= 0) return;
+      const share = Math.min(due, (remaining * due) / totalDue);
+      const used = _apply(k, share);
+      remaining -= used;
+    });
+    // Spillover pass: any rounding loss spills onto remaining-due buckets.
+    if (remaining > 0.01) {
+      for (const k of bucketKeys) {
+        if (remaining <= 0) break;
+        const used = _apply(k, remaining);
+        remaining -= used;
+      }
+    }
+    return remaining;
+  };
+
+  const _applyToCategoryBucket = (
+    cat: string,
+    amount: number
+  ): number => {
+    if (amount <= 0) return 0;
+    if (cat === 'rent') {
+      return amount - _apply('rent', amount);
+    }
+    if (cat === 'expenses') {
+      // per-property + non-repair building, prorated
+      const keys = ['charges'].concat(
+        Object.keys(buildingByType)
+          .filter((t) => t !== 'repair')
+          .map((t) => `building:${t}`)
+      );
+      return _applyProrated(keys, amount);
+    }
+    if (cat === 'repairs') {
+      const keys = Object.keys(buildingByType)
+        .filter((t) => t === 'repair')
+        .map((t) => `building:${t}`);
+      return _applyProrated(keys, amount);
+    }
+    // vat / previousBalance / extracharge — pie chart doesn't visualise
+    // them so we don't try to map onto a bucket.
+    return amount;
+  };
+
+  // Apply payments. Auto-spread fallback applies oldest-debt first.
+  (rent.payments || []).forEach((p: AnyRecord) => {
+    let amount = Number(p?.amount) || 0;
+    if (amount <= 0) return;
+    const allocation = Array.isArray(p?.allocation) ? p.allocation : null;
+    if (allocation && allocation.length) {
+      allocation.forEach((a: AnyRecord) => {
+        const aCat = String(a?.category || '');
+        const aAmt = Number(a?.amount) || 0;
+        if (aAmt <= 0) return;
+        amount -= aAmt;
+        _applyToCategoryBucket(aCat, aAmt);
+      });
+      // If any leftover (allocation totals < payment.amount), auto-spread
+      // the residual.
+    }
+    if (amount > 0) {
+      // Auto-spread: building charges first (repair before non-repair),
+      // then per-property charges, then rent.
+      const repairKeys = Object.keys(buildingByType)
+        .filter((t) => t === 'repair')
+        .map((t) => `building:${t}`);
+      const nonRepairBuildingKeys = Object.keys(buildingByType)
+        .filter((t) => t !== 'repair')
+        .map((t) => `building:${t}`);
+      amount = _applyProrated(repairKeys, amount);
+      amount = _applyProrated(nonRepairBuildingKeys, amount);
+      amount = _applyProrated(['charges'], amount);
+      amount = _applyProrated(['rent'], amount);
+    }
+  });
+
+  // Round before returning.
+  Object.keys(buckets).forEach((k) => {
+    buckets[k] = _round(buckets[k]);
+  });
+  return buckets;
+}
+
 export async function all(req: Req, res: Res) {
   const now = moment.utc();
   const beginOfTheMonth = moment.utc(now).startOf('month');
@@ -274,6 +425,10 @@ export async function all(req: Req, res: Res) {
           acc[key].buildingChargesByType[type] =
             (acc[key].buildingChargesByType[type] || 0) + (amount as number);
         });
+        // Wave-26 round-3i: per-bucket paid amount, accurate down to the
+        // wire format so the dashboard tooltip can show real numbers
+        // instead of paidRatio estimates.
+        const tenantPaidByBucket = _computePaidByBucket(rent);
         acc[key].tenants.push({
           name: tenantName,
           paid: tenantPaid,
@@ -281,7 +436,8 @@ export async function all(req: Req, res: Res) {
           baseRent: tenantBaseRent,
           charges: tenantCharges,
           buildingCharges: tenantBuildingCharges,
-          buildingChargesByType: tenantBuildingByType
+          buildingChargesByType: tenantBuildingByType,
+          paidByBucket: tenantPaidByBucket
         });
       });
       return acc;
@@ -316,6 +472,10 @@ export async function all(req: Req, res: Res) {
               byType[type] = _round(amount as number);
             }
           );
+          const paidByBucket: AnyRecord = {};
+          Object.entries(t.paidByBucket || {}).forEach(([k, amount]) => {
+            paidByBucket[k] = _round(amount as number);
+          });
           return {
             ...t,
             paid: _round(t.paid),
@@ -323,7 +483,8 @@ export async function all(req: Req, res: Res) {
             baseRent: _round(t.baseRent),
             charges: _round(t.charges),
             buildingCharges: _round(t.buildingCharges),
-            buildingChargesByType: byType
+            buildingChargesByType: byType,
+            paidByBucket
           };
         })
       };
