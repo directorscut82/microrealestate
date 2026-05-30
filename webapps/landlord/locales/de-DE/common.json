@@ -798,5 +798,12 @@
   "Record": "Erfassen",
   "Please complete required fields": "Bitte erforderliche Felder ausfüllen",
   "Date required when amount > 0": "Datum erforderlich, wenn Betrag > 0",
-  "Partial": "Teilweise"
+  "Partial": "Teilweise",
+  "New payment": "Neue Zahlung",
+  "Add another payment": "Weitere Zahlung hinzufügen",
+  "Editing a recorded payment. Your changes are not saved until you press Record on the dialog.": "Bearbeitung einer erfassten Zahlung. Ihre Änderungen werden erst gespeichert, wenn Sie auf Erfassen klicken.",
+  "Apply edit": "Übernehmen",
+  "Delete this recorded payment?": "Diese erfasste Zahlung löschen?",
+  "Edited (will save when you press Record)": "Bearbeitet (wird mit Erfassen gespeichert)",
+  "Removed (will save when you press Record)": "Gelöscht (wird mit Erfassen gespeichert)"
 }

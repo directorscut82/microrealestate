@@ -859,5 +859,12 @@
   "Record": "Εκτέλεση",
   "Please complete required fields": "Παρακαλώ συμπληρώστε τα υποχρεωτικά πεδία",
   "Date required when amount > 0": "Η ημερομηνία είναι υποχρεωτική όταν το ποσό > 0",
-  "Partial": "Μερική"
+  "Partial": "Μερική",
+  "New payment": "Νέα καταβολή",
+  "Add another payment": "Προσθήκη νέας καταβολής",
+  "Editing a recorded payment. Your changes are not saved until you press Record on the dialog.": "Επεξεργασία εγγεγραμμένης καταβολής. Οι αλλαγές δεν αποθηκεύονται μέχρι να πατήσετε Εκτέλεση στο παράθυρο.",
+  "Apply edit": "Εφαρμογή αλλαγών",
+  "Delete this recorded payment?": "Διαγραφή αυτής της καταβολής;",
+  "Edited (will save when you press Record)": "Επεξεργασία εκκρεμεί (θα αποθηκευτεί με Εκτέλεση)",
+  "Removed (will save when you press Record)": "Διαγραφή εκκρεμεί (θα αποθηκευτεί με Εκτέλεση)"
 }
