@@ -18,7 +18,14 @@ export default function RentOverviewCard({ tenant }) {
             <NumberFormat value={tenant.rental} />
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">{t('Expenses')}</span>
+            <span className="text-muted-foreground">
+              {/* Wave-26 round-3m: 'Expenses' read as 'Έξοδα' (the
+                  landlord's own building expenses) which is the wrong
+                  word for the tenant view. From the tenant's standpoint
+                  these are extra charges beyond rent (utilities, common
+                  fees, etc.). */}
+              {t('Additional charges')}
+            </span>
             <NumberFormat value={tenant.expenses} />
           </div>
           {tenant.discount > 0 ? (

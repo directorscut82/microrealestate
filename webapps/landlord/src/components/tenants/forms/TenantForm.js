@@ -190,6 +190,31 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
   const isCompany = watch('isCompany');
   const stepperMode = tenant?.stepperMode;
 
+  // Wave-26 round-3m: deduplicate the co-tenants list against the primary
+  // tenant before rendering, so a single-renter case doesn't show the
+  // primary tenant as their own συνενοικιαστής. Drops entries whose
+  // ΑΦΜ matches the primary tenant's taxId, or whose normalized name
+  // matches the primary tenant's normalized name.
+  const visibleCoTenants = useMemo(() => {
+    const list = tenant?.coTenants || [];
+    if (!list.length) return [];
+    const primaryNames = new Set(
+      [
+        tenant?.name,
+        `${tenant?.firstName || ''} ${tenant?.lastName || ''}`
+      ]
+        .map(_normalizeName)
+        .filter(Boolean)
+    );
+    const primaryTaxId = tenant?.taxId || null;
+    return list.filter((ct) => {
+      if (primaryTaxId && ct?.taxId === primaryTaxId) return false;
+      const norm = _normalizeName(ct?.name || '');
+      if (norm && primaryNames.has(norm)) return false;
+      return true;
+    });
+  }, [tenant?.coTenants, tenant?.name, tenant?.firstName, tenant?.lastName, tenant?.taxId]);
+
   const _onSubmit = async (data) => {
     const fullName = `${data.firstName} ${data.lastName}`.trim();
     await onSubmit({
@@ -254,14 +279,18 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
           <Label htmlFor="taxId">{t('Tax ID')}</Label>
           <Input id="taxId" disabled={readOnly} {...register('taxId')} placeholder={t('e.g. ΑΦΜ')} />
         </div>
-        {tenant?.coTenants?.length > 0 && (
+        {visibleCoTenants.length > 0 && (
           <div className="space-y-2">
             <Label>{t('Co-tenants')}</Label>
             <div className="border rounded-md p-3 space-y-2">
-              {tenant.coTenants.map((ct, i) => (
+              {visibleCoTenants.map((ct, i) => (
                 <div key={i} className="text-sm flex justify-between">
                   <span>{ct.name}</span>
-                  <span className="text-muted-foreground">ΑΦΜ: {ct.taxId}</span>
+                  {ct.taxId ? (
+                    <span className="text-muted-foreground">
+                      ΑΦΜ: {ct.taxId}
+                    </span>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -306,7 +335,7 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
           (alternative residence, summer address, etc.) belongs in the per-
           contact `notes` field below. */}
 
-      <div className="pb-10 mt-6">
+      <div className="pb-10 mt-12">
         <div className="text-xl">{t('Contact details')}</div>
         <div className="text-muted-foreground text-sm">{t("The contacts will receive the invoices and will be able to access the tenant's portal")}</div>
         <Separator className="mt-1 mb-2" />
