@@ -50,6 +50,8 @@ const paymentSchema = z
       z.coerce.number().min(0).optional()
     ),
     date: z.string().optional(),
+    // 'levy' is no longer offered in the dropdown but the enum keeps it
+    // so legacy records re-saved through the dialog don't trip validation.
     type: z.enum(['cash', 'transfer', 'levy', 'cheque']),
     reference: z.string().optional()
   })
@@ -61,6 +63,22 @@ const paymentSchema = z
       return !!(date && date.length > 0);
     },
     { message: 'Date required when amount > 0', path: ['date'] }
+  )
+  .refine(
+    ({ amount, date }) => {
+      // Wave-26 round-3g: server (rentmanager.ts F3) rejects payment
+      // dates >7 days in the future. Surface this client-side so the
+      // user gets a clear field error instead of a generic toast on
+      // submit. Date is stored ISO YYYY-MM-DD inside the form.
+      if (!date || amount == null || amount <= 0) return true;
+      const parsed = moment(date, 'YYYY-MM-DD', true);
+      if (!parsed.isValid()) return true; // first refinement handles this
+      return !parsed.isAfter(moment().add(7, 'days'));
+    },
+    {
+      message: 'Payment date cannot be more than 7 days in the future',
+      path: ['date']
+    }
   );
 
 const schema = z.object({
@@ -75,7 +93,16 @@ const schema = z.object({
   notepromo: z.string().optional()
 });
 
-const emptyPayment = { amount: '', date: '', type: 'transfer', reference: '' };
+// Wave-26 round-3g: default the new-draft date to today (ISO). Without
+// this the user has to pop the calendar even when paying for a payment
+// they're recording right now, which is the >95% case.
+const _todayISO = () => moment().format('YYYY-MM-DD');
+const emptyPayment = () => ({
+  amount: '',
+  date: _todayISO(),
+  type: 'transfer',
+  reference: ''
+});
 
 // Wave-26 round-3f: the form's payments[] now holds DRAFTS only — new
 // payments the user is about to submit. Existing/saved payments are read
@@ -418,7 +445,12 @@ function SavedPaymentEditForm({ initial, paymentTypes, onCancel, onSave, t }) {
             </SelectTrigger>
             <SelectContent>
               {paymentTypes.itemList.map((pt) => (
-                <SelectItem key={pt.id} value={pt.value}>
+                <SelectItem
+                  key={pt.id}
+                  value={pt.value}
+                  disabled={pt.disabled}
+                  className={pt.disabled ? 'italic text-ink-muted' : undefined}
+                >
                   {pt.label}
                 </SelectItem>
               ))}
@@ -428,7 +460,15 @@ function SavedPaymentEditForm({ initial, paymentTypes, onCancel, onSave, t }) {
         {type !== 'cash' && (
           <div className="space-y-1">
             <Label>{t('Reference')}</Label>
-            <Input value={reference} onChange={(e) => setReference(e.target.value)} />
+            <Input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={
+                type === 'cheque'
+                  ? t('Cheque no.')
+                  : t('IBAN or transaction id')
+              }
+            />
           </div>
         )}
         <div className="space-y-1">
@@ -859,7 +899,14 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {paymentTypes.itemList.map((pt) => (
-                          <SelectItem key={pt.id} value={pt.value}>{pt.label}</SelectItem>
+                          <SelectItem
+                            key={pt.id}
+                            value={pt.value}
+                            disabled={pt.disabled}
+                            className={pt.disabled ? 'italic text-ink-muted' : undefined}
+                          >
+                            {pt.label}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -867,7 +914,15 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                   {payments?.[index]?.type !== 'cash' && (
                     <div className="space-y-1">
                       <Label htmlFor={`payments.${index}.reference`}>{t('Reference')}</Label>
-                      <Input id={`payments.${index}.reference`} {...register(`payments.${index}.reference`)} />
+                      <Input
+                        id={`payments.${index}.reference`}
+                        placeholder={
+                          payments?.[index]?.type === 'cheque'
+                            ? t('Cheque no.')
+                            : t('IBAN or transaction id')
+                        }
+                        {...register(`payments.${index}.reference`)}
+                      />
                     </div>
                   )}
                   <div className="space-y-1">
@@ -900,7 +955,7 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => append(emptyPayment)}
+              onClick={() => append(emptyPayment())}
               data-cy="addNewPayment"
             >
               <LuPlus className="size-4 mr-1" />

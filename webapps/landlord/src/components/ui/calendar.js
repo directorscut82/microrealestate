@@ -32,8 +32,12 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
           'h-9 w-9 p-0 font-normal aria-selected:opacity-100'
         ),
         day_range_end: 'day-range-end',
+        // Wave-26 round-3g: --primary is ink (near-black) so the selected
+        // day was almost invisible against the cream cell. Olive (success
+        // brand color) reads as "confirmed/affirmative" and stays legible
+        // in both light and dark themes.
         day_selected:
-          'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground',
+          'bg-olive text-white hover:bg-olive hover:text-white focus:bg-olive focus:text-white',
         day_today: 'bg-accent text-accent-foreground',
         day_outside:
           'day-outside text-muted-foreground opacity-50 aria-selected:bg-accent/50 aria-selected:text-muted-foreground aria-selected:opacity-30',
