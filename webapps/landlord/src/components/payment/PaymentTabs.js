@@ -451,6 +451,7 @@ function SavedPaymentEditForm({ initial, paymentTypes, onCancel, onSave, t }) {
               const iso = d ? moment(d, 'DD/MM/YYYY').format('YYYY-MM-DD') : '';
               setDate(iso);
             }}
+            paymentContext
           />
         </div>
         <div className="space-y-1">
@@ -934,6 +935,7 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                           shouldDirty: true
                         });
                       }}
+                      paymentContext
                     />
                   </div>
                   <div className="space-y-1">
