@@ -227,10 +227,19 @@ async function _getRentsDataByTerm(
     totalPaid: 0,
     totalNotPaid: 0
   };
+  // Wave-26 round-3o: trust the per-rent status that frontdata.toRentData
+  // computes. The previous classifier `totalAmount <= 0 || newBalance >= 0
+  // → paid` desynced from the row UI's status (set in frontdata.ts:217-247),
+  // because that one accounts for carry-forward retroactive settlement and
+  // direct-pay coverage, but the overview's raw-field heuristic does not.
+  // Result on past months: a partially-paid row would render with a yellow
+  // status dot but the header KPI counted them as 'paid' (and partial flag
+  // hid because countPartiallyPaid was 0). Now both surfaces share one
+  // source of truth.
   rents.reduce((acc: AnyRecord, rent: AnyRecord) => {
-    if (rent.totalAmount <= 0 || rent.newBalance >= 0) {
+    if (rent.status === 'paid') {
       acc.countPaid++;
-    } else if (rent.payment > 0) {
+    } else if (rent.status === 'partiallypaid') {
       acc.countPartiallyPaid++;
     } else {
       acc.countNotPaid++;

@@ -147,7 +147,7 @@ function _formatDate(d) {
 // components can be tested independently. See AllocationBlock.js and
 // SavedPaymentEditForm.js in the same directory.
 
-function PaymentTabs({ rent, onSubmit, onError }, ref) {
+function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) {
   const queryClient = useQueryClient();
   const { t } = useTranslation('common');
   const paymentTypes = usePaymentTypes();
@@ -621,7 +621,8 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                           shouldDirty: true
                         });
                       }}
-                      paymentContext
+                      paymentContext={!lockDateToToday}
+                      disabled={lockDateToToday}
                     />
                   </div>
                   <div className="space-y-1">
