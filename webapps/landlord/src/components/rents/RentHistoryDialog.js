@@ -77,7 +77,7 @@ function RentListItem({ rent, tenant, onClick }) {
         </div>
         <div>
           <Button variant="ghost" size="icon" onClick={handleClick}>
-            <LuPencil />
+            <LuPencil className="size-4" />
           </Button>
         </div>
       </CardHeader>
@@ -129,7 +129,11 @@ function YearTotals({ tenant, year }) {
       }
     });
     return { future: false, collected, owed };
-  }, [tenant, year]);
+    // Wave-26 round-3o: depend on the rents array specifically, not on
+    // the tenant object reference. If a parent ever memoises `tenant`
+    // (a routine perf optimisation), shallow [tenant, year] would go
+    // stale even when tenant.rents updates with new payment data.
+  }, [tenant?.rents, year]);
 
   if (!totals || totals.future) return null;
 
@@ -137,10 +141,16 @@ function YearTotals({ tenant, year }) {
     <span className="ml-auto flex items-baseline gap-3 text-xs font-normal tabular-nums">
       <span className="text-olive">
         {t('Collected')}:{' '}
-        <NumberFormat value={totals.collected} />
+        {/* Wave-26 round-3o: showZero is REQUIRED here. Without it
+            NumberFormat renders '—' for 0, which is confusing on a
+            year that has tenants with all rents fully owed-but-not-
+            paid (collected=0) or all rents past-paid-and-zero-owed.
+            We want explicit '0,00 €' so the landlord knows the
+            number rendered, not a missing-data placeholder. */}
+        <NumberFormat value={totals.collected} showZero />
       </span>
       <span className={totals.owed > 0.005 ? 'text-oxide' : 'text-ink-muted'}>
-        {t('Owed')}: <NumberFormat value={totals.owed} />
+        {t('Owed')}: <NumberFormat value={totals.owed} showZero />
       </span>
     </span>
   );

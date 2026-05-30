@@ -22,7 +22,10 @@ export default function NewPaymentDialog({
   open,
   setOpen,
   data: defaultRent,
-  onClose
+  onClose,
+  // Wave-26 round-3o: when true, the date picker on payment drafts is
+  // disabled and locked to today. Used by the dashboard shortcut.
+  lockDateToToday = false
 }) {
   const { t } = useTranslation('common');
   const [selectedRent, setSelectedRent] = useState();
@@ -107,6 +110,7 @@ export default function NewPaymentDialog({
               rent={selectedRent}
               onSubmit={handleSubmit}
               onError={handleError}
+              lockDateToToday={lockDateToToday}
             />
           ) : null}
         </div>
