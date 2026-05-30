@@ -97,8 +97,18 @@ function MonthlyBreakdown({ rentAmounts }) {
   const hasMultiple = rentAmounts.preTaxAmounts.length > 1;
   const hasCharges = rentAmounts.charges.length > 0;
   const hasBuildingCharges = rentAmounts.buildingCharges.length > 0;
+  // Wave-26 round-3k: also show discount + extracharge lines so all
+  // contributors to the rent total are visible in one hover.
+  const hasDiscount = Number(rentAmounts.discount) < 0;
+  const hasExtra = Number(rentAmounts.additionalCosts) > 0;
 
-  if (!hasMultiple && !hasCharges && !hasBuildingCharges) {
+  if (
+    !hasMultiple &&
+    !hasCharges &&
+    !hasBuildingCharges &&
+    !hasDiscount &&
+    !hasExtra
+  ) {
     return null;
   }
 
@@ -130,6 +140,24 @@ function MonthlyBreakdown({ rentAmounts }) {
           <NumberFormat value={charge.amount} className="whitespace-nowrap" />
         </div>
       ))}
+      {hasDiscount && (
+        <div className="flex justify-between gap-4 text-olive">
+          <span className="truncate">{t('Discount')}</span>
+          <NumberFormat
+            value={rentAmounts.discount}
+            className="whitespace-nowrap"
+          />
+        </div>
+      )}
+      {hasExtra && (
+        <div className="flex justify-between gap-4 text-oxide">
+          <span className="truncate">{t('Additional cost')}</span>
+          <NumberFormat
+            value={rentAmounts.additionalCosts}
+            className="whitespace-nowrap"
+          />
+        </div>
+      )}
       <Separator className="my-0.5" />
       <div className="flex justify-between gap-4 font-medium">
         <span>{t('Total')}</span>
@@ -332,7 +360,9 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
   const hasBreakdown =
     rentAmounts.preTaxAmounts.length > 1 ||
     rentAmounts.charges.length > 0 ||
-    rentAmounts.buildingCharges.length > 0;
+    rentAmounts.buildingCharges.length > 0 ||
+    Number(rentAmounts.discount) < 0 ||
+    Number(rentAmounts.additionalCosts) > 0;
 
   return (
     <>
