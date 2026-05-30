@@ -452,6 +452,7 @@
   "Payment #{{count}}": "Payment #{{count}}",
   "Payment Receipts": "Payment Receipts",
   "Payment date cannot be more than 7 days in the future": "Payment date cannot be more than 7 days in the future",
+  "Payment date is after this rent month. Switch to that month’s rents page to record against it.": "Payment date is after this rent month. Switch to that month’s rents page to record against it.",
   "Payment date is before this rent month. Switch to that month’s rents page to record against it.": "Payment date is before this rent month. Switch to that month’s rents page to record against it.",
   "Payment fills the oldest unpaid category first, then the next.": "Payment fills the oldest unpaid category first, then the next.",
   "Payment of {{amount}}€ recorded": "Payment of {{amount}}€ recorded",

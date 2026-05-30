@@ -473,6 +473,7 @@
   "Payment #{{count}}": "Καταβολή #{{count}}",
   "Payment Receipts": "Αποδείξεις Πληρωμής",
   "Payment date cannot be more than 7 days in the future": "Η ημερομηνία καταβολής δεν μπορεί να είναι πέραν των 7 ημερών στο μέλλον",
+  "Payment date is after this rent month. Switch to that month’s rents page to record against it.": "Η ημερομηνία καταβολής είναι μετά τον μήνα ενοικίου. Άλλαξε σελίδα ενοικίων για να την καταχωρήσεις εκεί.",
   "Payment date is before this rent month. Switch to that month’s rents page to record against it.": "Η ημερομηνία καταβολής είναι πριν τον μήνα ενοικίου. Άλλαξε σελίδα ενοικίων για να την καταχωρήσεις εκεί.",
   "Payment fills the oldest unpaid category first, then the next.": "Η πληρωμή καλύπτει πρώτα την παλαιότερη οφειλή και μετά την επόμενη.",
   "Payment of {{amount}}€ recorded": "Καταγράφηκε καταβολή {{amount}}€",
