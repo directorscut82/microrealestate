@@ -64,7 +64,10 @@ const paymentSchema = z
   );
 
 const schema = z.object({
-  payments: z.array(paymentSchema).min(1),
+  // Wave-26 round-3f: was min(1). Form's payments[] is now drafts-only;
+  // empty array is legitimate (user is just editing notes/discount, or
+  // pressing Record to apply staged edits/deletes to saved tiles).
+  payments: z.array(paymentSchema),
   description: z.string().optional(),
   extracharge: z.coerce.number().min(0).optional(),
   noteextracharge: z.string().optional(),
