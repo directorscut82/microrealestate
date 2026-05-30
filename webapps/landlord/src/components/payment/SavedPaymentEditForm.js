@@ -6,9 +6,11 @@ import {
   SelectValue
 } from '../ui/select';
 import { Button } from '../ui/button';
+import { Collapse } from '../ui/collapse';
 import { DatePickerInput } from '../ui/date-picker-input';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Textarea } from '../ui/textarea';
 import moment from 'moment';
 import { useState } from 'react';
 
@@ -39,6 +41,34 @@ export default function SavedPaymentEditForm({
   const [date, setDate] = useState(isoFromInitial);
   const [type, setType] = useState(initial.type || 'transfer');
   const [reference, setReference] = useState(initial.reference || '');
+  // Wave-26 round-3q: per-payment note / discount / extra-charge are
+  // editable here too. Without these the saved-tile edit flow used to
+  // SILENTLY WIPE any attached promo/extracharge that the user had
+  // recorded on the original draft.
+  const [description, setDescription] = useState(initial.description || '');
+  const [promo, setPromo] = useState(
+    initial.promo != null && Number(initial.promo) > 0
+      ? String(initial.promo)
+      : ''
+  );
+  const [notepromo, setNotepromo] = useState(initial.notepromo || '');
+  const [extracharge, setExtracharge] = useState(
+    initial.extracharge != null && Number(initial.extracharge) > 0
+      ? String(initial.extracharge)
+      : ''
+  );
+  const [noteextracharge, setNoteextracharge] = useState(
+    initial.noteextracharge || ''
+  );
+  // Collapsibles default open when the corresponding field already has a
+  // value, so the user immediately sees what was attached.
+  const [noteOpen, setNoteOpen] = useState(!!initial.description);
+  const [discountOpen, setDiscountOpen] = useState(
+    Number(initial.promo) > 0
+  );
+  const [extraOpen, setExtraOpen] = useState(
+    Number(initial.extracharge) > 0
+  );
 
   const canSave =
     Number(amount) > 0 &&
@@ -110,6 +140,67 @@ export default function SavedPaymentEditForm({
           />
         </div>
       </div>
+
+      {/* Per-payment note / discount / extra-charge — collapsibles default
+          open when the value already exists, closed otherwise. */}
+      <div className="mt-3 space-y-2">
+        <Collapse title={t('Note')} open={noteOpen} onOpenChange={setNoteOpen}>
+          <div className="space-y-1">
+            <Label>{t('Note (only visible to landlord)')}</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+        </Collapse>
+        <Collapse
+          title={t('Discount')}
+          open={discountOpen}
+          onOpenChange={setDiscountOpen}
+        >
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label>{t('Amount')}</Label>
+              <Input
+                type="number"
+                value={promo}
+                onChange={(e) => setPromo(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>{t('Description (visible to tenant)')}</Label>
+              <Textarea
+                value={notepromo}
+                onChange={(e) => setNotepromo(e.target.value)}
+              />
+            </div>
+          </div>
+        </Collapse>
+        <Collapse
+          title={t('Additional cost')}
+          open={extraOpen}
+          onOpenChange={setExtraOpen}
+        >
+          <div className="space-y-2">
+            <div className="space-y-1">
+              <Label>{t('Amount')}</Label>
+              <Input
+                type="number"
+                value={extracharge}
+                onChange={(e) => setExtracharge(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>{t('Description (visible to tenant)')}</Label>
+              <Textarea
+                value={noteextracharge}
+                onChange={(e) => setNoteextracharge(e.target.value)}
+              />
+            </div>
+          </div>
+        </Collapse>
+      </div>
+
       <div className="flex justify-end gap-2 mt-3">
         <Button type="button" variant="outline" size="sm" onClick={onCancel}>
           {t('Cancel')}
@@ -124,7 +215,11 @@ export default function SavedPaymentEditForm({
               date: moment(date, 'YYYY-MM-DD').format('DD/MM/YYYY'),
               type,
               reference: type === 'cash' ? '' : reference,
-              description: initial.description || ''
+              description,
+              promo: Number(promo) || 0,
+              notepromo,
+              extracharge: Number(extracharge) || 0,
+              noteextracharge
             })
           }
         >
