@@ -215,25 +215,29 @@ export default function YearFigures({ className, dashboardData }) {
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
             />
+            {/* Wave-26 round-3t: paid (dark) renders first so it sits
+                on the LEFT of the stacked bar, owed (light) on the
+                right. Matches the pie's left=εισπράξεις / right=οφειλές
+                spatial mental model. */}
             <Bar
-              dataKey="notPaid"
-              fill={CHART_UNPAID}
+              dataKey="paid"
+              fill={CHART_PAID}
               stackId="stack"
               cursor="pointer"
               label={{
                 position: 'left',
                 fill: 'var(--color-ink)',
-                formatter: (value) => (value < 0 ? formatNumber(value) : ''),
+                formatter: (value) => (value > 0 ? formatNumber(value) : ''),
                 className: 'tracking-tight text-[10px] md:text-[11px] font-mono'
               }}
-              stroke={CHART_UNPAID_BORDER}
+              stroke={CHART_PAID_BORDER}
               radius={[4, 0, 0, 4]}
               barSize={20}
-              onClick={handleClick('notPaid')}
+              onClick={handleClick('paid')}
             />
             <Bar
-              dataKey="paid"
-              fill={CHART_PAID}
+              dataKey="notPaid"
+              fill={CHART_UNPAID}
               stackId="stack"
               cursor="pointer"
               label={{
@@ -242,10 +246,10 @@ export default function YearFigures({ className, dashboardData }) {
                 formatter: (value) => (value > 0 ? formatNumber(value) : ''),
                 className: 'tracking-tight text-[10px] md:text-[11px] font-mono'
               }}
-              stroke={CHART_PAID_BORDER}
+              stroke={CHART_UNPAID_BORDER}
               radius={[0, 4, 4, 0]}
               barSize={20}
-              onClick={handleClick('paid')}
+              onClick={handleClick('notPaid')}
             />
             <ReferenceLine x={0} stroke="oklch(88% 0.008 85)" />
           </BarChart>
