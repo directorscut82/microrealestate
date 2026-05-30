@@ -335,9 +335,12 @@ async function _getRentsDataByTerm(
     acc.totalToPay += rent.totalToPay;
     acc.totalPaid += rent.payment;
     acc.totalNotPaid -= rent.newBalance < 0 ? rent.newBalance : 0;
-    // round-3r: carry-in arrears (negative balance) summed unsigned.
-    if (rent.balance < 0) {
-      acc.totalCarriedBalance -= rent.balance;
+    // Wave-26 round-3s: carry-in arrears. Convention in this codebase
+    // is `rent.balance > 0` means tenant owes from prior months
+    // (carry-in debt). Round-3r had this inverted as `< 0` which is
+    // why the KPI parens never rendered.
+    if (rent.balance > 0) {
+      acc.totalCarriedBalance += rent.balance;
     }
     return acc;
   }, overview);

@@ -184,16 +184,15 @@ export default function YearFigures({ className, dashboardData }) {
               verticalAlign="top"
               content={() => (
                 <div className="flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-label text-ink-soft mb-6">
+                  {/* Wave-26 round-3s: legend swatches use the exact
+                      bar fill colors so legend ↔ bars match pixel-for-
+                      pixel. Also re-used by the pie chart legend. */}
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
-                      style={{ background: 'oklch(80% 0.030 245)' }}
+                      style={{ background: CHART_UNPAID }}
                       aria-hidden="true"
                     />
-                    {/* Wave-26 round-3r: 'Outstanding' on this bar
-                        means month-only shortfall (excludes carry).
-                        Subscript distinguishes from cumulative
-                        meaning of the pie's Outstanding swatch. */}
                     <span>
                       {t('Outstanding')}{' '}
                       <span className="text-ink-muted">
@@ -204,7 +203,7 @@ export default function YearFigures({ className, dashboardData }) {
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
-                      style={{ background: 'oklch(50% 0.090 245)' }}
+                      style={{ background: CHART_PAID }}
                       aria-hidden="true"
                     />
                     <span>{t('Receipts')}</span>
