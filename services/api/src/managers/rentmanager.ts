@@ -482,6 +482,14 @@ async function _updateByTerm(
           type: payment.type || '',
           reference: payment.reference || '',
           description: payment.description || '',
+          // Wave-26 round-3j: per-payment promo/extracharge persisted on
+          // the payment object so the UI can render them on the matching
+          // saved tile (and recompute the rent summary on next read).
+          // Always include the keys (with 0/'' fallback) for shape stability.
+          promo: Number(payment.promo) || 0,
+          notepromo: payment.notepromo || '',
+          extracharge: Number(payment.extracharge) || 0,
+          noteextracharge: payment.noteextracharge || '',
           // Wave-25: optional allocation, normalised. Empty array is dropped
           // so legacy reads that key off "allocation present" don't trip.
           ...(Array.isArray(payment.allocation) && payment.allocation.length
@@ -495,19 +503,49 @@ async function _updateByTerm(
         }));
     }
 
-    if (paymentData.promo) {
-      // Wave-20 F6: cap the promo against the rent's pre-promo grand total
-      // so we never produce a negative invoice. Without this guard, a
-      // €1000 promo on €600 rent silently emits totalAmount=-100, which
-      // then poisons accounting/dashboard/CSV reports. Look up the rent
-      // for the requested term in the input contract; the user-facing
-      // grand total is the pre-promo value (settlement discounts have
-      // not yet been added at this point).
-      const targetTerm = Number(term);
-      const targetRent = (occupant.rents || []).find(
-        (r: AnyRecord) => Number(r.term) === targetTerm
-      );
-      const grandTotalPrePromo = Number(targetRent?.total?.grandTotal) || 0;
+    // Wave-26 round-3j: per-payment description/promo/extracharge fields.
+    // The dialog now records these inline with each payment draft so the
+    // form does not re-show stored values from a previous reopen. We push
+    // one settlements.discounts/debts entry per payment that carries them,
+    // tagged with that payment's date so the UI can render the attached
+    // description on the correct saved tile.
+    //
+    // Backward compat: paymentData.promo / paymentData.extracharge /
+    // paymentData.description (rent-level) are still honored if the
+    // payment-level fields are absent on every entry.
+    const _vatFactor = contract.vatRate ? 1 / (1 + contract.vatRate) : 1;
+    const targetTerm = Number(term);
+    const targetRent = (occupant.rents || []).find(
+      (r: AnyRecord) => Number(r.term) === targetTerm
+    );
+    const grandTotalPrePromo = Number(targetRent?.total?.grandTotal) || 0;
+
+    let perPaymentTotalPromoGross = 0;
+    (paymentData.payments || []).forEach((p: AnyRecord) => {
+      perPaymentTotalPromoGross += Number(p?.promo) || 0;
+    });
+
+    if (perPaymentTotalPromoGross > 0) {
+      // Wave-20 F6 cap, summed across per-payment promos.
+      if (
+        grandTotalPrePromo > 0 &&
+        perPaymentTotalPromoGross > grandTotalPrePromo + 0.005
+      ) {
+        throw new ServiceError(
+          `Total promo (${perPaymentTotalPromoGross}) cannot exceed rent grand total of ${grandTotalPrePromo}`,
+          422
+        );
+      }
+      (paymentData.payments || []).forEach((p: AnyRecord) => {
+        const promo = Number(p?.promo) || 0;
+        if (promo <= 0) return;
+        settlements.discounts.push({
+          origin: 'settlement',
+          description: p?.notepromo || '',
+          amount: promo * _vatFactor
+        });
+      });
+    } else if (paymentData.promo) {
       const promoGross = Number(paymentData.promo);
       if (grandTotalPrePromo > 0 && promoGross > grandTotalPrePromo + 0.005) {
         throw new ServiceError(
@@ -515,36 +553,42 @@ async function _updateByTerm(
           422
         );
       }
-      // The user enters a VAT-inclusive amount. We store the net-of-VAT
-      // amount: task 4 (4_vats.ts) adds a VAT line for settlement
-      // discounts, and frontdata.ts:toRentData multiplies the net back to
-      // gross for display. Net effect on grandTotal: -original_promo.
       settlements.discounts.push({
         origin: 'settlement',
         description: paymentData.notepromo || '',
-        amount:
-          Number(paymentData.promo) *
-          (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
+        amount: Number(paymentData.promo) * _vatFactor
       });
     }
 
-    if (paymentData.extracharge) {
-      // Same net-of-VAT storage as promo. KNOWN ISSUE: task 4 does NOT
-      // apply VAT to debts (they are treated as carried-forward
-      // grandTotal amounts), so the actual grandTotal increment is
-      // extra/(1+vat) while the UI displays `extra`. Net under-bill of
-      // ~vat% on the displayed extracharge. Out of scope for this fix
-      // wave — would require either applying VAT to debts in task 4 OR
-      // changing the storage convention. See bug-hunt notes H7.
+    let perPaymentTotalExtraGross = 0;
+    (paymentData.payments || []).forEach((p: AnyRecord) => {
+      perPaymentTotalExtraGross += Number(p?.extracharge) || 0;
+    });
+
+    if (perPaymentTotalExtraGross > 0) {
+      (paymentData.payments || []).forEach((p: AnyRecord) => {
+        const extra = Number(p?.extracharge) || 0;
+        if (extra <= 0) return;
+        settlements.debts.push({
+          description: p?.noteextracharge || '',
+          amount: extra * _vatFactor
+        });
+      });
+    } else if (paymentData.extracharge) {
       settlements.debts.push({
         description: paymentData.noteextracharge || '',
-        amount:
-          Number(paymentData.extracharge) *
-          (contract.vatRate ? 1 / (1 + contract.vatRate) : 1)
+        amount: Number(paymentData.extracharge) * _vatFactor
       });
     }
 
-    if (paymentData.description) {
+    // Description: aggregate per-payment notes (one per line). Rent-level
+    // description still honored if no per-payment notes exist.
+    const perPaymentNotes = (paymentData.payments || [])
+      .map((p: AnyRecord) => String(p?.description || '').trim())
+      .filter(Boolean);
+    if (perPaymentNotes.length > 0) {
+      settlements.description = perPaymentNotes.join('\n');
+    } else if (paymentData.description) {
       settlements.description = paymentData.description;
     }
   }
