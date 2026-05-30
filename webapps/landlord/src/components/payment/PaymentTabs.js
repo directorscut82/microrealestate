@@ -25,7 +25,10 @@ import {
   SelectTrigger,
   SelectValue
 } from '../ui/select';
-import { LuPlus, LuTrash2 } from 'react-icons/lu';
+import { LuPencil, LuPlus, LuTrash2 } from 'react-icons/lu';
+import NumberFormat from '../NumberFormat';
+import ConfirmDialog from '../ConfirmDialog';
+import { cn } from '../../utils';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
 import {
@@ -71,22 +74,31 @@ const schema = z.object({
 
 const emptyPayment = { amount: '', date: '', type: 'transfer', reference: '' };
 
+// Wave-26 round-3f: the form's payments[] now holds DRAFTS only — new
+// payments the user is about to submit. Existing/saved payments are read
+// from `rent.payments` directly and rendered as locked summary tiles
+// outside the form. This eliminates the confusion where re-opening the
+// dialog showed the existing payment in editable inputs and pressing
+// "Εκτέλεση" appeared to do nothing (it submitted the same payment as
+// a no-op replace).
 function initialFormValues(rent) {
   return {
-    payments: rent?.payments?.length
-      ? rent.payments.map(({ amount, date, type, reference }) => ({
-          amount: amount === 0 ? '' : amount,
-          date: date ? moment(date, 'DD/MM/YYYY').format('YYYY-MM-DD') : '',
-          type,
-          reference: reference || ''
-        }))
-      : [emptyPayment],
+    payments: [],
     description: rent?.description?.trimEnd() || '',
     extracharge: rent?.extracharge !== 0 ? rent.extracharge : '',
     noteextracharge: rent?.noteextracharge?.trimEnd() || '',
     promo: rent?.promo !== 0 ? rent.promo : '',
     notepromo: rent?.notepromo?.trimEnd() || ''
   };
+}
+
+// Format a date string for display in the locked tile. Accepts both
+// DD/MM/YYYY (rent.payments persisted format) and ISO YYYY-MM-DD.
+function _formatDate(d) {
+  if (!d) return '';
+  let m = moment(d, 'DD/MM/YYYY', true);
+  if (!m.isValid()) m = moment(d, 'YYYY-MM-DD', true);
+  return m.isValid() ? m.format('L') : d;
 }
 
 // Wave-25: human-readable label for each payment category. The values here
@@ -356,6 +368,100 @@ function AllocationBlock({
   );
 }
 
+// Wave-26 round-3f: inline edit form for an already-saved payment.
+// Lives inside the locked tile when the user clicks ✏️. Changes are
+// staged in component state and committed to `savedPayments` only when
+// the user clicks Save. The user still has to press Εκτέλεση on the
+// outer dialog to actually persist the change to the server.
+function SavedPaymentEditForm({ initial, paymentTypes, onCancel, onSave, t }) {
+  const [amount, setAmount] = useState(String(initial.amount ?? ''));
+  // initial.date is the persisted DD/MM/YYYY format; convert to ISO
+  // for the DatePickerInput's internal storage (YYYY-MM-DD).
+  const isoFromInitial = initial.date
+    ? moment(initial.date, 'DD/MM/YYYY', true).isValid()
+      ? moment(initial.date, 'DD/MM/YYYY').format('YYYY-MM-DD')
+      : ''
+    : '';
+  const [date, setDate] = useState(isoFromInitial);
+  const [type, setType] = useState(initial.type || 'transfer');
+  const [reference, setReference] = useState(initial.reference || '');
+
+  const canSave =
+    Number(amount) > 0 &&
+    !!date &&
+    moment(date, 'YYYY-MM-DD', true).isValid();
+
+  return (
+    <div>
+      <div className="text-sm text-amber-700 mb-2">
+        {t('Editing a recorded payment. Your changes are not saved until you press Record on the dialog.')}
+      </div>
+      <div className="grid gap-2 items-end grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-1">
+          <Label>{t('Date')}</Label>
+          <DatePickerInput
+            value={date ? moment(date, 'YYYY-MM-DD').format('DD/MM/YYYY') : ''}
+            onChange={(d) => {
+              const iso = d ? moment(d, 'DD/MM/YYYY').format('YYYY-MM-DD') : '';
+              setDate(iso);
+            }}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label>{t('Type')}</Label>
+          <Select value={type} onValueChange={setType}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {paymentTypes.itemList.map((pt) => (
+                <SelectItem key={pt.id} value={pt.value}>
+                  {pt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {type !== 'cash' && (
+          <div className="space-y-1">
+            <Label>{t('Reference')}</Label>
+            <Input value={reference} onChange={(e) => setReference(e.target.value)} />
+          </div>
+        )}
+        <div className="space-y-1">
+          <Label>{t('Amount')}</Label>
+          <Input
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 mt-3">
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+          {t('Cancel')}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          disabled={!canSave}
+          onClick={() =>
+            onSave({
+              amount: Number(amount),
+              date: moment(date, 'YYYY-MM-DD').format('DD/MM/YYYY'),
+              type,
+              reference: type === 'cash' ? '' : reference,
+              description: initial.description || ''
+            })
+          }
+        >
+          {t('Apply edit')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function PaymentTabs({ rent, onSubmit, onError }, ref) {
   const queryClient = useQueryClient();
   const store = useContext(StoreContext);
@@ -376,6 +482,29 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
   //   custom   -> per-line inputs, sum must equal payment amount (or be a
   //               surplus that becomes carried-forward credit)
   const [allocState, setAllocState] = useState({});
+
+  // Wave-26 round-3f: saved payments are managed as a separate state list
+  // (locked tiles), not as form fields. The form's `payments[]` array
+  // becomes drafts-only. On submit we merge saved + drafts into the
+  // payload sent to the server.
+  //
+  //   savedPayments — what the server currently has (mirror of rent.payments)
+  //   editingIndex  — index of the saved payment being edited (or null)
+  //   editingDraft  — temp form-state for the row being edited
+  //   confirmingDelete — index of the saved payment pending deletion (or null)
+  const [savedPayments, setSavedPayments] = useState(() =>
+    (rent?.payments || [])
+      .filter((p) => Number(p?.amount) > 0)
+      .map((p) => ({
+        amount: Number(p.amount) || 0,
+        date: p.date || '',
+        type: p.type || 'transfer',
+        reference: p.reference || '',
+        description: p.description || ''
+      }))
+  );
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(null);
   const _setAllocMode = (key, mode) =>
     setAllocState((s) => ({ ...s, [key]: { ...(s[key] || {}), mode } }));
   const _setAllocSpecificCategory = (key, category) =>
@@ -442,18 +571,23 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         }
       }
       const clonedValues = _.cloneDeep(values);
-      clonedValues.payments = clonedValues.payments
+      // Wave-26 round-3f: drafts come from the form (clonedValues.payments).
+      // Existing/saved payments come from `savedPayments` state. We merge
+      // the two so the server replaces the rent's payments[] with the
+      // full intended ledger. Crucially this means: if no drafts AND
+      // savedPayments matches what's already on disk, the server-side
+      // state is identical and the request is a true no-op (idempotent).
+      const drafts = clonedValues.payments
         .filter(({ amount }) => amount > 0)
         .map((payment, idx) => {
           payment.date = payment.date
             ? moment(payment.date).format('DD/MM/YYYY')
             : '';
           if (payment.type === 'cash') delete payment.reference;
-          // Wave-25: attach allocation if user picked a non-auto mode. The
-          // form-array uses positional keys; allocState is keyed by the
-          // useFieldArray field id which is `fields[idx].id` at render
-          // time. The submit payload sees `values.payments[idx]` without
-          // that id, so we read the matching field id from the closure.
+          // Wave-25: attach allocation if user picked a non-auto mode.
+          // allocState is keyed by useFieldArray field id; the submit
+          // payload sees `values.payments[idx]` without ids, so we read
+          // the matching field id from the closure.
           const fieldKey = fields[idx]?.id;
           const aState = (fieldKey && allocState[fieldKey]) || {};
           const amt = Number(payment.amount) || 0;
@@ -470,10 +604,13 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
               .filter((a) => a.amount > 0);
             if (allocation.length) payment.allocation = allocation;
           }
-          // mode === 'auto' (or unset): no allocation sent — server keeps
-          // its legacy behavior. Same as pre-wave-25.
+          // mode === 'auto' (or unset): no allocation sent.
           return payment;
         });
+      // savedPayments dates are already in DD/MM/YYYY (the persisted
+      // format); drafts were converted above. Both are now in the
+      // server-expected shape.
+      clonedValues.payments = [...savedPayments, ...drafts];
 
       const payment = {
         _id: rent._id,
@@ -490,11 +627,11 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
-        // Wave-26 (7): explicit success toast so the save is no longer
-        // silent. The toast amount is the SUM of payments submitted for
-        // this term, not just the first row, so multi-row submits show
-        // the right total.
-        const _sum = (clonedValues.payments || []).reduce(
+        // Wave-26 round-3f: toast amount is the sum of NEW drafts
+        // submitted (not the full ledger) — that's what the user
+        // intuitively just "added". For pure edits or notes-only
+        // saves the toast falls back to a generic "Saved".
+        const _sum = drafts.reduce(
           (s, p) => s + (Number(p?.amount) || 0),
           0
         );
@@ -524,22 +661,12 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
       rent.year,
       t,
       fields,
-      allocState
+      allocState,
+      savedPayments
     ]
   );
 
   const payments = watch('payments');
-
-  // Wave-26 (1): tell the user up-front whether the dialog opened with an
-  // existing payment pre-filled vs a fresh entry. Eliminates the "why
-  // is there a number here already?" confusion.
-  const existingPayment = (rent?.payments || []).find(
-    (p) => Number(p?.amount) > 0
-  );
-  const existingPaidTotal = (rent?.payments || []).reduce(
-    (s, p) => s + (Number(p?.amount) || 0),
-    0
-  );
 
   // Wave-26 (2): future-term safeguard. The data model accepts payments on
   // any term (Wave-14 F3 only blocks dates >7d future). A typo recording
@@ -585,18 +712,10 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         <Card>
           <CardHeader className="text-lg px-6 pt-3 pb-0">{t('Payment')}</CardHeader>
           <CardContent>
-            {/* Wave-26: status banners — pre-fill source + future-term safeguard. */}
-            {existingPayment ? (
-              <div className="mb-3 p-2 rounded border border-olive/30 bg-olive/10 text-olive text-sm" data-cy="existingPaymentBanner">
-                {t('Editing existing payment of {{amount}}€', {
-                  amount: existingPaidTotal.toFixed(2)
-                })}
-              </div>
-            ) : (
-              <div className="mb-3 p-2 rounded border border-stone-line/40 bg-muted/30 text-muted-foreground text-sm" data-cy="noPaymentBanner">
-                {t('No payment recorded yet for this term.')}
-              </div>
-            )}
+            {/* Wave-26 round-3f: future-term safeguard banners (the
+                pre-fill banner is gone — saved payments now render as
+                locked tiles below, so there's nothing to be confused
+                about). */}
             {isFutureTermAllowed && (
               <div className="mb-3 p-2 rounded border border-amber-200 bg-amber-50 text-amber-700 text-sm" data-cy="futureTermBanner">
                 {t(
@@ -613,15 +732,103 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                 )}
               </div>
             )}
+
+            {/* Locked tiles — already-recorded payments. Read-only.
+                Edit/delete via the icon buttons. When editingIndex
+                matches, the tile expands inline into an edit form. */}
+            {savedPayments.length > 0 && (
+              <div className="space-y-2 mb-3" data-cy="savedPaymentsList">
+                {savedPayments.map((sp, sidx) => {
+                  const isEditing = editingIndex === sidx;
+                  return (
+                    <div
+                      key={`saved-${sidx}`}
+                      className={cn(
+                        'border rounded-md',
+                        isEditing
+                          ? 'border-amber-300 bg-amber-50 p-3'
+                          : 'border-olive/30 bg-olive/5 p-3'
+                      )}
+                      data-cy={`savedPayment-${sidx}`}
+                    >
+                      {!isEditing ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0 text-sm">
+                            <div className="font-medium">
+                              <NumberFormat value={sp.amount} />
+                              <span className="text-ink-muted font-normal">
+                                {' · '}
+                                {_formatDate(sp.date)}
+                                {' · '}
+                                {t(
+                                  (sp.type || 'transfer')[0].toUpperCase() +
+                                    (sp.type || 'transfer').slice(1)
+                                )}
+                                {sp.reference ? ` · ${sp.reference}` : ''}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setEditingIndex(sidx)}
+                              data-cy={`editSavedPayment-${sidx}`}
+                              aria-label={t('Edit')}
+                            >
+                              <LuPencil className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setConfirmingDelete(sidx)}
+                              data-cy={`deleteSavedPayment-${sidx}`}
+                              aria-label={t('Delete')}
+                            >
+                              <LuTrash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <SavedPaymentEditForm
+                          initial={sp}
+                          paymentTypes={paymentTypes}
+                          onCancel={() => setEditingIndex(null)}
+                          onSave={(updated) => {
+                            setSavedPayments((prev) => {
+                              const next = [...prev];
+                              next[sidx] = updated;
+                              return next;
+                            });
+                            setEditingIndex(null);
+                            toast.success(t('Edited (will save when you press Record)'));
+                          }}
+                          t={t}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Empty-state caption when nothing saved AND no draft yet. */}
+            {savedPayments.length === 0 && fields.length === 0 && (
+              <div className="mb-3 p-2 rounded border border-stone-line/40 bg-muted/30 text-muted-foreground text-sm" data-cy="noPaymentBanner">
+                {t('No payment recorded yet for this term.')}
+              </div>
+            )}
+
+            {/* Draft entry rows (form's payments[] — new entries only). */}
             {fields.map((field, index) => (
-              <div key={field.id} className="mb-4 p-3 border rounded-md">
+              <div key={field.id} className="mb-4 p-3 border rounded-md bg-bone">
                 <div className="flex justify-between items-center mb-2">
-                  <div className="font-medium">{t('Payment #{{count}}', { count: index + 1 })}</div>
-                  {fields.length > 1 && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
-                      <LuTrash2 className="size-4" />
-                    </Button>
-                  )}
+                  <div className="font-medium">{t('New payment')}</div>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} aria-label={t('Cancel')}>
+                    <LuTrash2 className="size-4" />
+                  </Button>
                 </div>
                 <div className="grid gap-2 items-end grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-1">
@@ -687,8 +894,16 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                 )}
               </div>
             ))}
-            <Button type="button" variant="outline" onClick={() => append(emptyPayment)}>
-              <LuPlus className="size-4 mr-1" />{t('Add a payment')}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => append(emptyPayment)}
+              data-cy="addNewPayment"
+            >
+              <LuPlus className="size-4 mr-1" />
+              {savedPayments.length > 0 || fields.length > 0
+                ? t('Add another payment')
+                : t('Add a payment')}
             </Button>
           </CardContent>
         </Card>
@@ -726,6 +941,34 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
           </div>
         </Collapse>
       </div>
+
+      {/* Wave-26 round-3f: delete confirmation for an already-saved
+          payment. Removing it from `savedPayments` is staged; nothing
+          is persisted to the server until the user presses Εκτέλεση
+          on the outer dialog. */}
+      <ConfirmDialog
+        title={t('Delete this recorded payment?')}
+        subTitle={
+          confirmingDelete != null && savedPayments[confirmingDelete]
+            ? `${savedPayments[confirmingDelete].amount}€ · ${_formatDate(
+                savedPayments[confirmingDelete].date
+              )}`
+            : ''
+        }
+        open={confirmingDelete != null}
+        setOpen={(open) => {
+          if (!open) setConfirmingDelete(null);
+        }}
+        onConfirm={() => {
+          const idx = confirmingDelete;
+          if (idx == null) return;
+          setSavedPayments((prev) => prev.filter((_, i) => i !== idx));
+          setConfirmingDelete(null);
+          toast.success(
+            t('Removed (will save when you press Record)')
+          );
+        }}
+      />
     </form>
   );
 }
