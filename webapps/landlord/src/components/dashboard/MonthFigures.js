@@ -123,6 +123,18 @@ export default function MonthFigures({ className, dashboardData }) {
     );
   }, [dashboardData?.revenues]);
 
+  // Wave-26 round-3q: pie now reflects REALITY only, no fabricated splits.
+  //
+  // Slices: one OWED slice per category that has a non-zero owed amount,
+  // plus ONE consolidated "Paid this month" slice equal to the total
+  // collected. Per-category paid attribution is dropped because there
+  // is no source of truth for it — payments without explicit
+  // allocation cannot be honestly split into rent/charges/insurance
+  // shares.
+  //
+  // Tooltip on owed slices: per-tenant Owed / Collected (collected
+  // sourced from payments[].allocation when present, else __unallocated).
+  // Tooltip on the Paid slice: per-tenant total collected (no category).
   const { pieData, legend } = useMemo(() => {
     const {
       baseRent,
@@ -135,79 +147,59 @@ export default function MonthFigures({ className, dashboardData }) {
       0
     );
     const totalDue = baseRent + charges + totalBuildingCharges;
-    if (totalDue === 0) return { pieData: [], legend: [] };
+    if (totalDue === 0 && (paid || 0) === 0) {
+      return { pieData: [], legend: [] };
+    }
 
-    const paidRatio = Math.min(paid / totalDue, 1);
     const segments = [];
     const legendItems = [];
 
+    // Owed slices — one per non-zero category. Each slice's value is
+    // the FULL owed amount; collected is shown only in the tooltip.
     if (baseRent > 0) {
-      const rentPaid = Math.round(baseRent * paidRatio);
-      const rentUnpaid = baseRent - rentPaid;
       legendItems.push({ type: 'rent', label: t(TYPE_LABELS.rent) });
-      if (rentPaid > 0)
-        segments.push({
-          name: t('Rent') + ' (' + t('collected') + ')',
-          value: rentPaid,
-          color: getColor('rent', 'paid'),
-          type: 'rent',
-          status: 'paid'
-        });
-      if (rentUnpaid > 0)
-        segments.push({
-          name: t('Rent') + ' (' + t('owed') + ')',
-          value: rentUnpaid,
-          color: getColor('rent', 'unpaid'),
-          type: 'rent',
-          status: 'unpaid'
-        });
+      segments.push({
+        name: t('Rent') + ' (' + t('owed') + ')',
+        value: baseRent,
+        color: getColor('rent', 'unpaid'),
+        type: 'rent',
+        status: 'unpaid'
+      });
     }
-
     if (charges > 0) {
-      const chargesPaid = Math.round(charges * paidRatio);
-      const chargesUnpaid = charges - chargesPaid;
       legendItems.push({ type: 'charges', label: t(TYPE_LABELS.charges) });
-      if (chargesPaid > 0)
-        segments.push({
-          name: t('Extra charges') + ' (' + t('collected') + ')',
-          value: chargesPaid,
-          color: getColor('charges', 'paid'),
-          type: 'charges',
-          status: 'paid'
-        });
-      if (chargesUnpaid > 0)
-        segments.push({
-          name: t('Extra charges') + ' (' + t('owed') + ')',
-          value: chargesUnpaid,
-          color: getColor('charges', 'unpaid'),
-          type: 'charges',
-          status: 'unpaid'
-        });
+      segments.push({
+        name: t('Extra charges') + ' (' + t('owed') + ')',
+        value: charges,
+        color: getColor('charges', 'unpaid'),
+        type: 'charges',
+        status: 'unpaid'
+      });
     }
-
     Object.entries(buildingChargesByType).forEach(([type, amount]) => {
       if (amount <= 0) return;
       const label = t(TYPE_LABELS[type] || type);
       legendItems.push({ type, label });
-      const typePaid = Math.round(amount * paidRatio);
-      const typeUnpaid = amount - typePaid;
-      if (typePaid > 0)
-        segments.push({
-          name: label + ' (' + t('collected') + ')',
-          value: typePaid,
-          color: getColor(type, 'paid'),
-          type,
-          status: 'paid'
-        });
-      if (typeUnpaid > 0)
-        segments.push({
-          name: label + ' (' + t('owed') + ')',
-          value: typeUnpaid,
-          color: getColor(type, 'unpaid'),
-          type,
-          status: 'unpaid'
-        });
+      segments.push({
+        name: label + ' (' + t('owed') + ')',
+        value: amount,
+        color: getColor(type, 'unpaid'),
+        type,
+        status: 'unpaid'
+      });
     });
+
+    // Single consolidated "Paid this month" slice — exact, no fabrication.
+    if ((paid || 0) > 0) {
+      legendItems.push({ type: '__paid', label: t('Paid this month') });
+      segments.push({
+        name: t('Paid this month'),
+        value: paid,
+        color: getColor('rent', 'paid'),
+        type: '__paid',
+        status: 'paid'
+      });
+    }
 
     return { pieData: segments, legend: legendItems };
   }, [currentRevenues, t]);
@@ -220,12 +212,68 @@ export default function MonthFigures({ className, dashboardData }) {
     // Wave-26 round-3i: per-tenant rows are filtered to the slice the user
     // is hovering (e.g. 'Rent · paid' shows only rent-paid columns; 'Charges
     // · owed' shows only the per-tenant charges-owed shortfall). Numbers
-    // come from `paidByBucket` (real allocation data, not paidRatio
-    // estimate). Bucket key matches the pie segment's `type`:
-    //   - type='rent'      -> bucket key 'rent', owed amount = tenant.baseRent
-    //   - type='charges'   -> bucket key 'charges', owed = tenant.charges
-    //   - building type    -> bucket key 'building:<type>',
-    //                          owed = tenant.buildingChargesByType[type]
+    // Wave-26 round-3q: tooltip shape depends on slice type.
+    //
+    // Paid slice (`type === '__paid'`): one column "Total received".
+    //   Reflects the recorded payments verbatim. Per-tenant `paid` from
+    //   `currentRevenues.tenants[i]`. No category attribution.
+    //
+    // Owed slices (`type === 'rent'/'charges'/<building>`): two columns
+    //   "Owed" and "Collected".
+    //   - Owed: tenant's owed amount for that exact bucket.
+    //   - Collected: sourced from `paidByBucket` ONLY if the tenant had
+    //     an explicit allocation pointing at this bucket (round-3i).
+    //     Payments without allocation contribute to `__unallocated`
+    //     and are NOT shown on the per-bucket tooltip — that money is
+    //     visible on the Paid slice instead.
+    if (entry.type === '__paid') {
+      const visible = tenants
+        .map((tenant) => ({
+          tenant,
+          paid: Number(tenant.paid) || 0
+        }))
+        .filter(({ paid }) => paid > 0);
+      return (
+        <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-3 py-2 text-label max-w-sm">
+          <div className="font-medium text-body text-ink leading-tight">
+            {entry.name}
+          </div>
+          <div className="font-mono tabular-nums text-label text-ink-muted mb-2">
+            {formatNumber(entry.value)}
+          </div>
+          {visible.length > 0 && (
+            <table className="w-full tabular-nums text-label">
+              <thead className="text-xs text-ink-muted">
+                <tr>
+                  <th className="text-left font-normal pb-1">
+                    {t('Tenant')}
+                  </th>
+                  <th className="text-right font-normal pb-1 pl-3">
+                    {t('Total received')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map(({ tenant, paid }, i) => (
+                  <tr key={i} className="border-t border-stone-line/40">
+                    <td className="py-0.5 pr-2 text-ink truncate max-w-[12rem]">
+                      {tenant.name}
+                    </td>
+                    <td
+                      className="py-0.5 pl-3 text-right"
+                      style={{ color: paidColor('rent') }}
+                    >
+                      {formatNumber(paid)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      );
+    }
+
     const bucketKey =
       entry.type === 'rent'
         ? 'rent'
@@ -239,9 +287,6 @@ export default function MonthFigures({ className, dashboardData }) {
           ? Number(tenant.charges) || 0
           : Number(tenant.buildingChargesByType?.[entry.type]) || 0;
 
-    // Filter to tenants who actually have a non-zero amount in this
-    // bucket (no point showing PAPADOPOULOS in a rent-tooltip if their
-    // rent is 0 because they only pay charges).
     const visibleTenants = tenants
       .map((tenant) => {
         const owed = ownedFor(tenant);
@@ -269,7 +314,7 @@ export default function MonthFigures({ className, dashboardData }) {
                   {t('Owed')}
                 </th>
                 <th className="text-right font-normal pb-1 pl-3">
-                  {t('Collected')}
+                  {t('Allocated')}
                 </th>
               </tr>
             </thead>

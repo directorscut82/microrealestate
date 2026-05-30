@@ -154,6 +154,53 @@ Changes are grouped into phases. Each phase should be completed before the next.
   - SMS bulk-send actions on /rents — server-side `_sendSms` exists but no UI surface yet.
   - Accounting CSV export of notes — only the in-app accounting view shows them.
 
+### 4.13 Payment Dialog Approach A + Per-Payment Refactor ✅ COMPLETE (May–June 2026)
+- **Driven by**: live UX feedback during landlord onboarding — re-opening the payment dialog on an already-paid rent showed the saved payment in editable inputs (so pressing Record looked like a no-op), Note/Discount/Extra-charge fields kept reseeding from the rent record, and several minor papercuts.
+- **Approach A — locked saved payments** (round-3f, deployed before 3h):
+  - Saved payments render as read-only "tiles" with ✏️ Edit / 🗑 Delete affordances. Form's `payments[]` array is drafts-only. Submit merges `[...savedPayments, ...drafts]` into the server payload. Idempotent — pressing Record with no drafts and no edits is a true no-op.
+- **Round-3h (UX polish)**:
+  - Filter chips on /rents use terser labels (Σε οφειλή / Μερικώς εξοφλ. / Εξοφλημένα). KPI tiles keep the longer "...this month" form.
+  - `.scrollbar-branded` utility in `globals.css` replaces the OS-native scrollbar with a thin ink thumb. Applied to payment dialog body and ResponsiveDialog content.
+  - "Paid this month" KPI flags partial sub-count: `2 (1 μερικώς)`. Parens hidden when `partialCount === 0`.
+  - PriorBalanceBreakdown collapses single-month buckets (`Apr 2026 – Apr 2026` → `Apr 2026`).
+  - Reference field label per payment type: `IBAN ή αρ. πράξης` for transfer, `Αρ. επιταγής` for cheque.
+  - `Levy` removed from payment-types dropdown; `Import from file (soon)` placeholder disabled+italic.
+  - Date-picker default = today; calendar selected day uses `bg-olive` (was near-invisible on `bg-primary` ink).
+- **Round-3i (dashboard pie tooltip)**:
+  - `dashboardmanager.ts:_computePaidByBucket()` walks `rent.payments[]` and uses each payment's `allocation[]` (wave-25) directly when present, else applies the same auto-spread (oldest-debt-first) logic used by the frontend. Bucket space is the dashboard-display category space (`rent`, `charges`, `building:<type>`) — distinct from the rent-pipeline category space the frontend's `paymentAllocation.js` uses (see comment block in dashboardmanager.ts for why these are NOT merged).
+  - MonthFigures pie tooltip rebuilt as a 3-column `Tenant / Owed / Collected` table; per-tenant `paidByBucket` field exposed on the `currentRevenues.tenants[]` shape. Pie segments themselves still use the prior `paidRatio` estimate (per user's explicit instruction not to change the pie chart).
+- **Round-3j (per-payment note / discount / extra-charge)** — see [architecture-patterns.md](architecture-patterns.md) and [frontend-patterns.md](frontend-patterns.md):
+  - Each payment carries its own `description / promo / notepromo / extracharge / noteextracharge`. The dialog footer collapsibles for these fields are gone — they live inside each draft row, and saved tiles render the attached values inline.
+  - rentmanager PATCH builds N entries in `settlements.discounts[]` / `settlements.debts[]` (one per payment that carries them) instead of one rent-level entry. Backward-compat: rent-level `paymentData.promo / extracharge / description` still honored when no per-payment fields present.
+- **Round-3k (surface discount + extracharge end-to-end)**:
+  - MonthlyBreakdown rent-table tooltip: Discount (olive) + Additional cost (oxide) lines when non-zero.
+  - RentDetails (Πρόγραμμα ενοικίων): Additional cost no longer hidden when tenant has multiple properties.
+  - Accounting projection now includes `description / notepromo / noteextracharge / discounts / debts` — the original projection was missing them and the Notes column had been silently empty since the feature shipped.
+- **Round-3l (date-picker help note)**: `paymentContext` opt-in renders a footer strip with bold-label + plain-language explanations of what date means vs. rent term. Greek wording reviewed and corrected ("παρελθούσα" → "ημερομηνία πριν τον μήνα ενοικίου").
+- **Round-3m (tenants page polish)**:
+  - Co-tenants list dedup against the primary tenant (taxId + normalized-name) so single-renter imports don't list the primary as their own συνενοικιαστής.
+  - Vestigial top-level Phone/Email inputs removed (per-contact phone1/phone2/email already handles this).
+  - Tenant-card "Expenses" → "Additional charges" (Έξοδα → Πρόσθετες χρεώσεις) — distinct from the per-payment "Additional cost" / Έκτακτη χρέωση. The two are intentionally different keys.
+- **Round-3n (Πρόγραμμα ενοικίων per-year totals)**:
+  - YearTotals component renders Collected (sum of `min(payment, grandTotal)`) and Owed (sum of `max(0, grandTotal - payment)` for past + current terms) right of each year header. Future years suppress both numbers.
+- **Round-3o (review-driven security + UX)**:
+  - **Per-payment field validation**: caps for `promo / extracharge` (10M) and `notepromo / noteextracharge` (1000 chars) — round-3j had shipped these fields with no validation.
+  - **CSV formula-injection sanitiser** in accountingmanager.ts (`_sanitizeCsvText`): prefixes leading `= + - @ \t \r` with a single quote on settlement notes flowing into rawData JSON.
+  - **Backdate guard** (server + client): payment date < rent term first day → 422 with "switch to that month's rents page". Forces explicit page switch.
+  - **Toast logic**: success only when something actually changed (drafts submitted OR saved-tile edit/delete); error surfaces the server's actual message instead of the generic "Something went wrong".
+  - **YearTotals showZero**: `0` now renders as `0,00 €` (was `—`).
+  - **YearTotals useMemo** depends on `tenant.rents` not `tenant` so a parent memoization doesn't go stale.
+  - **PaymentTabs.js split**: AllocationBlock + SavedPaymentEditForm extracted; parent went 1111 → 734 lines.
+  - **First jest test** for round-3i: `dashboardManagerComputePaidByBucket.test.js` (12 cases).
+- **Round-3p (past-month partial flag + dashboard date lock)**:
+  - rentmanager.ts overview classifier was using its own raw-field heuristic (`totalAmount <= 0 || newBalance >= 0 → paid`) that desynced from the row UI's `rent.status`. On past months a tenant who'd paid partially but later overpaid showed up correctly as "partial" in the row but as "paid" in the KPI tile. Both surfaces now read `rent.status` as the single source of truth.
+  - Dashboard "Πληρωμή ενοικίου" shortcut: NewPaymentDialog gains a `lockDateToToday` prop that disables the date picker on draft rows. The shortcut is for "tenant just paid me cash today, record it" — landlord can't accidentally backdate or forward-date from this entry point.
+- **Process change**: introduced six-pass review (logic / security / i18n / quality / coverage / UX) on every diff before commit. Memory persisted under `~/.claude/projects/.../memory/feedback_six_pass_review.md`.
+- **Out of scope (deferred)**:
+  - Pie tooltip layout to exactly match the rents-page MonthlyBreakdown style (3-col table vs flex rows). Cosmetic.
+  - Remaining 4 of 5 high-value tests Pass-5 named (per-payment validation integration, backdate guard, toast logic, YearTotals math).
+  - Sharing the auto-spread/prorated primitive between `paymentAllocation.js` and `_computePaidByBucket`. Documented inline as "different bucket spaces; revisit if a third caller appears".
+
 ### 4.11 Multi-Origin Self-Hosted Deployment ✅ COMPLETE (added May 2026)
 - **Purpose:** Serve the same landlord frontend simultaneously from LAN (`http://192.168.x.x:PORT`) and Tailscale IP (`http://100.x.x.x:PORT`) so family/staff can use the app over a shared Tailnet without DNS setup.
 - **Code changes (applied on `nas` branch only):**

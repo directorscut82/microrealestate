@@ -96,6 +96,14 @@ cd services/api && npx jest --no-coverage
 
 Per-service jest, no Docker. Run from the service directory.
 
+**Notable suites under `services/api/src/businesslogic/__tests__/`:**
+
+- `rent.test.js` — full computation pipeline (taskBase → taskDebts → taskDiscounts → taskVATs → taskBalance → taskPayments → taskTotal)
+- `paymentEdgeCases.test.js` — settlement edge cases, allocation surplus, partial-payment carry-forward
+- `dashboardManagerComputePaidByBucket.test.js` — round-3i accuracy: walks `rent.payments[]` with allocation-aware spreading or oldest-debt-first auto-spread, distributes per `rent` / `charges` / `building:<type>` buckets. Run when changing `dashboardmanager.ts:_computePaidByBucket()` or the rent-pipeline category mapping.
+
+Imports in the test files reference the **source** TS files (`../../managers/dashboardmanager.js`); jest resolves them through the workspace's TS preset, no separate build step needed.
+
 ## Production database protection
 
 E2E tests target the **live NAS**, but writes are scoped to a dedicated test realm. Three independent layers prevent collateral damage to your real data:
