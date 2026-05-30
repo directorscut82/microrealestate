@@ -25,33 +25,26 @@ import useTranslation from 'next-translate/useTranslation';
  */
 
 const CATEGORY_COLORS = {
-  // Charts use a quiet earth-tone palette built around petrol. Each
-  // category is muted (chroma 0.04–0.08 for paid, 0.018–0.028 for unpaid)
-  // so the dashboard reads as a ledger, not a marketing slide.
-  rent: { bold: 'oklch(45% 0.080 220)', faded: 'oklch(86% 0.024 220)' }, // sea/petrol — matches system palette
-  charges: { bold: 'oklch(40% 0.020 240)', faded: 'oklch(85% 0.012 240)' }, // slate
-  heating: { bold: 'oklch(50% 0.080 35)', faded: 'oklch(86% 0.024 35)' }, // terracotta
-  elevator: { bold: 'oklch(45% 0.040 200)', faded: 'oklch(86% 0.016 200)' }, // dim teal
-  cleaning: { bold: 'oklch(50% 0.040 180)', faded: 'oklch(86% 0.016 180)' }, // dusty teal
-  water_common: { bold: 'oklch(42% 0.045 220)', faded: 'oklch(86% 0.018 220)' }, // water
-  electricity_common: {
-    bold: 'oklch(55% 0.080 75)',
-    faded: 'oklch(88% 0.022 75)'
-  }, // muted amber
-  insurance: { bold: 'oklch(40% 0.060 290)', faded: 'oklch(84% 0.018 290)' }, // plum
-  management_fee: {
-    bold: 'oklch(45% 0.060 320)',
-    faded: 'oklch(84% 0.018 320)'
-  }, // mauve
-  garden: { bold: 'oklch(45% 0.070 130)', faded: 'oklch(86% 0.020 130)' }, // olive
-  repairs_fund: { bold: 'oklch(48% 0.070 60)', faded: 'oklch(86% 0.020 60)' }, // ochre
-  pest_control: { bold: 'oklch(45% 0.045 110)', faded: 'oklch(84% 0.016 110)' }, // sage
-  repair: { bold: 'oklch(48% 0.090 20)', faded: 'oklch(86% 0.022 20)' }, // copper
-  monthly_charge: {
-    bold: 'oklch(48% 0.080 50)',
-    faded: 'oklch(86% 0.022 50)'
-  }, // umber
-  other: { bold: 'oklch(50% 0.012 240)', faded: 'oklch(82% 0.008 240)' } // marble
+  // Wave-26 round-3r: Mediterranean earth palette, distinct hue per
+  // category, chroma boosted so each color reads as itself (not a
+  // washed-out tint). Paid (bold) = ~50% L / 0.10–0.13 C. Owed (faded)
+  // = ~78% L / 0.05–0.07 C — light but still recognisably the same
+  // hue, never grey-on-grey.
+  rent: { bold: 'oklch(50% 0.120 220)', faded: 'oklch(78% 0.058 220)' }, // petrol blue
+  charges: { bold: 'oklch(48% 0.060 245)', faded: 'oklch(78% 0.030 245)' }, // slate
+  heating: { bold: 'oklch(58% 0.135 35)', faded: 'oklch(80% 0.058 35)' }, // terracotta
+  elevator: { bold: 'oklch(52% 0.085 200)', faded: 'oklch(80% 0.040 200)' }, // dim teal
+  cleaning: { bold: 'oklch(54% 0.075 180)', faded: 'oklch(80% 0.038 180)' }, // dusty teal
+  water_common: { bold: 'oklch(50% 0.100 230)', faded: 'oklch(80% 0.046 230)' }, // ocean
+  electricity_common: { bold: 'oklch(62% 0.130 75)', faded: 'oklch(82% 0.058 75)' }, // ochre
+  insurance: { bold: 'oklch(45% 0.110 305)', faded: 'oklch(78% 0.052 305)' }, // plum
+  management_fee: { bold: 'oklch(50% 0.105 325)', faded: 'oklch(80% 0.050 325)' }, // mauve
+  garden: { bold: 'oklch(52% 0.115 135)', faded: 'oklch(80% 0.052 135)' }, // olive
+  repairs_fund: { bold: 'oklch(56% 0.115 60)', faded: 'oklch(82% 0.054 60)' }, // ochre amber
+  pest_control: { bold: 'oklch(52% 0.080 115)', faded: 'oklch(80% 0.038 115)' }, // sage
+  repair: { bold: 'oklch(54% 0.135 20)', faded: 'oklch(80% 0.060 20)' }, // copper
+  monthly_charge: { bold: 'oklch(54% 0.115 50)', faded: 'oklch(80% 0.054 50)' }, // umber
+  other: { bold: 'oklch(50% 0.030 245)', faded: 'oklch(78% 0.018 245)' } // marble grey
 };
 
 const TYPE_LABELS = {
@@ -97,9 +90,8 @@ export function unpaidColor(type) {
   return isDark() ? UNPAID_DARK : UNPAID_LIGHT;
 }
 
-function getColor(type, status) {
-  return status === 'paid' ? paidColor(type) : unpaidColor(type);
-}
+/* getColor removed in round-3r — pie slices use paidColor/unpaidColor
+   directly, legend uses literal oklch swatches. */
 
 export default function MonthFigures({ className, dashboardData }) {
   const { t } = useTranslation('common');
@@ -123,83 +115,68 @@ export default function MonthFigures({ className, dashboardData }) {
     );
   }, [dashboardData?.revenues]);
 
-  // Wave-26 round-3q: pie now reflects REALITY only, no fabricated splits.
+  // Wave-26 round-3r: per-category split with TWO sub-segments per
+  // category — paid (bold hue) + owed (faded hue). Sub-segment sizes
+  // come from REAL allocation data (paidByBucket on each tenant, summed
+  // across tenants). No paidRatio fabrication. Categories with zero
+  // both-owed-and-paid are skipped.
   //
-  // Slices: one OWED slice per category that has a non-zero owed amount,
-  // plus ONE consolidated "Paid this month" slice equal to the total
-  // collected. Per-category paid attribution is dropped because there
-  // is no source of truth for it — payments without explicit
-  // allocation cannot be honestly split into rent/charges/insurance
-  // shares.
-  //
-  // Tooltip on owed slices: per-tenant Owed / Collected (collected
-  // sourced from payments[].allocation when present, else __unallocated).
-  // Tooltip on the Paid slice: per-tenant total collected (no category).
-  const { pieData, legend } = useMemo(() => {
+  // Bucket aggregation: walk currentRevenues.tenants[*].paidByBucket
+  // server-side already does the per-rent allocation -> bucket mapping
+  // (dashboardmanager._computePaidByBucket). Frontend just sums.
+  const { pieData } = useMemo(() => {
     const {
       baseRent,
       charges,
       buildingChargesByType = {},
-      paid
+      tenants = []
     } = currentRevenues;
-    const totalBuildingCharges = Object.values(buildingChargesByType).reduce(
-      (s, v) => s + v,
-      0
-    );
-    const totalDue = baseRent + charges + totalBuildingCharges;
-    if (totalDue === 0 && (paid || 0) === 0) {
-      return { pieData: [], legend: [] };
-    }
+
+    // Sum paid amounts per bucket key across all tenants.
+    const paidByBucket = {};
+    tenants.forEach((tenant) => {
+      const tb = tenant?.paidByBucket || {};
+      Object.entries(tb).forEach(([k, v]) => {
+        paidByBucket[k] = (paidByBucket[k] || 0) + (Number(v) || 0);
+      });
+    });
 
     const segments = [];
     const legendItems = [];
 
-    // Owed slices — one per non-zero category. Each slice's value is
-    // the FULL owed amount; collected is shown only in the tooltip.
-    if (baseRent > 0) {
-      legendItems.push({ type: 'rent', label: t(TYPE_LABELS.rent) });
-      segments.push({
-        name: t('Rent') + ' (' + t('owed') + ')',
-        value: baseRent,
-        color: getColor('rent', 'unpaid'),
-        type: 'rent',
-        status: 'unpaid'
-      });
-    }
-    if (charges > 0) {
-      legendItems.push({ type: 'charges', label: t(TYPE_LABELS.charges) });
-      segments.push({
-        name: t('Extra charges') + ' (' + t('owed') + ')',
-        value: charges,
-        color: getColor('charges', 'unpaid'),
-        type: 'charges',
-        status: 'unpaid'
-      });
-    }
-    Object.entries(buildingChargesByType).forEach(([type, amount]) => {
-      if (amount <= 0) return;
-      const label = t(TYPE_LABELS[type] || type);
-      legendItems.push({ type, label });
-      segments.push({
-        name: label + ' (' + t('owed') + ')',
-        value: amount,
-        color: getColor(type, 'unpaid'),
+    const _push = (type, owedAmount, paidAmount) => {
+      if (owedAmount <= 0 && paidAmount <= 0) return;
+      legendItems.push({
         type,
-        status: 'unpaid'
+        label: t(TYPE_LABELS[type] || type)
       });
-    });
+      // Paid sub-segment first (visual prominence).
+      if (paidAmount > 0) {
+        segments.push({
+          name: t(TYPE_LABELS[type] || type),
+          value: Math.min(paidAmount, owedAmount), // can't exceed owed
+          color: paidColor(type),
+          type,
+          status: 'paid'
+        });
+      }
+      const unpaidValue = Math.max(0, owedAmount - paidAmount);
+      if (unpaidValue > 0) {
+        segments.push({
+          name: t(TYPE_LABELS[type] || type),
+          value: unpaidValue,
+          color: unpaidColor(type),
+          type,
+          status: 'unpaid'
+        });
+      }
+    };
 
-    // Single consolidated "Paid this month" slice — exact, no fabrication.
-    if ((paid || 0) > 0) {
-      legendItems.push({ type: '__paid', label: t('Paid this month') });
-      segments.push({
-        name: t('Paid this month'),
-        value: paid,
-        color: getColor('rent', 'paid'),
-        type: '__paid',
-        status: 'paid'
-      });
-    }
+    _push('rent', baseRent, paidByBucket.rent || 0);
+    _push('charges', charges, paidByBucket.charges || 0);
+    Object.entries(buildingChargesByType).forEach(([type, amount]) => {
+      _push(type, amount, paidByBucket[`building:${type}`] || 0);
+    });
 
     return { pieData: segments, legend: legendItems };
   }, [currentRevenues, t]);
@@ -208,92 +185,30 @@ export default function MonthFigures({ className, dashboardData }) {
     if (!active || !payload?.length) return null;
     const entry = payload[0].payload;
     const tenants = currentRevenues.tenants || [];
-
-    // Wave-26 round-3i: per-tenant rows are filtered to the slice the user
-    // is hovering (e.g. 'Rent · paid' shows only rent-paid columns; 'Charges
-    // · owed' shows only the per-tenant charges-owed shortfall). Numbers
-    // Wave-26 round-3q: tooltip shape depends on slice type.
-    //
-    // Paid slice (`type === '__paid'`): one column "Total received".
-    //   Reflects the recorded payments verbatim. Per-tenant `paid` from
-    //   `currentRevenues.tenants[i]`. No category attribution.
-    //
-    // Owed slices (`type === 'rent'/'charges'/<building>`): two columns
-    //   "Owed" and "Collected".
-    //   - Owed: tenant's owed amount for that exact bucket.
-    //   - Collected: sourced from `paidByBucket` ONLY if the tenant had
-    //     an explicit allocation pointing at this bucket (round-3i).
-    //     Payments without allocation contribute to `__unallocated`
-    //     and are NOT shown on the per-bucket tooltip — that money is
-    //     visible on the Paid slice instead.
-    if (entry.type === '__paid') {
-      const visible = tenants
-        .map((tenant) => ({
-          tenant,
-          paid: Number(tenant.paid) || 0
-        }))
-        .filter(({ paid }) => paid > 0);
-      return (
-        <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-3 py-2 text-label max-w-sm">
-          <div className="font-medium text-body text-ink leading-tight">
-            {entry.name}
-          </div>
-          <div className="font-mono tabular-nums text-label text-ink-muted mb-2">
-            {formatNumber(entry.value)}
-          </div>
-          {visible.length > 0 && (
-            <table className="w-full tabular-nums text-label">
-              <thead className="text-xs text-ink-muted">
-                <tr>
-                  <th className="text-left font-normal pb-1">
-                    {t('Tenant')}
-                  </th>
-                  <th className="text-right font-normal pb-1 pl-3">
-                    {t('Total received')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map(({ tenant, paid }, i) => (
-                  <tr key={i} className="border-t border-stone-line/40">
-                    <td className="py-0.5 pr-2 text-ink truncate max-w-[12rem]">
-                      {tenant.name}
-                    </td>
-                    <td
-                      className="py-0.5 pl-3 text-right"
-                      style={{ color: paidColor('rent') }}
-                    >
-                      {formatNumber(paid)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      );
-    }
-
     const bucketKey =
       entry.type === 'rent'
         ? 'rent'
         : entry.type === 'charges'
           ? 'charges'
           : `building:${entry.type}`;
-    const ownedFor = (tenant) =>
+    const owedFor = (tenant) =>
       entry.type === 'rent'
         ? Number(tenant.baseRent) || 0
         : entry.type === 'charges'
           ? Number(tenant.charges) || 0
           : Number(tenant.buildingChargesByType?.[entry.type]) || 0;
 
-    const visibleTenants = tenants
+    // Per-tenant rows: only show tenants with non-zero owed OR non-zero
+    // εισπράξεις in this bucket. Sort by owed desc so the largest
+    // outstanding tenants surface first when scrolling.
+    const rows = tenants
       .map((tenant) => {
-        const owed = ownedFor(tenant);
+        const owed = owedFor(tenant);
         const collected = Number(tenant.paidByBucket?.[bucketKey]) || 0;
         return { tenant, owed, collected };
       })
-      .filter(({ owed, collected }) => owed > 0 || collected > 0);
+      .filter(({ owed, collected }) => owed > 0.005 || collected > 0.005)
+      .sort((a, b) => b.owed - a.owed);
 
     return (
       <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-3 py-2 text-label max-w-sm">
@@ -303,49 +218,56 @@ export default function MonthFigures({ className, dashboardData }) {
         <div className="font-mono tabular-nums text-label text-ink-muted mb-2">
           {formatNumber(entry.value)}
         </div>
-        {visibleTenants.length > 0 && (
-          <table className="w-full tabular-nums text-label">
-            <thead className="text-xs text-ink-muted">
-              <tr>
-                <th className="text-left font-normal pb-1">
-                  {t('Tenant')}
-                </th>
-                <th className="text-right font-normal pb-1 pl-3">
-                  {t('Owed')}
-                </th>
-                <th className="text-right font-normal pb-1 pl-3">
-                  {t('Allocated')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleTenants.map(({ tenant, owed, collected }, i) => {
-                const fullyPaid =
-                  owed > 0 && collected + 0.005 >= owed;
-                return (
-                  <tr key={i} className="border-t border-stone-line/40">
-                    <td className="py-0.5 pr-2 text-ink truncate max-w-[12rem]">
-                      {tenant.name}
-                    </td>
-                    <td className="py-0.5 pl-3 text-right text-ink-muted">
-                      {formatNumber(owed)}
-                    </td>
-                    <td
-                      className={cn(
-                        'py-0.5 pl-3 text-right',
-                        fullyPaid ? '' : 'text-ink-muted'
-                      )}
-                      style={{
-                        color: fullyPaid ? paidColor(entry.type) : undefined
-                      }}
-                    >
-                      {formatNumber(collected)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        {rows.length > 0 && (
+          <div
+            className="max-h-[280px] overflow-y-auto scrollbar-branded"
+            // ~7 rows fit before scroll engages.
+          >
+            <table className="w-full tabular-nums text-label">
+              <thead className="text-xs text-ink-muted sticky top-0 bg-bone">
+                <tr>
+                  <th className="text-left font-normal pb-1">
+                    {t('Tenant')}
+                  </th>
+                  <th className="text-right font-normal pb-1 pl-3">
+                    {t('Owed')}
+                  </th>
+                  <th className="text-right font-normal pb-1 pl-3">
+                    {t('Collected')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ tenant, owed, collected }, i) => {
+                  const fullyPaid =
+                    owed > 0 && collected + 0.005 >= owed;
+                  return (
+                    <tr key={i} className="border-t border-stone-line/40">
+                      <td className="py-0.5 pr-2 text-ink truncate max-w-[12rem]">
+                        {tenant.name}
+                      </td>
+                      <td className="py-0.5 pl-3 text-right text-ink-muted">
+                        {formatNumber(owed)}
+                      </td>
+                      <td
+                        className={cn(
+                          'py-0.5 pl-3 text-right',
+                          fullyPaid ? '' : 'text-ink-muted'
+                        )}
+                        style={{
+                          color: fullyPaid
+                            ? paidColor(entry.type)
+                            : undefined
+                        }}
+                      >
+                        {formatNumber(collected)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     );
@@ -408,28 +330,34 @@ export default function MonthFigures({ className, dashboardData }) {
       />
       <DashboardCard
         Icon={LuBanknote}
-        title={t('Payments')}
-        description={t('Rents of {{monthYear}}', {
+        title={t('Rents of {{monthYear}}', {
           monthYear: moment().format('MMMM YYYY')
         })}
         renderContent={() => (
           <div>
             {pieData.length > 0 ? (
               <>
-                <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-label text-ink-soft mb-3">
-                  {legend.map(({ type, label }) => (
-                    <div key={type} className="flex items-center gap-1.5">
-                      <span
-                        className="size-2.5 rounded-pill"
-                        style={{ background: getColor(type, 'paid') }}
-                        aria-hidden="true"
-                      />
-                      <span>{label}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex justify-center text-label text-ink-muted mb-1">
-                  <span>{t('Bold = paid, faded = unpaid')}</span>
+                {/* Wave-26 round-3r: unified two-swatch legend matches
+                    the bar chart. Per-category hue is visible inside
+                    pie slices; the legend conveys the light/dark split
+                    abstractly. */}
+                <div className="flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-label text-ink-soft mb-3">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: 'oklch(80% 0.030 245)' }}
+                      aria-hidden="true"
+                    />
+                    <span>{t('Outstanding')}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: 'oklch(50% 0.090 245)' }}
+                      aria-hidden="true"
+                    />
+                    <span>{t('Receipts')}</span>
+                  </div>
                 </div>
                 <ChartContainer
                   config={{}}

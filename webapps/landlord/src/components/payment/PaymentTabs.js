@@ -135,6 +135,36 @@ function initialFormValues() {
 
 // Format a date string for display in the locked tile. Accepts both
 // DD/MM/YYYY (rent.payments persisted format) and ISO YYYY-MM-DD.
+// Wave-26 round-3r: render a payment's allocation breakdown as a
+// compact " (Rent 67 · Insurance 53)" string. Skips zero-amount
+// entries. Single-category case collapses to "(Rent)" without
+// per-amount detail. Caller-supplied `t` does the i18n.
+function _formatAllocation(allocation, t) {
+  if (!Array.isArray(allocation) || allocation.length === 0) return '';
+  const labelMap = {
+    rent: 'Rent',
+    expenses: 'Building expenses',
+    repairs: 'Repairs',
+    vat: 'VAT',
+    previousBalance: 'Previous balance',
+    extracharge: 'Extra charge'
+  };
+  const nonZero = allocation.filter((a) => Number(a?.amount) > 0.005);
+  if (nonZero.length === 0) return '';
+  if (nonZero.length === 1) {
+    return ` (${t(labelMap[nonZero[0].category] || nonZero[0].category)})`;
+  }
+  const _fmtAmt = (n) => {
+    const num = Number(n) || 0;
+    return Number.isInteger(num) ? String(num) : num.toFixed(2);
+  };
+  const parts = nonZero.map(
+    (a) =>
+      `${t(labelMap[a.category] || a.category)} ${_fmtAmt(a.amount)}`
+  );
+  return ` (${parts.join(' · ')})`;
+}
+
 function _formatDate(d) {
   if (!d) return '';
   let m = moment(d, 'DD/MM/YYYY', true);
@@ -186,7 +216,11 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
         promo: Number(p.promo) || 0,
         notepromo: p.notepromo || '',
         extracharge: Number(p.extracharge) || 0,
-        noteextracharge: p.noteextracharge || ''
+        noteextracharge: p.noteextracharge || '',
+        // Wave-26 round-3r: persisted allocation array, used by the
+        // saved-tile inline breakdown (e.g. "120 € (Ενοίκιο 67 ·
+        // Ασφάλιση 53) · 22/05 · Μετρητά").
+        allocation: Array.isArray(p.allocation) ? p.allocation : []
       }))
   );
   const [editingIndex, setEditingIndex] = useState(null);
@@ -505,6 +539,12 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="font-medium">
                               <NumberFormat value={sp.amount} />
+                              {/* Wave-26 round-3r: allocation breakdown
+                                  inline so the saved tile says exactly
+                                  what the money paid for. */}
+                              <span className="text-ink-soft font-normal">
+                                {_formatAllocation(sp.allocation, t)}
+                              </span>
                               <span className="text-ink-muted font-normal">
                                 {' · '}
                                 {_formatDate(sp.date)}

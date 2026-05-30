@@ -39,7 +39,88 @@ const PAYMENT_CATEGORIES = [
   'extracharge'
 ] as const;
 
+// Wave-26 round-3r: auto-spread fills oldest debt classes first so the
+// landlord's mental model matches the rent computation pipeline. Order
+// kept in sync with AUTO_SPREAD_ORDER in webapps/landlord/src/utils/
+// paymentAllocation.js.
+const AUTO_SPREAD_ORDER = [
+  'previousBalance',
+  'rent',
+  'expenses',
+  'repairs',
+  'vat',
+  'extracharge'
+] as const;
+
 type AnyRecord = Record<string, any>;
+
+const _round = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
+
+/**
+ * Wave-26 round-3r: compute the per-category split for a payment when the
+ * caller didn't pass an explicit allocation. Same oldest-debt-first rule
+ * the frontend uses (paymentAllocation.autoSpreadAllocation).
+ *
+ * `owed` shape: { rent, expenses, repairs, vat, previousBalance, extracharge }.
+ * Returns an array of { category, amount } entries with non-zero amounts.
+ * Caller must persist this on payment.allocation so every payment on
+ * disk has explicit attribution.
+ */
+function _computeAutoSpread(
+  amount: number,
+  owed: AnyRecord
+): { category: string; amount: number }[] {
+  let remaining = _round(amount);
+  const out: { category: string; amount: number }[] = [];
+  for (const cat of AUTO_SPREAD_ORDER) {
+    if (remaining <= 0) break;
+    const due = Number(owed?.[cat]) || 0;
+    if (due <= 0) continue;
+    const apply = _round(Math.min(remaining, due));
+    if (apply > 0) {
+      out.push({ category: cat, amount: apply });
+      remaining = _round(remaining - apply);
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-category owed amounts for a single rent. Mirrors the frontend's
+ * computeCategoryOwed in paymentAllocation.js, except we compute it over
+ * the RAW persisted rent (services-side rent.* shape) rather than the
+ * frontdata-flattened shape. Used by:
+ *   - PATCH /rents/payment auto-spread on save
+ *   - Migration script for legacy payments
+ */
+function _computeOwedByCategory(rent: AnyRecord): AnyRecord {
+  const sumAmounts = (arr: any) =>
+    Array.isArray(arr)
+      ? arr.reduce(
+          (s: number, x: AnyRecord) => s + (Number(x?.amount) || 0),
+          0
+        )
+      : 0;
+  const buildingChargesAll = Array.isArray(rent?.buildingCharges)
+    ? rent.buildingCharges
+    : [];
+  const repairCharges = buildingChargesAll
+    .filter((c: AnyRecord) => c?.type === 'repair')
+    .reduce((s: number, c: AnyRecord) => s + (Number(c.amount) || 0), 0);
+  const expenseBuildingCharges = buildingChargesAll
+    .filter((c: AnyRecord) => c?.type !== 'repair')
+    .reduce((s: number, c: AnyRecord) => s + (Number(c.amount) || 0), 0);
+  return {
+    rent: _round(Number(rent?.total?.preTaxAmount) || 0),
+    expenses: _round(sumAmounts(rent?.charges) + expenseBuildingCharges),
+    repairs: _round(repairCharges),
+    vat: _round(Number(rent?.total?.vat) || sumAmounts(rent?.vats)),
+    previousBalance: _round(
+      Math.max(0, Number(rent?.total?.balance) || 0)
+    ),
+    extracharge: _round(sumAmounts(rent?.debts))
+  };
+}
 
 async function _findOccupants(
   realm: CollectionTypes.Realm | null | undefined,
@@ -225,7 +306,13 @@ async function _getRentsDataByTerm(
     countNotPaid: 0,
     totalToPay: 0,
     totalPaid: 0,
-    totalNotPaid: 0
+    totalNotPaid: 0,
+    // Wave-26 round-3r: sum of carry-in arrears across all tenants for
+    // this month, surfaced on the /rents KPI tile as
+    // "Οφειλές (προηγ. οφειλές: XXX)". Reads frontdata's `rent.balance`
+    // (which is positive when tenant is in credit, negative when in
+    // arrears coming into this month).
+    totalCarriedBalance: 0
   };
   // Wave-26 round-3o: trust the per-rent status that frontdata.toRentData
   // computes. The previous classifier `totalAmount <= 0 || newBalance >= 0
@@ -248,10 +335,199 @@ async function _getRentsDataByTerm(
     acc.totalToPay += rent.totalToPay;
     acc.totalPaid += rent.payment;
     acc.totalNotPaid -= rent.newBalance < 0 ? rent.newBalance : 0;
+    // round-3r: carry-in arrears (negative balance) summed unsigned.
+    if (rent.balance < 0) {
+      acc.totalCarriedBalance -= rent.balance;
+    }
     return acc;
   }, overview);
 
   return { overview, rents };
+}
+
+/**
+ * Wave-26 round-3r: bulk "express εξόφληση" endpoint. Records ONE
+ * transfer payment per tenant for whatever combination of monthly +
+ * previousBalance the caller wants paid, all dated today.
+ *
+ * Body shape:
+ *   {
+ *     items: [
+ *       { tenantId, term, monthly?: boolean, previousBalance?: boolean }
+ *     ]
+ *   }
+ *
+ * Server resolves each item against the live rent doc (so the caller
+ * can't pass an arbitrary amount). Validation is per-item — invalid
+ * items abort the whole batch (no partial writes). All writes go
+ * through _updateByTerm which already runs Contract.payTerm atomically.
+ *
+ * Performance: the `items` array is typically <= 30 (one per tenant).
+ * We sequentialise per-item to keep the rent computation pipeline's
+ * per-tenant idempotency intact; parallel writes against the same
+ * tenant could clobber each other.
+ */
+export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
+  const realm = req.realm;
+  const authorizationHeader = req.headers.authorization;
+  const locale = req.headers['accept-language'] as string | undefined;
+  const body = (req.body || {}) as AnyRecord;
+  const items = Array.isArray(body.items) ? body.items : [];
+
+  if (items.length === 0) {
+    throw new ServiceError('items required', 422);
+  }
+  if (items.length > 50) {
+    throw new ServiceError('items count exceeds 50', 422);
+  }
+
+  // Validate every item up-front so a bad row aborts the batch before
+  // any write happens.
+  items.forEach((it: AnyRecord, idx: number) => {
+    validateObjectId(it?.tenantId, `items[${idx}].tenantId`);
+    validateTerm(String(it?.term || ''), `items[${idx}].term`);
+    if (
+      typeof it?.monthly !== 'boolean' &&
+      typeof it?.previousBalance !== 'boolean'
+    ) {
+      throw new ServiceError(
+        `items[${idx}] must request monthly or previousBalance`,
+        422
+      );
+    }
+    if (it?.monthly === false && it?.previousBalance === false) {
+      throw new ServiceError(
+        `items[${idx}] selects nothing to pay`,
+        422
+      );
+    }
+  });
+
+  const todayDDMMYYYY = moment.utc().format('DD/MM/YYYY');
+
+  // Wave-26 round-3r perf: prefetch all tenants in ONE query instead
+  // of N round-trips inside the loop. For 30-tenant batches this turns
+  // ~30 × RTT into 1 × RTT.
+  const tenantIds = items.map((it: AnyRecord) => String(it.tenantId));
+  const tenants = (await Collections.Tenant.find({
+    _id: { $in: tenantIds },
+    realmId: realm!._id
+  }).lean()) as AnyRecord[];
+  const tenantById = new Map(tenants.map((t) => [String(t._id), t]));
+
+  // Build paymentData payloads first (sync, no I/O) — surfaces missing-
+  // tenant errors before any write. After validation succeeds for all
+  // items we fan out the writes in parallel via Promise.all; each
+  // _updateByTerm operates on a different tenant doc so there is no
+  // cross-tenant contention.
+  const writePlans: Array<{
+    tenantId: string;
+    term: string;
+    amount: number;
+    paymentData: AnyRecord;
+  } | null> = items.map((it: AnyRecord, idx: number) => {
+    const tenantId = String(it.tenantId);
+    const term = String(it.term);
+
+    const tenant = tenantById.get(tenantId);
+    if (!tenant) {
+      throw new ServiceError(`items[${idx}] tenant not found`, 404);
+    }
+
+    const targetRent = (tenant.rents || []).find(
+      (r: AnyRecord) => Number(r.term) === Number(term)
+    );
+    if (!targetRent) {
+      throw new ServiceError(
+        `items[${idx}] rent for term not found`,
+        404
+      );
+    }
+
+    const owed = _computeOwedByCategory(targetRent);
+    const monthlyOwed = _round(
+      owed.rent + owed.expenses + owed.repairs + owed.vat + owed.extracharge
+    );
+    const previousOwed = _round(owed.previousBalance);
+    let amount = 0;
+    const allocation: { category: string; amount: number }[] = [];
+
+    if (it.monthly === true && monthlyOwed > 0) {
+      amount = _round(amount + monthlyOwed);
+      const monthOnlyOwed: AnyRecord = {
+        previousBalance: 0,
+        rent: owed.rent,
+        expenses: owed.expenses,
+        repairs: owed.repairs,
+        vat: owed.vat,
+        extracharge: owed.extracharge
+      };
+      allocation.push(..._computeAutoSpread(monthlyOwed, monthOnlyOwed));
+    }
+    if (it.previousBalance === true && previousOwed > 0) {
+      amount = _round(amount + previousOwed);
+      allocation.push({
+        category: 'previousBalance',
+        amount: previousOwed
+      });
+    }
+
+    if (amount <= 0) {
+      // Nothing actually owed for the requested categories — skip
+      // silently so a partially-owed batch doesn't fail because one
+      // tenant is already paid.
+      return null;
+    }
+
+    const paymentData: AnyRecord = {
+      _id: tenantId,
+      month: Number(term.slice(4, 6)),
+      year: Number(term.slice(0, 4)),
+      payments: [
+        {
+          amount,
+          date: todayDDMMYYYY,
+          type: 'transfer',
+          reference: '',
+          allocation
+        }
+      ],
+      promo: 0,
+      extracharge: 0
+    };
+
+    return { tenantId, term, amount, paymentData };
+  });
+
+  const live = writePlans.filter(
+    (p): p is NonNullable<typeof p> => p != null
+  );
+  // Parallel writes: each _updateByTerm targets a different tenant
+  // document so there is no contention. Errors from any one item
+  // reject the whole batch (Promise.all propagation) — preserves
+  // round-3r's "no partial writes" guarantee.
+  await Promise.all(
+    live.map((p) =>
+      _updateByTerm(authorizationHeader, locale, realm, p.term, p.paymentData)
+    )
+  );
+
+  res.json({
+    results: writePlans.map((p, idx) =>
+      p == null
+        ? {
+            tenantId: String(items[idx].tenantId),
+            term: String(items[idx].term),
+            skipped: true
+          }
+        : {
+            tenantId: p.tenantId,
+            term: p.term,
+            amount: p.amount,
+            skipped: false
+          }
+    )
+  });
 }
 
 export async function update(req: ReqNoParams, res: Res) {
@@ -547,35 +823,59 @@ async function _updateByTerm(
           }
         }
       });
+      // Wave-26 round-3r: every persisted payment carries an `allocation`.
+      // If the caller passed one (Specific / Custom mode), normalise and
+      // honour it. Otherwise compute auto-spread server-side against the
+      // rent's per-category owed, decrementing as we walk through the
+      // payments so a 2nd payment sees what's left after the 1st landed.
+      const _targetTermNum = Number(term);
+      const _targetRent = (occupant.rents || []).find(
+        (r: AnyRecord) => Number(r.term) === _targetTermNum
+      );
+      const _runningOwed = _computeOwedByCategory(_targetRent || {});
+
       settlements.payments = paymentData.payments
         .filter(({ amount }: AnyRecord) =>
           Number.isFinite(Number(amount)) && Number(amount) >= 0.01
         )
-        .map((payment: AnyRecord) => ({
-          date: payment.date || '',
-          amount: Number(payment.amount),
-          type: payment.type || '',
-          reference: payment.reference || '',
-          description: payment.description || '',
-          // Wave-26 round-3j: per-payment promo/extracharge persisted on
-          // the payment object so the UI can render them on the matching
-          // saved tile (and recompute the rent summary on next read).
-          // Always include the keys (with 0/'' fallback) for shape stability.
-          promo: Number(payment.promo) || 0,
-          notepromo: payment.notepromo || '',
-          extracharge: Number(payment.extracharge) || 0,
-          noteextracharge: payment.noteextracharge || '',
-          // Wave-25: optional allocation, normalised. Empty array is dropped
-          // so legacy reads that key off "allocation present" don't trip.
-          ...(Array.isArray(payment.allocation) && payment.allocation.length
-            ? {
-                allocation: payment.allocation.map((a: AnyRecord) => ({
-                  category: String(a.category),
-                  amount: Number(a.amount)
-                }))
-              }
-            : {})
-        }));
+        .map((payment: AnyRecord) => {
+          const amt = Number(payment.amount);
+          let allocation: { category: string; amount: number }[];
+          if (
+            Array.isArray(payment.allocation) &&
+            payment.allocation.length
+          ) {
+            allocation = payment.allocation.map((a: AnyRecord) => ({
+              category: String(a.category),
+              amount: Number(a.amount)
+            }));
+          } else {
+            allocation = _computeAutoSpread(amt, _runningOwed);
+          }
+          // Decrement runningOwed by what this payment took, so later
+          // payments in the same batch don't double-fill the same buckets.
+          allocation.forEach((entry) => {
+            const k = entry.category;
+            if (_runningOwed[k] != null) {
+              _runningOwed[k] = _round(
+                Math.max(0, Number(_runningOwed[k]) - entry.amount)
+              );
+            }
+          });
+          return {
+            date: payment.date || '',
+            amount: amt,
+            type: payment.type || '',
+            reference: payment.reference || '',
+            description: payment.description || '',
+            // Wave-26 round-3j fields, kept for shape stability.
+            promo: Number(payment.promo) || 0,
+            notepromo: payment.notepromo || '',
+            extracharge: Number(payment.extracharge) || 0,
+            noteextracharge: payment.noteextracharge || '',
+            allocation
+          };
+        });
     }
 
     // Wave-26 round-3j: per-payment description/promo/extracharge fields.

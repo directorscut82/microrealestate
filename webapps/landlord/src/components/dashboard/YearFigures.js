@@ -143,7 +143,6 @@ export default function YearFigures({ className, dashboardData }) {
     <DashboardCard
       Icon={LuBanknote}
       title={t('Rents of {{year}}', { year: moment().format('YYYY') })}
-      description={t('Rents for the year')}
       renderContent={() => (
         <ChartContainer
           config={{
@@ -184,22 +183,31 @@ export default function YearFigures({ className, dashboardData }) {
             <Legend
               verticalAlign="top"
               content={() => (
-                <div className="flex flex-wrap justify-center gap-4 text-label text-ink-soft mb-6">
+                <div className="flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-label text-ink-soft mb-6">
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
-                      style={{ background: CHART_UNPAID }}
+                      style={{ background: 'oklch(80% 0.030 245)' }}
                       aria-hidden="true"
                     />
-                    <span>{t('Cumulative balance')}</span>
+                    {/* Wave-26 round-3r: 'Outstanding' on this bar
+                        means month-only shortfall (excludes carry).
+                        Subscript distinguishes from cumulative
+                        meaning of the pie's Outstanding swatch. */}
+                    <span>
+                      {t('Outstanding')}{' '}
+                      <span className="text-ink-muted">
+                        ({t('this month')})
+                      </span>
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
-                      style={{ background: CHART_PAID }}
+                      style={{ background: 'oklch(50% 0.090 245)' }}
                       aria-hidden="true"
                     />
-                    <span>{t('Collected')}</span>
+                    <span>{t('Receipts')}</span>
                   </div>
                 </div>
               )}
