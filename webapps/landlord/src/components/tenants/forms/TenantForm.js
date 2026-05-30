@@ -296,16 +296,12 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
             </div>
           </div>
         )}
-        <div className="sm:flex sm:gap-2">
-          <div className="space-y-2 flex-1">
-            <Label htmlFor="phone">{t('Phone')}</Label>
-            <Input id="phone" disabled={readOnly} {...register('phone')} />
-          </div>
-          <div className="space-y-2 flex-1">
-            <Label htmlFor="email">{t('Email')}</Label>
-            <Input id="email" disabled={readOnly} {...register('email')} />
-          </div>
-        </div>
+        {/* Wave-26 round-3o: top-level Phone/Email removed. The Contact
+            details section below holds per-contact phone1/phone2/email.
+            Keeping a duplicate tenant-level pair here was confusing —
+            users entered data twice or wondered which one matters.
+            Existing data on these fields is preserved (no schema
+            change), the inputs just no longer surface in the UI. */}
         <div className="space-y-2">
           <Label>{t('The tenant belongs to')}</Label>
           <div className="flex flex-col gap-2">
