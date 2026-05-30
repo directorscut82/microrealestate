@@ -53,7 +53,21 @@ const paymentSchema = z
     // 'levy' is no longer offered in the dropdown but the enum keeps it
     // so legacy records re-saved through the dialog don't trip validation.
     type: z.enum(['cash', 'transfer', 'levy', 'cheque']),
-    reference: z.string().optional()
+    reference: z.string().optional(),
+    // Wave-26 round-3j: per-payment note/discount/extra-charge. These used to
+    // live at the rent level and were re-shown on every reopen; the user
+    // expects them to belong to the specific payment instead.
+    description: z.string().optional(),
+    promo: z.preprocess(
+      (v) => (v === '' || v == null ? undefined : v),
+      z.coerce.number().min(0).optional()
+    ),
+    notepromo: z.string().optional(),
+    extracharge: z.preprocess(
+      (v) => (v === '' || v == null ? undefined : v),
+      z.coerce.number().min(0).optional()
+    ),
+    noteextracharge: z.string().optional()
   })
   .refine(
     ({ amount, date }) => {
@@ -85,12 +99,9 @@ const schema = z.object({
   // Wave-26 round-3f: was min(1). Form's payments[] is now drafts-only;
   // empty array is legitimate (user is just editing notes/discount, or
   // pressing Record to apply staged edits/deletes to saved tiles).
-  payments: z.array(paymentSchema),
-  description: z.string().optional(),
-  extracharge: z.coerce.number().min(0).optional(),
-  noteextracharge: z.string().optional(),
-  promo: z.coerce.number().min(0).optional(),
-  notepromo: z.string().optional()
+  // round-3j: rent-level description/promo/extracharge fields removed.
+  // They now live per-payment in paymentSchema above.
+  payments: z.array(paymentSchema)
 });
 
 // Wave-26 round-3g: default the new-draft date to today (ISO). Without
@@ -101,7 +112,13 @@ const emptyPayment = () => ({
   amount: '',
   date: _todayISO(),
   type: 'transfer',
-  reference: ''
+  reference: '',
+  // Wave-26 round-3j: per-payment fields default empty.
+  description: '',
+  promo: '',
+  notepromo: '',
+  extracharge: '',
+  noteextracharge: ''
 });
 
 // Wave-26 round-3f: the form's payments[] now holds DRAFTS only — new
@@ -111,14 +128,13 @@ const emptyPayment = () => ({
 // dialog showed the existing payment in editable inputs and pressing
 // "Εκτέλεση" appeared to do nothing (it submitted the same payment as
 // a no-op replace).
-function initialFormValues(rent) {
+// Wave-26 round-3j: form's `payments[]` holds drafts only and starts
+// empty. Rent-level note/discount/extracharge fields are gone — those
+// values are now per-payment and read from `rent.payments[i]` directly
+// for saved tiles, or filled inline per draft when adding new payments.
+function initialFormValues() {
   return {
-    payments: [],
-    description: rent?.description?.trimEnd() || '',
-    extracharge: rent?.extracharge !== 0 ? rent.extracharge : '',
-    noteextracharge: rent?.noteextracharge?.trimEnd() || '',
-    promo: rent?.promo !== 0 ? rent.promo : '',
-    notepromo: rent?.notepromo?.trimEnd() || ''
+    payments: []
   };
 }
 
@@ -511,10 +527,7 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
   const store = useContext(StoreContext);
   const { t } = useTranslation('common');
   const paymentTypes = usePaymentTypes();
-  const initVals = initialFormValues(rent);
-  const [expandedNote, setExpandedNote] = useState(!!initVals.description);
-  const [expandedDiscount, setExpandedDiscount] = useState(initVals.promo > 0);
-  const [expandedAdditionalCost, setExpandedAdditionalCost] = useState(initVals.extracharge > 0);
+  const initVals = initialFormValues();
   const formRef = useRef();
 
   // Wave-25: per-payment allocation state. Keyed by field id so it survives
@@ -544,7 +557,12 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         date: p.date || '',
         type: p.type || 'transfer',
         reference: p.reference || '',
-        description: p.description || ''
+        // Wave-26 round-3j: per-payment note/discount/extracharge.
+        description: p.description || '',
+        promo: Number(p.promo) || 0,
+        notepromo: p.notepromo || '',
+        extracharge: Number(p.extracharge) || 0,
+        noteextracharge: p.noteextracharge || ''
       }))
   );
   const [editingIndex, setEditingIndex] = useState(null);
@@ -811,6 +829,30 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                                 {sp.reference ? ` · ${sp.reference}` : ''}
                               </span>
                             </div>
+                            {/* Wave-26 round-3j: surface per-payment
+                                note/discount/extra-charge attached to this
+                                saved tile, if any. */}
+                            {sp.description ? (
+                              <div className="mt-1 text-xs text-ink-muted italic">
+                                {t('Note')}: {sp.description}
+                              </div>
+                            ) : null}
+                            {Number(sp.promo) > 0 ? (
+                              <div className="mt-0.5 text-xs text-olive">
+                                {t('Discount')}:{' '}
+                                <NumberFormat value={Number(sp.promo)} />
+                                {sp.notepromo ? ` · ${sp.notepromo}` : ''}
+                              </div>
+                            ) : null}
+                            {Number(sp.extracharge) > 0 ? (
+                              <div className="mt-0.5 text-xs text-oxide">
+                                {t('Additional cost')}:{' '}
+                                <NumberFormat value={Number(sp.extracharge)} />
+                                {sp.noteextracharge
+                                  ? ` · ${sp.noteextracharge}`
+                                  : ''}
+                              </div>
+                            ) : null}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <Button
@@ -952,6 +994,69 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                     t={t}
                   />
                 )}
+
+                {/* Wave-26 round-3j: per-payment Note / Discount / Extra-charge.
+                    Collapsed by default. Saving with these fields populated
+                    attaches them to this specific payment, not the rent. */}
+                <div className="mt-3 space-y-2">
+                  <Collapse title={t('Note')}>
+                    <div className="space-y-1">
+                      <Label htmlFor={`payments.${index}.description`}>
+                        {t('Note (only visible to landlord)')}
+                      </Label>
+                      <Textarea
+                        id={`payments.${index}.description`}
+                        {...register(`payments.${index}.description`)}
+                      />
+                    </div>
+                  </Collapse>
+                  <Collapse title={t('Discount')}>
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <Label htmlFor={`payments.${index}.promo`}>
+                          {t('Amount')}
+                        </Label>
+                        <Input
+                          id={`payments.${index}.promo`}
+                          type="number"
+                          {...register(`payments.${index}.promo`)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`payments.${index}.notepromo`}>
+                          {t('Description (visible to tenant)')}
+                        </Label>
+                        <Textarea
+                          id={`payments.${index}.notepromo`}
+                          {...register(`payments.${index}.notepromo`)}
+                        />
+                      </div>
+                    </div>
+                  </Collapse>
+                  <Collapse title={t('Additional cost')}>
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <Label htmlFor={`payments.${index}.extracharge`}>
+                          {t('Amount')}
+                        </Label>
+                        <Input
+                          id={`payments.${index}.extracharge`}
+                          type="number"
+                          {...register(`payments.${index}.extracharge`)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor={`payments.${index}.noteextracharge`}>
+                          {t('Description (visible to tenant)')}
+                        </Label>
+                        <Textarea
+                          id={`payments.${index}.noteextracharge`}
+                          {...register(`payments.${index}.noteextracharge`)}
+                        />
+                      </div>
+                    </div>
+                  </Collapse>
+                </div>
               </div>
             ))}
             <Button
@@ -968,38 +1073,6 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
           </CardContent>
         </Card>
 
-        <Collapse title={t('Note')} open={expandedNote} onOpenChange={setExpandedNote}>
-          <div className="space-y-1">
-            <Label htmlFor="description">{t('Note (only visible to landlord)')}</Label>
-            <Textarea id="description" {...register('description')} />
-          </div>
-        </Collapse>
-
-        <Collapse title={t('Discount')} open={expandedDiscount} onOpenChange={setExpandedDiscount}>
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <Label htmlFor="promo">{t('Amount')}</Label>
-              <Input id="promo" type="number" {...register('promo')} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="notepromo">{t('Description (visible to tenant)')}</Label>
-              <Textarea id="notepromo" {...register('notepromo')} />
-            </div>
-          </div>
-        </Collapse>
-
-        <Collapse title={t('Additional cost')} open={expandedAdditionalCost} onOpenChange={setExpandedAdditionalCost}>
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <Label htmlFor="extracharge">{t('Amount')}</Label>
-              <Input id="extracharge" type="number" {...register('extracharge')} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="noteextracharge">{t('Description (visible to tenant)')}</Label>
-              <Textarea id="noteextracharge" {...register('noteextracharge')} />
-            </div>
-          </div>
-        </Collapse>
       </div>
 
       {/* Wave-26 round-3f: delete confirmation for an already-saved
