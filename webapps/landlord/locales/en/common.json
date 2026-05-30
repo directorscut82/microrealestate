@@ -810,5 +810,12 @@
   "Record": "Record",
   "Please complete required fields": "Please complete required fields",
   "Date required when amount > 0": "Date required when amount > 0",
-  "Partial": "Partial"
+  "Partial": "Partial",
+  "New payment": "New payment",
+  "Add another payment": "Add another payment",
+  "Editing a recorded payment. Your changes are not saved until you press Record on the dialog.": "Editing a recorded payment. Your changes are not saved until you press Record on the dialog.",
+  "Apply edit": "Apply edit",
+  "Delete this recorded payment?": "Delete this recorded payment?",
+  "Edited (will save when you press Record)": "Edited (will save when you press Record)",
+  "Removed (will save when you press Record)": "Removed (will save when you press Record)"
 }

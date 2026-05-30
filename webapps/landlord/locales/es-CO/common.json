@@ -798,5 +798,12 @@
   "Record": "Registrar",
   "Please complete required fields": "Completa los campos obligatorios",
   "Date required when amount > 0": "La fecha es obligatoria cuando el monto > 0",
-  "Partial": "Parcial"
+  "Partial": "Parcial",
+  "New payment": "Nuevo pago",
+  "Add another payment": "Agregar otro pago",
+  "Editing a recorded payment. Your changes are not saved until you press Record on the dialog.": "Editando un pago registrado. Tus cambios no se guardan hasta que presiones Registrar.",
+  "Apply edit": "Aplicar cambio",
+  "Delete this recorded payment?": "¿Eliminar este pago registrado?",
+  "Edited (will save when you press Record)": "Editado (se guardará al presionar Registrar)",
+  "Removed (will save when you press Record)": "Eliminado (se guardará al presionar Registrar)"
 }
