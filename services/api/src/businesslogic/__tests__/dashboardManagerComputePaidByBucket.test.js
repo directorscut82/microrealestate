@@ -1,8 +1,11 @@
 import { _computePaidByBucket } from '../../managers/dashboardmanager.js';
 
-// Test fixtures: build a "rent" record matching the shape dashboardmanager
-// reads from MongoDB. Only the fields _computePaidByBucket actually touches
-// (total.preTaxAmount, charges[], buildingCharges[], payments[]).
+// Wave-26 round-3r: this function is now an aggregator over
+// payments[].allocation only. Auto-spread fallback was moved to
+// rentmanager (persisted on save) and the legacy migration script.
+// Payments without an allocation contribute NOTHING to the buckets —
+// the round-3r migration backfills them all so this never happens
+// post-deploy.
 function makeRent({
   preTaxAmount = 0,
   charges = [],
@@ -23,28 +26,18 @@ describe('_computePaidByBucket', () => {
     expect(_computePaidByBucket(rent)).toEqual({});
   });
 
-  test('auto-spread: payment fully covers rent only when no other buckets', () => {
+  test('payments without allocation contribute zero to all buckets', () => {
+    // Round-3r contract: every payment must carry an explicit
+    // allocation by the time the dashboard reads it. Migration script
+    // backfills legacy payments.
     const rent = makeRent({
       preTaxAmount: 500,
       payments: [{ amount: 500 }]
     });
-    expect(_computePaidByBucket(rent)).toEqual({ rent: 500 });
+    expect(_computePaidByBucket(rent)).toEqual({});
   });
 
-  test('auto-spread fills repair-buildings BEFORE rent (oldest-debt-first order)', () => {
-    const rent = makeRent({
-      preTaxAmount: 500,
-      buildingCharges: [{ type: 'repair', amount: 200 }],
-      payments: [{ amount: 250 }]
-    });
-    // 250 should fill the 200 repair first, then 50 spills onto rent.
-    expect(_computePaidByBucket(rent)).toEqual({
-      'building:repair': 200,
-      rent: 50
-    });
-  });
-
-  test('explicit allocation routes amount to the requested category bucket', () => {
+  test('explicit allocation routes amount to the requested category', () => {
     const rent = makeRent({
       preTaxAmount: 500,
       charges: [{ amount: 100 }],
@@ -55,7 +48,6 @@ describe('_computePaidByBucket', () => {
         }
       ]
     });
-    // Allocation says 'rent', so rent gets 100 even though charges is owed.
     expect(_computePaidByBucket(rent)).toEqual({ rent: 100 });
   });
 
@@ -74,8 +66,9 @@ describe('_computePaidByBucket', () => {
         }
       ]
     });
-    // Expenses bucket = charges (100) + non-repair building (cleaning=100) = 200 owed.
-    // Allocation of 200 fully covers both, prorated 100/100.
+    // expenses owed = charges (100) + cleaning (100) = 200. Allocation
+    // of 200 fully covers both, prorated 100/100. Repair stays at 0
+    // (it's NOT in the expenses bucket).
     const out = _computePaidByBucket(rent);
     expect(out.charges).toBeCloseTo(100, 1);
     expect(out['building:cleaning']).toBeCloseTo(100, 1);
@@ -102,60 +95,83 @@ describe('_computePaidByBucket', () => {
     });
   });
 
-  test('partial allocation residual auto-spreads on remaining buckets', () => {
+  test('multi-allocation entries each go to their respective bucket', () => {
+    // Round-3r typical case: auto-spread produced rent + insurance,
+    // express-pay produced rent + previousBalance.
     const rent = makeRent({
-      preTaxAmount: 500,
-      buildingCharges: [{ type: 'repair', amount: 200 }],
+      preTaxAmount: 200,
+      buildingCharges: [{ type: 'insurance', amount: 67 }],
       payments: [
         {
-          amount: 300,
-          // Caller allocated only 100 of the 300 — residual 200 must spread.
-          allocation: [{ category: 'rent', amount: 100 }]
+          amount: 150,
+          allocation: [
+            { category: 'rent', amount: 83 },
+            { category: 'expenses', amount: 67 }
+          ]
         }
       ]
     });
+    // expenses (67) prorates onto charges (0) + insurance (67) → all
+    // 67 lands on insurance because charges has zero owed weight.
     const out = _computePaidByBucket(rent);
-    // Explicit alloc lands 100 in rent. Residual 200 auto-spreads:
-    // repair (oldest-debt) is owed 200, fills first and exhausts the
-    // residual. Rent stays at 100.
-    expect(out.rent).toBeCloseTo(100, 1);
-    expect(out['building:repair']).toBeCloseTo(200, 1);
+    expect(out.rent).toBeCloseTo(83, 1);
+    expect(out['building:insurance']).toBeCloseTo(67, 1);
+    expect(out.charges).toBeUndefined();
   });
 
-  test('multiple payments accumulate per-bucket', () => {
+  test('multiple payments accumulate per-bucket from their allocations', () => {
     const rent = makeRent({
       preTaxAmount: 500,
-      payments: [{ amount: 200 }, { amount: 150 }]
+      payments: [
+        { amount: 200, allocation: [{ category: 'rent', amount: 200 }] },
+        { amount: 150, allocation: [{ category: 'rent', amount: 150 }] }
+      ]
     });
     expect(_computePaidByBucket(rent)).toEqual({ rent: 350 });
   });
 
-  test('overpayment: amount exceeding all owed leaves residual silently dropped', () => {
-    const rent = makeRent({
-      preTaxAmount: 100,
-      payments: [{ amount: 500 }]
-    });
-    // Rent caps at owed (100). The 400 overpayment has no bucket — dropped.
-    expect(_computePaidByBucket(rent)).toEqual({ rent: 100 });
-  });
-
-  test('zero/negative payment amounts are skipped', () => {
+  test('zero-amount allocation entries are ignored', () => {
     const rent = makeRent({
       preTaxAmount: 500,
-      payments: [{ amount: 0 }, { amount: -50 }, { amount: 100 }]
+      payments: [
+        {
+          amount: 100,
+          allocation: [
+            { category: 'rent', amount: 100 },
+            { category: 'expenses', amount: 0 }
+          ]
+        }
+      ]
     });
     expect(_computePaidByBucket(rent)).toEqual({ rent: 100 });
   });
 
-  test('vat / previousBalance / extracharge allocations consume amount but no bucket', () => {
-    // These categories aren't visualised on the dashboard pie. The
-    // allocation is honored (the amount is "used") but no bucket grows.
+  test('vat / previousBalance / extracharge allocations consume amount but produce no bucket entry', () => {
+    // Pie chart doesn't visualise these categories. They are silently
+    // skipped during bucket aggregation.
     const rent = makeRent({
       preTaxAmount: 500,
       payments: [
         {
           amount: 100,
           allocation: [{ category: 'vat', amount: 100 }]
+        }
+      ]
+    });
+    expect(_computePaidByBucket(rent)).toEqual({});
+  });
+
+  test('expenses allocation with no expense buckets owed leaves no output', () => {
+    // Edge case: caller allocated to expenses but the rent has
+    // neither charges[] nor non-repair buildingCharges[]. _prorate
+    // returns silently because total weight is 0; bucket map stays
+    // empty.
+    const rent = makeRent({
+      preTaxAmount: 500,
+      payments: [
+        {
+          amount: 50,
+          allocation: [{ category: 'expenses', amount: 50 }]
         }
       ]
     });
@@ -169,14 +185,15 @@ describe('_computePaidByBucket', () => {
       payments: [
         {
           amount: 100.01,
-          allocation: [{ category: 'expenses', amount: 0.02 }]
+          allocation: [
+            { category: 'rent', amount: 99.99 },
+            { category: 'expenses', amount: 0.02 }
+          ]
         }
       ]
     });
     const out = _computePaidByBucket(rent);
     Object.values(out).forEach((v) => {
-      // Detect raw floats like 0.020000000000000018; rounded values
-      // multiplied by 100 should land on integers.
       expect(Math.round(v * 100) / 100).toBe(v);
     });
   });

@@ -1,5 +1,5 @@
 import { getRentAmounts, RentAmount } from './RentDetails';
-import { LuHistory, LuPaperclip } from 'react-icons/lu';
+import { LuHistory, LuPaperclip, LuZap } from 'react-icons/lu';
 import { useCallback, useContext, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -9,6 +9,7 @@ import { downloadDocument } from '../../utils/fetch';
 import { EmptyIllustration } from '../Illustrations';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
+import ExpressPaymentDialog from './ExpressPaymentDialog';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
 import RentHistoryDialog from './RentHistoryDialog';
 import { Separator } from '../ui/separator';
@@ -327,7 +328,7 @@ function StatusDot({ rent }) {
   );
 }
 
-function StatusLegend() {
+function StatusLegend({ actionsRight }) {
   const { t } = useTranslation('common');
   const items = [
     { key: 'paid', label: t('Paid') },
@@ -349,6 +350,7 @@ function StatusLegend() {
           {it.label}
         </span>
       ))}
+      {actionsRight ? <div className="ml-auto">{actionsRight}</div> : null}
     </div>
   );
 }
@@ -504,6 +506,8 @@ function RentTable({ rents = [], selected, setSelected }) {
   const store = useContext(StoreContext);
   const { t } = useTranslation('common');
   const [openNewPaymentDialog, setOpenNewPaymentDialog] = useState(false);
+  // Wave-26 round-3r: bulk express-payment dialog (right-side drawer).
+  const [openExpressDialog, setOpenExpressDialog] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
   const [openRentHistoryDialog, setOpenRentHistoryDialog] = useState(false);
   const [selectedRentHistory, setSelectedRentHistory] = useState(null);
@@ -571,6 +575,12 @@ function RentTable({ rents = [], selected, setSelected }) {
         data={selectedRentHistory}
       />
 
+      <ExpressPaymentDialog
+        open={openExpressDialog}
+        setOpen={setOpenExpressDialog}
+        rents={rents}
+      />
+
       {rents.length ? (
         <Card className="p-6">
           {store.organization.canSendEmails ? (
@@ -607,7 +617,28 @@ function RentTable({ rents = [], selected, setSelected }) {
               </div>
             );
           })}
-          <StatusLegend />
+          <StatusLegend
+            actionsRight={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setOpenExpressDialog(true)}
+                aria-label={t('Express settlement')}
+                title={t('Express settlement')}
+                className="gap-1.5"
+                data-cy="expressPaymentBtn"
+              >
+                <span className="relative inline-flex">
+                  <TbCashRegister className="size-4" />
+                  <LuZap className="size-3 -mr-0.5 text-olive" />
+                </span>
+                <span className="hidden md:inline">
+                  {t('Express settlement')}
+                </span>
+              </Button>
+            }
+          />
         </Card>
       ) : (
         <EmptyIllustration label={t('No rents found')} />
