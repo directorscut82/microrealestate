@@ -443,6 +443,7 @@
   "Payment #{{count}}": "Payment #{{count}}",
   "Payment Receipts": "Payment Receipts",
   "Payment date cannot be more than 7 days in the future": "A data do pagamento não pode estar a mais de 7 dias no futuro",
+  "Payment date is after this rent month. Switch to that month’s rents page to record against it.": "A data do pagamento é posterior a este mês de aluguel. Troque a página de aluguéis para registrá-lo lá.",
   "Payment date is before this rent month. Switch to that month’s rents page to record against it.": "A data do pagamento é anterior a este mês de aluguel. Troque a página de aluguéis para registrá-lo lá.",
   "Payment fills the oldest unpaid category first, then the next.": "O pagamento cobre primeiro a categoria mais antiga e depois a seguinte.",
   "Payment of {{amount}}€ recorded": "Pagamento de {{amount}}€ registrado",

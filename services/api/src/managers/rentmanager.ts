@@ -800,10 +800,13 @@ async function _updateByTerm(
             );
           }
           // Wave-26 round-3o: reject payment dates BEFORE the rent term's
-          // first day. The user explicitly opens the dialog from a specific
-          // month's rents page; a date in an earlier month almost always
-          // means the wrong page was opened. Forces the landlord to switch
-          // to the correct rent month deliberately.
+          // first day. round-3t: also reject payment dates AFTER the
+          // term's last day + 7d cheque-clearing cushion. Both cases
+          // almost always mean the user opened the wrong rents page;
+          // accepting the payment carries the credit/debit forward and
+          // can produce a NEGATIVE grandTotal on the next month
+          // (Contract.payTerm has no clamp). Forces the landlord to
+          // record against the correct term explicitly.
           //
           // term is YYYYMMDDHH (e.g. 2026050100 -> 2026-05-01).
           const termStr = String(term);
@@ -820,6 +823,21 @@ async function _updateByTerm(
             ) {
               throw new ServiceError(
                 `payments[${idx}].date is before this rent month — switch to that month's rents page to record against it`,
+                422
+              );
+            }
+            // Last day of the term-month, +7 days cushion.
+            const termLastDay = termFirstDay
+              .clone()
+              .endOf('month')
+              .add(7, 'days');
+            if (
+              parsed.isValid() &&
+              termLastDay.isValid() &&
+              parsed.isAfter(termLastDay)
+            ) {
+              throw new ServiceError(
+                `payments[${idx}].date is after this rent month — switch to that month's rents page to record against it`,
                 422
               );
             }
