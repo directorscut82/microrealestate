@@ -145,6 +145,11 @@ function Shortcuts({
       <NewPaymentDialog
         open={openNewPaymentDialog}
         setOpen={setOpenNewPaymentDialog}
+        // Wave-26 round-3o: dashboard shortcut is for "quick record of a
+        // rent that just came in today". Lock the date to today so the
+        // landlord can't accidentally backdate / forward-date from this
+        // entry point. For any other date use the rents-page dialog.
+        lockDateToToday
       />
       <TerminateLeaseDialog
         open={openTerminateLeaseDialog}
