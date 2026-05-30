@@ -150,14 +150,16 @@ export default function MonthFigures({ className, dashboardData }) {
           name: t('Rent') + ' (' + t('collected') + ')',
           value: rentPaid,
           color: getColor('rent', 'paid'),
-          type: 'rent'
+          type: 'rent',
+          status: 'paid'
         });
       if (rentUnpaid > 0)
         segments.push({
           name: t('Rent') + ' (' + t('owed') + ')',
           value: rentUnpaid,
           color: getColor('rent', 'unpaid'),
-          type: 'rent'
+          type: 'rent',
+          status: 'unpaid'
         });
     }
 
@@ -170,14 +172,16 @@ export default function MonthFigures({ className, dashboardData }) {
           name: t('Extra charges') + ' (' + t('collected') + ')',
           value: chargesPaid,
           color: getColor('charges', 'paid'),
-          type: 'charges'
+          type: 'charges',
+          status: 'paid'
         });
       if (chargesUnpaid > 0)
         segments.push({
           name: t('Extra charges') + ' (' + t('owed') + ')',
           value: chargesUnpaid,
           color: getColor('charges', 'unpaid'),
-          type: 'charges'
+          type: 'charges',
+          status: 'unpaid'
         });
     }
 
@@ -192,14 +196,16 @@ export default function MonthFigures({ className, dashboardData }) {
           name: label + ' (' + t('collected') + ')',
           value: typePaid,
           color: getColor(type, 'paid'),
-          type
+          type,
+          status: 'paid'
         });
       if (typeUnpaid > 0)
         segments.push({
           name: label + ' (' + t('owed') + ')',
           value: typeUnpaid,
           color: getColor(type, 'unpaid'),
-          type
+          type,
+          status: 'unpaid'
         });
     });
 
@@ -211,52 +217,90 @@ export default function MonthFigures({ className, dashboardData }) {
     const entry = payload[0].payload;
     const tenants = currentRevenues.tenants || [];
 
+    // Wave-26 round-3i: per-tenant rows are filtered to the slice the user
+    // is hovering (e.g. 'Rent · paid' shows only rent-paid columns; 'Charges
+    // · owed' shows only the per-tenant charges-owed shortfall). Numbers
+    // come from `paidByBucket` (real allocation data, not paidRatio
+    // estimate). Bucket key matches the pie segment's `type`:
+    //   - type='rent'      -> bucket key 'rent', owed amount = tenant.baseRent
+    //   - type='charges'   -> bucket key 'charges', owed = tenant.charges
+    //   - building type    -> bucket key 'building:<type>',
+    //                          owed = tenant.buildingChargesByType[type]
+    const bucketKey =
+      entry.type === 'rent'
+        ? 'rent'
+        : entry.type === 'charges'
+          ? 'charges'
+          : `building:${entry.type}`;
+    const ownedFor = (tenant) =>
+      entry.type === 'rent'
+        ? Number(tenant.baseRent) || 0
+        : entry.type === 'charges'
+          ? Number(tenant.charges) || 0
+          : Number(tenant.buildingChargesByType?.[entry.type]) || 0;
+
+    // Filter to tenants who actually have a non-zero amount in this
+    // bucket (no point showing PAPADOPOULOS in a rent-tooltip if their
+    // rent is 0 because they only pay charges).
+    const visibleTenants = tenants
+      .map((tenant) => {
+        const owed = ownedFor(tenant);
+        const collected = Number(tenant.paidByBucket?.[bucketKey]) || 0;
+        return { tenant, owed, collected };
+      })
+      .filter(({ owed, collected }) => owed > 0 || collected > 0);
+
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-64">
-        <div className="font-medium text-body text-ink mb-0.5 leading-tight">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-3 py-2 text-label max-w-sm">
+        <div className="font-medium text-body text-ink leading-tight">
           {entry.name}
         </div>
-        <div className="font-mono tabular-nums text-label text-ink mb-1.5">
+        <div className="font-mono tabular-nums text-label text-ink-muted mb-2">
           {formatNumber(entry.value)}
         </div>
-        {tenants.length > 0 && (
-          <div className="border-t border-stone-line pt-1.5 space-y-1">
-            {tenants.map((tenant, i) => {
-              const catAmount =
-                entry.type === 'rent'
-                  ? tenant.baseRent
-                  : entry.type === 'charges'
-                    ? tenant.charges
-                    : tenant.buildingChargesByType?.[entry.type] || 0;
-              if (catAmount <= 0) return null;
-              // Per-tenant proportional ratio against per-tenant due — best we
-              // can do without per-category paid breakdown from the API.
-              const tenantPaidRatio =
-                tenant.due > 0 ? Math.min(tenant.paid / tenant.due, 1) : 0;
-              const catPaid = Math.round(catAmount * tenantPaidRatio);
-              return (
-                <div key={i}>
-                  <div className="truncate text-label text-ink-soft">{tenant.name}</div>
-                  <div className="flex gap-2 text-label text-ink-muted font-mono tabular-nums">
-                    <span>
-                      {t('Owed')}: {formatNumber(catAmount)}
-                    </span>
-                    <span
+        {visibleTenants.length > 0 && (
+          <table className="w-full tabular-nums text-label">
+            <thead className="text-xs text-ink-muted">
+              <tr>
+                <th className="text-left font-normal pb-1">
+                  {t('Tenant')}
+                </th>
+                <th className="text-right font-normal pb-1 pl-3">
+                  {t('Owed')}
+                </th>
+                <th className="text-right font-normal pb-1 pl-3">
+                  {t('Collected')}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleTenants.map(({ tenant, owed, collected }, i) => {
+                const fullyPaid =
+                  owed > 0 && collected + 0.005 >= owed;
+                return (
+                  <tr key={i} className="border-t border-stone-line/40">
+                    <td className="py-0.5 pr-2 text-ink truncate max-w-[12rem]">
+                      {tenant.name}
+                    </td>
+                    <td className="py-0.5 pl-3 text-right text-ink-muted">
+                      {formatNumber(owed)}
+                    </td>
+                    <td
+                      className={cn(
+                        'py-0.5 pl-3 text-right',
+                        fullyPaid ? '' : 'text-ink-muted'
+                      )}
                       style={{
-                        color:
-                          catPaid >= catAmount
-                            ? paidColor(entry.type)
-                            : undefined
+                        color: fullyPaid ? paidColor(entry.type) : undefined
                       }}
-                      className={catPaid >= catAmount ? '' : 'text-ink-muted'}
                     >
-                      {t('Collected')}: {formatNumber(catPaid)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                      {formatNumber(collected)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     );
