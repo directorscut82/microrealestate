@@ -410,6 +410,47 @@ async function _updateByTerm(
             `payments[${idx}].description`
           );
         }
+        // Wave-26 round-3o (security): per-payment promo / extracharge /
+        // notepromo / noteextracharge introduced in round-3j had NO
+        // validation. Rent-level versions (lines 257-263, 296-302) cap
+        // numbers at 10M and strings at 1000 chars; the per-payment
+        // variants must match. Without these checks a tenant could
+        // submit a 10MB notepromo or a 9.99e308 promo that breaks
+        // downstream VAT calculations and inflates the document.
+        if (p?.promo !== undefined && p.promo !== null && p.promo !== '') {
+          validateFiniteNumber(p.promo, `payments[${idx}].promo`, {
+            min: 0,
+            max: 10000000
+          });
+        }
+        if (
+          p?.extracharge !== undefined &&
+          p.extracharge !== null &&
+          p.extracharge !== ''
+        ) {
+          validateFiniteNumber(
+            p.extracharge,
+            `payments[${idx}].extracharge`,
+            { min: 0, max: 10000000 }
+          );
+        }
+        if (p?.notepromo !== undefined && p.notepromo !== null) {
+          validateStringLength(
+            p.notepromo,
+            1000,
+            `payments[${idx}].notepromo`
+          );
+        }
+        if (
+          p?.noteextracharge !== undefined &&
+          p.noteextracharge !== null
+        ) {
+          validateStringLength(
+            p.noteextracharge,
+            1000,
+            `payments[${idx}].noteextracharge`
+          );
+        }
         // Wave-25: payment-by-category allocation validation. The field is
         // optional (legacy/auto-spread callers send no allocation), but when
         // present every entry must reference a known category, every amount
@@ -469,6 +510,31 @@ async function _updateByTerm(
               `payments[${idx}].date too far in the future`,
               422
             );
+          }
+          // Wave-26 round-3o: reject payment dates BEFORE the rent term's
+          // first day. The user explicitly opens the dialog from a specific
+          // month's rents page; a date in an earlier month almost always
+          // means the wrong page was opened. Forces the landlord to switch
+          // to the correct rent month deliberately.
+          //
+          // term is YYYYMMDDHH (e.g. 2026050100 -> 2026-05-01).
+          const termStr = String(term);
+          if (termStr.length === 10) {
+            const termFirstDay = moment.utc(
+              `${termStr.slice(0, 4)}-${termStr.slice(4, 6)}-01`,
+              'YYYY-MM-DD',
+              true
+            );
+            if (
+              parsed.isValid() &&
+              termFirstDay.isValid() &&
+              parsed.isBefore(termFirstDay)
+            ) {
+              throw new ServiceError(
+                `payments[${idx}].date is before this rent month — switch to that month's rents page to record against it`,
+                422
+              );
+            }
           }
         }
       });

@@ -15,7 +15,22 @@ function _round(n: number): number {
 
 /**
  * Wave-26 round-3i: compute per-bucket paid amount for the dashboard pie
- * chart's tooltip. The pie's bucket space is:
+ * chart's tooltip.
+ *
+ * NOTE on apparent duplication with webapps/landlord/src/utils/paymentAllocation.js:
+ * The frontend lib's bucket space is the rent-PIPELINE category space
+ * (rent, expenses, repairs, vat, previousBalance, extracharge) used for
+ * recording allocations on a payment. THIS function's bucket space is
+ * the DASHBOARD-DISPLAY category space (rent, charges, building:<type>)
+ * used for visualising historical payments against pie segments. Both
+ * use auto-spread + prorated primitives that SOUND identical but
+ * operate over different keys, so a shared implementation would have
+ * to be parameterised on the bucket space — and then one of the two
+ * sites would need a translation layer between bucket spaces. The
+ * cost of a thin shared helper exceeds its benefit while only two
+ * call sites exist. Revisit if a third caller appears.
+ *
+ * The pie's bucket space is:
  *   - 'rent'                       (rent.preTaxAmount)
  *   - 'charges'                    (per-property extra charges, sum)
  *   - 'building:<type>'            (each entry of buildingChargesByType)
@@ -39,7 +54,7 @@ function _round(n: number): number {
  * bucket. Sum across buckets <= rent.total.payment (residual goes to
  * non-pie categories).
  */
-function _computePaidByBucket(rent: AnyRecord): AnyRecord {
+export function _computePaidByBucket(rent: AnyRecord): AnyRecord {
   const buckets: AnyRecord = {};
   const baseRent = rent.total?.preTaxAmount || 0;
   const charges = (rent.charges || []).reduce(

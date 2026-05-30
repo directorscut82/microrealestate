@@ -16,6 +16,30 @@ function _round(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/**
+ * Wave-26 round-3o (security): neutralise CSV formula injection in any
+ * free-text field that ends up in the export. Excel/LibreOffice/Google
+ * Sheets evaluate cells starting with =, +, -, @ as formulas, so a
+ * tenant-provided note like `=SYSTEM("rm -rf")` would execute on the
+ * accountant's machine. Prefixing with a single quote forces the cell
+ * to render as text. Tab and carriage return are sanitised too because
+ * some tools treat them as field separators.
+ *
+ * json2csv handles standard quote/newline escaping correctly; this
+ * guard only addresses the formula-prefix vector json2csv ignores.
+ */
+function _sanitizeCsvText(s: string): string {
+  if (!s) return s;
+  // Strip any leading whitespace before the formula char so a
+  // crafted "  =cmd|' /C calc'!A1" still gets caught.
+  const leading = /^[\t\r\n ]*/;
+  const trimmed = s.replace(leading, '');
+  if (/^[=+\-@\t\r]/.test(trimmed)) {
+    return `'${s}`;
+  }
+  return s;
+}
+
 async function _fetchData(realmId: string, year: number): Promise<AnyRecord[]> {
   return await Collections.Tenant.aggregate([
     {
@@ -319,10 +343,15 @@ function _settlements(
           .trim();
         const desc = (description || '').trim();
         if (desc || np || ne) {
+          // Sanitise against CSV formula injection — these strings flow
+          // into rawData JSON consumed by the Accounting UI and may be
+          // exported to spreadsheet by downstream tooling. Cheap to
+          // apply unconditionally; cosmetic effect is a leading single
+          // quote on hostile input only.
           notesByMonth[month - 1] = {
-            description: desc,
-            notepromo: np,
-            noteextracharge: ne
+            description: _sanitizeCsvText(desc),
+            notepromo: _sanitizeCsvText(np),
+            noteextracharge: _sanitizeCsvText(ne)
           };
         }
       } else {

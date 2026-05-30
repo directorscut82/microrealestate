@@ -2,7 +2,6 @@ import { Card, CardContent, CardHeader } from '../ui/card';
 import {
   forwardRef,
   useCallback,
-  useContext,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -31,16 +30,12 @@ import ConfirmDialog from '../ConfirmDialog';
 import { cn } from '../../utils';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
-import {
-  PAYMENT_CATEGORIES,
-  applyAllocation,
-  autoSpreadAllocation,
-  computeCategoryOwed
-} from '../../utils/paymentAllocation';
-import { StoreContext } from '../../store';
+import { computeCategoryOwed } from '../../utils/paymentAllocation';
+import AllocationBlock from './AllocationBlock';
+import SavedPaymentEditForm from './SavedPaymentEditForm';
 import { toast } from 'sonner';
 import usePaymentTypes from '../../hooks/usePaymentTypes';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
 const paymentSchema = z
@@ -147,385 +142,13 @@ function _formatDate(d) {
   return m.isValid() ? m.format('L') : d;
 }
 
-// Wave-25: human-readable label for each payment category. The values here
-// are the LITERAL English keys that exist in every locale's common.json —
-// next-translate uses string-keyed flat JSON, not dot-notation namespaces.
-const CATEGORY_LABEL_KEY = {
-  rent: 'Rent',
-  expenses: 'Building expenses',
-  repairs: 'Repairs',
-  vat: 'VAT',
-  previousBalance: 'Previous balance',
-  extracharge: 'Extra charge'
-};
-
-/**
- * Wave-25: per-payment allocation block. Three modes:
- *   - auto: payment auto-spreads oldest debt category first (server default)
- *   - specific: pick one category, full amount goes there
- *   - custom: per-category inputs, sum should equal payment amount
- *
- * The preview shows owed-before / owed-after for every category that has
- * a non-zero owed amount. Categories with zero owed are hidden (avoids
- * cluttering the table with rows that don't apply this month).
- *
- * Overpayment surfaces a "Credit to next month" line so the surplus is
- * visible, never silent.
- */
-function AllocationBlock({
-  index,
-  fieldKey,
-  amount,
-  owed,
-  state,
-  onModeChange,
-  onSpecificCategoryChange,
-  onCustomAmountChange,
-  t
-}) {
-  const mode = state.mode || 'auto';
-  const specificCategory = state.specificCategory || '';
-  const custom = state.custom || {};
-
-  // Build the working allocation array based on the active mode. This is
-  // what the preview applies to `owed` to render before/after columns.
-  let allocation = [];
-  if (mode === 'auto') {
-    allocation = autoSpreadAllocation(amount, owed);
-  } else if (mode === 'specific' && specificCategory) {
-    allocation = [{ category: specificCategory, amount }];
-  } else if (mode === 'custom') {
-    allocation = Object.entries(custom)
-      .map(([category, val]) => ({ category, amount: Number(val) || 0 }))
-      .filter((a) => a.amount > 0);
-  }
-
-  const { remaining, creditToNextMonth, remainingTotal } = applyAllocation(
-    owed,
-    allocation
-  );
-
-  // Visible categories: anything with a non-zero owed amount, OR being
-  // explicitly allocated to in custom mode.
-  const visibleCats = PAYMENT_CATEGORIES.filter((c) => {
-    if ((Number(owed?.[c]) || 0) > 0) return true;
-    if (mode === 'custom' && Number(custom[c]) > 0) return true;
-    return false;
-  });
-
-  const customSum = Object.values(custom).reduce(
-    (s, v) => s + (Number(v) || 0),
-    0
-  );
-  const customDelta = amount - customSum; // >0 = under-allocated, <0 = over
-
-  return (
-    <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-3">
-      <div className="text-sm font-medium">{t('Apply to')}</div>
-
-      <div className="space-y-2">
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="radio"
-            name={`alloc-mode-${fieldKey}`}
-            value="auto"
-            checked={mode === 'auto'}
-            onChange={() => onModeChange('auto')}
-            className="mt-1"
-            data-cy={`allocMode-${index}-auto`}
-          />
-          <div className="flex-1">
-            <div>{t('Auto-spread (oldest first)')}</div>
-            <div className="text-xs text-muted-foreground">
-              {t(
-                'Payment fills the oldest unpaid category first, then the next.'
-              )}
-            </div>
-          </div>
-        </label>
-
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="radio"
-            name={`alloc-mode-${fieldKey}`}
-            value="specific"
-            checked={mode === 'specific'}
-            onChange={() => onModeChange('specific')}
-            className="mt-1"
-            data-cy={`allocMode-${index}-specific`}
-          />
-          <div className="flex-1">
-            <div>{t('Specific category')}</div>
-            {mode === 'specific' && (
-              <div className="mt-1">
-                <Select
-                  value={specificCategory}
-                  onValueChange={onSpecificCategoryChange}
-                >
-                  <SelectTrigger
-                    className="max-w-xs"
-                    data-cy={`allocSpecificCategory-${index}`}
-                  >
-                    <SelectValue placeholder={t('Select a category')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_CATEGORIES.filter(
-                      (c) => (Number(owed?.[c]) || 0) > 0
-                    ).map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {t(CATEGORY_LABEL_KEY[c])}
-                        {' '}
-                        ({(Number(owed?.[c]) || 0).toFixed(2)})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        </label>
-
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="radio"
-            name={`alloc-mode-${fieldKey}`}
-            value="custom"
-            checked={mode === 'custom'}
-            onChange={() => onModeChange('custom')}
-            className="mt-1"
-            data-cy={`allocMode-${index}-custom`}
-          />
-          <div className="flex-1">
-            <div>{t('Custom split')}</div>
-            {mode === 'custom' && (
-              <div className="mt-2 space-y-2">
-                {visibleCats.map((c) => (
-                  <div
-                    key={c}
-                    className="grid grid-cols-3 items-center gap-2 text-sm"
-                  >
-                    <div>{t(CATEGORY_LABEL_KEY[c])}</div>
-                    <div className="text-muted-foreground tabular-nums">
-                      {t('owed')}: {(Number(owed?.[c]) || 0).toFixed(2)}
-                    </div>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0.00"
-                      value={custom[c] ?? ''}
-                      onChange={(e) =>
-                        onCustomAmountChange(c, e.target.value)
-                      }
-                      data-cy={`allocCustom-${index}-${c}`}
-                    />
-                  </div>
-                ))}
-                <div
-                  className={`text-xs ${
-                    Math.abs(customDelta) < 0.005
-                      ? 'text-muted-foreground'
-                      : customDelta > 0
-                        ? 'text-amber-600'
-                        : 'text-destructive'
-                  }`}
-                >
-                  {t('Allocated')}: {customSum.toFixed(2)} /{' '}
-                  {amount.toFixed(2)}
-                  {Math.abs(customDelta) >= 0.005 &&
-                    ' — ' +
-                      (customDelta > 0
-                        ? t('{{amount}} unallocated', {
-                            amount: customDelta.toFixed(2)
-                          })
-                        : t('{{amount}} over', {
-                            amount: (-customDelta).toFixed(2)
-                          }))}
-                </div>
-              </div>
-            )}
-          </div>
-        </label>
-      </div>
-
-      {/* Preview: owed before / after for visible (non-zero owed) categories */}
-      <div className="bg-marble-tint/40 rounded-md p-3 space-y-1 text-sm">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">
-          {t('Preview after this {{amount}} payment', {
-            amount: amount.toFixed(2)
-          })}
-        </div>
-        {visibleCats.length === 0 ? (
-          <div className="text-muted-foreground italic">
-            {t('Nothing currently owed.')}
-          </div>
-        ) : (
-          <table className="w-full tabular-nums">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                <th className="text-left font-normal">{t('Category')}</th>
-                <th className="text-right font-normal">{t('Before')}</th>
-                <th className="text-right font-normal">{t('After')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleCats.map((c) => {
-                const before = Number(owed?.[c]) || 0;
-                const after = Number(remaining?.[c]) || 0;
-                const delta = before - after;
-                return (
-                  <tr key={c}>
-                    <td>{t(CATEGORY_LABEL_KEY[c])}</td>
-                    <td className="text-right">{before.toFixed(2)}</td>
-                    <td className="text-right">
-                      {after.toFixed(2)}
-                      {delta > 0.005 && (
-                        <span className="ml-1 text-xs text-olive">
-                          (-{delta.toFixed(2)})
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              <tr className="border-t border-stone-line/60 font-medium">
-                <td>{t('Total')}</td>
-                <td className="text-right">
-                  {(Number(owed?.total) || 0).toFixed(2)}
-                </td>
-                <td className="text-right">
-                  {Number(remainingTotal).toFixed(2)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-        {creditToNextMonth > 0 && (
-          <div
-            className="text-xs text-blue-700 mt-2"
-            data-cy={`allocCredit-${index}`}
-          >
-            {t('Credit to next month')}:{' '}
-            {creditToNextMonth.toFixed(2)}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Wave-26 round-3f: inline edit form for an already-saved payment.
-// Lives inside the locked tile when the user clicks ✏️. Changes are
-// staged in component state and committed to `savedPayments` only when
-// the user clicks Save. The user still has to press Εκτέλεση on the
-// outer dialog to actually persist the change to the server.
-function SavedPaymentEditForm({ initial, paymentTypes, onCancel, onSave, t }) {
-  const [amount, setAmount] = useState(String(initial.amount ?? ''));
-  // initial.date is the persisted DD/MM/YYYY format; convert to ISO
-  // for the DatePickerInput's internal storage (YYYY-MM-DD).
-  const isoFromInitial = initial.date
-    ? moment(initial.date, 'DD/MM/YYYY', true).isValid()
-      ? moment(initial.date, 'DD/MM/YYYY').format('YYYY-MM-DD')
-      : ''
-    : '';
-  const [date, setDate] = useState(isoFromInitial);
-  const [type, setType] = useState(initial.type || 'transfer');
-  const [reference, setReference] = useState(initial.reference || '');
-
-  const canSave =
-    Number(amount) > 0 &&
-    !!date &&
-    moment(date, 'YYYY-MM-DD', true).isValid();
-
-  return (
-    <div>
-      <div className="text-sm text-amber-700 mb-2">
-        {t('Editing a recorded payment. Your changes are not saved until you press Record on the dialog.')}
-      </div>
-      <div className="grid gap-2 items-end grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-        <div className="space-y-1">
-          <Label>{t('Date')}</Label>
-          <DatePickerInput
-            value={date ? moment(date, 'YYYY-MM-DD').format('DD/MM/YYYY') : ''}
-            onChange={(d) => {
-              const iso = d ? moment(d, 'DD/MM/YYYY').format('YYYY-MM-DD') : '';
-              setDate(iso);
-            }}
-            paymentContext
-          />
-        </div>
-        <div className="space-y-1">
-          <Label>{t('Type')}</Label>
-          <Select value={type} onValueChange={setType}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {paymentTypes.itemList.map((pt) => (
-                <SelectItem
-                  key={pt.id}
-                  value={pt.value}
-                  disabled={pt.disabled}
-                  className={pt.disabled ? 'italic text-ink-muted' : undefined}
-                >
-                  {pt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        {type !== 'cash' && (
-          <div className="space-y-1">
-            <Label>
-              {type === 'cheque'
-                ? t('Cheque no.')
-                : type === 'transfer'
-                  ? t('IBAN or transaction id')
-                  : t('Reference')}
-            </Label>
-            <Input
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-            />
-          </div>
-        )}
-        <div className="space-y-1">
-          <Label>{t('Amount')}</Label>
-          <Input
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="flex justify-end gap-2 mt-3">
-        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-          {t('Cancel')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          disabled={!canSave}
-          onClick={() =>
-            onSave({
-              amount: Number(amount),
-              date: moment(date, 'YYYY-MM-DD').format('DD/MM/YYYY'),
-              type,
-              reference: type === 'cash' ? '' : reference,
-              description: initial.description || ''
-            })
-          }
-        >
-          {t('Apply edit')}
-        </Button>
-      </div>
-    </div>
-  );
-}
+// Wave-26 round-3o: AllocationBlock + SavedPaymentEditForm extracted to
+// dedicated files so this module stays under 1000 lines and the sub-
+// components can be tested independently. See AllocationBlock.js and
+// SavedPaymentEditForm.js in the same directory.
 
 function PaymentTabs({ rent, onSubmit, onError }, ref) {
   const queryClient = useQueryClient();
-  const store = useContext(StoreContext);
   const { t } = useTranslation('common');
   const paymentTypes = usePaymentTypes();
   const initVals = initialFormValues();
@@ -593,7 +216,7 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
     watch,
     setValue,
     reset,
-    formState: { errors, isDirty, isSubmitting }
+    formState: { isDirty, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: initVals
@@ -627,6 +250,39 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
             t(
               'This term is {{count}} months in the future. Recording payments more than 3 months ahead is blocked.',
               { count: _ahead }
+            )
+          );
+          onError?.();
+          return;
+        }
+      }
+      // Wave-26 round-3o: client-side guard against payment dates BEFORE
+      // the rent term's first day. Prevents a misclick on the wrong
+      // month's rents page from silently recording an April payment
+      // under May's term. Server enforces the same rule (rentmanager.ts
+      // F3) — this is a UX-friendly early surface.
+      const _termStr = String(rent?.term || '');
+      const _termFirstDay =
+        _termStr.length === 10
+          ? moment.utc(
+              `${_termStr.slice(0, 4)}-${_termStr.slice(4, 6)}-01`,
+              'YYYY-MM-DD',
+              true
+            )
+          : null;
+      const _draftValues = values?.payments || [];
+      for (const _draft of _draftValues) {
+        if (!_draft?.date || Number(_draft?.amount) <= 0) continue;
+        const _parsed = moment(_draft.date, 'YYYY-MM-DD', true);
+        if (
+          _termFirstDay &&
+          _termFirstDay.isValid() &&
+          _parsed.isValid() &&
+          _parsed.isBefore(_termFirstDay)
+        ) {
+          toast.error(
+            t(
+              'Payment date is before this rent month. Switch to that month’s rents page to record against it.'
             )
           );
           onError?.();
@@ -682,6 +338,32 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         ...clonedValues
       };
 
+      // Wave-26 round-3o: detect whether the submit actually changes
+      // anything before firing a success toast. A no-op Record (no
+      // drafts, saved tiles unchanged from the original rent) used to
+      // toast 'Saved successfully' anyway — confusing because the user
+      // didn't change anything. Now we toast on:
+      //   - new drafts submitted   -> 'Payment of {amount} recorded'
+      //   - savedPayments changed  -> 'Saved'
+      //   - neither                -> nothing (silent close)
+      const _sum = drafts.reduce(
+        (s, p) => s + (Number(p?.amount) || 0),
+        0
+      );
+      const _origPayments = (rent?.payments || []).filter(
+        (p) => Number(p?.amount) > 0
+      );
+      const _savedTilesChanged =
+        savedPayments.length !== _origPayments.length ||
+        savedPayments.some((sp, i) => {
+          const op = _origPayments[i] || {};
+          return (
+            Number(sp.amount) !== Number(op.amount) ||
+            sp.date !== op.date ||
+            sp.type !== op.type ||
+            (sp.reference || '') !== (op.reference || '')
+          );
+        });
       try {
         await payRent({ term: String(rent.term), payment });
         // Invalidate via prefix so all rent periods, dashboards, tenants and
@@ -690,27 +372,31 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
-        // Wave-26 round-3f: toast amount is the sum of NEW drafts
-        // submitted (not the full ledger) — that's what the user
-        // intuitively just "added". For pure edits or notes-only
-        // saves the toast falls back to a generic "Saved".
-        const _sum = drafts.reduce(
-          (s, p) => s + (Number(p?.amount) || 0),
-          0
-        );
         if (_sum > 0) {
           toast.success(
             t('Payment of {{amount}}€ recorded', {
               amount: _sum.toFixed(2)
             })
           );
-        } else {
+        } else if (_savedTilesChanged) {
           toast.success(t('Saved'));
         }
+        // No toast when there was nothing to save.
         onSubmit?.();
       } catch (error) {
+        // Wave-26 round-3o: surface the API's actual error message
+        // (e.g. 'payments[0].promo cannot exceed grand total') instead
+        // of the generic 'Something went wrong' banner. Only fall back
+        // to the generic message when the server didn't send one.
+        // eslint-disable-next-line no-console
         console.error(error);
-        toast.error(t('Something went wrong'));
+        const apiMsg =
+          error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          (typeof error?.response?.data === 'string'
+            ? error.response.data
+            : null);
+        toast.error(apiMsg ? String(apiMsg) : t('Something went wrong'));
         onError?.();
       }
     },
