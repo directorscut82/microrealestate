@@ -6,13 +6,14 @@ import {
 import { Card, CardContent, CardHeader } from '../ui/card';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '../ui/drawer';
 import { LuChevronDown, LuChevronsUpDown, LuPencil } from 'react-icons/lu';
-import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { cn, getPeriod } from '../../utils';
 import { fetchTenantRents } from '../../utils/restcalls';
 import Loading from '../Loading';
 import moment from 'moment';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
+import NumberFormat from '../NumberFormat';
 import RentDetails from './RentDetails';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
@@ -84,6 +85,64 @@ function RentListItem({ rent, tenant, onClick }) {
         <RentDetails rent={rent} />
       </CardContent>
     </Card>
+  );
+}
+
+// Wave-26 round-3n: per-year totals shown next to the year in the
+// accordion header. Two figures: collected (sum of rent.total.payment
+// for terms in this year, but capped at grandTotal so a credit
+// carry-forward doesn't inflate the number) and remaining-owed
+// (sum of max(0, grandTotal - payment) for past + current terms only).
+//
+// For future years no figures are shown — the rent grandTotal is a
+// projection at that point and quoting "owed" before the term lands
+// would be misleading.
+function YearTotals({ tenant, year }) {
+  const { t } = useTranslation('common');
+  const totals = useMemo(() => {
+    const currentTermNum = Number(
+      moment.utc().startOf('month').format('YYYYMMDDHH')
+    );
+    const yearStr = String(year);
+    const yearRents = (tenant?.rents || []).filter(
+      (r) => String(r.term).slice(0, 4) === yearStr
+    );
+    if (yearRents.length === 0) return null;
+
+    // Year vs. today: future years suppress numbers.
+    const yearStartTerm = Number(`${yearStr}010100`);
+    if (yearStartTerm > currentTermNum) {
+      return { future: true };
+    }
+
+    let collected = 0;
+    let owed = 0;
+    yearRents.forEach((r) => {
+      const grand = Number(r?.total?.grandTotal) || 0;
+      const paid = Number(r?.total?.payment) || 0;
+      collected += Math.min(paid, Math.max(grand, 0));
+      // Only past + current terms contribute to owed; future months
+      // within the current year have not "matured" as debt yet.
+      const termNum = Number(r.term);
+      if (termNum <= currentTermNum) {
+        owed += Math.max(0, grand - paid);
+      }
+    });
+    return { future: false, collected, owed };
+  }, [tenant, year]);
+
+  if (!totals || totals.future) return null;
+
+  return (
+    <span className="ml-auto flex items-baseline gap-3 text-xs font-normal tabular-nums">
+      <span className="text-olive">
+        {t('Collected')}:{' '}
+        <NumberFormat value={totals.collected} />
+      </span>
+      <span className={totals.owed > 0.005 ? 'text-oxide' : 'text-ink-muted'}>
+        {t('Owed')}: <NumberFormat value={totals.owed} />
+      </span>
+    </span>
   );
 }
 
@@ -224,9 +283,10 @@ function RentHistory({ tenantId }) {
                   open={expandedYear === year}
                   onOpenChange={handleAccordionChange(year)}
                 >
-                  <CollapsibleTrigger className="flex items-center justify-between w-full p-4 font-medium hover:bg-muted rounded-md">
-                    {year}
-                    <LuChevronDown className={`size-4 transition-transform ${expandedYear === year ? 'rotate-180' : ''}`} />
+                  <CollapsibleTrigger className="flex items-center justify-between w-full p-4 font-medium hover:bg-muted rounded-md gap-3">
+                    <span>{year}</span>
+                    <YearTotals tenant={tenant} year={year} />
+                    <LuChevronDown className={`size-4 transition-transform shrink-0 ${expandedYear === year ? 'rotate-180' : ''}`} />
                   </CollapsibleTrigger>
                   {expandedYear === year ? (
                     <CollapsibleContent className="p-4">
