@@ -85,26 +85,38 @@ export function DatePickerInput({
           initialFocus
         />
         {paymentContext && (
-          <div className="border-t border-stone-line/60 px-3 py-2 max-w-[18rem] text-xs text-ink-muted leading-snug">
+          <div className="border-t border-stone-line/60 px-3 py-2 max-w-[20rem] text-xs text-ink-muted leading-snug">
             <div className="flex items-start gap-2">
               <LuInfo className="size-3.5 mt-0.5 shrink-0" />
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <div>
                   {t(
-                    'Date = when the payment was actually made. The rent month is fixed by the page you are on.'
+                    'This date is when the cash actually changed hands. The rent month is set by the page you opened — it cannot be changed here.'
                   )}
                 </div>
-                <ul className="space-y-0.5 text-ink-muted">
+                <ul className="space-y-1">
                   <li>
-                    · {t('Prepayment: future date (up to +7 days).')}
-                  </li>
-                  <li>
-                    · {t('Late payment: past date.')}
-                  </li>
-                  <li>
-                    ·{' '}
+                    <strong className="text-ink">
+                      {t('Prepayment')}:
+                    </strong>{' '}
                     {t(
-                      'Different rent month: switch the rents page.'
+                      'tenant pays in advance — pick a future date (up to +7 days from today).'
+                    )}
+                  </li>
+                  <li>
+                    <strong className="text-ink">
+                      {t('Late entry')}:
+                    </strong>{' '}
+                    {t(
+                      'cash was received earlier but you are recording it now — pick a date within this rent month.'
+                    )}
+                  </li>
+                  <li>
+                    <strong className="text-ink">
+                      {t('Different rent month')}:
+                    </strong>{' '}
+                    {t(
+                      'close this dialog and open the corresponding month from the rents page first.'
                     )}
                   </li>
                 </ul>

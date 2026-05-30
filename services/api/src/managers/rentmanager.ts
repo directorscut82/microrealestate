@@ -227,10 +227,19 @@ async function _getRentsDataByTerm(
     totalPaid: 0,
     totalNotPaid: 0
   };
+  // Wave-26 round-3o: trust the per-rent status that frontdata.toRentData
+  // computes. The previous classifier `totalAmount <= 0 || newBalance >= 0
+  // → paid` desynced from the row UI's status (set in frontdata.ts:217-247),
+  // because that one accounts for carry-forward retroactive settlement and
+  // direct-pay coverage, but the overview's raw-field heuristic does not.
+  // Result on past months: a partially-paid row would render with a yellow
+  // status dot but the header KPI counted them as 'paid' (and partial flag
+  // hid because countPartiallyPaid was 0). Now both surfaces share one
+  // source of truth.
   rents.reduce((acc: AnyRecord, rent: AnyRecord) => {
-    if (rent.totalAmount <= 0 || rent.newBalance >= 0) {
+    if (rent.status === 'paid') {
       acc.countPaid++;
-    } else if (rent.payment > 0) {
+    } else if (rent.status === 'partiallypaid') {
       acc.countPartiallyPaid++;
     } else {
       acc.countNotPaid++;
@@ -410,6 +419,47 @@ async function _updateByTerm(
             `payments[${idx}].description`
           );
         }
+        // Wave-26 round-3o (security): per-payment promo / extracharge /
+        // notepromo / noteextracharge introduced in round-3j had NO
+        // validation. Rent-level versions (lines 257-263, 296-302) cap
+        // numbers at 10M and strings at 1000 chars; the per-payment
+        // variants must match. Without these checks a tenant could
+        // submit a 10MB notepromo or a 9.99e308 promo that breaks
+        // downstream VAT calculations and inflates the document.
+        if (p?.promo !== undefined && p.promo !== null && p.promo !== '') {
+          validateFiniteNumber(p.promo, `payments[${idx}].promo`, {
+            min: 0,
+            max: 10000000
+          });
+        }
+        if (
+          p?.extracharge !== undefined &&
+          p.extracharge !== null &&
+          p.extracharge !== ''
+        ) {
+          validateFiniteNumber(
+            p.extracharge,
+            `payments[${idx}].extracharge`,
+            { min: 0, max: 10000000 }
+          );
+        }
+        if (p?.notepromo !== undefined && p.notepromo !== null) {
+          validateStringLength(
+            p.notepromo,
+            1000,
+            `payments[${idx}].notepromo`
+          );
+        }
+        if (
+          p?.noteextracharge !== undefined &&
+          p.noteextracharge !== null
+        ) {
+          validateStringLength(
+            p.noteextracharge,
+            1000,
+            `payments[${idx}].noteextracharge`
+          );
+        }
         // Wave-25: payment-by-category allocation validation. The field is
         // optional (legacy/auto-spread callers send no allocation), but when
         // present every entry must reference a known category, every amount
@@ -469,6 +519,31 @@ async function _updateByTerm(
               `payments[${idx}].date too far in the future`,
               422
             );
+          }
+          // Wave-26 round-3o: reject payment dates BEFORE the rent term's
+          // first day. The user explicitly opens the dialog from a specific
+          // month's rents page; a date in an earlier month almost always
+          // means the wrong page was opened. Forces the landlord to switch
+          // to the correct rent month deliberately.
+          //
+          // term is YYYYMMDDHH (e.g. 2026050100 -> 2026-05-01).
+          const termStr = String(term);
+          if (termStr.length === 10) {
+            const termFirstDay = moment.utc(
+              `${termStr.slice(0, 4)}-${termStr.slice(4, 6)}-01`,
+              'YYYY-MM-DD',
+              true
+            );
+            if (
+              parsed.isValid() &&
+              termFirstDay.isValid() &&
+              parsed.isBefore(termFirstDay)
+            ) {
+              throw new ServiceError(
+                `payments[${idx}].date is before this rent month — switch to that month's rents page to record against it`,
+                422
+              );
+            }
           }
         }
       });

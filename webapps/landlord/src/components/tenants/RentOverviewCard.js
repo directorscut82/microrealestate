@@ -21,9 +21,12 @@ export default function RentOverviewCard({ tenant }) {
             <span className="text-muted-foreground">
               {/* Wave-26 round-3m: 'Expenses' read as 'Έξοδα' (the
                   landlord's own building expenses) which is the wrong
-                  word for the tenant view. From the tenant's standpoint
-                  these are extra charges beyond rent (utilities, common
-                  fees, etc.). */}
+                  word for the tenant view. These are RECURRING extra
+                  costs the tenant pays alongside rent (utilities,
+                  common-area fees, etc.) — distinct from the
+                  per-payment 'Additional cost' (Έκτακτη χρέωση =
+                  extraordinary one-off charges). The two keys are
+                  intentionally separate. */}
               {t('Additional charges')}
             </span>
             <NumberFormat value={tenant.expenses} />
