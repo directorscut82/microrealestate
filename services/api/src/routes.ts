@@ -188,6 +188,14 @@ export default function routes(): express.Router {
     '/payment/:id/:term',
     Middlewares.asyncWrapper(rentManager.updateByTerm as any)
   );
+  // Wave-26 round-3r: bulk express-payment. Body shape:
+  //   { items: [{ tenantId, term, monthly?: bool, previousBalance?: bool }] }
+  // Server resolves each item against the live rent (computes monthly /
+  // prev-balance amounts), applies the payment, returns counts.
+  rentsRouter.post(
+    '/express',
+    Middlewares.asyncWrapper(rentManager.bulkExpressPayment as any)
+  );
   rentsRouter.get(
     '/tenant/:id',
     Middlewares.asyncWrapper(rentManager.rentsOfOccupant as any)

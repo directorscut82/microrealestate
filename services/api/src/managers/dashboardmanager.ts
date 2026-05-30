@@ -14,40 +14,30 @@ function _round(n: number): number {
 }
 
 /**
- * Wave-26 round-3q: per-bucket paid amount for the dashboard pie tooltip.
+ * Wave-26 round-3r: per-bucket paid amount for the dashboard pie chart.
  *
- * Behavior change vs round-3i: NO auto-spread. We do not invent a
- * category for unallocated payments. The pie tooltip shows real data:
+ * Pre-condition: every payment carries an explicit `allocation[]`.
+ * rentmanager.ts auto-spreads on save when the user didn't pick a mode,
+ * and the round-3r migration script backfills legacy payments. So this
+ * function is a straight aggregator: read each payment's allocation,
+ * map rent-pipeline categories onto the dashboard's display buckets,
+ * sum.
  *
- *   - When a payment carries an explicit `allocation[]` (wave-25),
- *     each entry lands directly on its target bucket(s):
- *       allocation { category: 'rent' }      -> 'rent'
- *       allocation { category: 'expenses' }  -> per-property + non-repair
- *                                                building (prorated)
- *       allocation { category: 'repairs' }   -> repair buildings (prorated)
- *       (vat / previousBalance / extracharge are ignored — pie doesn't
- *        visualise them.)
- *
- *   - Payments WITHOUT allocation contribute to a synthetic
- *     `__unallocated` bucket. The tooltip shows this as a separate
- *     "Συνολική καταβολή (χωρίς κατηγορία)" row so the user knows
- *     money was received but not categorised. Each pie slice's
- *     "Collected" column is exact for that slice — no fictional
- *     attribution.
- *
- * The pie segments themselves still render with the prior `paidRatio`
- * estimate (per the user's explicit instruction not to change the pie
- * chart layout). Only the TOOLTIP figures use this real data.
+ * Mapping rent-pipeline category -> dashboard bucket:
+ *   'rent'              -> 'rent'                  (single bucket)
+ *   'expenses'          -> 'charges' + 'building:<non-repair-type>'
+ *                          (prorated by owed amount within those keys)
+ *   'repairs'           -> 'building:<repair-type>'
+ *                          (prorated within repair-typed buildings)
+ *   'vat'/'previousBalance'/'extracharge' -> not visualised (skipped)
  *
  * Bucket space (matches pie segment `type`):
  *   - 'rent'                  (rent.total.preTaxAmount)
  *   - 'charges'               (per-property extra charges, sum)
  *   - 'building:<type>'       (each entry of buildingChargesByType)
- *   - '__unallocated'         (round-3q: payments with no allocation)
  */
 export function _computePaidByBucket(rent: AnyRecord): AnyRecord {
   const buckets: AnyRecord = {};
-  const baseRent = rent.total?.preTaxAmount || 0;
   const charges = (rent.charges || []).reduce(
     (s: number, c: AnyRecord) => s + (Number(c.amount) || 0),
     0
@@ -58,94 +48,69 @@ export function _computePaidByBucket(rent: AnyRecord): AnyRecord {
     buildingByType[t] = (buildingByType[t] || 0) + (Number(c.amount) || 0);
   });
 
-  // Owed copy decremented as explicit allocations are applied.
-  const owed: AnyRecord = { rent: baseRent, charges };
-  Object.entries(buildingByType).forEach(([t, v]) => {
-    owed[`building:${t}`] = v;
-  });
-
-  const _apply = (bucketKey: string, amount: number): number => {
-    const due = Number(owed[bucketKey]) || 0;
-    if (due <= 0 || amount <= 0) return 0;
-    const used = Math.min(due, amount);
-    owed[bucketKey] = due - used;
-    buckets[bucketKey] = (buckets[bucketKey] || 0) + used;
-    return used;
+  const _add = (bucket: string, amount: number) => {
+    if (amount <= 0) return;
+    buckets[bucket] = (buckets[bucket] || 0) + amount;
   };
 
-  // Distribute `amount` across bucket keys prorated by their current
-  // owed values. Returns the unused remainder (drops to __unallocated).
-  const _applyProrated = (bucketKeys: string[], amount: number): number => {
-    let remaining = amount;
-    const totalDue = bucketKeys.reduce(
-      (s, k) => s + Math.max(0, Number(owed[k]) || 0),
+  // Prorate `amount` across `keys` weighted by `weights[key]`. Skips
+  // zero-weight keys. Pure proportional split, no spillover — caller
+  // guarantees keys is non-empty and total weight > 0.
+  const _prorate = (
+    amount: number,
+    keys: string[],
+    weights: AnyRecord
+  ) => {
+    const total = keys.reduce(
+      (s, k) => s + Math.max(0, Number(weights[k]) || 0),
       0
     );
-    if (totalDue <= 0 || remaining <= 0) return remaining;
-    bucketKeys.forEach((k) => {
-      const due = Math.max(0, Number(owed[k]) || 0);
-      if (due <= 0) return;
-      const share = Math.min(due, (remaining * due) / totalDue);
-      const used = _apply(k, share);
-      remaining -= used;
+    if (total <= 0) return;
+    keys.forEach((k) => {
+      const w = Math.max(0, Number(weights[k]) || 0);
+      if (w <= 0) return;
+      _add(k, (amount * w) / total);
     });
-    if (remaining > 0.01) {
-      for (const k of bucketKeys) {
-        if (remaining <= 0) break;
-        const used = _apply(k, remaining);
-        remaining -= used;
-      }
-    }
-    return remaining;
-  };
-
-  const _applyToCategoryBucket = (cat: string, amount: number): number => {
-    if (amount <= 0) return 0;
-    if (cat === 'rent') {
-      return amount - _apply('rent', amount);
-    }
-    if (cat === 'expenses') {
-      const keys = ['charges'].concat(
-        Object.keys(buildingByType)
-          .filter((t) => t !== 'repair')
-          .map((t) => `building:${t}`)
-      );
-      return _applyProrated(keys, amount);
-    }
-    if (cat === 'repairs') {
-      const keys = Object.keys(buildingByType)
-        .filter((t) => t === 'repair')
-        .map((t) => `building:${t}`);
-      return _applyProrated(keys, amount);
-    }
-    // vat / previousBalance / extracharge — pie chart doesn't visualise.
-    return amount;
   };
 
   (rent.payments || []).forEach((p: AnyRecord) => {
-    const amount = Number(p?.amount) || 0;
-    if (amount <= 0) return;
-    const allocation = Array.isArray(p?.allocation) ? p.allocation : null;
-    if (allocation && allocation.length) {
-      let remaining = amount;
-      allocation.forEach((a: AnyRecord) => {
-        const aCat = String(a?.category || '');
-        const aAmt = Number(a?.amount) || 0;
-        if (aAmt <= 0) return;
-        const leftover = _applyToCategoryBucket(aCat, aAmt);
-        // Whatever the allocation explicitly named but the bucket
-        // couldn't absorb (e.g. allocation said 100 to rent but rent
-        // was only owed 50) goes back into __unallocated.
-        remaining -= aAmt - leftover;
-      });
-      if (remaining > 0.005) {
-        buckets.__unallocated =
-          (buckets.__unallocated || 0) + remaining;
+    const allocation = Array.isArray(p?.allocation) ? p.allocation : [];
+    allocation.forEach((a: AnyRecord) => {
+      const cat = String(a?.category || '');
+      const amt = Number(a?.amount) || 0;
+      if (amt <= 0) return;
+
+      if (cat === 'rent') {
+        _add('rent', amt);
+        return;
       }
-    } else {
-      // No allocation. Whole payment is "uncategorised collected".
-      buckets.__unallocated = (buckets.__unallocated || 0) + amount;
-    }
+      if (cat === 'expenses') {
+        // Spread across per-property charges + non-repair buildings,
+        // weighted by their owed amount. Single-key cases collapse to
+        // the obvious answer.
+        const weights: AnyRecord = { charges };
+        Object.keys(buildingByType)
+          .filter((t) => t !== 'repair')
+          .forEach((t) => {
+            weights[`building:${t}`] = buildingByType[t];
+          });
+        _prorate(amt, Object.keys(weights), weights);
+        return;
+      }
+      if (cat === 'repairs') {
+        const repairKeys = Object.keys(buildingByType)
+          .filter((t) => t === 'repair')
+          .map((t) => `building:${t}`);
+        const weights: AnyRecord = {};
+        repairKeys.forEach((k) => {
+          const t = k.slice('building:'.length);
+          weights[k] = buildingByType[t] || 0;
+        });
+        _prorate(amt, repairKeys, weights);
+        return;
+      }
+      // vat / previousBalance / extracharge: not on the pie.
+    });
   });
 
   Object.keys(buckets).forEach((k) => {

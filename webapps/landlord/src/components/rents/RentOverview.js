@@ -46,12 +46,22 @@ function PeriodNav({ period, onChange }) {
   );
 }
 
-function Stat({ label, count, partialCount, amount, color, className }) {
+function Stat({ label, count, partialCount, amount, color, className, carryIn }) {
   const { t } = useTranslation('common');
   return (
     <div className={cn('flex flex-col gap-0.5 min-w-0', className)}>
       <span className="text-label text-ink-muted uppercase tracking-wide">
         {label}
+        {/* Wave-26 round-3r: 'Οφειλές' tile shows '(prior dues: X)' so
+            the landlord knows how much of the outstanding figure is
+            carry-in from previous months vs. this month's bill. Parens
+            hide when carryIn is zero. */}
+        {typeof carryIn === 'number' && carryIn > 0.005 ? (
+          <span className="ml-1 text-ink-muted normal-case font-normal tracking-normal">
+            ({t('prior dues')}:{' '}
+            <NumberFormat value={carryIn} showZero={false} />)
+          </span>
+        ) : null}
       </span>
       <div className="flex items-baseline gap-2">
         <span
@@ -103,13 +113,14 @@ export function RentOverview({ data }) {
       </div>
       <div className="flex flex-wrap items-end gap-x-12 gap-y-4 pb-4 border-b border-stone-line">
         <Stat
-          label={t('Owed this month')}
+          label={t('Outstanding')}
           amount={data.totalNotPaid}
           count={data.countNotPaid}
+          carryIn={data.totalCarriedBalance ?? 0}
           color="text-oxide"
         />
         <Stat
-          label={t('Paid this month')}
+          label={t('Receipts')}
           amount={data.totalPaid}
           count={
             (data.countPaid ?? 0) + (data.countPartiallyPaid ?? 0)
