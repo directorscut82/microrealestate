@@ -459,15 +459,16 @@ function SavedPaymentEditForm({ initial, paymentTypes, onCancel, onSave, t }) {
         </div>
         {type !== 'cash' && (
           <div className="space-y-1">
-            <Label>{t('Reference')}</Label>
+            <Label>
+              {type === 'cheque'
+                ? t('Cheque no.')
+                : type === 'transfer'
+                  ? t('IBAN or transaction id')
+                  : t('Reference')}
+            </Label>
             <Input
               value={reference}
               onChange={(e) => setReference(e.target.value)}
-              placeholder={
-                type === 'cheque'
-                  ? t('Cheque no.')
-                  : t('IBAN or transaction id')
-              }
             />
           </div>
         )}
@@ -913,14 +914,15 @@ function PaymentTabs({ rent, onSubmit, onError }, ref) {
                   </div>
                   {payments?.[index]?.type !== 'cash' && (
                     <div className="space-y-1">
-                      <Label htmlFor={`payments.${index}.reference`}>{t('Reference')}</Label>
+                      <Label htmlFor={`payments.${index}.reference`}>
+                        {payments?.[index]?.type === 'cheque'
+                          ? t('Cheque no.')
+                          : payments?.[index]?.type === 'transfer'
+                            ? t('IBAN or transaction id')
+                            : t('Reference')}
+                      </Label>
                       <Input
                         id={`payments.${index}.reference`}
-                        placeholder={
-                          payments?.[index]?.type === 'cheque'
-                            ? t('Cheque no.')
-                            : t('IBAN or transaction id')
-                        }
                         {...register(`payments.${index}.reference`)}
                       />
                     </div>
