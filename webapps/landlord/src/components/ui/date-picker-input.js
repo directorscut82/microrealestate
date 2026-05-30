@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { LuCalendar } from 'react-icons/lu';
+import { LuCalendar, LuInfo } from 'react-icons/lu';
 import moment from 'moment';
 import { Button } from './button';
 import { Calendar } from './calendar';
 import { cn } from '../../utils';
 import { Popover, PopoverContent, PopoverTrigger } from './popover';
+import useTranslation from 'next-translate/useTranslation';
 
 /**
  * DatePickerInput — consistent calendar picker across all browsers/locales.
@@ -24,8 +25,13 @@ export function DatePickerInput({
   format = 'DD/MM/YYYY',
   disabled,
   id,
-  className
+  className,
+  // Wave-26 round-3l: when true, the popover footer renders a brief
+  // help note explaining what the payment date means vs. the rent
+  // term. Only the payment dialog opts in (set in PaymentTabs).
+  paymentContext = false
 }) {
+  const { t } = useTranslation('common');
   const parsed = React.useMemo(() => {
     if (!value) return null;
     // Accept both DD/MM/YYYY (canonical) and ISO 8601.
@@ -78,6 +84,34 @@ export function DatePickerInput({
           }}
           initialFocus
         />
+        {paymentContext && (
+          <div className="border-t border-stone-line/60 px-3 py-2 max-w-[18rem] text-xs text-ink-muted leading-snug">
+            <div className="flex items-start gap-2">
+              <LuInfo className="size-3.5 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <div>
+                  {t(
+                    'Date = when the payment was actually made. The rent month is fixed by the page you are on.'
+                  )}
+                </div>
+                <ul className="space-y-0.5 text-ink-muted">
+                  <li>
+                    · {t('Prepayment: future date (up to +7 days).')}
+                  </li>
+                  <li>
+                    · {t('Late payment: past date.')}
+                  </li>
+                  <li>
+                    ·{' '}
+                    {t(
+                      'Different rent month: switch the rents page.'
+                    )}
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
