@@ -433,3 +433,79 @@ export async function ensureSeedTenant(
 
   return { ...seed, tenantId: tenant._id, tenantName: tenant.name, tenantPhone1: phone1 };
 }
+
+export interface PaidLeasedTenantSeed extends LeasedTenantSeed {
+  /** The term the payment was recorded against, in YYYYMMDDHH form. */
+  paymentTerm: string;
+  /** The amount of the seeded payment in EUR. */
+  paymentAmount: number;
+}
+
+/**
+ * Builds on ensureSeedLeasedTenant: makes sure the leased tenant's
+ * CURRENT-MONTH rent has exactly ONE recorded payment of the requested
+ * amount (cash, dated today). Idempotent — if a different payment ledger
+ * is already recorded for this term, it is replaced with the canonical
+ * single-payment baseline so re-runs always start from the same state.
+ *
+ * Used by the payment-dialog locked-tile spec, which needs an existing
+ * saved payment to drive the add/edit/delete flows over.
+ */
+export async function ensureSeedLeasedTenantWithPayment(
+  request: APIRequestContext,
+  amount = 100
+): Promise<PaidLeasedTenantSeed> {
+  const seed = await ensureSeedLeasedTenant(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+
+  // Current month, term in YYYYMMDDHH form.
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const term = `${year}${month}0100`;
+
+  // Today's date in DD/MM/YYYY (api expects strict format).
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  const todayDDMMYYYY = `${day}/${month}/${year}`;
+
+  // PATCH /rents/payment/{tenantId}/{term} with a single-payment payload.
+  // The handler replaces the rent's payments[] array wholesale.
+  const payload = {
+    _id: seed.tenantId,
+    month: now.getUTCMonth() + 1,
+    year,
+    payments: [
+      {
+        amount,
+        date: todayDDMMYYYY,
+        type: 'cash',
+        reference: '',
+        description: ''
+      }
+    ],
+    description: '',
+    extracharge: 0,
+    noteextracharge: '',
+    promo: 0,
+    notepromo: ''
+  };
+
+  const resp = await request.patch(
+    `${GATEWAY}/api/v2/rents/payment/${seed.tenantId}/${term}`,
+    { headers: auth, data: payload }
+  );
+  expect(
+    [200, 201],
+    `seed payment (status=${resp.status()}, body: ${await resp.text().catch(() => '')})`
+  ).toContain(resp.status());
+
+  return {
+    ...seed,
+    paymentTerm: term,
+    paymentAmount: amount
+  };
+}
