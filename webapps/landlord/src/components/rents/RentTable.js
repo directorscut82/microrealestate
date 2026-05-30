@@ -227,9 +227,15 @@ function _bucketPriorRents(priorRents) {
     const endLabel = moment(
       `${endTerm.slice(0, 4)}-${endTerm.slice(4, 6)}-01`
     ).format('MMM YYYY');
+    // Wave-26 round-3h: collapse single-month buckets to one label so the
+    // tooltip doesn't read 'Apr 2026 – Apr 2026' when the slice is one month.
+    const label =
+      startTerm === endTerm || startLabel === endLabel
+        ? startLabel
+        : `${startLabel} – ${endLabel}`;
     buckets.push({
       key: startTerm,
-      label: `${startLabel} – ${endLabel}`,
+      label,
       amount: sum
     });
   }

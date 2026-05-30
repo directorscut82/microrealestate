@@ -91,7 +91,7 @@ export default function ResponsiveDialog({
         ) : null}
 
         {renderContent ? (
-          <div className="flex justify-center p-4 max-h-96 overflow-y-auto">
+          <div className="flex justify-center p-4 max-h-96 overflow-y-auto scrollbar-branded">
             {renderContent()}
           </div>
         ) : null}
