@@ -314,4 +314,33 @@
   .ease-out-expo {
     transition-timing-function: var(--ease-out-expo);
   }
+
+  /*
+   * Wave-26 round-3h: branded scroll-bar for scrollable dialog/drawer
+   * bodies. The OS-native scrollbar (cream-on-grey on macOS, blue on
+   * Windows) doesn't match our ink/cream palette. Auto-hides until
+   * hover; thumb is ink at 35% alpha so it sits quietly against any
+   * background. Uses both `scrollbar-*` (Firefox) and `::-webkit-*`
+   * (Chrome/Edge/Safari) so it lands consistently across browsers.
+   */
+  .scrollbar-branded {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(40 40 50 / 0.35) transparent;
+  }
+  .scrollbar-branded::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-branded::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-branded::-webkit-scrollbar-thumb {
+    background-color: rgb(40 40 50 / 0.25);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-branded::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(40 40 50 / 0.5);
+  }
 }
