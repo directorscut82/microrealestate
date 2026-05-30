@@ -26,7 +26,7 @@ const DrawerOverlay = React.forwardRef(({ className, ...props }, ref) => (
 DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName;
 
 const DrawerContent = React.forwardRef(
-  ({ className, children, ...props }, ref) => (
+  ({ className, children, hideHandle = false, ...props }, ref) => (
     <DrawerPortal>
       <DrawerOverlay />
       <DrawerPrimitive.Content
@@ -37,7 +37,12 @@ const DrawerContent = React.forwardRef(
         )}
         {...props}
       >
-        <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />
+        {/* Wave-26 round-3s: drag handle is bottom-anchored UX. Hide
+            on right-anchored drawers (express-payment dialog) since
+            it appears at the top-right and looks like a stray bar. */}
+        {!hideHandle && (
+          <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />
+        )}
         {children}
       </DrawerPrimitive.Content>
     </DrawerPortal>

@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader } from '../ui/card';
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -203,26 +204,38 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
   //   editingIndex  — index of the saved payment being edited (or null)
   //   editingDraft  — temp form-state for the row being edited
   //   confirmingDelete — index of the saved payment pending deletion (or null)
-  const [savedPayments, setSavedPayments] = useState(() =>
-    (rent?.payments || [])
-      .filter((p) => Number(p?.amount) > 0)
-      .map((p) => ({
-        amount: Number(p.amount) || 0,
-        date: p.date || '',
-        type: p.type || 'transfer',
-        reference: p.reference || '',
-        // Wave-26 round-3j: per-payment note/discount/extracharge.
-        description: p.description || '',
-        promo: Number(p.promo) || 0,
-        notepromo: p.notepromo || '',
-        extracharge: Number(p.extracharge) || 0,
-        noteextracharge: p.noteextracharge || '',
-        // Wave-26 round-3r: persisted allocation array, used by the
-        // saved-tile inline breakdown (e.g. "120 € (Ενοίκιο 67 ·
-        // Ασφάλιση 53) · 22/05 · Μετρητά").
-        allocation: Array.isArray(p.allocation) ? p.allocation : []
-      }))
+  // Wave-26 round-3s: derive savedPayments from rent.payments via
+  // useMemo (was useState with init, which only ran once on mount).
+  // When the parent re-feeds a fresh `rent` after a payment-record
+  // invalidation, the saved tiles must reflect the new payments,
+  // including any newly-attached promo/extracharge/notes.
+  const _normalizedRentPayments = useMemo(
+    () =>
+      (rent?.payments || [])
+        .filter((p) => Number(p?.amount) > 0)
+        .map((p) => ({
+          amount: Number(p.amount) || 0,
+          date: p.date || '',
+          type: p.type || 'transfer',
+          reference: p.reference || '',
+          description: p.description || '',
+          promo: Number(p.promo) || 0,
+          notepromo: p.notepromo || '',
+          extracharge: Number(p.extracharge) || 0,
+          noteextracharge: p.noteextracharge || '',
+          allocation: Array.isArray(p.allocation) ? p.allocation : []
+        })),
+    [rent?.payments]
   );
+  const [savedPayments, setSavedPayments] = useState(_normalizedRentPayments);
+  // Sync local edits with fresh server state when the rent prop
+  // changes (e.g. after a save invalidates queries and the parent
+  // re-renders with new data). Local edits during dialog session
+  // ARE preserved within the same `rent.payments` snapshot — only
+  // a genuinely-different snapshot triggers re-init.
+  useEffect(() => {
+    setSavedPayments(_normalizedRentPayments);
+  }, [_normalizedRentPayments]);
   const [editingIndex, setEditingIndex] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
   const _setAllocMode = (key, mode) =>
