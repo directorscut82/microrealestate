@@ -120,16 +120,22 @@ export default function RentDetails({ rent }) {
           ))}
         </>
       )}
-      {!hasMultipleProperties && !hasBuildingCharges && (
-        <div className="flex justify-between">
-          {t('Additional costs')}
+      {/* Wave-26 round-3k: always surface Additional cost when non-zero
+          (was previously gated on no-multiple-properties && no-building-
+          charges, which silently hid extracharge for tenants with
+          multiple properties or building charges). */}
+      {Number(rentAmounts.additionalCosts) > 0 && (
+        <div className="flex justify-between text-oxide">
+          {t('Additional cost')}
           <NumberFormat value={rentAmounts.additionalCosts} />
         </div>
       )}
-      <div className="flex justify-between">
-        {t('Discount')}
-        <NumberFormat value={rentAmounts.discount} />
-      </div>
+      {Number(rentAmounts.discount) < 0 && (
+        <div className="flex justify-between text-olive">
+          {t('Discount')}
+          <NumberFormat value={rentAmounts.discount} />
+        </div>
+      )}
       <Separator />
       <div className="flex justify-between">
         {t('Total to pay')}

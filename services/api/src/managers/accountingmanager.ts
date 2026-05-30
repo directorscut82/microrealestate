@@ -46,7 +46,17 @@ async function _fetchData(realmId: string, year: number): Promise<AnyRecord[]> {
               year: '$$rent.year',
               month: '$$rent.month',
               payments: '$$rent.payments',
-              total: '$$rent.total'
+              total: '$$rent.total',
+              // Wave-26 round-3k: surface the rent-level notes that the
+              // accounting CSV/UI builder reads at line 281. Without
+              // these in the projection, description/notepromo/
+              // noteextracharge were silently undefined and the Notes
+              // column was always empty.
+              description: '$$rent.description',
+              notepromo: '$$rent.notepromo',
+              noteextracharge: '$$rent.noteextracharge',
+              discounts: '$$rent.discounts',
+              debts: '$$rent.debts'
             }
           }
         }
@@ -278,7 +288,7 @@ function _settlements(
       () => null
     );
 
-    tenant.rents.forEach(({ month, payments, description, notepromo, noteextracharge }: AnyRecord) => {
+    tenant.rents.forEach(({ month, payments, description, discounts, debts }: AnyRecord) => {
       if (rawData) {
         settlements[month - 1] = payments.map(
           ({ date, type, amount, reference }: AnyRecord) => ({
@@ -291,9 +301,23 @@ function _settlements(
             reference
           })
         );
+        // Wave-26 round-3k: aggregate notepromo from settlement discounts
+        // and noteextracharge from debts. The rent doc itself doesn't
+        // store these as top-level fields — frontdata.ts builds them on
+        // serialise. We replicate the aggregation here so the Accounting
+        // notes column reflects rent-level + per-payment context.
+        const np = (discounts || [])
+          .filter((d: AnyRecord) => d?.origin === 'settlement')
+          .map((d: AnyRecord) => String(d?.description || '').trim())
+          .filter(Boolean)
+          .join('\n')
+          .trim();
+        const ne = (debts || [])
+          .map((d: AnyRecord) => String(d?.description || '').trim())
+          .filter(Boolean)
+          .join('\n')
+          .trim();
         const desc = (description || '').trim();
-        const np = (notepromo || '').trim();
-        const ne = (noteextracharge || '').trim();
         if (desc || np || ne) {
           notesByMonth[month - 1] = {
             description: desc,
