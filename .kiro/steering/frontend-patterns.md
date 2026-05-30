@@ -218,6 +218,41 @@ Root cause: Vaul sets `pointer-events: none` on `<body>` while the drawer is ope
 
 Refs: shadcn-ui/ui#7652, vaul#482. Applied in `webapps/landlord/src/components/ui/date-picker-input.js`.
 
+### Branded scrollbar (`.scrollbar-branded`)
+
+Long content inside a Drawer/Dialog body should opt into the branded scrollbar utility instead of the OS-native one (cream-on-grey on macOS, blue on Windows). Defined once in `webapps/landlord/src/styles/globals.css` — thin track, ink thumb at 25–50% alpha, cross-browser via both `scrollbar-*` (Firefox) and `::-webkit-scrollbar*` (Chromium/Safari).
+
+```jsx
+<div className="overflow-y-auto scrollbar-branded ...">
+```
+
+Currently applied in `NewPaymentDialog` body and `ResponsiveDialog` content. New scrollable surfaces inside dialogs should use it.
+
+### Per-payment fields (note / discount / extra-charge)
+
+`tenant.rents[i].payments[j]` carries optional `description / promo / notepromo / extracharge / noteextracharge`. The dialog's draft rows have inline collapsibles for these — they belong to the SPECIFIC payment, not to the rent month. Saved tiles render the attached values inline (italic note, olive discount, oxide extra-charge).
+
+When you add a new payment-attached field, mirror the round-3j approach:
+
+1. Add to the per-payment shape in `services/api/src/managers/rentmanager.ts:settlements.payments.map(...)` so it persists.
+2. Add validation under the `paymentData.payments.forEach(...)` loop with a finite-number cap (10M) or string-length cap (1000) that matches the rent-level guards.
+3. If the field aggregates into rent totals, push one entry into `settlements.discounts[]` / `settlements.debts[]` per non-empty payment, then let `frontdata.toRentData` aggregate them on serialise.
+4. Render in `PaymentTabs.js` saved-tile JSX (read-only) and inside each draft row's Collapse (editable).
+
+Backward-compat: rent-level `paymentData.promo / extracharge / description` paths are still honored when no per-payment fields are present, so legacy callers don't break.
+
+### `rent.status` is the single source of truth
+
+Anywhere the UI needs to classify a rent as paid / partiallypaid / notpaid, read `rent.status` (set by `services/api/src/managers/frontdata.ts:toRentData()`). Do NOT re-classify from raw fields like `totalAmount <= 0 || newBalance >= 0` — that heuristic misses retroactive carry-forward settlement and direct-pay coverage logic, and a parallel classifier WILL drift from the row UI.
+
+The `_listRents` overview classifier was on a different code path until round-3p; both surfaces now share `rent.status`.
+
+### Date-picker `paymentContext` mode
+
+`DatePickerInput` accepts a `paymentContext` prop. When true, the popover shows a footer help-strip explaining the payment-date vs rent-term distinction. Used inside `PaymentTabs.js` (both new-draft entry and saved-tile inline edit). NOT used elsewhere in the app — the help text is payment-specific.
+
+For the dashboard's "Πληρωμή ενοικίου" shortcut, pair `paymentContext={false}` with `disabled` to lock the date to today (NewPaymentDialog → PaymentTabs `lockDateToToday` prop).
+
 ### Submit button stuck on "Saving" after silent zod failure
 
 When you call `formRef.current.requestSubmit()` from an outer drawer/dialog and the form's `zodResolver` rejects, `_handleSubmit` is never called — so any "saving" state owned by the OUTER dialog never resets. Two fixes used by `NewPaymentDialog`:
