@@ -156,6 +156,9 @@ TypeScript services build chain: types → common → service (in that order).
 - Rate limiting on auth endpoints (signin, signup, forgot-password)
 - `organizationId` header validated as valid MongoDB ObjectId format before query
 - Input validation: percentage sums, enum/range checks, NaN guards on financial fields
+- **CSV formula-injection guard** (`accountingmanager.ts:_sanitizeCsvText`): prefixes leading `= + - @ \t \r` with a single quote on free-text fields (description / notepromo / noteextracharge) flowing into rawData JSON. Mitigates the Excel/Sheets formula-execution vector for spreadsheet-readable exports. json2csv handles the standard quote/newline escaping but does NOT handle formula prefix; this is the workaround.
+- **Per-payment field validation** in PATCH `/rents/payment/:id/:term`: each entry of `paymentData.payments[]` is validated for `amount, type, reference, description, allocation, date` (existing) and `promo / extracharge / notepromo / noteextracharge` (round-3j fields). Number caps at 10M, string caps at 1000 chars — matches the rent-level guards. `Schema.Types.Mixed` storage offers no persistence-layer enforcement, so the API is the single validation layer.
+- **Backdate guard** in PATCH `/rents/payment/:id/:term`: payment dates < the rent term's first day are rejected (422) so a misclick on the wrong month's rents page can't silently record against the wrong term. Mirrored client-side in `PaymentTabs.js` for early UX surface.
 
 ### CORS allowlist gotcha — `DOMAIN_URL` strips the port
 

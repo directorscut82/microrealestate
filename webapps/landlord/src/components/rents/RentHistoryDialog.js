@@ -118,8 +118,13 @@ function YearTotals({ tenant, year }) {
     let collected = 0;
     let owed = 0;
     yearRents.forEach((r) => {
-      const grand = Number(r?.total?.grandTotal) || 0;
-      const paid = Number(r?.total?.payment) || 0;
+      // Wave-26 round-3q: frontdata.toRentData flattens rent.total.*
+      // onto rentToReturn (totalAmount = grandTotal, payment, etc.).
+      // Reading r.total.grandTotal directly returned undefined for the
+      // entire API response — the prior implementation silently summed
+      // 0,00 € for every year. Use the flattened fields instead.
+      const grand = Number(r?.totalAmount) || 0;
+      const paid = Number(r?.payment) || 0;
       collected += Math.min(paid, Math.max(grand, 0));
       // Only past + current terms contribute to owed; future months
       // within the current year have not "matured" as debt yet.
