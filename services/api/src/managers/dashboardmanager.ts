@@ -285,19 +285,28 @@ export async function all(req: Req, res: Res) {
               }
             );
             if (currentRent) {
-              const balance = _round(
-                (currentRent.total?.payment || 0) -
-                  (currentRent.total?.grandTotal || 0)
+              // Wave-26 round-3t: emit remaining-unpaid as a POSITIVE
+              // amount so the dashboard tile shows the same number a
+              // landlord reads on /rents as 'συνολική οφειλή - ποσό
+              // καταβληθέν'. Prior code emitted `payment - grandTotal`
+              // which is negative for owed and confused the user.
+              const remaining = _round(
+                Math.max(
+                  0,
+                  (currentRent.total?.grandTotal || 0) -
+                    (currentRent.total?.payment || 0)
+                )
               );
-              acc.push({
-                tenant: { _id: tenant._id, name: _tenantName(tenant) },
-                balance
-              });
+              if (remaining > 0.005) {
+                acc.push({
+                  tenant: { _id: tenant._id, name: _tenantName(tenant) },
+                  balance: remaining
+                });
+              }
             }
             return acc;
           }, [])
-          .sort((t1: AnyRecord, t2: AnyRecord) => t1.balance - t2.balance)
-          .filter((t: AnyRecord) => t.balance < 0)
+          .sort((t1: AnyRecord, t2: AnyRecord) => t2.balance - t1.balance)
           .slice(0, 5)
       : [];
 

@@ -313,10 +313,13 @@ export default function MonthFigures({ className, dashboardData }) {
                   >
                     {tenant.name}
                   </button>
+                  {/* Wave-26 round-3t: balance is now POSITIVE remaining
+                      owed; render in oxide so it reads as 'they owe you
+                      this much' without the misleading negative sign. */}
                   <NumberFormat
                     value={balance}
-                    withColor
-                    className="font-medium"
+                    debitColor
+                    className="font-medium text-oxide"
                   />
                 </div>
               ))}
