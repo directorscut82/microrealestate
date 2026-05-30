@@ -46,7 +46,7 @@ function PeriodNav({ period, onChange }) {
   );
 }
 
-function Stat({ label, count, amount, color, className }) {
+function Stat({ label, count, partialCount, amount, color, className }) {
   const { t } = useTranslation('common');
   return (
     <div className={cn('flex flex-col gap-0.5 min-w-0', className)}>
@@ -65,6 +65,14 @@ function Stat({ label, count, amount, color, className }) {
         {typeof count === 'number' ? (
           <span className="text-label text-ink-muted">
             {t('{{count}} rents', { count })}
+            {/* Wave-26 round-3h: when the 'Paid this month' tile counts a mix
+                of fully-paid and partially-paid rents, surface the partial
+                sub-count in parens so the headline number doesn't lie. The
+                parens disappear when there are 0 partials — clean tile in
+                the common case. */}
+            {typeof partialCount === 'number' && partialCount > 0 ? (
+              <> ({t('{{count}} partial', { count: partialCount })})</>
+            ) : null}
           </span>
         ) : null}
       </div>
@@ -106,6 +114,7 @@ export function RentOverview({ data }) {
           count={
             (data.countPaid ?? 0) + (data.countPartiallyPaid ?? 0)
           }
+          partialCount={data.countPartiallyPaid ?? 0}
           color="text-olive"
         />
       </div>

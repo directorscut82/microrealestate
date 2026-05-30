@@ -95,7 +95,7 @@ export default function NewPaymentDialog({
           </DrawerTitle>
         </DrawerHeader>
 
-        <div className="p-4 overflow-y-auto mx-auto w-full max-w-screen-lg space-y-2">
+        <div className="p-4 overflow-y-auto scrollbar-branded mx-auto w-full max-w-screen-lg space-y-2">
           <RentSelector
             value={selectedRent}
             rents={rents}

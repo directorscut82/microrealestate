@@ -279,9 +279,11 @@ function Rents() {
       <List
         data={data}
         filters={[
-          { id: 'notpaid', label: t('Owed this month') },
-          { id: 'partiallypaid', label: t('Partially paid this month') },
-          { id: 'paid', label: t('Paid this month') }
+          // Wave-26 round-3h: terser filter chips. The longer 'Owed this month'
+          // form stays on the KPI tiles where the context is less obvious.
+          { id: 'notpaid', label: t('In arrears') },
+          { id: 'partiallypaid', label: t('Partially settled') },
+          { id: 'paid', label: t('Settled') }
         ]}
         filterFn={_filterData}
         renderActions={() =>
