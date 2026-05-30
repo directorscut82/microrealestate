@@ -545,13 +545,32 @@ function RentTable({ rents = [], selected, setSelected }) {
     [selected, setSelected]
   );
 
+  // Wave-26 round-3s: store rent _id only; resolve to the LIVE rent
+  // object on each render. Prior approach captured the rent ref at
+  // click time, so re-opening the dialog after a save (which
+  // invalidates RENTS queries and re-feeds the `rents` prop) showed
+  // stale `payments[]` — including the bug where a freshly recorded
+  // promo/extracharge wouldn't appear on the saved tile.
   const handleEdit = useCallback(
     (rent) => () => {
-      setSelectedPayment(rent);
+      setSelectedPayment({ _id: rent._id, term: rent.term });
       setOpenNewPaymentDialog(true);
     },
     [setOpenNewPaymentDialog, setSelectedPayment]
   );
+
+  // Resolve the latest rent for the dialog from current `rents` prop.
+  // Falls back to whatever was clicked if the row is no longer in
+  // the list (rare; e.g. month switched while dialog is open).
+  const liveSelectedRent = useMemo(() => {
+    if (!selectedPayment) return null;
+    return (
+      rents.find(
+        (r) =>
+          r._id === selectedPayment._id && r.term === selectedPayment.term
+      ) || selectedPayment
+    );
+  }, [rents, selectedPayment]);
 
   const handleHistory = useCallback(
     (rent) => () => {
@@ -566,7 +585,7 @@ function RentTable({ rents = [], selected, setSelected }) {
       <NewPaymentDialog
         open={openNewPaymentDialog}
         setOpen={setOpenNewPaymentDialog}
-        data={selectedPayment}
+        data={liveSelectedRent}
       />
 
       <RentHistoryDialog

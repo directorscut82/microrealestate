@@ -342,10 +342,14 @@ export default function MonthFigures({ className, dashboardData }) {
                     pie slices; the legend conveys the light/dark split
                     abstractly. */}
                 <div className="flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-label text-ink-soft mb-3">
+                  {/* Wave-26 round-3s: greyscale legend swatches that
+                      match the bar chart exactly (#bdb8b1 / #4a4d52).
+                      Per-category hue is visible inside pie slices;
+                      legend conveys the light=owed / dark=paid split. */}
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
-                      style={{ background: 'oklch(80% 0.030 245)' }}
+                      style={{ background: '#bdb8b1' }}
                       aria-hidden="true"
                     />
                     <span>{t('Outstanding')}</span>
@@ -353,7 +357,7 @@ export default function MonthFigures({ className, dashboardData }) {
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
-                      style={{ background: 'oklch(50% 0.090 245)' }}
+                      style={{ background: '#4a4d52' }}
                       aria-hidden="true"
                     />
                     <span>{t('Receipts')}</span>

@@ -39,17 +39,15 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
   const eligible = useMemo(() => {
     return (rents || [])
       .map((r) => {
-        // Wave-26 round-3r: r.totalAmount = grandTotal which already
-        // includes the balance carry. r.totalWithoutBalanceAmount is
-        // the THIS-MONTH bill alone (rent + charges + extras).
-        // For tenants in arrears (balance < 0), totalAmount - balance
-        // would DOUBLE the carry — wrong direction. Use the explicit
-        // pre-balance field directly.
+        // Wave-26 round-3s: convention in this codebase is
+        // `rent.balance > 0` means tenant has carry-in DEBT (arrears).
+        // Round-3r had this inverted; carryOwed was always 0 so the
+        // dialog never offered prior-balance rows.
         const monthlyOwed = Math.max(
           0,
           Number(r.totalWithoutBalanceAmount) || 0
         );
-        const carryOwed = Math.max(0, -(Number(r.balance) || 0));
+        const carryOwed = Math.max(0, Number(r.balance) || 0);
         // Subtract what's already been paid against monthly first.
         // payment is the lump paid sum; allocate it conceptually:
         // first to carry-in, then to monthly. Keeps the dialog from
@@ -166,9 +164,13 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
   return (
     <Drawer open={open} onOpenChange={setOpen} direction="right">
       {/* Override the default bottom-anchored geometry: right-anchored,
-          full-height, fixed width on >=sm. The drag-handle div inside
-          DrawerContent (top mx-auto bar) is harmless visually. */}
-      <DrawerContent className="!inset-y-0 !right-0 !left-auto !mt-0 !rounded-none h-full w-full sm:w-[440px] sm:max-w-[440px] flex flex-col">
+          full-height, fixed width on >=sm. hideHandle drops the
+          bottom-anchored drag bar that would otherwise appear at the
+          top of the right-side panel. */}
+      <DrawerContent
+        hideHandle
+        className="!inset-y-0 !right-0 !left-auto !mt-0 !rounded-none h-full w-full sm:w-[440px] sm:max-w-[440px] flex flex-col"
+      >
         <DrawerHeader>
           <DrawerTitle>{t('Express settlement')}</DrawerTitle>
           <div className="text-xs text-ink-muted">
