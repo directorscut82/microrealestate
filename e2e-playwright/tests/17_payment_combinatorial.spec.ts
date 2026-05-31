@@ -350,14 +350,14 @@ test('C08 · YearFigures bar chart renders with at least one bar', async ({
   await signIn(page);
   await gotoDashboard(page);
   await page.waitForTimeout(2500);
-  const bars = page.locator('.recharts-bar-rectangle');
-  const total = await bars.count();
-  // We don't enforce >0 (a fresh test realm with no payments may have
-  // no bars). Just confirm we got the chart container.
-  const chartContainer = page
-    .locator('[class*="recharts"]')
-    .first();
-  expect((await chartContainer.count()) || total >= 0).toBeGreaterThanOrEqual(0);
+  // Confirm the YearFigures chart container is rendered. The original
+  // assertion was (count || total >= 0) which is always truthy
+  // regardless of whether the chart exists. Now we require the chart's
+  // SVG to actually be present in the DOM. If the test realm has no
+  // payments yet, the chart still renders (with empty bars) so the
+  // container assertion is meaningful.
+  const chartContainer = page.locator('[class*="recharts"]').first();
+  await expect(chartContainer).toBeVisible({ timeout: 5000 });
 });
 
 // =============================================================
@@ -757,8 +757,12 @@ test('C22 · payment recorded with allocation-specific=expenses persists', async
     }
   }
   const resp = await clickRecord(page);
-  // Either persists with allocation, or auto-mode persists.
-  expect([200, 201, 422]).toContain(resp.status());
+  // Both branches (allocation=specific=expenses and the auto-mode
+  // fallback) are valid happy paths and the server should return 200.
+  // The previous assertion accepted 422 too, which silently masked a
+  // real validation regression. If allocation invariants fail and 422
+  // is returned, that is a bug we want to surface.
+  expect(resp.status()).toBe(200);
 });
 
 // =============================================================
