@@ -3,6 +3,31 @@
 
 import { logger } from '@microrealestate/common';
 
+/**
+ * Validate a Greek ΑΦΜ (tax id) using the official mod-11 checksum.
+ * Spec: 9 digits; first 8 digits weighted by 256, 128, 64, 32, 16, 8,
+ * 4, 2; sum modulo 11; result modulo 10 must equal the 9th digit.
+ *
+ * Returns true for valid AFMs. False for malformed or wrong-length
+ * inputs. Used to reject corrupt OCR output / typos at the import
+ * boundary before they reach mongo.
+ */
+export function isValidAfm(afm: string | undefined | null): boolean {
+  if (!afm) return false;
+  if (!/^\d{9}$/.test(afm)) return false;
+  // All-zeros fails the checksum but is also a sentinel value some
+  // legacy fixtures use; accept it as a documented "missing" marker.
+  if (afm === '000000000') return false;
+  const digits = afm.split('').map((d) => Number(d));
+  let sum = 0;
+  // weights for digits[0..7] are 2^8, 2^7, ..., 2^1
+  for (let i = 0; i < 8; i++) {
+    sum += digits[i] * Math.pow(2, 8 - i);
+  }
+  const checksum = (sum % 11) % 10;
+  return checksum === digits[8];
+}
+
 export type ParsedLandlord = {
   name: string;
   taxId: string;
@@ -212,12 +237,20 @@ export function parseGreekLease(text: string): ParsedLease {
     ? between(t, 'ΤΡΟΠΟΠΟΙΗΣΕ ΤΗ ΔΗΛΩΣΗ', 'ΣΤΟΙΧΕΙΑ ΕΚΜΙΣΘΩΤ')
     : undefined;
 
-  // Landlords
+  // Landlords. AFM is anchored to exactly 9 digits — the AADE form
+  // never emits anything else, and a wider \d+ would silently swallow
+  // an OCR-mangled run-on of digits from an adjacent field.
   const landlords: ParsedLandlord[] = [];
   const landlordRe =
-    /(?:Κύριος|Κυρία)\s+(.+?)\s*\(ΑΦΜ Δηλούντος:(\d+)\)\s*Ποσοστό\s+(\d+)/g;
+    /(?:Κύριος|Κυρία)\s+(.+?)\s*\(ΑΦΜ Δηλούντος:(\d{9})\)\s*Ποσοστό\s+(\d+)/g;
   let m;
   while ((m = landlordRe.exec(t)) !== null) {
+    if (!isValidAfm(m[2])) {
+      logger.warn(
+        `Greek lease parser: dropping landlord with invalid AFM "${m[2]}"`
+      );
+      continue;
+    }
     landlords.push({
       name: m[1].trim(),
       taxId: m[2],
@@ -225,11 +258,17 @@ export function parseGreekLease(text: string): ParsedLease {
     });
   }
 
-  // Tenants
+  // Tenants — same 9-digit anchor + checksum validation.
   const tenants: ParsedTenant[] = [];
   const tenantRe =
-    /ΟΝΟΜΑΤΕΠΩΝΥΜΟ\/ΕΠΩΝΥΜΙΑ\s+(.+?)\s*\(Α\.Φ\.Μ:(\d+)\)\s*(?:Ημ\/νία Αποδοχής\s+(\d{2}\/\d{2}\/\d{4}))?/g;
+    /ΟΝΟΜΑΤΕΠΩΝΥΜΟ\/ΕΠΩΝΥΜΙΑ\s+(.+?)\s*\(Α\.Φ\.Μ:(\d{9})\)\s*(?:Ημ\/νία Αποδοχής\s+(\d{2}\/\d{2}\/\d{4}))?/g;
   while ((m = tenantRe.exec(t)) !== null) {
+    if (!isValidAfm(m[2])) {
+      logger.warn(
+        `Greek lease parser: dropping tenant with invalid AFM "${m[2]}"`
+      );
+      continue;
+    }
     tenants.push({
       name: m[1].trim(),
       taxId: m[2],

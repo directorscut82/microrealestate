@@ -72,7 +72,10 @@ export async function getRentsData(params) {
       capital: dbTenant.capital,
       ein: dbTenant.siret,
       dos: dbTenant.rcs,
-      vatNumber: dbTenant.vatNumber,
+      // Tenant schema stores the VAT/tax id as `taxId`. Reading
+      // `vatNumber` here always returned undefined and the PDF rendered
+      // a blank where the company's ΑΦΜ should appear.
+      vatNumber: dbTenant.taxId,
       legalRepresentative: dbTenant.manager
     },
     addresses: [
