@@ -232,7 +232,7 @@ function ExpenseCard({
             const exps = [...property.expenses];
             exps.splice(ei, 1);
             setValue(`properties.${index}.expenses`, exps);
-          }}>
+          }} aria-label={t('Delete')}>
             <LuTrash2 className="size-3" />
           </Button>
         )}
@@ -453,7 +453,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
             <div className="flex justify-between items-center mb-2">
               <div className="font-medium">{t('Property #{{count}}', { count: index + 1 })}</div>
               {!readOnly && propertyFields.length > 1 && (
-                <Button type="button" variant="ghost" size="icon" onClick={() => removeProperty(index)}>
+                <Button type="button" variant="ghost" size="icon" onClick={() => removeProperty(index)} aria-label={t('Delete')}>
                   <LuTrash2 className="size-4" />
                 </Button>
               )}

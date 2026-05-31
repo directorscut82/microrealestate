@@ -2,7 +2,9 @@ import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import PropertyIcon from '../properties/PropertyIcon';
 
+import useTranslation from 'next-translate/useTranslation';
 function Address({ address }) {
+  const { t } = useTranslation('common');
   if (!address?.street1) {
     return null;
   }
@@ -52,6 +54,7 @@ export default function TenantPropertyList({ tenant, className }) {
             variant="ghost"
             size="icon"
             className="shrink-0 size-7 rounded-md text-muted-foreground"
+          aria-label={t('Remove property')}
           >
             <PropertyIcon type={property.type} className="size-4" />
           </Button>

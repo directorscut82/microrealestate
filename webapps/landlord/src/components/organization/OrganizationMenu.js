@@ -136,7 +136,7 @@ export default function OrganizationMenu({ className }) {
     <Sheet>
       <SheetTrigger asChild>
         <div className={className}>
-          <Button variant="ghost" size="icon" data-cy="orgMenu">
+          <Button variant="ghost" size="icon" data-cy="orgMenu" aria-label={t('Organization menu')}>
             <UserAvatar className="cursor-pointer" />
           </Button>
         </div>

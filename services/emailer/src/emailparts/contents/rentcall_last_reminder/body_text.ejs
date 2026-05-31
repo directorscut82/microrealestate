@@ -14,7 +14,7 @@
 
 <%- _.t('So far, one or more rents have not been paid. The current amount of unpaid rents is {{amount}}.', { amount: _.formatNumber(tenant.rents[0].total.grandTotal, 'currency') }) %>
 
-<%- _.t('We would be grateful if you could proceed to the payment of your rent debts in the following 10 days, otherwise we will engage an eviction procedure.') %>
+<%- _.t('We would be grateful if you could proceed to the payment of your rent debts in the following {{days}} days, otherwise we will engage an eviction procedure.', { days: (config && config.EVICTION_NOTICE_DAYS) || 10 }) %>
 
 <%- include('../__content_parts/text/paymentmethods.ejs') %>
 

@@ -72,7 +72,7 @@ const _refreshTokens = async (oldRefreshToken: string): Promise<{ refreshToken?:
   // Atomic consume: only the first concurrent request wins.
   const oldAccessToken = await _consumeRefreshToken(oldRefreshToken);
   if (!oldAccessToken) {
-    logger.error('refresh token not found in database');
+    logger.warn('refresh token not found in database');
     return {};
   }
 

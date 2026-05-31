@@ -340,7 +340,7 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
             <div className="flex justify-between items-center mb-2">
               <div className="font-medium">{t('Contact #{{count}}', { count: index + 1 })}</div>
               {!readOnly && fields.length > 1 && (
-                <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}><LuTrash2 className="size-4" /></Button>
+                <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} aria-label={t('Delete')}><LuTrash2 className="size-4" /></Button>
               )}
             </div>
             <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.contact`}>{t('Contact')}</Label><Input id={`contacts.${index}.contact`} disabled={readOnly} {...register(`contacts.${index}.contact`)} />{errors.contacts?.[index]?.contact && <p className="text-sm text-destructive">{errors.contacts[index].contact.message}</p>}</div>

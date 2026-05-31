@@ -31,7 +31,7 @@
                     </p>
 
                     <p>
-                       <strong><%- _.t('We would be grateful if you could proceed to the payment of your rent debts in the following 10 days, otherwise we will engage an eviction procedure.') %></strong>
+                       <strong><%- _.t('We would be grateful if you could proceed to the payment of your rent debts in the following {{days}} days, otherwise we will engage an eviction procedure.', { days: (config && config.EVICTION_NOTICE_DAYS) || 10 }) %></strong>
                     </p>
 
                     <%- include('../__content_parts/html/paymentmethods.ejs') %>

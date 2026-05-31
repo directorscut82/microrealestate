@@ -233,6 +233,7 @@ export default function ContractorList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleEdit(contractor)}
+                    aria-label={t('Edit')}
                     >
                       <LuPencil className="size-4" />
                     </Button>
@@ -240,6 +241,7 @@ export default function ContractorList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleDelete(contractor)}
+                    aria-label={t('Delete')}
                     >
                       <LuTrash2 className="size-4" />
                     </Button>

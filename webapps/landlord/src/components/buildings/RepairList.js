@@ -383,6 +383,7 @@ export default function RepairList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleEdit(repair)}
+                    aria-label={t('Edit')}
                     >
                       <LuPencil className="size-4" />
                     </Button>
@@ -390,6 +391,7 @@ export default function RepairList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleDelete(repair)}
+                    aria-label={t('Delete')}
                     >
                       <LuTrash2 className="size-4" />
                     </Button>
