@@ -432,9 +432,18 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
         });
       try {
         await payRent({ term: String(rent.term), payment });
-        // Invalidate via prefix so all rent periods, dashboards, tenants and
-        // accounting screens refetch (no specific period to keep stale).
-        queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+        // Block the close path on the rents refetch. invalidateQueries is
+        // fire-and-forget; closing the drawer immediately after it leaves
+        // the user staring at a row that still shows the OLD Payment cell
+        // for ~500-1500ms (network round-trip). They assume the click
+        // failed and click Record again — that is the duplicate-payment
+        // class of bug. Awaiting refetchQueries here guarantees the cache
+        // holds fresh data BEFORE the drawer closes. ExpressPaymentDialog
+        // uses the same pattern.
+        await queryClient.refetchQueries({ queryKey: [QueryKeys.RENTS] });
+        // Cross-screen caches refresh in the background — the user is on
+        // /rents; dashboard / tenants / accounting will be fresh on the
+        // next time they're viewed.
         queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });

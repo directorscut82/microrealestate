@@ -451,6 +451,307 @@ export interface PaidLeasedTenantSeed extends LeasedTenantSeed {
  * Used by the payment-dialog locked-tile spec, which needs an existing
  * saved payment to drive the add/edit/delete flows over.
  */
+/**
+ * Wave-26 round-3u: building seeded with FIVE distinct expense types
+ * (heating, elevator, cleaning, insurance, repairs) plus a unit linked
+ * to the seed property. Idempotent — re-runs reuse the existing seeded
+ * expenses by name. Used by spec 17 (combinatorial UI matrix) so each
+ * tenant's rent picks up real building-charges with real type values
+ * the dashboard pie can color independently.
+ */
+export interface RichBuildingSeed extends LeasedTenantSeed {
+  expenseHeatingId: string;
+  expenseElevatorId: string;
+  expenseCleaningId: string;
+  expenseInsuranceId: string;
+  expenseRepairId: string;
+  unitId: string;
+}
+
+export async function ensureSeedRichBuilding(
+  request: APIRequestContext
+): Promise<RichBuildingSeed> {
+  const seed = await ensureSeedLeasedTenant(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+
+  // Need a unit on the building, linked to the seed property, with
+  // generalThousandths populated so pro-rata methods produce non-zero
+  // shares.
+  const buildingResp = await request.get(
+    `${GATEWAY}/api/v2/buildings/${seed.buildingId}`,
+    { headers: auth }
+  );
+  expect(buildingResp.status(), 'fetch building rich').toBe(200);
+  const fullBuilding = (await buildingResp.json()) as {
+    _id: string;
+    expenses?: Array<{ _id: string; name: string; type?: string }>;
+    units?: Array<{
+      _id: string;
+      atakNumber: string;
+      propertyId?: string;
+      generalThousandths?: number;
+      heatingThousandths?: number;
+      elevatorThousandths?: number;
+    }>;
+  };
+
+  // Ensure unit linked to seed.propertyId with generalThousandths=1000.
+  let unit = fullBuilding.units?.find(
+    (u) => String(u.propertyId) === String(seed.propertyId)
+  );
+  if (!unit) {
+    // Create or PATCH first managed unit to link to seed.propertyId.
+    const candidate = fullBuilding.units?.find(
+      (u) => u.atakNumber === 'E2E-RichUnit'
+    );
+    if (!candidate) {
+      const created = await request.post(
+        `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units`,
+        {
+          headers: auth,
+          data: {
+            atakNumber: 'E2E-RichUnit',
+            isManaged: true,
+            occupancyType: 'rented',
+            propertyId: seed.propertyId,
+            generalThousandths: 1000,
+            heatingThousandths: 1000,
+            elevatorThousandths: 1000
+          }
+        }
+      );
+      expect(
+        [200, 201],
+        `create rich unit (status=${created.status()})`
+      ).toContain(created.status());
+      const updated = (await created.json()) as {
+        units: Array<{
+          _id: string;
+          atakNumber: string;
+          propertyId?: string;
+        }>;
+      };
+      unit = updated.units.find((u) => u.atakNumber === 'E2E-RichUnit');
+    } else {
+      // PATCH the existing unit to link
+      const patched = await request.patch(
+        `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units/${candidate._id}`,
+        {
+          headers: auth,
+          data: {
+            isManaged: true,
+            occupancyType: 'rented',
+            propertyId: seed.propertyId,
+            generalThousandths: 1000,
+            heatingThousandths: 1000,
+            elevatorThousandths: 1000
+          }
+        }
+      );
+      if (patched.status() < 400) {
+        unit = candidate;
+      }
+    }
+  }
+  if (!unit) throw new Error('Could not seed/find rich unit');
+  const unitId = unit._id;
+
+  // Helper to ensure a recurring expense by name exists on the building.
+  const ensureExpense = async (
+    name: string,
+    type: string,
+    amount: number,
+    method = 'general_thousandths'
+  ): Promise<string> => {
+    const cur = fullBuilding.expenses?.find((e) => e.name === name);
+    if (cur) return cur._id;
+    const created = await request.post(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}/expenses`,
+      {
+        headers: auth,
+        data: {
+          name,
+          type,
+          amount,
+          allocationMethod: method,
+          isRecurring: true,
+          startTerm: (() => {
+            // 6 months before today, normalized to a real YYYYMMDDHH.
+            const d = new Date();
+            const past = new Date(
+              Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 6, 1)
+            );
+            return Number(
+              `${past.getUTCFullYear()}${String(
+                past.getUTCMonth() + 1
+              ).padStart(2, '0')}0100`
+            );
+          })()
+        }
+      }
+    );
+    expect(
+      [200, 201],
+      `create ${name} expense (status=${created.status()}, body: ${await created.text().catch(() => '')})`
+    ).toContain(created.status());
+    const body = (await created.json()) as {
+      expenses: Array<{ _id: string; name: string }>;
+    };
+    const e = body.expenses.find((e) => e.name === name);
+    if (!e) throw new Error(`Created ${name} expense not in response`);
+    return e._id;
+  };
+
+  const expenseHeatingId = await ensureExpense('E2E-Heating', 'heating', 80);
+  const expenseElevatorId = await ensureExpense('E2E-Elevator', 'elevator', 40);
+  const expenseCleaningId = await ensureExpense('E2E-Cleaning', 'cleaning', 30);
+  const expenseInsuranceId = await ensureExpense(
+    'E2E-Insurance',
+    'insurance',
+    25
+  );
+  // Note: dashboard pie has a 'repair' bucket but the building-expense
+  // type whitelist exposes 'repairs_fund' (validators.ts EXPENSE_TYPES).
+  // The pipeline maps repairs_fund → 'repair' bucket via type matching.
+  const expenseRepairId = await ensureExpense(
+    'E2E-Repair',
+    'repairs_fund',
+    50
+  );
+
+  // Trigger a tenant PATCH so their rents[] array picks up the new
+  // building expenses (occupantmanager re-runs the contract pipeline).
+  await request.patch(`${GATEWAY}/api/v2/tenants/${seed.tenantId}`, {
+    headers: auth,
+    data: {
+      properties: [
+        { propertyId: seed.propertyId, rent: 500, expenses: [] }
+      ]
+    }
+  });
+
+  return {
+    ...seed,
+    expenseHeatingId,
+    expenseElevatorId,
+    expenseCleaningId,
+    expenseInsuranceId,
+    expenseRepairId,
+    unitId
+  };
+}
+
+/**
+ * Wave-26 round-3u: seeds a SECOND tenant (E2E-LeasedTenant-B) on a
+ * different property in the same realm. Used to exercise multi-tenant
+ * scenarios in the dashboard, top-unpaid, express drawer, and bar
+ * chart aggregation. Idempotent.
+ */
+export interface SecondTenantSeed extends LeasedTenantSeed {
+  tenantBId: string;
+  tenantBName: string;
+  propertyBId: string;
+}
+
+export async function ensureSeedSecondTenant(
+  request: APIRequestContext
+): Promise<SecondTenantSeed> {
+  const seed = await ensureSeedLeasedTenant(request);
+  const auth = {
+    Authorization: `Bearer ${seed.token}`,
+    'Content-Type': 'application/json',
+    organizationid: seed.realmId
+  };
+
+  // Find or create a second property.
+  const propsResp = await request.get(`${GATEWAY}/api/v2/properties`, {
+    headers: auth
+  });
+  expect(propsResp.status(), 'list props for second').toBe(200);
+  const props = (await propsResp.json()) as Array<{ _id: string; name: string }>;
+  let propB = props.find((p) => p.name === 'E2E-Property-B');
+  if (!propB) {
+    const created = await request.post(`${GATEWAY}/api/v2/properties`, {
+      headers: auth,
+      data: {
+        name: 'E2E-Property-B',
+        type: 'apartment',
+        rent: 0,
+        surface: 60,
+        address: { street1: 'Test', city: 'Test', zipCode: '00000' }
+      }
+    });
+    expect([200, 201]).toContain(created.status());
+    propB = (await created.json()) as { _id: string; name: string };
+  }
+
+  // Tenant B with a 6m past begin → 6m future end window.
+  const today = new Date();
+  const beginUtc = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 6, 1)
+  );
+  const endUtc = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 7, 0)
+  );
+  const toDDMMYYYY = (iso: string) => {
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  };
+  const beginApi = toDDMMYYYY(beginUtc.toISOString().substring(0, 10));
+  const endApi = toDDMMYYYY(endUtc.toISOString().substring(0, 10));
+
+  const tenants = (await (
+    await request.get(`${GATEWAY}/api/v2/tenants`, { headers: auth })
+  ).json()) as Array<{ _id: string; name: string }>;
+  let tenantB = tenants.find((t) => t.name === 'E2E-LeasedTenant-B');
+  if (!tenantB) {
+    const created = await request.post(`${GATEWAY}/api/v2/tenants`, {
+      headers: auth,
+      data: {
+        name: 'E2E-LeasedTenant-B',
+        isCompany: false,
+        manager: 'E2E-LeasedTenant-B',
+        contacts: [
+          {
+            contact: 'E2E-LeasedTenant-B',
+            email: '',
+            phone1: '6900000001',
+            phone: '',
+            phone2: ''
+          }
+        ],
+        leaseId: seed.leaseId,
+        beginDate: beginApi,
+        endDate: endApi,
+        properties: [{ propertyId: propB._id, rent: 750, expenses: [] }]
+      }
+    });
+    expect([200, 201]).toContain(created.status());
+    tenantB = (await created.json()) as { _id: string; name: string };
+  } else {
+    await request.patch(`${GATEWAY}/api/v2/tenants/${tenantB._id}`, {
+      headers: auth,
+      data: {
+        leaseId: seed.leaseId,
+        beginDate: beginApi,
+        endDate: endApi,
+        properties: [{ propertyId: propB._id, rent: 750, expenses: [] }]
+      }
+    });
+  }
+
+  return {
+    ...seed,
+    tenantBId: tenantB._id,
+    tenantBName: tenantB.name,
+    propertyBId: propB._id
+  };
+}
+
 export async function ensureSeedLeasedTenantWithPayment(
   request: APIRequestContext,
   amount = 100

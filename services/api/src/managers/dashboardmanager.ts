@@ -356,7 +356,13 @@ export async function all(req: Req, res: Res) {
           tenantBuildingByType[t] =
             (tenantBuildingByType[t] || 0) + (c.amount || 0);
         });
-        const tenantDue = rent.total?.grandTotal || 0;
+        // Clamp grandTotal at zero. After overpayment carry-forward, a
+        // tenant's grandTotal in a future month can be negative (the
+        // surplus credit reduces what they owe). Without clamping, that
+        // negative number flows into the dashboard "due" aggregates and
+        // skews them downward — months with credits look like they have
+        // less collectible than they do.
+        const tenantDue = Math.max(0, rent.total?.grandTotal || 0);
         const tenantPaid = rent.total?.payment || 0;
 
         if (!acc[key]) {
