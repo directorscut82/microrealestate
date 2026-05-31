@@ -71,21 +71,26 @@ export default function NewPaymentDialog({
   }, [setOpen]);
 
   const handleSave = useCallback(() => {
-    // Synchronous re-entry guard via ref — the useState `saving` flag
-    // can only catch repeated clicks AFTER React renders the disabled
-    // button. A fast double-click before that render runs handleSave
-    // twice, fires two PATCH requests, and the second loses to the
-    // optimistic-lock 409 with the toast appearing on a closed dialog.
-    // The ref is reset by handleSubmit (success) or handleError
-    // (PaymentTabs onError fires for both zod-validation failures and
-    // PATCH catch). Both paths are guaranteed to fire — no timeout
-    // fallback needed (the prior 80ms reset was racy: a fast PATCH
-    // would see isSubmitting=false and unlock the ref, allowing a
-    // queued duplicate click through).
+    // Synchronous re-entry guard via ref. The 80ms timeout reset the
+    // ref when react-hook-form's isSubmitting flag was false — that
+    // covers the case where zod validation rejected the submit before
+    // _handleSubmit fires (in which case neither handleSubmit nor
+    // handleError would ever resolve the saving state). 80ms turned
+    // out to be racy with fast PATCH responses, so we extend it to
+    // 800ms — long enough that a network round-trip is mid-flight
+    // (isSubmitting=true) and the ref stays locked, but short enough
+    // that a validation rejection unlocks the form without leaving
+    // the button stuck on "Saving".
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSaving(true);
     formRef.current.submit();
+    setTimeout(() => {
+      if (formRef.current && !formRef.current.isSubmitting?.()) {
+        submittingRef.current = false;
+        setSaving(false);
+      }
+    }, 800);
   }, []);
 
   const handleError = useCallback(() => {
