@@ -56,6 +56,30 @@ export function toRentData(
   emailStatus?: AnyRecord,
   allRents?: AnyRecord[]
 ): AnyRecord {
+  // _updateByTerm looks up `rent` by term and may receive undefined when
+  // the requested term is outside the rent ledger (e.g. PATCH against a
+  // future month the server hasn't generated yet). Guard before
+  // JSON.parse(JSON.stringify(undefined)) which throws SyntaxError and
+  // bubbles out as 500.
+  if (!inputRent) {
+    return {
+      total: {
+        balance: 0,
+        grandTotal: 0,
+        payment: 0,
+        preTaxAmount: 0,
+        vatAmount: 0,
+        discountAmount: 0,
+        charges: 0,
+        vat: 0,
+        discount: 0
+      },
+      payments: [],
+      discounts: [],
+      term: 0,
+      status: 'notpaid'
+    };
+  }
   const rent: AnyRecord = JSON.parse(JSON.stringify(inputRent));
 
   // Wave-24 A4: legacy/seed data sometimes lacks rent.total entirely. Without
