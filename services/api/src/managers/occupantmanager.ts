@@ -846,6 +846,19 @@ export async function add(req: Req, res: Res) {
 
   const propertyMap = await _buildPropertyMap(realm);
 
+  // Cross-realm guard: every propertyId in the body must resolve to a
+  // property in THIS realm. Without this, the .price access on the next
+  // line throws an opaque TypeError 500 when a foreign propertyId is
+  // passed; turn that into a clear 422 instead.
+  occupant.properties?.forEach((p: AnyRecord, i: number) => {
+    if (p?.propertyId && !propertyMap[String(p.propertyId)]) {
+      throw new ServiceError(
+        `properties[${i}].propertyId not found in this organization`,
+        422
+      );
+    }
+  });
+
   occupant.properties?.forEach((property: AnyRecord) => {
     property.property = propertyMap[property.propertyId];
     property.rent = property.rent || property.property.price;
@@ -1158,6 +1171,27 @@ export async function update(req: Req, res: Res) {
   await _assertNoDoubleOccupancy(realm!._id, newOccupant, occupantId);
 
   const propertyMap = await _buildPropertyMap(realm);
+
+  // Cross-realm guard. propertyMap is realm-scoped; if a propertyId in
+  // the body does not resolve here it either belongs to a different
+  // realm or does not exist. Persisting a foreign propertyId on this
+  // tenant would leave a dangling reference (the rent pipeline would
+  // silently drop the line, but the orphan stays in mongo and pollutes
+  // future queries). Reject loudly instead.
+  newOccupant.properties.forEach((rentedProperty: AnyRecord) => {
+    if (!rentedProperty.propertyId) return;
+    const inRealm = !!propertyMap[String(rentedProperty.propertyId)];
+    const wasOriginallyAssigned = (originalOccupant.properties || []).some(
+      ({ propertyId }: AnyRecord) =>
+        String(propertyId) === String(rentedProperty.propertyId)
+    );
+    if (!inRealm && !wasOriginallyAssigned) {
+      throw new ServiceError(
+        `Property ${rentedProperty.propertyId} not found in this organization`,
+        422
+      );
+    }
+  });
 
   newOccupant.properties = newOccupant.properties.map((rentedProperty: AnyRecord) => {
     if (!rentedProperty.property) {

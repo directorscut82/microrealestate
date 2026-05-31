@@ -232,6 +232,11 @@ export namespace CollectionTypes {
           description: string;
           amount: number;
           buildingName?: string;
+          // Set by the rent computation pipeline at task 1_base. Used
+          // by rentmanager._computeOwedByCategory and the dashboard pie
+          // to bucket repair charges separately from regular building
+          // expenses.
+          type?: string;
         }[]
       | [];
     paymentInstructions:
@@ -382,6 +387,10 @@ export namespace CollectionTypes {
     occupancyType?: OccupancyType;
     parkingAssignedTo?: string[];
     monthlyCharges: MonthlyCharge[] | [];
+    // Enrichment fields populated by buildingmanager._toBuildingData on
+    // the API response. Not persisted in mongo; read-only on the wire.
+    property?: Property | null;
+    tenant?: { _id: string; name: string } | null;
   };
 
   export type CustomAllocation = {

@@ -170,10 +170,8 @@ ${email.attachment
 
       let status: any;
       if (ALLOW_SENDING_EMAILS) {
-        status = await EmailEngine.sendEmail(email, data);
-        // Persist the audit trail before returning so callers see a
-        // consistent state on success. realmId is now required by the
-        // Email schema. Resolve it in priority order:
+        // Resolve realm scope BEFORE the send so a failed-send audit row
+        // can still be persisted with the right realmId. Order:
         //   1. organizationId from the route caller (the normal case for
         //      invoice / rentcall flows that go through checkOrganization)
         //   2. data.landlord._id (otp flow — derived from the tenant's
@@ -184,23 +182,54 @@ ${email.attachment
         // bucket would break the multi-tenant query model.
         const auditRealmId =
           organizationId || (data && data.landlord && data.landlord._id);
-        if (auditRealmId) {
-          await new Collections.Email({
-            realmId: auditRealmId,
-            templateName,
-            recordId,
-            params,
-            sentTo: recipients.to,
-            sentDate: new Date(),
-            emailId: status.id,
-            status: 'queued'
-          }).save();
-        } else {
-          logger.debug(
-            `skipping email audit row for ${templateName} (no realm context)`
-          );
+        try {
+          status = await EmailEngine.sendEmail(email, data);
+          if (auditRealmId) {
+            await new Collections.Email({
+              realmId: auditRealmId,
+              templateName,
+              recordId,
+              params,
+              sentTo: recipients.to,
+              sentDate: new Date(),
+              emailId: status.id,
+              status: 'queued'
+            }).save();
+          } else {
+            logger.debug(
+              `skipping email audit row for ${templateName} (no realm context)`
+            );
+          }
+          logger.info(`${templateName} sent to ${recordId} at ${recipients.to}`);
+        } catch (sendErr) {
+          // Persist a 'failed' audit row BEFORE rethrowing so the
+          // landlord can see and triage failed sends. Without this,
+          // failed emails simply disappeared (logged but not stored)
+          // and there was no way to identify recipients who never got
+          // their notice / invoice / OTP.
+          if (auditRealmId) {
+            try {
+              await new Collections.Email({
+                realmId: auditRealmId,
+                templateName,
+                recordId,
+                params,
+                sentTo: recipients.to,
+                sentDate: new Date(),
+                emailId: null,
+                status: 'failed',
+                error: String(
+                  (sendErr as { message?: string })?.message || sendErr
+                ).slice(0, 1000)
+              }).save();
+            } catch (auditErr) {
+              logger.error(
+                `failed to persist failed-email audit row: ${(auditErr as { message?: string })?.message || auditErr}`
+              );
+            }
+          }
+          throw sendErr;
         }
-        logger.info(`${templateName} sent to ${recordId} at ${recipients.to}`);
       } else {
         const message = `ALLOW_SENDING_EMAILS set to "false", ${templateName} not sent to ${recordId} at ${recipients.to}`;
         status = {

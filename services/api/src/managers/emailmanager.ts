@@ -232,8 +232,18 @@ export async function send(req: Req, res: Res) {
     })
   );
 
-  if (statusList.some((status) => !!status.error)) {
+  // Mixed-success batch: some tenants delivered, others failed. HTTP
+  // 500 for the whole batch was misleading — clients couldn't tell
+  // whether ANY succeeded. RFC 4918 207 Multi-Status (or 200 with
+  // per-item status when ALL succeeded) is the right shape: client
+  // iterates statusList and acts on each. Mirrors the SMS path.
+  const hasError = statusList.some((status) => !!status.error);
+  const allFailed =
+    statusList.length > 0 && statusList.every((status) => !!status.error);
+  if (allFailed) {
     res.status(500).json(statusList);
+  } else if (hasError) {
+    res.status(207).json(statusList);
   } else {
     res.json(statusList);
   }
