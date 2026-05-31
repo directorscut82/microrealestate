@@ -76,25 +76,29 @@ test('building dashboard finance card shows income, expenses, and net', async ({
   // locale-aware money — for el-GR EUR realm it's like "6.000,00 €". We
   // extract digits to compare numerically rather than textually.
   const numberFromText = (s: string) => {
-    // Strip everything but digits, dots, commas, minus. Convert any thousands
-    // separator (.) to nothing and decimal separator (,) to '.'.
-    const cleaned = s.replace(/[^\d.,-]/g, '');
+    // Normalise both ASCII '-' and Unicode '−' (U+2212) before stripping.
+    // Strip everything but digits, dots, commas, minus.
+    const withAsciiMinus = s.replace(/−/g, '-');
+    const cleaned = withAsciiMinus.replace(/[^\d.,-]/g, '');
     // Greek/EU format: thousand=., decimal=, → drop dots, swap comma to dot.
     const normalized = cleaned.replace(/\./g, '').replace(',', '.');
     return Number(normalized);
   };
 
-  // The card renders three labelled rows (Income / Expenses / Net). Each
-  // is a flex column whose label is one div and value is the next sibling.
-  // Match by the literal label and read the SIBLING with the EUR amount.
-  // Earlier selector `.locator('..').innerText()` picked up the wrapping
-  // grid and produced "Income\n0,00 €" or stale 0 values when the label
-  // happened to appear elsewhere on the page.
+  // The card renders three labelled rows (Income / Expenses / Net) as
+  // sibling divs with label + amount. The whole card's innerText
+  // contains them in order separated by newlines/whitespace. Walk the
+  // text and pull the amount that immediately follows each label.
+  // Permissive regex: any whitespace between label and the EUR amount,
+  // accept both ASCII '-' and Unicode '−' (U+2212) for negatives.
   const cardText = await card.innerText();
   const matchAfter = (label: string): string => {
-    const re = new RegExp(label + '\\s*[\\n\\r]+\\s*([−\\-]?[\\d.,\\s]+€)');
+    const re = new RegExp(
+      label + '[^0-9\\-−]*([\\-−]?[\\d.,\\u00a0\\s]+\\s*€)',
+      'u'
+    );
     const m = cardText.match(re);
-    return m ? m[1] : '';
+    return m ? m[1].trim() : '';
   };
   const incomeText = matchAfter('Income');
   const expensesText = matchAfter('Expenses');
