@@ -178,7 +178,45 @@ export default class Service {
 
     if (this.exposeHealthCheck) {
       this.expressServer.get('/health', async (req, res) => {
-        res.status(200).send('OK');
+        // Verify dependencies are reachable. A naive 200 was misleading:
+        // load balancers and orchestrators read /health to decide whether
+        // to route traffic; if mongo or redis went away the service kept
+        // claiming healthy, masking the real outage.
+        const checks: Record<string, string> = { service: 'ok' };
+        let healthy = true;
+
+        if (this.mongoClient) {
+          try {
+            const state = (this.mongoClient as any)?.connection?.readyState;
+            // 1 = connected (mongoose). Anything else means we are not
+            // ready to serve requests that depend on mongo.
+            if (state === 1) {
+              checks.mongo = 'ok';
+            } else {
+              checks.mongo = 'down(state=' + state + ')';
+              healthy = false;
+            }
+          } catch (e) {
+            checks.mongo = 'error';
+            healthy = false;
+          }
+        }
+
+        if (this.redisClient && (this.redisClient as any).isOpen !== undefined) {
+          try {
+            if ((this.redisClient as any).isOpen) {
+              checks.redis = 'ok';
+            } else {
+              checks.redis = 'down';
+              healthy = false;
+            }
+          } catch (e) {
+            checks.redis = 'error';
+            healthy = false;
+          }
+        }
+
+        res.status(healthy ? 200 : 503).json(checks);
       });
     }
 
