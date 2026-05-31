@@ -73,47 +73,36 @@ test('building dashboard finance card shows income, expenses, and net', async ({
   await expect(card).toBeVisible({ timeout: 20_000 });
 
   // Read the three figures by their stable label text. NumberFormat outputs
-  // locale-aware money — for el-GR EUR realm it's like "6.000,00 €". We
-  // extract digits to compare numerically rather than textually.
+  // locale-aware money — for el-GR EUR realm it's like "6.000,00 €".
   const numberFromText = (s: string) => {
-    // Normalise both ASCII '-' and Unicode '−' (U+2212) before stripping.
-    // Strip everything but digits, dots, commas, minus.
     const withAsciiMinus = s.replace(/−/g, '-');
     const cleaned = withAsciiMinus.replace(/[^\d.,-]/g, '');
-    // Greek/EU format: thousand=., decimal=, → drop dots, swap comma to dot.
     const normalized = cleaned.replace(/\./g, '').replace(',', '.');
     return Number(normalized);
   };
 
-  // The card renders three labelled rows (Income / Expenses / Net) as
-  // sibling divs with label + amount. The whole card's innerText
-  // contains them in order separated by newlines/whitespace. Walk the
-  // text and pull the amount that immediately follows each label.
-  // Permissive regex: any whitespace between label and the EUR amount,
-  // accept both ASCII '-' and Unicode '−' (U+2212) for negatives.
-  const cardText = await card.innerText();
-  const matchAfter = (label: string): string => {
-    // Each labelled row renders the label and amount in sibling divs, so
-    // innerText puts a newline between them. Match the label as its OWN
-    // line (^ multiline + $ end-of-line) so we skip the "Income vs
-    // expenses" heading (which has more text on the same line).
-    const re = new RegExp(
-      '^\\s*' + label + '\\s*$\\s*([\\-−]?[\\d.,\\u00a0\\s]+\\s*€)',
-      'mu'
+  // Each labelled row is rendered as <div><div>Label</div><div>amount</div></div>.
+  // Locate each label by EXACT text match, then read its next sibling div.
+  // This is robust against innerText line-wrapping differences and
+  // sidebar/heading text that pollutes a card-level innerText() probe.
+  const readAmountFor = async (label: string): Promise<number> => {
+    const labelDiv = page.locator(`div:text-is("${label}")`).first();
+    await expect(labelDiv, `label "${label}" must exist`).toBeVisible({
+      timeout: 10_000
+    });
+    const sibling = labelDiv.locator(
+      'xpath=following-sibling::div[1]'
     );
-    const m = cardText.match(re);
-    return m ? m[1].trim() : '';
+    const text = (await sibling.innerText()).trim();
+    return numberFromText(text);
   };
-  const incomeText = matchAfter('Income');
-  const expensesText = matchAfter('Expenses');
-  const netText = matchAfter('Net');
 
-  const income = numberFromText(incomeText.replace(/^Income/i, ''));
-  const expenses = numberFromText(expensesText.replace(/^Expenses/i, ''));
-  const net = numberFromText(netText.replace(/^Net/i, ''));
+  const income = await readAmountFor('Income');
+  const expenses = await readAmountFor('Expenses');
+  const net = await readAmountFor('Net');
 
-  expect(income, `annual income must be > 0 (got "${incomeText}")`).toBeGreaterThan(0);
-  expect(expenses, `annual expenses must be > 0 (got "${expensesText}")`).toBeGreaterThan(0);
+  expect(income, `annual income must be > 0 (got ${income})`).toBeGreaterThan(0);
+  expect(expenses, `annual expenses must be > 0 (got ${expenses})`).toBeGreaterThan(0);
   // Net should equal income - expenses within a 0.5 tolerance for any
   // rounding the locale formatter applies.
   expect(
