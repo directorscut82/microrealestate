@@ -45,22 +45,24 @@ export default function List({
   // it changes). Without this the list rendered an empty state until
   // the user typed in the search box, even though data was already
   // loaded. Apply the filter with empty defaults so the initial state
-  // matches what handleSearch would produce for an empty input.
+  // matches what handleSearch would produce for an empty input. Note
+  // `data` may be an array (tenants/properties/buildings pages) OR an
+  // object like {rents, overview} for the rents page — the filterFn
+  // is consumer-specific and knows how to read its own shape.
   useEffect(() => {
-    if (!Array.isArray(data) || data.length === 0) {
+    if (data == null) {
       setFilteredData([]);
       return;
     }
     if (typeof filterFn === 'function') {
       try {
-        setFilteredData(
-          filterFn(data, { searchText: '', statuses: [] })
-        );
+        const next = filterFn(data, { searchText: '', statuses: [] });
+        setFilteredData(Array.isArray(next) ? next : []);
       } catch {
-        setFilteredData(data);
+        setFilteredData(Array.isArray(data) ? data : []);
       }
     } else {
-      setFilteredData(data);
+      setFilteredData(Array.isArray(data) ? data : []);
     }
   }, [data, filterFn]);
 
