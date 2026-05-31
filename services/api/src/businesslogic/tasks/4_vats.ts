@@ -47,8 +47,23 @@ export default function taskVATs(
     // with building charges — risky without knowing the storage
     // convention. Documented and deferred to user.
 
-    // NOTE: Do NOT apply VAT to debts — they are carried-forward grandTotal
-    // amounts from previous terms that already include VAT.
+    // Carried-forward debts (no `origin` field) are already gross — they
+    // are previous-term grandTotal amounts that already include VAT.
+    // Settlement-origin debts (extracharge entered on a payment) are
+    // stored NET-of-VAT in rentmanager.ts via `_vatFactor`. They need
+    // a compensating positive VAT line so grandTotal reflects the gross
+    // value the landlord typed. Without this, a 124€ extra cost on a
+    // 24% VAT rent silently lands as 100€ on grandTotal.
+    rent.debts.forEach((debt) => {
+      if (debt.origin !== 'settlement') return;
+      const amount = Number(debt.amount) || 0;
+      rent.vats.push({
+        origin: 'settlement',
+        description: `${debt.description} T.V.A. (${rate * 100}%)`,
+        amount: Math.round(amount * rate * 100) / 100,
+        rate
+      });
+    });
 
     rent.discounts.forEach((discount) => {
       const amount = Number(discount.amount) || 0;

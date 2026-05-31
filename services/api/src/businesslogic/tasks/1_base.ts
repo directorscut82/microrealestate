@@ -23,7 +23,7 @@ export interface Rent {
   charges: { description: string; amount: number }[];
   buildingCharges?: { description: string; amount: number; buildingName?: string; type?: string }[];
   discounts: { origin: string; description: string; amount: number }[];
-  debts: { description: string; amount: number }[];
+  debts: { description: string; amount: number; origin?: string }[];
   vats: { origin: string; description: string; rate: number; amount: number }[];
   payments: { date: string; amount: number; type: string; reference: string; description?: string }[];
   description: string;
@@ -42,7 +42,7 @@ export interface Rent {
 
 export interface Settlements {
   payments?: { date: string; amount: number; type: string; reference: string; description?: string }[];
-  debts?: { description: string; amount: number }[];
+  debts?: { origin?: string; description: string; amount: number }[];
   discounts?: { origin?: string; description: string; amount: number }[];
   vats?: { origin: string; description: string; rate: number; amount: number }[];
   description?: string;
