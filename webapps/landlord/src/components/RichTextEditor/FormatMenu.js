@@ -91,6 +91,7 @@ function HeadingSelect({ editor }) {
 }
 
 const FormatMenu = ({ editor, showPrintButton }) => {
+  const { t } = useTranslation('common');
   if (!editor) {
     return null;
   }
