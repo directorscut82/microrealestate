@@ -372,18 +372,24 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
       // full intended ledger. Crucially this means: if no drafts AND
       // savedPayments matches what's already on disk, the server-side
       // state is identical and the request is a true no-op (idempotent).
+      // Pair every payment with its source field-array index BEFORE
+      // filtering by amount. Filtering after-the-fact and using the
+      // post-filter index would mismatch fields[idx] when blank
+      // drafts precede real ones — the wrong field's allocState
+      // would attach to the submitted payment.
       const drafts = clonedValues.payments
-        .filter(({ amount }) => amount > 0)
-        .map((payment, idx) => {
+        .map((payment, originalIdx) => ({ payment, originalIdx }))
+        .filter(({ payment }) => payment.amount > 0)
+        .map(({ payment, originalIdx }) => {
           payment.date = payment.date
             ? moment(payment.date).format('DD/MM/YYYY')
             : '';
           if (payment.type === 'cash') delete payment.reference;
           // Wave-25: attach allocation if user picked a non-auto mode.
-          // allocState is keyed by useFieldArray field id; the submit
-          // payload sees `values.payments[idx]` without ids, so we read
-          // the matching field id from the closure.
-          const fieldKey = fields[idx]?.id;
+          // allocState is keyed by useFieldArray field id; pull the
+          // id of the ORIGINAL field index (pre-filter) so the
+          // allocation lines up with the right user input.
+          const fieldKey = fields[originalIdx]?.id;
           const aState = (fieldKey && allocState[fieldKey]) || {};
           const amt = Number(payment.amount) || 0;
           if (aState.mode === 'specific' && aState.specificCategory && amt > 0) {
