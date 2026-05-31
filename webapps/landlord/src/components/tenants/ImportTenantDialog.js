@@ -194,7 +194,11 @@ export default function ImportTenantDialog({ open, setOpen }) {
       setParsedResults(unique);
       setState('preview');
     } catch {
+      // Clear files on error so a retry doesn't reuse the same broken
+      // PDF state. Without this the user can re-press Continue and
+      // burn another parse attempt against the same corrupt input.
       toast.error(t('Error parsing PDF'));
+      setFiles([]);
       setState('idle');
     }
   }, [files, t]);
