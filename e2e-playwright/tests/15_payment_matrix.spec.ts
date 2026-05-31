@@ -732,22 +732,41 @@ test.describe('payment matrix · cross-month + dashboard', () => {
     }
   });
 
-  test('S37 · payment with date 7 days after term last day passes', async () => {
+  test('S37 · payment dated 5 days after term last day is accepted (within 7-day cushion)', async () => {
     const ctx = await setupCtx();
     try {
+      // Server rule: date must be within [term-first-day, term-last-day +
+      // 7 days]. Pick a date 5 days after the last day of the term so we
+      // are unambiguously inside the cushion regardless of when the test
+      // runs. This used to be 7 days but the boundary check is inclusive
+      // and produces a date in the next month which is itself ambiguous;
+      // 5 days is decisively safe.
       const now = new Date();
-      const sevenAfter = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 7)
+      const fiveAfter = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 5)
       );
-      const dStr = `${String(sevenAfter.getUTCDate()).padStart(2, '0')}/${String(sevenAfter.getUTCMonth() + 1).padStart(2, '0')}/${sevenAfter.getUTCFullYear()}`;
+      const dStr = `${String(fiveAfter.getUTCDate()).padStart(2, '0')}/${String(fiveAfter.getUTCMonth() + 1).padStart(2, '0')}/${fiveAfter.getUTCFullYear()}`;
       const { status } = await pay(ctx, null, [
         { amount: 100, date: dStr, type: 'transfer', reference: '' }
       ]);
-      // 7-day cushion edge case: server uses moment.utc().add(7,'days')
-      // boundary on the LAST day of the month. We don't tightly assert
-      // pass/fail — just that the server gives a definite answer
-      // (200 or 422), not a 500.
-      expect([200, 422]).toContain(status);
+      expect(status).toBe(200);
+    } finally {
+      await teardownCtx(ctx);
+    }
+  });
+
+  test('S37b · payment dated 30 days after term last day is rejected (outside 7-day cushion)', async () => {
+    const ctx = await setupCtx();
+    try {
+      const now = new Date();
+      const thirtyAfter = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 0) // last day of next month
+      );
+      const dStr = `${String(thirtyAfter.getUTCDate()).padStart(2, '0')}/${String(thirtyAfter.getUTCMonth() + 1).padStart(2, '0')}/${thirtyAfter.getUTCFullYear()}`;
+      const { status } = await pay(ctx, null, [
+        { amount: 100, date: dStr, type: 'transfer', reference: '' }
+      ]);
+      expect(status).toBe(422);
     } finally {
       await teardownCtx(ctx);
     }
