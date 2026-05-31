@@ -763,21 +763,27 @@ export async function ensureSeedLeasedTenantWithPayment(
     organizationid: seed.realmId
   };
 
-  // Current month, term in YYYYMMDDHH form.
+  // Current month, term in YYYYMMDDHH form. Use LOCAL date (not UTC) —
+  // tests navigate the UI via `${getFullYear()}.${getMonth()+1}` which
+  // is local. Around midnight Athens (EEST = UTC+3), getUTCMonth and
+  // getMonth disagree by a month, so a UTC-based seed lands a payment
+  // in the prior month while the test's UI page is on the next month
+  // — the rent table renders empty and every payment-dialog test
+  // times out.
   const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
   const term = `${year}${month}0100`;
 
   // Today's date in DD/MM/YYYY (api expects strict format).
-  const day = String(now.getUTCDate()).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
   const todayDDMMYYYY = `${day}/${month}/${year}`;
 
   // PATCH /rents/payment/{tenantId}/{term} with a single-payment payload.
   // The handler replaces the rent's payments[] array wholesale.
   const payload = {
     _id: seed.tenantId,
-    month: now.getUTCMonth() + 1,
+    month: now.getMonth() + 1,
     year,
     payments: [
       {
