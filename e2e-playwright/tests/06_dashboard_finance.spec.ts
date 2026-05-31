@@ -93,9 +93,13 @@ test('building dashboard finance card shows income, expenses, and net', async ({
   // accept both ASCII '-' and Unicode '−' (U+2212) for negatives.
   const cardText = await card.innerText();
   const matchAfter = (label: string): string => {
+    // Each labelled row renders the label and amount in sibling divs, so
+    // innerText puts a newline between them. Match the label as its OWN
+    // line (^ multiline + $ end-of-line) so we skip the "Income vs
+    // expenses" heading (which has more text on the same line).
     const re = new RegExp(
-      label + '[^0-9\\-−]*([\\-−]?[\\d.,\\u00a0\\s]+\\s*€)',
-      'u'
+      '^\\s*' + label + '\\s*$\\s*([\\-−]?[\\d.,\\u00a0\\s]+\\s*€)',
+      'mu'
     );
     const m = cardText.match(re);
     return m ? m[1].trim() : '';
