@@ -46,7 +46,7 @@ async function openTenantPaymentDialog(
   await page.goto(`${encodeURIComponent(realmName)}/rents/${yearMonth}`);
 
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   const tenantRow = nameSpan.locator(

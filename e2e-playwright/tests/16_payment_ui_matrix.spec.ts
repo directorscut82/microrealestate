@@ -130,7 +130,7 @@ async function openTenantDialog(page: Page) {
   if (!_seed) throw new Error('seed not ready');
   await gotoCurrentMonth(page);
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: _seed.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_seed.tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   const tenantRow = nameSpan.locator(
@@ -301,7 +301,7 @@ test('T04 · cross-month FUTURE date triggers error toast (no PATCH)', async ({
     `${encodeURIComponent(_seed.realmName)}/rents/${ym}`
   );
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: _seed.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_seed.tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   const tenantRow = nameSpan.locator(
@@ -360,7 +360,7 @@ test('T05 · cross-month PAST date triggers error toast (no PATCH)', async ({
     `${encodeURIComponent(_seed.realmName)}/rents/${ym}`
   );
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: _seed.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_seed.tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   const tenantRow = nameSpan.locator(
