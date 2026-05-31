@@ -510,7 +510,11 @@ export async function leaveRealm(req: Req, res: Res) {
     );
   }
 
-  logger.info(`User ${email} left realm ${realm._id} (${realm.name})`);
+  // PII: don't log the user's email. Realm + caller's principal id is
+  // enough context for audit; emails in logs end up shipped to log-
+  // aggregation infrastructure that may not have the same handling
+  // contract as the user database.
+  logger.info(`User left realm ${realm._id} (${realm.name})`);
   res.sendStatus(204);
 }
 
