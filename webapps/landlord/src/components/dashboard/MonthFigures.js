@@ -336,26 +336,28 @@ export default function MonthFigures({ className, dashboardData }) {
         title={t('Rents of {{monthYear}}', {
           monthYear: moment().format('MMMM YYYY')
         })}
+        description={t('Pie chart subheader')}
         renderContent={() => (
           <div>
             {pieData.length > 0 ? (
               <>
-                {/* Wave-26 round-3r: unified two-swatch legend matches
-                    the bar chart. Per-category hue is visible inside
-                    pie slices; the legend conveys the light/dark split
-                    abstractly. */}
+                {/* Greyscale legend swatches match the bar chart exactly
+                    (#bdb8b1 / #4a4d52). Per-category hue is visible
+                    inside the pie slices; the legend conveys the
+                    light=owed / dark=paid split. */}
                 <div className="flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-label text-ink-soft mb-3">
-                  {/* Wave-26 round-3s: greyscale legend swatches that
-                      match the bar chart exactly (#bdb8b1 / #4a4d52).
-                      Per-category hue is visible inside pie slices;
-                      legend conveys the light=owed / dark=paid split. */}
                   <div className="flex items-center gap-1.5">
                     <span
                       className="size-2.5 rounded-pill"
                       style={{ background: '#bdb8b1' }}
                       aria-hidden="true"
                     />
-                    <span>{t('Outstanding')}</span>
+                    <span>
+                      {t('Outstanding')}{' '}
+                      <span className="text-ink-muted">
+                        ({t('this month')})
+                      </span>
+                    </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span
