@@ -322,9 +322,16 @@ test.describe('payment matrix · validation rejections', () => {
   test('S11 · payment date BEFORE term month rejected', async () => {
     const ctx = await setupCtx();
     try {
-      const lastMonth = `${String(new Date().getUTCDate()).padStart(2, '0')}/${String(new Date().getUTCMonth()).padStart(2, '0') || '12'}/${new Date().getUTCMonth() === 0 ? new Date().getUTCFullYear() - 1 : new Date().getUTCFullYear()}`;
+      // Build a date in the previous calendar month, formatted DD/MM/YYYY,
+      // using a real Date so we don't accidentally produce e.g. "32/04/2026".
+      const now = new Date();
+      const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
+      const dStr =
+        String(prev.getUTCDate()).padStart(2, '0') + '/' +
+        String(prev.getUTCMonth() + 1).padStart(2, '0') + '/' +
+        prev.getUTCFullYear();
       const { status, body } = await pay(ctx, null, [
-        { amount: 100, date: lastMonth, type: 'transfer', reference: '' }
+        { amount: 100, date: dStr, type: 'transfer', reference: '' }
       ]);
       expect(status).toBe(422);
       expect(body.message || body.error).toMatch(

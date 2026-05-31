@@ -84,9 +84,21 @@ test('building dashboard finance card shows income, expenses, and net', async ({
     return Number(normalized);
   };
 
-  const incomeText = await card.locator('div', { hasText: /^Income$/i }).first().locator('..').innerText();
-  const expensesText = await card.locator('div', { hasText: /^Expenses$/i }).first().locator('..').innerText();
-  const netText = await card.locator('div', { hasText: /^Net$/i }).first().locator('..').innerText();
+  // The card renders three labelled rows (Income / Expenses / Net). Each
+  // is a flex column whose label is one div and value is the next sibling.
+  // Match by the literal label and read the SIBLING with the EUR amount.
+  // Earlier selector `.locator('..').innerText()` picked up the wrapping
+  // grid and produced "Income\n0,00 €" or stale 0 values when the label
+  // happened to appear elsewhere on the page.
+  const cardText = await card.innerText();
+  const matchAfter = (label: string): string => {
+    const re = new RegExp(label + '\\s*[\\n\\r]+\\s*([−\\-]?[\\d.,\\s]+€)');
+    const m = cardText.match(re);
+    return m ? m[1] : '';
+  };
+  const incomeText = matchAfter('Income');
+  const expensesText = matchAfter('Expenses');
+  const netText = matchAfter('Net');
 
   const income = numberFromText(incomeText.replace(/^Income/i, ''));
   const expenses = numberFromText(expensesText.replace(/^Expenses/i, ''));
