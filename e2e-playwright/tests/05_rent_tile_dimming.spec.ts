@@ -43,17 +43,19 @@ test('RentHistoryDialog distinguishes past, current, and future month tiles', as
   await page.goto(`${encodeURIComponent(realmName)}/rents/${yearMonth}`);
 
   // The rents page renders each tenant as a Card-style div, not a <tr>.
-  // Locate the card by tenant name, then within it pick the LAST icon-only
-  // button — the button list is: payment (cash register), history (clock),
-  // and the history button (clock) is consistently last. We avoid relying on
-  // a data-cy hook because the row component does not expose one.
+  // Locate the card by tenant name, then within it pick the History
+  // icon-button by aria-label (which the wave-3 a11y batch added).
+  // Avoids depending on button-order which changes when columns are
+  // added/removed.
   const tenantCard = page
     .locator('div', { has: page.locator(`text=${tenantName}`) })
     .filter({ has: page.locator('text=Total due') })
     .first();
   await expect(tenantCard).toBeVisible({ timeout: 20_000 });
 
-  const historyBtn = tenantCard.locator('button').last();
+  const historyBtn = tenantCard
+    .locator('button[aria-label="History"], button[aria-label="Ιστορικό"]')
+    .first();
   await historyBtn.scrollIntoViewIfNeeded();
   await historyBtn.click();
 
