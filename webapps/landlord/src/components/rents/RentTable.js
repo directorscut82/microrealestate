@@ -526,10 +526,11 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               size="icon"
               onClick={onEdit(rent)}
               className="hidden sm:inline-flex"
+            aria-label={t('Record payment')}
             >
               <TbCashRegister className="size-6" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onHistory(rent)}>
+            <Button variant="ghost" size="icon" onClick={onHistory(rent)} aria-label={t('History')}>
               <LuHistory className="size-6" />
             </Button>
           </div>

@@ -63,7 +63,10 @@ export default function ResponsiveDialog({
         >
           {renderHeader ? (
             <DialogHeader className="text-lg font-semibold leading-none tracking-tight px-4">
-              <DialogTitle className="hidden">Dialog</DialogTitle>
+              {/* sr-only keeps the dialog accessible-name announced by
+                  screen readers; `hidden` would remove it from the a11y
+                  tree entirely, leaving a nameless dialog. */}
+              <DialogTitle className="sr-only">Dialog</DialogTitle>
               {renderHeader()}
             </DialogHeader>
           ) : null}

@@ -13,7 +13,9 @@ import {
 import { Button } from '../ui/button';
 import { Separator } from '../ui/separator';
 
+import useTranslation from 'next-translate/useTranslation';
 const TableMenu = ({ editor }) => {
+  const { t } = useTranslation('common');
   return editor ? (
     <div className="flex">
       <Button
@@ -27,6 +29,7 @@ const TableMenu = ({ editor }) => {
           })
         }
         disabled={!editor.isEditable}
+      aria-label={t('Insert table')}
       >
         <RiTable2 />
       </Button>
@@ -35,6 +38,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().deleteTable()}
         onClick={() => editor.chain().focus().deleteTable().run()}
+      aria-label={t('Delete table')}
       >
         <RiDeleteBin2Line />
       </Button>
@@ -44,6 +48,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().addColumnBefore()}
         onClick={() => editor.chain().focus().addColumnBefore().run()}
+      aria-label={t('Insert column left')}
       >
         <RiInsertColumnLeft />
       </Button>
@@ -52,6 +57,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().addColumnAfter()}
         onClick={() => editor.chain().focus().addColumnAfter().run()}
+      aria-label={t('Insert column right')}
       >
         <RiInsertColumnRight />
       </Button>
@@ -60,6 +66,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().deleteColumn()}
         onClick={() => editor.chain().focus().deleteColumn().run()}
+      aria-label={t('Delete column')}
       >
         <RiDeleteColumn />
       </Button>
@@ -69,6 +76,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().addRowBefore()}
         onClick={() => editor.chain().focus().addRowBefore().run()}
+      aria-label={t('Insert row above')}
       >
         <RiInsertRowTop />
       </Button>
@@ -77,6 +85,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().addRowAfter()}
         onClick={() => editor.chain().focus().addRowAfter().run()}
+      aria-label={t('Insert row below')}
       >
         <RiInsertRowBottom />
       </Button>
@@ -85,6 +94,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().deleteRow()}
         onClick={() => editor.chain().focus().deleteRow().run()}
+      aria-label={t('Delete row')}
       >
         <RiDeleteRow />
       </Button>
@@ -94,6 +104,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().mergeCells()}
         onClick={() => editor.chain().focus().mergeCells().run()}
+      aria-label={t('Merge cells')}
       >
         <RiMergeCellsHorizontal />
       </Button>
@@ -102,6 +113,7 @@ const TableMenu = ({ editor }) => {
         size="icon"
         disabled={!editor.isEditable || !editor.can().splitCell()}
         onClick={() => editor.chain().focus().splitCell().run()}
+      aria-label={t('Split cell')}
       >
         <RiSplitCellsHorizontal />
       </Button>

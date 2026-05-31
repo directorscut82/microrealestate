@@ -73,6 +73,7 @@ const DocumentItem = ({ document, onEdit, onDelete, disabled }) => {
         size="icon"
         onClick={handleDeleteClick}
         disabled={disabled}
+      aria-label={t('Delete')}
       >
         <LuTrash className="size-6" />
       </Button>

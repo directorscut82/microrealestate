@@ -156,6 +156,7 @@ export default function Members({ organization }) {
                     disabled={isActionDisabled}
                     size="icon"
                     className="w-12"
+                  aria-label={t('Delete')}
                   >
                     <LuTrash className="size-6" />
                   </Button>
@@ -210,6 +211,7 @@ export default function Members({ organization }) {
                   disabled={!!updating || store.user.role !== ADMIN_ROLE}
                   size="icon"
                   className="w-10"
+                aria-label={t('Delete')}
                 >
                   <LuTrash className="size-6" />
                 </Button>
