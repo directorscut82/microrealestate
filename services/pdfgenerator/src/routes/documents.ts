@@ -404,7 +404,7 @@ export default function () {
 
       if (documentFound.type === 'file') {
         if (!(documentFound as any)?.url) {
-          logger.error('document url required');
+          logger.warn('document url required');
           throw new ServiceError('missing fields', 422);
         }
 
@@ -421,7 +421,7 @@ export default function () {
           filePath !== uploadsRoot &&
           !filePath.startsWith(uploadsRoot + path.sep)
         ) {
-          logger.error(`document url ${url} escapes uploads root`);
+          logger.warn(`document url ${url} escapes uploads root`);
           throw new ServiceError('forbidden', 403);
         }
 

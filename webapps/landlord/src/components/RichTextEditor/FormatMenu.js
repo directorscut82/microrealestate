@@ -232,6 +232,7 @@ const FormatMenu = ({ editor, showPrintButton }) => {
         size="icon"
         disabled={!editor.isEditable}
         onClick={() => editor.chain().focus().setHorizontalRule().run()}
+      aria-label={t('Insert separator')}
       >
         <RiSeparator />
       </Button>

@@ -4,12 +4,14 @@ import { Button } from './ui/button';
 import { cn } from '../utils';
 import moment from 'moment';
 
+import useTranslation from 'next-translate/useTranslation';
 export default function PeriodPicker({
   value,
   period = 'month',
   className,
   onChange
 }) {
+  const { t } = useTranslation('common');
   const [month, setMonth] = useState(value || moment());
   const format = useMemo(() => {
     let format = 'MMM YY';
@@ -45,10 +47,10 @@ export default function PeriodPicker({
     >
       <span>{month.format(format)}</span>
       <div className="flex gap-2">
-        <Button variant="secondary" size="icon" onClick={handlePreviousClick}>
+        <Button variant="secondary" size="icon" onClick={handlePreviousClick} aria-label={t('Previous')}>
           <LuChevronLeft className="size-4" />
         </Button>
-        <Button variant="secondary" size="icon" onClick={handleNextClick}>
+        <Button variant="secondary" size="icon" onClick={handleNextClick} aria-label={t('Next')}>
           <LuChevronRight className="size-4" />
         </Button>
       </div>

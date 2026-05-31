@@ -76,7 +76,7 @@ function RentListItem({ rent, tenant, onClick }) {
           )}
         </div>
         <div>
-          <Button variant="ghost" size="icon" onClick={handleClick}>
+          <Button variant="ghost" size="icon" onClick={handleClick} aria-label={t('Edit')}>
             <LuPencil className="size-4" />
           </Button>
         </div>

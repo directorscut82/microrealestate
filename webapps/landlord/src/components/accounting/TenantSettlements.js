@@ -85,7 +85,7 @@ export default function TenantSettlements({
       <CardHeader>
         <CardTitle className="flex justify-between items-center text-lg md:text-xl">
           {t('Payments')}
-          <Button variant="ghost" size="icon" onClick={onCSVClick}>
+          <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
             <GrDocumentCsv className="size-6" />
           </Button>
         </CardTitle>

@@ -14,13 +14,9 @@ function _init(editor) {
 }
 
 function _getStyleValue(element, style) {
-  // const devicePixelRatio = window.devicePixelRatio || 1;
-  const value = Number(
+  return Number(
     window.getComputedStyle(element).getPropertyValue(style).replace('px', '')
   );
-  // * devicePixelRatio;
-
-  return value;
 }
 
 function _removeAllPageBreaks() {
@@ -143,13 +139,7 @@ export async function handlePrint(editor) {
   setTimeout(function () {
     try {
       iframe.focus();
-      // TODO: support of IE and EDGE
-      // try {
-      //   // IE or Edge
-      //   iframe.contentWindow.document.execCommand('print', false, null);
-      // } catch (e) {
       iframe.contentWindow.print();
-      // }
     } catch (error) {
       console.error(error);
     } finally {
