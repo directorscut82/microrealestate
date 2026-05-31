@@ -679,8 +679,20 @@ async function _updateByTerm(
           });
         }
         // Wave-24 B6: enum guard on payment.type.
+        // Wave-26 follow-up: a non-zero payment must have a type. Older
+        // legacy callers tolerated empty strings; modern UI always sets
+        // one. Reject empty string explicitly so we don't persist new
+        // type='' rows that would later fail strict reads.
         if (p?.type !== undefined && p.type !== null) {
-          validateEnum(p.type, PAYMENT_TYPES, `payments[${idx}].type`);
+          if (p.type === '' && Number(p?.amount) > 0) {
+            throw new ServiceError(
+              `payments[${idx}].type is required when amount > 0`,
+              422
+            );
+          }
+          if (p.type !== '') {
+            validateEnum(p.type, PAYMENT_TYPES, `payments[${idx}].type`);
+          }
         }
         // Wave-24 B7: cap length on free-text fields so a paste-bomb doesn't
         // bloat the embedded array document.
@@ -782,10 +794,23 @@ async function _updateByTerm(
             );
           }
         }
+        // Wave-26 follow-up: a non-zero payment must have a date.
+        // Older legacy callers were tolerated for empty/missing; modern
+        // UI always sets one. Reject explicitly when amount > 0.
+        if (
+          (p?.date === undefined || p?.date === null || p?.date === '') &&
+          Number(p?.amount) > 0
+        ) {
+          throw new ServiceError(
+            `payments[${idx}].date is required when amount > 0`,
+            422
+          );
+        }
         // Validate optional payment.date in DD/MM/YYYY when present.
-        // Empty string and missing are tolerated (legacy callers); but a
-        // non-empty malformed value must surface as 422 instead of being
-        // stored verbatim and breaking downstream date parsing.
+        // Empty string and missing are tolerated for amount==0 entries
+        // (which are dropped from persistence below); but a non-empty
+        // malformed value must surface as 422 instead of being stored
+        // verbatim and breaking downstream date parsing.
         if (p?.date !== undefined && p.date !== null && p.date !== '') {
           validateDateString(p.date, `payments[${idx}].date`);
           // Wave-14 F3: reject payment dates more than 7 days in the future.
