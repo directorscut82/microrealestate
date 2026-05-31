@@ -405,9 +405,15 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               <NumberFormat value={rentAmounts.discount} showZero />
             </div>
           )}
+          {Number(rentAmounts.additionalCosts) > 0 && (
+            <div className="ml-8 text-xs text-oxide italic">
+              {t('Additional cost')}:{' '}
+              <NumberFormat value={rentAmounts.additionalCosts} showZero />
+            </div>
+          )}
           <Reminder rent={rent} className="hidden md:inline-flex ml-8" />
         </div>
-        <div className="flex pl-8 md:pl-0 md:grid md:grid-cols-3 lg:grid-cols-5 gap-4 w-full md:w-4/6">
+        <div className="flex pl-8 md:pl-0 md:grid md:grid-cols-4 lg:grid-cols-6 gap-4 w-full md:w-4/6">
           {hasBreakdown ? (
             <TooltipProvider delayDuration={200}>
               <SCNTooltip>
@@ -461,12 +467,11 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
             creditColor={rentAmounts.totalAmount < 0}
             className={rentAmounts.totalAmount !== 0 ? 'font-bold' : ''}
           />
-          {/* Wave-26: Payment column hovers a remaining-owed line so the
-              user can see at a glance "how much is still due." */}
+          {/* Payment cell hovers a remaining-owed breakdown. */}
           <TooltipProvider delayDuration={200}>
             <SCNTooltip>
               <TooltipTrigger asChild>
-                <div className="grow cursor-default">
+                <div className="cursor-default">
                   <RentAmount
                     label={t('Payment')}
                     amount={rent.payment}
@@ -482,6 +487,39 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
               </TooltipContent>
             </SCNTooltip>
           </TooltipProvider>
+          {/* Remaining = max(0, totalAmount - payment). When the tenant
+              has overpaid we still show 0 here AND a small credit badge
+              under the value so the surplus is visible without flipping
+              the column to negative numbers. */}
+          {(() => {
+            const _gt = Number(rentAmounts.totalAmount) || 0;
+            const _pd = Number(rent.payment) || 0;
+            const _remaining = Math.max(0, Math.round((_gt - _pd) * 100) / 100);
+            const _surplus =
+              _pd > _gt ? Math.round((_pd - _gt) * 100) / 100 : 0;
+            return (
+              <div className="flex flex-col text-right min-w-0 leading-snug">
+                <div className="text-label text-ink-muted truncate">
+                  {t('Remaining')}
+                </div>
+                <NumberFormat
+                  value={_remaining}
+                  align="right"
+                  showZero
+                  debitColor={_remaining > 0}
+                  className={cn(
+                    'text-label text-ink',
+                    _remaining > 0 ? 'font-bold' : ''
+                  )}
+                />
+                {_surplus > 0 ? (
+                  <div className="text-[10px] text-olive whitespace-nowrap">
+                    {t('+{{surplus}}€ credit', { surplus: _surplus.toFixed(2) })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
           <div className="text-right space-x-2 grow whitespace-nowrap">
             <Button
               variant="ghost"
