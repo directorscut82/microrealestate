@@ -223,6 +223,19 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       );
     }
 
+    // Reject zero or negative totalAmount. A bill that costs nothing is
+    // never a real bill — it's almost always OCR / parser failure or a
+    // stale draft. Persisting zero/negative pollutes downstream
+    // dashboards and reconciliation. Allow a small tolerance for
+    // floating-point dust.
+    const _ta = Number(totalAmount);
+    if (!Number.isFinite(_ta) || _ta <= 0.005) {
+      throw new ServiceError(
+        `Bill totalAmount must be a positive number (got ${totalAmount})`,
+        422
+      );
+    }
+
     // If replacing, remove existing bill for same term+expense
     if (replaceExisting) {
       await Collections.Bill.deleteMany({
