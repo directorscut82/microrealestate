@@ -11,6 +11,13 @@ function SelectRentItem({ rent, onClick }) {
   const { t } = useTranslation('common');
   const rentAmounts = rent ? getRentAmounts(rent) : null;
 
+  // Remaining = max(0, totalAmount - payment). Surplus (overpaid) is
+  // shown as a small badge, mirroring the rent-table column.
+  const _gt = Number(rentAmounts?.totalAmount) || 0;
+  const _pd = Number(rentAmounts?.payment) || 0;
+  const _remaining = Math.max(0, Math.round((_gt - _pd) * 100) / 100);
+  const _surplus = _pd > _gt ? Math.round((_pd - _gt) * 100) / 100 : 0;
+
   return (
     <div className="w-full">
       {rent?.occupant ? (
@@ -19,19 +26,33 @@ function SelectRentItem({ rent, onClick }) {
           onClick={onClick}
         >
           <div>{rent.occupant.name}</div>
-          <div className="flex md:grid md:grid-cols-2 items-center">
+          <div className="flex md:grid md:grid-cols-3 items-center gap-2">
             <RentAmount
               label={t('Rent due')}
               amount={rentAmounts.totalAmount}
               withColor={false}
               debitColor={rentAmounts.totalAmount > 0}
             />
-            <div className="grow">
-              <RentAmount
-                label={t('Payment')}
-                amount={rentAmounts.payment !== 0 ? rentAmounts.payment : null}
-                withColor={true}
-              />
+            <RentAmount
+              label={t('Payment')}
+              amount={rentAmounts.payment !== 0 ? rentAmounts.payment : null}
+              withColor={true}
+            />
+            <div className="flex flex-col text-right min-w-0 leading-snug">
+              <div className="text-label text-ink-muted truncate">
+                {t('Remaining')}
+              </div>
+              <div className="text-label text-ink">
+                {/* Inline number to keep the surplus badge aligned. */}
+                <span className={_remaining > 0 ? 'font-bold text-oxide' : ''}>
+                  {_remaining.toFixed(2)}
+                </span>
+              </div>
+              {_surplus > 0 ? (
+                <div className="text-[10px] text-olive whitespace-nowrap">
+                  {t('+{{surplus}}€ credit', { surplus: _surplus.toFixed(2) })}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
