@@ -218,7 +218,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
         let leaseId = selectedLeaseIds[idx] || '';
         if (!leaseId) {
           const newLease = await createLease({
-            name: `Μίσθωση ${months} μηνών`,
+            name: t('Lease {{count}} months', { count: months }),
             numberOfTerms: months,
             timeRange: 'months',
             active: true
