@@ -77,14 +77,16 @@ function Tenant() {
   });
 
   // Tenant create/update can change property assignments, rent base, lease,
-  // begin/end dates and discounts — all of which feed rent computation and
-  // dashboard counters. PROPERTIES is invalidated because property occupancy
-  // status flips when a tenant is added/removed/reassigned.
+  // begin/end dates and discounts — all of which feed rent computation,
+  // dashboard counters and accounting (settlements, incoming/outgoing).
+  // PROPERTIES is invalidated because property occupancy status flips when
+  // a tenant is added/removed/reassigned.
   const _invalidateAllTenantDependents = () => {
     queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
   };
 
   const saveMutation = useMutation({

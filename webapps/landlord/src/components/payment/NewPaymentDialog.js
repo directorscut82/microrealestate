@@ -32,6 +32,13 @@ export default function NewPaymentDialog({
   const [rents, setRents] = useState();
   const [saving, setSaving] = useState(false);
   const formRef = useRef();
+  // Re-entrancy guard. Reading `saving` from useState in handleSave's
+  // closure is racy: a fast double-click runs the handler twice with
+  // `saving=false` captured both times, before React flushes setSaving.
+  // A useRef value is updated synchronously, so the second click sees
+  // the in-flight flag and bails. The visible disabled-state on the
+  // button still uses the useState (so it actually re-renders disabled).
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     const loadRents = async () => {
@@ -64,7 +71,13 @@ export default function NewPaymentDialog({
   }, [setOpen]);
 
   const handleSave = useCallback(() => {
-    if (saving) return;
+    // Synchronous re-entry guard via ref — the useState `saving` flag
+    // can only catch repeated clicks AFTER React renders the disabled
+    // button. A fast double-click before that render runs handleSave
+    // twice, fires two PATCH requests, and the second loses to the
+    // optimistic-lock 409 with the toast appearing on a closed dialog.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSaving(true);
     formRef.current.submit();
     // Wave-26 round-3c: if zod validation fails inside PaymentTabs,
@@ -74,16 +87,19 @@ export default function NewPaymentDialog({
     // next tick, validation rejected the submit and we should reset.
     setTimeout(() => {
       if (formRef.current && !formRef.current.isSubmitting?.()) {
+        submittingRef.current = false;
         setSaving(false);
       }
     }, 80);
-  }, [saving]);
+  }, []);
 
   const handleError = useCallback(() => {
+    submittingRef.current = false;
     setSaving(false);
   }, []);
 
   const handleSubmit = useCallback(() => {
+    submittingRef.current = false;
     setSaving(false);
     onClose?.(selectedRent);
     handleClose();
