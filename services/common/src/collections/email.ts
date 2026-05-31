@@ -9,9 +9,14 @@ const EmailSchema = new mongoose.Schema<CollectionTypes.Email>({
   params: {},
   sentTo: String,
   sentDate: Date,
+  // 'queued' on successful send (provider accepted), 'failed' when the
+  // emailer service threw (provider rejected, missing config, network).
   status: String,
-  emailId: String
-});
+  emailId: String,
+  // Optional message captured when the send fails; bounded to 1k chars
+  // by the writer to avoid unbounded log payloads in mongo.
+  error: String
+} as Record<string, unknown>);
 
 EmailSchema.index({ recordId: 1 });
 EmailSchema.index({ templateName: 1, recordId: 1 });

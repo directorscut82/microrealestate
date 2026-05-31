@@ -61,7 +61,14 @@
 <% }); %>
 
 <%
-	var emptyRowCount = 9 - rent.preTaxAmounts.length - rent.charges.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length;
+	// Pad the table to a consistent 9-row layout. If the invoice has
+	// MORE than 9 line items, render zero filler rows (Math.max guard);
+	// without this, emptyRowCount went negative and the for-loop's
+	// 0<negative condition silently produced zero iterations the same
+	// way, but a negative count was hidden math that could mask a real
+	// "items overflowed the layout" condition. Math.max makes the
+	// intent explicit.
+	var emptyRowCount = Math.max(0, 9 - rent.preTaxAmounts.length - rent.charges.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length);
 	for (var idx=0; idx<emptyRowCount; idx++) {
 %>
 	<tr class="item-row">
