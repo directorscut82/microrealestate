@@ -138,14 +138,36 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
       const r = await apiFetcher().post('/rents/express', { items });
       return r.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+    onSuccess: async (data) => {
+      // Await the rents refetch before closing the drawer. Without this,
+      // the drawer closes while the page-level useQuery is still mid-
+      // refetch and the rent rows render stale Payment cells for several
+      // hundred ms — users assume the click failed, re-click, double-pay.
+      // ExpressPaymentDialog and PaymentTabs use the same pattern.
+      await queryClient.refetchQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
-      toast.success(
-        t('Recorded {{count}} payments', { count: totals.count })
-      );
+      // Server returns { results: [{ skipped, tenantId, term, amount }] }.
+      // Toast the count of ACTUAL writes, not selections — a tenant whose
+      // owed amount became 0 between the dialog render and the click is
+      // skipped server-side. The old code reported totals.count (the
+      // selection count) and silently misled the user when skips happened.
+      const results = Array.isArray(data?.results) ? data.results : [];
+      const recorded = results.filter((r) => !r.skipped).length;
+      const skipped = results.filter((r) => r.skipped).length;
+      if (skipped > 0) {
+        toast.success(
+          t(
+            'Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)',
+            { recorded, total: totals.count, skipped }
+          )
+        );
+      } else {
+        toast.success(
+          t('Recorded {{count}} payments', { count: recorded || totals.count })
+        );
+      }
       setSelection({});
       setOpen(false);
     },
