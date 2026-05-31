@@ -115,7 +115,7 @@ async function gotoDashboard(page: Page) {
 async function openTenantDialog(page: Page, tenantName: string) {
   await gotoCurrentMonth(page);
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   const tenantRow = nameSpan.locator(
@@ -527,7 +527,7 @@ test('C14 · navigate to prior month and open dialog (no UI corruption)', async 
     `${encodeURIComponent(_rich!.realmName)}/rents/${ym}`
   );
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: _rich!.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   // Dialog opens without crash.
@@ -556,7 +556,7 @@ test('C15 · future month banner shows "Recording an advance payment"', async ({
     `${encodeURIComponent(_rich!.realmName)}/rents/${ym}`
   );
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: _rich!.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   const tenantRow = nameSpan.locator(
@@ -661,11 +661,11 @@ test('C19 · save 250, reload page → cell still 250', async ({ page }) => {
     .toBeCloseTo(250, 1);
   await page.reload();
   await expect(
-    page.locator('span.text-lg.font-medium', { hasText: _rich!.tenantName }).first()
+    page.locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`).first()
   ).toBeVisible({ timeout: 20_000 });
   // Re-resolve the row after reload.
   const newRow = page
-    .locator('span.text-lg.font-medium', { hasText: _rich!.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`)
     .first()
     .locator('xpath=ancestor::div[contains(@class, "flex") and .//*[contains(@class, "text-right")]][1]');
   await expect.poll(() => readPaymentCell(newRow), { timeout: 10_000 })
@@ -692,7 +692,7 @@ test('C20 · sign out + sign in again → saved payment still visible', async ({
   await signIn(page);
   await gotoCurrentMonth(page);
   const newRow = page
-    .locator('span.text-lg.font-medium', { hasText: _rich!.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`)
     .first()
     .locator('xpath=ancestor::div[contains(@class, "flex") and .//*[contains(@class, "text-right")]][1]');
   await expect.poll(() => readPaymentCell(newRow), { timeout: 10_000 })
@@ -708,10 +708,10 @@ test('C21 · navigate to /rents and confirm both tenants render', async ({
   await signIn(page);
   await gotoCurrentMonth(page);
   await expect(
-    page.locator('span.text-lg.font-medium', { hasText: _rich!.tenantName }).first()
+    page.locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`).first()
   ).toBeVisible({ timeout: 20_000 });
   await expect(
-    page.locator('span.text-lg.font-medium', { hasText: _twoTenants!.tenantBName }).first()
+    page.locator(`span.text-lg.font-medium:text-is("${_twoTenants!.tenantBName}")`).first()
   ).toBeVisible({ timeout: 5_000 });
 });
 
@@ -825,7 +825,7 @@ test('C24 · Payment cell hover surfaces "Owed remaining" tooltip', async ({
   await signIn(page);
   await gotoCurrentMonth(page);
   const row = page
-    .locator('span.text-lg.font-medium', { hasText: _rich!.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`)
     .first()
     .locator(
       'xpath=ancestor::div[contains(@class, "flex") and .//*[contains(@class, "text-right")]][1]'
@@ -865,7 +865,7 @@ test('C26 · clicking the history icon opens the rent history dialog', async ({
   await signIn(page);
   await gotoCurrentMonth(page);
   const row = page
-    .locator('span.text-lg.font-medium', { hasText: _rich!.tenantName })
+    .locator(`span.text-lg.font-medium:text-is("${_rich!.tenantName}")`)
     .first()
     .locator(
       'xpath=ancestor::div[contains(@class, "flex") and .//*[contains(@class, "text-right")]][1]'
