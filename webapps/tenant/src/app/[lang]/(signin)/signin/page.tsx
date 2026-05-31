@@ -56,8 +56,27 @@ export default function SignIn() {
           return router.replace(`/otp/${encodeURIComponent(values.email)}`);
         }
       } catch (error) {
+        // Surface the server-supplied message instead of always showing
+        // the generic 'Something went wrong'. The backend returns 422
+        // with a message like 'unsupported email' — without this the
+        // user has no idea why their signin failed.
+        // eslint-disable-next-line no-console
         console.error(error);
+        const apiMsg =
+          (error as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message ||
+          (error as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.error ||
+          (error as { message?: string })?.message;
+        toast({
+          variant: 'destructive',
+          title: t('Something went wrong'),
+          description: apiMsg
+            ? String(apiMsg)
+            : t('There was an error while signing in.')
+        });
+        setLoading(false);
+        return;
       }
+      // Non-2xx without a thrown error (rare with axios; defensive)
       toast({
         variant: 'destructive',
         title: t('Something went wrong'),

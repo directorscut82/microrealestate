@@ -135,12 +135,10 @@ export function toRentData(
 
   // Storage convention: promo and extracharge are stored net-of-VAT in
   // rentmanager.ts (divided by (1+vatRate)). Display convention here:
-  // multiply back to gross for the UI. Net effect for promo is correct
-  // because task 4 adds a settlement-VAT line (-net*vat) so grandTotal
-  // moves by -original_promo. For extracharge there's no symmetric VAT
-  // line (debts skip VAT in task 4) so the display value matches what
-  // the user entered but the actual grandTotal increment is
-  // extra/(1+vat). Known imbalance — see rentmanager.ts comment.
+  // multiply back to gross for the UI. Both promo and extracharge are
+  // symmetric: 4_vats.ts adds a compensating settlement-VAT line for
+  // each (negative for promo, positive for settlement-origin debts), so
+  // grandTotal moves by exactly the gross amount the landlord typed.
   // We safely read the contract VAT rate via filter+[0] to avoid
   // crashing when only settlement VAT lines exist (rent.vats[0] may
   // not be the contract one).
