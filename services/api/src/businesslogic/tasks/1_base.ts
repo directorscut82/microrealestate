@@ -478,11 +478,19 @@ export default function taskBase(
             .filter((charge) => charge.term === rent.term)
             .forEach((charge) => {
               if (charge.expenseId) monthlyChargeExpenseIds.add(String(charge.expenseId));
+              // Repair-distributed charges have repairId set (see
+              // buildingmanager._distributeRepairCharge). Tag them as
+              // type='repair' so they reach the dashboard pie's repair
+              // color and the auto-spread 'repairs' allocation bucket.
+              // Without this, the whole `repairs` chain
+              // (rentmanager._computeOwedByCategory.repairs and
+              // dashboardmanager pie's repair color) is dead code.
+              const _isRepair = !!(charge as { repairId?: unknown }).repairId;
               rent.buildingCharges!.push({
                 description: charge.description || 'Building charges',
                 amount: charge.amount,
                 buildingName: building.name,
-                type: 'monthly_charge'
+                type: _isRepair ? 'repair' : 'monthly_charge'
               });
             });
         }

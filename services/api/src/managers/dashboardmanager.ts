@@ -1,6 +1,7 @@
 import { Collections, logger } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import moment from 'moment';
+import { _isSettledByCarryForward } from './frontdata.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -285,11 +286,9 @@ export async function all(req: Req, res: Res) {
               }
             );
             if (currentRent) {
-              // Wave-26 round-3t: emit remaining-unpaid as a POSITIVE
-              // amount so the dashboard tile shows the same number a
-              // landlord reads on /rents as 'συνολική οφειλή - ποσό
-              // καταβληθέν'. Prior code emitted `payment - grandTotal`
-              // which is negative for owed and confused the user.
+              // Emit remaining-unpaid as a POSITIVE amount so the
+              // dashboard tile shows the same number a landlord reads
+              // on /rents as 'συνολική οφειλή - ποσό καταβληθέν'.
               const remaining = _round(
                 Math.max(
                   0,
@@ -297,7 +296,18 @@ export async function all(req: Req, res: Res) {
                     (currentRent.total?.payment || 0)
                 )
               );
-              if (remaining > 0.005) {
+              // Skip tenants whose current month is settled by a
+              // future-month overpayment. /rents shows them as 'paid'
+              // via frontdata.toRentData status logic; without the same
+              // check here, the dashboard's "Top 5 unpaid" tile would
+              // list a tenant /rents already says is settled —
+              // confusing the landlord. Use the same helper /rents
+              // uses, against the tenant's full ledger.
+              const settledByCarry = _isSettledByCarryForward(
+                Number(currentRent.term),
+                tenant.rents || []
+              );
+              if (remaining > 0.005 && !settledByCarry) {
                 acc.push({
                   tenant: { _id: tenant._id, name: _tenantName(tenant) },
                   balance: remaining
