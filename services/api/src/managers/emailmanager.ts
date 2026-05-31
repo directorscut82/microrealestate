@@ -96,10 +96,15 @@ async function _sendSms(
             }
           }
         );
-        logger.info(`SMS sent to ${tenant.name} at ${phone}`);
+        // PII: don't log tenant.name or phone in plaintext. Tenant id is
+        // enough to correlate the audit trail without leaking PII into
+        // log-aggregation systems.
+        logger.info(`SMS sent (tenant ${tenant._id})`);
         return { phone, status: response.data };
       } catch (error: any) {
-        logger.error(`SMS to ${tenant.name} at ${phone} failed: ${error.message}`);
+        logger.error(
+          `SMS failed (tenant ${tenant._id}): ${error.message}`
+        );
         return { phone, error: error.message };
       }
     })

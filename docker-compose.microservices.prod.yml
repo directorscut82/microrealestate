@@ -24,6 +24,16 @@ services:
   #   depends_on:
   #     - kibana
   ###############################################################################
+  # Redis & Mongo: data services that must auto-recover from crashes
+  # in production. Without `restart: unless-stopped`, a transient OOM or
+  # disk-full event leaves the entire stack in a failed state because
+  # every app container depends on these two.
+  ###############################################################################
+  redis:
+    restart: unless-stopped
+  mongo:
+    restart: unless-stopped
+  ###############################################################################
   # Gateway
   ###############################################################################
   gateway:
