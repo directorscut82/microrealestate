@@ -826,39 +826,10 @@ test('T21 · trash icon on draft row removes the row', async ({ page }) => {
   ).toHaveCount(0, { timeout: 3_000 });
 });
 
-// =============================================================
-// T22 amount but no date (clear date) → zod blocks submit
-// =============================================================
-test('T22 · amount without date → error toast (no PATCH)', async ({ page }) => {
-  await signIn(page);
-  await openTenantDialog(page);
-  await page.locator('[data-cy="addNewPayment"]').click();
-  await page.locator('input[name="payments.0.amount"]').fill('100');
-  // Clear the date by clearing the underlying value via the form
-  // setValue path: open picker and click the today again to deselect
-  // is tricky; instead we directly fill the date input (DatePickerInput
-  // might be readonly). Use evaluate to clear the form value directly:
-  await page.evaluate(() => {
-    const i = document.querySelector(
-      'input[name="payments.0.date"]'
-    ) as HTMLInputElement | null;
-    if (i) {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        'value'
-      )?.set;
-      setter?.call(i, '');
-      i.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  });
-  // The date is stored as form state, not the visible DatePickerInput.
-  // Easier: call react-hook-form's setValue via a custom event hack is
-  // brittle. Plan B: skip if we can't clear it; the spec is not blocking.
-  // Since reliably clearing the date in this UI is non-trivial, we'll
-  // mark this scenario as best-effort: just assert no PATCH if zod
-  // blocked. If the date is still set, this scenario is a no-op pass.
-  await page.waitForTimeout(300);
-});
+// T22 deleted — the test admitted it could not reliably clear the date
+// field and asserted nothing. A real "amount without date" test needs
+// either a date-deselect affordance in the UI (which doesn't exist) or
+// to skip the dialog and call zod directly as a unit test.
 
 // =============================================================
 // T23 negative amount → input rejects + zod refuses
@@ -1270,20 +1241,28 @@ test('T39 · allocation=specific=rent surfaces allocation breakdown on tile', as
 // =============================================================
 // T40 allocation=auto persists with NO allocation on the wire
 // =============================================================
-test('T40 · auto-spread default sends NO allocation field', async ({
+test('T40 · auto-spread default sends NO allocation field and PATCH succeeds', async ({
   page
 }) => {
   await signIn(page);
   await openTenantDialog(page);
   await page.locator('[data-cy="addNewPayment"]').click();
   await page.locator('input[name="payments.0.amount"]').fill('100');
-  // Default mode is 'auto' (per AllocationBlock); intercept the PATCH
-  // request body and assert no `allocation` key on the payment.
+  // Default mode is 'auto' (per AllocationBlock); capture both the
+  // request body (no allocation key) AND the response (200 with the
+  // expected payment total). Without the response assertion the test
+  // would pass even if the server 422'd and the dialog stayed open.
   const reqPromise = page.waitForRequest(
     (r) =>
       r.url().includes('/api/v2/rents/payment/') &&
       r.method() === 'PATCH',
     { timeout: 10_000 }
+  );
+  const respPromise = page.waitForResponse(
+    (r) =>
+      r.url().includes('/api/v2/rents/payment/') &&
+      r.request().method() === 'PATCH',
+    { timeout: 15_000 }
   );
   await page
     .locator('[role=dialog] button')
@@ -1293,10 +1272,15 @@ test('T40 · auto-spread default sends NO allocation field', async ({
   const req = await reqPromise;
   const body = req.postDataJSON?.() || JSON.parse(req.postData() || '{}');
   const lastPayment = body?.payments?.[body.payments.length - 1];
-  // The auto-mode payment should NOT carry an allocation key.
   expect(lastPayment).toBeTruthy();
   expect(
     Array.isArray(lastPayment.allocation) && lastPayment.allocation.length > 0,
     'auto mode must NOT send allocation array'
   ).toBe(false);
+  // Confirm the round-trip succeeded.
+  const resp = await respPromise;
+  expect(resp.status()).toBe(200);
+  const respBody = await resp.json();
+  expect(Number(respBody.payment)).toBeCloseTo(100, 1);
+  await expect(await getDrawer(page)).not.toBeVisible({ timeout: 10_000 });
 });
