@@ -41,6 +41,29 @@ export default function List({
     [filteredData]
   );
 
+  // Initialise filteredData when `data` lands (and re-initialise when
+  // it changes). Without this the list rendered an empty state until
+  // the user typed in the search box, even though data was already
+  // loaded. Apply the filter with empty defaults so the initial state
+  // matches what handleSearch would produce for an empty input.
+  useEffect(() => {
+    if (!Array.isArray(data) || data.length === 0) {
+      setFilteredData([]);
+      return;
+    }
+    if (typeof filterFn === 'function') {
+      try {
+        setFilteredData(
+          filterFn(data, { searchText: '', statuses: [] })
+        );
+      } catch {
+        setFilteredData(data);
+      }
+    } else {
+      setFilteredData(data);
+    }
+  }, [data, filterFn]);
+
   // Reset page index when chunks shrink below current page
   useEffect(() => {
     if (pageIndex > chunks.length) {
