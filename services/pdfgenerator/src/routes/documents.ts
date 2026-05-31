@@ -367,7 +367,10 @@ export default function () {
   documentsApi.get(
     '/',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      const organizationId = (req as any).realm?._id;
+      if (!organizationId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
 
       const documentsFound = await Collections.Document.find({
         realmId: organizationId
@@ -680,7 +683,10 @@ export default function () {
   documentsApi.patch(
     '/',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      const organizationId = (req as any).realm?._id;
+      if (!organizationId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
       if (!req.body._id) {
         logger.error('document id is missing');
         throw new ServiceError('missing fields', 422);
@@ -754,7 +760,10 @@ export default function () {
   documentsApi.delete(
     '/:ids',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      const organizationId = (req as any).realm?._id;
+      if (!organizationId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
       const documentIds = req.params.ids.split(',');
 
       // Wave-24 B12: cap bulk delete to prevent megaqueries.

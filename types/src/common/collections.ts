@@ -280,9 +280,46 @@ export namespace CollectionTypes {
           type: PaymentMethod;
           reference: string;
           amount: number;
+          // Per-payment fields stored alongside the payment by Wave-26
+          // round-3j (note/discount/extracharge attached to a specific
+          // payment instead of the rent). Optional.
+          description?: string;
+          promo?: number;
+          notepromo?: string;
+          extracharge?: number;
+          noteextracharge?: string;
+          // Round-3r migration: explicit allocation per category.
+          allocation?: { category: string; amount: number }[];
         }[]
       | [];
     description: string;
+    // Flattened read-side fields produced by frontdata.toRentData on the
+    // wire (NOT stored in mongo). The type historically only declared
+    // the persisted shape, leaving every API response consumer to read
+    // these via `any`. Declare them here so editors / typecheckers know
+    // they exist on the GET responses.
+    balance?: number;
+    newBalance?: number;
+    payment?: number;
+    discount?: number;
+    totalAmount?: number;
+    totalToPay?: number;
+    totalWithoutBalanceAmount?: number;
+    totalWithoutVatAmount?: number;
+    vatAmount?: number;
+    promo?: number;
+    notepromo?: string;
+    extracharge?: number;
+    noteextracharge?: string;
+    hasMultiplePayments?: boolean;
+    countMonthNotPaid?: number;
+    paymentStatus?: { month: number; status: string }[];
+    status?: 'paid' | 'partiallypaid' | 'notpaid';
+    priorRents?: { term: number; newBalance: number }[];
+    active?: 'active' | undefined;
+    vatRatio?: number;
+    uid?: string;
+    emailStatus?: Record<string, unknown>;
   };
 
   export type Tenant = {
@@ -352,6 +389,22 @@ export namespace CollectionTypes {
 
     stepperMode: boolean;
     archived?: boolean;
+    // Read-side enrichment fields produced by frontdata.toOccupantData on
+    // the wire (NOT stored in mongo). Document them so the API
+    // response shape is type-checked end-to-end.
+    contactEmails?: string[];
+    hasContactEmails?: boolean;
+    status?: 'inprogress' | 'stopped';
+    terminated?: boolean;
+    lease?: Lease;
+    office?: { surface: number; price: number };
+    parking?: { price: number };
+    rental?: number;
+    expenses?: number;
+    total?: number;
+    preTaxTotal?: number;
+    vat?: number;
+    hasPayments?: boolean;
   };
 
   export type UnitOwner = {
