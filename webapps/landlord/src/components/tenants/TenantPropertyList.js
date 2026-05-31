@@ -29,6 +29,7 @@ function Address({ address }) {
 }
 
 export default function TenantPropertyList({ tenant, className }) {
+  const { t } = useTranslation('common');
   if (!tenant.properties?.length) {
     return null;
   }
