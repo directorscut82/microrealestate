@@ -402,6 +402,7 @@ export default function UnitList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleEditUnit(unit)}
+                    aria-label={t('Edit')}
                     >
                       <LuPencil className="size-4" />
                     </Button>
@@ -409,6 +410,7 @@ export default function UnitList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleDeleteUnit(unit)}
+                    aria-label={t('Delete')}
                     >
                       <LuTrash className="size-4" />
                     </Button>

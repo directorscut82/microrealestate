@@ -833,6 +833,7 @@ export default function ExpenseList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleEditExpense(expense)}
+                    aria-label={t('Edit')}
                     >
                       <LuPencil className="size-4" />
                     </Button>
@@ -840,6 +841,7 @@ export default function ExpenseList({ building }) {
                       variant="ghost"
                       size="icon"
                       onClick={() => handleDeleteExpense(expense)}
+                    aria-label={t('Delete')}
                     >
                       <LuTrash className="size-4" />
                     </Button>

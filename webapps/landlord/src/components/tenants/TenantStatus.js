@@ -31,7 +31,7 @@ export default function TenantStatus({ tenant, className }) {
   return checks.length > 0 ? (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className={className}>
+        <Button variant="ghost" size="icon" className={className} aria-label={t('Tenant status')}>
           <LuAlertTriangle className="size-6 text-warning" />
         </Button>
       </PopoverTrigger>

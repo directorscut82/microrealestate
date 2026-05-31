@@ -41,7 +41,7 @@ export default function (): Router {
       }
 
       if (!EMAIL_RE.test(email)) {
-        logger.error('invalid email format');
+        logger.warn('invalid email format');
         throw new ServiceError('unsupported email', 422);
       }
 

@@ -130,6 +130,7 @@ export default function UploadFileItem({
             size="icon"
             onClick={handleClickUpload}
             disabled={disabled}
+          aria-label={t('Upload')}
           >
             <LuUploadCloud className="size-6" />
           </Button>
@@ -140,6 +141,7 @@ export default function UploadFileItem({
             size="icon"
             onClick={handleClickDelete}
             disabled={disabled}
+          aria-label={t('Delete')}
           >
             <LuTrash className="size-6" />
           </Button>
