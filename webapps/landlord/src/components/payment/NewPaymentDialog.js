@@ -76,21 +76,16 @@ export default function NewPaymentDialog({
     // button. A fast double-click before that render runs handleSave
     // twice, fires two PATCH requests, and the second loses to the
     // optimistic-lock 409 with the toast appearing on a closed dialog.
+    // The ref is reset by handleSubmit (success) or handleError
+    // (PaymentTabs onError fires for both zod-validation failures and
+    // PATCH catch). Both paths are guaranteed to fire — no timeout
+    // fallback needed (the prior 80ms reset was racy: a fast PATCH
+    // would see isSubmitting=false and unlock the ref, allowing a
+    // queued duplicate click through).
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSaving(true);
     formRef.current.submit();
-    // Wave-26 round-3c: if zod validation fails inside PaymentTabs,
-    // _handleSubmit never runs and neither handleSubmit (success) nor
-    // handleError (catch) fires here — the button stays in "Saving"
-    // forever. Watch the form's isSubmitting flag; if false on the
-    // next tick, validation rejected the submit and we should reset.
-    setTimeout(() => {
-      if (formRef.current && !formRef.current.isSubmitting?.()) {
-        submittingRef.current = false;
-        setSaving(false);
-      }
-    }, 80);
   }, []);
 
   const handleError = useCallback(() => {
