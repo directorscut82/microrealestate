@@ -587,6 +587,34 @@ export default function () {
         throw new ServiceError('missing fields', 422);
       }
 
+      // Cross-realm guard: tenantId / leaseId came from the request body
+      // and must be confirmed to belong to the authenticated realm. Without
+      // this an attacker could mint a document referencing a tenant from
+      // a different realm — the create succeeds because realmId on the
+      // doc itself is set from req.realm but the relationship rows would
+      // dangle. Confirm both ids resolve under the current realm.
+      const realmId = (req as any).realm._id;
+      const _tenantExists = await Collections.Tenant.exists({
+        _id: dataSet.tenantId,
+        realmId
+      });
+      if (!_tenantExists) {
+        throw new ServiceError(
+          'tenant not found in this organization',
+          404
+        );
+      }
+      const _leaseExists = await Collections.Lease.exists({
+        _id: dataSet.leaseId,
+        realmId
+      });
+      if (!_leaseExists) {
+        throw new ServiceError(
+          'lease not found in this organization',
+          404
+        );
+      }
+
       let template: any;
       if (dataSet.templateId) {
         template = await _getTempate((req as any).realm, dataSet.templateId);
@@ -683,16 +711,39 @@ export default function () {
         }
       }
 
+      // Optimistic lock on Mongoose's __v. Without this, two tabs editing
+      // the same template HTML simultaneously would both succeed and the
+      // second write silently overwrites the first. Pass __v in the
+      // filter; on mismatch findOneAndUpdate returns null and we raise a
+      // 409 so the client can refresh and retry. The client also bumps
+      // __v on every save so concurrent saves don't both think they hold
+      // the latest version.
+      const incomingV = Number((incoming as any).__v);
+      const filter: Record<string, unknown> = {
+        _id: incoming._id,
+        realmId: organizationId
+      };
+      if (Number.isInteger(incomingV)) filter.__v = incomingV;
+
       const updatedDocument = await Collections.Document.findOneAndUpdate(
-        {
-          _id: incoming._id,
-          realmId: organizationId
-        },
-        { $set: update },
+        filter,
+        { $set: update, $inc: { __v: 1 } },
         { new: true }
       );
 
       if (!updatedDocument) {
+        // Distinguish "not found" from "version mismatch". If the doc
+        // still exists under our realm, this is a 409; otherwise a 404.
+        const stillThere = await Collections.Document.exists({
+          _id: incoming._id,
+          realmId: organizationId
+        });
+        if (stillThere) {
+          throw new ServiceError(
+            'Document was edited elsewhere. Reload and try again.',
+            409
+          );
+        }
         throw new ServiceError('document not found', 404);
       }
 
@@ -753,15 +804,31 @@ export default function () {
         }
       });
 
-      // delete document from s3
+      // Delete S3 files BEFORE Mongo. If S3 fails, the documents stay
+      // in Mongo with their URLs intact and the user gets a 502 — they
+      // can retry without orphaned files. The reverse order (Mongo
+      // first, then fire-and-forget S3) leaks storage every time S3 is
+      // briefly unreachable, since the user has no way to find the
+      // orphaned files once the Mongo records are gone.
       if (s3.isEnabled((req as any).realm.thirdParties?.b2)) {
         const urlsIds = documents
           .filter((doc: any) => doc.type === 'file')
           .map(({ url, versionId }: any) => ({ url, versionId }));
 
-        s3.deleteFiles((req as any).realm.thirdParties.b2, urlsIds).catch((err) => {
-          logger.error('error deleting files from s3', err);
-        });
+        if (urlsIds.length > 0) {
+          try {
+            await s3.deleteFiles(
+              (req as any).realm.thirdParties.b2,
+              urlsIds
+            );
+          } catch (err) {
+            logger.error('error deleting files from s3', err);
+            throw new ServiceError(
+              'Failed to delete files from object storage. The document records have been kept; please retry.',
+              502
+            );
+          }
+        }
       }
 
       // delete documents from mongo
