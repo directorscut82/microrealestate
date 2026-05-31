@@ -205,6 +205,12 @@ export namespace CollectionTypes {
 
   export type PartRent = {
     term: number;
+    // Set by businesslogic/tasks/1_base.ts and consumed everywhere the
+    // PDF / accounting / dashboard render needs the month + year. The
+    // runtime shape always carries these; the type was missing them
+    // and downstream consumers had to read them via `any`.
+    month?: number;
+    year?: number;
     total: {
       preTaxAmount: number;
       charges: number;
