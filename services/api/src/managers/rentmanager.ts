@@ -967,14 +967,19 @@ async function _updateByTerm(
         if (extra <= 0) return;
         settlements.debts.push({
           description: p?.noteextracharge || '',
-          amount: extra * _vatFactor
-        });
+          amount: extra * _vatFactor,
+          // Mark as settlement-origin so 4_vats.ts can add the
+          // compensating VAT line. Without this, gross 124€ is stored
+          // net 100€ and grandTotal silently drops by 24€.
+          origin: 'settlement'
+        } as any);
       });
     } else if (paymentData.extracharge) {
       settlements.debts.push({
         description: paymentData.noteextracharge || '',
-        amount: Number(paymentData.extracharge) * _vatFactor
-      });
+        amount: Number(paymentData.extracharge) * _vatFactor,
+        origin: 'settlement'
+      } as any);
     }
 
     // Description: aggregate per-payment notes (one per line). Rent-level

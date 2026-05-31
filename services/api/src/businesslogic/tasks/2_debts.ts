@@ -13,7 +13,12 @@ export default function taskDebts(
       if (Number.isFinite(amount) && amount > 0) {
         rent.debts.push({
           description: debt.description || '',
-          amount
+          amount,
+          // Tag settlement-origin debts so 4_vats.ts can apply VAT only
+          // to user-entered extra charges (which rentmanager.ts stores
+          // net-of-VAT). Carried-forward debts from prior terms are
+          // already gross and have no `origin` field.
+          ...(debt.origin ? { origin: debt.origin } : {})
         });
       }
     });
