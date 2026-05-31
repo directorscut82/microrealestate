@@ -1,4 +1,5 @@
 {
+  "+{{surplus}}€ credit": "+{{surplus}}€ credit",
   "1st notice sent on {{date}}": "1st notice sent on {{date}}",
   "2nd notice sent on {{date}}": "2nd notice sent on {{date}}",
   "A business or an institution": "A business or an institution",
@@ -510,6 +511,7 @@
   "Rented": "Rented",
   "Rents": "Rents",
   "Rents for the period": "Rents for the period",
+  "Remaining": "Remaining",
   "Rents for the year": "Rents for the year",
   "Rents of {{monthYear}}": "Rents of {{monthYear}}",
   "Rents of {{year}}": "Rents of {{year}}",
