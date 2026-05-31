@@ -11,8 +11,8 @@
 	  	<%= preTaxAmount.description %>
 	  </td>
 		<td class="txtAlignRight">1</td>
-	  <td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount) %></td>
-		<td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount) %></td>
+	  <td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount, 'currency') %></td>
+		<td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount, 'currency') %></td>
 	</tr>
 <% }); %>
 
@@ -22,8 +22,8 @@
 		  	<%= charge.description %>
 		  </td>
 			<td class="txtAlignRight">1</td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount) %></td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount) %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
 		</tr>
 <% }); %>
 
@@ -33,8 +33,8 @@
 		  	<%= charge.buildingName ? charge.buildingName + ' - ' : '' %><%= charge.description %>
 		  </td>
 			<td class="txtAlignRight">1</td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount) %></td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount) %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
 		</tr>
 <% }); %>
 
@@ -44,8 +44,8 @@
 			<%= discount.description %>
 	  </td>
 	  <td class="txtAlignRight">1</td>
-	  <td class="txtAlignRight">- <%= _.formatNumber(discount.amount) %></td>
-		<td class="txtAlignRight">- <%= _.formatNumber(discount.amount) %></td>
+	  <td class="txtAlignRight">- <%= _.formatNumber(discount.amount, 'currency') %></td>
+		<td class="txtAlignRight">- <%= _.formatNumber(discount.amount, 'currency') %></td>
 	</tr>
 <% }); %>
 
@@ -55,8 +55,8 @@
 		  	<%= debt.description %>
 		  </td>
 			<td class="txtAlignRight">1</td>
-			<td class="txtAlignRight"><%= _.formatNumber(debt.amount) %></td>
-			<td class="txtAlignRight"><%= _.formatNumber(debt.amount) %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(debt.amount, 'currency') %></td>
+			<td class="txtAlignRight"><%= _.formatNumber(debt.amount, 'currency') %></td>
 		</tr>
 <% }); %>
 

@@ -222,7 +222,31 @@ function _computeBuildingChargeRaw(
     case 'by_surface': {
       const totalSurface = building.units.reduce((sum, u) => sum + (Number(u.surface) || 0), 0);
       if (totalSurface === 0) return 0;
-      return (amount * (Number(unit.surface) || 0)) / totalSurface;
+      // Carrier-remainder: every share except the last is rounded
+      // independently; the last unit (lex-max propertyId among units
+      // with surface > 0) absorbs the rounding remainder so the sum
+      // bills exactly `amount`. Without this, three units of 1m² each
+      // sharing 10€ each get 3.33€ and the building only collects
+      // 9.99€ — landlord eats the 0.01€ every month.
+      const myPropId = String(propertyId);
+      const _orderedIds = building.units
+        .filter((u) => (Number(u.surface) || 0) > 0 && u.propertyId)
+        .map((u) => String(u.propertyId))
+        .sort();
+      if (_orderedIds.length === 0) return 0;
+      const isLast = myPropId === _orderedIds[_orderedIds.length - 1];
+      if (!isLast) {
+        return (amount * (Number(unit.surface) || 0)) / totalSurface;
+      }
+      // Last unit gets `amount - sum(other rounded shares)`.
+      let othersSum = 0;
+      for (const id of _orderedIds) {
+        if (id === myPropId) continue;
+        const otherUnit = building.units.find((u) => String(u.propertyId) === id);
+        const share = (amount * (Number(otherUnit?.surface) || 0)) / totalSurface;
+        othersSum += Math.round(share * 100) / 100;
+      }
+      return Math.round((amount - othersSum) * 100) / 100;
     }
 
     case 'fixed': {
@@ -241,11 +265,9 @@ function _computeBuildingChargeRaw(
     }
 
     case 'custom_ratio': {
-      // Custom ratio — normalize to sum.
+      // Custom ratio — normalize to sum, carrier-remainder for rounding.
       // Single-unit fallback: if NO ratios are configured but the building
-      // has exactly one unit, that unit takes the full amount. With more
-      // than one unit and no ratios we cannot infer a split, so we return
-      // 0 and surface the misconfiguration in logs for the operator.
+      // has exactly one unit, that unit takes the full amount.
       const unitsWithProperty = building.units.filter((u) => u.propertyId);
       const totalRatio = customAllocations?.reduce((sum, a) => sum + (Number(a.value) || 0), 0) || 0;
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
@@ -259,15 +281,51 @@ function _computeBuildingChargeRaw(
       }
       if (!allocation) return 0;
       const av = Number(allocation.value) || 0;
-      return (amount * av) / totalRatio;
+      // Carrier-remainder: 7 units sharing 1€ at 1:1:1:1:1:1:1 each get
+      // 0.142857... rounded to 0.14 → sum 0.98 (2 cents lost). Last
+      // unit (lex-max propertyId among non-zero ratios) absorbs the
+      // remainder so the sum bills exactly amount.
+      const _ratioIds = (customAllocations || [])
+        .filter((a) => Number(a?.value) > 0)
+        .map((a) => String(a.propertyId))
+        .sort();
+      const myIdStr = String(propertyId);
+      const isLast = _ratioIds.length > 0 && myIdStr === _ratioIds[_ratioIds.length - 1];
+      if (!isLast) return (amount * av) / totalRatio;
+      let othersSum = 0;
+      for (const id of _ratioIds) {
+        if (id === myIdStr) continue;
+        const other = (customAllocations || []).find((a) => String(a.propertyId) === id);
+        const ov = Number(other?.value) || 0;
+        othersSum += Math.round(((amount * ov) / totalRatio) * 100) / 100;
+      }
+      return Math.round((amount - othersSum) * 100) / 100;
     }
 
     case 'custom_percentage': {
-      // Custom percentage - value is already a percentage
+      // Custom percentage - value is already a percentage. Same
+      // carrier-remainder pattern as the others so 3 units at 33.33%
+      // each don't bill 99.99% of the expense.
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
       if (!allocation) return 0;
       const pct = Number(allocation.value) || 0;
-      return pct > 0 ? (amount * pct) / 100 : 0;
+      if (pct <= 0) return 0;
+      const _pctIds = (customAllocations || [])
+        .filter((a) => Number(a?.value) > 0)
+        .map((a) => String(a.propertyId))
+        .sort();
+      const myIdStr = String(propertyId);
+      const isLast = _pctIds.length > 0 && myIdStr === _pctIds[_pctIds.length - 1];
+      if (!isLast) return (amount * pct) / 100;
+      let othersSum = 0;
+      for (const id of _pctIds) {
+        if (id === myIdStr) continue;
+        const other = (customAllocations || []).find((a) => String(a.propertyId) === id);
+        const op = Number(other?.value) || 0;
+        if (op <= 0) continue;
+        othersSum += Math.round(((amount * op) / 100) * 100) / 100;
+      }
+      return Math.round((amount - othersSum) * 100) / 100;
     }
 
     default:
@@ -420,11 +478,19 @@ export default function taskBase(
             .filter((charge) => charge.term === rent.term)
             .forEach((charge) => {
               if (charge.expenseId) monthlyChargeExpenseIds.add(String(charge.expenseId));
+              // Repair-distributed charges have repairId set (see
+              // buildingmanager._distributeRepairCharge). Tag them as
+              // type='repair' so they reach the dashboard pie's repair
+              // color and the auto-spread 'repairs' allocation bucket.
+              // Without this, the whole `repairs` chain
+              // (rentmanager._computeOwedByCategory.repairs and
+              // dashboardmanager pie's repair color) is dead code.
+              const _isRepair = !!(charge as { repairId?: unknown }).repairId;
               rent.buildingCharges!.push({
                 description: charge.description || 'Building charges',
                 amount: charge.amount,
                 buildingName: building.name,
-                type: 'monthly_charge'
+                type: _isRepair ? 'repair' : 'monthly_charge'
               });
             });
         }

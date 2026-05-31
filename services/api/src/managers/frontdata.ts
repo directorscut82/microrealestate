@@ -17,7 +17,7 @@ type AnyRecord = Record<string, any>;
 // per-month bill is therefore (grandTotal - balance), which we feed into
 // the running sum so each term contributes its OWN charges and payments
 // exactly once.
-function _isSettledByCarryForward(
+export function _isSettledByCarryForward(
   targetTerm: number,
   allRents: AnyRecord[]
 ): boolean {
