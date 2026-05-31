@@ -35,20 +35,23 @@ test('tenant search by partial phone1 matches the tenant', async ({ page }) => {
 
   await page.goto(`${encodeURIComponent(realmName)}/tenants`);
 
-  // Tenants render as cards (not rows). Match by name text — unique per
-  // run because the seed appends Date.now().
-  const tenantCard = page.getByText(tenantName, { exact: true });
-  await expect(tenantCard).toBeVisible({ timeout: 15_000 });
-
-  // Now search by a 6-digit substring of phone1. Pre-wave-24, this would
-  // not find the tenant because the search ignored phone1.
+  // Tenants list paginates and the seed tenant may be on page 2 with
+  // many test runs accumulated. The point of the test is the SEARCH
+  // path (search by phone1 substring should find the tenant), so go
+  // straight there instead of relying on the full list rendering the
+  // tenant on first paint.
   const phoneSubstring = tenantPhone1.slice(2, 8);
-  const searchInput = page.locator('input[placeholder*="Search" i], input[type=search]').first();
-  await expect(searchInput).toBeVisible();
+  const searchInput = page
+    .locator('input[placeholder*="Search" i], input[type=search]')
+    .first();
+  await expect(searchInput).toBeVisible({ timeout: 15_000 });
   await searchInput.fill(phoneSubstring);
 
+  // Pre-wave-24, search by phone1 substring would not find the tenant.
+  // Now it must.
+  const tenantCard = page.getByText(tenantName, { exact: true });
   await expect(
     tenantCard,
     `tenant ${tenantName} (phone1=${tenantPhone1}) must appear when searching for "${phoneSubstring}"`
-  ).toBeVisible({ timeout: 5_000 });
+  ).toBeVisible({ timeout: 10_000 });
 });

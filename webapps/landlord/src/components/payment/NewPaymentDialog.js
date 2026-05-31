@@ -99,11 +99,25 @@ export default function NewPaymentDialog({
   }, []);
 
   const handleSubmit = useCallback(() => {
-    submittingRef.current = false;
+    // Keep submittingRef = true through the drawer close animation so a
+    // second click that arrives during the close-out window cannot fire
+    // a duplicate PATCH. The ref resets when the drawer reopens (via
+    // the `open` effect below). Without this, force-clicks during the
+    // ~300ms vaul close animation slip past the ref guard because we
+    // had already set it false here.
     setSaving(false);
     onClose?.(selectedRent);
     handleClose();
   }, [handleClose, onClose, selectedRent]);
+
+  // Reset the re-entry guard when the dialog (re)opens. Closing the
+  // drawer keeps the ref locked so duplicate-clicks during the close
+  // animation are absorbed.
+  useEffect(() => {
+    if (open) {
+      submittingRef.current = false;
+    }
+  }, [open]);
 
   return (
     <Drawer open={open} onOpenChange={setOpen}>
