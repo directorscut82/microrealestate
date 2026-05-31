@@ -66,7 +66,10 @@ export default function () {
   templatesApi.get(
     '/',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      const organizationId = (req as any).realm?._id;
+      if (!organizationId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
 
       const templatesFound = await Collections.Template.find({
         realmId: organizationId
@@ -105,7 +108,10 @@ export default function () {
   templatesApi.post(
     '/',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      const organizationId = (req as any).realm?._id;
+      if (!organizationId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
 
       const errors = _checkTemplateParameters(req.body);
       if (errors.length) {
@@ -144,7 +150,14 @@ export default function () {
   templatesApi.patch(
     '/',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      // Use the realm validated by checkOrganization middleware, NOT
+      // the raw header. The middleware already proved the caller is
+      // authorised for this realm; trusting the header directly mixes
+      // raw transport input with authorisation state.
+      const realmId = (req as any).realm?._id;
+      if (!realmId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
 
       let errors = _checkTemplateParameters(req.body);
       if (!req.body._id) {
@@ -168,7 +181,7 @@ export default function () {
       const updatedTemplate = await Collections.Template.findOneAndUpdate(
         {
           _id: template._id,
-          realmId: organizationId
+          realmId
         },
         { $set: rest },
         { new: true }
@@ -185,7 +198,10 @@ export default function () {
   templatesApi.delete(
     '/:ids',
     Middlewares.asyncWrapper(async (req, res) => {
-      const organizationId = req.headers.organizationid;
+      const organizationId = (req as any).realm?._id;
+      if (!organizationId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
       const templateIds = req.params.ids.split(',');
       // Wave-24 B12: cap bulk delete + validate every id.
       if (templateIds.length > MAX_BULK_DELETE) {
