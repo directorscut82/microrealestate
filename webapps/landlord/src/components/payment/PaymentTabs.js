@@ -238,6 +238,16 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
   }, [_normalizedRentPayments]);
   const [editingIndex, setEditingIndex] = useState(null);
   const [confirmingDelete, setConfirmingDelete] = useState(null);
+  // Clear edit/delete-confirmation UI state when the dialog is fed a
+  // different rent (RentTable.liveSelectedRent re-derives on each
+  // open). Without this, opening the dialog on tenant A, clicking
+  // edit on a saved tile, closing the dialog, and reopening on
+  // tenant B would keep editingIndex pointing into B's tile array
+  // by old index — possibly out of bounds, possibly the wrong row.
+  useEffect(() => {
+    setEditingIndex(null);
+    setConfirmingDelete(null);
+  }, [rent?._id, rent?.term]);
   const _setAllocMode = (key, mode) =>
     setAllocState((s) => ({ ...s, [key]: { ...(s[key] || {}), mode } }));
   const _setAllocSpecificCategory = (key, category) =>

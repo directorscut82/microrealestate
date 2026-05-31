@@ -5,15 +5,26 @@ import {
   fetchTenants,
   QueryKeys
 } from '../../utils/restcalls';
+import dynamic from 'next/dynamic';
 import GeneralFigures from '../../components/dashboard/GeneralFigures';
-import MonthFigures from '../../components/dashboard/MonthFigures';
 import Page from '../../components/Page';
 import PendingBills from '../../components/dashboard/PendingBills';
 import Shortcuts from '../../components/dashboard/Shortcuts';
 import { useQuery } from '@tanstack/react-query';
 import Welcome from '../../components/Welcome';
 import { withAuthentication } from '../../components/Authentication';
-import YearFigures from '../../components/dashboard/YearFigures';
+
+// Lazy-load the chart components so recharts (~60 KB) doesn't enter
+// the initial bundle for users who never visit the dashboard route.
+// ssr:false because recharts depends on browser APIs.
+const MonthFigures = dynamic(
+  () => import('../../components/dashboard/MonthFigures'),
+  { ssr: false }
+);
+const YearFigures = dynamic(
+  () => import('../../components/dashboard/YearFigures'),
+  { ssr: false }
+);
 
 function Dashboard() {
   const dashboardQuery = useQuery({
