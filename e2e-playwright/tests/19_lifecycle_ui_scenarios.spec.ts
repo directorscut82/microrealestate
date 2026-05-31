@@ -300,7 +300,7 @@ async function gotoCurrentMonth(page: Page) {
 
 async function findTenantRow(page: Page, name: string) {
   const nameSpan = page
-    .locator('span.text-lg.font-medium', { hasText: name })
+    .locator(`span.text-lg.font-medium:text-is("${name}")`)
     .first();
   await expect(nameSpan).toBeVisible({ timeout: 20_000 });
   return nameSpan.locator(
@@ -1104,7 +1104,7 @@ test('L12 · rename propagates to /rents and /dashboard without reload', async (
       .poll(
         async () =>
           page
-            .locator('span.text-lg.font-medium', { hasText: newName })
+            .locator(`span.text-lg.font-medium:text-is("${newName}")`)
             .count(),
         { timeout: 20_000 }
       )
@@ -1544,9 +1544,9 @@ test('L6 · terminated tenant still appears in PAST months (historical preserved
       .poll(
         async () =>
           page
-            .locator('span.text-lg.font-medium', {
-              hasText: _seed!.tenantName
-            })
+            .locator(
+              `span.text-lg.font-medium:text-is("${_seed!.tenantName}")`
+            )
             .count(),
         { timeout: 20_000 }
       )
