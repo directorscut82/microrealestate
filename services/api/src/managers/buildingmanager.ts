@@ -167,7 +167,16 @@ async function _recomputeTenantsForProperty(
 
   const recomputeOne = async (tenant: any) => {
     const tenantObj: any = tenant.toObject();
-    if (!tenantObj.beginDate || !tenantObj.endDate) return;
+    if (!tenantObj.beginDate || !tenantObj.endDate) {
+      // A tenant without lease dates can't have rents recomputed (the
+      // contract pipeline needs them). Silently skipping makes orphaned
+      // tenants invisible to operators. Surface as a warning so the data
+      // gap is detectable in logs.
+      logger.warn(
+        `_recomputeTenantsForProperty: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
+      );
+      return;
+    }
     if (!tenantObj.properties?.length) return;
     const propertyIds = tenantObj.properties
       .map((p: any) => p.propertyId)
@@ -268,7 +277,14 @@ async function _recomputeTenantsForBuilding(
   }
 
   for (const tenantObj of unique) {
-    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
+    if (!tenantObj.beginDate || !tenantObj.endDate) {
+      // See _recomputeTenantsForProperty: surface orphaned tenants via
+      // logs instead of silently dropping them from the recompute set.
+      logger.warn(
+        `_recomputeTenantsForBuilding: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
+      );
+      continue;
+    }
     if (!tenantObj.properties?.length) continue;
     const tenantPropIds = tenantObj.properties
       .map((p: any) => p.propertyId)
