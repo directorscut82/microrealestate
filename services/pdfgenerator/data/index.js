@@ -54,9 +54,18 @@ export async function getRentsData(params) {
         total: {
           ...rent.total,
           payment: rent.total.payment || 0,
+          // subTotal must include EVERY pre-VAT line, including
+          // buildingCharges (κοινόχρηστα). Was previously omitted; the
+          // PDF's "subTotal" then disagreed with the visible grandTotal
+          // by the buildingCharges amount, confusing tenants who tried
+          // to verify the math themselves.
           subTotal:
             rent.total.preTaxAmount +
-            rent.total.charges -
+            rent.total.charges +
+            (rent.buildingCharges || []).reduce(
+              (s, c) => s + (Number(c.amount) || 0),
+              0
+            ) -
             rent.total.discount +
             rent.total.debts,
           newBalance: rent.total.grandTotal - rent.total.payment
