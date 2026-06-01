@@ -209,9 +209,39 @@ export default function SavedPaymentEditForm({
           type="button"
           size="sm"
           disabled={!canSave}
-          onClick={() =>
+          onClick={() => {
+            // B1: preserve the original allocation across edits. The
+            // form only edits scalar fields (amount, date, type,
+            // reference, note/promo/extracharge); the user's choice
+            // of which line(s) the payment pays must NOT be silently
+            // wiped on edit. Without this passthrough, savedPayments
+            // loses .allocation, the submit path sends no allocation,
+            // and the server auto-spreads the edited amount across
+            // whatever's oldest-unpaid — drifting the saved tile away
+            // from what the user originally selected.
+            //
+            // If the amount changed, the original allocation amounts
+            // are still passed through; the server's per-batch
+            // running-owed decrement may not match exactly, but the
+            // user-visible category/lineKey attribution is preserved.
+            // (Future: if the dialog re-runs auto-spread on amount
+            // changes, that's a UX choice for another commit.)
+            const newAmount = Number(amount);
+            const orig = Array.isArray(initial?.allocation)
+              ? initial.allocation
+              : [];
+            // If amount unchanged and there's exactly one allocation
+            // entry, no-op. If amount changed and there's a single
+            // entry, scale it to the new amount so sum(allocation)
+            // still equals payment.amount (server validator).
+            let allocation;
+            if (orig.length === 1 && newAmount > 0) {
+              allocation = [{ ...orig[0], amount: newAmount }];
+            } else if (orig.length > 0) {
+              allocation = orig;
+            }
             onSave({
-              amount: Number(amount),
+              amount: newAmount,
               date: moment(date, 'YYYY-MM-DD').format('DD/MM/YYYY'),
               type,
               reference: type === 'cash' ? '' : reference,
@@ -219,9 +249,10 @@ export default function SavedPaymentEditForm({
               promo: Number(promo) || 0,
               notepromo,
               extracharge: Number(extracharge) || 0,
-              noteextracharge
-            })
-          }
+              noteextracharge,
+              ...(allocation ? { allocation } : {})
+            });
+          }}
         >
           {t('Apply edit')}
         </Button>
