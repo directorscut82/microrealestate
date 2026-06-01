@@ -175,6 +175,61 @@ If a NEW failure appears outside this catalog, treat it as a real
 regression and investigate the deployed bundle revision via Portainer
 before assuming the test is wrong.
 
+## D-8 — Past-month overpayment does not propagate to next month's balance
+
+**Current behavior.** When a payment recorded on a frozen (past) term
+exceeds that term's `grandTotal`, the surplus is recorded on the touched
+term's `total.newBalance` (becomes negative) but does NOT cascade to the
+next term's `total.balance`. The downstream month's `grandTotal` is not
+re-derived; it stays at whatever value it had before the past-month
+payment landed.
+
+**Concrete example (verified in the June 2026 multi-date probe `w0qnvyfz1`,
+scenario MD4):** April 2026 baseline `grandTotal=400`, `payment=200`. A
+600€ probe payment lands on April. April.payment becomes 800 (correct).
+May.grandTotal stays at 876.67 unchanged. Expected if the credit were
+to propagate: May.balance would become −400 (the overpayment surplus),
+May.grandTotal would drop by 400 to 476.67.
+
+**Mechanism.** Pipeline (`5_balance.ts`, `7_total.ts`) is correct in
+isolation: `balance = previousRent.grandTotal − previousRent.payment`,
+allowed to be negative; `grandTotal` additively includes a negative
+balance. The blocker is the `_isFrozen` guard in
+`services/api/src/managers/contract.ts:271-276`. A past month with any
+payment / discount / debt / non-empty description is frozen. When the
+landlord touches an earlier past month, the freeze guard skips the
+forward-walk recomputation for every later past month, so May's balance
+is never refreshed against the new April.payment value.
+
+**Why this might matter.**
+- Cascading negative balances forward is the natural accountant's
+  expectation — overpaying April should reduce May's outstanding.
+- Currently the surplus is locked into the month it was recorded on
+  and surfaces only as a negative `newBalance` on that term — not on
+  any subsequent month.
+
+**Why the current behavior exists (intentional).**
+- The freeze guard protects historical rents from being silently
+  re-priced when an unrelated change cascades through the pipeline.
+  Without it, editing a one-off expense in April could rewrite the
+  grandTotal of every paid month after it. That's a much bigger
+  data-integrity hazard than locking surplus into one month.
+
+**Why deferred.** Lifting the freeze for the propagation case requires
+a UX choice (does the landlord want a "rebalance forward" toggle, an
+explicit credit-carry button, or automatic propagation?), plus
+migration concerns: existing past months with surplus payments would
+either need to stay locked (creating an inconsistent rule between
+historical and future overpayments) or be retroactively rebalanced.
+
+**Hooks if we eventually fix this.**
+- `services/api/src/managers/contract.ts:271-276` — `_isFrozen` guard.
+- `services/api/src/businesslogic/tasks/5_balance.ts` — already supports
+  negative balance, no change needed there.
+- Workaround for landlords today: the overpayment IS visible as the
+  recorded payment on the past term and contributes to that term's
+  newBalance. Future months can be adjusted manually if needed.
+
 ---
 
 When a deferred decision becomes urgent, move it from this file to an
