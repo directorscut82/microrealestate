@@ -18,8 +18,24 @@ export default function taskPayments(
         // (rents are Mixed-schema), so we read it via an `unknown` cast.
         const rawAlloc = (payment as unknown as { allocation?: unknown }).allocation;
         const allocation = Array.isArray(rawAlloc)
-          ? (rawAlloc as { category: string; amount: number }[]).map((a) => ({
+          ? (
+              rawAlloc as {
+                category: string;
+                lineKey?: string;
+                amount: number;
+              }[]
+            ).map((a) => ({
               category: a.category,
+              // B1: preserve lineKey through the rent-pipeline
+              // persistence step. The payment dialog identifies which
+              // exact line (preTax:0, charges:0, building:0, ...) a
+              // payment pays; without lineKey the saved tile falls
+              // back to the legacy English enum label ("Property
+              // charge") instead of the actual line description
+              // ("Επί του ενοικίου"), and edit-of-saved-payment
+              // re-derives the allocation by auto-spread instead of
+              // honoring the user's original line attribution.
+              ...(a.lineKey ? { lineKey: String(a.lineKey) } : {}),
               amount: Math.round((Number(a.amount) || 0) * 100) / 100
             }))
           : undefined;
