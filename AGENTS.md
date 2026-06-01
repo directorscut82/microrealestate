@@ -38,6 +38,60 @@ This is the #1 local-dev failure. The cookie/rate-limit theory is almost always 
 
 For a general "HTTP 500 from gateway" decision tree, see `.kiro/steering/test-running-guide.md`.
 
+## June 2026 — Recent state of play
+
+Multi-day debugging session left the following lessons that future agents must internalize before changing anything:
+
+### Timezone is the single most-bitten gotcha in this codebase
+
+The Playwright suite, the seed helpers, the form-side date guards, and the server-side date guards all do `moment.utc(...)` vs `moment(...)` (local). On Athens (UTC+2 winter / UTC+3 summer) these can disagree by a calendar day at midnight or near month boundaries. Mismatches in either direction cause silent test failures or 422 rejections that look like app bugs.
+
+**Rule:** if you see two `moment(...)` calls in the same comparison, BOTH must use `moment.utc(...)` OR neither — never mix. Anchors:
+
+- `services/api/src/managers/rentmanager.ts` F3 guard — uses `moment.utc(p.date, 'DD/MM/YYYY', true)` AND `moment.utc(termFirstDay,'YYYY-MM-DD', true)` — consistent ✓
+- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` (around line 316) — fixed in `a9d3fbab`: `_parsed = moment.utc(...)`, `_termFirstDay = moment.utc(...)` ✓
+- `e2e-playwright/tests/lib/api.ts` `ensureSeedLeasedTenantWithPayment` — uses `getMonth()` / `getFullYear()` (LOCAL) so the URL term matches the test's UI navigation (also LOCAL) ✓
+
+If any of those drift back to mismatch, **every payment dialog test will time out at 15-22s** because the client-side guard fires a "Payment date is before this rent month" toast and the PATCH never goes out. That's exactly what happened in suites #7-#10 (June 1).
+
+### The `b6165824 → dbf79562 → d5a5cb13` saga (do NOT repeat)
+
+The dialog has a `submittingRef` with an 80ms `setTimeout` fallback that resets the ref if `formRef.isSubmitting()` is false. The intent is to recover from zod-rejected submits where neither `onSubmit` nor `onError` would fire. **Do not "tighten" or remove this timeout** — every attempt has broken the entire dialog flow. The 80ms value was load-bearing in the working-suite-6 baseline. The double-click race that C28 catches is a known edge case; accept the flake rather than drag the rest of the form down with you.
+
+### Test seed leakage cascade
+
+Spec 19 (lifecycle scenarios) creates fixtures (E2E-LeasedTenant-B) AND mutates the canonical fixture (sets `terminationDate` in L02). When a test panics mid-flow, the `afterAll` cleanup may not run. Subsequent suites then find:
+
+1. **A second tenant whose name has E2E-LeasedTenant as a prefix** — substring-match selectors (`hasText: 'E2E-LeasedTenant'`) lock onto the wrong tenant. Use `:text-is("...")` for exact match.
+2. **The canonical tenant terminated** — the tenant disappears from current+future rent grids. The Mongoose `update` path doesn't `$unset` cleanly when you PATCH `terminationDate: null`; you must drop directly into mongo and run `$unset: {terminationDate: ""}`. The `mre-mongo-1` container is mongo 4.4 (`mongo` shell, not `mongosh`).
+
+If a Playwright run leaves the realm dirty, fix it via mongo before re-running. There is no `DELETE /api/reset` on NAS.
+
+### The deploy script's bash exit-0 is a lie
+
+`yarn deploy:nas` runs in the foreground (CI-wait poll + image pull + Portainer stack update + container revision verification). When you `&` it to background, bash returns exit 0 the moment it backgrounds — the actual deploy is still running. Always verify by polling Portainer for the container revision instead of trusting the exit code:
+
+```bash
+PT=$(cat .secrets/portainer-token)
+curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=true" -H "X-API-Key: $PT" \
+  | jq -r '.[] | select(.Names[0] | test("landlord-frontend")) | .Labels."org.opencontainers.image.revision"' \
+  | cut -c1-8
+```
+
+Run that to confirm NAS is on the commit you pushed BEFORE running tests.
+
+### Current state (June 1, 2026 — last suite #11)
+
+- **Production NAS revision**: `a9d3fbab` (master). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200.
+- **Suite #11 result**: 133 passed / 5 failed / 1 skipped / 16 did not run (16.5 min wall time).
+- **The 5 failures are all test bugs, not app bugs** — see `documentation/E2E_TESTING.md` for the catalog.
+- **The 16 "did not run"** are spec 19 tests after L06 (serial mode bails on first failure).
+- App-side bugs fixed in this session and shipped:
+  - `7d888322` — TenantPropertyList missing `useTranslation` (tenants page error boundary)
+  - `69e98638` — FormatMenu missing `useTranslation` (RichTextEditor crash)
+  - `669d8d75` — `frontdata.toRentData` JSON.parse undefined when PATCH-ing future term with no rent record (500 → graceful empty)
+  - `a9d3fbab` — PaymentTabs date guard timezone mismatch (the load-bearing fix; 36 dialog tests recovered)
+
 ## Table of Contents
 
 - [Directory Map](#directory-map) — where to find code
