@@ -113,5 +113,69 @@ patch.
 
 ---
 
+## D-6 — Tenant search clears on data refetch (spec 03)
+
+**Current behavior.** When the tenants page's `useInfiniteQuery` refetches
+in the background (window focus, mutation invalidation), the typed search
+text in the box stays but the filter resets to "all tenants" until the
+user types another character.
+
+**History.** Fixed once in `fb024ed4` via an init useEffect in
+`webapps/landlord/src/components/ResourceList/List.js`. That fix
+introduced a race condition where the init effect overwrote the user's
+search on every data reference change, breaking 60+ payment dialog tests
+in suite #7-#10. Reverted in `e1fe87d3` to restore dialog tests.
+
+**Why deferred.** A correct fix needs to call `handleSearch` with the
+*current* `searchText` and `selectedFilterIds` (not empty defaults) when
+data changes. That requires either lifting search state into the parent
+or passing it down to the init effect. Both are a refactor; one-line fix
+isn't safe.
+
+**Hooks if we eventually fix this.**
+- `webapps/landlord/src/components/ResourceList/List.js`
+- `webapps/landlord/src/components/SearchFilterBar.js` (line 92-97 — its
+  own useEffect already calls `onSearch` with current state on
+  `searchText` change; the gap is when *data* changes without
+  `searchText` changing).
+
+## D-7 — Test bugs in the live Playwright suite
+
+The following tests fail on a working baseline (suite #11, June 1 2026,
+133/155 pass). They are test-side bugs, not app bugs. They need to be
+re-authored, not "fixed" by changing app code:
+
+- **`spec 15 S36` and `spec 15 S37`** — assert that a date `last day of
+  current month` and `5 days into next month` pass the server's F3
+  guard. These pass when run near month-end but fail when run on day
+  1-22 of the month because the date is ≥7 days away in the FUTURE,
+  hitting the "too far in the future" guard. The tests should compute
+  the date dynamically against `today + 5d` instead of "month end".
+
+- **`spec 17 C28 · double-clicking Record does not double-fire PATCH`**
+  — flaky timing race against the dialog's 80ms `submittingRef` reset.
+  Don't tighten the timeout (it has been load-bearing for the entire
+  payment dialog flow — see AGENTS.md saga). The test should retry once
+  on a 1-PATCH outcome rather than asserting strict 1.
+
+- **`spec 19 L06 · adding a building expense lifts next-rent grandTotal`**
+  — test computes the wrong expected delta. `Contract.payTerm` only
+  generates rent records up to the requested term; future-month rents
+  aren't pre-generated, so PATCH-ing an expense doesn't immediately
+  change the next month's `totalAmount` until that month is touched.
+  The assertion needs to PATCH the next month explicitly to trigger
+  regeneration before reading.
+
+- **16 `spec 19` tests after L06** are listed as "did not run" because
+  Playwright runs spec 19 in serial mode and bails on the first failure.
+  They are not failing — they just didn't get to execute. Once L06 is
+  fixed, the rest of the spec will run.
+
+If a NEW failure appears outside this catalog, treat it as a real
+regression and investigate the deployed bundle revision via Portainer
+before assuming the test is wrong.
+
+---
+
 When a deferred decision becomes urgent, move it from this file to an
 open issue and prioritise alongside the live audit queue.

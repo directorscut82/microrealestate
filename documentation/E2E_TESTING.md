@@ -209,6 +209,39 @@ ordering doesn't matter.
 
 ## Common gotchas
 
+### Timezone mismatches break date guards silently (June 2026 incident)
+
+The form-side and server-side date guards both convert `'YYYY-MM-DD'` strings to moments and compare. **If one anchor uses `moment.utc(...)` and the other uses `moment(...)`** (local), the same calendar day parses to two absolute instants that disagree by hours. On Athens (UTC+2/+3), that's enough to flip an `isBefore` check around midnight or month boundary.
+
+The June 2026 instance:
+
+- `services/api/src/managers/rentmanager.ts` F3 guard — `parsed = moment.utc(p.date,'DD/MM/YYYY',true)` ✓
+- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` — pre-`a9d3fbab` had `_parsed = moment(...)` while `_termFirstDay = moment.utc(...)` — bug. Fixed to `moment.utc(...)`. Symptom: every payment dialog test fired a "Payment date is before this rent month" toast and the PATCH never reached the server.
+- `e2e-playwright/tests/lib/api.ts` `ensureSeedLeasedTenantWithPayment` — uses `getMonth()` / `getFullYear()` (LOCAL) so the URL term matches the test's UI navigation (also LOCAL). Don't change to UTC.
+
+**Rule:** when reviewing a spec or a guard, grep for `moment\(` next to `moment\.utc\(` in the same function. They MUST match.
+
+### Substring-trap on tenant name selectors
+
+If two tenants exist where one's name is a prefix of another's (e.g. `E2E-LeasedTenant` and `E2E-LeasedTenant-B`), `page.locator('span', { hasText: 'E2E-LeasedTenant' })` matches BOTH. The `.first()` may pick the wrong one depending on render order. Use exact-match: `page.locator('span:text-is("E2E-LeasedTenant")')`.
+
+This bit suite #7 hard when spec 19's L07 created tenant B and a panic mid-test left it in the realm. Every subsequent test that opened "the seed tenant's dialog" actually opened B's dialog and timed out asserting against A.
+
+### Realm leakage — terminationDate gets stuck
+
+Spec 19 L02 sets `terminationDate` on the seed tenant via API. The test's afterAll cleanup PATCHes `terminationDate: null` to undo, but the server's `_stringToDate(null) → undefined` makes Mongoose preserve the existing value. If the test panics before cleanup, the canonical seed tenant ends up permanently terminated → disappears from current+future rent grids → every dialog test downstream times out finding the row.
+
+Recovery: drop into mongo directly (4.4 shell, not mongosh; database is `mredb`, collection is `occupants` — Mongoose model name is `'Occupant'` even though TypeScript types call it `Tenant`):
+
+```js
+db.occupants.updateOne(
+  { _id: ObjectId("<seed_tenant_id>") },
+  { $unset: { terminationDate: "", guarantyPayback: "" } }
+)
+```
+
+Triggered via Portainer's docker-exec API (see `.kiro/steering/test-running-guide.md` for the curl recipe).
+
 ### `baseURL` must end with `/landlord/`
 
 The trailing slash matters. Without it, `page.goto('signin')` would

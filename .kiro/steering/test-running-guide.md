@@ -130,6 +130,59 @@ Before merging a new spec, grep it for:
 - `\.toBeTruthy\(\)` on a `.status()` — should be 0; demand a numeric status.
 - A `page.waitForResponse(...)` that isn't followed by an `expect(resp.status(), ...).toBe(...)` — that's a toothless test, the old Cypress trap.
 - `force: true` on a click — should be 0; if a click is unstable, find the real cause (viewport, hidden parent, animation).
+- `hasText: '<tenantName>'` on a span locator — substring-match. Use `:text-is("<tenantName>")` instead. **The June 2026 substring-trap incident**: when spec 19 leaves `E2E-LeasedTenant-B` in the realm, a `hasText: 'E2E-LeasedTenant'` selector matches the *wrong* tenant first; the dialog opens on B, the seed clear-PATCH targets A, and every assertion downstream is wrong.
+- `moment(date, 'YYYY-MM-DD', true)` next to a `moment.utc(other, ...)` — timezone mismatch. Both anchors must use `.utc(...)` OR neither.
+- `getUTCMonth()` next to a URL navigation that uses `getMonth()` — the seed and the test's UI navigation must agree on which month they target.
+
+## Suite-level realm hygiene
+
+E2E tests target the live NAS. The realm `CYPRESS-TEST-DO-NOT-USE` accumulates state across runs:
+
+- `ensureSeedLeasedTenant` is idempotent on tenant *creation* but does NOT reset all fields on every run. If a prior spec set `terminationDate`, `guarantyPayback`, etc., those persist.
+- The Mongoose update path doesn't `$unset` when you PATCH a field with `null` — `_stringToDate(null) → undefined → setOps drop the field → Mongoose preserves existing value`. Workaround for stuck state: drop into mongo directly:
+
+```bash
+PT=$(cat .secrets/portainer-token)
+MONGOID=$(curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=true" \
+  -H "X-API-Key: $PT" | jq -r '.[] | select(.Names[0] | test("mongo")) | .Id')
+PAYLOAD=$(jq -n '{
+  AttachStdout: true, AttachStderr: true,
+  Cmd: ["mongo", "mredb", "--quiet", "--eval",
+        "printjson(db.occupants.updateOne({_id: ObjectId(\"<TID>\")}, {$unset: {terminationDate: \"\"}}))"]
+}')
+EXEC=$(curl -s -X POST -H "X-API-Key: $PT" -H "Content-Type: application/json" \
+  "http://192.168.0.96:9000/api/endpoints/3/docker/containers/$MONGOID/exec" \
+  -d "$PAYLOAD" | jq -r .Id)
+curl -s -X POST -H "X-API-Key: $PT" -H "Content-Type: application/json" \
+  "http://192.168.0.96:9000/api/endpoints/3/docker/exec/$EXEC/start" \
+  -d '{"Detach":false,"Tty":false}'
+```
+
+The mongo container ships mongo 4.4's legacy `mongo` CLI (not `mongosh`). Database is `mredb`. Collection is `occupants` (Mongoose-side, the model name is `'Occupant'`; even though TypeScript types call it `Tenant`).
+
+## Verifying a deploy actually landed before running E2E
+
+`yarn deploy:nas` is a foreground script that orchestrates merge-to-nas → push → CI wait → image pull → Portainer stack update → container revision verification. If you background it (`& yarn deploy:nas`), bash returns exit 0 the instant it backgrounds — the actual deploy may still be in CI wait for ~5 minutes. **Never run E2E against a stale revision.**
+
+```bash
+# Always verify the running revision matches the commit you pushed:
+PT=$(cat .secrets/portainer-token)
+curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=true" -H "X-API-Key: $PT" \
+  | jq -r '.[] | select(.Names[0] | test("landlord-frontend|mre-api-1")) | "\(.Names[0]) \(.Labels."org.opencontainers.image.revision"[0:8])"'
+```
+
+Both the API and frontend containers must be on the same revision before re-running tests.
+
+## Known stable failures (June 2026 baseline = 133/155 pass)
+
+The following 5 tests fail on the current `a9d3fbab` build and they are **test-side bugs**, not app bugs. Don't "fix" them by changing app code:
+
+- **spec 03 `tenant search by partial phone1`** — known regression from the List.js init useEffect revert; the search box doesn't refilter on data refetch. To re-fix, the search-clobbered fix must be done WITHOUT clobbering the user's typed search (the previous attempt fb024ed4 broke 60+ dialog tests).
+- **spec 15 S36/S37** — assert that a date `last day of current month` and `5 days into next month` pass the server's F3 guard. They pass when run near month-end but fail when run on day 1-22 of the month because the date is ≥7 days away → "too far in future" guard fires. Test should compute the date dynamically against `today + 5d` instead of "month end".
+- **spec 17 C28 `double-clicking Record does not double-fire PATCH`** — flaky timing race against the 80ms submittingRef fallback. Don't tighten the timeout (see AGENTS.md "saga"); accept the flake.
+- **spec 19 L06 `adding a building expense lifts next-rent grandTotal`** — test logic computes the wrong expected delta. Expense isn't reflected in the next month because `Contract.payTerm` only generates rent for the requested term (not future months); the assertion needs to PATCH the next month explicitly to trigger regeneration.
+
+If a NEW failure appears outside that list, it's a real regression and you should investigate.
 
 ## Test inventory
 
