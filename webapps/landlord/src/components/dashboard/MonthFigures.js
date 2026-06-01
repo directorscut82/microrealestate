@@ -341,33 +341,11 @@ export default function MonthFigures({ className, dashboardData }) {
           <div>
             {pieData.length > 0 ? (
               <>
-                {/* Greyscale legend swatches match the bar chart exactly
-                    (#bdb8b1 / #4a4d52). Per-category hue is visible
-                    inside the pie slices; the legend conveys the
-                    light=owed / dark=paid split. */}
-                <div className="flex flex-wrap justify-center gap-x-6 gap-y-1.5 text-label text-ink-soft mb-3">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="size-2.5 rounded-pill"
-                      style={{ background: '#bdb8b1' }}
-                      aria-hidden="true"
-                    />
-                    <span>
-                      {t('Outstanding')}{' '}
-                      <span className="text-ink-muted">
-                        ({t('this month')})
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="size-2.5 rounded-pill"
-                      style={{ background: '#4a4d52' }}
-                      aria-hidden="true"
-                    />
-                    <span>{t('Receipts')}</span>
-                  </div>
-                </div>
+                {/* Legend lives at the BOTTOM CORNERS of the pie (under
+                    the chart): Owed (Οφειλές) bottom-left with the
+                    light swatch, Receipts (Εισπράξεις) bottom-right
+                    with the dark swatch. The previous centered-top
+                    legend was removed in favor of corner placement. */}
                 <ChartContainer
                   config={{}}
                   className="h-[320px] w-full overflow-hidden"
@@ -393,19 +371,34 @@ export default function MonthFigures({ className, dashboardData }) {
                   </PieChart>
                 </ChartContainer>
                 <div className="flex justify-between text-body mt-1 px-4 font-mono tabular-nums">
-                  <div>
-                    <span className="text-ink-muted">{t('Collected')}: </span>
+                  {/* Bottom-left corner: Owed (Οφειλές) + light swatch. */}
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: '#bdb8b1' }}
+                      aria-hidden="true"
+                    />
+                    <span className="text-ink-muted">{t('Owed')}: </span>
+                    <span className="font-semibold text-ink">
+                      {formatNumber(totalDue)}
+                    </span>
+                  </div>
+                  {/* Bottom-right corner: Receipts (Εισπράξεις) + dark
+                      swatch. Was previously labelled 'Collected'
+                      (Εισπραχθέντα); locale 'Receipts' renders as
+                      'Εισπράξεις' which is the user-correct word. */}
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="size-2.5 rounded-pill"
+                      style={{ background: '#4a4d52' }}
+                      aria-hidden="true"
+                    />
+                    <span className="text-ink-muted">{t('Receipts')}: </span>
                     <span
                       className="font-semibold"
                       style={{ color: paidColor('rent') }}
                     >
                       {formatNumber(totalPaid)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted">{t('Owed')}: </span>
-                    <span className="font-semibold text-ink">
-                      {formatNumber(totalDue)}
                     </span>
                   </div>
                 </div>
