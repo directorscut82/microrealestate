@@ -45,12 +45,17 @@ export function computeOwedLines(rent) {
   const lines = [];
 
   // Carry-forward from prior month — first in spread order.
+  // Scalar categories (previousBalance/vat/extracharge) carry no per-
+  // line description; the renderer derives the Greek label from the
+  // category itself. Storing an empty description keeps the upstream
+  // contract simple: description is the user-facing per-line text only
+  // when the underlying source array entry has one.
   const balance = Math.max(0, Number(rent?.balance) || 0);
   if (balance > 0.005) {
     lines.push({
       category: 'previousBalance',
       lineKey: 'previousBalance',
-      description: 'Previous balance',
+      description: '',
       amount: _round(balance)
     });
   }
@@ -101,7 +106,8 @@ export function computeOwedLines(rent) {
     });
   });
 
-  // VAT — aggregated scalar.
+  // VAT — aggregated scalar. No per-line description; renderer derives
+  // the label from the category.
   const sumAmounts = (arr) =>
     Array.isArray(arr)
       ? arr.reduce((s, x) => s + (Number(x?.amount) || 0), 0)
@@ -111,7 +117,7 @@ export function computeOwedLines(rent) {
     lines.push({
       category: 'vat',
       lineKey: 'vat',
-      description: 'VAT',
+      description: '',
       amount: vat
     });
   }
@@ -124,7 +130,7 @@ export function computeOwedLines(rent) {
     lines.push({
       category: 'extracharge',
       lineKey: 'extracharge',
-      description: 'Extra charge',
+      description: '',
       amount: extracharge
     });
   }
