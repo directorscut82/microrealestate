@@ -28,27 +28,25 @@ const PAYMENT_TYPES = ['cash', 'transfer', 'levy', 'cheque', ''] as const;
 // Wave-25: payment-by-category allocation. Categories map to the rent
 // breakdown the landlord sees in the UI (Ενοίκιο / Κοινόχρηστα / etc.).
 // `payment.allocation` is optional — when omitted, the server treats the
-// payment as auto-spread (today's behavior). When present, sum(allocation
-// amounts) must equal payment.amount; categories must be in this set.
+// payment as auto-spread. When present, sum(allocation amounts) must
+// equal payment.amount; categories must be in this set.
+//
+// Legacy values 'rent' / 'expenses' / 'repairs' / 'vat' /
+// 'previousBalance' / 'extracharge' are accepted for backwards-compat
+// with payments persisted before B1 (line-item allocation rollout).
+// New writes from the dialog use the line-item set: 'rent' /
+// 'propertyCharge' / 'buildingCharge' / 'repair' / 'vat' /
+// 'previousBalance' / 'extracharge', paired with a stable lineKey that
+// identifies the source array entry.
 const PAYMENT_CATEGORIES = [
   'rent',
-  'expenses',
-  'repairs',
+  'propertyCharge',
+  'buildingCharge',
+  'repair',
+  'expenses', // legacy: charges + non-repair buildingCharges aggregated
+  'repairs', // legacy: repair-typed buildingCharges aggregated
   'vat',
   'previousBalance',
-  'extracharge'
-] as const;
-
-// Wave-26 round-3r: auto-spread fills oldest debt classes first so the
-// landlord's mental model matches the rent computation pipeline. Order
-// kept in sync with AUTO_SPREAD_ORDER in webapps/landlord/src/utils/
-// paymentAllocation.js.
-const AUTO_SPREAD_ORDER = [
-  'previousBalance',
-  'rent',
-  'expenses',
-  'repairs',
-  'vat',
   'extracharge'
 ] as const;
 
@@ -57,43 +55,110 @@ type AnyRecord = Record<string, any>;
 const _round = (n: number): number => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
- * Wave-26 round-3r: compute the per-category split for a payment when the
- * caller didn't pass an explicit allocation. Same oldest-debt-first rule
- * the frontend uses (paymentAllocation.autoSpreadAllocation).
+ * B1: per-LINE-ITEM owed for a single rent. Each entry corresponds to one
+ * persisted line in the rent's underlying arrays (rent.preTaxAmounts /
+ * rent.charges / rent.buildingCharges) plus the scalar carry-forward and
+ * settlement fields (vat / previousBalance / extracharge).
  *
- * `owed` shape: { rent, expenses, repairs, vat, previousBalance, extracharge }.
- * Returns an array of { category, amount } entries with non-zero amounts.
- * Caller must persist this on payment.allocation so every payment on
- * disk has explicit attribution.
+ * Shape per entry:
+ *   {
+ *     category: 'rent' | 'propertyCharge' | 'buildingCharge' |
+ *               'repair' | 'vat' | 'previousBalance' | 'extracharge',
+ *     lineKey:  '<sourceArray>:<index>'  // e.g. 'preTax:0', 'charges:1',
+ *                                          // 'building:0' (non-repair),
+ *                                          // 'building:2' (repair),
+ *                                          // 'vat', 'previousBalance',
+ *                                          // 'extracharge'
+ *     description: string,
+ *     amount: number,
+ *     type?: string,         // present on building lines (insurance/water/...)
+ *     buildingName?: string  // present on building lines
+ *   }
+ *
+ * `lineKey` is the stable identifier used by payment.allocation[i].lineKey
+ * to attribute payment back to the exact line it pays. Indexes refer to
+ * the rent's source arrays at the moment payment is recorded; rents are
+ * frozen once paid (Contract.payTerm preserves them) so the key remains
+ * valid for that rent's lifetime.
+ *
+ * Auto-spread uses this list (in array order) to fill oldest debt classes
+ * first; explicit allocations from the dialog reference lineKey directly.
  */
-function _computeAutoSpread(
-  amount: number,
-  owed: AnyRecord
-): { category: string; amount: number }[] {
-  let remaining = _round(amount);
-  const out: { category: string; amount: number }[] = [];
-  for (const cat of AUTO_SPREAD_ORDER) {
-    if (remaining <= 0) break;
-    const due = Number(owed?.[cat]) || 0;
-    if (due <= 0) continue;
-    const apply = _round(Math.min(remaining, due));
-    if (apply > 0) {
-      out.push({ category: cat, amount: apply });
-      remaining = _round(remaining - apply);
-    }
-  }
-  return out;
-}
+type OwedLine = {
+  category:
+    | 'rent'
+    | 'propertyCharge'
+    | 'buildingCharge'
+    | 'repair'
+    | 'vat'
+    | 'previousBalance'
+    | 'extracharge';
+  lineKey: string;
+  description: string;
+  amount: number;
+  type?: string;
+  buildingName?: string;
+};
 
-/**
- * Per-category owed amounts for a single rent. Mirrors the frontend's
- * computeCategoryOwed in paymentAllocation.js, except we compute it over
- * the RAW persisted rent (services-side rent.* shape) rather than the
- * frontdata-flattened shape. Used by:
- *   - PATCH /rents/payment auto-spread on save
- *   - Migration script for legacy payments
- */
-function _computeOwedByCategory(rent: AnyRecord): AnyRecord {
+function _computeOwedLines(rent: AnyRecord): OwedLine[] {
+  const lines: OwedLine[] = [];
+  // Carry-forward from prior month: must be paid first per AUTO_SPREAD_ORDER.
+  const balance = Math.max(0, Number(rent?.total?.balance) || 0);
+  if (balance > 0.005) {
+    lines.push({
+      category: 'previousBalance',
+      lineKey: 'previousBalance',
+      description: 'Previous balance',
+      amount: _round(balance)
+    });
+  }
+  // Rent (preTaxAmounts) — typically one entry per property, but data
+  // model allows multiple.
+  const preTax = Array.isArray(rent?.preTaxAmounts)
+    ? rent.preTaxAmounts
+    : [];
+  preTax.forEach((p: AnyRecord, i: number) => {
+    const amount = _round(Number(p?.amount) || 0);
+    if (amount <= 0.005) return;
+    lines.push({
+      category: 'rent',
+      lineKey: `preTax:${i}`,
+      description: String(p?.description || 'Rent'),
+      amount
+    });
+  });
+  // Property-level surcharges (rent.charges) — rent-side line items
+  // sourced from tenant.properties[].expenses[].title.
+  const charges = Array.isArray(rent?.charges) ? rent.charges : [];
+  charges.forEach((c: AnyRecord, i: number) => {
+    const amount = _round(Number(c?.amount) || 0);
+    if (amount <= 0.005) return;
+    lines.push({
+      category: 'propertyCharge',
+      lineKey: `charges:${i}`,
+      description: String(c?.description || 'Charge'),
+      amount
+    });
+  });
+  // Building charges — split by type. Non-repair = κοινόχρηστα,
+  // type==='repair' = επισκευές. Each line gets its own row.
+  const buildingCharges = Array.isArray(rent?.buildingCharges)
+    ? rent.buildingCharges
+    : [];
+  buildingCharges.forEach((c: AnyRecord, i: number) => {
+    const amount = _round(Number(c?.amount) || 0);
+    if (amount <= 0.005) return;
+    const isRepair = c?.type === 'repair';
+    lines.push({
+      category: isRepair ? 'repair' : 'buildingCharge',
+      lineKey: `building:${i}`,
+      description: String(c?.description || 'Building charge'),
+      amount,
+      type: c?.type ? String(c.type) : undefined,
+      buildingName: c?.buildingName ? String(c.buildingName) : undefined
+    });
+  });
+  // VAT — aggregated scalar (sum of vats[] entries or rent.total.vat).
   const sumAmounts = (arr: any) =>
     Array.isArray(arr)
       ? arr.reduce(
@@ -101,25 +166,55 @@ function _computeOwedByCategory(rent: AnyRecord): AnyRecord {
           0
         )
       : 0;
-  const buildingChargesAll = Array.isArray(rent?.buildingCharges)
-    ? rent.buildingCharges
-    : [];
-  const repairCharges = buildingChargesAll
-    .filter((c: AnyRecord) => c?.type === 'repair')
-    .reduce((s: number, c: AnyRecord) => s + (Number(c.amount) || 0), 0);
-  const expenseBuildingCharges = buildingChargesAll
-    .filter((c: AnyRecord) => c?.type !== 'repair')
-    .reduce((s: number, c: AnyRecord) => s + (Number(c.amount) || 0), 0);
-  return {
-    rent: _round(Number(rent?.total?.preTaxAmount) || 0),
-    expenses: _round(sumAmounts(rent?.charges) + expenseBuildingCharges),
-    repairs: _round(repairCharges),
-    vat: _round(Number(rent?.total?.vat) || sumAmounts(rent?.vats)),
-    previousBalance: _round(
-      Math.max(0, Number(rent?.total?.balance) || 0)
-    ),
-    extracharge: _round(sumAmounts(rent?.debts))
-  };
+  const vat = _round(Number(rent?.total?.vat) || sumAmounts(rent?.vats));
+  if (vat > 0.005) {
+    lines.push({
+      category: 'vat',
+      lineKey: 'vat',
+      description: 'VAT',
+      amount: vat
+    });
+  }
+  // Extracharge — settlement-origin debts, aggregated scalar.
+  const extracharge = _round(sumAmounts(rent?.debts));
+  if (extracharge > 0.005) {
+    lines.push({
+      category: 'extracharge',
+      lineKey: 'extracharge',
+      description: 'Extra charge',
+      amount: extracharge
+    });
+  }
+  return lines;
+}
+
+/**
+ * B1: auto-spread that emits per-LINE allocations.
+ * Walks the OwedLine list (which is already in AUTO_SPREAD_ORDER:
+ * previousBalance → rent → propertyCharge → buildingCharge → repair →
+ * vat → extracharge by virtue of the order _computeOwedLines pushes
+ * them) and fills each line up to its owed amount until the payment is
+ * exhausted.
+ */
+function _computeAutoSpreadLines(
+  amount: number,
+  lines: OwedLine[]
+): { category: string; lineKey: string; amount: number }[] {
+  let remaining = _round(amount);
+  const out: { category: string; lineKey: string; amount: number }[] = [];
+  for (const line of lines) {
+    if (remaining <= 0) break;
+    const apply = _round(Math.min(remaining, line.amount));
+    if (apply > 0) {
+      out.push({
+        category: line.category,
+        lineKey: line.lineKey,
+        amount: apply
+      });
+      remaining = _round(remaining - apply);
+    }
+  }
+  return out;
 }
 
 async function _findOccupants(
@@ -447,30 +542,46 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
       );
     }
 
-    const owed = _computeOwedByCategory(targetRent);
-    const monthlyOwed = _round(
-      owed.rent + owed.expenses + owed.repairs + owed.vat + owed.extracharge
+    // B1: line-based owed for express settlement. Split into the
+    // previousBalance line vs everything else so the caller can opt in
+    // to settling either or both.
+    const allLines = _computeOwedLines(targetRent);
+    const monthLines = allLines.filter(
+      (l) => l.category !== 'previousBalance'
     );
-    const previousOwed = _round(owed.previousBalance);
+    const previousLine = allLines.find(
+      (l) => l.category === 'previousBalance'
+    );
+    const monthlyOwed = _round(
+      monthLines.reduce((s, l) => s + l.amount, 0)
+    );
+    const previousOwed = _round(previousLine?.amount || 0);
     let amount = 0;
-    const allocation: { category: string; amount: number }[] = [];
+    const allocation: {
+      category: string;
+      lineKey?: string;
+      amount: number;
+    }[] = [];
 
     if (it.monthly === true && monthlyOwed > 0) {
       amount = _round(amount + monthlyOwed);
-      const monthOnlyOwed: AnyRecord = {
-        previousBalance: 0,
-        rent: owed.rent,
-        expenses: owed.expenses,
-        repairs: owed.repairs,
-        vat: owed.vat,
-        extracharge: owed.extracharge
-      };
-      allocation.push(..._computeAutoSpread(monthlyOwed, monthOnlyOwed));
+      // Walk each month-line in spread order, attributing the full
+      // owed amount to its matching lineKey.
+      monthLines.forEach((l) => {
+        if (l.amount > 0.005) {
+          allocation.push({
+            category: l.category,
+            lineKey: l.lineKey,
+            amount: l.amount
+          });
+        }
+      });
     }
-    if (it.previousBalance === true && previousOwed > 0) {
+    if (it.previousBalance === true && previousOwed > 0 && previousLine) {
       amount = _round(amount + previousOwed);
       allocation.push({
         category: 'previousBalance',
+        lineKey: previousLine.lineKey,
         amount: previousOwed
       });
     }
@@ -878,7 +989,14 @@ async function _updateByTerm(
       const _targetRent = (occupant.rents || []).find(
         (r: AnyRecord) => Number(r.term) === _targetTermNum
       );
-      const _runningOwed = _computeOwedByCategory(_targetRent || {});
+      // B1: line-based auto-spread. Each owed line carries a stable
+      // lineKey ('preTax:0'/'charges:1'/'building:0'/'previousBalance'/
+      // 'vat'/'extracharge'). _runningOwedLines is decremented as
+      // successive payments in the same PATCH consume each line so a
+      // batch of multiple payments doesn't double-fill the same line.
+      const _runningOwedLines: OwedLine[] = _computeOwedLines(
+        _targetRent || {}
+      );
 
       settlements.payments = paymentData.payments
         .filter(({ amount }: AnyRecord) =>
@@ -886,26 +1004,51 @@ async function _updateByTerm(
         )
         .map((payment: AnyRecord) => {
           const amt = Number(payment.amount);
-          let allocation: { category: string; amount: number }[];
+          let allocation: {
+            category: string;
+            lineKey?: string;
+            amount: number;
+          }[];
           if (
             Array.isArray(payment.allocation) &&
             payment.allocation.length
           ) {
+            // Caller-supplied allocation. Pass through both new
+            // {category, lineKey, amount} entries and legacy
+            // {category, amount} entries unchanged. Persistence shape
+            // accepts both; readers (dashboard, frontdata) handle the
+            // missing-lineKey case via prorate fallback.
             allocation = payment.allocation.map((a: AnyRecord) => ({
               category: String(a.category),
+              lineKey: a.lineKey ? String(a.lineKey) : undefined,
               amount: Number(a.amount)
             }));
           } else {
-            allocation = _computeAutoSpread(amt, _runningOwed);
+            // Auto-spread against per-line owed. Emits {category,
+            // lineKey, amount} per consumed line.
+            allocation = _computeAutoSpreadLines(amt, _runningOwedLines);
           }
-          // Decrement runningOwed by what this payment took, so later
-          // payments in the same batch don't double-fill the same buckets.
+          // Decrement _runningOwedLines per allocation entry. Match
+          // by lineKey when present; fall back to deducting from the
+          // first line of the same category for legacy {category,
+          // amount} allocations.
           allocation.forEach((entry) => {
-            const k = entry.category;
-            if (_runningOwed[k] != null) {
-              _runningOwed[k] = _round(
-                Math.max(0, Number(_runningOwed[k]) - entry.amount)
-              );
+            const ek = entry.lineKey;
+            const ec = entry.category;
+            const eAmt = Number(entry.amount) || 0;
+            if (eAmt <= 0) return;
+            let toApply = eAmt;
+            for (const line of _runningOwedLines) {
+              if (toApply <= 0.005) break;
+              if (line.amount <= 0.005) continue;
+              const matches = ek
+                ? line.lineKey === ek
+                : line.category === ec;
+              if (!matches) continue;
+              const take = _round(Math.min(toApply, line.amount));
+              line.amount = _round(line.amount - take);
+              toApply = _round(toApply - take);
+              if (ek) break; // exact-match lineKey: only one line should match
             }
           });
           return {
