@@ -23,11 +23,13 @@ import { withAuthentication } from '../../../components/Authentication';
 
 const PAGE_LIMIT = 100;
 
-function _filterData(data, filters) {
-  let filteredItems =
-    filters.statuses?.length === 0
-      ? data
-      : data.filter(({ status }) => filters.statuses.includes(status));
+function _filterData(data = [], filters) {
+  let filteredItems = data;
+  if (filters.statuses?.length) {
+    filteredItems = filteredItems.filter(({ status }) =>
+      filters.statuses.includes(status)
+    );
+  }
 
   if (filters.searchText) {
     const regExp = /\s|\.|-/gi;
