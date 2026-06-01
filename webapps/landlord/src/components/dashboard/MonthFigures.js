@@ -31,6 +31,12 @@ const CATEGORY_COLORS = {
   // = ~78% L / 0.05–0.07 C — light but still recognisably the same
   // hue, never grey-on-grey.
   rent: { bold: 'oklch(50% 0.120 220)', faded: 'oklch(78% 0.058 220)' }, // petrol blue
+  // B1 top-level slices (in addition to per-type entries below for
+  // tooltip subcategory rows). propertyCharge = "Επί του ενοικίου"
+  // (rent surcharge), koinoxrhsta = "Κοινόχρηστα" (sum of non-repair
+  // building-types).
+  propertyCharge: { bold: 'oklch(48% 0.060 245)', faded: 'oklch(78% 0.030 245)' }, // slate
+  koinoxrhsta: { bold: 'oklch(50% 0.105 325)', faded: 'oklch(80% 0.050 325)' }, // mauve (mirrors management_fee)
   charges: { bold: 'oklch(48% 0.060 245)', faded: 'oklch(78% 0.030 245)' }, // slate
   heating: { bold: 'oklch(58% 0.135 35)', faded: 'oklch(80% 0.058 35)' }, // terracotta
   elevator: { bold: 'oklch(52% 0.085 200)', faded: 'oklch(80% 0.040 200)' }, // dim teal
@@ -48,7 +54,14 @@ const CATEGORY_COLORS = {
 };
 
 const TYPE_LABELS = {
+  // B1 top-level pie categories (4 slices).
   rent: 'Rent',
+  propertyCharge: 'Rent surcharge',
+  koinoxrhsta: 'Common expenses',
+  repair: 'Repairs',
+  // Legacy / per-type labels retained for backwards-compat with any
+  // caller that still passes a building-expense `type` (used by
+  // tooltip subcategory rows below).
   charges: 'Extra charges',
   heating: 'Heating',
   elevator: 'Elevator',
@@ -60,7 +73,6 @@ const TYPE_LABELS = {
   garden: 'Garden',
   repairs_fund: 'Repairs fund',
   pest_control: 'Pest control',
-  repair: 'Repairs',
   monthly_charge: 'Building charges',
   other: 'Other'
 };
@@ -122,8 +134,16 @@ export default function MonthFigures({ className, dashboardData }) {
   // both-owed-and-paid are skipped.
   //
   // Bucket aggregation: walk currentRevenues.tenants[*].paidByBucket
-  // server-side already does the per-rent allocation -> bucket mapping
-  // (dashboardmanager._computePaidByBucket). Frontend just sums.
+  // B1: pie aggregates the granular per-line server data into 4
+  // top-level slices: enoikio (rent), epi-tou-enoikiou (charges),
+  // koinoxrhsta (building-non-repair), episkeues (building-repair).
+  // Per-line description detail moves to the hover tooltip.
+  //
+  // Bucket map (top -> server bucket key in tenant.paidByBucket):
+  //   rent           <- 'rent'
+  //   propertyCharge <- 'charges'
+  //   koinoxrhsta    <- every 'building:<type>' where type !== 'repair'
+  //   repair         <- 'building:repair'
   const { pieData } = useMemo(() => {
     const {
       baseRent,
@@ -132,97 +152,204 @@ export default function MonthFigures({ className, dashboardData }) {
       tenants = []
     } = currentRevenues;
 
-    // Sum paid amounts per bucket key across all tenants.
-    const paidByBucket = {};
+    // Sum paid amounts per top-category across all tenants by walking
+    // each tenant.paidByBucket entry once.
+    const paidByTop = {
+      rent: 0,
+      propertyCharge: 0,
+      koinoxrhsta: 0,
+      repair: 0
+    };
     tenants.forEach((tenant) => {
       const tb = tenant?.paidByBucket || {};
       Object.entries(tb).forEach(([k, v]) => {
-        paidByBucket[k] = (paidByBucket[k] || 0) + (Number(v) || 0);
+        const amt = Number(v) || 0;
+        if (k === 'rent') {
+          paidByTop.rent += amt;
+        } else if (k === 'charges') {
+          paidByTop.propertyCharge += amt;
+        } else if (k === 'building:repair') {
+          paidByTop.repair += amt;
+        } else if (k.startsWith('building:')) {
+          paidByTop.koinoxrhsta += amt;
+        }
       });
     });
 
-    const segments = [];
-    const legendItems = [];
+    // Sum owed per top-category. baseRent / charges are already
+    // top-level; building-by-type is split by `repair` vs everything
+    // else.
+    let owedKoinoxrhsta = 0;
+    let owedRepair = 0;
+    Object.entries(buildingChargesByType).forEach(([type, amount]) => {
+      const a = Number(amount) || 0;
+      if (type === 'repair') owedRepair += a;
+      else owedKoinoxrhsta += a;
+    });
+    const owedByTop = {
+      rent: Number(baseRent) || 0,
+      propertyCharge: Number(charges) || 0,
+      koinoxrhsta: owedKoinoxrhsta,
+      repair: owedRepair
+    };
 
-    const _push = (type, owedAmount, paidAmount) => {
+    const segments = [];
+
+    const _push = (top, owedAmount, paidAmount) => {
       if (owedAmount <= 0 && paidAmount <= 0) return;
-      legendItems.push({
-        type,
-        label: t(TYPE_LABELS[type] || type)
-      });
       // Paid sub-segment first (visual prominence).
       if (paidAmount > 0) {
         segments.push({
-          name: t(TYPE_LABELS[type] || type),
+          name: t(TYPE_LABELS[top] || top),
           value: Math.min(paidAmount, owedAmount), // can't exceed owed
-          color: paidColor(type),
-          type,
+          color: paidColor(top),
+          type: top,
           status: 'paid'
         });
       }
       const unpaidValue = Math.max(0, owedAmount - paidAmount);
       if (unpaidValue > 0) {
         segments.push({
-          name: t(TYPE_LABELS[type] || type),
+          name: t(TYPE_LABELS[top] || top),
           value: unpaidValue,
-          color: unpaidColor(type),
-          type,
+          color: unpaidColor(top),
+          type: top,
           status: 'unpaid'
         });
       }
     };
 
-    _push('rent', baseRent, paidByBucket.rent || 0);
-    _push('charges', charges, paidByBucket.charges || 0);
-    Object.entries(buildingChargesByType).forEach(([type, amount]) => {
-      _push(type, amount, paidByBucket[`building:${type}`] || 0);
-    });
+    // Order: rent, epi-tou-enoikiou, koinoxrhsta, episkeues.
+    _push('rent', owedByTop.rent, paidByTop.rent);
+    _push('propertyCharge', owedByTop.propertyCharge, paidByTop.propertyCharge);
+    _push('koinoxrhsta', owedByTop.koinoxrhsta, paidByTop.koinoxrhsta);
+    _push('repair', owedByTop.repair, paidByTop.repair);
 
-    return { pieData: segments, legend: legendItems };
+    return { pieData: segments };
   }, [currentRevenues, t]);
 
+  // B1: tooltip rows expand the hovered TOP slice into per-tenant
+  // per-line subcategory rows. Each row shows the tenant name, the
+  // line description (verbatim from rent.charges/rent.buildingCharges,
+  // e.g. "Επί του ενοικίου", "τεστε"), and the owed/collected for
+  // that specific line. Multiple rows per tenant when a tenant has
+  // multiple lines in the hovered top-category.
   const CustomTooltip = ({ active, payload }) => {
     if (!active || !payload?.length) return null;
     const entry = payload[0].payload;
+    const top = entry.type; // 'rent' | 'propertyCharge' | 'koinoxrhsta' | 'repair'
     const tenants = currentRevenues.tenants || [];
-    const bucketKey =
-      entry.type === 'rent'
-        ? 'rent'
-        : entry.type === 'charges'
-          ? 'charges'
-          : `building:${entry.type}`;
-    const owedFor = (tenant) =>
-      entry.type === 'rent'
-        ? Number(tenant.baseRent) || 0
-        : entry.type === 'charges'
-          ? Number(tenant.charges) || 0
-          : Number(tenant.buildingChargesByType?.[entry.type]) || 0;
 
-    // Per-tenant rows: only show tenants with non-zero owed OR non-zero
-    // εισπράξεις in this bucket. Sort by owed desc so the largest
-    // outstanding tenants surface first when scrolling.
-    const rows = tenants
-      .map((tenant) => {
-        const owed = owedFor(tenant);
-        const collected = Number(tenant.paidByBucket?.[bucketKey]) || 0;
-        return { tenant, owed, collected };
-      })
-      .filter(({ owed, collected }) => owed > 0.005 || collected > 0.005)
+    // Build per-tenant per-line rows for the hovered top-category.
+    // The server emits chargesLines and buildingChargesLines per
+    // tenant; we filter and split them by `type` for the building
+    // case. For 'rent' we use baseRent (a single line per tenant —
+    // typically one preTaxAmounts entry).
+    const rows = [];
+    tenants.forEach((tenant) => {
+      const tenantName = tenant?.name || '';
+      if (top === 'rent') {
+        const owed = Number(tenant.baseRent) || 0;
+        const collected = Number(tenant.paidByBucket?.rent) || 0;
+        if (owed > 0.005 || collected > 0.005) {
+          rows.push({
+            tenantName,
+            lineDescription: '',
+            lineSubLabel: '',
+            owed,
+            collected
+          });
+        }
+      } else if (top === 'propertyCharge') {
+        const lines = Array.isArray(tenant.chargesLines)
+          ? tenant.chargesLines
+          : [];
+        const collectedTotal = Number(tenant.paidByBucket?.charges) || 0;
+        const owedTotal = lines.reduce(
+          (s, l) => s + (Number(l?.amount) || 0),
+          0
+        );
+        // Split this tenant's "charges" collected pro-rata across its
+        // chargesLines (the server emits a single 'charges' bucket
+        // sum; the lineKey-based payment will refine this in a future
+        // pass). Single-line case (the common one) collapses to a
+        // direct attribution.
+        lines.forEach((l) => {
+          const lineOwed = Number(l?.amount) || 0;
+          if (lineOwed <= 0.005) return;
+          const collected =
+            owedTotal > 0
+              ? (collectedTotal * lineOwed) / owedTotal
+              : 0;
+          rows.push({
+            tenantName,
+            lineDescription: l.description || '',
+            lineSubLabel: '',
+            owed: lineOwed,
+            collected
+          });
+        });
+      } else {
+        // top === 'koinoxrhsta' OR 'repair'.
+        const wantsRepair = top === 'repair';
+        const lines = Array.isArray(tenant.buildingChargesLines)
+          ? tenant.buildingChargesLines
+          : [];
+        const matchingLines = lines.filter((l) =>
+          wantsRepair ? l?.type === 'repair' : l?.type !== 'repair'
+        );
+        if (matchingLines.length === 0) return;
+        // Aggregate per-line. Collected per line: server already
+        // attributes per-bucket via lineKey when present; for
+        // back-compat we read paidByBucket['building:<type>'] which
+        // is shared across same-type lines.
+        const groupedCollected = {};
+        matchingLines.forEach((l) => {
+          const key = `building:${l.type || 'other'}`;
+          groupedCollected[key] = Number(tenant.paidByBucket?.[key]) || 0;
+        });
+        const owedByType = {};
+        matchingLines.forEach((l) => {
+          const k = `building:${l.type || 'other'}`;
+          owedByType[k] = (owedByType[k] || 0) + (Number(l?.amount) || 0);
+        });
+        matchingLines.forEach((l) => {
+          const lineOwed = Number(l?.amount) || 0;
+          if (lineOwed <= 0.005) return;
+          const k = `building:${l.type || 'other'}`;
+          const totalForType = owedByType[k] || 0;
+          const collected =
+            totalForType > 0
+              ? (groupedCollected[k] * lineOwed) / totalForType
+              : 0;
+          rows.push({
+            tenantName,
+            lineDescription: l.description || '',
+            lineSubLabel:
+              l.type && TYPE_LABELS[l.type] ? t(TYPE_LABELS[l.type]) : '',
+            owed: lineOwed,
+            collected
+          });
+        });
+      }
+    });
+
+    // Filter rows that have actual money (owed or collected > 0) and
+    // sort by owed desc so largest first.
+    const visibleRows = rows
+      .filter((r) => r.owed > 0.005 || r.collected > 0.005)
       .sort((a, b) => b.owed - a.owed);
 
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-3 py-2 text-label max-w-sm">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-3 py-2 text-label max-w-md">
         <div className="font-medium text-body text-ink leading-tight">
           {entry.name}
         </div>
         <div className="font-mono tabular-nums text-label text-ink-muted mb-2">
           {formatNumber(entry.value)}
         </div>
-        {rows.length > 0 && (
-          <div
-            className="max-h-[280px] overflow-y-auto scrollbar-branded"
-            // ~7 rows fit before scroll engages.
-          >
+        {visibleRows.length > 0 && (
+          <div className="max-h-[280px] overflow-y-auto scrollbar-branded">
             <table className="w-full tabular-nums text-label">
               <thead className="text-xs text-ink-muted sticky top-0 bg-bone">
                 <tr>
@@ -233,21 +360,34 @@ export default function MonthFigures({ className, dashboardData }) {
                     {t('Owed')}
                   </th>
                   <th className="text-right font-normal pb-1 pl-3">
-                    {t('Collected')}
+                    {t('Receipts')}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ tenant, owed, collected }, i) => {
+                {visibleRows.map((r, i) => {
                   const fullyPaid =
-                    owed > 0 && collected + 0.005 >= owed;
+                    r.owed > 0 && r.collected + 0.005 >= r.owed;
+                  // Tenant column shows: <tenant> (<subcategory or description>)
+                  // when the row has a sub-label; falls back to plain
+                  // tenant name for the rent case.
+                  const subFragment = r.lineDescription
+                    ? r.lineSubLabel
+                      ? `${r.lineDescription} — ${r.lineSubLabel}`
+                      : r.lineDescription
+                    : '';
                   return (
                     <tr key={i} className="border-t border-stone-line/40">
-                      <td className="py-0.5 pr-2 text-ink truncate max-w-[12rem]">
-                        {tenant.name}
+                      <td className="py-0.5 pr-2 text-ink max-w-[16rem]">
+                        <div className="truncate">{r.tenantName}</div>
+                        {subFragment && (
+                          <div className="text-xs text-ink-muted truncate">
+                            {subFragment}
+                          </div>
+                        )}
                       </td>
                       <td className="py-0.5 pl-3 text-right text-ink-muted">
-                        {formatNumber(owed)}
+                        {formatNumber(r.owed)}
                       </td>
                       <td
                         className={cn(
@@ -260,7 +400,7 @@ export default function MonthFigures({ className, dashboardData }) {
                             : undefined
                         }}
                       >
-                        {formatNumber(collected)}
+                        {formatNumber(r.collected)}
                       </td>
                     </tr>
                   );
