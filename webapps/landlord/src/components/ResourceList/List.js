@@ -41,30 +41,20 @@ export default function List({
     [filteredData]
   );
 
-  // Initialise filteredData when `data` lands (and re-initialise when
-  // it changes). Without this the list rendered an empty state until
-  // the user typed in the search box, even though data was already
-  // loaded. Apply the filter with empty defaults so the initial state
-  // matches what handleSearch would produce for an empty input. Note
-  // `data` may be an array (tenants/properties/buildings pages) OR an
-  // object like {rents, overview} for the rents page — the filterFn
-  // is consumer-specific and knows how to read its own shape.
-  useEffect(() => {
-    if (data == null) {
-      setFilteredData([]);
-      return;
-    }
-    if (typeof filterFn === 'function') {
-      try {
-        const next = filterFn(data, { searchText: '', statuses: [] });
-        setFilteredData(Array.isArray(next) ? next : []);
-      } catch {
-        setFilteredData(Array.isArray(data) ? data : []);
-      }
-    } else {
-      setFilteredData(Array.isArray(data) ? data : []);
-    }
-  }, [data, filterFn]);
+  // No init useEffect here. SearchFilterBar (rendered inside <Header>)
+  // owns the search/filter state and runs its own useEffect on mount —
+  // that effect calls onSearch (= handleSearch below) with the current
+  // search text and selected filter ids, populating filteredData. When
+  // `data` refetches (background invalidation, focus refetch),
+  // handleSearch's identity changes (deps include `data`), which makes
+  // SearchFilterBar's useEffect refire with the user's CURRENT search
+  // state — preserving the user's filter through refetches.
+  //
+  // The previous init useEffect here (with empty defaults) was clobbering
+  // the user's typed search whenever data refetched: it ran AFTER
+  // SearchFilterBar's effect (parent effects fire after child effects),
+  // overwriting the filtered list with the unfiltered data. Removed
+  // entirely; rely on SearchFilterBar as the single source of truth.
 
   // Reset page index when chunks shrink below current page
   useEffect(() => {
@@ -79,7 +69,23 @@ export default function List({
         searchText: text,
         statuses: filters.filter(({ id }) => id).map(({ id }) => id)
       };
-      setFilteredData(filterFn(data, newFilters));
+      // Guard against `data` being undefined while useQuery is still
+      // loading. SearchFilterBar's useEffect fires onSearch on mount
+      // before the query resolves; without this guard the consumer's
+      // filterFn dereferences undefined (e.g. data.rents on the rents
+      // page) and throws. handleSearch identity changes when data lands
+      // (deps include data), which re-triggers SearchFilterBar's effect
+      // to populate the list correctly.
+      if (data == null) {
+        setFilteredData([]);
+        return;
+      }
+      try {
+        const next = filterFn(data, newFilters);
+        setFilteredData(Array.isArray(next) ? next : []);
+      } catch {
+        setFilteredData(Array.isArray(data) ? data : []);
+      }
     },
     [data, filterFn]
   );
