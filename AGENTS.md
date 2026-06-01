@@ -38,6 +38,12 @@ This is the #1 local-dev failure. The cookie/rate-limit theory is almost always 
 
 For a general "HTTP 500 from gateway" decision tree, see `.kiro/steering/test-running-guide.md`.
 
+## Definition of "done" — read EVERY session before declaring anything fixed
+
+**Nothing is fixed/working/shipped/verified until a Playwright browser drives the actual user flow against the deployed NAS UI and the assertions hold.** A green suite count is NOT proof. Manual browser spot-check (open http://192.168.0.96:1350/landlord/, sign in, do the thing) beats every test run. Existence assertions like `toBeVisible()` on a row that is also visible in the unfiltered list are tautologies, not coverage — use `toHaveCount(N)` or value-delta. Surfaces that need refetch-resilience coverage (type → wait → re-assert) are listed in `.kiro/steering/test-running-guide.md` "Definition of done"; ship the spec in the same PR as the change or the change is not done.
+
+If you find yourself saying "the suite passes, it's working" — open the app in a browser first. The user has had to ask for this >20 times in this codebase. Don't make it 21.
+
 ## June 2026 — Recent state of play
 
 Multi-day debugging session left the following lessons that future agents must internalize before changing anything:
