@@ -10,6 +10,106 @@ inclusion: always
 
 The old Cypress suite at `e2e/` was deleted in commit `e478a59` (May 2026). Don't look for it. The historic context is captured in [`documentation/E2E_TESTING.md`](../../documentation/E2E_TESTING.md).
 
+## Definition of "done" (non-negotiable, READ FIRST)
+
+**Nothing is "done", "fixed", "working", "shipped", or "verified" until a real Playwright browser drives the actual user flow end-to-end through deployed NAS UI and the assertions hold.** A green test suite is NOT proof of correctness. Five categories of evidence are required for every claim:
+
+1. **A spec exists for the user flow** — not just the underlying API call, the actual click-by-click journey a landlord takes (open page → click button → fill form → submit → see result → re-open and verify).
+2. **The spec asserts set-narrowing or value-delta** — not existence. `expect(rows).toHaveCount(N)` after a search, `expect(balance).toBe(grandTotal - paid)` after a payment. **`toBeVisible()` on a single row when the unfiltered list also contains that row is a tautology and does not count as coverage.** This is what spec 03 was for two months and what shipped the search bug.
+3. **The spec exercises refetch resilience for any UI that holds state** — type → wait past staleTime / blur+focus / trigger mutation → re-assert state holds. React Query background refetch is the #1 footgun in this codebase; flows that don't simulate it haven't tested anything that matters in production.
+4. **The spec runs against the deployed revision** — verify Portainer revision matches the commit BEFORE running the spec (see "Verifying a deploy" below). A spec that passes against stale code is worse than no spec.
+5. **Manual browser spot-check of the same flow** — at least once per substantive change. Open the deployed app at http://192.168.0.96:1350/landlord/, sign in, do the thing the user would do. Five minutes of human use beats every test suite.
+
+**No test counts as a pass if it was made green by:**
+- Loosening assertions (`toBeTruthy()` on a status, `toBeVisible().or(...)` on outcomes that should be deterministic).
+- Conditional pass-on-either-outcome (`if (patchHappened) annotate else assert button enabled`).
+- Hacks like overly-long timeouts that mask races.
+- Skipping an assertion because "the test itself was wrong" without writing the correct assertion in the same PR.
+- Reverting to a baseline that "had this passing" without verifying the revert actually restores the user flow.
+
+**No claim of "fixed" or "shipped" without:**
+- Naming the spec(s) that prove it.
+- Showing the green run output AND the deployed revision they ran against.
+- A second pair of eyes (or workflow) that didn't write the fix doing the verification.
+
+**These are the surfaces that MUST have refetch-resilience coverage** (the surfaces that have been bitten in production):
+- Tenants index search by name / phone / email
+- Tenants index filter chips (Lease running / Lease ended / archived toggle)
+- Properties index search by name / atak / address / surface
+- Properties index filter chips (vacant / occupied / by type)
+- Buildings index search by name / address
+- Buildings index filter chips (hasElevator / hasCentralHeating)
+- Rents index search by tenant name / payment reference
+- Rents index filter chips (notpaid / partiallypaid / paid)
+- Payment dialog: open / fill / record / re-open / edit / delete / record again
+- Express drawer: open / multi-tenant settle / verify each row
+- Cross-page invalidation: record on /rents → /dashboard / /accounting / /tenants/:id within same session
+
+If you ship a change to any of those surfaces and the spec covering it doesn't exist or doesn't assert refetch resilience, **write the spec in the same PR or the change is not done.** This is the rule that would have caught the search/filter bug on day 1 instead of day 3.
+
+## Search / filter scenario catalog (REQUIRED coverage)
+
+The bug that shipped on suite #6 and lived through 12 suite runs was caught by zero of 155 tests because the canary asserted `toBeVisible()` on a row that was visible in the unfiltered list anyway. The catalog below MUST be implemented as actual specs. Each one is a separate `test(...)` block.
+
+### Tenants index (`/[org]/tenants`)
+
+1. Type 6 chars of a phone1 → list narrows to 1 row by `toHaveCount(1)` (NOT `toBeVisible`). Assert a known non-matching tenant is `not.toBeVisible`.
+2. Type 6 chars of a phone1, wait 30s past React Query staleTime → list still shows the same 1 row. Assert search input still has the typed text.
+3. Type a substring in name → list narrows. Then trigger a mutation in another tab (or `page.evaluate(queryClient.invalidateQueries)`) → list still narrows.
+4. Type, then click "Lease running" filter chip → list narrows further (filter AND search compose). Assert toHaveCount.
+5. Click "Lease running" filter chip with empty search → list filters by status. Toggle off → full list returns.
+6. Click "Lease ended" filter chip when 0 tenants are terminated → list shows empty state.
+7. Click "Show archived" toggle → archived tenants appear. Toggle off → archived disappear.
+8. Type a substring, click on a tenant card → navigate to detail. Click Back → search input still populated, list still narrowed.
+9. Type a query that matches 0 tenants → empty state visible, paginator absent.
+10. Type, then clear the input → full list restored.
+
+### Properties index (`/[org]/properties`)
+
+11. Type 4 chars of property name → list narrows by toHaveCount.
+12. Type 4 chars of `atakNumber` → list narrows.
+13. Type 4 chars of `address.street1` → list narrows.
+14. Type a 2-digit `surface` value → list narrows.
+15. Click "vacant" filter chip → only vacant properties (server `status='vacant'`).
+16. Click "occupied" filter chip → only occupied.
+17. Click an apartment-type filter (e.g. "apartment") → only that type.
+18. Click multiple filter chips (multi-select) → AND'd filter.
+19. Type a substring + click a filter chip → both apply, count is intersection.
+20. Type, navigate to detail, Back → state preserved.
+21. Type → wait past staleTime → search still active.
+
+### Buildings index (`/[org]/buildings`)
+
+22. Type 3 chars of building name → toHaveCount narrows.
+23. Type a city → narrows.
+24. Click "hasElevator" filter chip → only buildings with elevator.
+25. Click "hasCentralHeating" filter chip → only those with heating.
+26. Both chips selected → intersection.
+27. Type + chip → both apply.
+28. Type → trigger refetch → narrowing holds.
+
+### Rents index (`/[org]/rents/:yyyy.mm`)
+
+29. Type tenant name in search → row narrows.
+30. Click "In arrears" filter chip → only `status='notpaid'` rows.
+31. Click "Partially settled" → only `status='partiallypaid'`.
+32. Click "Settled" → only `status='paid'`.
+33. Multi-select 2 status chips → union.
+34. Type a payment reference → row matching that reference is shown.
+35. Type, then record a payment via the cash icon → after drawer closes and rents refetch, search input still populated AND the row reflects the new payment AND list still narrowed.
+36. Type, navigate to next month, navigate back → search preserved.
+37. Click filter chip → record a payment that flips status of one tenant → that tenant's row leaves the filtered list (status changed) → assert.
+
+### Cross-surface (where the bug actually compounds)
+
+38. Tenants page filter active → record a payment for the FIRST tenant in the filtered list (via the row's cash icon if exposed there, or via deep-link to /rents) → return to /tenants → filter still active.
+39. Open Express drawer with rents-page filter active → only filtered tenants appear in Express list.
+40. Search active on tenants → click a tenant → terminate them → Back → tenant either still in filtered set (if filter doesn't include status) or removed (if it does). Either way, deterministic, asserted.
+
+The catalog targets ~40 distinct scenarios. Group them into specs `25_search_filter_tenants.spec.ts`, `26_search_filter_properties.spec.ts`, `27_search_filter_buildings.spec.ts`, `28_search_filter_rents.spec.ts`, `29_search_filter_cross_surface.spec.ts` to parallelize and keep file sizes manageable. Each spec must use `toHaveCount` / `not.toBeVisible` set-narrowing assertions, NOT `toBeVisible` on a single matching row.
+
+These scenarios are NOT optional. If you change anything in `ResourceList/List.js`, `SearchFilterBar.js`, or any consumer's `_filterData`, the relevant scenarios from this catalog must run green against the deployed revision before the change ships. If they don't exist yet, write them in the same PR.
+
 ## Rules (non-negotiable)
 
 1. **Never weaken assertions to make a test pass.** If a test fails, decide whether it's a real app bug or a real test-shape problem before touching anything. Both fix paths exist; "delete the assertion" is not one of them.

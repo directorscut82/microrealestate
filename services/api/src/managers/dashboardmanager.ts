@@ -78,9 +78,45 @@ export function _computePaidByBucket(rent: AnyRecord): AnyRecord {
     const allocation = Array.isArray(p?.allocation) ? p.allocation : [];
     allocation.forEach((a: AnyRecord) => {
       const cat = String(a?.category || '');
+      const lineKey = a?.lineKey ? String(a.lineKey) : '';
       const amt = Number(a?.amount) || 0;
       if (amt <= 0) return;
 
+      // B1 fast-path: payments with explicit lineKey are attributed to
+      // the exact source line. No prorate needed — the dialog (or
+      // caller) already decided which line to pay.
+      if (lineKey) {
+        if (cat === 'rent' || cat === 'previousBalance' ||
+            cat === 'vat' || cat === 'extracharge') {
+          if (cat === 'rent') _add('rent', amt);
+          // vat/previousBalance/extracharge: not on the pie (line 113
+          // comment). Drop them silently as before.
+          return;
+        }
+        if (cat === 'propertyCharge') {
+          // lineKey is 'charges:<idx>' — pay one specific property
+          // charge. Aggregate into the same 'charges' bucket the pie
+          // already renders (no per-property fan-out needed since the
+          // dashboard's per-tenant charges field is a single number).
+          _add('charges', amt);
+          return;
+        }
+        if (cat === 'buildingCharge' || cat === 'repair') {
+          // lineKey is 'building:<idx>'. Resolve back to the type by
+          // looking up the underlying buildingCharges array entry.
+          const m = lineKey.match(/^building:(\d+)$/);
+          const idx = m ? Number(m[1]) : -1;
+          const entry = idx >= 0
+            ? (rent.buildingCharges || [])[idx]
+            : null;
+          const type = entry?.type || (cat === 'repair' ? 'repair' : 'other');
+          _add(`building:${type}`, amt);
+          return;
+        }
+      }
+
+      // Legacy fallback: payments without lineKey use the pre-B1
+      // prorate-by-owed reconstruction.
       if (cat === 'rent') {
         _add('rent', amt);
         return;
@@ -409,6 +445,21 @@ export async function all(req: Req, res: Res) {
         // wire format so the dashboard tooltip can show real numbers
         // instead of paidRatio estimates.
         const tenantPaidByBucket = _computePaidByBucket(rent);
+        // B1: per-line detail so the pie tooltip can show actual line
+        // descriptions (e.g. 'Επι του ενοικίου', 'τεστε') instead of
+        // only the aggregated `type` enum label.
+        const chargesLines = (rent.charges || []).map((c: AnyRecord) => ({
+          description: String(c?.description || ''),
+          amount: Number(c?.amount) || 0
+        }));
+        const buildingChargesLines = (rent.buildingCharges || []).map(
+          (c: AnyRecord) => ({
+            description: String(c?.description || ''),
+            type: c?.type ? String(c.type) : 'other',
+            buildingName: c?.buildingName ? String(c.buildingName) : '',
+            amount: Number(c?.amount) || 0
+          })
+        );
         acc[key].tenants.push({
           name: tenantName,
           paid: tenantPaid,
@@ -417,6 +468,8 @@ export async function all(req: Req, res: Res) {
           charges: tenantCharges,
           buildingCharges: tenantBuildingCharges,
           buildingChargesByType: tenantBuildingByType,
+          chargesLines,
+          buildingChargesLines,
           paidByBucket: tenantPaidByBucket
         });
       });
@@ -456,6 +509,20 @@ export async function all(req: Req, res: Res) {
           Object.entries(t.paidByBucket || {}).forEach(([k, amount]) => {
             paidByBucket[k] = _round(amount as number);
           });
+          // B1: round per-line amounts so the pie tooltip shows the
+          // same precision as the bucket totals.
+          const chargesLines = (t.chargesLines || []).map(
+            (l: AnyRecord) => ({
+              ...l,
+              amount: _round(Number(l?.amount) || 0)
+            })
+          );
+          const buildingChargesLines = (t.buildingChargesLines || []).map(
+            (l: AnyRecord) => ({
+              ...l,
+              amount: _round(Number(l?.amount) || 0)
+            })
+          );
           return {
             ...t,
             paid: _round(t.paid),
@@ -464,6 +531,8 @@ export async function all(req: Req, res: Res) {
             charges: _round(t.charges),
             buildingCharges: _round(t.buildingCharges),
             buildingChargesByType: byType,
+            chargesLines,
+            buildingChargesLines,
             paidByBucket
           };
         })

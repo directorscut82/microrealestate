@@ -37,7 +37,13 @@ function SettlementList({ month, tenantId, settlements, notes }) {
       </div>
       <div
         className={cn(
-          'flex flex-col gap-2 items-center justify-end col-span-2 px-4 py-2 border-r md:flex-row md:col-span-3 md:gap-8',
+          // Multi-payment cell: when 2+ payments are recorded for the
+          // same month, the previous flex-row layout overflowed the
+          // 3-of-6-cols width because each payment used text-2xl with
+          // no min-width and no wrap. Switching to flex-wrap with a
+          // min-width per payment lets multiple payments wrap onto a
+          // second/third line within the cell instead of spilling.
+          'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2 border-r',
           !hasSettlements ? 'bg-muted' : ''
         )}
       >
@@ -47,11 +53,15 @@ function SettlementList({ month, tenantId, settlements, notes }) {
               return amount > 0 ? (
                 <div
                   key={`${tenantId}_${month}_${index}`}
-                  className="text-right"
+                  className="text-right min-w-[8rem] flex-shrink-0"
                 >
-                  <div>{moment(date).format('L')}</div>
-                  <div>{t(type[0].toUpperCase() + type.slice(1))}</div>
-                  <NumberFormat value={amount} withColor className="text-2xl" />
+                  <div className="text-xs text-muted-foreground">
+                    {moment(date).format('L')}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {t(type[0].toUpperCase() + type.slice(1))}
+                  </div>
+                  <NumberFormat value={amount} withColor className="text-lg" />
                 </div>
               ) : null;
             })

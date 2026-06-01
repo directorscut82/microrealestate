@@ -6,45 +6,44 @@ import {
   SelectValue
 } from '../ui/select';
 import {
-  PAYMENT_CATEGORIES,
   applyAllocation,
   autoSpreadAllocation
 } from '../../utils/paymentAllocation';
 import { Input } from '../ui/input';
 
-// Wave-25: human-readable label for each payment category. The values here
-// are the LITERAL English keys that exist in every locale's common.json —
-// next-translate uses string-keyed flat JSON, not dot-notation namespaces.
+// B1: localized labels for the line CATEGORY (when the line's own
+// description is generic or missing). Per-line `description` is the
+// preferred display; this is the fallback / category label.
 const CATEGORY_LABEL_KEY = {
   rent: 'Rent',
-  expenses: 'Building expenses',
-  repairs: 'Repairs',
+  propertyCharge: 'Property charge',
+  buildingCharge: 'Common expenses',
+  repair: 'Repair',
   vat: 'VAT',
   previousBalance: 'Previous balance',
   extracharge: 'Extra charge'
 };
 
 /**
- * Wave-25: per-payment allocation block. Three modes:
- *   - auto: payment auto-spreads oldest debt category first (server default)
- *   - specific: pick one category, full amount goes there
- *   - custom: per-category inputs, sum should equal payment amount
+ * B1: per-payment allocation block. Three modes:
+ *   - auto: payment auto-spreads oldest debt LINE first (server default).
+ *   - specific: pick one specific line, full amount goes there.
+ *   - custom: per-line inputs, sum should equal payment amount.
  *
- * The preview shows owed-before / owed-after for every category that has
- * a non-zero owed amount. Categories with zero owed are hidden (avoids
- * cluttering the table with rows that don't apply this month).
+ * The preview shows owed-before / owed-after for every owed line.
  *
  * Overpayment surfaces a "Credit to next month" line so the surplus is
  * visible, never silent.
  *
- * Extracted from PaymentTabs.js in round-3o so the parent stays under
- * 1000 lines and the allocation logic can be tested in isolation.
+ * Each line carries a stable `lineKey` that's persisted on
+ * payment.allocation[i].lineKey so the server can attribute payment
+ * back to the exact source array entry it pays.
  */
 export default function AllocationBlock({
   index,
   fieldKey,
   amount,
-  owed,
+  owedLines,
   state,
   onModeChange,
   onSpecificCategoryChange,
@@ -52,32 +51,55 @@ export default function AllocationBlock({
   t
 }) {
   const mode = state.mode || 'auto';
-  const specificCategory = state.specificCategory || '';
+  // In specific mode, state.specificCategory holds the chosen lineKey
+  // (kept the prop name for back-compat with PaymentTabs; the value
+  // semantically identifies a line, not a category enum).
+  const specificLineKey = state.specificCategory || '';
+  // Custom split: state.custom is keyed by lineKey -> amount string.
   const custom = state.custom || {};
 
-  // Build the working allocation array based on the active mode. This is
-  // what the preview applies to `owed` to render before/after columns.
-  let allocation = [];
-  if (mode === 'auto') {
-    allocation = autoSpreadAllocation(amount, owed);
-  } else if (mode === 'specific' && specificCategory) {
-    allocation = [{ category: specificCategory, amount }];
-  } else if (mode === 'custom') {
-    allocation = Object.entries(custom)
-      .map(([category, val]) => ({ category, amount: Number(val) || 0 }))
-      .filter((a) => a.amount > 0);
-  }
-
-  const { remaining, creditToNextMonth, remainingTotal } = applyAllocation(
-    owed,
-    allocation
+  // Lines with non-zero owed amount drive both the preview rows and the
+  // mode selectors. Only these are payable — zero-owed lines are hidden
+  // to avoid a clutter of nothing-to-allocate rows.
+  const payableLines = (owedLines || []).filter(
+    (l) => (Number(l?.amount) || 0) > 0.005
   );
 
-  // Visible categories: anything with a non-zero owed amount, OR being
+  // Build the working allocation array based on the active mode. This
+  // is what the preview applies to `payableLines` to render the
+  // before/after columns.
+  let allocation = [];
+  if (mode === 'auto') {
+    allocation = autoSpreadAllocation(amount, payableLines);
+  } else if (mode === 'specific' && specificLineKey) {
+    const line = payableLines.find((l) => l.lineKey === specificLineKey);
+    if (line) {
+      allocation = [
+        { category: line.category, lineKey: line.lineKey, amount }
+      ];
+    }
+  } else if (mode === 'custom') {
+    allocation = Object.entries(custom)
+      .map(([lineKey, val]) => {
+        const line = payableLines.find((l) => l.lineKey === lineKey);
+        if (!line) return null;
+        return {
+          category: line.category,
+          lineKey,
+          amount: Number(val) || 0
+        };
+      })
+      .filter((a) => a && a.amount > 0);
+  }
+
+  const { remainingLines, creditToNextMonth, remainingTotal } =
+    applyAllocation(payableLines, allocation);
+
+  // Visible lines: anything with a non-zero owed amount, OR being
   // explicitly allocated to in custom mode.
-  const visibleCats = PAYMENT_CATEGORIES.filter((c) => {
-    if ((Number(owed?.[c]) || 0) > 0) return true;
-    if (mode === 'custom' && Number(custom[c]) > 0) return true;
+  const visibleLines = payableLines.filter((l) => {
+    if (l.amount > 0.005) return true;
+    if (mode === 'custom' && Number(custom[l.lineKey]) > 0) return true;
     return false;
   });
 
@@ -86,6 +108,17 @@ export default function AllocationBlock({
     0
   );
   const customDelta = amount - customSum; // >0 = under-allocated, <0 = over
+
+  const owedTotal = payableLines.reduce(
+    (s, l) => s + (Number(l?.amount) || 0),
+    0
+  );
+
+  const lineLabel = (line) =>
+    line?.description?.trim() ||
+    (CATEGORY_LABEL_KEY[line?.category]
+      ? CATEGORY_LABEL_KEY[line.category]
+      : line?.category || '');
 
   return (
     <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-3">
@@ -127,22 +160,19 @@ export default function AllocationBlock({
             {mode === 'specific' && (
               <div className="mt-1">
                 <Select
-                  value={specificCategory}
+                  value={specificLineKey}
                   onValueChange={onSpecificCategoryChange}
                 >
                   <SelectTrigger
-                    className="max-w-xs"
+                    className="max-w-md"
                     data-cy={`allocSpecificCategory-${index}`}
                   >
                     <SelectValue placeholder={t('Select a category')} />
                   </SelectTrigger>
                   <SelectContent>
-                    {PAYMENT_CATEGORIES.filter(
-                      (c) => (Number(owed?.[c]) || 0) > 0
-                    ).map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {t(CATEGORY_LABEL_KEY[c])} (
-                        {(Number(owed?.[c]) || 0).toFixed(2)})
+                    {payableLines.map((l) => (
+                      <SelectItem key={l.lineKey} value={l.lineKey}>
+                        {lineLabel(l)} ({l.amount.toFixed(2)})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -166,23 +196,27 @@ export default function AllocationBlock({
             <div>{t('Custom split')}</div>
             {mode === 'custom' && (
               <div className="mt-2 space-y-2">
-                {visibleCats.map((c) => (
+                {visibleLines.map((l) => (
                   <div
-                    key={c}
+                    key={l.lineKey}
                     className="grid grid-cols-3 items-center gap-2 text-sm"
                   >
-                    <div>{t(CATEGORY_LABEL_KEY[c])}</div>
+                    <div className="truncate" title={lineLabel(l)}>
+                      {lineLabel(l)}
+                    </div>
                     <div className="text-muted-foreground tabular-nums">
-                      {t('owed')}: {(Number(owed?.[c]) || 0).toFixed(2)}
+                      {t('owed')}: {l.amount.toFixed(2)}
                     </div>
                     <Input
                       type="number"
                       step="0.01"
                       min="0"
                       placeholder="0.00"
-                      value={custom[c] ?? ''}
-                      onChange={(e) => onCustomAmountChange(c, e.target.value)}
-                      data-cy={`allocCustom-${index}-${c}`}
+                      value={custom[l.lineKey] ?? ''}
+                      onChange={(e) =>
+                        onCustomAmountChange(l.lineKey, e.target.value)
+                      }
+                      data-cy={`allocCustom-${index}-${l.lineKey}`}
                     />
                   </div>
                 ))}
@@ -213,14 +247,14 @@ export default function AllocationBlock({
         </label>
       </div>
 
-      {/* Preview: owed before / after for visible (non-zero owed) categories */}
+      {/* Preview: owed before / after for visible (non-zero owed) lines. */}
       <div className="bg-marble-tint/40 rounded-md p-3 space-y-1 text-sm">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">
           {t('Preview after this {{amount}} payment', {
             amount: amount.toFixed(2)
           })}
         </div>
-        {visibleCats.length === 0 ? (
+        {visibleLines.length === 0 ? (
           <div className="text-muted-foreground italic">
             {t('Nothing currently owed.')}
           </div>
@@ -234,13 +268,15 @@ export default function AllocationBlock({
               </tr>
             </thead>
             <tbody>
-              {visibleCats.map((c) => {
-                const before = Number(owed?.[c]) || 0;
-                const after = Number(remaining?.[c]) || 0;
+              {visibleLines.map((l, i) => {
+                const before = l.amount;
+                const after = Number(remainingLines?.[i]?.amount) || 0;
                 const delta = before - after;
                 return (
-                  <tr key={c}>
-                    <td>{t(CATEGORY_LABEL_KEY[c])}</td>
+                  <tr key={l.lineKey}>
+                    <td className="truncate max-w-[14rem]" title={lineLabel(l)}>
+                      {lineLabel(l)}
+                    </td>
                     <td className="text-right">{before.toFixed(2)}</td>
                     <td className="text-right">
                       {after.toFixed(2)}
@@ -255,9 +291,7 @@ export default function AllocationBlock({
               })}
               <tr className="border-t border-stone-line/60 font-medium">
                 <td>{t('Total')}</td>
-                <td className="text-right">
-                  {(Number(owed?.total) || 0).toFixed(2)}
-                </td>
+                <td className="text-right">{owedTotal.toFixed(2)}</td>
                 <td className="text-right">
                   {Number(remainingTotal).toFixed(2)}
                 </td>
