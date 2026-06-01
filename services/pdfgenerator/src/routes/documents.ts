@@ -331,9 +331,18 @@ export default function () {
         if (!tenant) {
           throw new ServiceError('tenant not found', 404);
         }
-        const termNumber = Number(term);
+        // Pre-flight: at least one rent in the requested term-prefix
+        // must exist. The data picker at pdfgenerator/data/index.js:47
+        // uses `String(rent.term).startsWith(term)`, so the same shape
+        // applies here — strict numeric equality would 404 every
+        // year-prefix request because rent.term is 10-digit
+        // YYYYMMDDHH while the year-of-invoices request passes the
+        // 4-digit YYYY prefix.
+        const termStr = String(term);
         const rents = (tenant as any).rents || [];
-        const hasTerm = rents.some((r: any) => Number(r.term) === termNumber);
+        const hasTerm = rents.some((r: any) =>
+          String(r.term).startsWith(termStr)
+        );
         if (!hasTerm) {
           throw new ServiceError('rent not found for term', 404);
         }

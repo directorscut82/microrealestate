@@ -136,47 +136,124 @@ function initialFormValues() {
 
 // Format a date string for display in the locked tile. Accepts both
 // DD/MM/YYYY (rent.payments persisted format) and ISO YYYY-MM-DD.
-// B1: render a payment's allocation breakdown as a compact
-// " (Rent 67 · Insurance 53)" string. Skips zero-amount entries.
-// Single-line case collapses to "(Rent)" without per-amount detail.
-// Resolves the allocation entry's lineKey back to the matching line in
-// `owedLines` so the saved-tile shows the actual line description
-// (e.g. "Επί του ενοικίου", "τεστε") instead of an enum label. Falls
-// back to the legacy category-label map for old payments without
-// lineKey.
-function _formatAllocation(allocation, t, owedLines) {
-  if (!Array.isArray(allocation) || allocation.length === 0) return '';
-  const legacyLabelMap = {
-    rent: 'Rent',
-    expenses: 'Building expenses',
-    repairs: 'Repairs',
-    propertyCharge: 'Property charge',
-    buildingCharge: 'Common expenses',
-    repair: 'Repair',
-    vat: 'VAT',
-    previousBalance: 'Previous balance',
-    extracharge: 'Extra charge'
-  };
-  const labelFor = (a) => {
-    if (a?.lineKey && Array.isArray(owedLines)) {
-      const line = owedLines.find((l) => l.lineKey === a.lineKey);
-      if (line?.description?.trim()) return line.description;
+// B1: per-allocation-entry display info. Each entry produces one
+// stacked bullet under the payment's amount/date/type line, formatted
+// as "Πληρωμή <category> (<source description if any>): <amount>".
+//
+// Resolution strategy for the parenthetical (<source description>):
+//   1. Decode the lineKey (preTax:i / charges:i / building:i) to read
+//      rent.preTaxAmounts[i] / rent.charges[i] / rent.buildingCharges[i]
+//      directly. Works whether or not the line is still in owedLines
+//      (which filters out fully-paid lines).
+//   2. If rent doesn't carry the source array entry, fall back to
+//      owedLines.find by lineKey.
+//   3. For scalar lineKeys (previousBalance / vat / extracharge),
+//      there is no source description — render no parenthetical.
+//
+// Building lines additionally include the type label (e.g. "Insurance")
+// after the description: "(τεστε — Ασφάλιση)".
+const _CATEGORY_LEAD_KEY = {
+  rent: 'Payment of rent',
+  propertyCharge: 'Payment of property charge',
+  buildingCharge: 'Payment of building charge',
+  repair: 'Payment of repair',
+  previousBalance: 'Payment of previous balance',
+  vat: 'Payment of VAT',
+  extracharge: 'Payment of extra charge',
+  // Legacy categories from pre-B1 payments (no lineKey). The
+  // "expenses" / "repairs" fall back to building-charge / repair.
+  expenses: 'Payment of building charge',
+  repairs: 'Payment of repair'
+};
+
+// Map `building:<type>` enum to a t-able localized label. Used for the
+// per-bullet parenthetical's type-suffix.
+const _BUILDING_TYPE_LABEL_KEY = {
+  heating: 'Heating',
+  elevator: 'Elevator',
+  cleaning: 'Cleaning',
+  water_common: 'Water',
+  electricity_common: 'Electricity',
+  insurance: 'Insurance',
+  management_fee: 'Management',
+  garden: 'Garden',
+  repairs_fund: 'Repairs fund',
+  pest_control: 'Pest control',
+  monthly_charge: 'Building charges',
+  other: 'Other',
+  repair: 'Repair'
+};
+
+function _resolveLineSource(allocationEntry, rent, owedLines) {
+  const lineKey = allocationEntry?.lineKey;
+  if (!lineKey) return { description: '', typeLabel: '' };
+  // First try the rent's underlying source arrays directly. Works for
+  // fully-paid lines that owedLines has filtered out.
+  if (rent) {
+    const preTaxMatch = lineKey.match(/^preTax:(\d+)$/);
+    if (preTaxMatch) {
+      const idx = Number(preTaxMatch[1]);
+      const entry = (rent.preTaxAmounts || [])[idx];
+      return { description: String(entry?.description || ''), typeLabel: '' };
     }
-    return t(legacyLabelMap[a.category] || a.category);
-  };
-  const nonZero = allocation.filter((a) => Number(a?.amount) > 0.005);
-  if (nonZero.length === 0) return '';
-  if (nonZero.length === 1) {
-    return ` (${labelFor(nonZero[0])})`;
+    const chargesMatch = lineKey.match(/^charges:(\d+)$/);
+    if (chargesMatch) {
+      const idx = Number(chargesMatch[1]);
+      const entry = (rent.charges || [])[idx];
+      return { description: String(entry?.description || ''), typeLabel: '' };
+    }
+    const buildingMatch = lineKey.match(/^building:(\d+)$/);
+    if (buildingMatch) {
+      const idx = Number(buildingMatch[1]);
+      const entry = (rent.buildingCharges || [])[idx];
+      return {
+        description: String(entry?.description || ''),
+        typeLabel: entry?.type ? String(entry.type) : ''
+      };
+    }
   }
-  const _fmtAmt = (n) => {
-    const num = Number(n) || 0;
-    return Number.isInteger(num) ? String(num) : num.toFixed(2);
-  };
-  const parts = nonZero.map(
-    (a) => `${labelFor(a)} ${_fmtAmt(a.amount)}`
+  // Fall back to owedLines (still useful when rent isn't in scope).
+  if (Array.isArray(owedLines)) {
+    const line = owedLines.find((l) => l.lineKey === lineKey);
+    if (line) {
+      return {
+        description: String(line.description || ''),
+        typeLabel: line.type ? String(line.type) : ''
+      };
+    }
+  }
+  return { description: '', typeLabel: '' };
+}
+
+function _allocationBullet(entry, t, rent, owedLines) {
+  const category = String(entry?.category || '');
+  const lead = t(_CATEGORY_LEAD_KEY[category] || 'Payment of rent');
+  const { description, typeLabel } = _resolveLineSource(
+    entry,
+    rent,
+    owedLines
   );
-  return ` (${parts.join(' · ')})`;
+  // Build parenthetical "(description — Type)" for non-scalar lines.
+  // Scalar lines (previousBalance/vat/extracharge) get no
+  // parenthetical because the lead text already carries the meaning.
+  const isScalar =
+    category === 'previousBalance' ||
+    category === 'vat' ||
+    category === 'extracharge';
+  let paren = '';
+  if (!isScalar) {
+    const localizedType = typeLabel
+      ? t(_BUILDING_TYPE_LABEL_KEY[typeLabel] || typeLabel)
+      : '';
+    if (description && localizedType) {
+      paren = ` (${description} — ${localizedType})`;
+    } else if (description) {
+      paren = ` (${description})`;
+    } else if (localizedType) {
+      paren = ` (${localizedType})`;
+    }
+  }
+  return { lead, paren };
 }
 
 function _formatDate(d) {
@@ -626,12 +703,6 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                           <div className="flex-1 min-w-0 text-sm">
                             <div className="font-medium">
                               <NumberFormat value={sp.amount} />
-                              {/* Wave-26 round-3r: allocation breakdown
-                                  inline so the saved tile says exactly
-                                  what the money paid for. */}
-                              <span className="text-ink-soft font-normal">
-                                {_formatAllocation(sp.allocation, t, owedLines)}
-                              </span>
                               <span className="text-ink-muted font-normal">
                                 {' · '}
                                 {_formatDate(sp.date)}
@@ -643,6 +714,43 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                                 {sp.reference ? ` · ${sp.reference}` : ''}
                               </span>
                             </div>
+                            {/* B1: stacked bullets — one per allocation
+                                entry. Each line reads
+                                "Πληρωμή <category> (<source description
+                                — type if building>): <amount>". Always
+                                rendered when allocation is present, even
+                                for single-entry allocations. */}
+                            {Array.isArray(sp.allocation) &&
+                            sp.allocation.length > 0 ? (
+                              <div className="mt-1 space-y-0.5 text-xs text-ink-soft">
+                                {sp.allocation
+                                  .filter(
+                                    (a) => Number(a?.amount) > 0.005
+                                  )
+                                  .map((a, ai) => {
+                                    const { lead, paren } =
+                                      _allocationBullet(a, t, rent, owedLines);
+                                    return (
+                                      <div
+                                        key={ai}
+                                        className="leading-snug"
+                                      >
+                                        <span className="text-ink-muted">
+                                          {'↳ '}
+                                        </span>
+                                        {lead}
+                                        {paren}
+                                        {': '}
+                                        <span className="tabular-nums">
+                                          <NumberFormat
+                                            value={Number(a.amount)}
+                                          />
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            ) : null}
                             {/* Wave-26 round-3j: surface per-payment
                                 note/discount/extra-charge attached to this
                                 saved tile, if any. */}
