@@ -316,7 +316,12 @@ export default function () {
         if (!OBJECT_ID_RE.test(String(tenantId))) {
           throw new ServiceError('invalid tenant id', 422);
         }
-        if (!/^\d{10}$/.test(String(term))) {
+        // Accept either a full 10-digit YYYYMMDDHH term (single-month
+        // invoice) or a 4-digit YYYY year (year-of-invoices). The data
+        // layer at services/pdfgenerator/data/index.js filters via
+        // `String(rent.term).startsWith(term)`, so a 4-digit prefix
+        // correctly selects every rent in that year.
+        if (!/^\d{4}(\d{6})?$/.test(String(term))) {
           throw new ServiceError('invalid term format', 422);
         }
         const tenant = await Collections.Tenant.findOne({
