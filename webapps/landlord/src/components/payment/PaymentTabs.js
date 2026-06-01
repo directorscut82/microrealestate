@@ -335,7 +335,7 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
       const _draftValues = values?.payments || [];
       for (const _draft of _draftValues) {
         if (!_draft?.date || Number(_draft?.amount) <= 0) continue;
-        const _parsed = moment(_draft.date, 'YYYY-MM-DD', true);
+        const _parsed = moment.utc(_draft.date, 'YYYY-MM-DD', true);
         if (
           _termFirstDay &&
           _termFirstDay.isValid() &&
