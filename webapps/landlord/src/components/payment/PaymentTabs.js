@@ -31,7 +31,7 @@ import ConfirmDialog from '../ConfirmDialog';
 import { cn } from '../../utils';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
-import { computeCategoryOwed } from '../../utils/paymentAllocation';
+import { computeOwedLines } from '../../utils/paymentAllocation';
 import AllocationBlock from './AllocationBlock';
 import SavedPaymentEditForm from './SavedPaymentEditForm';
 import { toast } from 'sonner';
@@ -136,32 +136,45 @@ function initialFormValues() {
 
 // Format a date string for display in the locked tile. Accepts both
 // DD/MM/YYYY (rent.payments persisted format) and ISO YYYY-MM-DD.
-// Wave-26 round-3r: render a payment's allocation breakdown as a
-// compact " (Rent 67 · Insurance 53)" string. Skips zero-amount
-// entries. Single-category case collapses to "(Rent)" without
-// per-amount detail. Caller-supplied `t` does the i18n.
-function _formatAllocation(allocation, t) {
+// B1: render a payment's allocation breakdown as a compact
+// " (Rent 67 · Insurance 53)" string. Skips zero-amount entries.
+// Single-line case collapses to "(Rent)" without per-amount detail.
+// Resolves the allocation entry's lineKey back to the matching line in
+// `owedLines` so the saved-tile shows the actual line description
+// (e.g. "Επί του ενοικίου", "τεστε") instead of an enum label. Falls
+// back to the legacy category-label map for old payments without
+// lineKey.
+function _formatAllocation(allocation, t, owedLines) {
   if (!Array.isArray(allocation) || allocation.length === 0) return '';
-  const labelMap = {
+  const legacyLabelMap = {
     rent: 'Rent',
     expenses: 'Building expenses',
     repairs: 'Repairs',
+    propertyCharge: 'Property charge',
+    buildingCharge: 'Common expenses',
+    repair: 'Repair',
     vat: 'VAT',
     previousBalance: 'Previous balance',
     extracharge: 'Extra charge'
   };
+  const labelFor = (a) => {
+    if (a?.lineKey && Array.isArray(owedLines)) {
+      const line = owedLines.find((l) => l.lineKey === a.lineKey);
+      if (line?.description?.trim()) return line.description;
+    }
+    return t(legacyLabelMap[a.category] || a.category);
+  };
   const nonZero = allocation.filter((a) => Number(a?.amount) > 0.005);
   if (nonZero.length === 0) return '';
   if (nonZero.length === 1) {
-    return ` (${t(labelMap[nonZero[0].category] || nonZero[0].category)})`;
+    return ` (${labelFor(nonZero[0])})`;
   }
   const _fmtAmt = (n) => {
     const num = Number(n) || 0;
     return Number.isInteger(num) ? String(num) : num.toFixed(2);
   };
   const parts = nonZero.map(
-    (a) =>
-      `${t(labelMap[a.category] || a.category)} ${_fmtAmt(a.amount)}`
+    (a) => `${labelFor(a)} ${_fmtAmt(a.amount)}`
   );
   return ` (${parts.join(' · ')})`;
 }
@@ -264,7 +277,7 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
       }
     }));
 
-  const owed = useMemo(() => computeCategoryOwed(rent), [rent]);
+  const owedLines = useMemo(() => computeOwedLines(rent), [rent]);
 
   const {
     register,
@@ -385,27 +398,44 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
             ? moment(payment.date).format('DD/MM/YYYY')
             : '';
           if (payment.type === 'cash') delete payment.reference;
-          // Wave-25: attach allocation if user picked a non-auto mode.
-          // allocState is keyed by useFieldArray field id; pull the
-          // id of the ORIGINAL field index (pre-filter) so the
-          // allocation lines up with the right user input.
+          // B1: per-line allocation. allocState's specificCategory and
+          // custom-keyed entries are LINE KEYS (e.g. 'preTax:0',
+          // 'charges:1', 'building:0', 'previousBalance', 'vat',
+          // 'extracharge'). Resolve each lineKey back to the owedLine
+          // so we can persist {category, lineKey, amount}. Server
+          // attributes by lineKey directly (no prorate).
           const fieldKey = fields[originalIdx]?.id;
           const aState = (fieldKey && allocState[fieldKey]) || {};
           const amt = Number(payment.amount) || 0;
+          const lineByKey = (k) =>
+            (owedLines || []).find((l) => l.lineKey === k);
           if (aState.mode === 'specific' && aState.specificCategory && amt > 0) {
-            payment.allocation = [
-              { category: aState.specificCategory, amount: amt }
-            ];
+            const line = lineByKey(aState.specificCategory);
+            if (line) {
+              payment.allocation = [
+                {
+                  category: line.category,
+                  lineKey: line.lineKey,
+                  amount: amt
+                }
+              ];
+            }
           } else if (aState.mode === 'custom' && aState.custom) {
             const allocation = Object.entries(aState.custom)
-              .map(([category, value]) => ({
-                category,
-                amount: Number(value) || 0
-              }))
-              .filter((a) => a.amount > 0);
+              .map(([lineKey, value]) => {
+                const line = lineByKey(lineKey);
+                if (!line) return null;
+                return {
+                  category: line.category,
+                  lineKey: line.lineKey,
+                  amount: Number(value) || 0
+                };
+              })
+              .filter((a) => a && a.amount > 0);
             if (allocation.length) payment.allocation = allocation;
           }
-          // mode === 'auto' (or unset): no allocation sent.
+          // mode === 'auto' (or unset): no allocation sent — server
+          // auto-spreads.
           return payment;
         });
       // savedPayments dates are already in DD/MM/YYYY (the persisted
@@ -600,7 +630,7 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                                   inline so the saved tile says exactly
                                   what the money paid for. */}
                               <span className="text-ink-soft font-normal">
-                                {_formatAllocation(sp.allocation, t)}
+                                {_formatAllocation(sp.allocation, t, owedLines)}
                               </span>
                               <span className="text-ink-muted font-normal">
                                 {' · '}
@@ -768,7 +798,7 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                     index={index}
                     fieldKey={field.id}
                     amount={Number(payments?.[index]?.amount) || 0}
-                    owed={owed}
+                    owedLines={owedLines}
                     state={allocState[field.id] || {}}
                     onModeChange={(mode) => _setAllocMode(field.id, mode)}
                     onSpecificCategoryChange={(cat) =>

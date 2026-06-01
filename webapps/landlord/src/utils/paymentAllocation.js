@@ -1,119 +1,159 @@
 /**
- * Wave-25: Per-category breakdown of what a tenant owes for a given rent.
- * Used by the PaymentTabs allocation UI to:
- *   - render the "owed before / owed after" preview
- *   - feed the default values when the user switches to Custom split
- *   - guide auto-spread allocation order (oldest categories first)
+ * B1: Per-line-item payment allocation.
  *
- * The category set is fixed and matches the server-side PAYMENT_CATEGORIES
- * enum in services/api/src/managers/rentmanager.ts. Keep them in sync.
+ * Each rent's owed amount is broken into LINE ITEMS that correspond to
+ * the underlying source arrays in rent.* (preTaxAmounts, charges,
+ * buildingCharges) plus the scalar carry-forward and settlement fields.
+ * The katavoli dialog renders one row per line so the user can pick
+ * exactly which entry a payment settles, instead of collapsing
+ * everything into 6 fixed buckets.
  *
- * Mapping from rent-pipeline fields to UI categories:
- *   rent              -> sum(rent.preTaxAmounts)
- *   expenses          -> sum(rent.charges) + sum(rent.buildingCharges where type !== 'repair')
- *   repairs           -> sum(rent.buildingCharges where type === 'repair')
- *   vat               -> rent.total.vat (or sum(rent.vats))
- *   previousBalance   -> Math.max(0, rent.balance)   // carry-in from prior term, debit only
- *   extracharge       -> sum(rent.debts)             // settlement-only debts; legacy debts treated same
+ * Mirrors services/api/src/managers/rentmanager.ts _computeOwedLines.
+ * Keep the two in sync.
  *
- * Note: the rent object the dialog sees is the frontdata-shaped rent
- * (services/api/src/managers/frontdata.ts). It exposes `balance`,
- * `totalAmount`, `discount`, `extracharge`, plus the raw arrays
- * `preTaxAmounts`, `charges`, `buildingCharges`, `debts`.
+ * Line shape:
+ *   {
+ *     category: 'rent' | 'propertyCharge' | 'buildingCharge' |
+ *               'repair' | 'vat' | 'previousBalance' | 'extracharge',
+ *     lineKey:  '<sourceArray>:<index>'
+ *               // 'preTax:0', 'charges:1', 'building:0',
+ *               // or 'previousBalance' / 'vat' / 'extracharge' (scalar)
+ *     description: string,
+ *     amount: number,
+ *     type?: string,         // present on building/repair lines
+ *     buildingName?: string  // present on building/repair lines
+ *   }
+ *
+ * Auto-spread order matches rentmanager.AUTO_SPREAD by virtue of the
+ * order in which computeOwedLines pushes entries:
+ *   previousBalance → rent → propertyCharge → buildingCharge →
+ *   repair → vat → extracharge.
  */
-
-export const PAYMENT_CATEGORIES = [
-  'rent',
-  'expenses',
-  'repairs',
-  'vat',
-  'previousBalance',
-  'extracharge'
-];
-
-/**
- * The order in which Auto-spread fills owed categories. Oldest debt classes
- * first so a partial payment closes the most-overdue obligations first.
- */
-export const AUTO_SPREAD_ORDER = [
-  'previousBalance',
-  'rent',
-  'expenses',
-  'repairs',
-  'vat',
-  'extracharge'
-];
 
 const _round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
- * Compute owed amounts per category for a single rent.
- *
- * Returns an object keyed by category, plus a `total` field that should
- * equal rent.totalAmount within rounding tolerance.
+ * Build the per-line owed list for a single rent. The frontdata-shaped
+ * rent (services/api/src/managers/frontdata.ts) is what arrives at the
+ * dialog — it exposes the same source arrays as the persisted shape
+ * (`preTaxAmounts`, `charges`, `buildingCharges`, `vats`, `debts`) plus
+ * the flattened totals (`balance`, `totalAmount`, `extracharge`,
+ * `discount`).
  */
-export function computeCategoryOwed(rent) {
-  if (!rent) {
-    return PAYMENT_CATEGORIES.reduce(
-      (acc, k) => ({ ...acc, [k]: 0 }),
-      { total: 0 }
-    );
+export function computeOwedLines(rent) {
+  if (!rent) return [];
+  const lines = [];
+
+  // Carry-forward from prior month — first in spread order.
+  const balance = Math.max(0, Number(rent?.balance) || 0);
+  if (balance > 0.005) {
+    lines.push({
+      category: 'previousBalance',
+      lineKey: 'previousBalance',
+      description: 'Previous balance',
+      amount: _round(balance)
+    });
   }
 
+  // Rent (preTaxAmounts) — typically one per property.
+  const preTax = Array.isArray(rent.preTaxAmounts) ? rent.preTaxAmounts : [];
+  preTax.forEach((p, i) => {
+    const amount = _round(Number(p?.amount) || 0);
+    if (amount <= 0.005) return;
+    lines.push({
+      category: 'rent',
+      lineKey: `preTax:${i}`,
+      description: String(p?.description || 'Rent'),
+      amount
+    });
+  });
+
+  // Property-level surcharges (rent.charges) — sourced from
+  // tenant.properties[].expenses[].title (e.g. "Επί του ενοικίου").
+  const charges = Array.isArray(rent.charges) ? rent.charges : [];
+  charges.forEach((c, i) => {
+    const amount = _round(Number(c?.amount) || 0);
+    if (amount <= 0.005) return;
+    lines.push({
+      category: 'propertyCharge',
+      lineKey: `charges:${i}`,
+      description: String(c?.description || 'Charge'),
+      amount
+    });
+  });
+
+  // Building charges — split by type. type !== 'repair' is κοινόχρηστα,
+  // type === 'repair' is επισκευές.
+  const buildingCharges = Array.isArray(rent.buildingCharges)
+    ? rent.buildingCharges
+    : [];
+  buildingCharges.forEach((c, i) => {
+    const amount = _round(Number(c?.amount) || 0);
+    if (amount <= 0.005) return;
+    const isRepair = c?.type === 'repair';
+    lines.push({
+      category: isRepair ? 'repair' : 'buildingCharge',
+      lineKey: `building:${i}`,
+      description: String(c?.description || 'Building charge'),
+      amount,
+      type: c?.type ? String(c.type) : undefined,
+      buildingName: c?.buildingName ? String(c.buildingName) : undefined
+    });
+  });
+
+  // VAT — aggregated scalar.
   const sumAmounts = (arr) =>
     Array.isArray(arr)
       ? arr.reduce((s, x) => s + (Number(x?.amount) || 0), 0)
       : 0;
+  const vat = _round(Number(rent?.vat) || sumAmounts(rent?.vats));
+  if (vat > 0.005) {
+    lines.push({
+      category: 'vat',
+      lineKey: 'vat',
+      description: 'VAT',
+      amount: vat
+    });
+  }
 
-  const preTaxRent = sumAmounts(rent.preTaxAmounts);
-  const propertyCharges = sumAmounts(rent.charges);
-  const buildingChargesAll = Array.isArray(rent.buildingCharges)
-    ? rent.buildingCharges
-    : [];
-  const repairCharges = buildingChargesAll
-    .filter((c) => c?.type === 'repair')
-    .reduce((s, c) => s + (Number(c.amount) || 0), 0);
-  const expenseBuildingCharges = buildingChargesAll
-    .filter((c) => c?.type !== 'repair')
-    .reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  // Extra charge — settlement-origin debts, aggregated scalar.
+  const extracharge = _round(
+    Number(rent?.extracharge) || sumAmounts(rent?.debts)
+  );
+  if (extracharge > 0.005) {
+    lines.push({
+      category: 'extracharge',
+      lineKey: 'extracharge',
+      description: 'Extra charge',
+      amount: extracharge
+    });
+  }
 
-  const owed = {
-    rent: _round(preTaxRent),
-    expenses: _round(propertyCharges + expenseBuildingCharges),
-    repairs: _round(repairCharges),
-    vat: _round(Number(rent?.vat) || sumAmounts(rent?.vats)),
-    previousBalance: _round(Math.max(0, Number(rent?.balance) || 0)),
-    extracharge: _round(Number(rent?.extracharge) || sumAmounts(rent?.debts))
-  };
-
-  return {
-    ...owed,
-    total: _round(
-      owed.rent +
-        owed.expenses +
-        owed.repairs +
-        owed.vat +
-        owed.previousBalance +
-        owed.extracharge
-    )
-  };
+  return lines;
 }
 
 /**
- * Auto-spread a payment amount across owed categories oldest-first.
- * Returns an allocation array suitable for Custom-split mode, useful as
- * the seed when the user switches modes.
+ * Auto-spread a payment amount across owed lines (oldest-first).
+ * Returns an allocation array suitable for persistence:
+ *   [{ category, lineKey, amount }, ...]
+ *
+ * `lines` MUST come from computeOwedLines — the input order is the
+ * spread order.
  */
-export function autoSpreadAllocation(amount, owed) {
+export function autoSpreadAllocation(amount, lines) {
   let remaining = _round(amount);
   const out = [];
-  for (const cat of AUTO_SPREAD_ORDER) {
+  for (const line of lines || []) {
     if (remaining <= 0) break;
-    const due = Number(owed?.[cat]) || 0;
+    const due = Number(line?.amount) || 0;
     if (due <= 0) continue;
     const apply = _round(Math.min(remaining, due));
     if (apply > 0) {
-      out.push({ category: cat, amount: apply });
+      out.push({
+        category: line.category,
+        lineKey: line.lineKey,
+        amount: apply
+      });
       remaining = _round(remaining - apply);
     }
   }
@@ -121,37 +161,66 @@ export function autoSpreadAllocation(amount, owed) {
 }
 
 /**
- * Apply an allocation array to an owed map. Returns the per-category owed
- * AFTER applying the allocation (clamped at 0; surplus per-category is
- * silently ignored — the dialog's preview should call this with a
- * validated allocation that doesn't over-pay any single category).
+ * Apply an allocation array to a line list. Returns:
+ *   - remainingLines: the same shape as `lines` with each line's
+ *     `amount` decremented by what was allocated to it (clamped at 0).
+ *   - creditToNextMonth: surplus when the allocation total exceeds the
+ *     sum of owed line amounts.
+ *   - remainingTotal: sum of remainingLines amounts.
  *
- * Also returns:
- *   - `creditToNextMonth`: the surplus when the payment exceeds total owed.
- *     (sum of (allocation amount - owed) clamped at 0; OR
- *      sum(allocation) - sum(owed) clamped at 0, whichever applies).
+ * Match strategy: prefer exact-match by lineKey; fall back to the
+ * first line of the same category for legacy {category, amount}
+ * allocations that don't carry a lineKey.
  */
-export function applyAllocation(owed, allocation) {
-  const remaining = { ...owed };
-  delete remaining.total;
+export function applyAllocation(lines, allocation) {
+  const remainingLines = (lines || []).map((l) => ({ ...l }));
   let allocSum = 0;
   for (const entry of allocation || []) {
-    if (!entry || !PAYMENT_CATEGORIES.includes(entry.category)) continue;
+    if (!entry) continue;
     const amt = Number(entry.amount) || 0;
+    if (amt <= 0) continue;
     allocSum += amt;
-    const cur = Number(remaining[entry.category]) || 0;
-    remaining[entry.category] = _round(Math.max(0, cur - amt));
+    let toApply = amt;
+    const ek = entry.lineKey;
+    const ec = entry.category;
+    for (const line of remainingLines) {
+      if (toApply <= 0.005) break;
+      if (line.amount <= 0.005) continue;
+      const matches = ek ? line.lineKey === ek : line.category === ec;
+      if (!matches) continue;
+      const take = _round(Math.min(toApply, line.amount));
+      line.amount = _round(line.amount - take);
+      toApply = _round(toApply - take);
+      if (ek) break;
+    }
   }
-  const owedTotal = PAYMENT_CATEGORIES.reduce(
-    (s, k) => s + (Number(owed?.[k]) || 0),
+  const owedTotal = (lines || []).reduce(
+    (s, l) => s + (Number(l?.amount) || 0),
     0
   );
   const creditToNextMonth = _round(Math.max(0, allocSum - owedTotal));
   const remainingTotal = _round(
-    PAYMENT_CATEGORIES.reduce(
-      (s, k) => s + (Number(remaining[k]) || 0),
-      0
-    )
+    remainingLines.reduce((s, l) => s + (Number(l?.amount) || 0), 0)
   );
-  return { remaining, creditToNextMonth, remainingTotal };
+  return { remainingLines, creditToNextMonth, remainingTotal };
 }
+
+/**
+ * Group the line list into the 4 top-level pie categories so the
+ * dialog can show grouped subtotals if needed:
+ *   enoikio: rent
+ *   epi-tou-enoikiou: propertyCharge
+ *   koinoxrhsta: buildingCharge (non-repair)
+ *   episkeues: repair
+ * vat / previousBalance / extracharge are NOT in the 4-category split
+ * (they sit alongside as their own concepts).
+ */
+export const TOP_CATEGORY_ORDER = [
+  'previousBalance',
+  'rent',
+  'propertyCharge',
+  'buildingCharge',
+  'repair',
+  'vat',
+  'extracharge'
+];
