@@ -5,7 +5,7 @@
     <div style="font-size: 9pt; color: #555; letter-spacing: 1pt;"><%= _.t(documentActor.role === 'manager' ? 'Property manager' : 'Owner') %></div>
     <h1><%= documentActor.name %></h1>
     <% if (documentActor.taxId) { %>
-        <div><%= _.t('Tenant tax id') %>: <%= documentActor.taxId %></div>
+        <div><%= _.t('Tax id') %>: <%= documentActor.taxId %></div>
     <% } %>
     <% if (documentActor.address) { %>
         <div>

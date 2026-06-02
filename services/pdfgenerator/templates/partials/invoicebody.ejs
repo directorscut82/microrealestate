@@ -80,11 +80,24 @@ function debtLabel(debt) {
   </tr>
 <% }); %>
 
+<% if (!rent._omitCharges) { %>
+  <% (rent.charges || []).forEach(function(charge) { %>
+    <tr class="item-row">
+      <td class="description"><%= _.t('Property charge') %><% if (charge.description) { %>  (<%= charge.description %>)<% } %></td>
+      <td class="txtAlignRight">1</td>
+      <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
+      <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
+    </tr>
+  <% }); %>
+<% } %>
+
 <%
   // rent.charges (Δαπάνη επί του ενοικίου / property surcharge) is
   // intentionally OMITTED from the receipt body — it is paid by the
-  // tenant to a third party, not received by the landlord.
-  var emptyRowCount = Math.max(0, 9 - rent.preTaxAmounts.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length);
+  // tenant to a third party, not received by the landlord. Rent-calls
+  // INCLUDE it so the rendered table sums to the headline grandTotal.
+  var chargesCount = !rent._omitCharges ? (rent.charges || []).length : 0;
+  var emptyRowCount = Math.max(0, 9 - rent.preTaxAmounts.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length - chargesCount);
   for (var idx=0; idx<emptyRowCount; idx++) {
 %>
   <tr class="item-row">
