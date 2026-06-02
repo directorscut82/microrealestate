@@ -4,9 +4,9 @@ import moment from 'moment';
 import path from 'path';
 import { Service } from '@microrealestate/common';
 
-export async function get(params) {
+export async function get(params, documentId = 'invoice') {
   const { TEMPLATES_DIRECTORY } = Service.getInstance().envConfig.getValues();
-  const data = await utils.getRentsData(params);
+  const data = await utils.getRentsData(params, documentId);
 
   if (!data || !data.tenant || !data.tenant.rents) {
     throw new Error(
