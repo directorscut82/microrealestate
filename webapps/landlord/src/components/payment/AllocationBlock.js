@@ -15,16 +15,17 @@ import {
   rentLineLabel
 } from '../../utils/lineLabels';
 import { Input } from '../ui/input';
+import useFormatNumber from '../../hooks/useFormatNumber';
 
-// Wave-26 round-3u: scalar-line labels (previousBalance / vat / extracharge)
-// where there is no per-line description to substitute in. For
-// rent / propertyCharge / buildingCharge / repair we delegate to the
-// shared lineLabels utility so the format matches the Πρόγραμμα row,
-// the saved-tile bullet paren, and the PDF body.
+// Wave-26 round-3u/3v: scalar-line labels (previousBalance / vat / extracharge)
+// where there is no per-line description to substitute in. We use the
+// "Payment of …" keys so the dropdown option, the custom-split row, the
+// preview Πριν/Μετά table, and the saved-tile bullet all render the same
+// localized phrase (e.g. 'Πληρωμή προηγούμενου υπολοίπου').
 const SCALAR_CATEGORY_LABEL_KEY = {
-  vat: 'VAT',
-  previousBalance: 'Previous balance',
-  extracharge: 'Extra charge'
+  vat: 'Payment of VAT',
+  previousBalance: 'Payment of previous balance',
+  extracharge: 'Payment of extra charge'
 };
 
 /**
@@ -53,6 +54,11 @@ export default function AllocationBlock({
   onCustomAmountChange,
   t
 }) {
+  // Wave-26 round-3v: locale-aware money formatter (el-GR → "1.234,56 €",
+  // en-* → "$1,234.56"). Replaces raw .toFixed(2) which printed dot-decimal
+  // numbers regardless of the org's locale.
+  const formatNumber = useFormatNumber();
+  const fmt = (n) => formatNumber(Number(n) || 0, 'currency', 2);
   const mode = state.mode || 'auto';
   // In specific mode, state.specificCategory holds the chosen lineKey
   // (kept the prop name for back-compat with PaymentTabs; the value
@@ -188,7 +194,7 @@ export default function AllocationBlock({
                   <SelectContent>
                     {payableLines.map((l) => (
                       <SelectItem key={l.lineKey} value={l.lineKey}>
-                        {lineLabel(l)} ({l.amount.toFixed(2)})
+                        {lineLabel(l)} ({fmt(l.amount)})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -221,7 +227,7 @@ export default function AllocationBlock({
                       {lineLabel(l)}
                     </div>
                     <div className="text-muted-foreground tabular-nums">
-                      {t('owed')}: {l.amount.toFixed(2)}
+                      {t('owed')}: {fmt(l.amount)}
                     </div>
                     <Input
                       type="number"
@@ -245,16 +251,16 @@ export default function AllocationBlock({
                         : 'text-destructive'
                   }`}
                 >
-                  {t('Allocated')}: {customSum.toFixed(2)} /{' '}
-                  {amount.toFixed(2)}
+                  {t('Allocated')}: {fmt(customSum)} /{' '}
+                  {fmt(amount)}
                   {Math.abs(customDelta) >= 0.005 &&
                     ' — ' +
                       (customDelta > 0
                         ? t('{{amount}} unallocated', {
-                            amount: customDelta.toFixed(2)
+                            amount: fmt(customDelta)
                           })
                         : t('{{amount}} over', {
-                            amount: (-customDelta).toFixed(2)
+                            amount: fmt(-customDelta)
                           }))}
                 </div>
               </div>
@@ -267,7 +273,7 @@ export default function AllocationBlock({
       <div className="bg-marble-tint/40 rounded-md p-3 space-y-1 text-sm">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">
           {t('Preview after this {{amount}} payment', {
-            amount: amount.toFixed(2)
+            amount: fmt(amount)
           })}
         </div>
         {visibleLines.length === 0 ? (
@@ -293,12 +299,12 @@ export default function AllocationBlock({
                     <td className="truncate max-w-[14rem]" title={lineLabel(l)}>
                       {lineLabel(l)}
                     </td>
-                    <td className="text-right">{before.toFixed(2)}</td>
+                    <td className="text-right">{fmt(before)}</td>
                     <td className="text-right">
-                      {after.toFixed(2)}
+                      {fmt(after)}
                       {delta > 0.005 && (
                         <span className="ml-1 text-xs text-olive">
-                          (-{delta.toFixed(2)})
+                          (-{fmt(delta)})
                         </span>
                       )}
                     </td>
@@ -307,9 +313,9 @@ export default function AllocationBlock({
               })}
               <tr className="border-t border-stone-line/60 font-medium">
                 <td>{t('Total')}</td>
-                <td className="text-right">{owedTotal.toFixed(2)}</td>
+                <td className="text-right">{fmt(owedTotal)}</td>
                 <td className="text-right">
-                  {Number(remainingTotal).toFixed(2)}
+                  {fmt(remainingTotal)}
                 </td>
               </tr>
             </tbody>
@@ -320,7 +326,7 @@ export default function AllocationBlock({
             className="text-xs text-blue-700 mt-2"
             data-cy={`allocCredit-${index}`}
           >
-            {t('Credit to next month')}: {creditToNextMonth.toFixed(2)}
+            {t('Credit to next month')}: {fmt(creditToNextMonth)}
           </div>
         )}
       </div>

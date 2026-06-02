@@ -189,6 +189,49 @@ const _BUILDING_TYPE_LABEL_KEY = {
 function _resolveLineSource(allocationEntry, rent, owedLines) {
   const lineKey = allocationEntry?.lineKey;
   if (!lineKey) {
+    // Wave-26 round-3v: legacy allocations (pre-B1) have no lineKey. Derive
+    // a best-effort source description from the rent's category arrays so
+    // the saved-tile bullet shows a meaningful paren instead of being blank.
+    // The legacy "expenses" bucket is ambiguous (could map to either
+    // rent.charges or rent.buildingCharges), so we leave its paren empty;
+    // its lead is already 'Πληρωμή χρέωσης' which is acceptable on its own.
+    const category = String(allocationEntry?.category || '');
+    if (rent) {
+      if (category === 'rent') {
+        const entry = (rent.preTaxAmounts || [])[0];
+        return {
+          description: String(entry?.description || ''),
+          typeLabel: '',
+          buildingName: ''
+        };
+      }
+      if (category === 'propertyCharge') {
+        const entry = (rent.charges || [])[0];
+        return {
+          description: String(entry?.description || ''),
+          typeLabel: '',
+          buildingName: ''
+        };
+      }
+      if (category === 'buildingCharge') {
+        const entry = (rent.buildingCharges || [])[0];
+        return {
+          description: String(entry?.description || ''),
+          typeLabel: entry?.type ? String(entry.type) : '',
+          buildingName: String(entry?.buildingName || '')
+        };
+      }
+      if (category === 'repair') {
+        const list = rent.buildingCharges || [];
+        const entry =
+          list.find((b) => String(b?.type || '') === 'repair') || list[0];
+        return {
+          description: String(entry?.description || ''),
+          typeLabel: entry?.type ? String(entry.type) : '',
+          buildingName: String(entry?.buildingName || '')
+        };
+      }
+    }
     return { description: '', typeLabel: '', buildingName: '' };
   }
   if (rent) {
