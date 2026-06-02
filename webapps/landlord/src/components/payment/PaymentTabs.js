@@ -160,9 +160,11 @@ const _CATEGORY_LEAD_KEY = {
   previousBalance: 'Payment of previous balance',
   vat: 'Payment of VAT',
   extracharge: 'Payment of extra charge',
-  // Legacy categories from pre-B1 payments (no lineKey). The
-  // "expenses" / "repairs" fall back to building-charge / repair.
-  expenses: 'Payment of building charge',
+  // Legacy pre-B1 payments (no lineKey). "expenses" used to be the
+  // catch-all bucket for both property-charge and building-charge,
+  // so we cannot infer which one the landlord intended. Render a
+  // generic lead instead of guessing.
+  expenses: 'Payment of charge',
   repairs: 'Payment of repair'
 };
 
@@ -186,21 +188,29 @@ const _BUILDING_TYPE_LABEL_KEY = {
 
 function _resolveLineSource(allocationEntry, rent, owedLines) {
   const lineKey = allocationEntry?.lineKey;
-  if (!lineKey) return { description: '', typeLabel: '' };
-  // First try the rent's underlying source arrays directly. Works for
-  // fully-paid lines that owedLines has filtered out.
+  if (!lineKey) {
+    return { description: '', typeLabel: '', buildingName: '' };
+  }
   if (rent) {
     const preTaxMatch = lineKey.match(/^preTax:(\d+)$/);
     if (preTaxMatch) {
       const idx = Number(preTaxMatch[1]);
       const entry = (rent.preTaxAmounts || [])[idx];
-      return { description: String(entry?.description || ''), typeLabel: '' };
+      return {
+        description: String(entry?.description || ''),
+        typeLabel: '',
+        buildingName: ''
+      };
     }
     const chargesMatch = lineKey.match(/^charges:(\d+)$/);
     if (chargesMatch) {
       const idx = Number(chargesMatch[1]);
       const entry = (rent.charges || [])[idx];
-      return { description: String(entry?.description || ''), typeLabel: '' };
+      return {
+        description: String(entry?.description || ''),
+        typeLabel: '',
+        buildingName: ''
+      };
     }
     const buildingMatch = lineKey.match(/^building:(\d+)$/);
     if (buildingMatch) {
@@ -208,52 +218,59 @@ function _resolveLineSource(allocationEntry, rent, owedLines) {
       const entry = (rent.buildingCharges || [])[idx];
       return {
         description: String(entry?.description || ''),
-        typeLabel: entry?.type ? String(entry.type) : ''
+        typeLabel: entry?.type ? String(entry.type) : '',
+        buildingName: String(entry?.buildingName || '')
       };
     }
   }
-  // Fall back to owedLines (still useful when rent isn't in scope).
   if (Array.isArray(owedLines)) {
     const line = owedLines.find((l) => l.lineKey === lineKey);
     if (line) {
       return {
         description: String(line.description || ''),
-        typeLabel: line.type ? String(line.type) : ''
+        typeLabel: line.type ? String(line.type) : '',
+        buildingName: String(line.buildingName || '')
       };
     }
   }
-  return { description: '', typeLabel: '' };
+  return { description: '', typeLabel: '', buildingName: '' };
 }
 
 function _allocationBullet(entry, t, rent, owedLines) {
   const category = String(entry?.category || '');
-  const lead = t(_CATEGORY_LEAD_KEY[category] || 'Payment of rent');
-  const { description, typeLabel } = _resolveLineSource(
+  const baseLead = t(_CATEGORY_LEAD_KEY[category] || 'Payment of rent');
+  const { description, typeLabel, buildingName } = _resolveLineSource(
     entry,
     rent,
     owedLines
   );
-  // Build parenthetical "(description — Type)" for non-scalar lines.
-  // Scalar lines (previousBalance/vat/extracharge) get no
-  // parenthetical because the lead text already carries the meaning.
   const isScalar =
     category === 'previousBalance' ||
     category === 'vat' ||
     category === 'extracharge';
-  let paren = '';
-  if (!isScalar) {
-    const localizedType = typeLabel
-      ? t(_BUILDING_TYPE_LABEL_KEY[typeLabel] || typeLabel)
-      : '';
-    if (description && localizedType) {
-      paren = ` (${description} — ${localizedType})`;
-    } else if (description) {
-      paren = ` (${description})`;
-    } else if (localizedType) {
-      paren = ` (${localizedType})`;
-    }
+  // Wave-26 round-3u: building/repair bullets — append the localized type
+  // label to the lead AND render the paren as `(<buildingName> - <description>)`,
+  // mirroring the row format on the Πρόγραμμα tile.
+  if (
+    !isScalar &&
+    (category === 'buildingCharge' || category === 'repair') &&
+    typeLabel
+  ) {
+    const typeKey = _BUILDING_TYPE_LABEL_KEY[typeLabel] || typeLabel;
+    const localizedType = t(typeKey);
+    const lead =
+      localizedType && localizedType !== typeKey
+        ? `${baseLead} - ${localizedType}`
+        : baseLead;
+    let paren = '';
+    if (buildingName && description) paren = ` (${buildingName} - ${description})`;
+    else if (buildingName) paren = ` (${buildingName})`;
+    else if (description) paren = ` (${description})`;
+    return { lead, paren };
   }
-  return { lead, paren };
+  let paren = '';
+  if (!isScalar && description) paren = ` (${description})`;
+  return { lead: baseLead, paren };
 }
 
 function _formatDate(d) {

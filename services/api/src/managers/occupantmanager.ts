@@ -271,65 +271,116 @@ async function _recomputeSiblingTenantsInBuildings(
   const siblings: AnyRecord[] = await Collections.Tenant.find(tenantFilter).lean();
   if (!siblings.length) return;
 
-  for (const tenantObj of siblings) {
-    if (!tenantObj.beginDate || !tenantObj.endDate) continue;
-    if (!tenantObj.properties?.length) continue;
-    const tenantPropIds = (tenantObj.properties as AnyRecord[])
-      .map((p) => p.propertyId)
-      .filter(Boolean);
-    if (!tenantPropIds.length) continue;
+  // Wave-26 round-3u: see buildingmanager._saveRecomputedRentsWithRetry.
+  // Sibling-tenant recompute used to do a blind updateOne, which races with
+  // concurrent payment PATCHes (rentmanager._updateByTerm) and overwrote
+  // the just-saved payment-derived state. Optimistic-concurrency retry
+  // closes the race; re-reading the tenant on each attempt ensures the
+  // recompute is based on the latest rent state including any racing
+  // payment write that won this round.
+  const SIBLING_MAX_ATTEMPTS = 5;
+  for (const tenantInitial of siblings) {
+    const initialId = String((tenantInitial as AnyRecord)._id);
+    let done = false;
+    for (let attempt = 1; attempt <= SIBLING_MAX_ATTEMPTS; attempt++) {
+      const fresh =
+        attempt === 1
+          ? tenantInitial
+          : ((await Collections.Tenant.findOne({ _id: initialId }).lean()) as AnyRecord | null);
+      if (!fresh) {
+        done = true;
+        break;
+      }
+      const tenantObj: AnyRecord = fresh;
+      if (!tenantObj.beginDate || !tenantObj.endDate) {
+        done = true;
+        break;
+      }
+      if (!tenantObj.properties?.length) {
+        done = true;
+        break;
+      }
+      const tenantPropIds = (tenantObj.properties as AnyRecord[])
+        .map((p) => p.propertyId)
+        .filter(Boolean);
+      if (!tenantPropIds.length) {
+        done = true;
+        break;
+      }
 
-    const props: any[] = await Collections.Property.find({
-      realmId,
-      _id: { $in: tenantPropIds }
-    }).lean();
-    const propMap = props.reduce((acc: AnyRecord, p: any) => {
-      acc[String(p._id)] = p;
-      return acc;
-    }, {});
-    (tenantObj.properties as AnyRecord[]).forEach((p) => {
-      p.property = propMap[String(p.propertyId)] || p.property;
-    });
-
-    const tenantBuildings: any[] = await Collections.Building.find({
-      realmId,
-      'units.propertyId': { $in: tenantPropIds }
-    }).lean();
-    await _attachTenantGroupsToBuildings(realmId, tenantBuildings);
-
-    try {
-      const termFrequency = tenantObj.frequency || 'months';
-      const contractIn = {
-        begin: tenantObj.beginDate,
-        end: tenantObj.endDate,
-        frequency: termFrequency,
-        terms: Math.ceil(
-          moment(tenantObj.endDate).diff(
-            moment(tenantObj.beginDate),
-            termFrequency as moment.unitOfTime.Diff,
-            true
-          )
-        ),
-        properties: tenantObj.properties,
-        buildings: tenantBuildings,
-        vatRate: tenantObj.vatRatio,
-        discount: tenantObj.discount,
-        rents: tenantObj.rents || []
-      };
-      const updated = Contract.update(contractIn as any, {
-        begin: tenantObj.beginDate,
-        end: tenantObj.endDate,
-        termination: tenantObj.terminationDate,
-        properties: tenantObj.properties,
-        frequency: termFrequency
+      const props: any[] = await Collections.Property.find({
+        realmId,
+        _id: { $in: tenantPropIds }
+      }).lean();
+      const propMap = props.reduce((acc: AnyRecord, p: any) => {
+        acc[String(p._id)] = p;
+        return acc;
+      }, {});
+      (tenantObj.properties as AnyRecord[]).forEach((p) => {
+        p.property = propMap[String(p.propertyId)] || p.property;
       });
-      await Collections.Tenant.updateOne(
-        { _id: tenantObj._id },
-        { rents: updated.rents }
-      );
-    } catch (error) {
+
+      const tenantBuildings: any[] = await Collections.Building.find({
+        realmId,
+        'units.propertyId': { $in: tenantPropIds }
+      }).lean();
+      await _attachTenantGroupsToBuildings(realmId, tenantBuildings);
+
+      try {
+        const termFrequency = tenantObj.frequency || 'months';
+        const contractIn = {
+          begin: tenantObj.beginDate,
+          end: tenantObj.endDate,
+          frequency: termFrequency,
+          terms: Math.ceil(
+            moment(tenantObj.endDate).diff(
+              moment(tenantObj.beginDate),
+              termFrequency as moment.unitOfTime.Diff,
+              true
+            )
+          ),
+          properties: tenantObj.properties,
+          buildings: tenantBuildings,
+          vatRate: tenantObj.vatRatio,
+          discount: tenantObj.discount,
+          rents: tenantObj.rents || []
+        };
+        const updated = Contract.update(contractIn as any, {
+          begin: tenantObj.beginDate,
+          end: tenantObj.endDate,
+          termination: tenantObj.terminationDate,
+          properties: tenantObj.properties,
+          frequency: termFrequency
+        });
+        const result = await Collections.Tenant.findOneAndUpdate(
+          { _id: tenantObj._id, __v: Number(tenantObj.__v) || 0 },
+          { $set: { rents: updated.rents }, $inc: { __v: 1 } },
+          { new: true }
+        ).lean();
+        if (result) {
+          done = true;
+          break;
+        }
+        const stillExists = await Collections.Tenant.findOne(
+          { _id: tenantObj._id },
+          { _id: 1 }
+        ).lean();
+        if (!stillExists) {
+          done = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 25 * attempt));
+      } catch (error) {
+        logger.error(
+          `sibling recompute failed for tenant ${tenantObj.name}: ${error}`
+        );
+        done = true;
+        break;
+      }
+    }
+    if (!done) {
       logger.error(
-        `sibling recompute failed for tenant ${tenantObj.name}: ${error}`
+        `sibling recompute failed for tenant ${initialId} after ${SIBLING_MAX_ATTEMPTS} version-conflict retries`
       );
     }
   }

@@ -1,3 +1,8 @@
+import {
+  buildingLineLabel,
+  chargeLineLabel,
+  rentLineLabel
+} from '../../utils/lineLabels';
 import { cn } from '../../utils';
 import NumberFormat from '../NumberFormat';
 import { Separator } from '../ui/separator';
@@ -14,6 +19,14 @@ export function getRentAmounts(rent) {
     absNewBalance: Math.abs(rent.newBalance),
     isDebitNewBalance: rent.newBalance < 0,
     additionalCosts: rent.extracharge,
+    // Wave-26 round-3u: NOTE — rentAmounts.rent here is the
+    // grandTotal-minus-balance "monthly amount" used by RentTable's
+    // tooltip total + cell. RentDetails (Πρόγραμμα tile) NO LONGER
+    // renders it as "Ενοίκιο" — that line was a double-count of the
+    // charges/buildingCharges that are also rendered as separate rows.
+    // The tile now iterates preTaxAmounts/charges/buildingCharges
+    // directly. This `rent` field is kept ONLY for the RentTable
+    // tooltip's "Total" row.
     rent: rent.totalWithoutBalanceAmount + rent.promo - rent.extracharge,
     discount: turnToNegative(rent.promo),
     payment: rent.payment,
@@ -37,9 +50,6 @@ export function RentAmount({
   withColor = true,
   className
 }) {
-  // Label and digits both at text-label size so the column reads as one
-  // tight stack instead of label-on-top-of-headline. Mono digits are
-  // optically wider than sans, which is why the visual gap looked off.
   return (
     <div className={cn('flex flex-col text-right min-w-0 leading-snug', className)}>
       <div className="text-label text-ink-muted truncate">{label}</div>
@@ -59,9 +69,12 @@ export default function RentDetails({ rent }) {
   const { t } = useTranslation('common');
 
   const rentAmounts = getRentAmounts(rent);
-  const hasBuildingCharges = rentAmounts.buildingCharges.length > 0;
-  const hasMultipleProperties = rentAmounts.preTaxAmounts.length > 1;
-  const hasCharges = rentAmounts.charges.length > 0;
+  const buildingNonRepair = rentAmounts.buildingCharges.filter(
+    (c) => c?.type !== 'repair'
+  );
+  const buildingRepair = rentAmounts.buildingCharges.filter(
+    (c) => c?.type === 'repair'
+  );
 
   return (
     <div className="flex flex-col gap-2">
@@ -77,53 +90,63 @@ export default function RentDetails({ rent }) {
           creditColor={!rentAmounts.isDebitBalance}
         />
       </div>
-      {hasMultipleProperties ? (
-        rentAmounts.preTaxAmounts.map((item, i) => (
-          <div key={i} className="flex justify-between text-sm">
-            <span className="text-muted-foreground">{item.description}</span>
-            <NumberFormat value={item.amount} />
-          </div>
-        ))
-      ) : (
-        <div className="flex justify-between">
-          {t('Rent')}
-          <NumberFormat value={rentAmounts.rent} />
+
+      {/* Wave-26 round-3u: per-line rent rows. Always iterate
+          preTaxAmounts[i] using the shared rentLineLabel rule. The prior
+          single-property branch was bundling charges + buildingCharges
+          into the "Ενοίκιο" row by reading rentAmounts.rent (which is
+          grandTotal − balance + promo − extracharge), then ALSO rendering
+          those same lines below — double-counting. */}
+      {rentAmounts.preTaxAmounts.map((item, i) => (
+        <div key={`r-${i}`} className="flex justify-between">
+          <span>{rentLineLabel(t, item)}</span>
+          <NumberFormat value={item.amount} />
         </div>
-      )}
-      {hasCharges && (
-        <>
-          {rentAmounts.charges.map((charge, i) => (
-            <div key={`c-${i}`} className="flex justify-between text-sm">
-              <span className="text-muted-foreground">
-                {charge.description}
-              </span>
-              <NumberFormat value={charge.amount} />
-            </div>
-          ))}
-        </>
-      )}
-      {hasBuildingCharges && (
+      ))}
+
+      {rentAmounts.charges.map((charge, i) => (
+        <div key={`c-${i}`} className="flex justify-between text-sm">
+          <span className="text-muted-foreground">
+            {chargeLineLabel(t, charge)}
+          </span>
+          <NumberFormat value={charge.amount} />
+        </div>
+      ))}
+
+      {buildingNonRepair.length > 0 && (
         <>
           <Separator />
           <div className="text-xs font-medium text-muted-foreground uppercase">
             {t('Building charges')}
           </div>
-          {rentAmounts.buildingCharges.map((charge, i) => (
+          {buildingNonRepair.map((charge, i) => (
             <div key={`bc-${i}`} className="flex justify-between text-sm">
               <span className="text-muted-foreground">
-                {charge.buildingName
-                  ? `${charge.buildingName} - ${charge.description}`
-                  : charge.description}
+                {buildingLineLabel(t, charge)}
               </span>
               <NumberFormat value={charge.amount} />
             </div>
           ))}
         </>
       )}
-      {/* Wave-26 round-3k: always surface Additional cost when non-zero
-          (was previously gated on no-multiple-properties && no-building-
-          charges, which silently hid extracharge for tenants with
-          multiple properties or building charges). */}
+
+      {buildingRepair.length > 0 && (
+        <>
+          <Separator />
+          <div className="text-xs font-medium text-muted-foreground uppercase">
+            {t('Repairs')}
+          </div>
+          {buildingRepair.map((charge, i) => (
+            <div key={`rp-${i}`} className="flex justify-between text-sm">
+              <span className="text-muted-foreground">
+                {buildingLineLabel(t, charge)}
+              </span>
+              <NumberFormat value={charge.amount} />
+            </div>
+          ))}
+        </>
+      )}
+
       {Number(rentAmounts.additionalCosts) > 0 && (
         <div className="flex justify-between text-oxide">
           {t('Additional cost')}

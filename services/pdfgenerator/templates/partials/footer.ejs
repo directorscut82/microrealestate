@@ -1,15 +1,5 @@
 <div class="footer">
-    <% if (landlord.isCompany) { %>
-        <%= _.t( !landlord.companyInfo.capital ?
-                    '{{companyName}}, {{legalStructure}} - EIN: {{ein}}' :
-                    '{{companyName}}, {{legalStructure}} - EIN: {{ein}} - capital of {{capital}}', {
-                companyName: landlord.name,
-                legalStructure: landlord.companyInfo.legalStructure,
-                ein: landlord.companyInfo.ein,
-                capital: _.formatNumber(landlord.companyInfo.capital, 'currency'),
-            })
-        %>
-    <% } else { %>
-        <%= landlord.name %>
-    <% } %>
+    <div><%= documentActor.name %><% if (documentActor.taxId) { %> — <%= _.t('Tenant tax id') %>: <%= documentActor.taxId %><% } %></div>
+    <div style="margin-top: 8mm; border-top: 1pt solid #555; width: 60mm;"></div>
+    <div style="font-size: 8pt;"><%= _.t('Signature') %></div>
 </div>
