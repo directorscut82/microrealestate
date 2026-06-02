@@ -9,16 +9,19 @@ import {
   applyAllocation,
   autoSpreadAllocation
 } from '../../utils/paymentAllocation';
+import {
+  buildingLineLabel,
+  chargeLineLabel,
+  rentLineLabel
+} from '../../utils/lineLabels';
 import { Input } from '../ui/input';
 
-// B1: localized labels for the line CATEGORY (when the line's own
-// description is generic or missing). Per-line `description` is the
-// preferred display; this is the fallback / category label.
-const CATEGORY_LABEL_KEY = {
-  rent: 'Rent',
-  propertyCharge: 'Property charge',
-  buildingCharge: 'Common expenses',
-  repair: 'Repair',
+// Wave-26 round-3u: scalar-line labels (previousBalance / vat / extracharge)
+// where there is no per-line description to substitute in. For
+// rent / propertyCharge / buildingCharge / repair we delegate to the
+// shared lineLabels utility so the format matches the Πρόγραμμα row,
+// the saved-tile bullet paren, and the PDF body.
+const SCALAR_CATEGORY_LABEL_KEY = {
   vat: 'VAT',
   previousBalance: 'Previous balance',
   extracharge: 'Extra charge'
@@ -114,11 +117,24 @@ export default function AllocationBlock({
     0
   );
 
-  const lineLabel = (line) =>
-    line?.description?.trim() ||
-    (CATEGORY_LABEL_KEY[line?.category]
-      ? CATEGORY_LABEL_KEY[line.category]
-      : line?.category || '');
+  // Wave-26 round-3u: route per-line labels through the shared rule so
+  // the dropdown options + Πριν/Μετά table match the Πρόγραμμα row and
+  // the saved-tile bullet paren exactly.
+  const lineLabel = (line) => {
+    if (!line) return '';
+    if (line.category === 'rent') return rentLineLabel(t, line);
+    if (line.category === 'propertyCharge') return chargeLineLabel(t, line);
+    if (line.category === 'buildingCharge' || line.category === 'repair') {
+      return buildingLineLabel(t, line);
+    }
+    // Scalar lines (vat / previousBalance / extracharge): use the
+    // localized category key. The line's `description` is empty by
+    // construction (paymentAllocation.computeOwedLines).
+    if (SCALAR_CATEGORY_LABEL_KEY[line.category]) {
+      return t(SCALAR_CATEGORY_LABEL_KEY[line.category]);
+    }
+    return line.description?.trim() || line.category || '';
+  };
 
   return (
     <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-3">

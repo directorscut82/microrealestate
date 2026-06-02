@@ -5,76 +5,92 @@
   <th><%= _.t('Total without VAT') %></th>
 </tr>
 
-<% rent.preTaxAmounts.forEach(function(preTaxAmount) { %>
-	<tr class="item-row">
-	  <td class="description">
-	  	<%= preTaxAmount.description %>
-	  </td>
-		<td class="txtAlignRight">1</td>
-	  <td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount, 'currency') %></td>
-		<td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount, 'currency') %></td>
-	</tr>
-<% }); %>
+<%
+// Building expense type → localized label key
+var BUILDING_TYPE_LABEL_KEY = {
+  heating: 'Heating',
+  elevator: 'Elevator',
+  cleaning: 'Cleaning',
+  water_common: 'Water',
+  electricity_common: 'Electricity',
+  insurance: 'Insurance',
+  management_fee: 'Management',
+  garden: 'Garden',
+  repairs_fund: 'Repairs fund',
+  pest_control: 'Pest control',
+  monthly_charge: 'Other',
+  other: 'Other',
+  repair: 'Repair'
+};
+function rentLabel(item) {
+  var d = (item && item.description ? String(item.description).trim() : '');
+  return d ? (_.t('Rent') + '  (' + d + ')') : _.t('Rent');
+}
+function buildingLabel(charge) {
+  var typeKey = BUILDING_TYPE_LABEL_KEY[charge.type] || 'Other';
+  var typeLabel = _.t(typeKey);
+  var d = (charge && charge.description ? String(charge.description).trim() : '');
+  var b = (charge && charge.buildingName ? String(charge.buildingName).trim() : '');
+  var paren;
+  if (b && d) paren = '(' + b + ' - ' + d + ')';
+  else if (b) paren = '(' + b + ')';
+  else if (d) paren = '(' + d + ')';
+  else paren = '';
+  return paren ? (typeLabel + '  ' + paren) : typeLabel;
+}
+function debtLabel(debt) {
+  var d = (debt && debt.description ? String(debt.description).trim() : '');
+  return d || _.t('Additional cost');
+}
+%>
 
-<% rent.charges.forEach(function(charge) { %>
-		<tr class="item-row">
-		  <td class="description">
-		  	<%= charge.description %>
-		  </td>
-			<td class="txtAlignRight">1</td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
-		</tr>
+<% rent.preTaxAmounts.forEach(function(preTaxAmount) { %>
+  <tr class="item-row">
+    <td class="description"><%= rentLabel(preTaxAmount) %></td>
+    <td class="txtAlignRight">1</td>
+    <td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount, 'currency') %></td>
+    <td class="txtAlignRight"><%= _.formatNumber(preTaxAmount.amount, 'currency') %></td>
+  </tr>
 <% }); %>
 
 <% (rent.buildingCharges || []).forEach(function(charge) { %>
-		<tr class="item-row">
-		  <td class="description">
-		  	<%= charge.buildingName ? charge.buildingName + ' - ' : '' %><%= charge.description %>
-		  </td>
-			<td class="txtAlignRight">1</td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
-			<td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
-		</tr>
+  <tr class="item-row">
+    <td class="description"><%= buildingLabel(charge) %></td>
+    <td class="txtAlignRight">1</td>
+    <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
+    <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
+  </tr>
 <% }); %>
 
 <% rent.discounts.forEach(function(discount) { %>
-	<tr class="item-row">
-	  <td class="description">
-			<%= discount.description %>
-	  </td>
-	  <td class="txtAlignRight">1</td>
-	  <td class="txtAlignRight">- <%= _.formatNumber(discount.amount, 'currency') %></td>
-		<td class="txtAlignRight">- <%= _.formatNumber(discount.amount, 'currency') %></td>
-	</tr>
+  <tr class="item-row">
+    <td class="description"><%= discount.description %></td>
+    <td class="txtAlignRight">1</td>
+    <td class="txtAlignRight">- <%= _.formatNumber(discount.amount, 'currency') %></td>
+    <td class="txtAlignRight">- <%= _.formatNumber(discount.amount, 'currency') %></td>
+  </tr>
 <% }); %>
 
 <% rent.debts.forEach(function(debt) { %>
-		<tr class="item-row">
-		  <td class="description">
-		  	<%= debt.description %>
-		  </td>
-			<td class="txtAlignRight">1</td>
-			<td class="txtAlignRight"><%= _.formatNumber(debt.amount, 'currency') %></td>
-			<td class="txtAlignRight"><%= _.formatNumber(debt.amount, 'currency') %></td>
-		</tr>
+  <tr class="item-row">
+    <td class="description"><%= debtLabel(debt) %></td>
+    <td class="txtAlignRight">1</td>
+    <td class="txtAlignRight"><%= _.formatNumber(debt.amount, 'currency') %></td>
+    <td class="txtAlignRight"><%= _.formatNumber(debt.amount, 'currency') %></td>
+  </tr>
 <% }); %>
 
 <%
-	// Pad the table to a consistent 9-row layout. If the invoice has
-	// MORE than 9 line items, render zero filler rows (Math.max guard);
-	// without this, emptyRowCount went negative and the for-loop's
-	// 0<negative condition silently produced zero iterations the same
-	// way, but a negative count was hidden math that could mask a real
-	// "items overflowed the layout" condition. Math.max makes the
-	// intent explicit.
-	var emptyRowCount = Math.max(0, 9 - rent.preTaxAmounts.length - rent.charges.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length);
-	for (var idx=0; idx<emptyRowCount; idx++) {
+  // rent.charges (Δαπάνη επί του ενοικίου / property surcharge) is
+  // intentionally OMITTED from the receipt body — it is paid by the
+  // tenant to a third party, not received by the landlord.
+  var emptyRowCount = Math.max(0, 9 - rent.preTaxAmounts.length - (rent.buildingCharges || []).length - rent.discounts.length - rent.debts.length);
+  for (var idx=0; idx<emptyRowCount; idx++) {
 %>
-	<tr class="item-row">
-		<td class="description">&nbsp;</td>
-		<td class="txtAlignRight">&nbsp;</td>
-		<td class="txtAlignRight">&nbsp;</td>
-		<td class="txtAlignRight">&nbsp;</td>
-	</tr>
+  <tr class="item-row">
+    <td class="description">&nbsp;</td>
+    <td class="txtAlignRight">&nbsp;</td>
+    <td class="txtAlignRight">&nbsp;</td>
+    <td class="txtAlignRight">&nbsp;</td>
+  </tr>
 <% } %>
