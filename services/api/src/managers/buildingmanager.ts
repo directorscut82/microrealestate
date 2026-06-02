@@ -165,22 +165,36 @@ function _findMemberIdByEmail(realm: any, email: string): string | undefined {
 // permanently inconsistent with the rent's input arrays (PRIFTI June 2026
 // drift incident). The retry loop reads tenant + buildings + properties
 // fresh on each attempt so the recompute uses the latest rent state.
-const RECOMPUTE_MAX_ATTEMPTS = 5;
+// Wave-26 round-3v: 5→8 attempts with EXPONENTIAL backoff. The original
+// linear "25 * attempt" budget peaked at 125ms — short enough that a slow
+// rentmanager._updateByTerm could exhaust all 5 retries before the racing
+// payment write committed. The new schedule (50, 100, 200, 400, 800, 800,
+// 800, 800 ms) gives ~3.95s of total wait before giving up, which covers
+// the worst observed payment-PATCH durations on NAS.
+const RECOMPUTE_MAX_ATTEMPTS = 8;
+
+function _recomputeBackoffMs(attempt: number): number {
+  return Math.min(50 * Math.pow(2, attempt - 1), 800);
+}
 
 async function _saveRecomputedRentsWithRetry(
+  realmId: string,
   tenantId: string,
   expectedVersion: number,
   newRents: any[]
 ): Promise<{ ok: true } | { ok: false; reason: 'conflict' | 'notfound' }> {
+  // realmId is part of the filter so a stale tenantId from a different
+  // realm can never get its rents overwritten by this realm's recompute.
+  // Same scoping discipline as the rest of the multi-tenant query layer.
   const result = await Collections.Tenant.findOneAndUpdate(
-    { _id: tenantId, __v: expectedVersion },
+    { _id: tenantId, realmId, __v: expectedVersion },
     { $set: { rents: newRents }, $inc: { __v: 1 } },
     { new: true }
   ).lean();
   if (!result) {
     // Distinguish: did the document disappear, or did __v move?
     const exists = await Collections.Tenant.findOne(
-      { _id: tenantId },
+      { _id: tenantId, realmId },
       { _id: 1 }
     ).lean();
     return { ok: false, reason: exists ? 'conflict' : 'notfound' };
@@ -264,6 +278,7 @@ async function _recomputeTenantsForProperty(
           frequency: termFrequency
         });
         const saveResult = await _saveRecomputedRentsWithRetry(
+          realmId,
           String(tenantObj._id),
           Number(tenantObj.__v) || 0,
           updated.rents
@@ -275,8 +290,8 @@ async function _recomputeTenantsForProperty(
           return;
         }
         if (saveResult.reason === 'notfound') return;
-        // conflict — backoff briefly so the racing writer can finish
-        await new Promise((r) => setTimeout(r, 25 * attempt));
+        // conflict — exponential backoff so the racing writer can finish
+        await new Promise((r) => setTimeout(r, _recomputeBackoffMs(attempt)));
       } catch (error) {
         logger.error(
           `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
@@ -285,7 +300,13 @@ async function _recomputeTenantsForProperty(
       }
     }
     logger.error(
-      `Failed to recompute rents for tenant ${tenantInitial._id} after ${RECOMPUTE_MAX_ATTEMPTS} version-conflict retries (property ${propertyId})`
+      `Failed to recompute rents for tenant after exhausting version-conflict retries (property scope)`,
+      {
+        tenantId: String(tenantInitial._id),
+        realmId,
+        propertyId,
+        finalAttempt: RECOMPUTE_MAX_ATTEMPTS
+      }
     );
   };
 
@@ -399,6 +420,7 @@ async function _recomputeTenantsForBuilding(
           frequency: termFrequency
         });
         const saveResult = await _saveRecomputedRentsWithRetry(
+          realmId,
           String(tenantObj._id),
           Number(tenantObj.__v) || 0,
           updated.rents
@@ -414,7 +436,7 @@ async function _recomputeTenantsForBuilding(
           saved = true;
           break;
         }
-        await new Promise((r) => setTimeout(r, 25 * attempt));
+        await new Promise((r) => setTimeout(r, _recomputeBackoffMs(attempt)));
       } catch (error) {
         logger.error(
           `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
@@ -425,7 +447,13 @@ async function _recomputeTenantsForBuilding(
     }
     if (!saved) {
       logger.error(
-        `Failed to recompute rents for tenant ${initialId} after ${RECOMPUTE_MAX_ATTEMPTS} version-conflict retries (building ${building._id})`
+        `Failed to recompute rents for tenant after exhausting version-conflict retries (building scope)`,
+        {
+          tenantId: initialId,
+          realmId,
+          buildingId: String(building._id),
+          finalAttempt: RECOMPUTE_MAX_ATTEMPTS
+        }
       );
     }
   }

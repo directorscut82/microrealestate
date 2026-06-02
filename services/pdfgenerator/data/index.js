@@ -1,8 +1,16 @@
 import { Collections, logger } from '@microrealestate/common';
 import moment from 'moment';
 
-export async function getRentsData(params) {
+export async function getRentsData(params, documentId) {
   const { id: tenantId, term, realmId } = params;
+  // Wave-26 round-3v: rent.charges (Δαπάνη επί του ενοικίου) is excluded
+  // from RECEIPTS (απόδειξη είσπραξης) — paid by the tenant to a third
+  // party, not received by the landlord — but MUST be included in
+  // rent-calls so the rendered subTotal sums to the headline grandTotal
+  // already shown in the limit line and the on-screen Πρόγραμμα tile.
+  // Default to invoice/receipt behavior (omit charges) when the caller
+  // does not pass a documentId, preserving the historical contract.
+  const omitCharges = documentId === 'invoice' || !documentId;
 
   // Realm-scope the query: callers MUST supply the realmId of the requester
   // so a session in one organization can never read a tenant from another.
@@ -51,10 +59,18 @@ export async function getRentsData(params) {
   }
 
   const landlord = dbTenant.realmId;
+  // Wave-26 round-3v: capture the realm slug name BEFORE clobbering it.
+  // When a realm is configured without companyInfo.name AND without any
+  // contact name, the previous code left landlord.name as '' and the PDF
+  // header rendered an empty <h1>. The realm document itself always has
+  // a name (the org slug — e.g. "landlord"), so fall back to that.
+  const realmSlugName = String(landlord?.name || '');
   landlord.name =
     (landlord.isCompany
       ? landlord.companyInfo?.name
-      : landlord.contacts?.[0]?.name) || '';
+      : landlord.contacts?.[0]?.name) ||
+    realmSlugName ||
+    '';
   landlord.hasCompanyInfo = !!landlord.companyInfo;
   landlord.hasBankInfo = !!landlord.bankInfo;
   landlord.hasAddress = !!landlord.addresses?.length;
@@ -70,23 +86,39 @@ export async function getRentsData(params) {
         billingReference: `${moment(rent.term, 'YYYYMMDDHH').format('MM_YY_')}${
           dbTenant.reference
         }`,
+        // Wave-26 round-3v: tell the shared invoicebody.ejs whether to
+        // render the rent.charges (property-surcharge) loop. Receipts
+        // omit it; rent-calls keep it so the line items sum to the
+        // headline grandTotal. The flag is consumed by invoicebody.ejs
+        // and also drives the empty-row filler math.
+        _omitCharges: omitCharges,
         total: (() => {
-          // Wave-26 round-3u: receipts (απόδειξη είσπραξης) exclude
-          // rent.charges (Δαπάνες επί του ενοικίου). Those are surcharges
-          // the tenant pays to a third party — not amounts the landlord
-          // collects on this receipt. The on-screen Πρόγραμμα tile keeps
-          // them, but the PDF body and totals must drop them.
+          // Wave-26 round-3v: subTotal MUST include rent.charges for
+          // rent-call documents so the rendered table sums to the
+          // headline rent.total.grandTotal already used in the limit
+          // line. For receipts, we keep the prior behavior and exclude
+          // rent.charges (third-party surcharge — not landlord income).
           const buildingChargesSum = (rent.buildingCharges || []).reduce(
+            (s, c) => s + (Number(c.amount) || 0),
+            0
+          );
+          const propertyChargesSum = (rent.charges || []).reduce(
             (s, c) => s + (Number(c.amount) || 0),
             0
           );
           const subTotal =
             (rent.total.preTaxAmount || 0) +
-            buildingChargesSum -
+            buildingChargesSum +
+            (omitCharges ? 0 : propertyChargesSum) -
             (rent.total.discount || 0) +
             (rent.total.debts || 0);
-          const invoiceGrandTotal =
-            Math.round((subTotal + (rent.total.balance || 0)) * 100) / 100;
+          // Receipt headline = subTotal + previous balance (the landlord
+          // perspective). Rent-call headline = the rent's own grandTotal
+          // already computed by the businesslogic pipeline so the PDF
+          // matches the rest of the app exactly.
+          const invoiceGrandTotal = omitCharges
+            ? Math.round((subTotal + (rent.total.balance || 0)) * 100) / 100
+            : Math.round((rent.total.grandTotal || 0) * 100) / 100;
           return {
             ...rent.total,
             payment: rent.total.payment || 0,
