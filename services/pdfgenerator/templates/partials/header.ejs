@@ -1,31 +1,38 @@
 <div class="logo">
-    <img src="<%= logoUrl %>">
-    <h1><%= landlord.name %></h1>
-    <% if(landlord.hasAddress) { -%>
-        <div >
-            <%= landlord.addresses[0].street1 %>
-            <% if (landlord.addresses[0].street2) { %>
-                <br><%= landlord.addresses[0].street2 %>
+    <% if (typeof logoUrl !== 'undefined' && logoUrl) { %>
+        <img src="<%= logoUrl %>">
+    <% } %>
+    <div style="font-size: 9pt; color: #555; letter-spacing: 1pt;"><%= _.t(documentActor.role === 'manager' ? 'Property manager' : 'Owner') %></div>
+    <h1><%= documentActor.name %></h1>
+    <% if (documentActor.taxId) { %>
+        <div><%= _.t('Tenant tax id') %>: <%= documentActor.taxId %></div>
+    <% } %>
+    <% if (documentActor.address) { %>
+        <div>
+            <% if (documentActor.address.street1) { %>
+                <%= documentActor.address.street1 %>
             <% } %>
-            <br><%= landlord.addresses[0].zipCode %> <%= landlord.addresses[0].city %>
-            <% if (landlord.addresses[0].state) { %>
-                <br><%= landlord.addresses[0].state %>
+            <% if (documentActor.address.street2) { %>
+                <br><%= documentActor.address.street2 %>
             <% } %>
-            <% if (landlord.addresses[0].country) { %>
-                <br><%= landlord.addresses[0].country %>
+            <% if (documentActor.address.zipCode || documentActor.address.city) { %>
+                <br><%= documentActor.address.zipCode || '' %> <%= documentActor.address.city || '' %>
+            <% } %>
+            <% if (documentActor.address.state) { %>
+                <br><%= documentActor.address.state %>
+            <% } %>
+            <% if (documentActor.address.country) { %>
+                <br><%= documentActor.address.country %>
             <% } %>
         </div>
-    <% } -%>
-    <% for (contact in landlord.contacts) { %>
+    <% } %>
+    <% if (documentActor.phone || documentActor.email) { %>
         <div class="contact">
-            <% if (contact.phone1) { %>
-                <%= _.t('Phone: {{phone}}', { phone: contact.phone1 }) %><br>
+            <% if (documentActor.phone) { %>
+                <%= _.t('Phone: {{phone}}', { phone: documentActor.phone }) %><br>
             <% } %>
-            <% if (contact.phone2) { %>
-                <%= _.t('Phone: {{phone}}', { phone: contact.phone2 }) %><br>
-            <% } %>
-            <% if (contact.email) { %>
-                <%= _.t('Email: {{email}}', { email: contact.email }) %><br>
+            <% if (documentActor.email) { %>
+                <%= _.t('Email: {{email}}', { email: documentActor.email }) %><br>
             <% } %>
         </div>
     <% } %>

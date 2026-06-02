@@ -1,3 +1,8 @@
+import {
+  buildingLineLabel,
+  chargeLineLabel,
+  rentLineLabel
+} from '../../utils/lineLabels';
 import { getRentAmounts, RentAmount } from './RentDetails';
 import { LuHistory, LuPaperclip, LuZap } from 'react-icons/lu';
 import { useCallback, useContext, useMemo, useState } from 'react';
@@ -98,8 +103,6 @@ function MonthlyBreakdown({ rentAmounts }) {
   const hasMultiple = rentAmounts.preTaxAmounts.length > 1;
   const hasCharges = rentAmounts.charges.length > 0;
   const hasBuildingCharges = rentAmounts.buildingCharges.length > 0;
-  // Wave-26 round-3k: also show discount + extracharge lines so all
-  // contributors to the rent total are visible in one hover.
   const hasDiscount = Number(rentAmounts.discount) < 0;
   const hasExtra = Number(rentAmounts.additionalCosts) > 0;
 
@@ -118,7 +121,7 @@ function MonthlyBreakdown({ rentAmounts }) {
       {rentAmounts.preTaxAmounts.map((item, i) => (
         <div key={`r-${i}`} className="flex justify-between gap-4">
           <span className="text-muted-foreground truncate">
-            {hasMultiple ? item.description : t('Rent')}
+            {rentLineLabel(t, item)}
           </span>
           <NumberFormat value={item.amount} className="whitespace-nowrap" />
         </div>
@@ -126,7 +129,7 @@ function MonthlyBreakdown({ rentAmounts }) {
       {hasCharges && rentAmounts.charges.map((charge, i) => (
         <div key={`c-${i}`} className="flex justify-between gap-4">
           <span className="text-muted-foreground truncate">
-            {charge.description || t('Extra charges')}
+            {chargeLineLabel(t, charge)}
           </span>
           <NumberFormat value={charge.amount} className="whitespace-nowrap" />
         </div>
@@ -134,9 +137,7 @@ function MonthlyBreakdown({ rentAmounts }) {
       {hasBuildingCharges && rentAmounts.buildingCharges.map((charge, i) => (
         <div key={`b-${i}`} className="flex justify-between gap-4">
           <span className="text-muted-foreground truncate">
-            {charge.buildingName
-              ? `${charge.buildingName} - ${charge.description}`
-              : charge.description}
+            {buildingLineLabel(t, charge)}
           </span>
           <NumberFormat value={charge.amount} className="whitespace-nowrap" />
         </div>
@@ -330,10 +331,15 @@ function StatusDot({ rent }) {
 
 function StatusLegend({ actionsRight }) {
   const { t } = useTranslation('common');
+  // Wave-26 round-3u: dedicated keys for the rent-status pill labels.
+  // The plain "Paid" / "Partial" / "Owed" keys are used elsewhere in
+  // the app (KPI tiles, tooltips) where the bare noun fits — but on
+  // the per-rent-row pill we want adjectives ("Εξοφλημένο" not
+  // "Εισπράξεις") so the label describes the rent's STATE.
   const items = [
-    { key: 'paid', label: t('Paid') },
-    { key: 'partial', label: t('Partial') },
-    { key: 'owed', label: t('Owed') },
+    { key: 'paid', label: t('Rent paid') },
+    { key: 'partial', label: t('Rent partial') },
+    { key: 'owed', label: t('Rent owed') },
     { key: 'none', label: t('No charge') }
   ];
   return (

@@ -31,6 +31,25 @@ export async function getRentsData(params) {
     throw new Error(`tenant ${tenantId} not found`);
   }
 
+  // Wave-26 round-3u: pull the building doc(s) for the tenant's properties
+  // so the receipt header can prefer the building.manager (διαχειριστής)
+  // over the realm (ιδιοκτήτης) when present. The Property schema carries
+  // buildingId, but populate() didn't reach into Building. Fetch separately.
+  const propertyBuildingIds = (dbTenant.properties || [])
+    .map((p) => p?.propertyId?.buildingId)
+    .filter(Boolean)
+    .map((id) => String(id));
+  let firstBuilding = null;
+  if (propertyBuildingIds.length) {
+    try {
+      firstBuilding = await Collections.Building.findOne({
+        _id: propertyBuildingIds[0]
+      }).lean();
+    } catch (error) {
+      logger.error(error);
+    }
+  }
+
   const landlord = dbTenant.realmId;
   landlord.name =
     (landlord.isCompany
@@ -51,25 +70,41 @@ export async function getRentsData(params) {
         billingReference: `${moment(rent.term, 'YYYYMMDDHH').format('MM_YY_')}${
           dbTenant.reference
         }`,
-        total: {
-          ...rent.total,
-          payment: rent.total.payment || 0,
-          // subTotal must include EVERY pre-VAT line, including
-          // buildingCharges (κοινόχρηστα). Was previously omitted; the
-          // PDF's "subTotal" then disagreed with the visible grandTotal
-          // by the buildingCharges amount, confusing tenants who tried
-          // to verify the math themselves.
-          subTotal:
-            rent.total.preTaxAmount +
-            rent.total.charges +
-            (rent.buildingCharges || []).reduce(
-              (s, c) => s + (Number(c.amount) || 0),
-              0
-            ) -
-            rent.total.discount +
-            rent.total.debts,
-          newBalance: rent.total.grandTotal - rent.total.payment
-        }
+        total: (() => {
+          // Wave-26 round-3u: receipts (απόδειξη είσπραξης) exclude
+          // rent.charges (Δαπάνες επί του ενοικίου). Those are surcharges
+          // the tenant pays to a third party — not amounts the landlord
+          // collects on this receipt. The on-screen Πρόγραμμα tile keeps
+          // them, but the PDF body and totals must drop them.
+          const buildingChargesSum = (rent.buildingCharges || []).reduce(
+            (s, c) => s + (Number(c.amount) || 0),
+            0
+          );
+          const subTotal =
+            (rent.total.preTaxAmount || 0) +
+            buildingChargesSum -
+            (rent.total.discount || 0) +
+            (rent.total.debts || 0);
+          const invoiceGrandTotal =
+            Math.round((subTotal + (rent.total.balance || 0)) * 100) / 100;
+          return {
+            ...rent.total,
+            payment: rent.total.payment || 0,
+            subTotal: Math.round(subTotal * 100) / 100,
+            invoiceGrandTotal,
+            newBalance: invoiceGrandTotal - (rent.total.payment || 0)
+          };
+        })(),
+        // Property address line for the customer-reference table
+        // (Διεύθυνση μισθίου). First property only — multi-property
+        // tenants get the first one rendered; the table is a single row.
+        propertyAddress: (() => {
+          const addr = dbTenant.properties?.[0]?.propertyId?.address;
+          if (!addr) return '';
+          return [addr.street1, addr.zipCode, addr.city]
+            .filter(Boolean)
+            .join(', ');
+        })()
       }));
   }
 
@@ -87,13 +122,17 @@ export async function getRentsData(params) {
       vatNumber: dbTenant.taxId,
       legalRepresentative: dbTenant.manager
     },
+    // Wave-26 round-3u: expose tenant.contacts so the receipt's tenant
+     // block can render phone1/phone2/email under the ΑΦΜ line.
+    contacts: dbTenant.contacts || [],
     addresses: [
       {
         street1: dbTenant.street1,
         street2: dbTenant.street2,
         city: dbTenant.city,
         state: dbTenant.state,
-        country: dbTenant.country
+        country: dbTenant.country,
+        zipCode: dbTenant.zipCode || ''
       }
     ],
     contract: {
@@ -124,10 +163,37 @@ export async function getRentsData(params) {
       .slice(0, 100);
   const fileName = `${sanitize(dbTenant.name)}-${term}`;
 
+  // Wave-26 round-3u: documentActor — the issuer rendered in the receipt's
+  // header + footer. Priority: building.manager (διαχειριστής) when ANY of
+  // its fields is present; else the realm (ιδιοκτήτης). Empty fields stay
+  // empty — there is no implicit fallback to admin user info.
+  const buildDocumentActor = () => {
+    const m = firstBuilding?.manager;
+    if (m && (m.name || m.taxId || m.phone || m.email || m.company)) {
+      return {
+        role: 'manager',
+        name: m.name || m.company || '',
+        taxId: m.taxId || '',
+        phone: m.phone || '',
+        email: m.email || '',
+        address: null
+      };
+    }
+    return {
+      role: 'owner',
+      name: landlord.name,
+      taxId: landlord.companyInfo?.vatNumber || '',
+      phone: landlord.contacts?.[0]?.phone1 || '',
+      email: landlord.contacts?.[0]?.email || '',
+      address: landlord.addresses?.[0] || null
+    };
+  };
+
   return {
     fileName,
     tenant,
-    landlord
+    landlord,
+    documentActor: buildDocumentActor()
   };
 }
 

@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import { EmptyIllustration } from '../Illustrations';
@@ -6,9 +7,52 @@ import { GrDocumentCsv } from 'react-icons/gr';
 import { LuPaperclip } from 'react-icons/lu';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
+import { useState } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
 const months = moment.localeData().months();
+
+// Wave-26 round-3u: per-month receipt picker. Renders a Button that
+// opens a popover with 12 month buttons; selecting a month invokes the
+// caller's onPick(monthNumber) which builds the 10-digit term and
+// downloads the single-page PDF.
+function ReceiptMonthPicker({ onPick, t }) {
+  const [open, setOpen] = useState(false);
+  const localeMonths = moment.localeData().months();
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal>
+      <PopoverTrigger asChild>
+        <Button variant="secondary" className="flex items-center gap-1">
+          <LuPaperclip /> {t('Receipt')}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-2" align="end">
+        <div className="text-xs text-muted-foreground px-2 py-1 mb-1">
+          {t('Receipt')}
+        </div>
+        <div className="grid grid-cols-3 gap-1">
+          {localeMonths.map((monthName, idx) => {
+            const month = idx + 1;
+            return (
+              <Button
+                key={month}
+                variant="ghost"
+                size="sm"
+                className="text-xs h-8"
+                onClick={() => {
+                  onPick(month);
+                  setOpen(false);
+                }}
+              >
+                {monthName.slice(0, 3)}
+              </Button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 function SettlementList({ month, tenantId, settlements, notes }) {
   const { t } = useTranslation('common');
@@ -108,16 +152,17 @@ export default function TenantSettlements({
           >
             <div className="flex justify-between text-xl px-2">
               <div>{settlement.tenant}</div>
-              <Button
-                variant="secondary"
-                className="flex items-center gap-1"
-                onClick={onDownloadYearInvoices({
+              {/* Wave-26 round-3u: per-month receipt picker. Opens a
+                  popover dropdown with one button per month of the
+                  current accounting year; clicking a month downloads
+                  a single-page receipt for that term. */}
+              <ReceiptMonthPicker
+                onPick={onDownloadYearInvoices({
                   _id: settlement.tenantId,
                   name: settlement.tenant
                 })}
-              >
-                <LuPaperclip /> {t('Invoices')}
-              </Button>
+                t={t}
+              />
             </div>
             <div className="text-muted-foreground mb-2">
               {moment(settlement.beginDate).format('L')} -{' '}
