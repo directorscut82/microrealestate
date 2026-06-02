@@ -300,7 +300,7 @@ async function _recomputeTenantsForProperty(
       }
     }
     logger.error(
-      `Failed to recompute rents for tenant after exhausting version-conflict retries (property scope)`,
+      'Failed to recompute rents for tenant after exhausting version-conflict retries (property scope)',
       {
         tenantId: String(tenantInitial._id),
         realmId,
@@ -447,7 +447,7 @@ async function _recomputeTenantsForBuilding(
     }
     if (!saved) {
       logger.error(
-        `Failed to recompute rents for tenant after exhausting version-conflict retries (building scope)`,
+        'Failed to recompute rents for tenant after exhausting version-conflict retries (building scope)',
         {
           tenantId: initialId,
           realmId,
