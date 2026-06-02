@@ -278,7 +278,12 @@ async function _recomputeSiblingTenantsInBuildings(
   // closes the race; re-reading the tenant on each attempt ensures the
   // recompute is based on the latest rent state including any racing
   // payment write that won this round.
-  const SIBLING_MAX_ATTEMPTS = 5;
+  // Wave-26 round-3v: 5→8 with exponential backoff. See buildingmanager
+  // for the rationale — short linear backoff exhausted before slow racing
+  // writes committed, leaving total.grandTotal permanently inconsistent.
+  const SIBLING_MAX_ATTEMPTS = 8;
+  const siblingBackoffMs = (attempt: number) =>
+    Math.min(50 * Math.pow(2, attempt - 1), 800);
   for (const tenantInitial of siblings) {
     const initialId = String((tenantInitial as AnyRecord)._id);
     let done = false;
@@ -352,8 +357,11 @@ async function _recomputeSiblingTenantsInBuildings(
           properties: tenantObj.properties,
           frequency: termFrequency
         });
+        // Wave-26 round-3v: realmId added to the filter and the existence
+        // re-read so a stale tenantId from another realm cannot be touched
+        // by this realm's sibling-recompute.
         const result = await Collections.Tenant.findOneAndUpdate(
-          { _id: tenantObj._id, __v: Number(tenantObj.__v) || 0 },
+          { _id: tenantObj._id, realmId, __v: Number(tenantObj.__v) || 0 },
           { $set: { rents: updated.rents }, $inc: { __v: 1 } },
           { new: true }
         ).lean();
@@ -362,14 +370,14 @@ async function _recomputeSiblingTenantsInBuildings(
           break;
         }
         const stillExists = await Collections.Tenant.findOne(
-          { _id: tenantObj._id },
+          { _id: tenantObj._id, realmId },
           { _id: 1 }
         ).lean();
         if (!stillExists) {
           done = true;
           break;
         }
-        await new Promise((r) => setTimeout(r, 25 * attempt));
+        await new Promise((r) => setTimeout(r, siblingBackoffMs(attempt)));
       } catch (error) {
         logger.error(
           `sibling recompute failed for tenant ${tenantObj.name}: ${error}`
@@ -380,7 +388,12 @@ async function _recomputeSiblingTenantsInBuildings(
     }
     if (!done) {
       logger.error(
-        `sibling recompute failed for tenant ${initialId} after ${SIBLING_MAX_ATTEMPTS} version-conflict retries`
+        `sibling recompute failed for tenant after exhausting version-conflict retries`,
+        {
+          tenantId: initialId,
+          realmId,
+          finalAttempt: SIBLING_MAX_ATTEMPTS
+        }
       );
     }
   }
