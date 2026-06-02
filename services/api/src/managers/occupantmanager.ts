@@ -388,7 +388,7 @@ async function _recomputeSiblingTenantsInBuildings(
     }
     if (!done) {
       logger.error(
-        `sibling recompute failed for tenant after exhausting version-conflict retries`,
+        'sibling recompute failed for tenant after exhausting version-conflict retries',
         {
           tenantId: initialId,
           realmId,
