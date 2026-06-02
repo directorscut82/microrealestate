@@ -1,17 +1,34 @@
 <div class="customer">
+	<div style="font-size: 9pt; color: #555; letter-spacing: 1pt;"><%= _.t('Tenant') %></div>
 	<h3><%= tenant.name %></h3>
-	<% if (tenant.isCompany) { %>
-		<%= tenant.companyInfo.legalRepresentative %>
+	<% if (tenant.companyInfo && tenant.companyInfo.vatNumber) { %>
+		<%= _.t('Tenant tax id') %>: <%= tenant.companyInfo.vatNumber %><br>
 	<% } %>
-	<br><%= tenant.addresses[0].street1 %>
-	<% if (tenant.addresses[0].street2) { %>
-    	<br><%= tenant.addresses[0].street2 %>
-    <% } %>
-	<br><%= tenant.addresses[0].zipCode %> <%= tenant.addresses[0].city %>
-	<% if (tenant.addresses[0].state) { %>
-		<br><%= tenant.addresses[0].state %>
+	<% if (tenant.isCompany && tenant.companyInfo && tenant.companyInfo.legalRepresentative) { %>
+		<%= tenant.companyInfo.legalRepresentative %><br>
 	<% } %>
-	<% if (tenant.addresses[0].country) { %>
-		<br><%= tenant.addresses[0].country %>
+	<% if (tenant.contacts && tenant.contacts[0]) { %>
+		<% if (tenant.contacts[0].phone1) { %>
+			<%= _.t('Phone: {{phone}}', { phone: tenant.contacts[0].phone1 }) %><br>
+		<% } %>
+		<% if (tenant.contacts[0].phone2) { %>
+			<%= _.t('Phone: {{phone}}', { phone: tenant.contacts[0].phone2 }) %><br>
+		<% } %>
+		<% if (tenant.contacts[0].email) { %>
+			<%= _.t('Email: {{email}}', { email: tenant.contacts[0].email }) %><br>
+		<% } %>
+	<% } %>
+	<% if (tenant.addresses && tenant.addresses[0] && tenant.addresses[0].street1) { %>
+		<%= tenant.addresses[0].street1 %>
+		<% if (tenant.addresses[0].street2) { %>
+			<br><%= tenant.addresses[0].street2 %>
+		<% } %>
+		<br><%= tenant.addresses[0].zipCode %> <%= tenant.addresses[0].city %>
+		<% if (tenant.addresses[0].state) { %>
+			<br><%= tenant.addresses[0].state %>
+		<% } %>
+		<% if (tenant.addresses[0].country) { %>
+			<br><%= tenant.addresses[0].country %>
+		<% } %>
 	<% } %>
 </div>

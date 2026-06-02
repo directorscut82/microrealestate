@@ -115,11 +115,17 @@ function Accounting() {
     [t, year]
   );
 
+  // Wave-26 round-3u: per-month receipt download. The popover gives the
+  // user one button per month of the current accounting year; clicking
+  // a month fetches a single-page PDF via /documents/invoice/<tid>/<term>.
+  // The backend regex `^\d{4}(\d{6})?$` already accepts a 10-digit term.
   const getYearInvoices = useCallback(
-    (tenant) => () => {
+    (tenant) => (month) => {
+      const mm = String(month).padStart(2, '0');
+      const term = `${year}${mm}0100`;
       downloadDocument({
-        endpoint: `/documents/invoice/${tenant._id}/${year}`,
-        documentName: `${tenant.name}-${year}-${t('invoice')}.pdf`
+        endpoint: `/documents/invoice/${tenant._id}/${term}`,
+        documentName: `${tenant.name}-${year}${mm}-${t('receipt')}.pdf`
       });
     },
     [year, t]

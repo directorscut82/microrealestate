@@ -155,6 +155,39 @@ function _findMemberIdByEmail(realm: any, email: string): string | undefined {
   return member ? String(member._id) : undefined;
 }
 
+// Wave-26 round-3u: optimistic-concurrency wrapper for the rent-recompute
+// writes triggered by building expense / property edits. Without this,
+// _recomputeTenantsForBuilding / _recomputeTenantsForProperty would do
+// `Tenant.updateOne({_id}, {rents: ...})` blindly. If a concurrent payment
+// PATCH (rentmanager._updateByTerm) was running on the same tenant, the
+// recompute write would overwrite the just-saved payment-derived state
+// with a snapshot taken before the payment landed — leaving total.grandTotal
+// permanently inconsistent with the rent's input arrays (PRIFTI June 2026
+// drift incident). The retry loop reads tenant + buildings + properties
+// fresh on each attempt so the recompute uses the latest rent state.
+const RECOMPUTE_MAX_ATTEMPTS = 5;
+
+async function _saveRecomputedRentsWithRetry(
+  tenantId: string,
+  expectedVersion: number,
+  newRents: any[]
+): Promise<{ ok: true } | { ok: false; reason: 'conflict' | 'notfound' }> {
+  const result = await Collections.Tenant.findOneAndUpdate(
+    { _id: tenantId, __v: expectedVersion },
+    { $set: { rents: newRents }, $inc: { __v: 1 } },
+    { new: true }
+  ).lean();
+  if (!result) {
+    // Distinguish: did the document disappear, or did __v move?
+    const exists = await Collections.Tenant.findOne(
+      { _id: tenantId },
+      { _id: 1 }
+    ).lean();
+    return { ok: false, reason: exists ? 'conflict' : 'notfound' };
+  }
+  return { ok: true };
+}
+
 async function _recomputeTenantsForProperty(
   realmId: string,
   propertyId: string
@@ -165,79 +198,95 @@ async function _recomputeTenantsForProperty(
   });
   if (!tenants.length) return;
 
-  const recomputeOne = async (tenant: any) => {
-    const tenantObj: any = tenant.toObject();
-    if (!tenantObj.beginDate || !tenantObj.endDate) {
-      // A tenant without lease dates can't have rents recomputed (the
-      // contract pipeline needs them). Silently skipping makes orphaned
-      // tenants invisible to operators. Surface as a warning so the data
-      // gap is detectable in logs.
-      logger.warn(
-        `_recomputeTenantsForProperty: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
-      );
-      return;
-    }
-    if (!tenantObj.properties?.length) return;
-    const propertyIds = tenantObj.properties
-      .map((p: any) => p.propertyId)
-      .filter(Boolean);
-    const properties = await Collections.Property.find({
-      realmId,
-      _id: { $in: propertyIds }
-    }).lean();
-    const propMap = properties.reduce((acc: any, p: any) => {
-      acc[String(p._id)] = p;
-      return acc;
-    }, {});
-    tenantObj.properties.forEach((p: any) => {
-      p.property = propMap[String(p.propertyId)] || p.property;
-    });
-    const buildings: CollectionTypes.Building[] =
-      (await Collections.Building.find({
+  const recomputeOne = async (tenantInitial: any) => {
+    for (let attempt = 1; attempt <= RECOMPUTE_MAX_ATTEMPTS; attempt++) {
+      // Re-read the tenant on every attempt so the recompute is based on
+      // the latest rent state (in particular, latest payments). Without the
+      // re-read, attempt N would keep producing the same stale rents[] and
+      // every retry would lose the same race.
+      const fresh =
+        attempt === 1
+          ? tenantInitial
+          : await Collections.Tenant.findOne({ _id: tenantInitial._id });
+      if (!fresh) return;
+      const tenantObj: any = fresh.toObject ? fresh.toObject() : fresh;
+      if (!tenantObj.beginDate || !tenantObj.endDate) {
+        logger.warn(
+          `_recomputeTenantsForProperty: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
+        );
+        return;
+      }
+      if (!tenantObj.properties?.length) return;
+      const propertyIds = tenantObj.properties
+        .map((p: any) => p.propertyId)
+        .filter(Boolean);
+      const properties = await Collections.Property.find({
         realmId,
-        'units.propertyId': { $in: propertyIds }
-      }).lean()) as CollectionTypes.Building[];
-    // Wave-17 B1: attach tenant groups so "equal" allocation divides by
-    // unique tenants (not units) and emits one line per tenant/expense.
-    await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
-    try {
-      const termFrequency = tenantObj.frequency || 'months';
-      const contract = {
-        begin: tenantObj.beginDate,
-        end: tenantObj.endDate,
-        frequency: termFrequency,
-        terms: Math.ceil(
-          moment(tenantObj.endDate).diff(
-            moment(tenantObj.beginDate),
-            termFrequency as moment.unitOfTime.Diff,
-            true
-          )
-        ),
-        properties: tenantObj.properties,
-        buildings,
-        vatRate: tenantObj.vatRatio,
-        discount: tenantObj.discount,
-        rents: tenantObj.rents || []
-      };
-      const updated = Contract.update(contract, {
-        begin: tenantObj.beginDate,
-        end: tenantObj.endDate,
-        termination: tenantObj.terminationDate,
-        properties: tenantObj.properties,
-        frequency: termFrequency
+        _id: { $in: propertyIds }
+      }).lean();
+      const propMap = properties.reduce((acc: any, p: any) => {
+        acc[String(p._id)] = p;
+        return acc;
+      }, {});
+      tenantObj.properties.forEach((p: any) => {
+        p.property = propMap[String(p.propertyId)] || p.property;
       });
-      await Collections.Tenant.updateOne(
-        { _id: tenant._id },
-        { rents: updated.rents }
-      );
-      logger.info(
-        `Recomputed rents for tenant ${tenantObj.name} (property ${propertyId})`
-      );
-    } catch (error) {
-      logger.error(
-        `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
-      );
+      const buildings: CollectionTypes.Building[] =
+        (await Collections.Building.find({
+          realmId,
+          'units.propertyId': { $in: propertyIds }
+        }).lean()) as CollectionTypes.Building[];
+      await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
+      try {
+        const termFrequency = tenantObj.frequency || 'months';
+        const contract = {
+          begin: tenantObj.beginDate,
+          end: tenantObj.endDate,
+          frequency: termFrequency,
+          terms: Math.ceil(
+            moment(tenantObj.endDate).diff(
+              moment(tenantObj.beginDate),
+              termFrequency as moment.unitOfTime.Diff,
+              true
+            )
+          ),
+          properties: tenantObj.properties,
+          buildings,
+          vatRate: tenantObj.vatRatio,
+          discount: tenantObj.discount,
+          rents: tenantObj.rents || []
+        };
+        const updated = Contract.update(contract, {
+          begin: tenantObj.beginDate,
+          end: tenantObj.endDate,
+          termination: tenantObj.terminationDate,
+          properties: tenantObj.properties,
+          frequency: termFrequency
+        });
+        const saveResult = await _saveRecomputedRentsWithRetry(
+          String(tenantObj._id),
+          Number(tenantObj.__v) || 0,
+          updated.rents
+        );
+        if (saveResult.ok) {
+          logger.info(
+            `Recomputed rents for tenant ${tenantObj.name} (property ${propertyId})`
+          );
+          return;
+        }
+        if (saveResult.reason === 'notfound') return;
+        // conflict — backoff briefly so the racing writer can finish
+        await new Promise((r) => setTimeout(r, 25 * attempt));
+      } catch (error) {
+        logger.error(
+          `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+        );
+        return;
+      }
     }
+    logger.error(
+      `Failed to recompute rents for tenant ${tenantInitial._id} after ${RECOMPUTE_MAX_ATTEMPTS} version-conflict retries (property ${propertyId})`
+    );
   };
 
   await Promise.all(tenants.map(recomputeOne));
@@ -276,74 +325,107 @@ async function _recomputeTenantsForBuilding(
     unique.push(t);
   }
 
-  for (const tenantObj of unique) {
-    if (!tenantObj.beginDate || !tenantObj.endDate) {
-      // See _recomputeTenantsForProperty: surface orphaned tenants via
-      // logs instead of silently dropping them from the recompute set.
-      logger.warn(
-        `_recomputeTenantsForBuilding: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
-      );
-      continue;
-    }
-    if (!tenantObj.properties?.length) continue;
-    const tenantPropIds = tenantObj.properties
-      .map((p: any) => p.propertyId)
-      .filter(Boolean);
-    const properties = await Collections.Property.find({
-      realmId,
-      _id: { $in: tenantPropIds }
-    }).lean();
-    const propMap = properties.reduce((acc: any, p: any) => {
-      acc[String(p._id)] = p;
-      return acc;
-    }, {});
-    tenantObj.properties.forEach((p: any) => {
-      p.property = propMap[String(p.propertyId)] || p.property;
-    });
-    const buildings: CollectionTypes.Building[] =
-      (await Collections.Building.find({
+  for (const tenantInitial of unique) {
+    const initialId = String((tenantInitial as any)._id);
+    let saved = false;
+    for (let attempt = 1; attempt <= RECOMPUTE_MAX_ATTEMPTS; attempt++) {
+      // Re-read the tenant on every attempt so the recompute is based on
+      // the latest rent state (esp. latest payments). Without this re-read
+      // a __v conflict retry would just re-emit the same stale rents[].
+      const fresh =
+        attempt === 1
+          ? tenantInitial
+          : (await Collections.Tenant.findOne({ _id: initialId }).lean()) as any;
+      if (!fresh) {
+        saved = true;
+        break;
+      }
+      const tenantObj: any = fresh;
+      if (!tenantObj.beginDate || !tenantObj.endDate) {
+        logger.warn(
+          `_recomputeTenantsForBuilding: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
+        );
+        saved = true;
+        break;
+      }
+      if (!tenantObj.properties?.length) {
+        saved = true;
+        break;
+      }
+      const tenantPropIds = tenantObj.properties
+        .map((p: any) => p.propertyId)
+        .filter(Boolean);
+      const properties = await Collections.Property.find({
         realmId,
-        'units.propertyId': { $in: tenantPropIds }
-      }).lean()) as CollectionTypes.Building[];
-    // Wave-17 B1: attach tenant groups so "equal" allocation divides by
-    // unique tenants (not units) and emits one line per tenant/expense.
-    await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
-    try {
-      const termFrequency = tenantObj.frequency || 'months';
-      const contract = {
-        begin: tenantObj.beginDate,
-        end: tenantObj.endDate,
-        frequency: termFrequency,
-        terms: Math.ceil(
-          moment(tenantObj.endDate).diff(
-            moment(tenantObj.beginDate),
-            termFrequency as moment.unitOfTime.Diff,
-            true
-          )
-        ),
-        properties: tenantObj.properties,
-        buildings,
-        vatRate: tenantObj.vatRatio,
-        discount: tenantObj.discount,
-        rents: tenantObj.rents || []
-      };
-      const updated = Contract.update(contract, {
-        begin: tenantObj.beginDate,
-        end: tenantObj.endDate,
-        termination: tenantObj.terminationDate,
-        properties: tenantObj.properties,
-        frequency: termFrequency
+        _id: { $in: tenantPropIds }
+      }).lean();
+      const propMap = properties.reduce((acc: any, p: any) => {
+        acc[String(p._id)] = p;
+        return acc;
+      }, {});
+      tenantObj.properties.forEach((p: any) => {
+        p.property = propMap[String(p.propertyId)] || p.property;
       });
-      await Collections.Tenant.updateOne(
-        { _id: tenantObj._id },
-        { rents: updated.rents }
-      );
-      logger.info(
-        `Recomputed rents for tenant ${tenantObj.name} (building ${building._id})`
-      );
-    } catch (error) {
+      const buildings: CollectionTypes.Building[] =
+        (await Collections.Building.find({
+          realmId,
+          'units.propertyId': { $in: tenantPropIds }
+        }).lean()) as CollectionTypes.Building[];
+      await _attachTenantGroupsToBuildings(realmId, buildings as any[]);
+      try {
+        const termFrequency = tenantObj.frequency || 'months';
+        const contract = {
+          begin: tenantObj.beginDate,
+          end: tenantObj.endDate,
+          frequency: termFrequency,
+          terms: Math.ceil(
+            moment(tenantObj.endDate).diff(
+              moment(tenantObj.beginDate),
+              termFrequency as moment.unitOfTime.Diff,
+              true
+            )
+          ),
+          properties: tenantObj.properties,
+          buildings,
+          vatRate: tenantObj.vatRatio,
+          discount: tenantObj.discount,
+          rents: tenantObj.rents || []
+        };
+        const updated = Contract.update(contract, {
+          begin: tenantObj.beginDate,
+          end: tenantObj.endDate,
+          termination: tenantObj.terminationDate,
+          properties: tenantObj.properties,
+          frequency: termFrequency
+        });
+        const saveResult = await _saveRecomputedRentsWithRetry(
+          String(tenantObj._id),
+          Number(tenantObj.__v) || 0,
+          updated.rents
+        );
+        if (saveResult.ok) {
+          logger.info(
+            `Recomputed rents for tenant ${tenantObj.name} (building ${building._id})`
+          );
+          saved = true;
+          break;
+        }
+        if (saveResult.reason === 'notfound') {
+          saved = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 25 * attempt));
+      } catch (error) {
+        logger.error(
+          `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+        );
+        saved = true;
+        break;
+      }
+    }
+    if (!saved) {
       logger.error(
-        `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+        `Failed to recompute rents for tenant ${initialId} after ${RECOMPUTE_MAX_ATTEMPTS} version-conflict retries (building ${building._id})`
       );
     }
   }

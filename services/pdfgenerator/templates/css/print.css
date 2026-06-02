@@ -131,7 +131,6 @@ span.error {
   color: #333;
   font-weight: bold;
   font-size: 14pt;
-  text-transform: uppercase;
   letter-spacing: 2pt;
 }
 .title .invoice {
