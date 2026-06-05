@@ -39,8 +39,15 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
       .filter((p: any) => p.buildingId)
       .map((p: any) => String(p.buildingId))
   )];
+  // Defense-in-depth: realm-scope the building lookup. property.buildingId
+  // is server-controlled but a tampered or stale id pointing at another
+  // realm's building would otherwise leak that building's name into the
+  // properties listing.
   const buildings = buildingIds.length
-    ? await Collections.Building.find({ _id: { $in: buildingIds } }, { name: 1 }).lean()
+    ? await Collections.Building.find(
+        { realmId: realm!._id, _id: { $in: buildingIds } },
+        { name: 1 }
+      ).lean()
     : [];
   const buildingMap = new Map((buildings as any[]).map((b: any) => [String(b._id), b.name]));
 

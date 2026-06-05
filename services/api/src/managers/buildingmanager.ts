@@ -242,7 +242,10 @@ async function _recomputeTenantsForProperty(
       const fresh =
         attempt === 1
           ? tenantInitial
-          : await Collections.Tenant.findOne({ _id: tenantInitial._id });
+          : await Collections.Tenant.findOne({
+              _id: tenantInitial._id,
+              realmId
+            });
       if (!fresh) return;
       const tenantObj: any = fresh.toObject ? fresh.toObject() : fresh;
       if (!tenantObj.beginDate || !tenantObj.endDate) {
@@ -379,7 +382,10 @@ async function _recomputeTenantsForBuilding(
       const fresh =
         attempt === 1
           ? tenantInitial
-          : (await Collections.Tenant.findOne({ _id: initialId }).lean()) as any;
+          : ((await Collections.Tenant.findOne({
+              _id: initialId,
+              realmId
+            }).lean()) as any);
       if (!fresh) {
         saved = true;
         break;
@@ -1006,10 +1012,16 @@ export async function importFromE9(req: Req, res: Res) {
             if (!existingByDeh.altAtakNumbers.includes(parsedUnit.atakNumber)) {
               existingByDeh.altAtakNumbers.push(parsedUnit.atakNumber);
             }
-            // Also update the linked Property record
+            // Also update the linked Property record. Realm-scope the
+            // updateOne so a smuggled propertyId pointing at another realm's
+            // Property cannot have its altAtakNumbers mutated by this E9
+            // import.
             if (existingByDeh.propertyId) {
               await Collections.Property.updateOne(
-                { _id: existingByDeh.propertyId },
+                {
+                  _id: existingByDeh.propertyId,
+                  realmId: realm!._id
+                },
                 { $addToSet: { altAtakNumbers: parsedUnit.atakNumber } }
               );
             }

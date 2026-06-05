@@ -577,10 +577,13 @@ async function _fetchPendingBills(realmId: string): Promise<AnyRecord[]> {
 
   if (!bills.length) return [];
 
-  // Get building names for grouping
+  // Get building names for grouping. Realm-scope the lookup as defense-in-
+  // depth: bills are already realm-filtered above, but enforcing realmId
+  // on the building fetch closes the door if a tampered bill.buildingId
+  // ever pointed at another realm's building.
   const buildingIds = [...new Set(bills.map((b) => b.buildingId))];
   const buildings: AnyRecord[] = await Collections.Building.find(
-    { _id: { $in: buildingIds } },
+    { realmId, _id: { $in: buildingIds } },
     { name: 1, expenses: 1 }
   ).lean();
   const buildingMap = new Map(
