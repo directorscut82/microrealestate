@@ -234,9 +234,53 @@ export default function SavedPaymentEditForm({
             // entry, no-op. If amount changed and there's a single
             // entry, scale it to the new amount so sum(allocation)
             // still equals payment.amount (server validator).
+            //
+            // Audit B1 follow-up: same applies for MULTI-entry splits.
+            // Without scaling, reducing a 200€ split to 100€ left the
+            // 200€-summing allocation in place, and rentmanager.ts:901
+            // rejected the PATCH with `allocation total 200.00 exceeds
+            // payment amount 100.00` (HTTP 422) — locking the user out
+            // of editing any split payment downward. We scale every
+            // entry by newAmount/oldAmount, round each to 2dp, then
+            // absorb the rounding remainder into the largest entry so
+            // sum(allocation) === newAmount exactly.
             let allocation;
             if (orig.length === 1 && newAmount > 0) {
               allocation = [{ ...orig[0], amount: newAmount }];
+            } else if (orig.length > 1 && newAmount > 0) {
+              const oldSum = orig.reduce(
+                (s, e) => s + (Number(e?.amount) || 0),
+                0
+              );
+              if (oldSum > 0) {
+                const ratio = newAmount / oldSum;
+                const scaled = orig.map((e) => ({
+                  ...e,
+                  amount: Math.round((Number(e?.amount) || 0) * ratio * 100) / 100
+                }));
+                const scaledSum = scaled.reduce((s, e) => s + e.amount, 0);
+                const remainder = Math.round((newAmount - scaledSum) * 100) / 100;
+                if (remainder !== 0 && scaled.length > 0) {
+                  // Absorb rounding remainder into the entry with the
+                  // LARGEST scaled amount. Falls back to the first entry
+                  // if all are equal.
+                  let maxIdx = 0;
+                  for (let i = 1; i < scaled.length; i++) {
+                    if (scaled[i].amount > scaled[maxIdx].amount) maxIdx = i;
+                  }
+                  scaled[maxIdx] = {
+                    ...scaled[maxIdx],
+                    amount:
+                      Math.round((scaled[maxIdx].amount + remainder) * 100) /
+                      100
+                  };
+                }
+                allocation = scaled;
+              } else {
+                // oldSum was 0 (corrupt/legacy data) — pass through
+                // unchanged rather than divide-by-zero.
+                allocation = orig;
+              }
             } else if (orig.length > 0) {
               allocation = orig;
             }
