@@ -5,6 +5,11 @@ export default function Index() {
 }
 
 export async function getServerSideProps(context) {
+  // E23: server-side rendering — request-scoped Store so concurrent SSR
+  // requests can't trample each other's user/organization state. Pass
+  // the store explicitly to setupOrganizationsInStore (the legacy
+  // signature read from a module-level `_store` that was raced across
+  // concurrent requests).
   const store = getStoreInstance();
 
   const { status } = await store.user.refreshTokens(context);
@@ -12,7 +17,7 @@ export async function getServerSideProps(context) {
     return { redirect: { destination: '/signin', permanent: false } };
   }
 
-  await setupOrganizationsInStore();
+  await setupOrganizationsInStore(undefined, store);
   if (!store.user.signedIn) {
     return { redirect: { destination: '/signin', permanent: false } };
   }

@@ -194,6 +194,11 @@ export default function BillImportDialog({ open, setOpen, building }) {
       queryClient.invalidateQueries({
         queryKey: [QueryKeys.BUILDINGS, building?._id]
       });
+      // E9: the dashboard summary counts pending bills / unpaid building
+      // expenses. Without this invalidation the user lands back on the
+      // dashboard and the badges still show the pre-import counts until
+      // the next route change.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       toast.success(
         t('{{count}} bill(s) imported successfully', {
           count: billsToConfirm.length

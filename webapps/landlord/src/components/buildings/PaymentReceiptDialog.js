@@ -68,6 +68,10 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
           queryKey: [QueryKeys.BUILDINGS, building._id]
         });
       }
+      // E9: marking bills paid changes the dashboard's pending-bills /
+      // outstanding-expenses tiles. Refresh DASHBOARD so the user sees
+      // the updated state immediately on return.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       toast.success(
         t('{{count}} bill(s) marked as paid', { count: billIds.length })
       );
