@@ -185,6 +185,24 @@ function _toTenantResponse(
           const payments = Array.isArray((rent as any).payments)
             ? (rent as any).payments
             : [];
+          // E10: mirror the landlord-side frontdata.toRentData decision
+          // tree so the same rent reads the same status from either API.
+          // The wire enum stays 'paid' | 'partially-paid' | 'unpaid'
+          // (the tenant frontend's locales / equality checks depend on
+          // these literals) but the rule that decides which one to send
+          // tracks frontdata: a direct payment that closes the deficit
+          // is 'paid', a partial direct payment is 'partially-paid',
+          // anything else is 'unpaid'. The previous rule
+          // (`grandTotal - payment <= 0 → paid`) flagged carry-credit
+          // months as paid even when no money had landed in that term.
+          const _grandTotal = Number(total.grandTotal) || 0;
+          const _payment = Number(total.payment) || 0;
+          const _status: 'paid' | 'partially-paid' | 'unpaid' =
+            _payment > 0 && _grandTotal - _payment <= 0.005
+              ? 'paid'
+              : _payment > 0
+                ? 'partially-paid'
+                : 'unpaid';
           return {
             id: `${tenant._id}-${rent.term}`,
             term: rent.term,
@@ -194,12 +212,7 @@ function _toTenantResponse(
             methods: payments
               .filter((payment: any) => !!payment)
               .map((payment: any) => payment.type),
-            status:
-              total.grandTotal - (total.payment || 0) <= 0
-                ? 'paid'
-                : total.payment > 0
-                  ? 'partially-paid'
-                  : 'unpaid',
+            status: _status,
             payments:
               payments.map((payment: any) => ({
                 date: payment.date,

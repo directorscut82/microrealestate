@@ -39,7 +39,13 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
       phone: String,
       phone1: String,
       phone2: String,
-      email: String
+      email: String,
+      // E12: free-form per-contact notes ("ask for John when calling",
+      // "secondary speaks French", etc.). The landlord UI's contact
+      // form already binds this field; without a schema entry every
+      // PATCH silently dropped it on save and the user assumed the
+      // backend was lying about persisting their input.
+      notes: String
     }
   ],
 
