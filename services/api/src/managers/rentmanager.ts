@@ -616,31 +616,54 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
   const live = writePlans.filter(
     (p): p is NonNullable<typeof p> => p != null
   );
-  // Parallel writes: each _updateByTerm targets a different tenant
-  // document so there is no contention. Errors from any one item
-  // reject the whole batch (Promise.all propagation) — preserves
-  // round-3r's "no partial writes" guarantee.
-  await Promise.all(
+  // E18: switch from Promise.all (one rejection → entire batch rejects;
+  // earlier successful writes are already persisted but the client gets
+  // a 5xx with no breakdown) to Promise.allSettled. The N writes are
+  // independent (different tenants) so partial-success is the correct
+  // semantic — surface the per-item outcome so the client can toast a
+  // partial-skip message and the user can retry only the failed rows.
+  const writeOutcomes = await Promise.allSettled(
     live.map((p) =>
       _updateByTerm(authorizationHeader, locale, realm, p.term, p.paymentData)
     )
   );
+  const _liveErrorByKey = new Map<string, string>();
+  writeOutcomes.forEach((outcome, idx) => {
+    if (outcome.status === 'rejected') {
+      const p = live[idx];
+      _liveErrorByKey.set(`${p.tenantId}:${p.term}`, String(
+        outcome.reason?.message || outcome.reason
+      ));
+    }
+  });
 
   res.json({
-    results: writePlans.map((p, idx) =>
-      p == null
-        ? {
-            tenantId: String(items[idx].tenantId),
-            term: String(items[idx].term),
-            skipped: true
-          }
-        : {
-            tenantId: p.tenantId,
-            term: p.term,
-            amount: p.amount,
-            skipped: false
-          }
-    )
+    results: writePlans.map((p, idx) => {
+      if (p == null) {
+        return {
+          tenantId: String(items[idx].tenantId),
+          term: String(items[idx].term),
+          skipped: true
+        };
+      }
+      const errMsg = _liveErrorByKey.get(`${p.tenantId}:${p.term}`);
+      if (errMsg) {
+        return {
+          tenantId: p.tenantId,
+          term: p.term,
+          amount: p.amount,
+          skipped: false,
+          failed: true,
+          error: errMsg
+        };
+      }
+      return {
+        tenantId: p.tenantId,
+        term: p.term,
+        amount: p.amount,
+        skipped: false
+      };
+    })
   });
 }
 
@@ -876,6 +899,16 @@ async function _updateByTerm(
               422
             );
           }
+          // E3: cap the allocation array. Real owed-line counts top out
+          // around 5-10 (rent + a handful of charges + scalars); 32 is
+          // generous and stops a paste-bomb from ballooning the embedded
+          // payment document.
+          if (p.allocation.length > 32) {
+            throw new ServiceError(
+              `payments[${idx}].allocation exceeds maximum of 32 entries`,
+              422
+            );
+          }
           let allocSum = 0;
           p.allocation.forEach((entry: AnyRecord, allocIdx: number) => {
             if (!entry || typeof entry !== 'object') {
@@ -889,6 +922,24 @@ async function _updateByTerm(
               PAYMENT_CATEGORIES,
               `payments[${idx}].allocation[${allocIdx}].category`
             );
+            // E3: lineKey is a stable identifier of the form
+            // 'preTax:<idx>' / 'charges:<idx>' / 'building:<idx>' / scalar
+            // names. 64 chars is well above the realistic maximum (~20)
+            // and rejects oversized free-text smuggled into the field.
+            if (entry.lineKey !== undefined && entry.lineKey !== null) {
+              if (typeof entry.lineKey !== 'string') {
+                throw new ServiceError(
+                  `payments[${idx}].allocation[${allocIdx}].lineKey must be a string`,
+                  422
+                );
+              }
+              if (entry.lineKey.length > 64) {
+                throw new ServiceError(
+                  `payments[${idx}].allocation[${allocIdx}].lineKey exceeds maximum length of 64`,
+                  422
+                );
+              }
+            }
             validateFiniteNumber(
               entry.amount,
               `payments[${idx}].allocation[${allocIdx}].amount`,
