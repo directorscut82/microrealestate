@@ -225,8 +225,10 @@ async function _recomputeTenantsForProperty(
       if (!fresh) return;
       const tenantObj: any = fresh.toObject ? fresh.toObject() : fresh;
       if (!tenantObj.beginDate || !tenantObj.endDate) {
+        // PII: don't log tenant.name. Tenant id is enough to correlate
+        // the audit trail without leaking PII into log-aggregation.
         logger.warn(
-          `_recomputeTenantsForProperty: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
+          `_recomputeTenantsForProperty: skipped tenant ${tenantObj._id}: missing beginDate/endDate`
         );
         return;
       }
@@ -285,7 +287,7 @@ async function _recomputeTenantsForProperty(
         );
         if (saveResult.ok) {
           logger.info(
-            `Recomputed rents for tenant ${tenantObj.name} (property ${propertyId})`
+            `Recomputed rents for tenant ${tenantObj._id} (property ${propertyId})`
           );
           return;
         }
@@ -294,7 +296,7 @@ async function _recomputeTenantsForProperty(
         await new Promise((r) => setTimeout(r, _recomputeBackoffMs(attempt)));
       } catch (error) {
         logger.error(
-          `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+          `Failed to recompute rents for tenant ${tenantObj._id}: ${error}`
         );
         return;
       }
@@ -363,8 +365,10 @@ async function _recomputeTenantsForBuilding(
       }
       const tenantObj: any = fresh;
       if (!tenantObj.beginDate || !tenantObj.endDate) {
+        // PII: don't log tenant.name. Tenant id is enough to correlate
+        // the audit trail without leaking PII into log-aggregation.
         logger.warn(
-          `_recomputeTenantsForBuilding: skipped tenant ${tenantObj._id} (${tenantObj.name || '?'}): missing beginDate/endDate`
+          `_recomputeTenantsForBuilding: skipped tenant ${tenantObj._id}: missing beginDate/endDate`
         );
         saved = true;
         break;
@@ -427,7 +431,7 @@ async function _recomputeTenantsForBuilding(
         );
         if (saveResult.ok) {
           logger.info(
-            `Recomputed rents for tenant ${tenantObj.name} (building ${building._id})`
+            `Recomputed rents for tenant ${tenantObj._id} (building ${building._id})`
           );
           saved = true;
           break;
@@ -439,7 +443,7 @@ async function _recomputeTenantsForBuilding(
         await new Promise((r) => setTimeout(r, _recomputeBackoffMs(attempt)));
       } catch (error) {
         logger.error(
-          `Failed to recompute rents for tenant ${tenantObj.name}: ${error}`
+          `Failed to recompute rents for tenant ${tenantObj._id}: ${error}`
         );
         saved = true;
         break;

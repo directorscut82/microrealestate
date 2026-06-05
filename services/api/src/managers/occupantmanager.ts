@@ -380,7 +380,7 @@ async function _recomputeSiblingTenantsInBuildings(
         await new Promise((r) => setTimeout(r, siblingBackoffMs(attempt)));
       } catch (error) {
         logger.error(
-          `sibling recompute failed for tenant ${tenantObj.name}: ${error}`
+          `sibling recompute failed for tenant ${tenantObj._id}: ${error}`
         );
         done = true;
         break;

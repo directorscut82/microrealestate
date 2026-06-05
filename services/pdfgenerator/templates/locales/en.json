@@ -44,6 +44,7 @@
   "Signature": "Signature",
   "Property manager": "PROPERTY MANAGER",
   "Owner": "OWNER",
+  "Tenant": "TENANT",
   "Heating": "Heating",
   "Elevator": "Elevator",
   "Cleaning": "Cleaning",
