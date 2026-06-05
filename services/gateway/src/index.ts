@@ -78,7 +78,22 @@ function configureCORS(application: Express.Application) {
       );
     }
     if (config.DOMAIN_URL) {
-      rawDomains.push(URLUtils.destructUrl(config.DOMAIN_URL).domain);
+      // E4: URLUtils.destructUrl strips the leading subdomain when the
+      // hostname has 3+ labels (e.g. 'app.example.com' -> 'example.com'),
+      // which means an Origin header for the actual deployed subdomain
+      // never matched the resulting CORS regex. Use the URL constructor's
+      // .host directly so the registered origin matches the browser's
+      // Origin byte-for-byte.
+      try {
+        const parsed = new URL(config.DOMAIN_URL);
+        if (parsed.host) {
+          rawDomains.push(parsed.host);
+        }
+      } catch {
+        // Malformed DOMAIN_URL — fall back to the legacy helper rather
+        // than silently dropping the value.
+        rawDomains.push(URLUtils.destructUrl(config.DOMAIN_URL).domain);
+      }
     }
 
     // Escape regex meta-chars in each domain literal (dots, ports, etc.) and

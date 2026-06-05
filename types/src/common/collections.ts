@@ -76,7 +76,14 @@ export namespace CollectionTypes {
       capital: number;
       ein: string;
       dos: string;
-      vatnumber: string;
+      // E11: align the type with the runtime shape. The Mongoose schema
+      // (services/common/src/collections/realm.ts), the PDF templates
+      // (services/pdfgenerator/templates), and the landlord frontend
+      // (webapps/landlord/src/components/organization/BillingForm.js)
+      // all read/write `vatNumber` (camelCase). The previous lowercase
+      // `vatnumber` in this type meant every consumer was forced to
+      // bypass the type system with `(realm as any).companyInfo.vatNumber`.
+      vatNumber: string;
     };
     thirdParties: {
       gmail: {
@@ -349,6 +356,9 @@ export namespace CollectionTypes {
       phone1: string;
       phone2: string;
       email: string;
+      // E12: free-form per-contact note. Optional — only populated when
+      // the landlord types something into the per-contact "notes" input.
+      notes?: string;
     }[];
     reference: string;
     contract: string;
