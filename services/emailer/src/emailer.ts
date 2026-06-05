@@ -67,6 +67,15 @@ export async function send(
     params
   };
 
+  // Inject organizationId into params so downstream data builders (e.g.
+  // emailparts/data/invoice) can scope their tenant/realm lookups by
+  // realmId for defense-in-depth. Avoid clobbering a caller-supplied
+  // realmId — it might already be set by an upstream service that has
+  // its own scoping invariants.
+  if (organizationId && params && typeof params === 'object' && !params.realmId) {
+    params.realmId = organizationId;
+  }
+
   let data: any;
   try {
     logger.debug('fetch email data');
