@@ -44,6 +44,7 @@
   "Signature": "Firma",
   "Property manager": "ADMINISTRADOR",
   "Owner": "PROPIETARIO",
+  "Tenant": "ARRENDATARIO",
   "Heating": "Calefacción",
   "Elevator": "Ascensor",
   "Cleaning": "Limpieza",
