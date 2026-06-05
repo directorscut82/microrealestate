@@ -6,6 +6,7 @@ import {
   ServiceError
 } from '@microrealestate/common';
 import { authRateLimit } from './index.js';
+import { redactEmail } from '../utils/redact.js';
 import axios from 'axios';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
@@ -209,7 +210,7 @@ const _userSignIn = Middlewares.asyncWrapper(async (req: Request, res: Response)
     (account as any)?.password || dummyHash
   );
   if (!account || !validPassword) {
-    logger.info(`login failed for ${email}`);
+    logger.info(`login failed for ${redactEmail(email)}`);
     throw new ServiceError('invalid credentials', 401);
   }
 
@@ -413,7 +414,7 @@ export default function (): Router {
           )
           .catch((err: any) => {
             logger.error(
-              `failed to dispatch reset_password email for ${email}: ${err?.message || err}`
+              `failed to dispatch reset_password email for ${redactEmail(email)}: ${err?.message || err}`
             );
           });
       }

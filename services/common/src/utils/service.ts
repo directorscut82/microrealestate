@@ -105,12 +105,22 @@ export default class Service {
     if (this.useRequestParsers) {
       this.expressServer.use(_cookieParser() as any);
       this.expressServer.use(Express.urlencoded({ extended: true }));
-      // Global JSON body limit raised to 50mb so the database-restore endpoint
-      // (which round-trips a JSON backup file through req.body) actually works.
-      // The previous 1mb default ran first and silently truncated, defeating
-      // the route-level 50mb override at services/api/src/routes.ts. File
-      // uploads use multer separately, so this only affects pure-JSON paths.
-      this.expressServer.use(Express.json({ limit: '50mb' }));
+      // E6: keep the global JSON limit at Express's default (100kb). The
+      // earlier 50mb override applied to every endpoint in every service —
+      // a single huge POST anywhere could exhaust process memory. The
+      // database-restore endpoint that legitimately needs the big cap
+      // installs its own `express.json({ limit: '50mb' })` per-route at
+      // services/api/src/routes.ts. We skip the global parser on that
+      // path so the per-route parser (which actually lifts the cap) is
+      // the first to run when the request arrives — without this skip,
+      // body-parser raises 413 here before the per-route middleware ever
+      // sees the request.
+      this.expressServer.use((req, res, next) => {
+        if (req.path === '/api/v2/database/restore') {
+          return next();
+        }
+        return Express.json()(req, res, next);
+      });
       this.expressServer.use(_methodOverride() as any);
       if (this.useMongo) {
         this.expressServer.use(mongoSanitize({
@@ -202,9 +212,15 @@ export default class Service {
           }
         }
 
-        if (this.redisClient && (this.redisClient as any).isOpen !== undefined) {
+        if (this.redisClient) {
           try {
-            if ((this.redisClient as any).isOpen) {
+            // E5: RedisClient now exposes a typed `isOpen` getter that
+            // proxies node-redis's underlying connection liveness. The
+            // previous guard `(redisClient as any).isOpen !== undefined`
+            // skipped the check entirely because the wrapper class did
+            // not declare the property — every healthy redis was reported
+            // as 'down' by silent omission.
+            if (this.redisClient.isOpen) {
               checks.redis = 'ok';
             } else {
               checks.redis = 'down';

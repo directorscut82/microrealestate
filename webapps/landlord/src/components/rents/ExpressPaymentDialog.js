@@ -154,9 +154,23 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
       // skipped server-side. The old code reported totals.count (the
       // selection count) and silently misled the user when skips happened.
       const results = Array.isArray(data?.results) ? data.results : [];
-      const recorded = results.filter((r) => !r.skipped).length;
+      const failed = results.filter((r) => r.failed).length;
+      const recorded = results.filter((r) => !r.skipped && !r.failed).length;
       const skipped = results.filter((r) => r.skipped).length;
-      if (skipped > 0) {
+      // E18: server now returns per-item outcomes from Promise.allSettled
+      // — surface failures as a warning toast distinct from the
+      // already-settled skips so the user knows to retry the failed
+      // rows. Without this branch, partial-write failures landed
+      // silently as "Recorded N payments" with N being only the
+      // successes.
+      if (failed > 0) {
+        toast.warning(
+          t(
+            'Recorded {{recorded}} of {{total}} payments ({{failed}} failed)',
+            { recorded, total: totals.count, failed }
+          )
+        );
+      } else if (skipped > 0) {
         toast.success(
           t(
             'Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)',

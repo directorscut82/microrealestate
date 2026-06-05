@@ -26,6 +26,13 @@ export default class RedisClient {
   private client: redis.RedisClientType | null = null;
   private envConfig: EnvironmentConfig;
 
+  // E5: expose connection liveness so the service /health endpoint can
+  // give a truthful answer instead of always reading 'down' (the previous
+  // wrapper neither implemented nor proxied node-redis's `isOpen` flag).
+  get isOpen(): boolean {
+    return !!(this.client && (this.client as any).isOpen);
+  }
+
   get: RedisClientTypes.GetFunction = () => Promise.resolve(null);
   set: RedisClientTypes.SetFunction = () => Promise.resolve(null);
   del: RedisClientTypes.DelFunction = () => Promise.resolve(-1);

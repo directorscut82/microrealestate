@@ -763,21 +763,52 @@ export async function remove(req: Req, res: Res) {
 
   // Cascade-delete linked Bill records before the buildings — otherwise
   // bills reference dangling buildingIds.
-  await Collections.Bill.deleteMany({
-    realmId: realm!._id,
-    buildingId: { $in: ids }
-  });
+  // E16: track step-level failure across the (Bill → Building → Property)
+  // cascade so partial cleanup is surfaced as a 500 with structured info.
+  // The previous code awaited each step in sequence: a failure on the
+  // Property.updateMany step (after Building.deleteMany succeeded) would
+  // bubble as a 500 with no breakdown of what landed, leaving the
+  // operator unable to tell whether the buildings still existed.
+  const _failureInfo: Record<string, string> = {};
+  try {
+    await Collections.Bill.deleteMany({
+      realmId: realm!._id,
+      buildingId: { $in: ids }
+    });
+  } catch (e: any) {
+    _failureInfo.bills = String(e?.message || e);
+  }
 
-  await Collections.Building.deleteMany({
-    _id: { $in: ids },
-    realmId: realm!._id
-  });
+  try {
+    await Collections.Building.deleteMany({
+      _id: { $in: ids },
+      realmId: realm!._id
+    });
+  } catch (e: any) {
+    _failureInfo.buildings = String(e?.message || e);
+  }
 
   // Clear buildingId from linked properties
-  await Collections.Property.updateMany(
-    { realmId: realm!._id, buildingId: { $in: ids } },
-    { $unset: { buildingId: '' } }
-  );
+  try {
+    await Collections.Property.updateMany(
+      { realmId: realm!._id, buildingId: { $in: ids } },
+      { $unset: { buildingId: '' } }
+    );
+  } catch (e: any) {
+    _failureInfo.propertyUnlink = String(e?.message || e);
+  }
+
+  if (Object.keys(_failureInfo).length > 0) {
+    logger.error(
+      `building remove partial failure: ${JSON.stringify(_failureInfo)}`
+    );
+    return res.status(500).json({
+      status: 500,
+      message:
+        'Partial failure deleting building(s). Some related records may not have been cleaned up.',
+      failures: _failureInfo
+    });
+  }
 
   res.sendStatus(200);
 }
@@ -2294,10 +2325,21 @@ export async function addRepair(req: Req, res: Res) {
         // Check whether ANY tenant in this building has a paid rent for
         // that term. If yes, the bill is frozen and our charge would be
         // invisible.
+        // E20: use $elemMatch so the term-match AND the
+        // payments.amount > 0 must both apply to the SAME rent entry.
+        // The previous shape (`'rents.term': N` + `'rents.payments.amount': {$gt: 0}`)
+        // used dot-paths that match ACROSS the rents[] array — a tenant
+        // with a paid rent in March 2026 AND an empty rent in May 2026
+        // would falsely report May 2026 as "frozen" and reject the
+        // legitimate charge.
         const paidExists = await Collections.Tenant.exists({
           realmId: realm!._id,
-          'rents.term': Number(req.body.chargeTerm),
-          'rents.payments.amount': { $gt: 0 }
+          rents: {
+            $elemMatch: {
+              term: Number(req.body.chargeTerm),
+              payments: { $elemMatch: { amount: { $gt: 0 } } }
+            }
+          }
         } as any);
         if (paidExists) {
           throw new ServiceError(

@@ -220,16 +220,26 @@ function _computeBuildingChargeRaw(
     }
 
     case 'by_surface': {
-      const totalSurface = building.units.reduce((sum, u) => sum + (Number(u.surface) || 0), 0);
+      // E19: surface allocation must only consider MANAGED units (units
+      // tied to a Property the landlord operates). The previous
+      // denominator summed over ALL units in the building including the
+      // owner-occupied / vacant / non-managed ones — so when a building
+      // had any unmanaged unit, the managed tenants' share went DOWN
+      // (denominator inflated), the building bill was under-collected,
+      // and the missing amount silently disappeared from the rent.
+      const totalSurface = managedUnits.reduce(
+        (sum, u) => sum + (Number(u.surface) || 0),
+        0
+      );
       if (totalSurface === 0) return 0;
       // Carrier-remainder: every share except the last is rounded
-      // independently; the last unit (lex-max propertyId among units
-      // with surface > 0) absorbs the rounding remainder so the sum
-      // bills exactly `amount`. Without this, three units of 1m² each
-      // sharing 10€ each get 3.33€ and the building only collects
+      // independently; the last unit (lex-max propertyId among managed
+      // units with surface > 0) absorbs the rounding remainder so the
+      // sum bills exactly `amount`. Without this, three units of 1m²
+      // each sharing 10€ each get 3.33€ and the building only collects
       // 9.99€ — landlord eats the 0.01€ every month.
       const myPropId = String(propertyId);
-      const _orderedIds = building.units
+      const _orderedIds = managedUnits
         .filter((u) => (Number(u.surface) || 0) > 0 && u.propertyId)
         .map((u) => String(u.propertyId))
         .sort();
@@ -242,7 +252,9 @@ function _computeBuildingChargeRaw(
       let othersSum = 0;
       for (const id of _orderedIds) {
         if (id === myPropId) continue;
-        const otherUnit = building.units.find((u) => String(u.propertyId) === id);
+        const otherUnit = managedUnits.find(
+          (u) => String(u.propertyId) === id
+        );
         const share = (amount * (Number(otherUnit?.surface) || 0)) / totalSurface;
         othersSum += Math.round(share * 100) / 100;
       }

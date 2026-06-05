@@ -1182,14 +1182,20 @@ export async function update(req: Req, res: Res) {
       422
     );
   }
-  // Optimistic lock: prefer the __v the client read with, falling back to
-  // the fresh value only if the client didn't send one. This catches the
-  // case where two concurrent edits started from the same GET response —
-  // without it, both POSTs would re-read the latest __v here and both win.
+  // E15: __v is REQUIRED on the PATCH body. Falling back to the freshly
+  // re-read __v silently disabled optimistic locking the moment a client
+  // forgot to round-trip the field — two concurrent editors would each
+  // miss the conflict signal because the server kept "winning" each
+  // race against itself. A missing __v now surfaces as 422 so the
+  // client gets a deterministic error and the user is forced to refresh.
   const requestedVersion = Number(req.body.__v);
-  const documentVersion = Number.isFinite(requestedVersion)
-    ? requestedVersion
-    : originalOccupant.__v;
+  if (!Number.isFinite(requestedVersion)) {
+    throw new ServiceError(
+      'tenant __v is required on PATCH (optimistic lock)',
+      422
+    );
+  }
+  const documentVersion = requestedVersion;
 
   if (originalOccupant.documents) {
     newOccupant.documents = originalOccupant.documents;
@@ -1564,6 +1570,12 @@ export async function remove(req: Req, res: Res) {
 
   const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
   const documentIds = documents.map(({ _id }: any) => _id).join(',');
+  // E16: track partial-failure across the remove pipeline. The previous
+  // code logged documents-DELETE failures to the operator but returned
+  // 200 to the client — the user thought the tenant was fully cleaned
+  // up while related documents were still on disk / in S3. Collect
+  // failures and surface them as a 500 with structured info at the end.
+  const _failureInfo: Record<string, string> = {};
   if (!documentIds) {
     logger.debug('no documents to delete for tenant');
   } else {
@@ -1580,6 +1592,7 @@ export async function remove(req: Req, res: Res) {
       const errorMessage = error.response?.data?.message || error.message;
       logger.error('DELETE documents failed');
       logger.error(errorMessage);
+      _failureInfo.documents = String(errorMessage || error);
     }
   }
 
@@ -1643,6 +1656,24 @@ export async function remove(req: Req, res: Res) {
       removedPropIds,
       undefined
     );
+  }
+
+  // E16: if any side-step (documents cascade) failed, surface a 500 so
+  // the operator knows orphan resources may exist — but include the
+  // counts of what DID land so the client can refresh accurately.
+  if (Object.keys(_failureInfo).length > 0) {
+    logger.error(
+      `tenant remove partial failure: ${JSON.stringify(_failureInfo)}`
+    );
+    return res.status(500).json({
+      status: 500,
+      message:
+        'Partial failure deleting tenant(s). Some related records may not have been cleaned up.',
+      deleted: tenantDeleteResult.deletedCount ?? 0,
+      archived: idsToArchive.size,
+      requested: occupantIds.length,
+      failures: _failureInfo
+    });
   }
 
   // Partial-success path: report counts so the client can detect drift.
@@ -1759,7 +1790,13 @@ export async function overview(req: Req, res: Res) {
   };
 
   result = occupants.reduce((acc, occupant: AnyRecord) => {
-    const endMoment = moment(occupant.terminationDate || occupant.endDate);
+    // E2: keep both sides of the comparison in UTC. `currentDate` above is
+    // moment.utc() and the persisted endDate/terminationDate are pure dates;
+    // mixing in a local-zone moment caused day-boundary flicker around
+    // midnight on Athens (UTC+2/+3) — a tenant whose endDate is "today"
+    // could flip between countActive and countInactive depending on the
+    // server's local-time offset.
+    const endMoment = moment.utc(occupant.terminationDate || occupant.endDate);
     if (endMoment.isBefore(currentDate, 'day')) {
       acc.countInactive++;
     } else {

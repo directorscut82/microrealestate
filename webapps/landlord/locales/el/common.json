@@ -516,6 +516,7 @@
   "Please select a JSON backup file": "Παρακαλώ επιλέξτε ένα αρχείο αντιγράφου ασφαλείας JSON",
   "Property occupied by {{name}} — remove them first": "Το ακίνητο κατοικείται από {{name}} — αφαιρέστε τον/την πρώτα",
   "ready": "έτοιμο",
+  "Recorded {{recorded}} of {{total}} payments ({{failed}} failed)": "Καταχωρήθηκαν {{recorded}} από {{total}} πληρωμές ({{failed}} απέτυχαν)",
   "Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)": "Καταχωρήθηκαν {{recorded}} από {{total}} πληρωμές ({{skipped}} ήδη εξοφλημένες)",
   "recurring": "επαναλαμβανόμενο",
   "Rent paid": "Εξοφλημένο",

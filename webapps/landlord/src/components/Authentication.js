@@ -11,7 +11,9 @@ async function fetchData(store, router) {
     return store.organization.items;
   }
 
-  await setupOrganizationsInStore(router.query.organization);
+  // E23: pass the store explicitly so the helper doesn't depend on the
+  // module-level `_store` (which the SSR path now bypasses).
+  await setupOrganizationsInStore(router.query.organization, store);
   return store.organization.items;
 }
 
