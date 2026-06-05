@@ -1,7 +1,7 @@
 <div class="reference">
     <table>
         <tr>
-            <td class="label"><%=_.t('Receipt number')%></td>
+            <td class="label"><%=_.t(typeof labelKey !== 'undefined' ? labelKey : 'Billing reference')%></td>
             <td><%= rent.billingReference %></td>
         </tr>
         <tr>

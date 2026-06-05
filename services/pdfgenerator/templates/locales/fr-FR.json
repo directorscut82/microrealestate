@@ -44,6 +44,7 @@
   "Signature": "Signature du percepteur",
   "Property manager": "GÉRANT",
   "Owner": "PROPRIÉTAIRE",
+  "Tenant": "LOCATAIRE",
   "Heating": "Chauffage",
   "Elevator": "Ascenseur",
   "Cleaning": "Nettoyage",
