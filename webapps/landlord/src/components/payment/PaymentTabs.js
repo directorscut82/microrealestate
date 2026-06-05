@@ -31,7 +31,10 @@ import ConfirmDialog from '../ConfirmDialog';
 import { cn } from '../../utils';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
-import { computeOwedLines } from '../../utils/paymentAllocation';
+import {
+  applyAllocation,
+  computeOwedLines
+} from '../../utils/paymentAllocation';
 import AllocationBlock from './AllocationBlock';
 import SavedPaymentEditForm from './SavedPaymentEditForm';
 import { toast } from 'sonner';
@@ -414,7 +417,24 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
       }
     }));
 
-  const owedLines = useMemo(() => computeOwedLines(rent), [rent]);
+  // E8: the preview must reflect what the SAVED payments have already
+  // consumed. Without this seed the AllocationBlock kept advertising the
+  // gross owed-line amounts even after a payment had landed against a
+  // specific line — users would over-allocate the next payment and only
+  // see the discrepancy after submit. Reduce each line by what the
+  // already-saved payments allocated to it before handing it to the
+  // block.
+  const owedLines = useMemo(() => {
+    const baseLines = computeOwedLines(rent);
+    const savedAllocations = (savedPayments || [])
+      .flatMap((sp) =>
+        Array.isArray(sp?.allocation) ? sp.allocation : []
+      )
+      .filter((a) => a && Number(a.amount) > 0);
+    if (savedAllocations.length === 0) return baseLines;
+    const { remainingLines } = applyAllocation(baseLines, savedAllocations);
+    return remainingLines;
+  }, [rent, savedPayments]);
 
   const {
     register,

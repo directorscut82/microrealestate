@@ -25,10 +25,16 @@ import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../../components/Authentication';
 
 function _filterData(data, filters) {
+  // E17: defend against an undefined `data` (initial render before
+  // useQuery resolves, error states, paginated empty pages, etc.). The
+  // List component invokes filterFn before its own loading branch on
+  // each render and `data.rents` previously crashed with "Cannot read
+  // properties of undefined" on those frames.
+  const _rents = Array.isArray(data?.rents) ? data.rents : [];
   let filteredItems =
     filters.statuses?.length > 0
-      ? data.rents.filter(({ status }) => filters.statuses.includes(status))
-      : data.rents;
+      ? _rents.filter(({ status }) => filters.statuses.includes(status))
+      : _rents;
 
   if (filters.searchText) {
     const regExp = /\s|\.|-/gi;
