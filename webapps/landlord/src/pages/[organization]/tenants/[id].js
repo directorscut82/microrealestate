@@ -373,7 +373,14 @@ function Tenant() {
                 className="w-full"
                 onClick={async () => {
                   try {
-                    await saveMutation.mutateAsync({ _id: selected._id, terminationDate: new Date().toISOString() });
+                    // E15: include __v so the server-side optimistic-lock
+                    // check on PATCH /tenants/:id receives the same version
+                    // we read with. Without it the server returns 422.
+                    await saveMutation.mutateAsync({
+                      _id: selected._id,
+                      __v: selected.__v,
+                      terminationDate: new Date().toISOString()
+                    });
                     await removeMutation.mutateAsync([selected._id]);
                     setOpenConfirmDeleteTenant(false);
                     router.back();

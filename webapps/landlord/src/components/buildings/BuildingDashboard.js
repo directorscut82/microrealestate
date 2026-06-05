@@ -106,6 +106,13 @@ export default function BuildingDashboard({ building }) {
     const map = new Map();
     if (tenants) {
       tenants.forEach((tenant) => {
+        // E22: skip terminated / archived tenants so the building view's
+        // "Tenant / Occupant" column doesn't keep showing a person who
+        // has already moved out. Without this filter the dashboard
+        // claimed a unit was rented even after termination, masking the
+        // vacancy from the operator until they navigated to the tenant
+        // record itself.
+        if (tenant.terminated || tenant.archived) return;
         if (tenant.properties) {
           tenant.properties.forEach((tp) => {
             map.set(tp.propertyId, {

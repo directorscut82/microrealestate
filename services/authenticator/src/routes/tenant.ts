@@ -6,6 +6,7 @@ import {
   ServiceError
 } from '@microrealestate/common';
 import { authRateLimit } from './index.js';
+import { redactEmail } from '../utils/redact.js';
 import axios from 'axios';
 import { customAlphabet } from 'nanoid';
 import express, { Router } from 'express';
@@ -49,7 +50,7 @@ export default function (): Router {
         'contacts.email': { $eq: email }
       });
       if (!tenants.length) {
-        logger.info(`login failed for ${email} tenant not found`);
+        logger.info(`login failed for ${redactEmail(email)} tenant not found`);
         // Constant-time-ish behavior: still return 204 immediately so the
         // unknown-tenant branch is indistinguishable from the known one.
         return res.sendStatus(204);
@@ -65,7 +66,9 @@ export default function (): Router {
         { EX: 300 }
       );
 
-      logger.debug(`OTP created for email ${email} on domain ${req.hostname}`);
+      logger.debug(
+        `OTP created for email ${redactEmail(email)} on domain ${req.hostname}`
+      );
 
       // Fire-and-forget: do not await the emailer so the known-tenant
       // branch returns in roughly the same time as the unknown-tenant
@@ -88,7 +91,7 @@ export default function (): Router {
         )
         .catch((err: any) => {
           logger.error(
-            `failed to dispatch OTP email for ${email}: ${err?.message || err}`
+            `failed to dispatch OTP email for ${redactEmail(email)}: ${err?.message || err}`
           );
         });
 

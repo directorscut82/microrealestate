@@ -529,6 +529,8 @@
   "Record": "Record",
   "Record payment": "Record payment",
   "Recorded {{count}} payments": "Recorded {{count}} payments",
+  "Recorded {{recorded}} of {{total}} payments ({{failed}} failed)": "Recorded {{recorded}} of {{total}} payments ({{failed}} failed)",
+  "Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)": "Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)",
   "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.": "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.",
   "Recurring": "Recurring",
   "Recurring Expense": "Recurring Expense",

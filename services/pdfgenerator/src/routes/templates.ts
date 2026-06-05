@@ -178,16 +178,39 @@ export default function () {
       // the path '_id' would create a conflict" error.
       // eslint-disable-next-line no-unused-vars
       const { _id, __v, realmId: _realmId, ...rest } = template as any;
+      // E14: optimistic lock on Mongoose's __v, mirroring the Document
+      // PATCH at services/pdfgenerator/src/routes/documents.ts. Two tabs
+      // editing the same template's HTML/contents simultaneously would
+      // both succeed, with the second write silently overwriting the
+      // first. Pass __v in the filter; on mismatch findOneAndUpdate
+      // returns null and we raise 409 so the client can refresh.
+      const incomingV = Number(__v);
+      const filter: Record<string, unknown> = {
+        _id: template._id,
+        realmId
+      };
+      if (Number.isInteger(incomingV)) filter.__v = incomingV;
+
       const updatedTemplate = await Collections.Template.findOneAndUpdate(
-        {
-          _id: template._id,
-          realmId
-        },
-        { $set: rest },
+        filter,
+        { $set: rest, $inc: { __v: 1 } },
         { new: true }
       );
 
       if (!updatedTemplate) {
+        // Distinguish "not found" from "version mismatch". If the
+        // template still exists under our realm, this is a 409;
+        // otherwise a 404.
+        const stillThere = await Collections.Template.exists({
+          _id: template._id,
+          realmId
+        });
+        if (stillThere) {
+          throw new ServiceError(
+            'Template was edited elsewhere. Reload and try again.',
+            409
+          );
+        }
         throw new ServiceError('template not found', 404);
       }
 
