@@ -252,10 +252,13 @@ export async function remove(req: ReqWithIds, res: Res) {
 
   // Mongo standalone (NAS deployment) doesn't support multi-document
   // transactions, so we run the deletes in parallel without a session.
-  // Failure mode: if one delete succeeds and another fails, we get partial
-  // cleanup. Acceptable for now — the realmId filter prevents cross-realm
-  // damage and a retry will re-converge.
-  const [leaseDeleteResult] = await Promise.all([
+  // E16: switch from Promise.all (one rejection → entire batch throws,
+  // caller gets a 500 with no breakdown of what landed) to allSettled so
+  // we can surface structured info about exactly which step failed
+  // while still returning a 500 — the partial-cleanup state IS an
+  // operator-visible problem, just not one that should hide what got
+  // through.
+  const [leaseRes, templateDeleteRes, templateUpdateRes] = await Promise.allSettled([
     Collections.Lease.deleteMany({
       _id: { $in: leaseIds },
       realmId: realm!._id
@@ -274,6 +277,42 @@ export async function remove(req: ReqWithIds, res: Res) {
       }
     )
   ]);
+
+  const _failureInfo: Record<string, string> = {};
+  if (leaseRes.status === 'rejected') {
+    _failureInfo.leases = String(leaseRes.reason?.message || leaseRes.reason);
+  }
+  if (templateDeleteRes.status === 'rejected') {
+    _failureInfo.templatesDeleted = String(
+      templateDeleteRes.reason?.message || templateDeleteRes.reason
+    );
+  }
+  if (templateUpdateRes.status === 'rejected') {
+    _failureInfo.templatesUpdated = String(
+      templateUpdateRes.reason?.message || templateUpdateRes.reason
+    );
+  }
+  if (Object.keys(_failureInfo).length > 0) {
+    logger.error(
+      `lease remove partial failure: ${JSON.stringify(_failureInfo)}`
+    );
+    return res.status(500).json({
+      status: 500,
+      message:
+        'Partial failure deleting lease(s). Some related records may not have been cleaned up.',
+      failures: _failureInfo
+    });
+  }
+
+  // Narrowed by the failure check above — if we reach here, every step
+  // settled successfully so leaseRes.status === 'fulfilled'. The early
+  // return on _failureInfo above means the rejected branch can't reach
+  // this code path; assert via type narrowing.
+  if (leaseRes.status !== 'fulfilled') {
+    // Unreachable in practice — kept for type narrowing.
+    throw new ServiceError('lease delete unexpectedly rejected', 500);
+  }
+  const leaseDeleteResult = leaseRes.value;
 
   if ((leaseDeleteResult?.deletedCount ?? 0) === 0) {
     throw new ServiceError(
