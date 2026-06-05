@@ -99,6 +99,27 @@ function _findBuilding(building: any, _id: string) {
   return building;
 }
 
+// Audit B3: Optimistic concurrency wrapper for building.save(). The
+// schema (collections/building.ts) now sets optimisticConcurrency:true
+// so Mongoose bumps __v on every save and throws VersionError when the
+// document was modified between findOne and save. Surface that as a
+// 409 ("Building was modified concurrently. Please retry.") instead of
+// letting one writer silently overwrite the other or leaking a generic
+// 500. Mirrors realmmanager.ts:430-443.
+async function _saveBuildingWithVersionCheck(b: any): Promise<void> {
+  try {
+    await b.save();
+  } catch (err: any) {
+    if (err && err.name === 'VersionError') {
+      throw new ServiceError(
+        'Building was modified concurrently. Please retry.',
+        409
+      );
+    }
+    throw err;
+  }
+}
+
 // Wave-18 B5: validate that every customAllocations[].propertyId references
 // a unit that belongs to this building, and that custom_percentage shares
 // sum to 100 (±0.01 tolerance). Without this guard, an expense saved with
@@ -582,7 +603,7 @@ export async function add(req: Req, res: Res) {
     createdDate: now,
     updatedDate: now
   });
-  await building.save();
+  await _saveBuildingWithVersionCheck(building);
 
   // Link properties to the building
   const unitPropertyIds = (units || [])
@@ -904,7 +925,7 @@ export async function importFromE9(req: Req, res: Res) {
           createdDate: new Date(),
           updatedDate: new Date()
         });
-        await building.save();
+        await _saveBuildingWithVersionCheck(building);
       } else {
         // Consolidate: merge incoming data into existing building
         let updated = false;
@@ -927,7 +948,7 @@ export async function importFromE9(req: Req, res: Res) {
         }
         if (updated) {
           b.updatedDate = new Date();
-          await building.save();
+          await _saveBuildingWithVersionCheck(building);
         }
       }
 
@@ -1060,7 +1081,7 @@ export async function importFromE9(req: Req, res: Res) {
       }
 
       (building as any).updatedDate = new Date();
-      await building!.save();
+      await _saveBuildingWithVersionCheck(building!);
 
       createdBuildings.push(building.toObject());
 
@@ -1187,7 +1208,7 @@ export async function addUnit(req: Req, res: Res) {
   }
 
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Link property if propertyId provided
   if (req.body.propertyId) {
@@ -1294,7 +1315,7 @@ export async function updateUnit(req: Req, res: Res) {
   }
 
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Update property links if propertyId changed
   if (oldPropertyId && oldPropertyId !== req.body.propertyId) {
@@ -1359,7 +1380,7 @@ export async function removeUnit(req: Req, res: Res) {
 
   (building as any).units.pull(unit._id);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -1404,7 +1425,7 @@ export async function addMonthlyCharge(req: Req, res: Res) {
 
   unit.monthlyCharges.push(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   if (unit.propertyId) {
     await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
@@ -1458,7 +1479,7 @@ export async function updateMonthlyCharge(req: Req, res: Res) {
 
   charge.set(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   if (unit.propertyId) {
     await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
@@ -1491,7 +1512,7 @@ export async function removeMonthlyCharge(req: Req, res: Res) {
 
   unit.monthlyCharges.pull(charge._id);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   if (unit.propertyId) {
     await _recomputeTenantsForProperty(realm!._id, String(unit.propertyId));
@@ -1536,6 +1557,20 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   if (!units.length) {
     throw new ServiceError('Building has no units', 422);
   }
+
+  // Audit B2: build a plain-object snapshot of the building and attach
+  // _tenantGroups to it so the "equal" allocation method divides by
+  // unique tenants (not managed units). Without this, the per-unit
+  // toObject() inside the loop ships a plain object with no
+  // _tenantGroups, computeBuildingChargeForProperty falls through to
+  // the per-managed-unit fallback at 1_base.ts:209-219, and a tenant
+  // occupying multiple units in the same building (apt + storage) is
+  // billed once per unit (double-billed for "equal" allocation).
+  // Mirrors the live-path attach in _recomputeTenantsForProperty
+  // (line 154) and _recomputeTenantsForBuilding (line 254) added in
+  // wave-17 (51bbefca).
+  const buildingPlain = (building as any).toObject();
+  await _attachTenantGroupsToBuildings(realm!._id as string, [buildingPlain]);
 
   // Validate every referenced expenseId exists on the building before we
   // mutate any unit. Silently accepting unknown ids leaves orphan charges.
@@ -1592,9 +1627,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
         const description =
           entry.description || buildingExpense?.name || 'Building charge';
 
-        // Compute share for this unit
+        // Compute share for this unit. Pass the buildingPlain snapshot
+        // (with _tenantGroups attached above) so equal-allocation
+        // groups by unique tenant instead of by managed unit.
         const share = computeBuildingChargeForProperty(
-          (building as any).toObject(),
+          buildingPlain,
           String(unit.propertyId),
           {
             ...(buildingExpense?.toObject?.() || {}),
@@ -1638,7 +1675,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   }
 
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Recompute rents for all tenants linked to this building
   const propertyIds = units
@@ -1755,7 +1792,7 @@ export async function addExpense(req: Req, res: Res) {
 
   (building as any).expenses.push(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Wave-14 F6: recompute every tenant linked to the building exactly once.
   await _recomputeTenantsForBuilding(realm!._id, building);
@@ -1860,7 +1897,7 @@ export async function updateExpense(req: Req, res: Res) {
 
   expense.set(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Wave-14 F6: recompute every tenant linked to the building exactly once.
   await _recomputeTenantsForBuilding(realm!._id, building);
@@ -1924,7 +1961,7 @@ export async function removeExpense(req: Req, res: Res) {
   }
 
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Wave-14 F6: recompute every tenant linked to the building exactly once.
   await _recomputeTenantsForBuilding(realm!._id, building);
@@ -1980,7 +2017,7 @@ export async function addContractor(req: Req, res: Res) {
 
   (building as any).contractors.push(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -2015,7 +2052,7 @@ export async function updateContractor(req: Req, res: Res) {
 
   contractor.set(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -2050,7 +2087,7 @@ export async function removeContractor(req: Req, res: Res) {
 
   (building as any).contractors.pull(contractor._id);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
@@ -2104,7 +2141,7 @@ async function _distributeRepairCharge(
   if (repair.status === 'cancelled') {
     await _removeRepairCharges(building, repair);
     building.updatedDate = new Date();
-    await building.save();
+    await _saveBuildingWithVersionCheck(building);
 
     const propertyIds = building.units
       .filter((u: any) => u.propertyId)
@@ -2178,7 +2215,7 @@ async function _distributeRepairCharge(
   }
 
   building.updatedDate = new Date();
-  await building.save();
+  await _saveBuildingWithVersionCheck(building);
 
   // Recompute rents
   const propertyIds = building.units
@@ -2269,7 +2306,7 @@ export async function addRepair(req: Req, res: Res) {
 
   (building as any).repairs.push(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Distribute repair cost to tenants if chargeable
   const newRepair = (building as any).repairs[
@@ -2341,7 +2378,7 @@ export async function updateRepair(req: Req, res: Res) {
 
   repair.set(req.body);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Re-distribute repair cost
   await _distributeRepairCharge(building as any, repair, realm!._id);
@@ -2372,7 +2409,7 @@ export async function removeRepair(req: Req, res: Res) {
 
   (building as any).repairs.pull(repair._id);
   (building as any).updatedDate = new Date();
-  await building!.save();
+  await _saveBuildingWithVersionCheck(building!);
 
   // Recompute rents for affected tenants
   const propertyIds = (building as any).units

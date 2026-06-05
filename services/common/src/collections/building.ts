@@ -261,6 +261,14 @@ const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
   notes: String,
   createdDate: Date,
   updatedDate: Date
+}, {
+  // Audit B3: Optimistic concurrency. Mongoose now bumps __v on every
+  // save() and throws VersionError if the document was modified between
+  // findOne and save. buildingmanager wraps every save() in
+  // _saveBuildingWithVersionCheck() which surfaces the conflict as a
+  // 409 instead of letting one of two concurrent writers silently
+  // overwrite the other. Mirrors realm.ts (line 119).
+  optimisticConcurrency: true
 });
 
 BuildingSchema.index({ realmId: 1 });
