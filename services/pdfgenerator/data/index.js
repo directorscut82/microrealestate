@@ -50,9 +50,14 @@ export async function getRentsData(params, documentId) {
   let firstBuilding = null;
   if (propertyBuildingIds.length) {
     try {
-      firstBuilding = await Collections.Building.findOne({
-        _id: propertyBuildingIds[0]
-      }).lean();
+      // Defense-in-depth: scope the building lookup by realmId so a
+      // tampered tenant.properties.buildingId pointing at another realm's
+      // building cannot leak that building's manager block onto the PDF.
+      const buildingFilter = { _id: propertyBuildingIds[0] };
+      if (realmId) {
+        buildingFilter.realmId = realmId;
+      }
+      firstBuilding = await Collections.Building.findOne(buildingFilter).lean();
     } catch (error) {
       logger.error(error);
     }
