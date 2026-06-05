@@ -291,7 +291,10 @@ async function _recomputeSiblingTenantsInBuildings(
       const fresh =
         attempt === 1
           ? tenantInitial
-          : ((await Collections.Tenant.findOne({ _id: initialId }).lean()) as AnyRecord | null);
+          : ((await Collections.Tenant.findOne({
+              _id: initialId,
+              realmId
+            }).lean()) as AnyRecord | null);
       if (!fresh) {
         done = true;
         break;

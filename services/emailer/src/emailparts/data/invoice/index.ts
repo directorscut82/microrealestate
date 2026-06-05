@@ -2,7 +2,16 @@ import { Collections } from '@microrealestate/common';
 import moment from 'moment';
 
 export async function get(tenantId: string, params: Record<string, any>) {
-  const dbTenant = await Collections.Tenant.findOne({ _id: tenantId })
+  // Defense-in-depth: scope the tenant lookup by realmId when the caller
+  // (emailer.send) injected one, so a session in one organization cannot
+  // produce email content for a tenant in another. The flag stays optional
+  // to preserve back-compat with system-level callers (reset_password/otp)
+  // that operate without an org context.
+  const tenantFilter: Record<string, any> = { _id: tenantId };
+  if (params?.realmId) {
+    tenantFilter.realmId = params.realmId;
+  }
+  const dbTenant = await Collections.Tenant.findOne(tenantFilter)
     .populate('realmId')
     .populate('leaseId')
     .populate('properties.propertyId');
