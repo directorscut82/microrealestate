@@ -113,31 +113,31 @@ patch.
 
 ---
 
-## D-6 — Tenant search clears on data refetch (spec 03)
+## D-6 — Tenant search clears on data refetch (spec 03) — RESOLVED
 
-**Current behavior.** When the tenants page's `useInfiniteQuery` refetches
-in the background (window focus, mutation invalidation), the typed search
-text in the box stays but the filter resets to "all tenants" until the
-user types another character.
+**Status:** Fixed in `49040d15` (June 1 2026). `ResourceList/List.js`'s
+init useEffect was removing the user's typed search on every data-reference
+change because the parent's effect ran AFTER `SearchFilterBar`'s onMount
+effect. The fix removes the init useEffect entirely and lets
+`SearchFilterBar`'s existing `useEffect` (deps include `searchText`,
+`selectedFilterIds`, `onSearch`) act as the single source of truth — it
+fires on mount with current state and re-fires whenever `handleSearch`
+identity changes when data lands or refetches. The null-data guard moved
+inside `handleSearch` so consumer `filterFn`s don't dereference
+`data.rents` when data is `undefined`. Tenants-page `_filterData` was also
+normalized to match buildings/properties shape (`if (statuses?.length)
+filter else all`).
 
-**History.** Fixed once in `fb024ed4` via an init useEffect in
-`webapps/landlord/src/components/ResourceList/List.js`. That fix
-introduced a race condition where the init effect overwrote the user's
-search on every data reference change, breaking 60+ payment dialog tests
-in suite #7-#10. Reverted in `e1fe87d3` to restore dialog tests.
+**Earlier history.** A first attempt at the fix shipped as `fb024ed4`
+introduced a race that clobbered the user's search on every data
+reference change, breaking 60+ payment dialog tests in suite #7-#10. That
+attempt was reverted in `e1fe87d3` to restore dialog tests. The
+`49040d15` fix avoids the race by deleting the init effect rather than
+trying to feed it current state.
 
-**Why deferred.** A correct fix needs to call `handleSearch` with the
-*current* `searchText` and `selectedFilterIds` (not empty defaults) when
-data changes. That requires either lifting search state into the parent
-or passing it down to the init effect. Both are a refactor; one-line fix
-isn't safe.
-
-**Hooks if we eventually fix this.**
+**Anchors (for regression hunting).**
 - `webapps/landlord/src/components/ResourceList/List.js`
-- `webapps/landlord/src/components/SearchFilterBar.js` (line 92-97 — its
-  own useEffect already calls `onSearch` with current state on
-  `searchText` change; the gap is when *data* changes without
-  `searchText` changing).
+- `webapps/landlord/src/components/SearchFilterBar.js` lines 92-97
 
 ## D-7 — Test bugs in the live Playwright suite
 
@@ -175,60 +175,88 @@ If a NEW failure appears outside this catalog, treat it as a real
 regression and investigate the deployed bundle revision via Portainer
 before assuming the test is wrong.
 
-## D-8 — Past-month overpayment does not propagate to next month's balance
+## D-8 — Past-month overpayment propagation has two regimes
 
-**Current behavior.** When a payment recorded on a frozen (past) term
-exceeds that term's `grandTotal`, the surplus is recorded on the touched
-term's `total.newBalance` (becomes negative) but does NOT cascade to the
-next term's `total.balance`. The downstream month's `grandTotal` is not
-re-derived; it stays at whatever value it had before the past-month
-payment landed.
+**Current behavior — two regimes, both verified live (T4 probe, June 2026).**
 
-**Concrete example (verified in the June 2026 multi-date probe `w0qnvyfz1`,
-scenario MD4):** April 2026 baseline `grandTotal=400`, `payment=200`. A
-600€ probe payment lands on April. April.payment becomes 800 (correct).
-May.grandTotal stays at 876.67 unchanged. Expected if the credit were
-to propagate: May.balance would become −400 (the overpayment surplus),
-May.grandTotal would drop by 400 to 476.67.
+The propagation outcome depends on whether downstream months have their
+own settlement state (`_isFrozen`). The pipeline runs `5_balance.ts`
+forward-walking each term, but the freeze guard in
+`services/api/src/managers/contract.ts:271-276` short-circuits the
+recompute for any month that has a payment, discount, debt, or non-empty
+description.
 
-**Mechanism.** Pipeline (`5_balance.ts`, `7_total.ts`) is correct in
-isolation: `balance = previousRent.grandTotal − previousRent.payment`,
-allowed to be negative; `grandTotal` additively includes a negative
-balance. The blocker is the `_isFrozen` guard in
-`services/api/src/managers/contract.ts:271-276`. A past month with any
-payment / discount / debt / non-empty description is frozen. When the
-landlord touches an earlier past month, the freeze guard skips the
-forward-walk recomputation for every later past month, so May's balance
-is never refreshed against the new April.payment value.
+### Regime A — downstream UNFROZEN: surplus DOES propagate
 
-**Why this might matter.**
-- Cascading negative balances forward is the natural accountant's
-  expectation — overpaying April should reduce May's outstanding.
-- Currently the surplus is locked into the month it was recorded on
-  and surfaces only as a negative `newBalance` on that term — not on
-  any subsequent month.
+When the months after the touched past month have NO settlements (no
+payment, no discount, no debt, no description), the forward walk
+recomputes them naturally. Recording a 600€ payment on April when
+`April.grandTotal=400` produces:
+
+- `April.payment = 600`, `April.newBalance = −200` (surplus on the
+  touched term)
+- `May.balance = April.grandTotal − April.payment = −200`
+- `May.grandTotal` drops by 200 (the carried surplus)
+- The credit cascades through June, July, etc. until it is absorbed by
+  a non-zero `grandTotal` or hits a frozen month.
+
+This is the natural accountant's expectation and works today without
+any code change.
+
+### Regime B — downstream FROZEN: surplus locks into the touched month
+
+When the next month already has its own settlement (a payment was
+recorded against it, or it carries a `description` / `promo` /
+`extracharge`), `_isFrozen` returns true and the forward walk skips
+the recompute for that term and every later frozen term. Result:
+
+- `April.payment = 600`, `April.newBalance = −200` (surplus visible
+  here only)
+- `May.balance` stays at whatever it was before the April probe
+- `May.grandTotal` is unchanged
+- The 200€ surplus does NOT visibly carry forward to May, June, etc.
+
+**T4 probe evidence:** in scenarios where May had a recorded payment
+(even a tiny one), the April overpayment did not flow into May's
+balance. In scenarios where May was clean (no payment yet), the April
+overpayment did flow naturally.
 
 **Why the current behavior exists (intentional).**
-- The freeze guard protects historical rents from being silently
-  re-priced when an unrelated change cascades through the pipeline.
-  Without it, editing a one-off expense in April could rewrite the
-  grandTotal of every paid month after it. That's a much bigger
-  data-integrity hazard than locking surplus into one month.
 
-**Why deferred.** Lifting the freeze for the propagation case requires
-a UX choice (does the landlord want a "rebalance forward" toggle, an
-explicit credit-carry button, or automatic propagation?), plus
-migration concerns: existing past months with surplus payments would
-either need to stay locked (creating an inconsistent rule between
-historical and future overpayments) or be retroactively rebalanced.
+The freeze guard protects historical rents from being silently re-priced
+when an unrelated change cascades through the pipeline. Without it,
+editing a one-off expense in April could rewrite the `grandTotal` of
+every paid month after it, mutating the user's historical ledger. That
+is a worse data-integrity hazard than locking a surplus into the month
+it was recorded on.
+
+**Why this might matter for landlords.**
+
+- Regime A users (typical case: paying ahead before next month is
+  recorded) get the natural cascading they expect.
+- Regime B users (paying back-month overage AFTER later months were
+  partially settled) see the surplus marooned on the touched term as a
+  negative `newBalance` and have to manually adjust later months if they
+  want the credit applied there.
+
+**Why deferred.** A "lift the freeze for surplus propagation only"
+behavior is conceptually simple but practically risky: the freeze guard
+is what prevents an arbitrary edit from rewriting paid months. Selectively
+unfreezing for the propagation case requires distinguishing "this month
+has its own real settlement that we must preserve" from "this month was
+frozen because something earlier created a description". A correct fix
+needs a UX choice (rebalance-forward toggle? explicit credit-carry
+button? automatic with confirmation?) plus a migration story for existing
+realm data.
 
 **Hooks if we eventually fix this.**
 - `services/api/src/managers/contract.ts:271-276` — `_isFrozen` guard.
 - `services/api/src/businesslogic/tasks/5_balance.ts` — already supports
   negative balance, no change needed there.
-- Workaround for landlords today: the overpayment IS visible as the
-  recorded payment on the past term and contributes to that term's
-  newBalance. Future months can be adjusted manually if needed.
+- Workaround for landlords today (Regime B): the overpayment IS visible
+  as the recorded payment on the past term and contributes to that
+  term's `newBalance`. Future months can be adjusted manually via a
+  `promo` / `discount` line keyed to the surplus amount.
 
 ---
 

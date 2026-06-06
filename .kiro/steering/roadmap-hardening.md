@@ -130,8 +130,18 @@ Changes are grouped into phases. Each phase should be completed before the next.
 
 ### 4.10 Dashboard Performance ✅ COMPLETE (added May 2026)
 - MongoDB aggregation pipeline with `$filter` on rents by term (was loading full arrays)
-- Transaction atomicity for multi-document updates
 - 20 unit tests for aggregation logic
+- **NOT shipped despite earlier roadmap claim:** multi-document MongoDB
+  transactions. `mongoose.startSession` is re-exported from
+  `services/common/src/collections/index.ts:14` but no service ever
+  imports or calls it; no `withTransaction` / `startTransaction` callsite
+  exists anywhere under `services/`. Multi-document updates rely on
+  per-document optimistic concurrency (`If-Match` / `__v` checks) and
+  best-effort sequential writes. Real transaction support remains a
+  future hardening item — would require a replica set on the deployed
+  Mongo (currently a single-node), wrapping `rentmanager.update*`,
+  `accountingmanager` settlements, and the dashboard rebuild path in
+  `withTransaction`, plus retry-on-`TransientTransactionError`.
 
 ### 4.12 Payment + Rents UX Wave ✅ COMPLETE (May–June 2026)
 - **Driven by**: real usage feedback from the deployed NAS — landlord couldn't tell at a glance whether a tenant had been paid, payment dialog was confusing, accounting/notes weren't surfaced, calendar inside the payment drawer was uncllickable.
