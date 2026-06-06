@@ -23,10 +23,17 @@ const _generateTokens = async (dbAccount: Record<string, any>): Promise<{ refres
   const { REFRESH_TOKEN_SECRET, ACCESS_TOKEN_SECRET, PRODUCTION } =
     Service.getInstance().envConfig.getValues();
   const { _id, password, ...account } = dbAccount;
+  // Pin algorithm to HS256 explicitly. jsonwebtoken's default is HS256
+  // for symmetric secrets so behaviour is unchanged, but setting it
+  // explicitly mirrors the verify() side (which already passes
+  // `algorithms: ['HS256']`) and removes any chance of the default
+  // shifting in a future major version.
   const refreshToken = jwt.sign({ account }, REFRESH_TOKEN_SECRET!, {
+    algorithm: 'HS256',
     expiresIn: PRODUCTION ? '600s' : '12h'
   });
   const accessToken = jwt.sign({ account }, ACCESS_TOKEN_SECRET!, {
+    algorithm: 'HS256',
     expiresIn: '5m'
   });
 
@@ -174,6 +181,7 @@ const _applicationSignIn = Middlewares.asyncWrapper(async (req: Request, res: Re
 
   delete application.clientSecret;
   const accessToken = jwt.sign({ application }, ACCESS_TOKEN_SECRET!, {
+    algorithm: 'HS256',
     expiresIn: '300s'
   });
 
@@ -325,7 +333,8 @@ export default function (): Router {
           jti: clientId,
           exp: expiryDate.getTime() / 1000
         },
-        APPCREDZ_TOKEN_SECRET!
+        APPCREDZ_TOKEN_SECRET!,
+        { algorithm: 'HS256' }
       );
 
       res.json({ clientId, clientSecret });
@@ -386,6 +395,7 @@ export default function (): Router {
       });
       if (account) {
         const token = jwt.sign({ email }, RESET_TOKEN_SECRET!, {
+          algorithm: 'HS256',
           expiresIn: '1h'
         });
         await Service.getInstance().redisClient!.set(token, email, {

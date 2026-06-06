@@ -161,6 +161,7 @@ export default function (): Router {
 
       const account = { email: payload.email, role: 'tenant' };
       const sessionToken = jwt.sign({ account }, ACCESS_TOKEN_SECRET!, {
+        algorithm: 'HS256',
         expiresIn: PRODUCTION ? '30m' : '12h'
       });
       await Service.getInstance().redisClient!.set(

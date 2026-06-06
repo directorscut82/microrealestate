@@ -165,7 +165,16 @@ export function validateArrayMaxLength(
   maxLength: number,
   fieldName: string
 ): void {
-  if (Array.isArray(arr) && arr.length > maxLength) {
+  // Reject non-array inputs explicitly. Previously silent: a string or
+  // object slipped past this guard because the only check was
+  // `Array.isArray(arr) && arr.length > max`. Downstream code that
+  // assumed an array shape (e.g. .forEach / [i]) would either crash
+  // with a confusing TypeError or coerce wrong. Surface a 422 here.
+  if (arr == null) return;
+  if (!Array.isArray(arr)) {
+    throw new ServiceError(`${fieldName} must be an array`, 422);
+  }
+  if (arr.length > maxLength) {
     throw new ServiceError(
       `${fieldName} exceeds maximum of ${maxLength} items`,
       422
@@ -185,7 +194,14 @@ export function validateStringLength(
     }
     return undefined;
   }
-  const s = String(value);
+  // Reject non-string inputs. Previously coerced via String(value) — an
+  // array or object payload would land as e.g. "1,2,3" or "[object Object]"
+  // and pass length checks, then be persisted in mongo as garbage. Mirrors
+  // the strict shape used by validateStringField below.
+  if (typeof value !== 'string') {
+    throw new ServiceError(`${fieldName} must be a string`, 422);
+  }
+  const s = value;
   if (opts.minLength && s.trim().length < opts.minLength) {
     throw new ServiceError(
       `${fieldName} must be at least ${opts.minLength} characters`,

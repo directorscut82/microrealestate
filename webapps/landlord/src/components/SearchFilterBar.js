@@ -129,10 +129,16 @@ export default function SearchFilterBar({ filters = [], onSearch, className }) {
           undefined,
           { shallow: true }
         );
-        onSearch(inputSelectedStatus, inputSearchText);
+        // Do NOT call onSearch(...) imperatively here. handleTextChange /
+        // handleFilterChange already update local state (searchText /
+        // selectedFilterIds), which triggers the useEffect at the top of
+        // this component that calls onSearch. Calling it again here used
+        // to fire onSearch twice on every keystroke — visible as
+        // duplicated network calls on filter pages and a flash of
+        // "filtered then refetched" results in ResourceList.
       });
     },
-    [onSearch, router]
+    [router]
   );
 
   const handleTextChange = useCallback(
