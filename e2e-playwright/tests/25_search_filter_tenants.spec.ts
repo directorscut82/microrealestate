@@ -188,19 +188,53 @@ test('25.3 search holds across an external mutation (manual invalidate)', async 
   });
   expect(getResp.status(), 'tenant get').toBe(200);
   const fullTenant = (await getResp.json()) as Record<string, unknown>;
+  // GET /tenants/:id returns the document via toOccupantData, which
+  // unconditionally formats beginDate/endDate via moment.utc(...).format().
+  // For a tenant created without a lease window (ensureSeedTenant), the
+  // persisted dates are undefined and `moment.utc(undefined)` returns
+  // NOW — both beginDate and endDate come back as today's date string.
+  // Round-tripping that body trips the "End date must be after begin
+  // date" guard (endDate <= beginDate). Drop those fields plus any
+  // computed/derived ones that the create flow can re-derive from the
+  // remaining persisted document. This keeps the PATCH semantically a
+  // "touch" of the tenant (updates reference only) without poking the
+  // lease-window guards.
+  const cleanTenant: Record<string, unknown> = { ...fullTenant };
+  for (const k of [
+    'beginDate',
+    'endDate',
+    'terminationDate',
+    'lease',
+    'office',
+    'parking',
+    'street1',
+    'street2',
+    'zipCode',
+    'city',
+    'country',
+    'rental',
+    'expenses',
+    'total',
+    'contactEmails',
+    'hasContactEmails',
+    'status',
+    'terminated'
+  ]) {
+    delete cleanTenant[k];
+  }
   const patchResp = await apiCtx.patch(`${GATEWAY}/api/v2/tenants/${tenantId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       organizationid: realmId,
       'Content-Type': 'application/json'
     },
-    data: { ...fullTenant, reference: `INVALIDATE-${Date.now()}` }
+    data: { ...cleanTenant, reference: `INVALIDATE-${Date.now()}` }
   });
+  const patchBody = await patchResp.text().catch(() => '');
   expect(
-    patchResp.status(),
-    `tenant patch (body: ${await patchResp.text().catch(() => '')})`
-  ).toBeGreaterThanOrEqual(200);
-  expect(patchResp.status()).toBeLessThan(300);
+    patchResp.status() >= 200 && patchResp.status() < 300,
+    `tenant patch status=${patchResp.status()} body=${patchBody}`
+  ).toBe(true);
   await apiCtx.dispose();
 
   // Trigger a refetch by toggling visibility (Page Visibility API).
@@ -226,20 +260,27 @@ test('25.4 search + "Lease running" chip composes (AND filter)', async ({ page }
   await signIn(page);
   await gotoTenants(page, leased.realmName);
 
-  // Search by tenant's exact name.
+  // Search by tenant's name. The tenants page _filterData
+  // (webapps/landlord/src/pages/[organization]/tenants/index.js:44) uses
+  // String.indexOf for the name match, so typing "E2E-LeasedTenant" will
+  // also match a leftover "E2E-LeasedTenant-B" from a panicked spec 19
+  // run (CLAUDE.md "Test seed leakage cascade"). Assert with the exact-
+  // name `tenantCard` selector (`hasText: /^E2E-LeasedTenant$/`) so the
+  // count is deterministic regardless of leakage. Same recipe as 28.29
+  // and 29.39 (exact-name `:text-is(...)` post-filter assertion).
   await page.locator('[data-cy=globalSearchField]').fill(leased.tenantName);
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(tenantCard(page, leased.tenantName)).toHaveCount(1, {
+    timeout: 15_000
+  });
 
   // Now add the "Lease running" filter chip — the canonical leased tenant
   // has begin/end straddling today so they remain in the narrowed set.
   await clickFilterChip(page, /Lease running|Σύμβαση σε ισχύ/i);
 
-  // Still exactly 1 (narrowed by name AND status=inprogress).
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 10_000 });
+  // Exact-name match still resolves to exactly 1 row after the chip.
+  await expect(tenantCard(page, leased.tenantName)).toHaveCount(1, {
+    timeout: 10_000
+  });
   await expect(tenantCard(page, leased.tenantName)).toBeVisible();
 });
 
@@ -314,19 +355,60 @@ test('25.7 "Show archived" toggle adds/removes archived tenants', async ({
   // Seed a one-off tenant we will archive so the toggle has something to flip.
   const seed = await ensureSeedTenant(apiCtx);
   const token = await getAccessToken(apiCtx);
-  // Archive that tenant.
+  // Archive that tenant. A partial PATCH `{ archived: true }` trips the
+  // server-side `update` validator which requires `name` (occupantmanager.ts
+  // ~line 1083 → 1106 "missing fields", 422). Mirror 25.3's recipe: GET
+  // the tenant, drop derived/computed fields the create flow re-derives,
+  // overlay `archived: true`, PATCH the full body.
+  const auth = {
+    Authorization: `Bearer ${token}`,
+    organizationid: seed.realmId,
+    'Content-Type': 'application/json'
+  };
+  const getResp = await apiCtx.get(
+    `${GATEWAY}/api/v2/tenants/${seed.tenantId}`,
+    { headers: auth }
+  );
+  expect(getResp.status(), 'tenant get').toBe(200);
+  const fullTenant = (await getResp.json()) as Record<string, unknown>;
+  // Same drop-list as 25.3 — `toOccupantData` formats undefined dates
+  // via moment.utc() which returns NOW; round-tripping those would trip
+  // the "End date must be after begin date" guard.
+  const cleanTenant: Record<string, unknown> = { ...fullTenant };
+  for (const k of [
+    'beginDate',
+    'endDate',
+    'terminationDate',
+    'lease',
+    'office',
+    'parking',
+    'street1',
+    'street2',
+    'zipCode',
+    'city',
+    'country',
+    'rental',
+    'expenses',
+    'total',
+    'contactEmails',
+    'hasContactEmails',
+    'status',
+    'terminated'
+  ]) {
+    delete cleanTenant[k];
+  }
   const archResp = await apiCtx.patch(
     `${GATEWAY}/api/v2/tenants/${seed.tenantId}`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        organizationid: seed.realmId,
-        'Content-Type': 'application/json'
-      },
-      data: { archived: true }
+      headers: auth,
+      data: { ...cleanTenant, archived: true }
     }
   );
-  expect(archResp.status(), 'archive tenant').toBeLessThan(400);
+  const archBody = await archResp.text().catch(() => '');
+  expect(
+    archResp.status() >= 200 && archResp.status() < 300,
+    `archive tenant status=${archResp.status()} body=${archBody}`
+  ).toBe(true);
   await apiCtx.dispose();
 
   await signIn(page);

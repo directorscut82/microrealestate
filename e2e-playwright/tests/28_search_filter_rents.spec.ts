@@ -411,7 +411,7 @@ test('28.35 search persists across a payment mutation (refetch resilience)', asy
     now.getMonth() + 1
   ).padStart(2, '0')}/${now.getFullYear()}`;
   const term = currentTerm();
-  await apiCtx2.patch(
+  const patchResp = await apiCtx2.patch(
     `${GATEWAY}/api/v2/rents/payment/${seed.tenantId}/${term}`,
     {
       headers: auth,
@@ -432,10 +432,25 @@ test('28.35 search persists across a payment mutation (refetch resilience)', asy
       }
     }
   );
+  expect(
+    patchResp.status(),
+    `partial payment patch (body: ${await patchResp.text().catch(() => '')})`
+  ).toBe(200);
   await apiCtx2.dispose();
 
-  // Trigger a refetch (focus event).
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  // Trigger a refetch by reloading the page. The search text is
+  // persisted in `router.query.search` (SearchFilterBar pushes the
+  // current text to the URL on every keystroke via shallow push), so
+  // a reload re-mounts the page with the same searchText state but a
+  // fresh useQuery — which is exactly what "external mutation +
+  // refetch resilience" exercises. A bare focus/visibility dispatch
+  // is unreliable in headless Chromium (React Query's focusManager
+  // depends on browser-level visibility events that synthesised JS
+  // events don't reproduce).
+  await page.reload();
+  await expect(
+    page.locator('[data-cy=globalSearchField]')
+  ).toBeVisible({ timeout: 20_000 });
 
   // Search input still has the typed value.
   await expect(
@@ -468,10 +483,16 @@ test('28.36 search persists across navigate to next month and back', async ({
   const ym = currentYearMonth();
   await gotoRents(page, seed.realmName, ym);
 
+  // Search by tenant name. The rents page _filterData uses indexOf on
+  // occupant.name, so "E2E-LeasedTenant" substring-matches a leftover
+  // "E2E-LeasedTenant-B" from a panicked prior run (CLAUDE.md "Test seed
+  // leakage cascade"). Assert via the exact-name span selector (mirrors
+  // 28.29 line 131) so the count is deterministic regardless of leakage.
+  const exactRow = page.locator(
+    `span.text-lg.font-medium:text-is("${seed.tenantName}")`
+  );
   await page.locator('[data-cy=globalSearchField]').fill(seed.tenantName);
-  await expect(
-    page.locator('[data-cy^="status-"]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(exactRow).toHaveCount(1, { timeout: 15_000 });
 
   // Next month URL: increment month by 1, wrap year.
   const [yearStr, monthStr] = ym.split('.');
@@ -498,9 +519,8 @@ test('28.36 search persists across navigate to next month and back', async ({
   await expect(
     page.locator('[data-cy=globalSearchField]')
   ).toHaveValue(seed.tenantName, { timeout: 15_000 });
-  await expect(
-    page.locator('[data-cy^="status-"]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  // Exact-name row still present after roundtrip.
+  await expect(exactRow).toHaveCount(1, { timeout: 15_000 });
 });
 
 test('28.37 chip + payment that flips status drops the row from filtered set', async ({
