@@ -2221,7 +2221,13 @@ async function _distributeRepairCharge(
   const term = Number(repair.chargeTerm);
   const repairIdStr = String(repair._id);
 
+  // F5 (mirrors saveMonthlyStatement / B2 fix at line 1604): the plain-
+  // object snapshot must carry _tenantGroups so equal-allocation groups
+  // by unique tenant rather than by managed unit. Without this attach,
+  // a tenant occupying multiple units on the same building gets billed
+  // a per-unit share for repairs (double-charged for "equal").
   const buildingObj = building.toObject ? building.toObject() : building;
+  await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
 
   for (const unit of building.units) {
     if (!unit.propertyId) continue;
