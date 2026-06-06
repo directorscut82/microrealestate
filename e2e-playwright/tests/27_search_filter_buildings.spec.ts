@@ -134,8 +134,19 @@ test('27.22 search 3 chars of building name narrows the list', async ({ page }) 
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeed(apiCtx);
-  // Unique tag in the building name.
-  const tag = 'BNM' + Math.random().toString(36).slice(2, 4).toUpperCase();
+  // Unique tag in the building name. The previous suffix was 2 random
+  // base36 chars (~1300 distinct values) which collided across repeated
+  // CYPRESS realm runs — leftover buildings from prior runs whose name
+  // happened to contain the new tag would show up alongside the just-
+  // created one (search returned 2 instead of 1). Bump to 8 hex chars
+  // (~4 billion distinct values) so collisions are vanishingly unlikely.
+  const tag =
+    'BNM' +
+    Math.random()
+      .toString(16)
+      .slice(2, 10)
+      .padEnd(8, '0')
+      .toUpperCase();
   await ensureSearchableBuilding(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Building`,
     atakPrefix: `${tag}AT`
