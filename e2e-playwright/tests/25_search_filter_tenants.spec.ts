@@ -188,19 +188,53 @@ test('25.3 search holds across an external mutation (manual invalidate)', async 
   });
   expect(getResp.status(), 'tenant get').toBe(200);
   const fullTenant = (await getResp.json()) as Record<string, unknown>;
+  // GET /tenants/:id returns the document via toOccupantData, which
+  // unconditionally formats beginDate/endDate via moment.utc(...).format().
+  // For a tenant created without a lease window (ensureSeedTenant), the
+  // persisted dates are undefined and `moment.utc(undefined)` returns
+  // NOW — both beginDate and endDate come back as today's date string.
+  // Round-tripping that body trips the "End date must be after begin
+  // date" guard (endDate <= beginDate). Drop those fields plus any
+  // computed/derived ones that the create flow can re-derive from the
+  // remaining persisted document. This keeps the PATCH semantically a
+  // "touch" of the tenant (updates reference only) without poking the
+  // lease-window guards.
+  const cleanTenant: Record<string, unknown> = { ...fullTenant };
+  for (const k of [
+    'beginDate',
+    'endDate',
+    'terminationDate',
+    'lease',
+    'office',
+    'parking',
+    'street1',
+    'street2',
+    'zipCode',
+    'city',
+    'country',
+    'rental',
+    'expenses',
+    'total',
+    'contactEmails',
+    'hasContactEmails',
+    'status',
+    'terminated'
+  ]) {
+    delete cleanTenant[k];
+  }
   const patchResp = await apiCtx.patch(`${GATEWAY}/api/v2/tenants/${tenantId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       organizationid: realmId,
       'Content-Type': 'application/json'
     },
-    data: { ...fullTenant, reference: `INVALIDATE-${Date.now()}` }
+    data: { ...cleanTenant, reference: `INVALIDATE-${Date.now()}` }
   });
+  const patchBody = await patchResp.text().catch(() => '');
   expect(
-    patchResp.status(),
-    `tenant patch (body: ${await patchResp.text().catch(() => '')})`
-  ).toBeGreaterThanOrEqual(200);
-  expect(patchResp.status()).toBeLessThan(300);
+    patchResp.status() >= 200 && patchResp.status() < 300,
+    `tenant patch status=${patchResp.status()} body=${patchBody}`
+  ).toBe(true);
   await apiCtx.dispose();
 
   // Trigger a refetch by toggling visibility (Page Visibility API).
