@@ -109,7 +109,11 @@ test('29.38 tenants-page filter survives a cross-surface payment mutation', asyn
   await expect(
     page
       .locator('[data-cy=openResourceButton]')
-      .filter({ has: page.locator(`:text-is("${seed.tenantName}")`) })
+      .filter({
+        hasText: new RegExp(
+          `^${seed.tenantName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}$`
+        )
+      })
   ).toBeVisible({ timeout: 10_000 });
 
   // Cross-surface mutation: record a payment via API on the rents path
@@ -161,7 +165,11 @@ test('29.38 tenants-page filter survives a cross-surface payment mutation', asyn
   await expect(
     page
       .locator('[data-cy=openResourceButton]')
-      .filter({ has: page.locator(`:text-is("${seed.tenantName}")`) })
+      .filter({
+        hasText: new RegExp(
+          `^${seed.tenantName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}$`
+        )
+      })
   ).toBeVisible();
 
   // Cleanup.

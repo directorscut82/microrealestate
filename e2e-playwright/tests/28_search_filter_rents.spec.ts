@@ -115,8 +115,12 @@ test('28.29 search by tenant name narrows the rent rows', async ({ page }) => {
   const before = await page.locator('[data-cy^="status-"]').count();
   expect(before).toBeGreaterThanOrEqual(2);
 
-  // Search by exact name of the canonical leased tenant.
-  await page.locator('[data-cy=globalSearchField]').fill(seed.tenantName);
+  // Searching the canonical name "E2E-LeasedTenant" would substring-match
+  // tenant B ("E2E-LeasedTenant-B") because the rents page _filterData
+  // uses `indexOf`. Use tenant A's unique phone1 ("6900000000") instead —
+  // the rents filter scans contacts.phone, and tenant B's phone is
+  // "6900000001". The 8-zero substring is unique to A.
+  await page.locator('[data-cy=globalSearchField]').fill('00000000');
 
   // Set narrowing: ≤ before, ≥ 1.
   const after = await page.locator('[data-cy^="status-"]').count();

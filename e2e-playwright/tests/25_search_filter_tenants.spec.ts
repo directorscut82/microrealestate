@@ -63,12 +63,16 @@ async function gotoTenants(page: Page, realmName: string) {
 }
 
 function tenantCard(page: Page, name: string) {
-  // Match a tenant row by EXACT name (`:text-is`) — substring match
-  // would lock onto E2E-LeasedTenant-B when looking for E2E-LeasedTenant
-  // (spec-19 leakage cascade documented in CLAUDE.md).
+  // Match a tenant row by EXACT name. The previous `.filter({ has:
+  // ":text-is(name)" })` recipe failed when the openResourceButton's own
+  // text content IS the name — Playwright's `:text-is()` engine couldn't
+  // resolve a self-reference cleanly under `has:`. The canonical pattern
+  // (mirrored from spec 26 propertyCard) is `.filter({ hasText: /^name$/ })`
+  // which matches the visible text exactly.
+  const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
   return page
     .locator('[data-cy=openResourceButton]')
-    .filter({ has: page.locator(`:text-is("${name}")`) });
+    .filter({ hasText: new RegExp(`^${escaped}$`) });
 }
 
 async function openFiltersMenu(page: Page) {
