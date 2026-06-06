@@ -137,13 +137,25 @@ async function ensureSearchableProperty(
   return { _id: prop._id };
 }
 
-test('26.11 search 4 chars of property name narrows to that property', async ({ page }) => {
+test('26.11 search prefix of property name narrows to that property', async ({ page }) => {
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeed(apiCtx);
-  // Use a unique 6-letter token so we can search a 4-char substring
-  // that won't collide with E2E-Property / E2E-Property-B.
-  const tag = 'NMQX' + Math.random().toString(36).slice(2, 4).toUpperCase();
+  // Mirror the spec 27.22 building-tag fix: unique 8-hex-char tag (~4
+  // billion distinct values) prefixed with a 3-letter sentinel so we
+  // can grep this fixture from logs. The previous shape (static 'NMQX'
+  // + 2 random base36 chars) made the search prefix ALWAYS the static
+  // 'NMQX' substring — leftover E2E-NMQX*-Name properties from prior
+  // failed runs would still match and the assertion (count == 1)
+  // would fail with received 5 (or 2, or 6, depending on leakage).
+  // Bump to 11 hex chars and search the full tag.
+  const tag =
+    'PNM' +
+    Math.random()
+      .toString(16)
+      .slice(2, 10)
+      .padEnd(8, '0')
+      .toUpperCase();
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Name`,
     atakNumber: `${tag}-AT`,
@@ -155,8 +167,9 @@ test('26.11 search 4 chars of property name narrows to that property', async ({ 
   await signIn(page);
   await gotoProperties(page, seed.realmName);
 
-  // Search 4 chars of name.
-  await page.locator('[data-cy=globalSearchField]').fill(tag.slice(0, 4));
+  // Search the full unique tag — collisions across runs are vanishingly
+  // unlikely (~4B distinct values) so leftover fixtures don't pollute.
+  await page.locator('[data-cy=globalSearchField]').fill(tag);
 
   await expect(
     page.locator('[data-cy=openResourceButton]')

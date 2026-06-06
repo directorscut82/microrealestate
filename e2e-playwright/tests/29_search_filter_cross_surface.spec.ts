@@ -215,10 +215,18 @@ test('29.39 Express drawer respects rents-page search filter', async ({ page }) 
   await page.keyboard.press('Escape');
   await expect(drawer).not.toBeVisible({ timeout: 5_000 });
 
-  // Now apply a name search that matches ONLY tenant A. RentTable feeds
+  // Now apply a search that matches ONLY tenant A. RentTable feeds
   // ExpressPaymentDialog from its `rents` prop (= filtered data), so the
   // drawer must show only tenant A.
-  await page.locator('[data-cy=globalSearchField]').fill(seedAB.tenantName);
+  //
+  // Use tenant A's UNIQUE phone1 substring "00000000" (8 zeros) — appears
+  // in A's "6900000000" but NOT in B's "6900000001". Searching by
+  // `seedAB.tenantName` ("E2E-LeasedTenant") would substring-match
+  // "E2E-LeasedTenant-B" because the rents page _filterData uses
+  // indexOf, leaving 2+ rows visible and the count==1 expectation
+  // failing with received 2 (or 4 if other leakage exists). Mirrors
+  // spec 28.29 line 123 anchor.
+  await page.locator('[data-cy=globalSearchField]').fill('00000000');
   // Wait for the rents page to narrow to 1 row.
   await expect(
     page.locator('[data-cy^="status-"]')
