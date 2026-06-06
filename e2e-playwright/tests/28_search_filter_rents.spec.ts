@@ -483,10 +483,16 @@ test('28.36 search persists across navigate to next month and back', async ({
   const ym = currentYearMonth();
   await gotoRents(page, seed.realmName, ym);
 
+  // Search by tenant name. The rents page _filterData uses indexOf on
+  // occupant.name, so "E2E-LeasedTenant" substring-matches a leftover
+  // "E2E-LeasedTenant-B" from a panicked prior run (CLAUDE.md "Test seed
+  // leakage cascade"). Assert via the exact-name span selector (mirrors
+  // 28.29 line 131) so the count is deterministic regardless of leakage.
+  const exactRow = page.locator(
+    `span.text-lg.font-medium:text-is("${seed.tenantName}")`
+  );
   await page.locator('[data-cy=globalSearchField]').fill(seed.tenantName);
-  await expect(
-    page.locator('[data-cy^="status-"]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(exactRow).toHaveCount(1, { timeout: 15_000 });
 
   // Next month URL: increment month by 1, wrap year.
   const [yearStr, monthStr] = ym.split('.');
@@ -513,9 +519,8 @@ test('28.36 search persists across navigate to next month and back', async ({
   await expect(
     page.locator('[data-cy=globalSearchField]')
   ).toHaveValue(seed.tenantName, { timeout: 15_000 });
-  await expect(
-    page.locator('[data-cy^="status-"]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  // Exact-name row still present after roundtrip.
+  await expect(exactRow).toHaveCount(1, { timeout: 15_000 });
 });
 
 test('28.37 chip + payment that flips status drops the row from filtered set', async ({
