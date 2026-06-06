@@ -277,12 +277,66 @@ Both the API and frontend containers must be on the same revision before re-runn
 
 The following 5 tests fail on the current `a9d3fbab` build and they are **test-side bugs**, not app bugs. Don't "fix" them by changing app code:
 
-- **spec 03 `tenant search by partial phone1`** — known regression from the List.js init useEffect revert; the search box doesn't refilter on data refetch. To re-fix, the search-clobbered fix must be done WITHOUT clobbering the user's typed search (the previous attempt fb024ed4 broke 60+ dialog tests).
+- **spec 03 `tenant search by partial phone1`** — RESOLVED on master in `49040d15` (June 1 2026). Re-running this spec against any revision ≥ `49040d15` should pass. The note about the `fb024ed4` race is preserved for archaeology only — the resolved fix takes a different shape (delete the init useEffect rather than feed it current state).
 - **spec 15 S36/S37** — assert that a date `last day of current month` and `5 days into next month` pass the server's F3 guard. They pass when run near month-end but fail when run on day 1-22 of the month because the date is ≥7 days away → "too far in future" guard fires. Test should compute the date dynamically against `today + 5d` instead of "month end".
 - **spec 17 C28 `double-clicking Record does not double-fire PATCH`** — flaky timing race against the 80ms submittingRef fallback. Don't tighten the timeout (see AGENTS.md "saga"); accept the flake.
 - **spec 19 L06 `adding a building expense lifts next-rent grandTotal`** — test logic computes the wrong expected delta. Expense isn't reflected in the next month because `Contract.payTerm` only generates rent for the requested term (not future months); the assertion needs to PATCH the next month explicitly to trigger regeneration.
 
 If a NEW failure appears outside that list, it's a real regression and you should investigate.
+
+## Verified-clean summary (June 2026 audit waves A–F)
+
+The audit waves run between late May and early June 2026 catalogued
+behaviors as either "fix required" (shipped under batches A–E) or
+"verified clean / behavior is correct as-is". The clean list is recorded
+here so future agents don't re-investigate already-confirmed behavior
+and don't accidentally regress it during cleanup work.
+
+**Behaviors verified correct as-is (do NOT change without re-running the
+relevant probe first):**
+
+- **Past-month overpayment propagation** — has two regimes documented in
+  `documentation/DEFERRED_DECISIONS.md` D-8. T4 probes confirmed:
+  surplus DOES cascade through unfrozen downstream months naturally;
+  surplus is locked in the touched term only when downstream months
+  have their own settlements (the `_isFrozen` guard in
+  `services/api/src/managers/contract.ts:271-276` is intentional and
+  load-bearing).
+- **Payment dialog `submittingRef` 80ms reset fallback** — load-bearing.
+  Several attempts to tighten or remove this timeout broke the entire
+  dialog flow. The C28 double-click race remains a known test flake;
+  accept it. See AGENTS.md "saga" section.
+- **Greek lease parser, IRIS QR generation, RF payment codes** — covered
+  by the 13 unit tests in `services/api/src/managers/__tests__/`. Don't
+  rewrite the parser regexes without re-running those.
+- **Frontend store reactivity (`InjectStoreContext` /
+  `useSyncExternalStore`)** — current shape (subscribe + notify, plain
+  classes) is a deliberate replacement for MobX. Don't reintroduce
+  `mobx` or `mobx-react-lite`.
+- **`destructUrl()` port-stripping** — known limitation tracked under
+  Phase 5.5. The `APP_DOMAIN=host:port` workaround is the documented
+  escape hatch; CORS regex builder consumes `APP_DOMAIN` verbatim.
+- **Dashboard pie tooltip layout** — kept as 3-column table per round-3o
+  decision. Pie segments themselves still use the `paidRatio` estimate
+  (per explicit instruction). Don't change segment math without
+  re-running `dashboardManagerComputePaidByBucket.test.js`.
+- **Auto-spread payment allocation order (oldest-debt-first)** — used by
+  both `paymentAllocation.js` (frontend) and `_computePaidByBucket`
+  (backend). They operate on different bucket spaces (rent-pipeline
+  category space vs dashboard-display category space) — kept separate
+  intentionally. See round-3i comment block in
+  `services/api/src/managers/dashboardmanager.ts`.
+- **Multi-document updates without MongoDB transactions** — see §4.10
+  note in roadmap-hardening.md. The deployed Mongo is a single-node,
+  not a replica set; transactions cannot be enabled without a
+  topology change. Optimistic concurrency on individual documents is
+  the current correctness mechanism.
+
+If you read this list and are about to "fix" one of these items: stop,
+re-run the probe that validated the existing behavior first, and confirm
+the regression you think you see is real. The audit waves spent a lot of
+time confirming these are correct; the cost of re-verification is
+cheaper than the cost of regressing them.
 
 ## Test inventory
 
