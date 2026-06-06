@@ -388,8 +388,13 @@ test('28.35 search persists across a payment mutation (refetch resilience)', asy
   await signIn(page);
   await gotoRents(page, seed.realmName, currentYearMonth());
 
-  // Narrow by name.
-  await page.locator('[data-cy=globalSearchField]').fill(seed.tenantName);
+  // Narrow by tenant A's UNIQUE phone1 substring ("00000000" — 8 zeros
+  // appear in tenant A's "6900000000" but NOT in tenant B's
+  // "6900000001"). Searching by `seed.tenantName` ("E2E-LeasedTenant")
+  // would substring-match a leftover "E2E-LeasedTenant-B" from a prior
+  // panicked run and break the count==1 narrowing. Same anchor pattern
+  // used by spec 28.29 (line 123 comment).
+  await page.locator('[data-cy=globalSearchField]').fill('00000000');
   await expect(
     page.locator('[data-cy^="status-"]')
   ).toHaveCount(1, { timeout: 15_000 });
@@ -435,8 +440,8 @@ test('28.35 search persists across a payment mutation (refetch resilience)', asy
   // Search input still has the typed value.
   await expect(
     page.locator('[data-cy=globalSearchField]')
-  ).toHaveValue(seed.tenantName);
-  // List still narrowed to 1 row (still matching by name).
+  ).toHaveValue('00000000');
+  // List still narrowed to 1 row (still matching by phone1 substring).
   await expect(
     page.locator('[data-cy^="status-"]')
   ).toHaveCount(1, { timeout: 15_000 });
