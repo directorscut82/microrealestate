@@ -507,17 +507,43 @@ test('L02 · terminate mid-year hides tenant from future months', async ({
   if (!_seed) throw new Error('seed not ready');
   const api = await request.newContext();
 
-  // Reuse the canonical seed's property so we don't pile up orphan
-  // properties — a tenant occupying the same property is fine because
-  // the spec's other tests have already cleared the canonical
-  // tenant's payments via beforeEach. We only switch the assignment
-  // for the lifetime of this test; the canonical tenant's properties
-  // are NOT mutated.
+  // L3 (June 2026): the disposable tenant needs its OWN property — sharing
+  // _seed.propertyId with the canonical leased tenant trips the
+  // _assertNoDoubleOccupancy server-side guard with HTTP 422 ("property
+  // already occupied") because the canonical's lease still owns the
+  // window. Find-or-create E2E-Property-Z and assign the disposable
+  // tenant there. We never delete the property in finally{} (idempotent
+  // re-use across runs) — only the tenant.
   let disposableId: string | null = null;
   try {
     await signIn(page);
 
-    // 1. Find or create the disposable tenant.
+    // 1a. Find or create the dedicated disposable property.
+    const propsResp = await api.get(`${GATEWAY}/api/v2/properties`, {
+      headers: auth(_seed)
+    });
+    expect(propsResp.status(), 'list properties').toBe(200);
+    const props = (await propsResp.json()) as Array<{
+      _id: string;
+      name: string;
+    }>;
+    let propZ = props.find((p) => p.name === 'E2E-Property-Z');
+    if (!propZ) {
+      const createdProp = await api.post(`${GATEWAY}/api/v2/properties`, {
+        headers: auth(_seed),
+        data: {
+          name: 'E2E-Property-Z',
+          type: 'apartment',
+          rent: 0,
+          surface: 50,
+          address: { street1: 'Test', city: 'Test', zipCode: '00000' }
+        }
+      });
+      expect([200, 201]).toContain(createdProp.status());
+      propZ = (await createdProp.json()) as { _id: string; name: string };
+    }
+
+    // 1b. Find or create the disposable tenant on the dedicated property.
     const beginDateApi = _seed.beginDate.split('-').reverse().join('/');
     const endDateApi = _seed.endDate.split('-').reverse().join('/');
     const list = await api.get(`${GATEWAY}/api/v2/tenants`, {
@@ -545,12 +571,7 @@ test('L02 · terminate mid-year hides tenant from future months', async ({
           leaseId: _seed.leaseId,
           beginDate: beginDateApi,
           endDate: endDateApi,
-          // NB: shares propertyId with canonical, but rent=0 so no
-          // double-billing on the shared property; the spec only
-          // exercises terminationDate semantics.
-          properties: [
-            { propertyId: _seed.propertyId, rent: 0, expenses: [] }
-          ]
+          properties: [{ propertyId: propZ._id, rent: 0, expenses: [] }]
         }
       });
       expect([200, 201]).toContain(created.status());
