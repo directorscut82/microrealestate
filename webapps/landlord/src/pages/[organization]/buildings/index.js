@@ -28,19 +28,25 @@ function _filterData(data = [], filters) {
     // Wave-24 B3: the previous `\s|\.-` regex matched a literal "." followed
     // by "-" rather than the intended "any of space, dot, or hyphen".
     // Fix to a true character class.
+    //
+    // L1 (June 2026): the predicate was using `field?.replace(...)...indexOf(cleaned) !== -1`,
+    // which short-circuits to `undefined` when the field is missing — and
+    // `undefined !== -1` evaluates to `true`, so any building lacking a
+    // description/street1/city matched every query. Coerce to '' first so
+    // the chain resolves to a real number.
     const regExp = /\s|\.|-/gi;
     const cleaned = filters.searchText.toLowerCase().replace(regExp, '');
+    const matchField = (val) =>
+      String(val ?? '')
+        .replace(regExp, '')
+        .toLowerCase()
+        .indexOf(cleaned) !== -1;
     filteredItems = filteredItems.filter(
       (b) =>
-        b.name?.replace(regExp, '').toLowerCase().indexOf(cleaned) !== -1 ||
-        b.description?.replace(regExp, '').toLowerCase().indexOf(cleaned) !==
-          -1 ||
-        b.address?.street1
-          ?.replace(regExp, '')
-          .toLowerCase()
-          .indexOf(cleaned) !== -1 ||
-        b.address?.city?.replace(regExp, '').toLowerCase().indexOf(cleaned) !==
-          -1
+        matchField(b.name) ||
+        matchField(b.description) ||
+        matchField(b.address?.street1) ||
+        matchField(b.address?.city)
     );
   }
 
