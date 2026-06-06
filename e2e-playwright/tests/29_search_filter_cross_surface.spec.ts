@@ -266,17 +266,22 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
     page.locator('[data-cy=openResourceButton]').first()
   ).toBeVisible({ timeout: 15_000 });
 
-  // Search by exact name → 1 row.
+  // Search by tenant name. The tenants page _filterData uses indexOf on
+  // name, so "E2E-LeasedTenant" substring-matches a leftover
+  // "E2E-LeasedTenant-B" from a panicked spec 19 run (CLAUDE.md "Test seed
+  // leakage cascade"). Assert via the exact-name `tenantCard` selector
+  // (`hasText: /^E2E-LeasedTenant$/`) so the count is deterministic
+  // regardless of leakage. Same recipe as 25.4 / 28.36 / 29.39.
+  const escaped = seed.tenantName.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const exactCard = page
+    .locator('[data-cy=openResourceButton]')
+    .filter({ hasText: new RegExp(`^${escaped}$`) });
   await page.locator('[data-cy=globalSearchField]').fill(seed.tenantName);
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(exactCard).toHaveCount(1, { timeout: 15_000 });
 
   // Apply "Lease running" filter → tenant must still appear (not terminated).
   await clickFilterChip(page, /Lease running|Σύμβαση σε ισχύ/i);
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 10_000 });
+  await expect(exactCard).toHaveCount(1, { timeout: 10_000 });
 
   // Terminate the tenant via API (sets terminationDate).
   const apiCtx2 = await request.newContext();
@@ -301,21 +306,17 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
   // Trigger refetch.
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
 
-  // The "Lease running" filter excludes terminated tenants → row gone.
-  // The search input still holds the name; filter still active.
+  // The "Lease running" filter excludes terminated tenants → exact-name
+  // row gone. The search input still holds the name; filter still active.
   await expect(
     page.locator('[data-cy=globalSearchField]')
   ).toHaveValue(seed.tenantName, { timeout: 15_000 });
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(0, { timeout: 15_000 });
+  await expect(exactCard).toHaveCount(0, { timeout: 15_000 });
 
   // Toggle "Lease running" off (so we can find the terminated tenant) and
   // assert the search alone now matches them. Click the chip again.
   await clickFilterChip(page, /Lease running|Σύμβαση σε ισχύ/i);
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(exactCard).toHaveCount(1, { timeout: 15_000 });
 
   // Cleanup: clear terminationDate via direct mongo since PATCH null
   // isn't reliable (CLAUDE.md saga). The next test run that requires
