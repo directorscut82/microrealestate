@@ -152,8 +152,11 @@ describe('Task 3: Discounts', () => {
   test('adds contract-level discount', () => {
     const contract = makeContract({ discount: 200 });
     const rent = taskDiscounts(contract, RENT_DATE, null, null, makeRent());
+    // Description was changed from the French 'Remise exceptionnelle' to
+    // a locale-neutral 'Discount' so the persisted ledger doesn't ship
+    // untranslated French to non-French UIs (see task implementation).
     expect(rent.discounts).toEqual([
-      { origin: 'contract', description: 'Remise exceptionnelle', amount: 200 }
+      { origin: 'contract', description: 'Discount', amount: 200 }
     ]);
   });
 

@@ -19,11 +19,18 @@ export default function taskVATs(
     if (rate < 0) rate = 0;
     if (rate > 1) rate = 1; // Cap at 100% after conversion
 
+    // Float math on `rate * 100` produces ugly remainders for tenants on
+     // unusual VAT rates (e.g. 0.245 * 100 → 24.500000000000004). Round
+     // the displayed percentage to 2 decimals so the description stays
+     // human-readable. Computed amounts are unaffected — they continue
+     // to use the precise `rate`.
+    const _ratePct = Math.round(rate * 10000) / 100;
+
     rent.preTaxAmounts.forEach((preTaxAmount) => {
       const amount = Number(preTaxAmount.amount) || 0;
       rent.vats.push({
         origin: 'contract',
-        description: `${preTaxAmount.description} T.V.A. (${rate * 100}%)`,
+        description: `${preTaxAmount.description} T.V.A. (${_ratePct}%)`,
         amount: Math.round(amount * rate * 100) / 100,
         rate
       });
@@ -33,7 +40,7 @@ export default function taskVATs(
       const amount = Number(charges.amount) || 0;
       rent.vats.push({
         origin: 'contract',
-        description: `${charges.description} T.V.A. (${rate * 100}%)`,
+        description: `${charges.description} T.V.A. (${_ratePct}%)`,
         amount: Math.round(amount * rate * 100) / 100,
         rate
       });
@@ -59,7 +66,7 @@ export default function taskVATs(
       const amount = Number(debt.amount) || 0;
       rent.vats.push({
         origin: 'settlement',
-        description: `${debt.description} T.V.A. (${rate * 100}%)`,
+        description: `${debt.description} T.V.A. (${_ratePct}%)`,
         amount: Math.round(amount * rate * 100) / 100,
         rate
       });
@@ -69,7 +76,7 @@ export default function taskVATs(
       const amount = Number(discount.amount) || 0;
       rent.vats.push({
         origin: discount.origin,
-        description: `${discount.description} T.V.A. (${rate * 100}%)`,
+        description: `${discount.description} T.V.A. (${_ratePct}%)`,
         amount: Math.round(amount * rate * -1 * 100) / 100,
         rate
       });
