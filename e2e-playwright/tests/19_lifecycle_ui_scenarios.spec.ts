@@ -41,6 +41,7 @@ import {
   PaidLeasedTenantSeed,
   SecondTenantSeed
 } from './lib/api';
+import { mongoExec } from './lib/mongoExec';
 
 const GATEWAY = process.env.NAS_GATEWAY_URL || 'http://192.168.0.96:1350';
 const TEST_EMAIL = process.env.TEST_EMAIL ?? '';
@@ -60,7 +61,10 @@ test.beforeAll(async () => {
 });
 
 // Best-effort spec-level cleanup so a panicking test doesn't leak the
-// secondary fixture tenant into the seed realm.
+// secondary fixture tenant or the L02 disposable tenant into the seed
+// realm. Also belt-and-braces unsets terminationDate on the canonical
+// fixture in case any earlier test set it and the per-test cleanup
+// missed (spec-19 leakage cascade documented in CLAUDE.md).
 test.afterAll(async () => {
   if (!_seed) return;
   const apiCtx = await request.newContext();
@@ -76,17 +80,40 @@ test.afterAll(async () => {
         _id: string;
         name: string;
       }>;
-      const secondary = tenants.find((t) => t.name === 'E2E-LeasedTenant-B');
-      if (secondary) {
-        await apiCtx
-          .delete(`${GATEWAY}/api/v2/tenants/${secondary._id}`, {
-            headers: {
-              Authorization: `Bearer ${_seed.token}`,
-              organizationid: _seed.realmId
-            }
-          })
-          .catch(() => {});
+      // Drop disposable fixtures (L02-Z + the original LeasedTenant-B
+      // seed used by other scenarios in this spec).
+      for (const disposableName of [
+        'E2E-LeasedTenant-Z',
+        'E2E-LeasedTenant-B'
+      ]) {
+        const t = tenants.find((x) => x.name === disposableName);
+        if (t) {
+          await apiCtx
+            .delete(`${GATEWAY}/api/v2/tenants/${t._id}`, {
+              headers: {
+                Authorization: `Bearer ${_seed.token}`,
+                organizationid: _seed.realmId
+              }
+            })
+            .catch(() => {});
+        }
       }
+    }
+
+    // F6 belt-and-braces: ALWAYS $unset terminationDate on the canonical
+    // fixture via mongo. The Mongoose update path doesn't always clear
+    // the field cleanly when PATCH-ing terminationDate: null (CLAUDE.md
+    // saga); a mid-flow panic in L6 has historically left the canonical
+    // tenant terminated, cascading into spec-06 dashboard finance reading
+    // 0 (active tenants are filtered out by terminated/archived). The
+    // mongoExec helper is a no-op when run outside the NAS environment
+    // (no portainer-token), so this stays safe in CI.
+    try {
+      mongoExec(
+        `db.occupants.updateOne({name: 'E2E-LeasedTenant'}, {$unset: {terminationDate: ''}});`
+      );
+    } catch (e) {
+      // Best-effort. Don't blow up afterAll on mongo connectivity hiccups.
     }
   } finally {
     await apiCtx.dispose();
@@ -468,85 +495,114 @@ test('L01 · 3-month progression: paid → partial → overpayment carries credi
 // =============================================================
 // L02 Lease termination hides future-month rent rows
 // =============================================================
+// F6 (June 2026): pivoted to a DISPOSABLE fixture (E2E-LeasedTenant-Z) so
+// a panic mid-flow never leaves the canonical E2E-LeasedTenant terminated.
+// The previous design mutated the canonical seed and depended on a
+// finally{} restore that may not run on hard panic — every subsequent
+// spec then ran against a terminated tenant (dashboard finance widget
+// reads 0 income, etc.).
 test('L02 · terminate mid-year hides tenant from future months', async ({
   page
 }) => {
   if (!_seed) throw new Error('seed not ready');
   const api = await request.newContext();
-  // Snapshot original tenant doc so we can restore deterministically.
-  const original = await getTenantDoc(api, _seed);
-  if (!original) {
-    await api.dispose();
-    test.skip(true, 'cannot snapshot tenant doc for safe restore');
-    return;
-  }
-  const originalBeginDate = String(original.beginDate || '');
-  const originalEndDate = String(original.endDate || '');
-  const originalProperties = Array.isArray(original.properties)
-    ? original.properties
-    : [{ propertyId: _seed.propertyId, rent: 500, expenses: [] }];
-  // The dialog requires terminationDate (zod min(1)). Drive termination
-  // via API directly — we are validating post-termination UI behavior,
-  // not the dialog mechanics (covered elsewhere). Use the FIRST OF
-  // THIS MONTH as termination date so future months drop the tenant.
-  const today = new Date();
-  const firstOfThisMonth = `01/${String(today.getMonth() + 1).padStart(
-    2,
-    '0'
-  )}/${today.getFullYear()}`;
 
+  // Reuse the canonical seed's property so we don't pile up orphan
+  // properties — a tenant occupying the same property is fine because
+  // the spec's other tests have already cleared the canonical
+  // tenant's payments via beforeEach. We only switch the assignment
+  // for the lifetime of this test; the canonical tenant's properties
+  // are NOT mutated.
+  let disposableId: string | null = null;
   try {
     await signIn(page);
+
+    // 1. Find or create the disposable tenant.
+    const beginDateApi = _seed.beginDate.split('-').reverse().join('/');
+    const endDateApi = _seed.endDate.split('-').reverse().join('/');
+    const list = await api.get(`${GATEWAY}/api/v2/tenants`, {
+      headers: auth(_seed)
+    });
+    expect(list.status(), 'list tenants').toBe(200);
+    const tenants = (await list.json()) as Array<{ _id: string; name: string }>;
+    let disposable = tenants.find((t) => t.name === 'E2E-LeasedTenant-Z');
+    if (!disposable) {
+      const created = await api.post(`${GATEWAY}/api/v2/tenants`, {
+        headers: auth(_seed),
+        data: {
+          name: 'E2E-LeasedTenant-Z',
+          isCompany: false,
+          manager: 'E2E-LeasedTenant-Z',
+          contacts: [
+            {
+              contact: 'E2E-LeasedTenant-Z',
+              email: '',
+              phone1: '6900000099',
+              phone: '',
+              phone2: ''
+            }
+          ],
+          leaseId: _seed.leaseId,
+          beginDate: beginDateApi,
+          endDate: endDateApi,
+          // NB: shares propertyId with canonical, but rent=0 so no
+          // double-billing on the shared property; the spec only
+          // exercises terminationDate semantics.
+          properties: [
+            { propertyId: _seed.propertyId, rent: 0, expenses: [] }
+          ]
+        }
+      });
+      expect([200, 201]).toContain(created.status());
+      disposable = (await created.json()) as { _id: string; name: string };
+    }
+    disposableId = disposable._id;
+
+    // 2. Drive termination on the DISPOSABLE tenant. Pull __v first.
+    const fetched = await api.get(
+      `${GATEWAY}/api/v2/tenants/${disposableId}`,
+      { headers: auth(_seed) }
+    );
+    expect(fetched.status(), 'fetch disposable pre-PATCH').toBe(200);
+    const dCur = (await fetched.json()) as Record<string, unknown> & {
+      __v?: number;
+    };
+    const today = new Date();
+    const firstOfThisMonth = `01/${String(today.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}/${today.getFullYear()}`;
     const patched = await api.patch(
-      `${GATEWAY}/api/v2/tenants/${_seed.tenantId}`,
+      `${GATEWAY}/api/v2/tenants/${disposableId}`,
       {
         headers: auth(_seed),
         data: {
-          ...original,
+          ...dCur,
           terminationDate: firstOfThisMonth,
-          guarantyPayback: 0
+          guarantyPayback: 0,
+          __v: dCur.__v
         }
       }
     );
     expect([200, 201]).toContain(patched.status());
 
-    // After termination the tenant doc has terminationDate set. The rent
-    // grid keeps the row visible (it's part of the historical schedule)
-    // but the tenant document itself reports terminated=true. Verify
-    // server-side rather than relying on UI hiding.
+    // 3. Verify terminationDate persisted server-side.
     const checkResp = await api.get(
-      `${GATEWAY}/api/v2/tenants/${_seed.tenantId}`,
+      `${GATEWAY}/api/v2/tenants/${disposableId}`,
       { headers: auth(_seed) }
     );
     expect(checkResp.status()).toBe(200);
     const checked = await checkResp.json();
     expect(checked.terminationDate).toBeTruthy();
   } finally {
-    // Restore the original lease window. Pass the FULL original doc so
-    // any field the API doesn't reset on null (e.g. terminationDate,
-    // guarantyPayback) is restored explicitly.
-    await api
-      .patch(`${GATEWAY}/api/v2/tenants/${_seed.tenantId}`, {
-        headers: auth(_seed),
-        data: {
-          ...original,
-          terminationDate: original.terminationDate || null,
-          beginDate:
-            originalBeginDate || _seed.beginDate.split('-').reverse().join('/'),
-          endDate:
-            originalEndDate || _seed.endDate.split('-').reverse().join('/'),
-          properties: originalProperties
-        }
-      })
-      .catch(() => {});
-    // Also explicitly null any termination if the doc happened to have
-    // one set in original (shouldn't, but defensive).
-    await api
-      .patch(`${GATEWAY}/api/v2/tenants/${_seed.tenantId}`, {
-        headers: auth(_seed),
-        data: { terminationDate: null }
-      })
-      .catch(() => {});
+    // Always delete the disposable tenant — never leak it forward.
+    if (disposableId) {
+      await api
+        .delete(`${GATEWAY}/api/v2/tenants/${disposableId}`, {
+          headers: auth(_seed)
+        })
+        .catch(() => {});
+    }
     await api.dispose();
   }
 });
