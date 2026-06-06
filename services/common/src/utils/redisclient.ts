@@ -79,10 +79,13 @@ export default class RedisClient {
   }
 
   async disconnect() {
-    if (!this.client) {
-      throw new Error('cannot quit, connection not established');
-    }
-
+    // Silent return when no connection has been established. Throwing
+    // here previously made graceful-shutdown noisy: SIGINT triggers
+    // disconnect() before connect() if the service crashed early or
+    // if no Redis-using path ran. The thrown error then propagated
+    // into the SIGINT handler's catch block and printed an alarming
+    // 'cannot quit' line in logs, drowning the actual shutdown trace.
+    if (!this.client) return;
     await this.client.quit();
   }
 }
