@@ -8,7 +8,19 @@ export type ConnectionRole = 'administrator' | 'renter' | 'tenant';
 export type UserRole = Exclude<ConnectionRole, 'tenant'>;
 export type ConnectionType = 'service' | 'user' | 'application'; // 'service' is for internal services, 'user' is for users, 'application' is for external applications
 
-export type PaymentMethod = 'transfer' | 'credit-card' | 'cash' | 'check';
+// Aligned to runtime values used by the rent manager
+// (services/api/src/managers/rentmanager.ts PAYMENT_TYPES) and the
+// frontend zod enum (PaymentTabs.js paymentSchema). Previously listed
+// 'check' which never matched what the codebase actually persisted —
+// stored payments use 'cheque'. 'levy' is also accepted by the API,
+// kept here for legacy records.
+export type PaymentMethod =
+  | 'transfer'
+  | 'credit-card'
+  | 'cash'
+  | 'cheque'
+  | 'levy'
+  | '';
 export type PaymentStatus = 'paid' | 'partially-paid' | 'unpaid';
 export type LeaseStatus = 'active' | 'ended' | 'terminated';
 export type LeaseTimeRange = 'days' | 'weeks' | 'months' | 'years';

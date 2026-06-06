@@ -34,6 +34,29 @@ const _gracefulShutdown = async (signal: string) => {
 process.on('SIGINT', () => _gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => _gracefulShutdown('SIGTERM'));
 
+// Last-resort safety nets for the worst classes of node failure: a
+// promise rejected with no .catch() and a synchronous throw outside any
+// try block. Without these, the default behaviour terminates the process
+// silently (`unhandledRejection` will become a hard exit in newer node
+// majors), leaving operators with no breadcrumb in container logs about
+// what crashed. We log + continue running for unhandledRejection (most
+// often a fire-and-forget background task — bringing the whole service
+// down is worse than logging) but treat uncaughtException as fatal and
+// drain via the same graceful-shutdown path used by SIGTERM.
+process.on('unhandledRejection', (reason: unknown) => {
+  const msg =
+    reason instanceof Error
+      ? `${reason.message}\n${reason.stack || ''}`
+      : String(reason);
+  Logger.default.error(`unhandledRejection: ${msg}`);
+});
+process.on('uncaughtException', (err: Error) => {
+  Logger.default.error(`uncaughtException: ${err.message}\n${err.stack || ''}`);
+  // Don't loop into _gracefulShutdown if the exception was thrown DURING
+  // shutdown — exit with non-zero so the container manager restarts us.
+  setTimeout(() => process.exit(1), 100).unref();
+});
+
 export default class Service {
   static cookieParser = _cookieParser;
   static methodOverride = _methodOverride;

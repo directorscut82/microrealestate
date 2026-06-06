@@ -35,6 +35,7 @@ import {
   applyAllocation,
   computeOwedLines
 } from '../../utils/paymentAllocation';
+import { BUILDING_TYPE_LABEL_KEY } from '../../utils/lineLabels';
 import AllocationBlock from './AllocationBlock';
 import SavedPaymentEditForm from './SavedPaymentEditForm';
 import { toast } from 'sonner';
@@ -83,10 +84,13 @@ const paymentSchema = z
       // dates >7 days in the future. Surface this client-side so the
       // user gets a clear field error instead of a generic toast on
       // submit. Date is stored ISO YYYY-MM-DD inside the form.
+      // Both sides parsed in UTC. Mixing LOCAL and UTC moments here
+      // produced off-by-one rejections at midnight on UTC+2/+3 — the
+      // same family of timezone bugs documented in CLAUDE.md (June 2026).
       if (!date || amount == null || amount <= 0) return true;
-      const parsed = moment(date, 'YYYY-MM-DD', true);
+      const parsed = moment.utc(date, 'YYYY-MM-DD', true);
       if (!parsed.isValid()) return true; // first refinement handles this
-      return !parsed.isAfter(moment().add(7, 'days'));
+      return !parsed.isAfter(moment.utc().add(7, 'days'));
     },
     {
       message: 'Payment date cannot be more than 7 days in the future',
@@ -172,22 +176,14 @@ const _CATEGORY_LEAD_KEY = {
 };
 
 // Map `building:<type>` enum to a t-able localized label. Used for the
-// per-bullet parenthetical's type-suffix.
-const _BUILDING_TYPE_LABEL_KEY = {
-  heating: 'Heating',
-  elevator: 'Elevator',
-  cleaning: 'Cleaning',
-  water_common: 'Water',
-  electricity_common: 'Electricity',
-  insurance: 'Insurance',
-  management_fee: 'Management',
-  garden: 'Garden',
-  repairs_fund: 'Repairs fund',
-  pest_control: 'Pest control',
-  monthly_charge: 'Building charges',
-  other: 'Other',
-  repair: 'Repair'
-};
+// per-bullet parenthetical's type-suffix. Re-uses the canonical map
+// in utils/lineLabels.js — previously this file declared its own copy
+// where `monthly_charge` mapped to 'Building charges' while the shared
+// map mapped it to 'Other', so the same building-charge type rendered
+// with two different labels depending on which surface displayed it
+// (Πρόγραμμα/RentTable used the shared map; PaymentTabs saved-tile
+// bullets used the local copy).
+const _BUILDING_TYPE_LABEL_KEY = BUILDING_TYPE_LABEL_KEY;
 
 function _resolveLineSource(allocationEntry, rent, owedLines) {
   const lineKey = allocationEntry?.lineKey;
@@ -468,10 +464,9 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
       );
       const _rentTerm = Number(rent?.term || 0);
       if (_rentTerm > _currentTerm) {
-        const _ahead = moment(String(_rentTerm).slice(0, 6) + '01').diff(
-          moment().startOf('month'),
-          'months'
-        );
+        const _ahead = moment
+          .utc(String(_rentTerm).slice(0, 6) + '01', 'YYYYMMDD')
+          .diff(moment.utc().startOf('month'), 'months');
         if (_ahead > 3) {
           toast.error(
             t(
@@ -705,10 +700,16 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
     moment.utc().startOf('month').format('YYYYMMDDHH')
   );
   const rentTerm = Number(rent?.term || 0);
+  // Both moments must be UTC to match the term math above (which uses
+  // moment.utc().format('YYYYMMDDHH')). Mixing LOCAL with UTC here was
+  // off-by-one near midnight on positive-offset timezones — at 23:30
+  // local on the last day of the month, moment().startOf('month') was
+  // still on the *current* local month while currentTerm had already
+  // ticked over to the next UTC month, computing monthsAhead = -1.
   const monthsAhead =
     rentTerm > currentTerm
-      ? moment(String(rentTerm).slice(0, 6) + '01').diff(
-          moment().startOf('month'),
+      ? moment.utc(String(rentTerm).slice(0, 6) + '01', 'YYYYMMDD').diff(
+          moment.utc().startOf('month'),
           'months'
         )
       : 0;

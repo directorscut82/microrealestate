@@ -35,7 +35,15 @@ AccountSchema.pre('save', function (next) {
     this.createdDate = new Date();
   }
   this.email = this.email.toLowerCase();
-  this.password = bcrypt.hashSync(this.password, 10);
+  // Only hash the password when it is being set (create) or modified
+  // (password reset). Re-hashing an already-hashed value on unrelated
+  // saves (e.g. profile updates) would silently invalidate the user's
+  // credentials — bcrypt.hash of a bcrypt hash is a different hash.
+  // This is the same root cause referenced in the May-2026 double-hash
+  // incident captured in CLAUDE.md.
+  if (this.isModified('password')) {
+    this.password = bcrypt.hashSync(this.password, 10);
+  }
   next();
 });
 

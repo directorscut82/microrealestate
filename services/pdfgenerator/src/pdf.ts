@@ -98,11 +98,25 @@ function _walkDirSync(dir: string): string[] {
   return out;
 }
 
+// Re-entrancy guard for the cleanup interval. The sweep walks the uploads
+// tree and queries Document records — under load (large uploads dir, slow
+// mongo) a single tick can take longer than CLEANUP_INTERVAL_MS, and
+// setInterval will fire the next iteration on top of the still-running
+// one. Two concurrent sweeps then race fs.statSync / fs.rmSync on the
+// same paths and emit ENOENT noise in logs. Skip the tick when one is
+// already in flight.
+let cleanupRunning = false;
+
 function startCleanupTimer() {
   if (cleanupTimer) {
     return;
   }
   cleanupTimer = setInterval(async () => {
+    if (cleanupRunning) {
+      return;
+    }
+    cleanupRunning = true;
+    try {
     const { TEMPORARY_DIRECTORY, PDF_DIRECTORY, UPLOADS_DIRECTORY } =
       Service.getInstance().envConfig.getValues();
     const now = Date.now();
@@ -153,6 +167,9 @@ function startCleanupTimer() {
       } catch (err) {
         logger.warn(`pdf cleanup: failed to scan uploads ${uploadsRoot}: ${err}`);
       }
+    }
+    } finally {
+      cleanupRunning = false;
     }
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
