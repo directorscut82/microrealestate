@@ -180,7 +180,20 @@ test('26.12 search 4 chars of atakNumber narrows the list', async ({ page }) => 
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeed(apiCtx);
-  const tag = 'ATKQ' + Math.random().toString(36).slice(2, 4).toUpperCase();
+  // Mirror 26.11's recipe: 11-char unique tag (3-letter sentinel prefix +
+  // 8 hex). The previous shape (static 'ATKQ' + 2 random base36 chars)
+  // made the search prefix ALWAYS the static 'ATKQ' substring — leftover
+  // E2E-ATKQ*-Property fixtures from prior failed runs would still match
+  // and the count==1 expectation would fail with 2+ rows. Search the full
+  // unique tag so collisions across runs are vanishingly unlikely (~4B
+  // distinct values).
+  const tag =
+    'ATK' +
+    Math.random()
+      .toString(16)
+      .slice(2, 10)
+      .padEnd(8, '0')
+      .toUpperCase();
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Name`,
     atakNumber: `${tag}-ATAK`,
@@ -192,7 +205,9 @@ test('26.12 search 4 chars of atakNumber narrows the list', async ({ page }) => 
   await signIn(page);
   await gotoProperties(page, seed.realmName);
 
-  await page.locator('[data-cy=globalSearchField]').fill(tag.slice(0, 4));
+  // Search the full 11-char tag (sentinel + 8 hex) — uniqueness avoids
+  // substring collisions with leftover fixtures.
+  await page.locator('[data-cy=globalSearchField]').fill(tag);
 
   await expect(
     page.locator('[data-cy=openResourceButton]')
