@@ -158,6 +158,9 @@ export namespace CollectionTypes {
     sentDate: Date;
     status: string;
     emailId: string;
+    // Optional message captured when status is 'failed'. Mirrors the
+    // schema field on services/common/src/collections/email.ts.
+    error?: string;
   };
 
   export type Lease = {
