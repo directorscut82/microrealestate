@@ -70,13 +70,16 @@ export async function ensureSeed(request: APIRequestContext): Promise<SeedHandle
   }
   const realmId = realm._id;
 
-  // 2. Building — find one starting with E2E-, create if none.
+  // 2. Building — exact-name lookup so leaked E2E-* fixtures from failed
+  // runs (e.g. spec 27 creates E2E-BNM<random>-Building) cannot reorder
+  // the list and trick us into adopting the wrong canonical building.
+  // Mirrors the lease/property exact-name pattern below (L4 fix).
   const buildingsResp = await request.get(`${GATEWAY}/api/v2/buildings`, {
     headers: auth(realmId)
   });
   expect(buildingsResp.status(), 'list buildings').toBe(200);
   const buildings = (await buildingsResp.json()) as Array<{ _id: string; name: string }>;
-  let building = buildings.find((b) => b.name?.startsWith('E2E-'));
+  let building = buildings.find((b) => b.name === 'E2E-Building');
   if (!building) {
     const created = await request.post(`${GATEWAY}/api/v2/buildings`, {
       headers: auth(realmId),
