@@ -11,6 +11,7 @@ import {
   ensureSeedSecondTenant,
   getAccessToken
 } from './lib/api';
+import { mongoExec } from './lib/mongoExec';
 
 const GATEWAY = process.env.NAS_GATEWAY_URL || 'http://192.168.0.96:1350';
 const TEST_EMAIL = process.env.TEST_EMAIL ?? '';
@@ -257,6 +258,22 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
   const seed = await ensureSeedLeasedTenant(apiCtx);
   await apiCtx.dispose();
 
+  // Pre-condition: $unset any leftover terminationDate on the canonical
+  // tenant. The cleanup at end-of-test only runs when the test completes
+  // — if a prior run failed mid-flow (e.g. because of a bug WE just
+  // introduced), the canonical tenant stays terminated and every subsequent
+  // run of 29.40 (and 25.x specs that rely on the canonical tenant being
+  // active) cascades. Belt-and-braces: clear at start. CLAUDE.md "Test
+  // seed leakage cascade" — only $unset (not PATCH null) clears reliably.
+  try {
+    mongoExec(
+      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {\\$unset: {terminationDate: ''}});`
+    );
+  } catch (e) {
+    // Best-effort. If mongoExec is unavailable (no portainer-token),
+    // continue — the test may still succeed if the realm is clean.
+  }
+
   await signIn(page);
   await page.goto(`${encodeURIComponent(seed.realmName)}/tenants`);
   await expect(
@@ -283,31 +300,83 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
   await clickFilterChip(page, /Lease running|Σύμβαση σε ισχύ/i);
   await expect(exactCard).toHaveCount(1, { timeout: 10_000 });
 
-  // Terminate the tenant via API (sets terminationDate).
+  // Terminate the tenant via API (sets terminationDate). A partial PATCH
+  // with only `{ terminationDate }` trips occupantmanager.ts update()'s
+  // missing-name 422 (line 1083 → 1106). Mirror 25.3 / 25.7 recipe: GET
+  // tenant, drop derived/computed fields, overlay terminationDate, PATCH
+  // the full body. KEEP beginDate/endDate this time — the leased tenant's
+  // dates are valid (6 months past/future) so round-tripping doesn't trip
+  // the "End date must be after begin date" guard the way it does for
+  // ensureSeedTenant (which has no lease window).
   const apiCtx2 = await request.newContext();
   const auth = {
     Authorization: `Bearer ${seed.token}`,
     organizationid: seed.realmId,
     'Content-Type': 'application/json'
   };
-  const now = new Date();
-  const termDate = `${String(now.getDate()).padStart(2, '0')}/${String(
-    now.getMonth() + 1
-  ).padStart(2, '0')}/${now.getFullYear()}`;
+  const getResp = await apiCtx2.get(
+    `${GATEWAY}/api/v2/tenants/${seed.tenantId}`,
+    { headers: auth }
+  );
+  expect(getResp.status(), 'tenant get').toBe(200);
+  const fullTenant = (await getResp.json()) as Record<string, unknown>;
+  const cleanTenant: Record<string, unknown> = { ...fullTenant };
+  for (const k of [
+    'terminationDate',
+    'lease',
+    'office',
+    'parking',
+    'street1',
+    'street2',
+    'zipCode',
+    'city',
+    'country',
+    'rental',
+    'expenses',
+    'total',
+    'contactEmails',
+    'hasContactEmails',
+    'status',
+    'terminated'
+  ]) {
+    delete cleanTenant[k];
+  }
+  // Termination date must be STRICTLY before today on the SERVER's UTC
+  // calendar: toOccupantData uses `endMoment.isBefore(currentDate, 'day')`
+  // (frontdata.ts:440) where both moments are moment.utc(). A naive
+  // "yesterday" computed from local time (e.g. Athens UTC+3) lands on the
+  // same UTC calendar day as the server when the test runs late evening
+  // local. Use 48h ago to clear the boundary in both the server-UTC and
+  // the local timezone.
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const termDate = `${String(twoDaysAgo.getDate()).padStart(2, '0')}/${String(
+    twoDaysAgo.getMonth() + 1
+  ).padStart(2, '0')}/${twoDaysAgo.getFullYear()}`;
   const termResp = await apiCtx2.patch(
     `${GATEWAY}/api/v2/tenants/${seed.tenantId}`,
     {
       headers: auth,
-      data: { terminationDate: termDate }
+      data: { ...cleanTenant, terminationDate: termDate }
     }
   );
-  expect(termResp.status(), 'terminate tenant').toBeLessThan(400);
+  const termBody = await termResp.text().catch(() => '');
+  expect(
+    termResp.status() >= 200 && termResp.status() < 300,
+    `terminate tenant status=${termResp.status()} body=${termBody}`
+  ).toBe(true);
 
-  // Trigger refetch.
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  // Trigger refetch. `dispatchEvent(new Event('focus'))` is unreliable
+  // headless (CLAUDE.md notes; spec 28.35 switched to reload for the same
+  // reason). Reload preserves both router.query.search and
+  // router.query.statuses (SearchFilterBar.js), so search input AND
+  // "Lease running" chip remain active after remount.
+  await page.reload();
+  await expect(
+    page.locator('[data-cy=globalSearchField]')
+  ).toBeVisible({ timeout: 20_000 });
 
   // The "Lease running" filter excludes terminated tenants → exact-name
-  // row gone. The search input still holds the name; filter still active.
+  // row gone. The search input still holds the name (from URL).
   await expect(
     page.locator('[data-cy=globalSearchField]')
   ).toHaveValue(seed.tenantName, { timeout: 15_000 });
@@ -318,24 +387,19 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
   await clickFilterChip(page, /Lease running|Σύμβαση σε ισχύ/i);
   await expect(exactCard).toHaveCount(1, { timeout: 15_000 });
 
-  // Cleanup: clear terminationDate via direct mongo since PATCH null
-  // isn't reliable (CLAUDE.md saga). The next test run that requires
-  // ensureSeedLeasedTenant will re-PATCH the dates and a stale
-  // terminationDate will need a $unset. This spec is the LAST in the
-  // catalog (29 > 25-28), but the realm is shared with later runs.
-  // Best-effort cleanup via PATCH; an admin one-off may need to clear
-  // the leftover terminationDate manually if other specs blow up.
-  const cleanResp = await apiCtx2.patch(
-    `${GATEWAY}/api/v2/tenants/${seed.tenantId}`,
-    {
-      headers: auth,
-      // PATCH terminationDate: null is the documented (if imperfect) clear path.
-      data: { terminationDate: null }
-    }
-  );
-  if (cleanResp.status() >= 400) {
+  // Cleanup: $unset terminationDate directly via mongo. PATCH `null`/`''`
+  // both go through `_stringToDate` which returns `undefined`; Mongoose
+  // `$set: { terminationDate: undefined }` is a no-op (the field stays).
+  // CLAUDE.md "Test seed leakage cascade" — only `$unset` clears it.
+  // mongoExec returns null when the portainer-token is unavailable (e.g.
+  // CI dry-run), so this is a no-op outside the NAS environment.
+  try {
+    mongoExec(
+      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {\\$unset: {terminationDate: ''}});`
+    );
+  } catch (e) {
     console.warn(
-      `[S29.40] cleanup PATCH failed status=${cleanResp.status()}; terminationDate may persist — see CLAUDE.md "Test seed leakage cascade"`
+      `[S29.40] cleanup mongoExec failed: ${(e as Error).message}; terminationDate may persist — re-run with portainer-token to recover`
     );
   }
   await apiCtx2.dispose();
