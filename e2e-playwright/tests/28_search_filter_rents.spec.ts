@@ -411,7 +411,7 @@ test('28.35 search persists across a payment mutation (refetch resilience)', asy
     now.getMonth() + 1
   ).padStart(2, '0')}/${now.getFullYear()}`;
   const term = currentTerm();
-  await apiCtx2.patch(
+  const patchResp = await apiCtx2.patch(
     `${GATEWAY}/api/v2/rents/payment/${seed.tenantId}/${term}`,
     {
       headers: auth,
@@ -432,10 +432,25 @@ test('28.35 search persists across a payment mutation (refetch resilience)', asy
       }
     }
   );
+  expect(
+    patchResp.status(),
+    `partial payment patch (body: ${await patchResp.text().catch(() => '')})`
+  ).toBe(200);
   await apiCtx2.dispose();
 
-  // Trigger a refetch (focus event).
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  // Trigger a refetch by reloading the page. The search text is
+  // persisted in `router.query.search` (SearchFilterBar pushes the
+  // current text to the URL on every keystroke via shallow push), so
+  // a reload re-mounts the page with the same searchText state but a
+  // fresh useQuery — which is exactly what "external mutation +
+  // refetch resilience" exercises. A bare focus/visibility dispatch
+  // is unreliable in headless Chromium (React Query's focusManager
+  // depends on browser-level visibility events that synthesised JS
+  // events don't reproduce).
+  await page.reload();
+  await expect(
+    page.locator('[data-cy=globalSearchField]')
+  ).toBeVisible({ timeout: 20_000 });
 
   // Search input still has the typed value.
   await expect(
