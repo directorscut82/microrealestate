@@ -751,9 +751,12 @@ test('L05 · delete-only-payment flips status from paid back to owed', async ({
 
     await signIn(page);
     await gotoCurrentMonth(page);
-    await expect(page.locator('[data-cy="status-paid"]').first()).toBeVisible({
-      timeout: 15_000
-    });
+    // Wait for the canonical tenant's row specifically to render with
+    // status=paid (not a leftover paid tenant from prior runs).
+    const preRow = await findTenantRow(page, _seed.tenantName);
+    await expect(
+      preRow.locator('[data-cy="status-paid"]')
+    ).toHaveCount(1, { timeout: 15_000 });
 
     await openDialogForTenant(page, _seed.tenantName);
     await page.locator('[data-cy="deleteSavedPayment-0"]').click();
@@ -768,10 +771,21 @@ test('L05 · delete-only-payment flips status from paid back to owed', async ({
     expect(resp.status()).toBe(200);
     expect(Number((await resp.json()).payment)).toBeCloseTo(0, 1);
     await expect(await getDrawer(page)).not.toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('[data-cy="status-owed"]').first()).toBeVisible({
-      timeout: 15_000
-    });
-    expect(await page.locator('[data-cy="status-paid"]').count()).toBe(0);
+    // Scope the dot assertion to the CANONICAL tenant's row. Asserting
+    // `status-paid count === 0` page-wide is brittle: a leftover paid
+    // tenant from a prior failed run (or tenant B planted in L07/L08
+    // when this spec is re-run after a panic) leaves residual paid dots
+    // and the global assertion fails with received==2 even though
+    // tenant A has correctly flipped to owed. The user-visible
+    // contract is "this tenant's row went from paid → owed", which
+    // is what we verify.
+    const canonicalRow = await findTenantRow(page, _seed.tenantName);
+    await expect(
+      canonicalRow.locator('[data-cy="status-owed"]')
+    ).toHaveCount(1, { timeout: 15_000 });
+    await expect(
+      canonicalRow.locator('[data-cy="status-paid"]')
+    ).toHaveCount(0);
   } finally {
     await api.dispose();
   }

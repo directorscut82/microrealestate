@@ -157,7 +157,7 @@ test('25.2 search persists past staleTime / window blur+focus', async ({ page, c
 test('25.3 search holds across an external mutation (manual invalidate)', async ({ page }) => {
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
-  const { realmName, tenantName, tenantId, tenantPhone1, realmId } = await ensureSeedTenant(apiCtx);
+  const { realmName, tenantName, tenantId, realmId } = await ensureSeedTenant(apiCtx);
 
   await signIn(page);
   await gotoTenants(page, realmName);
@@ -170,19 +170,36 @@ test('25.3 search holds across an external mutation (manual invalidate)', async 
   ).toHaveCount(1, { timeout: 15_000 });
 
   // External mutation: PATCH the tenant via API in a fresh context.
-  // After the mutation the in-page React Query cache is now stale; we
-  // explicitly invalidate it (simulating a focus refetch / cross-tab
-  // invalidation event) and re-assert the search still holds.
+  // The tenant PATCH endpoint expects the FULL tenant document round-tripped
+  // (mirrors what restcalls.js `updateTenant` sends — `apiFetcher().patch(
+  // '/tenants/:id', tenant)`). A partial body trips the server-side
+  // optimistic-lock guard ("__v required") and the rent-clearing safety
+  // ("tenant has recorded payments. Restore property rent/entry/exit
+  // dates before saving.") when the persisted tenant has paid rents
+  // from prior runs. GET → mutate `reference` → PATCH back: the same
+  // surface the landlord UI uses, so the test reflects a realistic
+  // external mutation rather than an unrealistic partial PATCH.
   const token = await getAccessToken(apiCtx);
+  const getResp = await apiCtx.get(`${GATEWAY}/api/v2/tenants/${tenantId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      organizationid: realmId
+    }
+  });
+  expect(getResp.status(), 'tenant get').toBe(200);
+  const fullTenant = (await getResp.json()) as Record<string, unknown>;
   const patchResp = await apiCtx.patch(`${GATEWAY}/api/v2/tenants/${tenantId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       organizationid: realmId,
       'Content-Type': 'application/json'
     },
-    data: { reference: `INVALIDATE-${Date.now()}` }
+    data: { ...fullTenant, reference: `INVALIDATE-${Date.now()}` }
   });
-  expect(patchResp.status(), 'tenant patch').toBeGreaterThanOrEqual(200);
+  expect(
+    patchResp.status(),
+    `tenant patch (body: ${await patchResp.text().catch(() => '')})`
+  ).toBeGreaterThanOrEqual(200);
   expect(patchResp.status()).toBeLessThan(300);
   await apiCtx.dispose();
 
