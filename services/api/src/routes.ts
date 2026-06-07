@@ -20,8 +20,39 @@ const uploadRateLimits = new Map<string, { count: number; resetAt: number }>();
 const UPLOAD_RATE_WINDOW_MS = 60_000; // 1 minute
 const UPLOAD_RATE_MAX = 10; // 10 uploads per minute per user
 
+// L12: periodic GC for the in-memory rate-limit map. Without this the
+// map grew without bound — each unique key persisted forever even
+// after its window expired, leaking ~120 bytes per (realmId, user)
+// pair on every upload. The interval is short enough that an idle
+// process cleans within minutes; unref() so it does not keep the
+// Node event loop alive when the API is shutting down (tests / sigint).
+const UPLOAD_RATE_GC_INTERVAL_MS = 5 * 60_000; // 5 minutes
+function _uploadRateLimitsGc() {
+  const now = Date.now();
+  for (const [k, v] of uploadRateLimits) {
+    if (now > v.resetAt) uploadRateLimits.delete(k);
+  }
+}
+const _uploadRateLimitsGcTimer = setInterval(
+  _uploadRateLimitsGc,
+  UPLOAD_RATE_GC_INTERVAL_MS
+);
+if (typeof (_uploadRateLimitsGcTimer as any).unref === 'function') {
+  (_uploadRateLimitsGcTimer as any).unref();
+}
+
 function uploadRateLimit(req: any, res: any, next: any) {
-  const key = `${req.realm?._id}:${req.user?.email || req.ip}`;
+  // L12: assert realm presence before keying. A missing realm would
+  // serialise to the literal string 'undefined:<email>', collapsing
+  // every user with no resolved realm into a single bucket — which
+  // both rate-limits unrelated users and is meaningless for
+  // multi-tenant accounting.
+  if (!req.realm?._id) {
+    return res
+      .status(400)
+      .json({ message: 'organization context is required for uploads' });
+  }
+  const key = `${req.realm._id}:${req.user?.email || req.ip}`;
   const now = Date.now();
   const entry = uploadRateLimits.get(key);
   if (!entry || now > entry.resetAt) {

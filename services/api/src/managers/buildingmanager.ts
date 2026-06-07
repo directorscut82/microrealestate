@@ -181,6 +181,69 @@ function _findMemberIdByEmail(realm: any, email: string): string | undefined {
   return member ? String(member._id) : undefined;
 }
 
+// L14: Greek-aware string normaliser used to match a manually-created
+// building against an E9-parsed street1 even when one side is in
+// uppercase polytonic Greek (E9 source) and the other is in mixed
+// case with diacritics (manual entry). The normalised form is used
+// for lookup ONLY — never persisted, so existing records keep their
+// original casing/accents. NFKD + lower + diacritic strip is the
+// standard Unicode-aware approach.
+function _greekNormalize(s: string | undefined | null): string {
+  if (!s) return '';
+  return String(s)
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// L2: locale-aware floor label. The E9 importer previously hardcoded
+// the Greek labels (Ισόγειο / Υπόγειο / Όροφος) into the Property name.
+// For non-Greek realms (e.g. fr-FR or en realms re-importing an E9 from
+// a Greek property they manage) that produced names that mixed Greek
+// labels with the rest of the UI's locale. Read realm.locale and emit
+// the localised label when we have a translation, falling back to the
+// Greek default so existing data remains stable.
+function _floorLabel(
+  floor: number | null | undefined,
+  realm: any
+): string {
+  const isBasement = floor != null && floor < 0;
+  const isGround = floor == null || floor === 0;
+  const locale = (realm && realm.locale) || 'el';
+
+  // The labels mirror the Basement / Ground floor / Floor entries that
+  // already live in webapps/landlord/locales/<lang>/common.json. Keep
+  // the table small and additive — drift between server and client
+  // locales is not worth dragging in a full i18n stack server-side.
+  const TABLE: Record<string, { ground: string; basement: string; floor: string }> =
+    {
+      el: { ground: 'Ισόγειο', basement: 'Υπόγειο', floor: 'Όροφος' },
+      en: { ground: 'Ground floor', basement: 'Basement', floor: 'Floor' },
+      'fr-FR': {
+        ground: 'Rez-de-chaussée',
+        basement: 'Sous-sol',
+        floor: 'Étage'
+      },
+      'de-DE': {
+        ground: 'Erdgeschoss',
+        basement: 'Keller',
+        floor: 'Stockwerk'
+      },
+      'es-CO': {
+        ground: 'Planta baja',
+        basement: 'Sótano',
+        floor: 'Piso'
+      },
+      'pt-BR': { ground: 'Térreo', basement: 'Porão', floor: 'Andar' }
+    };
+  const entry = TABLE[locale] || TABLE['el'];
+  if (isGround) return entry.ground;
+  if (isBasement) return entry.basement;
+  return `${entry.floor} ${floor}`;
+}
+
 // Wave-26 round-3u: optimistic-concurrency wrapper for the rent-recompute
 // writes triggered by building expense / property edits. Without this,
 // _recomputeTenantsForBuilding / _recomputeTenantsForProperty would do
@@ -858,6 +921,22 @@ export async function importFromE9(req: Req, res: Res) {
 
   // Extract and parse PDF
   const text = await extractTextFromPdf(file.buffer);
+
+  // L7: upfront E9 marker sniff. Lease PDFs and other non-E9 documents
+  // were previously fed through the full ~3s parser before being
+  // rejected with a generic "No buildings found" — confusing UX and
+  // wasted CPU on every non-E9 upload. Reject early when neither
+  // marker is present so the user sees a useful 422 in milliseconds.
+  if (
+    !text.includes('ΕΝΤΥΠΟ Ε9') &&
+    !text.includes('ΠΕΡΙΟΥΣΙΑΚΗ ΚΑΤΑΣΤΑΣΗ')
+  ) {
+    throw new ServiceError(
+      'PDF does not look like an E9 declaration (missing ΕΝΤΥΠΟ Ε9 / ΠΕΡΙΟΥΣΙΑΚΗ ΚΑΤΑΣΤΑΣΗ markers)',
+      422
+    );
+  }
+
   const parsed = parseE9(text);
 
   if (!parsed.owner.taxId) {
@@ -867,7 +946,21 @@ export async function importFromE9(req: Req, res: Res) {
     );
   }
 
+  // L6: distinguish empty PDF, no-buildings, and land-plot-only outcomes
+  // so the user can tell whether the upload was wrong (empty / non-E9
+  // body) versus the realm legitimately has nothing to import. Without
+  // this every failure surfaced as the same generic "No buildings found"
+  // and the user could not tell which retry was appropriate.
   if (parsed.buildings.length === 0) {
+    if (!text.trim()) {
+      throw new ServiceError('E9 PDF appears to be empty', 422);
+    }
+    if (parsed.skippedLandPlots > 0) {
+      throw new ServiceError(
+        'E9 PDF contains only land plots (ΠΙΝΑΚΑΣ 2). MicroRealEstate manages buildings — nothing to import.',
+        422
+      );
+    }
     throw new ServiceError('No buildings found in E9 PDF', 422);
   }
 
@@ -958,6 +1051,29 @@ export async function importFromE9(req: Req, res: Res) {
     const createdBuildingIds: string[] = [];
 
     try {
+    // L13: mirror the 200-unit cap that addUnit / addBuilding enforce on
+    // the manual path. The E9 importer can append to an existing
+    // building, so the cap is computed against (existing + incoming)
+    // and not against the parsed unit count alone — without this,
+    // re-importing a 195-unit building plus 10 new units would silently
+    // push the total over the schema limit and trigger downstream
+    // ValidationErrors on the next save.
+    for (const buildingData of parsed.buildings) {
+      const existingForCap = await Collections.Building.findOne({
+        realmId: realm!._id,
+        'address.street1': buildingData.address.street1
+      })
+        .select({ units: 1 })
+        .lean();
+      const existingCount = ((existingForCap as any)?.units || []).length;
+      const incomingCount = (buildingData.units || []).length;
+      if (existingCount + incomingCount > 200) {
+        throw new ServiceError(
+          `Too many units in E9 (${existingCount + incomingCount} ≥ 200) for building "${buildingData.address.street1}"`,
+          422
+        );
+      }
+    }
     for (const buildingData of parsed.buildings) {
       // Check if building exists
       // 1. Exact address match (street1 + zipCode)
@@ -973,6 +1089,35 @@ export async function importFromE9(req: Req, res: Res) {
           realmId: realm!._id,
           'address.street1': buildingData.address.street1
         });
+      }
+
+      // 3. L14: Greek-aware case/accent-insensitive fallback. A user
+      // who manually created "Αχαρνών 167" before importing an E9 that
+      // declared "ΑΧΑΡΝΩΝ 167" would have those two records treated as
+      // separate buildings — silently duplicating the building and
+      // splitting unit attachment between the two. Pull every building
+      // in the realm and pick the first whose normalised street1
+      // matches the parsed street1. This is realm-scoped so it cannot
+      // cross tenants.
+      if (!building && buildingData.address.street1) {
+        const normalisedTarget = _greekNormalize(buildingData.address.street1);
+        if (normalisedTarget) {
+          const candidates = await Collections.Building.find({
+            realmId: realm!._id
+          })
+            .select({ _id: 1, address: 1 })
+            .lean();
+          const hit = (candidates as any[]).find(
+            (c) =>
+              _greekNormalize(c?.address?.street1 || '') === normalisedTarget
+          );
+          if (hit) {
+            building = await Collections.Building.findOne({
+              _id: (hit as any)._id,
+              realmId: realm!._id
+            });
+          }
+        }
       }
 
       // NOTE: Do NOT match by ATAK prefix — it's a cadastral area code, not building ID
@@ -1060,17 +1205,44 @@ export async function importFromE9(req: Req, res: Res) {
           (u: any) => u.atakNumber === parsedUnit.atakNumber
         );
         if (existingUnit) {
-          // Add this owner if not already listed
-          const hasOwner = existingUnit.owners?.some(
-            (o: any) => o.name === ownerFullName
-          );
-          if (!hasOwner && existingUnit.owners) {
+          // L11: find an existing owner entry by memberId where we
+          // have one (most reliable across renames / accent / case),
+          // falling back to taxId, then to a string name compare. The
+          // pure string-compared name was wrong whenever the realm
+          // member's display name drifted from the E9 owner name (e.g.
+          // accent-stripped Property records vs. polytonic E9 capture).
+          const ownerMemberId = memberId || userEmail;
+          const ownerTaxId = (parsed.owner as any).taxId || '';
+          const findExistingOwner = (owners: any[]): any =>
+            (owners || []).find((o: any) => {
+              if (ownerMemberId && o.memberId && o.memberId === ownerMemberId)
+                return true;
+              if (ownerTaxId && o.taxId && o.taxId === ownerTaxId) return true;
+              return o.name === ownerFullName;
+            });
+          const existingOwner = findExistingOwner(existingUnit.owners);
+          if (!existingOwner && existingUnit.owners) {
             existingUnit.owners.push({
               type: 'member',
               name: ownerFullName,
               percentage: parsedUnit.ownershipPercentage,
-              memberId: memberId || userEmail
+              memberId: ownerMemberId
             });
+          } else if (existingOwner) {
+            // L4: year-on-year re-imports may declare a different
+            // ownership percentage (transfers, shifts in joint
+            // ownership). Keep the latest E9 declaration as the source
+            // of truth instead of silently preserving the prior value.
+            // Audit log so the change is visible in operator review.
+            if (
+              typeof parsedUnit.ownershipPercentage === 'number' &&
+              parsedUnit.ownershipPercentage !== existingOwner.percentage
+            ) {
+              logger.info(
+                `E9 import: owner ${ownerMemberId || ownerFullName} percentage updated on ATAK ${parsedUnit.atakNumber}: ${existingOwner.percentage} → ${parsedUnit.ownershipPercentage}`
+              );
+              existingOwner.percentage = parsedUnit.ownershipPercentage;
+            }
           }
           continue;
         }
@@ -1087,17 +1259,34 @@ export async function importFromE9(req: Req, res: Res) {
             )
           : null;
         if (existingByDeh) {
-          // Same apartment, add co-owner
-          const hasOwner = existingByDeh.owners?.some(
-            (o: any) => o.name === ownerFullName
-          );
-          if (!hasOwner && existingByDeh.owners) {
+          // Same apartment, add co-owner.
+          // L11: dedupe by memberId/taxId before falling back to name.
+          const ownerMemberId = memberId || userEmail;
+          const ownerTaxId = (parsed.owner as any).taxId || '';
+          const existingOwner = (existingByDeh.owners || []).find((o: any) => {
+            if (ownerMemberId && o.memberId && o.memberId === ownerMemberId)
+              return true;
+            if (ownerTaxId && o.taxId && o.taxId === ownerTaxId) return true;
+            return o.name === ownerFullName;
+          });
+          if (!existingOwner && existingByDeh.owners) {
             existingByDeh.owners.push({
               type: 'member',
               name: ownerFullName,
               percentage: parsedUnit.ownershipPercentage,
-              memberId: memberId || userEmail
+              memberId: ownerMemberId
             });
+          } else if (existingOwner) {
+            // L4: see ATAK-match branch above for rationale.
+            if (
+              typeof parsedUnit.ownershipPercentage === 'number' &&
+              parsedUnit.ownershipPercentage !== existingOwner.percentage
+            ) {
+              logger.info(
+                `E9 import: owner ${ownerMemberId || ownerFullName} percentage updated on DEH-matched ATAK ${parsedUnit.atakNumber}: ${existingOwner.percentage} → ${parsedUnit.ownershipPercentage}`
+              );
+              existingOwner.percentage = parsedUnit.ownershipPercentage;
+            }
           }
           // Store co-owner's ATAK in altAtakNumbers (on building unit and property)
           if (existingByDeh.atakNumber !== parsedUnit.atakNumber) {
@@ -1120,6 +1309,45 @@ export async function importFromE9(req: Req, res: Res) {
               );
             }
           }
+          // L5: when an empty-only field on the matched Property record
+          // can be filled from the new E9 row (and the user has not
+          // opted into forceOverwrite which is handled in the by-ATAK
+          // branch), fill it. Preserves user edits via the empty-only
+          // rule from T2.P1.20 — we never overwrite a non-empty value.
+          if (existingByDeh.propertyId) {
+            const fillSet: Record<string, any> = {};
+            if (parsedUnit.surface) fillSet.surface = parsedUnit.surface;
+            if (parsedUnit.yearBuilt) fillSet.yearBuilt = parsedUnit.yearBuilt;
+            if (parsedUnit.electricitySupplyNumber) {
+              fillSet.electricitySupplyNumber =
+                parsedUnit.electricitySupplyNumber;
+            }
+            if ((parsedUnit as any).kaek) {
+              fillSet.kaek = (parsedUnit as any).kaek;
+            }
+            const $or: any[] = Object.keys(fillSet).map((k) => ({
+              [k]: { $in: [null, undefined, ''] }
+            }));
+            // Build per-field empty-only update so we update each
+            // field independently and never clobber a populated value.
+            for (const k of Object.keys(fillSet)) {
+              await Collections.Property.updateOne(
+                {
+                  _id: existingByDeh.propertyId,
+                  realmId: realm!._id,
+                  $or: [
+                    { [k]: { $exists: false } },
+                    { [k]: null },
+                    { [k]: '' }
+                  ]
+                },
+                { $set: { [k]: fillSet[k] } }
+              );
+            }
+            // Suppress unused-var warning for $or (built but not used
+            // because per-field guard above is more granular).
+            void $or;
+          }
           continue;
         }
 
@@ -1130,25 +1358,70 @@ export async function importFromE9(req: Req, res: Res) {
         });
 
         if (!property) {
-          property = await Collections.Property.create({
-            realmId: realm!._id,
-            name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${
-              parsedUnit.floor == null || parsedUnit.floor === 0
-                ? 'Ισόγειο'
-                : parsedUnit.floor < 0
-                  ? 'Υπόγειο'
-                  : 'Όροφος ' + parsedUnit.floor
-            }`,
-            type: _inferPropertyType(parsedUnit),
-            surface: parsedUnit.surface,
-            atakNumber: parsedUnit.atakNumber,
-            electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
-            buildingId: String(building!._id),
-            address: buildingData.address
-          });
-          // T2.P1.6: track newly-created property so a downstream
-          // exception can delete it during rollback.
-          createdPropertyIds.push(String(property._id));
+          // L16: the partial unique index on (realmId, atakNumber)
+          // means a concurrent E9 import (e.g. two browser tabs) racing
+          // for the same ATAK would have the second findOne miss and
+          // both fall through to create — the loser would surface a
+          // raw E11000 as a 500. Catch the duplicate-key, refetch by
+          // ATAK, and proceed with the existing record so the user
+          // sees the same outcome as a sequential re-import.
+          try {
+            property = await Collections.Property.create({
+              realmId: realm!._id,
+              name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${_floorLabel(
+                parsedUnit.floor,
+                realm
+              )}`,
+              type: _inferPropertyType(parsedUnit),
+              surface: parsedUnit.surface,
+              atakNumber: parsedUnit.atakNumber,
+              // L9: persist the cadastral code when E9 emitted one.
+              ...(((parsedUnit as any).kaek)
+                ? { kaek: (parsedUnit as any).kaek }
+                : {}),
+              electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
+              buildingId: String(building!._id),
+              address: buildingData.address
+            });
+            // T2.P1.6: track newly-created property so a downstream
+            // exception can delete it during rollback.
+            createdPropertyIds.push(String(property._id));
+          } catch (createErr: any) {
+            if (createErr && createErr.code === 11000) {
+              property = await Collections.Property.findOne({
+                realmId: realm!._id,
+                atakNumber: parsedUnit.atakNumber
+              });
+              if (!property) {
+                // The duplicate key existed at write time but the
+                // refetch missed — surface the original error so the
+                // outer rollback path can clean up.
+                throw createErr;
+              }
+              // Fall into the existing-property branch below — apply
+              // the empty-only fills via a synthetic re-entry.
+              property.buildingId = String(building!._id) as any;
+              if (
+                forceOverwrite ||
+                !property.electricitySupplyNumber
+              ) {
+                property.electricitySupplyNumber =
+                  parsedUnit.electricitySupplyNumber as any;
+              }
+              if (parsedUnit.surface && (forceOverwrite || !property.surface)) {
+                property.surface = parsedUnit.surface as any;
+              }
+              if (
+                (parsedUnit as any).kaek &&
+                (forceOverwrite || !(property as any).kaek)
+              ) {
+                (property as any).kaek = (parsedUnit as any).kaek;
+              }
+              await property.save();
+            } else {
+              throw createErr;
+            }
+          }
         } else {
           // T2.P1.20: gate destructive writes. Without forceOverwrite we
           // only fill empty fields on an existing Property — preserving
@@ -1164,18 +1437,23 @@ export async function importFromE9(req: Req, res: Res) {
           }
           // Fix name if it's still just an ATAK number (from lease import)
           // OR if force-overwriting (user opted in to refresh from E9).
-          const floorLabel =
-            parsedUnit.floor == null || parsedUnit.floor === 0
-              ? 'Ισόγειο'
-              : parsedUnit.floor < 0
-                ? 'Υπόγειο'
-                : `Όροφος ${parsedUnit.floor}`;
+          // L2: read realm.locale so non-Greek realms get a localised
+          // label instead of always falling back to Greek strings.
+          const floorLabel = _floorLabel(parsedUnit.floor, realm);
           if (/^\d{11}$/.test(property.name) || forceOverwrite) {
             property.name =
               `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
           }
           if (parsedUnit.surface && (forceOverwrite || !property.surface)) {
             property.surface = parsedUnit.surface as any;
+          }
+          // L9: backfill kaek when E9 emitted one and the existing
+          // Property record does not have it (or force-overwriting).
+          if (
+            (parsedUnit as any).kaek &&
+            (forceOverwrite || !(property as any).kaek)
+          ) {
+            (property as any).kaek = (parsedUnit as any).kaek;
           }
           await property.save();
         }

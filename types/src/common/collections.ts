@@ -188,6 +188,9 @@ export namespace CollectionTypes {
     price: number;
     atakNumber?: string;
     altAtakNumbers?: string[];
+    // L9: cadastral code (Κ.Α.Ε.Κ.) — optional National Cadastre
+    // identifier carried alongside ATAK on Greek properties.
+    kaek?: string;
     dehNumber?: string;
     buildingId?: string | Building;
     electricitySupplyNumber?: string;

@@ -25,6 +25,11 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
   price: Number,
   atakNumber: String,
   altAtakNumbers: [String],
+  // L9: cadastral code (Κ.Α.Ε.Κ.) emitted by the National Cadastre.
+  // Optional and untyped beyond String — different vintages of E9 use
+  // 12-25 digit identifiers. Stored alongside ATAK so both identifiers
+  // are queryable without re-parsing the PDF.
+  kaek: String,
   dehNumber: String,
   buildingId: String,
   electricitySupplyNumber: String,

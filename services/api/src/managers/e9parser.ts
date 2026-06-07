@@ -6,6 +6,14 @@ export type ParsedE9Owner = {
   lastName: string;
   firstName: string;
   fatherName: string;
+  // L3: legal-entity owners (Α.Ε./Ε.Π.Ε./Ι.Κ.Ε./Ο.Ε./Ε.Ε./ΑΕΒΕ etc.) do
+  // NOT carry first/last/father triplets — they have a single company
+  // name on the ΕΠΩΝΥΜΟ line. When we detect the legal-form marker we
+  // emit the full company name in `name` and leave the physical-person
+  // fields empty rather than mangling the name across three columns.
+  isCompany?: boolean;
+  legalForm?: string;
+  name?: string;
 };
 
 export type ParsedE9CoOwner = {
@@ -21,6 +29,12 @@ export type ParsedE9CoOwner = {
 
 export type ParsedE9Unit = {
   atakNumber: string;
+  // L9: optional cadastral code (Κ.Α.Ε.Κ.) — E9 occasionally carries the
+  // National Cadastre's KAEK alongside the AADE ATAK. Persisted on the
+  // Property record so downstream consumers (display, lookups) can
+  // surface both identifiers without re-parsing the PDF. Missing on
+  // most rows (the standard E9 row does not include it).
+  kaek?: string;
   state: string;
   municipality: string;
   // T3.P1.27: `district` previously sat here but was never populated
@@ -130,8 +144,19 @@ function parseE9Row(
   atakPrefix: string,
   atakSuffix: string
 ): ParsedE9Unit | null {
-  // Remove the ATAK prefix/suffix from start
-  const afterAtak = rowText.substring(12).trim(); // "005578 02430 " = 12 chars
+  // Remove the ATAK prefix/suffix from start.
+  // L15: don't hardcode substring(12). The ATAK regex matches
+  // "<6 digits> <whitespace> <5 digits>"; the whitespace can collapse
+  // (already done by parseE9's normalisation pass) but a future caller
+  // could feed a row preserving multiple spaces. Compute the actual
+  // span via a regex anchored at the row start so we never decapitate
+  // the first non-ATAK character of the row.
+  const atakHead = rowText.match(
+    new RegExp(`^${atakPrefix}\\s+${atakSuffix}\\b`)
+  );
+  const afterAtak = (
+    atakHead ? rowText.substring(atakHead[0].length) : rowText.substring(12)
+  ).trim();
 
   // Extract state — pattern: "ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)" or "ΑΝΑΤ. ΑΤΤΙΚΗΣ (ΝΟΜΑΡΧΙΑ)"
   // Also handle non-ΝΟΜΑΡΧΙΑ states like "ΚΥΚΛΑΔΩΝ"
@@ -319,6 +344,26 @@ function parseE9Row(
     ownershipPercentage = parseFloat(`${ownMatch2[1]}.${ownMatch2[2]}`);
   } else if (ownMatch) {
     ownershipPercentage = parseInt(ownMatch[1], 10);
+  } else {
+    // L1: fractional-rights fallback. E9 occasionally encodes ownership as
+    // a Greek-style fraction "1/2" (or "1 / 2") instead of "50, 0000".
+    // Without this branch the parser falls through to the default of 100
+    // and silently misrepresents a half-owner as full owner. Constrain the
+    // numerator/denominator to 1-3 digits and require denominator > 0 so
+    // we don't false-positive on unrelated digit pairs (zip prefixes,
+    // block numbers).
+    const fracMatch = rowText.match(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/);
+    if (fracMatch) {
+      const num = parseInt(fracMatch[1], 10);
+      const den = parseInt(fracMatch[2], 10);
+      if (den > 0 && num <= den) {
+        const pct = (num / den) * 100;
+        if (pct > 0 && pct <= 100) {
+          // Round to two decimals to keep the bounds invariant tight.
+          ownershipPercentage = Math.round(pct * 100) / 100;
+        }
+      }
+    }
   }
   const coOwners: ParsedE9CoOwner[] = [];
   // Find every "PCT, FRAC" or "PCT,FRAC" triplet head. Skip the first
@@ -514,8 +559,19 @@ function parseE9Row(
     }
   }
 
+  // L9: cadastral code (Κ.Α.Ε.Κ.) — when present, E9 rows include a
+  // 25-digit identifier prefixed by ΚΑΕΚ or Κ.Α.Ε.Κ. Conservatively
+  // capture 12-25 digits (the historic formats vary) and only when the
+  // marker is on the same row, so we don't grab a stray ATAK suffix.
+  let kaek: string | undefined = undefined;
+  const kaekMatch = rowText.match(/Κ(?:\.?Α\.?Ε\.?Κ\.?)\s*[:\s]\s*(\d{12,25})/);
+  if (kaekMatch) {
+    kaek = kaekMatch[1];
+  }
+
   return {
     atakNumber: atakPrefix + atakSuffix,
+    ...(kaek ? { kaek } : {}),
     state: cleanState(state),
     municipality: city || cleanCity(municipality),
     street,
@@ -588,6 +644,68 @@ export function parseE9(text: string): ParsedE9Result {
   if (!owner.taxId) {
     const afmAlt = text.match(/ΑΦΜ\s+υπόχρεου\s*:\s*(\d+)/);
     if (afmAlt) owner.taxId = afmAlt[1];
+  }
+
+  // L3: legal-entity detector. The 3-token regexes above mangle company
+  // names (e.g. "ΑΚΡΟΠΟΛΗ Α.Ε.") into firstName/lastName/fatherName by
+  // splitting on whitespace. Detect company markers on the ΕΠΩΝΥΜΟ line
+  // and, when matched, emit the full company name as `owner.name` while
+  // clearing the physical-person triplet so downstream consumers don't
+  // render "Α.Ε. ΑΚΡΟΠΟΛΗ ΟΛΥΜΠΟΣ" as a person's full name.
+  // The ordering of forms below intentionally puts longer / more-specific
+  // markers first (ΑΕΒΕ before ΑΕ; Α.Ε. before Α.) so the matcher does
+  // not stop early on a prefix.
+  const COMPANY_FORMS = [
+    'ΑΕΒΕ',
+    'Α.Ε.Β.Ε.',
+    'Α.Ε.',
+    'ΑΕ',
+    'Ε.Π.Ε.',
+    'ΕΠΕ',
+    'Ι.Κ.Ε.',
+    'ΙΚΕ',
+    'Ο.Ε.',
+    'ΟΕ',
+    'Ε.Ε.',
+    'ΕΕ'
+  ];
+  // Build a single line search around the ΕΠΩΝΥΜΟ token so we capture
+  // the company name AND the legal-form abbreviation that may follow or
+  // precede it. Scope to a generous window (200 chars) after the keyword.
+  const epoLineMatch = t.match(/ΕΠΩΝΥΜΟ\s+ή\s+ΕΠΩΝΥΜΙΑ\s+([^\n]{0,200})/);
+  if (epoLineMatch) {
+    const window = epoLineMatch[1];
+    const detectedForm = COMPANY_FORMS.find((form) => {
+      // Word-boundary-ish guard: surround with non-letter on both sides
+      // so e.g. "ΑΕ" inside "ΘΑΕΡΑ" doesn't trigger.
+      const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(
+        `(^|[^Α-ΩΆ-Ώα-ωά-ώA-Z])${escaped}(?![Α-ΩΆ-Ώα-ωά-ώA-Z])`
+      );
+      return re.test(window);
+    });
+    if (detectedForm) {
+      owner.isCompany = true;
+      owner.legalForm = detectedForm;
+      // Reconstruct the company name from the captured tokens. The
+      // earlier regex captured firstName/lastName/fatherName as 3 tokens
+      // — re-join them in source order; the legal form may be embedded
+      // anywhere so include it explicitly when not already present.
+      const fragments: string[] = [];
+      if (ownerA) {
+        fragments.push(ownerA[1], ownerA[2], ownerA[3]);
+      } else if (ownerB) {
+        fragments.push(ownerB[2], ownerB[3], ownerB[4]);
+      }
+      let composed = fragments.filter(Boolean).join(' ').trim();
+      if (composed && !composed.includes(detectedForm)) {
+        composed = `${composed} ${detectedForm}`;
+      }
+      owner.name = composed || undefined;
+      owner.firstName = '';
+      owner.lastName = '';
+      owner.fatherName = '';
+    }
   }
 
   // Extract ΠΙΝΑΚΑΣ 1 section
