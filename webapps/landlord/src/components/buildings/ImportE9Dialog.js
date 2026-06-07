@@ -55,7 +55,8 @@ export default function ImportE9Dialog({ open, setOpen }) {
       });
       setState('preview');
     } catch (error) {
-      toast.error(t('Failed to parse E9 PDF'));
+      const serverMessage = error.response?.data?.message;
+      toast.error(serverMessage || t('Failed to parse E9 PDF'));
       setState('idle');
     }
   }, [files, t]);
@@ -73,7 +74,8 @@ export default function ImportE9Dialog({ open, setOpen }) {
       toast.success(t('Buildings imported successfully'));
       handleClose();
     } catch (error) {
-      toast.error(t('Failed to import buildings'));
+      const serverMessage = error.response?.data?.message;
+      toast.error(serverMessage || t('Failed to import buildings'));
       setState('preview');
     }
   }, [files, handleClose, queryClient, t]);
