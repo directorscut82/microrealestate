@@ -59,6 +59,15 @@ export function errorHandler(
   let message = error.message;
   if (error instanceof ServiceError && error.statusCode) {
     status = error.statusCode;
+  } else if (anyErr?.name === 'MulterError') {
+    // P2.3 / M5: multer surfaces upload limits as MulterError with codes
+    // (LIMIT_FILE_SIZE, LIMIT_FILE_COUNT, LIMIT_UNEXPECTED_FILE, etc.).
+    // Without this branch the asyncWrapper-caught error fell through to
+    // the generic 500 path, hiding a recoverable user-input problem
+    // behind an opaque "internal server error". 413 maps cleanly onto
+    // LIMIT_FILE_SIZE; everything else (wrong field name, too many
+    // files) is a malformed-request 422 the client should surface.
+    status = anyErr.code === 'LIMIT_FILE_SIZE' ? 413 : 422;
   } else if (Number.isFinite(anyErr?.status)) {
     status = Number(anyErr.status);
   } else if (Number.isFinite(anyErr?.statusCode)) {
