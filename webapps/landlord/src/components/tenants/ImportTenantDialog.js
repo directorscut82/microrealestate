@@ -6,6 +6,7 @@ import {
   fetchBuildings,
   fetchLeases,
   fetchProperties,
+  fetchTenantRents,
   fetchTenants,
   importTenantPdf,
   QueryKeys,
@@ -53,6 +54,12 @@ export default function ImportTenantDialog({ open, setOpen }) {
   const [parsedResults, setParsedResults] = useState([]);
   const [selectedLeaseIds, setSelectedLeaseIds] = useState({});
   const [markPaidFlags, setMarkPaidFlags] = useState({});
+  // P1.7 / M3: opt-in flag per row to update an existing matched property
+  // from the parsed PDF. Default OFF so re-importing the same PDF (or
+  // an amendment) doesn't silently overwrite manually edited fields like
+  // surface corrections, custom name, expense categories, etc. 4 duplicate
+  // pairs in the user's PDF corpus would otherwise clobber edits.
+  const [updatePropertyFlags, setUpdatePropertyFlags] = useState({});
 
   const { data: leases = [] } = useQuery({
     queryKey: [QueryKeys.LEASES],
@@ -100,7 +107,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
       if (startDate.isValid() && startDate.isBefore(now)) {
         pastMonths = Math.floor(now.diff(startDate, 'months', true));
       }
-      const prop = parsed.properties[0];
+      const prop = parsed.properties?.[0];
       let matchedProperty = null;
       if (prop?.atakNumber) {
         // Primary: exact ATAK match (check both atakNumber and altAtakNumbers)
@@ -109,7 +116,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
             p.altAtakNumbers?.includes(prop.atakNumber)
         );
         // Fallback: match by street + floor (co-owned properties have different ATAKs)
-        if (!matchedProperty && prop.address?.street1) {
+        if (!matchedProperty && prop?.address?.street1) {
           const floorMatch = prop.rawAddress?.match(/Όροφος\s+(\d+)/);
           const isIsogeio = !floorMatch && /Ισόγειο/i.test(prop.rawAddress || '');
           const floor = floorMatch ? parseInt(floorMatch[1], 10) : (isIsogeio ? 0 : null);
@@ -118,7 +125,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
             : null;
           // street1 may include appended floor (e.g. "ΚΑΛΑΜΩΝ 24, Όροφος 1")
           // Extract just the street+number part before the comma
-          const streetOnly = prop.address.street1.split(',')[0].trim();
+          const streetOnly = (prop.address?.street1 || '').split(',')[0].trim();
           if (floor !== null && floorLabel) {
             matchedProperty = existingProperties.find(
               (p) => {
@@ -162,45 +169,87 @@ export default function ImportTenantDialog({ open, setOpen }) {
     setFiles([]);
     setParsedResults([]);
     setSelectedLeaseIds({});
+    // P1.5 / N3: clear per-row opt-in flags. Persistent dialog mount means
+    // these maps survive close/reopen — without the reset, prior session's
+    // flags re-apply to a different tenant/property.
+    setMarkPaidFlags({});
+    setUpdatePropertyFlags({});
   }, [setOpen]);
 
   const handleParse = useCallback(async () => {
     if (files.length === 0) return;
 
     setState('loading');
-    try {
-      const results = [];
-      for (const file of files) {
+    // P1.6 / N2: per-file try/catch so a single bad PDF (parse error, or
+    // a 429 from the server-side 10/min rate limit) doesn't wipe the whole
+    // batch. We collect partial results and only blow up the whole flow on
+    // the very first file failing — at that point there's nothing to keep.
+    const results = [];
+    let rateLimited = false;
+    let hadParseError = false;
+    for (const file of files) {
+      try {
         const result = await importTenantPdf(file);
         results.push({ ...result, _fileName: file.name });
+      } catch (err) {
+        if (err?.response?.status === 429) {
+          rateLimited = true;
+          break;
+        }
+        hadParseError = true;
+        // continue — surface a generic error after the loop, but keep
+        // any successfully parsed files so the user doesn't retype.
       }
-      // Deduplicate: skip files with same declaration number or same tenant+property
-      const seen = new Set();
-      const unique = results.filter((r) => {
-        const key = r.declarationNumber
-          || `${r.tenants?.[0]?.taxId}_${r.properties?.[0]?.atakNumber}`;
-        if (!key || key === 'undefined_undefined') return true;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      if (unique.length < results.length) {
-        toast.info(
-          t('{{count}} duplicate files skipped', {
-            count: results.length - unique.length
-          })
-        );
-      }
-      setParsedResults(unique);
-      setState('preview');
-    } catch {
-      // Clear files on error so a retry doesn't reuse the same broken
-      // PDF state. Without this the user can re-press Continue and
-      // burn another parse attempt against the same corrupt input.
+    }
+
+    if (rateLimited) {
+      toast.error(
+        t(
+          'Too many files; uploaded {{count}} of {{total}} — try again in 1 minute',
+          { count: results.length, total: files.length }
+        )
+      );
+    } else if (hadParseError && results.length === 0) {
       toast.error(t('Error parsing PDF'));
       setFiles([]);
       setState('idle');
+      return;
+    } else if (hadParseError) {
+      toast.warning(
+        t('{{count}} of {{total}} files failed to parse', {
+          count: files.length - results.length,
+          total: files.length
+        })
+      );
     }
+
+    if (results.length === 0) {
+      // Nothing parsed (rate limited on file 0, or all files failed).
+      setFiles([]);
+      setState('idle');
+      return;
+    }
+
+    // Deduplicate: skip files with same declaration number or same tenant+property
+    const seen = new Set();
+    const unique = results.filter((r) => {
+      const key =
+        r.declarationNumber ||
+        `${r.tenants?.[0]?.taxId}_${r.properties?.[0]?.atakNumber}`;
+      if (!key || key === 'undefined_undefined') return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (unique.length < results.length) {
+      toast.info(
+        t('{{count}} duplicate files skipped', {
+          count: results.length - unique.length
+        })
+      );
+    }
+    setParsedResults(unique);
+    setState('preview');
   }, [files, t]);
 
   const createMutation = useMutation({
@@ -275,16 +324,38 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
         let property;
         if (matchInfo?.matchedProperty) {
-          property = await updateProperty({
-            _id: matchInfo.matchedProperty._id,
-            ...propertyData
-          });
+          // P1.7 / M3: only overwrite the existing property when the user
+          // explicitly opted in via the per-row checkbox. Default OFF so
+          // re-importing the same lease (or an amendment) doesn't silently
+          // clobber manual edits like surface corrections, custom name,
+          // expense categories, etc.
+          if (updatePropertyFlags[idx]) {
+            property = await updateProperty({
+              _id: matchInfo.matchedProperty._id,
+              ...propertyData
+            });
+          } else {
+            property = matchInfo.matchedProperty;
+          }
         } else {
           property = await createProperty(propertyData);
         }
 
         // Ensure a building exists for this property
         if (!property.buildingId && streetPart) {
+          // P1.8 / N4: greekleaseparser surfaces the landlord names + AFMs
+          // + ownership percentages but the import previously sent owners:
+          // []. For any co-owned property (6/11 user PDFs) this dropped 50%+
+          // of the ownership data. The Building schema's UnitOwnerSchema
+          // accepts type ∈ {'member','external'} — parsed lease landlords
+          // are external co-owners by definition (they're in the lease, not
+          // necessarily in the realm members list).
+          const ownersFromPdf = (parsed.landlords || []).map((L) => ({
+            type: 'external',
+            name: L.name,
+            taxId: L.taxId,
+            percentage: L.ownershipPercent
+          }));
           const buildings = await fetchBuildings();
           const existingBuilding = buildings.find(
             (b) => b.name === streetPart || b.address?.street1 === streetPart
@@ -304,31 +375,83 @@ export default function ImportTenantDialog({ open, setOpen }) {
                   electricitySupplyNumber: prop.dehNumber || '',
                   propertyId: property._id,
                   isManaged: true,
-                  owners: []
+                  owners: ownersFromPdf
                 }
               );
             }
           } else {
-            // Create a new building with one unit
-            await apiFetcher().post('/buildings', {
-              name: streetPart,
-              atakPrefix: (prop.atakNumber || '').slice(0, 5),
-              address: propertyData.address,
-              units: [{
-                atakNumber: prop.atakNumber || '',
-                floor: floorNum ?? 0,
-                surface: prop.surface || 0,
-                electricitySupplyNumber: prop.dehNumber || '',
-                propertyId: property._id,
-                isManaged: true,
-                owners: []
-              }]
-            });
+            // P1.3 / M2: 8/11 PDFs in the user's corpus share atakPrefix
+            // '00557' (same building, different units). buildingmanager
+            // refuses a second building with the same prefix (422). Catch
+            // that, look up the actual building by prefix, and fall back
+            // to adding the unit there. Any other 422 surfaces the server
+            // message in the toast for diagnosability.
+            const atakPrefix = (prop.atakNumber || '').slice(0, 5);
+            try {
+              await apiFetcher().post('/buildings', {
+                name: streetPart,
+                atakPrefix,
+                address: propertyData.address,
+                units: [
+                  {
+                    atakNumber: prop.atakNumber || '',
+                    floor: floorNum ?? 0,
+                    surface: prop.surface || 0,
+                    electricitySupplyNumber: prop.dehNumber || '',
+                    propertyId: property._id,
+                    isManaged: true,
+                    owners: ownersFromPdf
+                  }
+                ]
+              });
+            } catch (err) {
+              const msg = err?.response?.data?.message || '';
+              const isPrefixCollision =
+                err?.response?.status === 422 &&
+                /atak prefix/i.test(msg) &&
+                /already exists/i.test(msg);
+              if (isPrefixCollision && atakPrefix) {
+                const refreshed = await fetchBuildings();
+                const sharedBuilding = refreshed.find(
+                  (b) => b.atakPrefix === atakPrefix
+                );
+                if (sharedBuilding) {
+                  const hasUnitAlready = sharedBuilding.units?.some(
+                    (u) => u.propertyId === property._id
+                  );
+                  if (!hasUnitAlready) {
+                    await apiFetcher().post(
+                      `/buildings/${sharedBuilding._id}/units`,
+                      {
+                        atakNumber: prop.atakNumber || '',
+                        floor: floorNum ?? 0,
+                        surface: prop.surface || 0,
+                        electricitySupplyNumber: prop.dehNumber || '',
+                        propertyId: property._id,
+                        isManaged: true,
+                        owners: ownersFromPdf
+                      }
+                    );
+                  }
+                } else {
+                  throw err;
+                }
+              } else {
+                throw err;
+              }
+            }
           }
         }
 
         // 3. Resolve tenant
-        const primaryTenant = parsed.tenants[0];
+        // P1.1 / M6: client-side defense — even though the server now
+        // 422s non-lease PDFs in pdfimportmanager, malformed legitimate
+        // PDFs may produce a tenants[0] without a name. Don't crash the
+        // whole batch on a single weird row.
+        const primaryTenant = parsed.tenants?.[0];
+        if (!primaryTenant?.name) {
+          continue;
+        }
         const nameParts = primaryTenant.name.split(/\s+/);
         const lastName = nameParts[0] || '';
         const firstName = nameParts.slice(1).join(' ') || '';
@@ -386,15 +509,19 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
         // Settle past months if flag is set (pays full grandTotal including charges)
         if (markPaidFlags[idx] !== false && matchInfo?.pastMonths > 0) {
-          // Fetch computed rents to get actual grandTotal per term
-          const year = moment().format('YYYY');
-          let rentsData;
+          // P1.2 / M4: previously hit `/rents/:year` which is not a
+          // registered route — the silent catch fell back to base
+          // monthlyRent only, dropping charges/VAT/discount. Use the
+          // actual endpoint (services/api/src/routes.ts:200) which
+          // returns the full per-term rent ledger for this tenant in a
+          // single round-trip and is correct across multi-year leases.
+          let tenantRents = [];
           try {
-            rentsData = await apiFetcher().get(`/rents/${year}`);
-          } catch { rentsData = null; }
-          const tenantRents = rentsData?.rents?.filter(
-            (r) => r.occupant?._id === tenant._id
-          ) || [];
+            const rentsData = await fetchTenantRents(tenant._id);
+            tenantRents = rentsData?.rents || [];
+          } catch {
+            tenantRents = [];
+          }
 
           const startDate = moment(parsed.validityStart || parsed.originalStartDate, 'DD/MM/YYYY');
           const now = moment();
@@ -472,7 +599,24 @@ export default function ImportTenantDialog({ open, setOpen }) {
             <FileDropZone
               multiple
               files={files}
-              onFilesChange={setFiles}
+              onFilesChange={(newFiles) => {
+                // P1.6 / N2: cap to 10 files — the server-side
+                // uploadRateLimit middleware (services/api/src/routes.ts)
+                // is hard-set to 10/min/user, so anything beyond 10 is
+                // guaranteed to 429 and force a 1-minute backoff. Better
+                // to surface the limit in-band before parse than to let
+                // the user queue 30 files and hit a wall halfway through.
+                if (newFiles.length > 10) {
+                  toast.warning(
+                    t(
+                      'Maximum 10 files per import; only the first 10 will be kept'
+                    )
+                  );
+                  setFiles(newFiles.slice(0, 10));
+                } else {
+                  setFiles(newFiles);
+                }
+              }}
               disabled={isLoading}
               description={t(
                 'Upload one or more Greek lease PDF files to import tenants'
@@ -594,6 +738,27 @@ export default function ImportTenantDialog({ open, setOpen }) {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {info?.matchedProperty && !info?.occupiedBy && (
+                      <div className="flex items-center gap-2 pt-2 p-2 bg-muted/50 rounded-md">
+                        <Checkbox
+                          id={`updateProp-${idx}`}
+                          checked={!!updatePropertyFlags[idx]}
+                          onCheckedChange={(checked) =>
+                            setUpdatePropertyFlags((prev) => ({
+                              ...prev,
+                              [idx]: checked
+                            }))
+                          }
+                        />
+                        <label
+                          htmlFor={`updateProp-${idx}`}
+                          className="text-sm flex items-center gap-1.5 cursor-pointer"
+                        >
+                          {t('Update property fields from PDF')}
+                        </label>
+                      </div>
+                    )}
 
                     {info?.pastMonths > 0 && (
                       <div className="flex items-center gap-2 pt-2 p-2 bg-muted/50 rounded-md">
