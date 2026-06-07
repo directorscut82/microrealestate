@@ -38,7 +38,29 @@ export type ParsedTenant = {
   name: string;
   taxId: string;
   acceptanceDate?: string;
+  // P2.5 / M8: AADE PDFs do not flag whether the tenant is a natural
+  // person or a legal entity — the only signal is a Greek legal-form
+  // suffix on the name (Α.Ε., Ε.Π.Ε., Ι.Κ.Ε., Ο.Ε., Ε.Ε., ΑΕΒΕ,
+  // Α.Β.Ε.Ε.). Surface that to the import dialog so it doesn't try to
+  // first/last-name-decompose a company.
+  isCompany?: boolean;
+  companyName?: string;
+  legalForm?: string;
 };
+
+// Detects Greek legal-form suffixes on a tenant name. Anchored to end-of-
+// string with optional internal dots so both "Α.Ε." and "ΑΕ" hit. Returns
+// the matched legal form for downstream display, or null when natural.
+export function detectGreekLegalForm(name: string): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  // Order matters: longest forms first so "ΑΕΒΕ"/"Α.Β.Ε.Ε." don't get
+  // shadowed by the shorter "Ε.Ε." / "Α.Ε." patterns.
+  const re =
+    /(ΑΕΒΕ|Α\.?Β\.?Ε\.?Ε\.?|Ε\.?Π\.?Ε\.?|Ι\.?Κ\.?Ε\.?|Ο\.?Ε\.?|Ε\.?Ε\.?|Α\.?Ε\.?)$/i;
+  const m = trimmed.match(re);
+  return m ? m[1] : null;
+}
 
 export type ParsedEnergyCertificate = {
   number: string;
@@ -91,6 +113,14 @@ function parseGreekDecimal(value: string): number {
   let cleaned = value.replace(/[€\s]/g, '');
   if (cleaned.includes(',')) {
     cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d{1,3}\.\d{3}$/.test(cleaned)) {
+    // P2.6 / L1: dot-only number with no decimal comma. AADE emits both
+    // "1.234,56" and the bare "1.234" (one thousand two hundred thirty-four)
+    // for whole-thousand amounts. Without a decimal cue parseFloat would
+    // mis-read "1.234" as 1.234 (one and a quarter) and silently truncate
+    // every kilo-rent or large surface. Detect the unambiguous
+    // "1-3 digits . exactly 3 digits" thousands shape and strip the dot.
+    cleaned = cleaned.replace('.', '');
   }
   const num = parseFloat(cleaned);
   return isNaN(num) ? 0 : num;
@@ -132,7 +162,11 @@ const CATEGORY_MAP: Record<string, string> = {
   Διαμέρισμα: 'apartment',
   Κατάστημα: 'store',
   Γραφείο: 'office',
-  Αποθήκη: 'store',
+  // P2.4 / M7: 'Αποθήκη' is a basement / storage room — map it to the
+  // canonical 'storage' property type (see services/api/src/validators.ts
+  // PROPERTY_TYPES). Was previously aliased to 'store' which conflated it
+  // with retail spaces and broke per-type surface-lower-bound logic.
+  Αποθήκη: 'storage',
   'Βιομηχανικός χώρος': 'building',
   Γκαράζ: 'garage',
   Parking: 'parking',
@@ -151,7 +185,15 @@ function mapCategoryToType(category: string): string {
 }
 
 // Parse "Όροφος 3 ΣΠΑΡΤΙΑΤΩΝ 9 11147 ΓΑΛΑΤΣΙΟΥ, ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)"
-// into structured address fields
+// into structured address fields.
+//
+// P2.2 / M1: previously a naive split-on-comma, which misfires whenever the
+// street1 itself contains a comma (e.g. "ΛΕΩΦ. ΑΛΕΞΑΝΔΡΑΣ 12, ΥΠ' ΑΡ. 3 ...
+// 11522 ΑΘΗΝΩΝ, ΑΘΗΝΩΝ (ΝΟΜΑΡΧΙΑ)") because the early commas swallow the
+// street into multiple "parts" and the city/state mapping shifts. Anchor the
+// parse on the 5-digit zip token instead — the AADE PDF format always emits
+// "<street1...> <ZIP> <city_genitive>, <state_genitive>" after the floor and
+// the (ΝΟΜΑΡΧΙΑ) suffix are stripped, so the zip is a stable pivot.
 function parseAddress(raw: string): ParsedAddress {
   const result: ParsedAddress = {
     street1: '',
@@ -161,52 +203,73 @@ function parseAddress(raw: string): ParsedAddress {
   };
   if (!raw) return result;
 
-  // Extract floor: "Όροφος N" or "Ισόγειο" or "Υπόγειο"
-  const floorMatch = raw.match(/(Όροφος\s+\d+|Ισόγειο|Υπόγειο)/i);
+  // P2.7 / L2: extend floor regex to include the rest of the floor lexicon
+  // AADE actually emits — Mezzanine (Ημιόροφος / ΗΜΙΟΡΟΦΟΣ), Sofita
+  // (Σοφίτα / ΣΟΦΙΤΑ), Pataro (Πατάρι), and Ημιυπόγειο. Without these the
+  // tokens were silently leaking into street1 (e.g. "ΣΠΑΡΤΙΑΤΩΝ 9 Σοφίτα").
+  const FLOOR_RE =
+    /(Όροφος\s+\d+|Ισόγειο|Υπόγειο|Ημιόροφος|Σοφίτα|Πατάρι|Ημιυπόγειο|ΗΜΙΟΡΟΦΟΣ|ΣΟΦΙΤΑ)/i;
+
+  // Extract floor first so it doesn't pollute street1
+  const floorMatch = raw.match(FLOOR_RE);
   if (floorMatch) result.floor = floorMatch[1];
 
-  // Extract zip code: 5-digit number
-  const zipMatch = raw.match(/\b(\d{5})\b/);
-  if (zipMatch) result.zipCode = zipMatch[1];
-
-  // Remove floor and zip from the string to isolate street and location
+  // Strip floor + (ΝΟΜΑΡΧΙΑ) + collapse whitespace. We keep the zip so the
+  // anchor-pattern below can find it.
   const cleaned = raw
-    .replace(/(Όροφος\s+\d+|Ισόγειο|Υπόγειο)/i, '')
-    .replace(/\b\d{5}\b/, '')
+    .replace(FLOOR_RE, '')
     .replace(/\(ΝΟΜΑΡΧΙΑ\)/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Split on comma — typically "STREET CITY, REGION"
-  const parts = cleaned
-    .split(',')
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  if (parts.length >= 2) {
-    // Last part is region (ΑΘΗΝΩΝ → ΑΘΗΝΑ)
-    result.state = parts[parts.length - 1]
+  // Anchor on the 5-digit zip token: "<street1> <ZIP> <city>, <state>"
+  const anchored = cleaned.match(/^(.*?)\s+(\d{5})\s+(.+?),\s*(.+)$/);
+  if (anchored) {
+    result.street1 = anchored[1].trim();
+    result.zipCode = anchored[2];
+    // City and state are typically genitive (ΓΑΛΑΤΣΙΟΥ → ΓΑΛΑΤΣΙ,
+    // ΑΘΗΝΩΝ → ΑΘΗΝΑ). Same suffix-rewrites as before.
+    result.city = anchored[3]
+      .trim()
+      .replace(/ΟΥ$/, '')
+      .replace(/ου$/, '')
+      .replace(/ΑΣ$/, 'Α')
+      .replace(/ας$/, 'α');
+    result.state = anchored[4]
+      .trim()
       .replace(/ΩΝ$/, 'Α')
       .replace(/ων$/, 'α');
-
-    // First part has street + city
-    const firstPart = parts[0];
-    // City is typically the last word(s) in genitive (ΓΑΛΑΤΣΙΟΥ)
-    // Pattern: "STREET_NAME NUMBER CITY_GENITIVE"
-    const streetCityMatch = firstPart.match(/^(.+?\s+\d+)\s+(.+)$/);
-    if (streetCityMatch) {
-      result.street1 = streetCityMatch[1].trim();
-      // Convert genitive to nominative: ΓΑΛΑΤΣΙΟΥ → ΓΑΛΑΤΣΙ
-      result.city = streetCityMatch[2]
-        .replace(/ΟΥ$/, '')
-        .replace(/ου$/, '')
-        .replace(/ΑΣ$/, 'Α')
-        .replace(/ας$/, 'α');
-    } else {
-      result.street1 = firstPart;
+  } else {
+    // Fallback when the zip-anchored shape doesn't match (unusual AADE
+    // output): keep the older zip + comma-split heuristic so we surface
+    // *something* useful for the import dialog rather than an empty
+    // address.
+    const zipMatch = cleaned.match(/\b(\d{5})\b/);
+    if (zipMatch) result.zipCode = zipMatch[1];
+    const stripped = cleaned.replace(/\b\d{5}\b/, '').trim();
+    const parts = stripped
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length >= 2) {
+      result.state = parts[parts.length - 1]
+        .replace(/ΩΝ$/, 'Α')
+        .replace(/ων$/, 'α');
+      const firstPart = parts[0];
+      const streetCityMatch = firstPart.match(/^(.+?\s+\d+)\s+(.+)$/);
+      if (streetCityMatch) {
+        result.street1 = streetCityMatch[1].trim();
+        result.city = streetCityMatch[2]
+          .replace(/ΟΥ$/, '')
+          .replace(/ου$/, '')
+          .replace(/ΑΣ$/, 'Α')
+          .replace(/ας$/, 'α');
+      } else {
+        result.street1 = firstPart;
+      }
+    } else if (parts.length === 1) {
+      result.street1 = parts[0];
     }
-  } else if (parts.length === 1) {
-    result.street1 = parts[0];
   }
 
   // Append floor to street if present
@@ -269,11 +332,19 @@ export function parseGreekLease(text: string): ParsedLease {
       );
       continue;
     }
-    tenants.push({
-      name: m[1].trim(),
+    const tenantName = m[1].trim();
+    const legalForm = detectGreekLegalForm(tenantName);
+    const tenant: ParsedTenant = {
+      name: tenantName,
       taxId: m[2],
       acceptanceDate: m[3] || undefined
-    });
+    };
+    if (legalForm) {
+      tenant.isCompany = true;
+      tenant.companyName = tenantName;
+      tenant.legalForm = legalForm;
+    }
+    tenants.push(tenant);
   }
 
   // Lease details
