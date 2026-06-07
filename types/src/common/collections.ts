@@ -453,6 +453,11 @@ export namespace CollectionTypes {
     generalThousandths?: number;
     heatingThousandths?: number;
     elevatorThousandths?: number;
+    // T2.P1.14: ΕΙΔΟΣ ΔΙΚΑΙΩΜΑΤΟΣ from E9 — full ownership, bare
+    // ownership (Ψιλή κυριότητα), or usufruct (Επικαρπία). Optional
+    // because legacy units predate the field and default to 'full'
+    // server-side via the schema default.
+    rightType?: 'full' | 'bare' | 'usufruct';
     owners: UnitOwner[] | [];
     propertyId?: string | Property;
     isManaged: boolean;

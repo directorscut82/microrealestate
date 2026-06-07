@@ -266,13 +266,22 @@ export async function deleteBuilding(ids) {
   await apiFetcher().delete(`/buildings/${ids.join(',')}`);
 }
 
-export async function importBuildingPdf(file, confirmed = false) {
+export async function importBuildingPdf(file, confirmed = false, options = {}) {
   const formData = new FormData();
   formData.append('pdf', file);
-  const url = confirmed
-    ? '/buildings/import-pdf?confirmed=true'
-    : '/buildings/import-pdf';
-  const response = await apiFetcher().post(url, formData);
+  // T2.P1.20: caller may pass `force=true` to opt into destructive overwrite
+  // of existing Property fields (electricitySupplyNumber, name, surface).
+  // Default is non-destructive — server only fills empty fields.
+  const params = [];
+  if (confirmed) params.push('confirmed=true');
+  if (options.force) params.push('force=true');
+  const url =
+    '/buildings/import-pdf' + (params.length ? `?${params.join('&')}` : '');
+  // T2.P1.21: forward AbortSignal so the dialog can cancel an in-flight
+  // upload when the user clicks Cancel during parsing/confirming.
+  const response = await apiFetcher().post(url, formData, {
+    signal: options.signal
+  });
   return response.data;
 }
 

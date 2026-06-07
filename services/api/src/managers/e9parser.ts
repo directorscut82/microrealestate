@@ -8,6 +8,17 @@ export type ParsedE9Owner = {
   fatherName: string;
 };
 
+export type ParsedE9CoOwner = {
+  // T2.P1.4: optional co-owner triplet from the E9 row tail. The PDF
+  // can declare up to 3 owners per ATAK; the FIRST owner's percentage
+  // is the primary ownershipPercentage on the unit (for backwards
+  // compatibility with existing callers), while any additional owners
+  // appear here.
+  percentage: number;
+  taxId: string;
+  rightType: 'full' | 'bare' | 'usufruct';
+};
+
 export type ParsedE9Unit = {
   atakNumber: string;
   state: string;
@@ -25,6 +36,14 @@ export type ParsedE9Unit = {
   category: number | null;
   yearBuilt: number | null;
   ownershipPercentage: number;
+  // T2.P1.14: ΕΙΔΟΣ ΔΙΚΑΙΩΜΑΤΟΣ — full ownership (Πλήρης, code 1), bare
+  // ownership (Ψιλή κυριότητα, code 2), or usufruct (Επικαρπία, code 3).
+  // Defaults to 'full' when the row digit is missing or unrecognized
+  // — every prior parse implicitly assumed full ownership.
+  rightType: 'full' | 'bare' | 'usufruct';
+  // T2.P1.4: any co-owner triplets detected after the primary owner.
+  // Empty array when the unit has a single owner (the common case).
+  coOwners: ParsedE9CoOwner[];
   electricitySupplyNumber: string;
   isElectrified: boolean;
 };
@@ -154,6 +173,23 @@ function parseE9Row(
           /^([\u0391-\u03A9\u0386-\u038F.\s-]+)\s+([\u0391-\u03A9\u0386-\u038F]{3,})\s+(\d+)\s/
         )
       : null;
+
+  // T2.P1.3: 4th fallback for settlement-style rows with a NON-NUMERIC
+  // block-plot identifier (e.g. "\u039B\u0391\u0393\u039F\u039D\u0397\u03A3\u0399 ... X ... X 831\u0391"). The PDF
+  // emits a settlement chain followed by `X`, then block streets,
+  // another `X`, then an alphanumeric block-plot id (e.g. "831\u0391") in
+  // place of a street number. The three earlier patterns require pure
+  // numeric \d+ for the street number and silently drop these rows;
+  // surface>0 then gets dropped as a land plot at buildingMap. Match
+  // conservatively on the double-X with an alphanumeric tail token so
+  // we don't false-positive on standard urban rows.
+  const settlementBlockPlotMatch =
+    !compoundStreetMatch && !simpleStreetMatch && !ruralMatch
+      ? rest.match(
+          /^([\u0391-\u03A9\u0386-\u038F.\s-]+?)\s+X\s+[\u0391-\u03A9\u0386-\u038F.\s()]+?\s+X\s+(\d+[\u0391-\u03A9]?)\s/
+        )
+      : null;
+
   const municipalityAndStreet = !ruralMatch
     ? compoundStreetMatch || simpleStreetMatch
     : null;
@@ -174,6 +210,35 @@ function parseE9Row(
     street = ruralMatch[3].trim(); // settlement name
     streetNumber = '0'; // no number for rural
     rest = rest.substring(ruralMatch[0].length);
+  } else if (settlementBlockPlotMatch) {
+    // T2.P1.3: settlement with alphanumeric block-plot identifier. Pull
+    // the most-specific 1-2 trailing tokens of the settlement chain as
+    // the street label so the building gets a usable name. e.g.
+    // "ΚΑΛΥΒΙΩΝ ΘΟΡΙΚΟΥ - ΠΑΡΑΛΙΑ ΛΑΓΟΝΗΣΙ ΑΓ. ΑΝΑΣΤΑΣΙΑΣ" → street
+    // "ΑΓ. ΑΝΑΣΤΑΣΙΑΣ", municipality "ΚΑΛΥΒΙΩΝ ΘΟΡΙΚΟΥ - ΠΑΡΑΛΙΑ
+    // ΛΑΓΟΝΗΣΙ".
+    const chain = settlementBlockPlotMatch[1].trim();
+    const blockPlotId = settlementBlockPlotMatch[2];
+    const tokens = chain.split(/\s+/);
+    if (tokens.length >= 2) {
+      const prevToken = tokens[tokens.length - 2];
+      // Keep ΑΓ./ΑΓΙΟΥ/ΑΓΙΩΝ/ΕΘΝ./ΛΕΩΦ./ΒΑΣΙΛ. attached to the next
+      // token so abbreviated saint/national/avenue names stay grouped.
+      if (
+        /^(ΑΓ\.?|ΑΓΙΟΥ|ΑΓΙΩΝ|ΕΘΝ\.?|ΛΕΩΦ\.?|ΒΑΣΙΛ\.?)$/.test(prevToken)
+      ) {
+        street = `${prevToken} ${tokens[tokens.length - 1]}`;
+        municipality = tokens.slice(0, -2).join(' ').trim();
+      } else {
+        street = tokens[tokens.length - 1];
+        municipality = tokens.slice(0, -1).join(' ').trim();
+      }
+    } else {
+      street = chain;
+      municipality = chain;
+    }
+    streetNumber = blockPlotId;
+    rest = rest.substring(settlementBlockPlotMatch[0].length);
   }
 
   // Look for X marker (indicates inhabited building with block streets)
@@ -217,6 +282,12 @@ function parseE9Row(
   const zipCode = zipCandidate ? zipCandidate[1] : '';
 
   // Extract ownership: look for patterns "100, 0000" or "50,0 0000" or "100,0000"
+  // T2.P1.4: collect ALL ownership triplets present in the row tail.
+  // Each triplet is the percentage column (PCT, FRAC) followed by
+  // YEAR_USUFRUCT (4 digits, often 0000) and optionally a 9-digit AFM
+  // for the usufructuary. The PDF can carry up to 3 such triplets per
+  // ATAK; we keep the first as the primary ownership and emit the rest
+  // as `coOwners` so downstream importer can attach all of them.
   let ownershipPercentage = 100;
   const ownMatch = rowText.match(/\b(\d{1,3}),\s*0{4}\b/);
   const ownMatch2 = rowText.match(/\b(\d{1,3}),(\d)\s+0{4}\b/);
@@ -224,6 +295,27 @@ function parseE9Row(
     ownershipPercentage = parseFloat(`${ownMatch2[1]}.${ownMatch2[2]}`);
   } else if (ownMatch) {
     ownershipPercentage = parseInt(ownMatch[1], 10);
+  }
+  const coOwners: ParsedE9CoOwner[] = [];
+  // Find every "PCT, FRAC" or "PCT,FRAC" triplet head. Skip the first
+  // occurrence (already captured as ownershipPercentage) and look for
+  // up to 2 more (E9 schema caps owners per ATAK at 3).
+  const allOwnTriplets = [
+    ...rowText.matchAll(/\b(\d{1,3}),\s*(\d{4})\s+(\d{9})?/g)
+  ];
+  if (allOwnTriplets.length > 1) {
+    for (let i = 1; i < Math.min(allOwnTriplets.length, 3); i++) {
+      const pct = parseInt(allOwnTriplets[i][1], 10);
+      const taxId = allOwnTriplets[i][3] || '';
+      // Skip noise matches where pct is 0 — those are absent triplets.
+      if (pct > 0 && pct <= 100) {
+        coOwners.push({
+          percentage: pct,
+          taxId,
+          rightType: 'full'
+        });
+      }
+    }
   }
 
   // Extract year built: 4-digit year 16xx-20xx (covers historical Greek
@@ -306,6 +398,13 @@ function parseE9Row(
   // Floor can be 0-9 (single digit for most buildings)
   // Special: Υ = underground (basement), Ι = ισόγειο (not always present)
   // Category: 1=apartment, 2=store, 51=storage, etc.
+  // T2.P1.14: ΕΙΔΟΣ ΔΙΚΑΙΩΜΑΤΟΣ — ownership-rights code from E9 column.
+  //   1 = full ownership (Πλήρης κυριότητα)
+  //   2 = bare ownership (Ψιλή κυριότητα)
+  //   3 = usufruct       (Επικαρπία)
+  // Defaults to 'full' since every previously-parsed E9 row was
+  // implicitly treated as full ownership.
+  let rightType: 'full' | 'bare' | 'usufruct' = 'full';
   let floor: number | null = null;
   let category: number | null = null;
 
@@ -357,6 +456,23 @@ function parseE9Row(
     }
   }
 
+  // T2.P1.14: extract rightType. The digit appears between blockNumber
+  // and the category/floor/surface triplet. Conservative match: look
+  // for "<blockNumber> <rightDigit> <category>" where rightDigit is
+  // 1/2/3 and category is at most 2 digits. If we cannot match
+  // confidently, leave rightType at the default 'full'.
+  if (blockNumber && surface > 0) {
+    const rightAfterBlock = rowText.match(
+      new RegExp(`\\b${blockNumber}\\s+([123])\\s+\\d{1,2}\\s`)
+    );
+    if (rightAfterBlock) {
+      const code = rightAfterBlock[1];
+      if (code === '1') rightType = 'full';
+      else if (code === '2') rightType = 'bare';
+      else if (code === '3') rightType = 'usufruct';
+    }
+  }
+
   // City name from row - look after zip code
   // T1.P1.12: always run cleanCity() so the genitive municipality
   // (\u0393\u0391\u039B\u0391\u03A4\u03A3\u0399\u039F\u03A5) is normalized to its nominative form (\u0393\u0391\u039B\u0391\u03A4\u03A3\u0399) regardless
@@ -391,6 +507,8 @@ function parseE9Row(
     category,
     yearBuilt,
     ownershipPercentage,
+    rightType,
+    coOwners,
     electricitySupplyNumber,
     isElectrified
   };
