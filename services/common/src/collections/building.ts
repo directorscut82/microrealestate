@@ -45,6 +45,14 @@ const BuildingUnitSchema = new mongoose.Schema({
   generalThousandths: Number,
   heatingThousandths: Number,
   elevatorThousandths: Number,
+  // T2.P1.14: ΕΙΔΟΣ ΔΙΚΑΙΩΜΑΤΟΣ from E9 imports. Defaults to 'full'
+  // since every prior import implicitly treated rows as full
+  // ownership; bare/usufruct rows now round-trip from the E9 parser.
+  rightType: {
+    type: String,
+    enum: ['full', 'bare', 'usufruct'],
+    default: 'full'
+  },
   owners: [UnitOwnerSchema],
   propertyId: String,
   isManaged: { type: Boolean, default: false },

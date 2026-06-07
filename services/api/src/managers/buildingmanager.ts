@@ -941,6 +941,23 @@ export async function importFromE9(req: Req, res: Res) {
     const userEmail = (req as any).user?.email;
     const memberId = _findMemberIdByEmail(realm, userEmail);
 
+    // T2.P1.20: opt-in destructive overwrite. Default OFF — server only
+    // fills empty fields on existing Property records. With force=true
+    // it overwrites electricitySupplyNumber, surface, and the
+    // auto-generated name fallback even when the Property already had
+    // values. Surfaced via the "Update existing properties" checkbox in
+    // ImportE9Dialog preview.
+    const forceOverwrite = req.query.force === 'true';
+
+    // T2.P1.6: track every Property and Building this request creates so
+    // a mid-batch failure can be rolled back. Without this, a partial
+    // import leaves orphaned Property records whose buildingId points at
+    // a Building that may not have been finalized — and the user sees a
+    // confusing 500 with no way to recover except hand-editing mongo.
+    const createdPropertyIds: string[] = [];
+    const createdBuildingIds: string[] = [];
+
+    try {
     for (const buildingData of parsed.buildings) {
       // Check if building exists
       // 1. Exact address match (street1 + zipCode)
@@ -985,6 +1002,9 @@ export async function importFromE9(req: Req, res: Res) {
           updatedDate: new Date()
         });
         await _saveBuildingWithVersionCheck(building);
+        // T2.P1.6: remember the new building so a downstream failure can
+        // delete it during rollback.
+        createdBuildingIds.push(String(building._id));
         wasCreated = true;
       } else {
         // Consolidate: merge incoming data into existing building
@@ -1107,41 +1127,71 @@ export async function importFromE9(req: Req, res: Res) {
             buildingId: String(building!._id),
             address: buildingData.address
           });
+          // T2.P1.6: track newly-created property so a downstream
+          // exception can delete it during rollback.
+          createdPropertyIds.push(String(property._id));
         } else {
+          // T2.P1.20: gate destructive writes. Without forceOverwrite we
+          // only fill empty fields on an existing Property — preserving
+          // user edits (e.g. a hand-corrected DEH supply number) that
+          // would otherwise be silently clobbered by every re-import.
           property.buildingId = String(building!._id) as any;
-          property.electricitySupplyNumber =
-            parsedUnit.electricitySupplyNumber as any;
+          if (
+            forceOverwrite ||
+            !property.electricitySupplyNumber
+          ) {
+            property.electricitySupplyNumber =
+              parsedUnit.electricitySupplyNumber as any;
+          }
           // Fix name if it's still just an ATAK number (from lease import)
-          if (/^\d{11}$/.test(property.name)) {
-            const floorLabel =
-              parsedUnit.floor == null || parsedUnit.floor === 0
-                ? 'Ισόγειο'
-                : parsedUnit.floor < 0
-                  ? 'Υπόγειο'
-                  : `Όροφος ${parsedUnit.floor}`;
+          // OR if force-overwriting (user opted in to refresh from E9).
+          const floorLabel =
+            parsedUnit.floor == null || parsedUnit.floor === 0
+              ? 'Ισόγειο'
+              : parsedUnit.floor < 0
+                ? 'Υπόγειο'
+                : `Όροφος ${parsedUnit.floor}`;
+          if (/^\d{11}$/.test(property.name) || forceOverwrite) {
             property.name =
               `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
           }
-          if (parsedUnit.surface && !property.surface) {
+          if (parsedUnit.surface && (forceOverwrite || !property.surface)) {
             property.surface = parsedUnit.surface as any;
           }
           await property.save();
         }
 
+        // T2.P1.4: include any co-owner triplets the parser detected as
+        // additional `external` owners. They carry the AFM emitted by
+        // E9 but no realm member is associated yet — a follow-up flow
+        // can reconcile them to realm members by taxId.
+        const owners: any[] = [
+          {
+            type: 'member',
+            name: ownerFullName,
+            percentage: parsedUnit.ownershipPercentage,
+            memberId: memberId || userEmail
+          }
+        ];
+        for (const co of (parsedUnit as any).coOwners || []) {
+          owners.push({
+            type: 'external',
+            name: co.taxId ? `ΑΦΜ ${co.taxId}` : 'Co-owner',
+            percentage: co.percentage,
+            taxId: co.taxId || undefined
+          });
+        }
         (building as any).units.push({
           atakNumber: parsedUnit.atakNumber,
           floor: parsedUnit.floor,
           surface: parsedUnit.surface,
           yearBuilt: parsedUnit.yearBuilt,
           electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
-          owners: [
-            {
-              type: 'member',
-              name: ownerFullName,
-              percentage: parsedUnit.ownershipPercentage,
-              memberId: memberId || userEmail
-            }
-          ],
+          // T2.P1.14: persist rightType so bare/usufruct units survive
+          // round-trip and downstream UIs can treat them differently
+          // (e.g. usufruct units shouldn't appear in owner-side reports).
+          rightType: (parsedUnit as any).rightType || 'full',
+          owners,
           propertyId: String(property._id),
           isManaged: true
         });
@@ -1203,6 +1253,45 @@ export async function importFromE9(req: Req, res: Res) {
       skippedLandPlots: parsed.skippedLandPlots,
       failedRows: parsed.failedRows
     });
+    } catch (importErr) {
+      // T2.P1.6: rollback any Property and Building records this request
+      // created before re-throwing. Without this, a mid-batch failure
+      // (e.g. mongoose VersionError, network blip on the 5th building)
+      // leaves orphan Property docs with buildingId pointing at a saved
+      // Building plus partial unit lists — recovering would require
+      // hand-editing mongo. We tolerate cleanup errors (log and continue)
+      // because surfacing the original importErr is more useful than the
+      // cleanup secondary failure.
+      try {
+        if (createdPropertyIds.length) {
+          await Collections.Property.deleteMany({
+            _id: { $in: createdPropertyIds },
+            realmId: realm!._id
+          });
+        }
+      } catch (cleanupErr) {
+        logger.error(
+          `E9 import rollback: Property cleanup failed: ${String(
+            cleanupErr
+          )} (originalIds=${createdPropertyIds.join(',')})`
+        );
+      }
+      try {
+        if (createdBuildingIds.length) {
+          await Collections.Building.deleteMany({
+            _id: { $in: createdBuildingIds },
+            realmId: realm!._id
+          });
+        }
+      } catch (cleanupErr) {
+        logger.error(
+          `E9 import rollback: Building cleanup failed: ${String(
+            cleanupErr
+          )} (originalIds=${createdBuildingIds.join(',')})`
+        );
+      }
+      throw importErr;
+    }
   }
 
   // Return preview
