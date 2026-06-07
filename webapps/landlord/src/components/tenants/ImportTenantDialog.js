@@ -6,6 +6,7 @@ import {
   fetchBuildings,
   fetchLeases,
   fetchProperties,
+  fetchTenant,
   fetchTenantRents,
   fetchTenants,
   importTenantPdf,
@@ -159,7 +160,25 @@ export default function ImportTenantDialog({ open, setOpen }) {
         );
       }
 
-      return { months, pastMonths, matchedProperty, matchedTenant, occupiedBy };
+      // P2.10 / N7: AADE PDFs occasionally surface mis-keyed dates where
+      // validityEnd is on or before validityStart (typo on the original
+      // declaration; user-supplied amendment with a wrong end). Compute a
+      // dateInvalid flag so the preview can warn AND the Import button
+      // stays disabled rather than producing a tenant whose lease is
+      // already expired before it begins.
+      const _vs = moment(parsed.validityStart, 'DD/MM/YYYY', true);
+      const _ve = moment(parsed.validityEnd, 'DD/MM/YYYY', true);
+      const dateInvalid =
+        _vs.isValid() && _ve.isValid() ? !_ve.isAfter(_vs) : false;
+
+      return {
+        months,
+        pastMonths,
+        matchedProperty,
+        matchedTenant,
+        occupiedBy,
+        dateInvalid
+      };
     });
   }, [parsedResults, existingProperties, existingTenants]);
 
@@ -232,7 +251,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
     // Deduplicate: skip files with same declaration number or same tenant+property
     const seen = new Set();
-    const unique = results.filter((r) => {
+    let unique = results.filter((r) => {
       const key =
         r.declarationNumber ||
         `${r.tenants?.[0]?.taxId}_${r.properties?.[0]?.atakNumber}`;
@@ -241,6 +260,23 @@ export default function ImportTenantDialog({ open, setOpen }) {
       seen.add(key);
       return true;
     });
+    // P2.8 / L6: cross-reference amendments against their originals. The
+    // declarationNumber-only key above lets BOTH "12345" (original) and
+    // "12345-AMD" (amendment whose amendsDeclaration === "12345") through
+    // because they have distinct declaration numbers. When the user drops
+    // an entire AADE export folder for a tenant they end up with N rows
+    // for the same lease. Prefer the amendment (newer / most recent state)
+    // and drop the originals it amends.
+    const amendsDeclSet = new Set(
+      unique
+        .map((r) => r.amendsDeclaration)
+        .filter((d) => typeof d === 'string' && d.length > 0)
+    );
+    if (amendsDeclSet.size > 0) {
+      unique = unique.filter(
+        (r) => !(r.declarationNumber && amendsDeclSet.has(r.declarationNumber))
+      );
+    }
     if (unique.length < results.length) {
       toast.info(
         t('{{count}} duplicate files skipped', {
@@ -255,13 +291,29 @@ export default function ImportTenantDialog({ open, setOpen }) {
   const createMutation = useMutation({
     mutationFn: async () => {
       const created = [];
+      // P2.11 / N8: track every skip reason so the success toast can
+      // surface a non-zero count to the user. Without this the dialog
+      // silently auto-navigated on a single success even when N rows
+      // were dropped (occupied / invalid dates / no resolvable property).
+      let skipped = 0;
 
       for (let idx = 0; idx < parsedResults.length; idx++) {
         const parsed = parsedResults[idx];
         const matchInfo = matchInfos[idx];
 
         // Skip entries where property is occupied by another tenant
-        if (matchInfo?.occupiedBy) continue;
+        if (matchInfo?.occupiedBy) {
+          skipped += 1;
+          continue;
+        }
+        // P2.10 / N7: defense in depth — the Import button is disabled
+        // when any row's validityEnd <= validityStart, but if we ever
+        // reach the mutation with an invalid row (programmatic call,
+        // race), skip it cleanly rather than persist a backwards lease.
+        if (matchInfo?.dateInvalid) {
+          skipped += 1;
+          continue;
+        }
 
         const months =
           matchInfo?.months ||
@@ -279,8 +331,18 @@ export default function ImportTenantDialog({ open, setOpen }) {
           leaseId = newLease._id;
         }
 
-        // 2. Resolve property
-        const prop = parsed.properties[0];
+        // 2. Resolve properties (P2.9 / N1)
+        // AADE PDFs may declare multiple properties under a single lease
+        // (e.g. apartment + storage room + parking spot, all rented to the
+        // same tenant). Iterate over `parsed.properties` and create or
+        // match each one — previously only properties[0] was processed
+        // and the rest were silently dropped. Each iteration goes through
+        // the same resolve-property → ensure-building flow as before; the
+        // outputs are accumulated into `resolvedProperties` and threaded
+        // into the tenant body's properties[] array further down.
+        const resolvedProperties = [];
+        for (let pIdx = 0; pIdx < parsed.properties.length; pIdx++) {
+          const prop = parsed.properties[pIdx];
         // Compute a proper name from address (e.g. "ΚΑΛΑΜΩΝ 24 - Ισόγειο")
         const streetPart = (prop.address?.street1 || '').split(',')[0].trim();
         const floorRaw = (prop.address?.street1 || '').match(/Όροφος\s*(\d+)/);
@@ -322,8 +384,40 @@ export default function ImportTenantDialog({ open, setOpen }) {
             : undefined
         };
 
+        // Per-property match resolution: matchInfo only carries the
+        // primary (properties[0]) match. For pIdx > 0 (additional
+        // properties on a multi-property lease) we look up the match
+        // inline against existingProperties using the same atak-or-
+        // street-floor heuristic the matchInfos memo uses.
+        let perPropertyMatch = null;
+        let perPropertyOccupiedBy = null;
+        if (pIdx === 0) {
+          perPropertyMatch = matchInfo?.matchedProperty || null;
+          perPropertyOccupiedBy = matchInfo?.occupiedBy || null;
+        } else if (prop?.atakNumber) {
+          perPropertyMatch =
+            existingProperties.find(
+              (p) =>
+                p.atakNumber === prop.atakNumber ||
+                p.altAtakNumbers?.includes(prop.atakNumber)
+            ) || null;
+          if (perPropertyMatch && !matchInfo?.matchedTenant) {
+            perPropertyOccupiedBy =
+              existingTenants.find((t) =>
+                t.properties?.some(
+                  (tp) => tp.propertyId === perPropertyMatch._id
+                )
+              ) || null;
+          }
+        }
+
+        // Skip properties already occupied by another tenant — the user
+        // saw the warning at preview time. Continue with the remaining
+        // properties on the same lease so we don't lose data.
+        if (perPropertyOccupiedBy) continue;
+
         let property;
-        if (matchInfo?.matchedProperty) {
+        if (perPropertyMatch) {
           // P1.7 / M3: only overwrite the existing property when the user
           // explicitly opted in via the per-row checkbox. Default OFF so
           // re-importing the same lease (or an amendment) doesn't silently
@@ -331,14 +425,38 @@ export default function ImportTenantDialog({ open, setOpen }) {
           // expense categories, etc.
           if (updatePropertyFlags[idx]) {
             property = await updateProperty({
-              _id: matchInfo.matchedProperty._id,
+              _id: perPropertyMatch._id,
               ...propertyData
             });
           } else {
-            property = matchInfo.matchedProperty;
+            property = perPropertyMatch;
           }
         } else {
-          property = await createProperty(propertyData);
+          // P2.12 / N9: a concurrent identical import (same PDF, two
+          // tabs / two browsers / a re-clicked button) can race past the
+          // existingProperties match and try to insert a duplicate
+          // atakNumber. Mongo answers with E11000 which the common
+          // errorHandler now translates to 409. Recover by re-fetching
+          // properties and treating the duplicate as already-imported.
+          try {
+            property = await createProperty(propertyData);
+          } catch (err) {
+            if (err?.response?.status === 409 && propertyData.atakNumber) {
+              const refreshedProps = await fetchProperties();
+              const dup = refreshedProps.find(
+                (p) =>
+                  p.atakNumber === propertyData.atakNumber ||
+                  p.altAtakNumbers?.includes(propertyData.atakNumber)
+              );
+              if (dup) {
+                property = dup;
+              } else {
+                throw err;
+              }
+            } else {
+              throw err;
+            }
+          }
         }
 
         // Ensure a building exists for this property
@@ -443,6 +561,25 @@ export default function ImportTenantDialog({ open, setOpen }) {
           }
         }
 
+        // Record the resolved property + per-property rent so the tenant
+        // body below can attach all of them. prop.monthlyRent is the
+        // per-property amount AADE emits separately from the lease total.
+        resolvedProperties.push({
+          property,
+          rent: prop.monthlyRent || 0
+        });
+        }
+        // End P2.9 / N1 per-property loop.
+
+        // No properties resolved at all (every property on the lease was
+        // occupied by another tenant). Skip this lease entirely; the
+        // outer loop's `created` array is the success ledger so we
+        // simply don't push.
+        if (resolvedProperties.length === 0) {
+          skipped += 1;
+          continue;
+        }
+
         // 3. Resolve tenant
         // P1.1 / M6: client-side defense — even though the server now
         // 422s non-lease PDFs in pdfimportmanager, malformed legitimate
@@ -450,28 +587,40 @@ export default function ImportTenantDialog({ open, setOpen }) {
         // whole batch on a single weird row.
         const primaryTenant = parsed.tenants?.[0];
         if (!primaryTenant?.name) {
+          skipped += 1;
           continue;
         }
+        // P2.5 / M8: when the parser flagged this tenant as a Greek legal
+        // entity (Α.Ε., Ε.Π.Ε., etc.), persist it as a company instead of
+        // first/last-name-decomposing the legal name. The Tenant schema
+        // accepts isCompany/company/manager/legalForm — the API just
+        // round-trips them. We don't have a manager name from the AADE
+        // PDF, so leave that empty for the user to fill in.
+        const isCompany = !!primaryTenant.isCompany;
         const nameParts = primaryTenant.name.split(/\s+/);
-        const lastName = nameParts[0] || '';
-        const firstName = nameParts.slice(1).join(' ') || '';
+        const lastName = isCompany ? '' : nameParts[0] || '';
+        const firstName = isCompany ? '' : nameParts.slice(1).join(' ') || '';
         const beginDate = parsed.validityStart || parsed.originalStartDate;
         const tenantData = {
           name: primaryTenant.name,
           firstName,
           lastName,
+          isCompany,
+          company: isCompany
+            ? primaryTenant.companyName || primaryTenant.name
+            : '',
+          legalForm: isCompany ? primaryTenant.legalForm || '' : '',
+          manager: '',
           leaseId,
           beginDate,
           endDate: parsed.validityEnd || '',
-          properties: [
-            {
-              propertyId: property._id,
-              rent: prop.monthlyRent || 0,
-              expenses: [],
-              entryDate: beginDate,
-              exitDate: parsed.validityEnd || ''
-            }
-          ],
+          properties: resolvedProperties.map((rp) => ({
+            propertyId: rp.property._id,
+            rent: rp.rent,
+            expenses: [],
+            entryDate: beginDate,
+            exitDate: parsed.validityEnd || ''
+          })),
           taxId: primaryTenant.taxId || '',
           declarationNumber: parsed.declarationNumber || '',
           amendsDeclaration: parsed.amendsDeclaration || '',
@@ -488,7 +637,9 @@ export default function ImportTenantDialog({ open, setOpen }) {
           })),
           contacts: [
             {
-              contact: `${firstName} ${lastName}`.trim(),
+              contact: isCompany
+                ? primaryTenant.companyName || primaryTenant.name
+                : `${firstName} ${lastName}`.trim(),
               email: '',
               phone1: '',
               phone2: ''
@@ -499,12 +650,79 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
         let tenant;
         if (matchInfo?.matchedTenant) {
+          // P2.1 / H2: previously the PATCH overwrote properties[] with a
+          // single-element array built from parsed.properties[0], wiping any
+          // existing property entries on a multi-property tenant. GET the
+          // current tenant, merge the new property entry keyed on
+          // propertyId (skip if already present, append if new), and PATCH
+          // the merged body. Also thread __v from the matched fixture so
+          // occupantmanager's optimistic-lock guard accepts the request
+          // (otherwise it 422s on missing __v).
+          let mergedProperties = tenantData.properties;
+          let baseVersion = matchInfo.matchedTenant.__v;
+          try {
+            const fresh = await fetchTenant(matchInfo.matchedTenant._id);
+            const existing = Array.isArray(fresh?.properties)
+              ? fresh.properties
+              : [];
+            const existingIds = new Set(
+              existing.map((p) => String(p.propertyId))
+            );
+            // Append only the parsed entries that are not already on the
+            // tenant. P2.9 / N1 produces N entries (one per parsed
+            // property) so we walk the whole list rather than only [0].
+            const newEntries = tenantData.properties.filter(
+              (e) => !existingIds.has(String(e.propertyId))
+            );
+            mergedProperties = newEntries.length
+              ? [...existing, ...newEntries]
+              : existing;
+            if (Number.isFinite(fresh?.__v)) {
+              baseVersion = fresh.__v;
+            }
+          } catch {
+            // GET failed — fall back to the dialog's snapshot to avoid
+            // blocking the import. The merge degrades to "old behavior"
+            // for this one row only, which is the safest fallback when
+            // we can't read the live state.
+          }
           tenant = await updateTenant({
             _id: matchInfo.matchedTenant._id,
-            ...tenantData
+            ...tenantData,
+            properties: mergedProperties,
+            __v: baseVersion
           });
         } else {
-          tenant = await createTenant(tenantData);
+          // P2.12 / N9: concurrent same-PDF imports may try to insert two
+          // tenants with the same taxId. The server now translates that
+          // E11000 into a 409. Re-read tenants and treat the duplicate as
+          // already-imported (success). If we somehow can't find the
+          // duplicate (race vs another in-flight import that hasn't
+          // committed yet), surface a recoverable error.
+          try {
+            tenant = await createTenant(tenantData);
+          } catch (err) {
+            if (err?.response?.status === 409 && tenantData.taxId) {
+              const refreshedTenants = await fetchTenants();
+              const dup = refreshedTenants.find(
+                (t) =>
+                  t.taxId === tenantData.taxId ||
+                  t.coTenants?.some((ct) => ct.taxId === tenantData.taxId)
+              );
+              if (dup) {
+                tenant = dup;
+              } else {
+                toast.warning(
+                  t(
+                    'Another import is in progress; please retry'
+                  )
+                );
+                throw err;
+              }
+            } else {
+              throw err;
+            }
+          }
         }
 
         // Settle past months if flag is set (pays full grandTotal including charges)
@@ -546,9 +764,9 @@ export default function ImportTenantDialog({ open, setOpen }) {
         created.push(tenant);
       }
 
-      return created;
+      return { created, skipped };
     },
-    onSuccess: (tenants) => {
+    onSuccess: ({ created: tenants, skipped }) => {
       // Bulk-import touches tenants, properties, leases, and (when past
       // months are settled) the rent + accounting ledgers. Buildings can
       // be created mid-import as well. Invalidate the entire stack so no
@@ -561,15 +779,27 @@ export default function ImportTenantDialog({ open, setOpen }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
       handleClose();
+      // P2.11 / N8: surface skipped count alongside the success message
+      // so a single-success import that swallowed N occupied / invalid
+      // rows isn't silently auto-navigated. Always toast first; navigate
+      // afterwards.
+      if (skipped > 0) {
+        toast.success(
+          t(
+            'Imported {{count}} tenant ({{skipped}} skipped — already occupied or invalid)',
+            { count: tenants.length, skipped }
+          )
+        );
+      } else if (tenants.length !== 1) {
+        toast.success(
+          t('{{count}} tenants imported', { count: tenants.length })
+        );
+      }
       if (tenants.length === 1 && tenants[0]?._id) {
         router.push(
           `/${store.organization.selected?.name}/tenants/${tenants[0]._id}`,
           undefined,
           { locale: store.organization.selected?.locale }
-        );
-      } else {
-        toast.success(
-          t('{{count}} tenants imported', { count: tenants.length })
         );
       }
     },
@@ -681,6 +911,15 @@ export default function ImportTenantDialog({ open, setOpen }) {
                       </div>
                     )}
 
+                    {info?.dateInvalid && (
+                      <div className="flex items-center gap-1 text-xs text-red-700">
+                        <LuAlertTriangle className="size-3" />
+                        {t(
+                          'Lease end date is before start date — please verify the source PDF'
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-3 gap-2 text-sm">
                       <div>
                         <span className="text-muted-foreground">
@@ -702,16 +941,21 @@ export default function ImportTenantDialog({ open, setOpen }) {
                       </div>
                     </div>
 
-                    {parsed.properties[0] && (
-                      <div className="text-sm text-muted-foreground">
+                    {/* P2.9 / N1: render one row per parsed property so
+                        multi-property leases (apartment + storage room +
+                        parking) surface the full set the import will
+                        create / attach. */}
+                    {parsed.properties.map((p, pIdx) => (
+                      <div
+                        key={pIdx}
+                        className="text-sm text-muted-foreground"
+                      >
                         <LuCheck className="inline size-3 mr-1" />
-                        {parsed.properties[0].address?.street1}
-                        {parsed.properties[0].surface &&
-                          ` · ${parsed.properties[0].surface} τμ`}
-                        {parsed.properties[0].atakNumber &&
-                          ` · ΑΤΑΚ: ${parsed.properties[0].atakNumber}`}
+                        {p.address?.street1}
+                        {p.surface ? ` · ${p.surface} τμ` : ''}
+                        {p.atakNumber ? ` · ΑΤΑΚ: ${p.atakNumber}` : ''}
                       </div>
-                    )}
+                    ))}
 
                     <div className="space-y-1">
                       <Label className="text-xs">{t('Contract')}</Label>
@@ -796,7 +1040,21 @@ export default function ImportTenantDialog({ open, setOpen }) {
             </Button>
           )}
           {state === 'preview' && (
-            <Button onClick={handleConfirm} disabled={isLoading}>
+            <Button
+              onClick={handleConfirm}
+              // P2.10 / N7: gate the Import button on every importable row
+              // having validityEnd > validityStart. We don't filter the
+              // invalid rows out — surfacing the per-row warning AND
+              // blocking the action lets the user fix the source PDF
+              // (or remove that file from the batch) instead of silently
+              // skipping it.
+              disabled={
+                isLoading ||
+                matchInfos.some(
+                  (info) => info?.dateInvalid && !info?.occupiedBy
+                )
+              }
+            >
               {parsedResults.length === 1
                 ? matchInfos[0]?.matchedTenant
                   ? t('Update')
