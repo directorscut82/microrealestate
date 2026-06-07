@@ -1002,5 +1002,10 @@
   "unpaid": "unpaid",
   "{{count}} bill(s) imported successfully": "{{count}} bill(s) imported successfully",
   "{{count}} bill(s) marked as paid": "{{count}} bill(s) marked as paid",
-  "{{count}} duplicate files skipped": "{{count}} duplicate files skipped"
+  "{{count}} duplicate files skipped": "{{count}} duplicate files skipped",
+  "{{count}} duplicate files skipped_one": "1 duplicate file skipped",
+  "{{count}} of {{total}} files failed to parse": "{{count}} of {{total}} files failed to parse",
+  "Maximum 10 files per import; only the first 10 will be kept": "Maximum 10 files per import; only the first 10 will be kept",
+  "Too many files; uploaded {{count}} of {{total}} — try again in 1 minute": "Too many files; uploaded {{count}} of {{total}} — try again in 1 minute",
+  "Update property fields from PDF": "Update property fields from PDF"
 }
