@@ -157,8 +157,13 @@ function _assertCustomAllocationPropertyIds(
 
 // Infer property type from E9 parsed unit data
 function _inferPropertyType(unit: ParsedE9Unit): string {
-  // Category from E9: 1=apartment, 2=store, 51=parking/storage
+  // Category from E9: 1=apartment, 2=store, 5/6=storage, 51=parking
   if (unit.category !== null) {
+    // T1.P1.13: AADE categories 5 and 6 designate αποθήκη (storage) units —
+    // not parking, not apartment. Map them to the canonical 'storage'
+    // PROPERTY_TYPE so they don't masquerade as apartments and inherit
+    // surface-based defaults that don't apply (basements with 0 m²).
+    if (unit.category === 5 || unit.category === 6) return 'storage';
     if (unit.category === 2) return 'store';
     if (unit.category >= 50) return 'parking';
   }
@@ -917,6 +922,17 @@ export async function importFromE9(req: Req, res: Res) {
   // If confirmed=true query param, actually create/update
   if (req.query.confirmed === 'true') {
     const createdBuildings = [];
+    // T1.P1.19: track per-building outcome so the response reports
+    // wasCreated/wasUpdated counts instead of returning created:true on
+    // every call (which lies on re-imports that only attached units to
+    // existing buildings).
+    const perBuildingOutcomes: {
+      buildingId: string;
+      buildingName: string;
+      wasCreated: boolean;
+      wasUpdated: boolean;
+      unitsAdded: number;
+    }[] = [];
 
     const ownerFullName =
       `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
@@ -945,6 +961,10 @@ export async function importFromE9(req: Req, res: Res) {
       // NOTE: Do NOT match by ATAK prefix — it's a cadastral area code, not building ID
       // Multiple buildings can share the same prefix (e.g. ΑΧΑΡΝΩΝ 167 and ΚΑΛΑΜΩΝ 24)
 
+      let wasCreated = false;
+      let wasUpdated = false;
+      let unitsAdded = 0;
+
       if (!building) {
         // Create new building
         building = new Collections.Building({
@@ -965,6 +985,7 @@ export async function importFromE9(req: Req, res: Res) {
           updatedDate: new Date()
         });
         await _saveBuildingWithVersionCheck(building);
+        wasCreated = true;
       } else {
         // Consolidate: merge incoming data into existing building
         let updated = false;
@@ -988,6 +1009,7 @@ export async function importFromE9(req: Req, res: Res) {
         if (updated) {
           b.updatedDate = new Date();
           await _saveBuildingWithVersionCheck(building);
+          wasUpdated = true;
         }
       }
 
@@ -1123,10 +1145,25 @@ export async function importFromE9(req: Req, res: Res) {
           propertyId: String(property._id),
           isManaged: true
         });
+        unitsAdded++;
       }
 
       (building as any).updatedDate = new Date();
       await _saveBuildingWithVersionCheck(building!);
+
+      // T1.P1.19: a re-import that only attached units to an existing
+      // building (no field-merge above) should still report wasUpdated:true.
+      if (!wasCreated && unitsAdded > 0) {
+        wasUpdated = true;
+      }
+
+      perBuildingOutcomes.push({
+        buildingId: String((building as any)._id),
+        buildingName: (building as any).name,
+        wasCreated,
+        wasUpdated,
+        unitsAdded
+      });
 
       createdBuildings.push(building.toObject());
 
@@ -1142,7 +1179,30 @@ export async function importFromE9(req: Req, res: Res) {
     }
 
     const result = await _toBuildingData(realm!._id, createdBuildings);
-    return res.json({ created: true, buildings: result });
+    // T1.P1.19: emit per-building outcomes plus aggregate counts so the
+    // dialog can surface accurate "X created, Y updated, Z units added"
+    // text instead of a blanket "created:true" lie. Keep the legacy
+    // `created` boolean (true when any building was created) so older
+    // callers don't break, but its meaning is now "imported successfully"
+    // rather than "everything was newly created".
+    const createdCount = perBuildingOutcomes.filter((o) => o.wasCreated).length;
+    const updatedCount = perBuildingOutcomes.filter(
+      (o) => !o.wasCreated && o.wasUpdated
+    ).length;
+    const unitsAddedTotal = perBuildingOutcomes.reduce(
+      (sum, o) => sum + o.unitsAdded,
+      0
+    );
+    return res.json({
+      created: true,
+      buildings: result,
+      outcomes: perBuildingOutcomes,
+      createdCount,
+      updatedCount,
+      unitsAddedTotal,
+      skippedLandPlots: parsed.skippedLandPlots,
+      failedRows: parsed.failedRows
+    });
   }
 
   // Return preview

@@ -226,9 +226,10 @@ function parseE9Row(
     ownershipPercentage = parseInt(ownMatch[1], 10);
   }
 
-  // Extract year built: 4-digit year 19xx or 20xx
+  // Extract year built: 4-digit year 16xx-20xx (covers historical Greek
+  // buildings such as 1896 — narrower 19xx|20xx regex previously rejected them).
   let yearBuilt: number | null = null;
-  const yearMatch = rowText.match(/\b(19\d{2}|20\d{2})\b/);
+  const yearMatch = rowText.match(/\b(1[6789]\d{2}|20\d{2})\b/);
   if (yearMatch) {
     yearBuilt = parseInt(yearMatch[1], 10);
   }
@@ -277,10 +278,18 @@ function parseE9Row(
       ) ?? 0;
   }
   if (surfaceCandidates.length >= 2) {
-    auxSurface =
-      parseGreekDecimal(
-        surfaceCandidates[1][1] + ',' + surfaceCandidates[1][2]
-      ) ?? 0;
+    // T1.P1.10: when the row has only one declared surface but the regex
+    // matches the same value twice (e.g. PDF prints the total beside the
+    // unit surface), the second match is a duplicate of the first — not a
+    // separate auxiliary surface. Detect this by comparing the captured
+    // groups verbatim and keep auxSurface at 0.
+    const firstRaw =
+      surfaceCandidates[0][1] + ',' + surfaceCandidates[0][2];
+    const secondRaw =
+      surfaceCandidates[1][1] + ',' + surfaceCandidates[1][2];
+    if (firstRaw !== secondRaw) {
+      auxSurface = parseGreekDecimal(secondRaw) ?? 0;
+    }
   }
 
   // For large surfaces with dot separators (e.g. "2.478,00" or "1.032,00")
@@ -349,7 +358,12 @@ function parseE9Row(
   }
 
   // City name from row - look after zip code
-  let city = municipality;
+  // T1.P1.12: always run cleanCity() so the genitive municipality
+  // (\u0393\u0391\u039B\u0391\u03A4\u03A3\u0399\u039F\u03A5) is normalized to its nominative form (\u0393\u0391\u039B\u0391\u03A4\u03A3\u0399) regardless
+  // of whether a zipCode-based city extraction succeeded. Without this,
+  // rows missing a zip group separately from rows that have one even when
+  // they refer to the same city.
+  let city = cleanCity(municipality);
   if (zipCode) {
     const afterZipForCity = rowText.substring(rowText.lastIndexOf(zipCode) + 6);
     const cityMatch = afterZipForCity.match(
@@ -479,15 +493,20 @@ export function parseE9(text: string): ParsedE9Result {
     }
   }
 
-  // GROUP BY ADDRESS (street + streetNumber + zipCode), NOT by ATAK prefix
-  // When zip is missing, group by street+number only (merge with any existing)
-  const buildingKey = (u: ParsedE9Unit) => {
-    // Include zip to prevent merging different buildings at same street+number in different areas
-    const key = `${u.street}|${u.streetNumber}|${u.zipCode}`.toUpperCase();
-    return key;
-  };
+  // GROUP BY ADDRESS (street + streetNumber), NOT by ATAK prefix.
+  // T1.P1.7: group on street+number first, then refine by zipCode only
+  // when BOTH the existing group and the incoming unit have a non-empty
+  // zip. Otherwise an empty-zip row would split a real building into two
+  // groups (e.g. ΣΠΑΡΤΙΑΤΩΝ 9 with one zip-less row alongside zipped
+  // siblings produced 2 buildings when it should have been 1).
+  const baseKey = (u: ParsedE9Unit) =>
+    `${u.street}|${u.streetNumber}`.toUpperCase();
 
-  const buildingMap = new Map<string, ParsedE9Unit[]>();
+  // Map: baseKey → array of subgroups, each subgroup: { zipCode, units }
+  const buildingMap = new Map<
+    string,
+    { zipCode: string; units: ParsedE9Unit[] }[]
+  >();
   for (const unit of units) {
     // Skip units with no address (failed to parse)
     if (!unit.street && !unit.streetNumber) {
@@ -499,15 +518,36 @@ export function parseE9(text: string): ParsedE9Result {
       skippedAsLand++;
       continue;
     }
-    const key = buildingKey(unit);
-    if (!buildingMap.has(key)) {
-      buildingMap.set(key, []);
+    const k = baseKey(unit);
+    if (!buildingMap.has(k)) {
+      buildingMap.set(k, []);
     }
-    buildingMap.get(key)!.push(unit);
+    const groups = buildingMap.get(k)!;
+    // Merge into an existing subgroup when:
+    //   - either side has empty zip (treat as "unknown, same building"), or
+    //   - both sides agree on zip
+    let target = groups.find(
+      (g) => !g.zipCode || !unit.zipCode || g.zipCode === unit.zipCode
+    );
+    if (!target) {
+      target = { zipCode: unit.zipCode, units: [] };
+      groups.push(target);
+    }
+    // Promote the subgroup zip if we now know it.
+    if (!target.zipCode && unit.zipCode) {
+      target.zipCode = unit.zipCode;
+    }
+    target.units.push(unit);
   }
 
   const buildings: ParsedE9Building[] = [];
-  for (const [, buildingUnits] of buildingMap.entries()) {
+  const allBuildingUnitGroups: ParsedE9Unit[][] = [];
+  for (const groups of buildingMap.values()) {
+    for (const g of groups) {
+      allBuildingUnitGroups.push(g.units);
+    }
+  }
+  for (const buildingUnits of allBuildingUnitGroups) {
     const firstUnit = buildingUnits[0];
 
     // Use the most common ATAK prefix among units in this building
