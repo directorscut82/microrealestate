@@ -36,6 +36,23 @@ export async function parseImportedPdf(
   try {
     const text = await extractTextFromPdf(file.buffer);
     const parsed = parseGreekLease(text);
+    // P1.1 / M6: reject non-lease PDFs (e.g. E9 wealth declarations,
+    // ΠΕΡΙΟΥΣΙΑΚΗ ΚΑΤΑΣΤΑΣΗ printouts, random Taxisnet receipts) at the
+    // server boundary. parseGreekLease returns the empty default shape
+    // for any input that lacks the AADE lease section markers; the
+    // landlord dialog then crashes on `primaryTenant.name.split` and on
+    // `prop.address?.street1` (optional chain on .address, not on prop).
+    // 5/16 PDFs in the user's corpus took this path. Better to fail fast
+    // here with a recognisable 422 than crash the dialog client-side.
+    if (
+      (!parsed.tenants || parsed.tenants.length === 0) &&
+      (!parsed.properties || parsed.properties.length === 0)
+    ) {
+      throw new ServiceError(
+        'PDF does not appear to be an AADE Taxisnet lease declaration',
+        422
+      );
+    }
     res.json(parsed);
   } catch (err) {
     if (err instanceof ServiceError) throw err;

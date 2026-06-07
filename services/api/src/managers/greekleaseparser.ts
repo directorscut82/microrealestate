@@ -335,7 +335,15 @@ export function parseGreekLease(text: string): ParsedLease {
       between(s, 'ΜΗΝΙΑΙΟ ΜΙΣΘΩΜΑ', 'ΑΡΙΘΜΟΣ ΠΑΡΟΧΗΣ ΔΕΗ')
     );
 
-    const dehNumber = between(s, 'ΑΡΙΘΜΟΣ ΠΑΡΟΧΗΣ ΔΕΗ', 'ΣΤΟΙΧΕΙΑ ΕΝΕΡΓΕΙΑΚΟΥ');
+    // P1.4 / H1: AADE PDFs may emit either of two patterns after the DEH
+    // number — "ΣΤΟΙΧΕΙΑ ΕΝΕΡΓΕΙΑΚΟΥ ΠΙΣΤΟΠΟΙΗΤΙΚΟΥ ..." (when a cert
+    // exists) or "ΕΝΕΡΓΕΙΑΚΟ ΠΙΣΤΟΠΟΙΗΤΙΚΟ ΔΕΝ ΟΡΙΣΤΗΚΕ" (when none does).
+    // The earlier `between(...)` end-label only matched the first form so
+    // ~6/11 PDFs in the user's corpus silently lost the DEH number.
+    // Self-contained regex anchored on the digits — robust to both shapes
+    // and any future trailing-label change AADE makes.
+    const dehMatchRaw = s.match(/ΑΡΙΘΜΟΣ ΠΑΡΟΧΗΣ ΔΕΗ\s*(\d+)/);
+    const dehNumber = dehMatchRaw ? dehMatchRaw[1] : '';
 
     // Energy certificate — may be in a separate section
     let energyCertificate: ParsedEnergyCertificate | undefined;
