@@ -347,6 +347,16 @@ export default function ImportE9Dialog({ open, setOpen }) {
     if (failedFiles.length === 0) return;
     handleParse(failedFiles);
   }, [failedFiles, handleParse]);
+  // T3.P1.30: nothing-new detector — drives the idempotency banner AND
+  // the Confirm-button disable state so the dialog cannot fire a
+  // pointless write request for a fully-overlapping re-import.
+  const noNewData =
+    !!preview &&
+    preview.buildings.length > 0 &&
+    preview.buildings.every((b) => b.existingBuildingId) &&
+    preview.buildings.every((b) =>
+      (b.units || []).every((u) => u.existingPropertyId)
+    );
 
   return (
     <ResponsiveDialog
@@ -432,6 +442,32 @@ export default function ImportE9Dialog({ open, setOpen }) {
 
           {state === 'preview' && preview && (
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              {/* T3.P1.30: idempotency banner — when EVERY preview building
+                  already exists AND every unit in every preview building
+                  already maps to an existing Property, re-running the
+                  import would only re-link records that are already
+                  linked. Surface this loudly and disable Confirm so the
+                  user does not waste a network round-trip (and the rate
+                  limit budget) re-uploading PDFs the system has already
+                  ingested. */}
+              {noNewData && (
+                <div
+                  className="border border-warning rounded-md p-3 flex items-start gap-2 text-sm"
+                  data-cy="e9NoNewDataBanner"
+                >
+                  <LuAlertTriangle className="size-4 text-warning mt-0.5" />
+                  <div>
+                    <div className="font-medium">
+                      {t('No new data — already imported')}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {t(
+                        'Every building and unit in this PDF is already in the system. Nothing would change.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+              )}
               {preview.owners.length > 0 && (
                 <div className="border rounded-md p-4 space-y-2">
                   <div className="font-medium">
@@ -589,7 +625,11 @@ export default function ImportE9Dialog({ open, setOpen }) {
             </Button>
           )}
           {state === 'preview' && (
-            <Button onClick={handleConfirm} data-cy="confirmImport">
+            <Button
+              onClick={handleConfirm}
+              disabled={noNewData}
+              data-cy="confirmImport"
+            >
               {t('Confirm Import')}
             </Button>
           )}

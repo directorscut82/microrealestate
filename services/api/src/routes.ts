@@ -49,9 +49,17 @@ function verifyPdfContent(req: any, res: any, next: any) {
         file.buffer.length < 4 ||
         file.buffer.slice(0, 4).toString() !== '%PDF'
       ) {
-        return res.status(422).json({
-          message: `Invalid PDF file content: ${file.originalname || 'unknown'}`
-        });
+        // T3.P1.28: route the rejection through ServiceError so the
+        // error envelope matches every other 422 in the API
+        // (`{status, message}` via the central errorHandler). The
+        // previous inline `res.status(422).json({message})` skipped
+        // `status` and broke client error parsing for this one path.
+        return next(
+          new ServiceError(
+            `Invalid PDF file content: ${file.originalname || 'unknown'}`,
+            422
+          )
+        );
       }
     }
   }

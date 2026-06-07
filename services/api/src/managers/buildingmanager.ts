@@ -983,7 +983,25 @@ export async function importFromE9(req: Req, res: Res) {
       let unitsAdded = 0;
 
       if (!building) {
-        // Create new building
+        // T3.P1.29: derive UI-required fields (totalFloors, hasElevator)
+        // from the parsed unit floors so the Edit Building form does not
+        // open with two empty mandatory inputs after every E9 import.
+        // - totalFloors: max(floor) + abs(min(floor)) + 1, counting any
+        //   basement(s) as additional floors. Defaults to undefined when
+        //   no unit declared a numeric floor (server schema accepts it
+        //   as Number; the form treats undefined as "please fill in").
+        // - hasElevator: heuristic — any unit on the 4th floor or above
+        //   strongly implies an elevator. User can correct in the form.
+        const numericFloors = (buildingData.units || [])
+          .map((u: any) => u.floor)
+          .filter((f: any) => typeof f === 'number');
+        let totalFloors: number | undefined = undefined;
+        if (numericFloors.length > 0) {
+          const maxF = Math.max(...numericFloors);
+          const minF = Math.min(...numericFloors);
+          totalFloors = maxF + Math.abs(Math.min(0, minF)) + 1;
+        }
+        const hasElevator = numericFloors.some((f: number) => f >= 4);
         building = new Collections.Building({
           realmId: realm!._id,
           name: buildingData.address.street1,
@@ -992,7 +1010,8 @@ export async function importFromE9(req: Req, res: Res) {
           blockNumber: buildingData.blockNumber,
           blockStreets: buildingData.blockStreets,
           yearBuilt: buildingData.yearBuilt,
-          hasElevator: false,
+          ...(totalFloors !== undefined && { totalFloors }),
+          hasElevator,
           hasCentralHeating: false,
           units: [],
           expenses: [],

@@ -23,7 +23,9 @@ export type ParsedE9Unit = {
   atakNumber: string;
   state: string;
   municipality: string;
-  district: string;
+  // T3.P1.27: `district` previously sat here but was never populated
+  // (always set to ''). No consumer reads it. Removed to keep the type
+  // honest about what the parser actually emits.
   street: string;
   streetNumber: string;
   zipCode: string;
@@ -81,11 +83,14 @@ function parseGreekDecimal(value: string): number | null {
 }
 
 function cleanState(state: string): string {
-  return state
-    .replace(/\(ΝΟΜΑΡΧΙΑ\)/gi, '')
-    .replace(/ΩΝ$/, 'Α')
-    .replace(/ων$/, 'α')
-    .trim();
+  // T3.P1.26: drop the heuristic Greek-case stripping. The previous
+  // `ΩΝ$ → Α` / `ων$ → α` substitutions assumed a singular feminine
+  // genitive (ΑΘΗΝΩΝ → ΑΘΗΝΑ) but mis-cased plural prefectures
+  // (ΚΥΚΛΑΔΩΝ → ΚΥΚΛΑΔΑ, should stay ΚΥΚΛΑΔΩΝ; ΔΩΔΕΚΑΝΗΣΩΝ → ΔΩΔΕΚΑΝΗΣΑ,
+  // should stay ΔΩΔΕΚΑΝΗΣΩΝ). Preserving the raw genitive is safer than
+  // a wrong nominalisation — display layers can apply a lookup table
+  // when they need a specific case.
+  return state.replace(/\(ΝΟΜΑΡΧΙΑ\)/gi, '').trim();
 }
 
 function cleanCity(city: string): string {
@@ -256,12 +261,31 @@ function parseE9Row(
       );
       if (streetsMatch) {
         const streetsStr = streetsMatch[1].trim();
-        // Split on known separators (spaces between multi-word street names)
-        streetsStr.split(/\s+/).forEach((s) => {
-          if (s.length > 2 && s !== 'ΑΓ.' && s !== 'ΑΓ') {
-            blockStreets.push(s);
+        // Split on known separators (spaces between multi-word street names).
+        // T3.P1.23: drop tokens that start with '(' — leading parens leak in
+        // through the [Α-ΩΆ-Ώ.\s()] character class
+        // (e.g. "(ΝΟΜΑΡΧΙΑ)" debris) and would otherwise appear as a
+        // standalone block-street, polluting the building card.
+        // T3.P1.24: preserve 'ΑΓ.' / 'ΑΓ' (saint) and 'ΑΓΙΟΥ' / 'ΑΓΙΩΝ'
+        // when they precede a real word — instead of dropping the prefix
+        // and stranding the saint's name as a single token, glue the
+        // prefix to the next token so e.g. "ΑΓ. ΑΝΑΣΤΑΣΙΑΣ" stays
+        // grouped as one street label.
+        const tokens = streetsStr.split(/\s+/).filter(Boolean);
+        for (let i = 0; i < tokens.length; i++) {
+          const tok = tokens[i];
+          if (tok.startsWith('(')) continue; // T3.P1.23
+          if (/^(ΑΓ\.?|ΑΓΙΟΥ|ΑΓΙΩΝ)$/.test(tok)) {
+            // T3.P1.24: glue prefix onto the next token if present.
+            const next = tokens[i + 1];
+            if (next && next.length > 2 && !next.startsWith('(')) {
+              blockStreets.push(`${tok} ${next}`);
+              i++;
+            }
+            continue;
           }
-        });
+          if (tok.length > 2) blockStreets.push(tok);
+        }
       }
     }
   }
@@ -494,7 +518,6 @@ function parseE9Row(
     atakNumber: atakPrefix + atakSuffix,
     state: cleanState(state),
     municipality: city || cleanCity(municipality),
-    district: '',
     street,
     streetNumber,
     zipCode,
@@ -693,6 +716,15 @@ export function parseE9(text: string): ParsedE9Result {
     // Use the most complete zipCode available from any unit in the building
     const zipCode = buildingUnits.find((u) => u.zipCode)?.zipCode || '';
 
+    // T3.P1.25: aggregate blockNumber from any unit that has one (mirror
+    // yearBuilt aggregation above). Previously we always took
+    // firstUnit.blockNumber — when the first row of a building had no
+    // block-number column (common when the first unit is an aux/storage
+    // entry), the building was emitted with blockNumber:'' even though
+    // sibling rows declared the block.
+    const blockNumber =
+      buildingUnits.find((u) => u.blockNumber)?.blockNumber || '';
+
     buildings.push({
       atakPrefix: dominantPrefix,
       address: {
@@ -702,7 +734,7 @@ export function parseE9(text: string): ParsedE9Result {
         state: firstUnit.state,
         country: 'GR'
       },
-      blockNumber: firstUnit.blockNumber,
+      blockNumber,
       blockStreets: Array.from(allBlockStreets),
       yearBuilt,
       units: buildingUnits
