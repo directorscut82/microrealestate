@@ -867,8 +867,10 @@ export async function importFromE9(req: Req, res: Res) {
   }
 
   // Build preview response
+  const previewOwnerName =
+    `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
   const preview = {
-    owner: parsed.owner,
+    owner: { ...parsed.owner, name: previewOwnerName },
     buildings: await Promise.all(
       parsed.buildings.map(async (building) => {
         // Check if building already exists by address first, then atakPrefix
