@@ -922,17 +922,30 @@ export async function importFromE9(req: Req, res: Res) {
   // Extract and parse PDF
   const text = await extractTextFromPdf(file.buffer);
 
+  // L6 (run BEFORE L7): empty-PDF check has its own specific message;
+  // letting the L7 marker check fire first would short-circuit it with
+  // a misleading "does not look like an E9" error.
+  if (!text.trim()) {
+    throw new ServiceError('E9 PDF appears to be empty', 422);
+  }
+
   // L7: upfront E9 marker sniff. Lease PDFs and other non-E9 documents
   // were previously fed through the full ~3s parser before being
   // rejected with a generic "No buildings found" — confusing UX and
-  // wasted CPU on every non-E9 upload. Reject early when neither
-  // marker is present so the user sees a useful 422 in milliseconds.
-  if (
-    !text.includes('ΕΝΤΥΠΟ Ε9') &&
-    !text.includes('ΠΕΡΙΟΥΣΙΑΚΗ ΚΑΤΑΣΤΑΣΗ')
-  ) {
+  // wasted CPU on every non-E9 upload. Real AADE-issued PDFs use the
+  // genitive case ("ΒΕΒΑΙΩΣΗ ΔΗΛΩΘΕΙΣΑΣ ΠΕΡΙΟΥΣΙΑΚΗΣ ΚΑΤΑΣΤΑΣΗΣ") so we
+  // accept any inflected form of ΠΕΡΙΟΥΣΙΑΚ-, plus a bare "Ε9" token
+  // (covers "ΕΝΤΥΠΟ Ε9", "ΣΤΟΙΧΕΙΑ Ε9", etc.), plus the canonical AADE
+  // form header.
+  const E9_MARKERS = [
+    /Ε9/,
+    /ΠΕΡΙΟΥΣΙΑΚ[ΗΟΩ]Σ?/,
+    /ΒΕΒΑΙΩΣΗ ΥΠΟΒΟΛΗΣ ΔΗΛΩΣΗΣ ΣΤΟΙΧΕΙΩΝ ΑΚΙΝΗΤΩΝ/
+  ];
+  const looksLikeE9 = E9_MARKERS.some((rx) => rx.test(text));
+  if (!looksLikeE9) {
     throw new ServiceError(
-      'PDF does not look like an E9 declaration (missing ΕΝΤΥΠΟ Ε9 / ΠΕΡΙΟΥΣΙΑΚΗ ΚΑΤΑΣΤΑΣΗ markers)',
+      'PDF does not look like an E9 declaration (missing Ε9 / ΠΕΡΙΟΥΣΙΑΚ- markers)',
       422
     );
   }
@@ -946,15 +959,11 @@ export async function importFromE9(req: Req, res: Res) {
     );
   }
 
-  // L6: distinguish empty PDF, no-buildings, and land-plot-only outcomes
-  // so the user can tell whether the upload was wrong (empty / non-E9
-  // body) versus the realm legitimately has nothing to import. Without
-  // this every failure surfaced as the same generic "No buildings found"
-  // and the user could not tell which retry was appropriate.
+  // L6 (continued): distinguish no-buildings vs land-plot-only outcomes
+  // so the user can tell whether the realm legitimately has nothing to
+  // import vs uploaded the wrong file. Without this every failure
+  // surfaced as the same generic "No buildings found".
   if (parsed.buildings.length === 0) {
-    if (!text.trim()) {
-      throw new ServiceError('E9 PDF appears to be empty', 422);
-    }
     if (parsed.skippedLandPlots > 0) {
       throw new ServiceError(
         'E9 PDF contains only land plots (ΠΙΝΑΚΑΣ 2). MicroRealEstate manages buildings — nothing to import.',
