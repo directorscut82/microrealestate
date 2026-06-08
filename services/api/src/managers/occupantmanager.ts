@@ -16,7 +16,8 @@ import {
   validateObjectId,
   validateFiniteNumber,
   validateStringField,
-  validateArrayMaxLength
+  validateArrayMaxLength,
+  validateGreekAFM
 } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -949,6 +950,10 @@ export async function add(req: Req, res: Res) {
   if (!occupant.taxId || typeof occupant.taxId !== 'string' || !occupant.taxId.trim()) {
     throw new ServiceError('taxId is required', 422);
   }
+  // Tier C1 — AFM checksum. Reject obviously-invalid AFMs at creation
+  // (typo, transposition, partial entry). AADE PDF imports always carry
+  // a checksum-valid AFM; manual entry can mistype.
+  validateGreekAFM(occupant.taxId, 'taxId');
   if (occupant.leaseId) {
     validateObjectId(occupant.leaseId, 'leaseId');
     const leaseExists = await Collections.Lease.exists({

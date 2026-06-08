@@ -11,6 +11,7 @@ import {
   validateFiniteNumber,
   validateEnum,
   sanitizeMongoObject,
+  isValidGreekPostalCode,
   PROPERTY_TYPES
 } from '../validators.js';
 
@@ -120,6 +121,13 @@ export async function add(req: Req, res: Res) {
   }
   if (!addr.zipCode || typeof addr.zipCode !== 'string' || !addr.zipCode.trim()) {
     throw new ServiceError('address.zipCode is required', 422);
+  }
+  // Tier C2 — Greek postal code format (5 digits).
+  if (!isValidGreekPostalCode(addr.zipCode.trim())) {
+    throw new ServiceError(
+      'address.zipCode must be 5 digits',
+      422
+    );
   }
   validateFiniteNumber(req.body.landSurface, 'landSurface', {
     min: 0,

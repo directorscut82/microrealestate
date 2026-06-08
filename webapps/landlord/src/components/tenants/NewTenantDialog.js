@@ -28,10 +28,18 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
-// Greek AFM: 9 digits with a checksum. Tier C1 enforces the checksum;
-// at the dialog level we require digits-only + length=9 so an obvious
-// typo is caught at creation. AADE PDF imports always carry a valid AFM.
+// Greek AFM: 9 digits with a modulo-11 checksum. Tier C1 — block
+// transposed-digit typos at the dialog level. AADE PDF imports always
+// carry a checksum-valid AFM.
 const AFM_REGEX = /^[0-9]{9}$/;
+function isValidAFM(value) {
+  if (typeof value !== 'string' || !AFM_REGEX.test(value)) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(value[i], 10) * Math.pow(2, 8 - i);
+  }
+  return ((sum % 11) % 10) === parseInt(value[8], 10);
+}
 
 const schema = z
   .object({
@@ -40,7 +48,8 @@ const schema = z
     taxId: z
       .string()
       .trim()
-      .regex(AFM_REGEX, 'AFM must be 9 digits'),
+      .regex(AFM_REGEX, 'AFM must be 9 digits')
+      .refine(isValidAFM, { message: 'Invalid AFM checksum' }),
     isCopyFrom: z.boolean(),
     copyFrom: z.string()
   })
