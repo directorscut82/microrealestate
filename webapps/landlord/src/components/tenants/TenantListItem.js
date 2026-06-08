@@ -43,8 +43,26 @@ export default function TenantListItem({ tenant }) {
     return 0;
   }, [tenant.beginDate, tenant.endDate, tenant.terminationDate]);
 
+  // Tier B8 — 3-state lease pill: terminated / future-start / running.
+  // Previously a 2-state predicate ("Lease ended" vs "Lease running")
+  // contradicted the no-property warning when the tenant had a future
+  // beginDate but no termination. Compute the state once here and use a
+  // single attribute hook for tests (data-lease-state).
+  const leaseState = useMemo(() => {
+    if (tenant.terminated) return 'terminated';
+    if (tenant.beginDate) {
+      const begin = moment(tenant.beginDate, 'DD/MM/YYYY').startOf('day');
+      if (begin.isAfter(moment().startOf('day'))) return 'future';
+    }
+    return 'running';
+  }, [tenant.terminated, tenant.beginDate]);
+
+  // Tier B7 — alignment: make the Card a flex column with CardContent
+  // expanding to fill available space, so cards on the same row line up
+  // regardless of whether they show the property list or the missing-info
+  // warning.
   return (
-    <Card className="relative">
+    <Card className="relative flex flex-col h-full">
       <TenantStatus tenant={tenant} className="absolute top-0.5 right-0.5" />
       <CardHeader className="mb-4 cursor-pointer" onClick={handleClick}>
         <CardTitle className="flex justify-start items-center gap-2">
@@ -68,7 +86,7 @@ export default function TenantListItem({ tenant }) {
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className="text-sm text-muted-foreground pb-0">
+      <CardContent className="text-sm text-muted-foreground pb-0 flex-1">
         <div className="cursor-pointer" onClick={handleClick}>
           <div>
             {tenant.beginDate
@@ -97,20 +115,31 @@ export default function TenantListItem({ tenant }) {
         <TenantPropertyList tenant={tenant} className="mt-2" />
       </CardContent>
 
-      <CardFooter className="p-0 flex-col">
+      <CardFooter className="p-0 flex-col mt-auto">
         <div className="flex items-center justify-end w-full py-3 px-5">
           <Badge
-            variant={tenant.terminated ? 'secondary' : 'success'}
+            data-lease-state={leaseState}
+            variant={
+              leaseState === 'terminated'
+                ? 'secondary'
+                : leaseState === 'future'
+                  ? 'outline'
+                  : 'success'
+            }
             className="font-normal text-label leading-none"
           >
             <span
               aria-hidden="true"
               className={cn(
                 'size-1.5 rounded-pill shrink-0',
-                tenant.terminated ? 'bg-ink-muted' : 'bg-olive'
+                leaseState === 'terminated' && 'bg-ink-muted',
+                leaseState === 'future' && 'bg-amber-500',
+                leaseState === 'running' && 'bg-olive'
               )}
             />
-            {tenant.terminated ? t('Lease ended') : t('Lease running')}
+            {leaseState === 'terminated' && t('Lease ended')}
+            {leaseState === 'future' && t('Lease starts in the future')}
+            {leaseState === 'running' && t('Lease running')}
           </Badge>
         </div>
       </CardFooter>
