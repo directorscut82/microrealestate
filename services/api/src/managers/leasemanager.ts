@@ -45,12 +45,15 @@ export async function add(req: ReqNoParams, res: Res) {
     throw new ServiceError('missing fields', 422);
   }
 
-  // Validate enum + numeric inputs BEFORE Mongoose. add() previously left
-  // these to schema validation which throws a generic ValidationError that
-  // bubbles to errorHandler as a 500.
-  if (lease.timeRange !== undefined) {
-    validateEnum(lease.timeRange, TIME_RANGES, 'timeRange');
+  // Tier A4 — Lease minimum-required at creation.
+  // numberOfTerms and timeRange are mandatory: a lease without either
+  // cannot drive rent generation downstream. The previous shape allowed
+  // `timeRange: undefined` and silently set `active: false` — the lease
+  // showed up in dropdowns but no tenant could be created against it.
+  if (lease.timeRange === undefined || lease.timeRange === null || lease.timeRange === '') {
+    throw new ServiceError('timeRange is required', 422);
   }
+  validateEnum(lease.timeRange, TIME_RANGES, 'timeRange');
   validateFiniteNumber(lease.numberOfTerms, 'numberOfTerms', {
     min: 1,
     max: 1000,
