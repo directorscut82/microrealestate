@@ -413,15 +413,21 @@ test.describe.serial('V_T2: E9 import behavioural fixes', () => {
     // more deterministic — it avoids any list-shape edge cases and
     // exercises the same persistence layer the override and the
     // re-import write to.
+    // mongoExec runs the script through `sh -c "mongo --eval '<script>'"`,
+    // and shell quoting strips backslashes from $-prefixed mongo operators.
+    // Avoid $exists/$nin entirely — fetch all candidates and filter in JS.
     const findRes = mongoExec(`
-      var p = db.properties.findOne({
-        realmId: "${realmId}",
-        electricitySupplyNumber: { \\$exists: true, \\$nin: [null, ""] }
+      var hit = null;
+      db.properties.find({ realmId: "${realmId}" }).forEach(function(p) {
+        if (hit) return;
+        var v = p.electricitySupplyNumber;
+        if (v != null && v !== "") {
+          // p._id.valueOf() returns the bare 24-char hex; String(p._id)
+          // wraps it as 'ObjectId("...")' which would nest if re-interpolated.
+          hit = { propertyId: p._id.valueOf(), electricitySupplyNumber: v };
+        }
       });
-      print(JSON.stringify(p ? {
-        propertyId: String(p._id),
-        electricitySupplyNumber: p.electricitySupplyNumber
-      } : null));
+      print(JSON.stringify(hit));
     `);
     console.log('==== T2.7 FIND-DEH-PROPERTY ====');
     console.log(findRes);
@@ -438,13 +444,13 @@ test.describe.serial('V_T2: E9 import behavioural fixes', () => {
     // via mongo (the API patch validates and may strip 'MANUAL-DEH' as a
     // non-numeric DEH; mongo bypass is the cleanest way to inject the
     // exact sentinel value the spec asks for). Property._id is ObjectId.
+    // Same shell-escape constraint as above — use save() instead of updateOne($set).
     const setRes = mongoExec(`
-      db.properties.updateOne(
-        { _id: ObjectId('${propertyId}') },
-        { \\$set: { electricitySupplyNumber: 'MANUAL-DEH-T27' } }
-      );
       var p = db.properties.findOne({ _id: ObjectId('${propertyId}') });
-      print(JSON.stringify({ before: p.electricitySupplyNumber }));
+      p.electricitySupplyNumber = 'MANUAL-DEH-T27';
+      db.properties.save(p);
+      var p2 = db.properties.findOne({ _id: ObjectId('${propertyId}') });
+      print(JSON.stringify({ before: p2.electricitySupplyNumber }));
     `);
     console.log('==== T2.7 PRE-IMPORT ====');
     console.log(setRes);
