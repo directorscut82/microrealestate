@@ -18,12 +18,20 @@ function _tenantName(tenant) {
   );
 }
 
+// Mirrors dashboardmanager.ts active-tenant predicate:
+//   1) tenant has at least one property assigned (T1.7 surfaced
+//      property-less tenants as setup-incomplete, they don't generate
+//      rent records and shouldn't inflate the dashboard)
+//   2) (terminationDate || endDate) is a valid date that is not in
+//      the past, with both sides in UTC
 function computeActiveTenants(allTenants, now) {
   return allTenants.filter((tenant) => {
-    const terminationMoment = tenant.terminationDate
-      ? moment.utc(tenant.terminationDate)
-      : moment.utc(tenant.endDate);
-    return terminationMoment.isSameOrAfter(now, 'day');
+    if (!tenant.properties?.length) return false;
+    const endValue = tenant.terminationDate || tenant.endDate;
+    if (!endValue) return false;
+    const endMoment = moment.utc(endValue);
+    if (!endMoment.isValid()) return false;
+    return endMoment.isSameOrAfter(now, 'day');
   });
 }
 
@@ -275,6 +283,41 @@ describe('Dashboard computation logic', () => {
       });
       const result = computeActiveTenants([tenant], now);
       expect(result).toHaveLength(1);
+    });
+
+    // T2.1 regression coverage. The pre-T2.1 predicate counted any
+    // tenant whose `terminationDate || endDate` was missing as active
+    // (because moment.utc(undefined) resolves to "now"), so a half-
+    // setup property-less tenant inflated activeTenants and the
+    // dashboard occupancy denominator alongside it.
+    it('should exclude property-less tenants', () => {
+      const now = moment.utc();
+      const tenant = makeTenant({
+        endDate: now.clone().add(1, 'month').toDate(),
+        properties: []
+      });
+      const result = computeActiveTenants([tenant], now);
+      expect(result).toHaveLength(0);
+    });
+
+    it('should exclude tenants with no end date at all', () => {
+      const now = moment.utc();
+      const tenant = makeTenant({
+        endDate: undefined,
+        terminationDate: undefined
+      });
+      const result = computeActiveTenants([tenant], now);
+      expect(result).toHaveLength(0);
+    });
+
+    it('should exclude tenants with an invalid terminationDate', () => {
+      const now = moment.utc();
+      const tenant = makeTenant({
+        endDate: now.clone().add(1, 'year').toDate(),
+        terminationDate: 'not-a-real-date'
+      });
+      const result = computeActiveTenants([tenant], now);
+      expect(result).toHaveLength(0);
     });
   });
 

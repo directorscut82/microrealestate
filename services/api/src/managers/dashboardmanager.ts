@@ -194,16 +194,30 @@ export async function all(req: Req, res: Res) {
     }
   ]);
 
+  // T2.1: a tenant counts as "active" only when:
+  //   1) it has at least one property assigned (property-less tenants are
+  //      flagged with the amber warning surfaced by T1.7 — they are setup-
+  //      incomplete and don't generate rent records, so they shouldn't
+  //      inflate the dashboard's active-tenant tile or the occupancy
+  //      denominator), AND
+  //   2) (terminationDate || endDate) is a valid date that is not in the
+  //      past. Both sides of the comparison are kept in UTC. Tenants with
+  //      neither field present are treated as inactive — without an end
+  //      date we cannot prove the lease is ongoing, and frontdata.ts's
+  //      `terminated` flag relies on the same field-pair so the surfaces
+  //      stay aligned (frontdata parses with an explicit format which
+  //      makes a missing pair Invalid → terminated stays false there; the
+  //      practical drift is the same: no end date == not yet billable).
   const activeTenants = allTenants.reduce(
     (acc: AnyRecord[], tenant: AnyRecord) => {
-      const terminationMoment = tenant.terminationDate
-        ? moment.utc(tenant.terminationDate)
-        : moment.utc(tenant.endDate);
-
-      if (terminationMoment.isSameOrAfter(now, 'day')) {
+      if (!tenant.properties?.length) return acc;
+      const endValue = tenant.terminationDate || tenant.endDate;
+      if (!endValue) return acc;
+      const endMoment = moment.utc(endValue);
+      if (!endMoment.isValid()) return acc;
+      if (endMoment.isSameOrAfter(now, 'day')) {
         acc.push(tenant);
       }
-
       return acc;
     },
     []
