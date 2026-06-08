@@ -69,6 +69,34 @@ function _hasRequiredFields(realm: AnyRecord): void {
       422
     );
   }
+
+  // Tier A7 — Realm minimum-required at creation. Legal-entity realms
+  // must carry companyInfo.name + companyInfo.legalStructure +
+  // companyInfo.ein (or vatNumber-equivalent). Without these, PDF
+  // receipts render the company header as empty and the receipt fails
+  // legal compliance ("ΕΠΩΝΥΜΙΑ" / "ΑΦΜ" / "Νομική μορφή" blank).
+  // Personal-account realms have no companyInfo requirement.
+  if (realm.isCompany === true) {
+    const ci = realm.companyInfo || {};
+    if (!ci.name || typeof ci.name !== 'string' || !ci.name.trim()) {
+      throw new ServiceError(
+        'companyInfo.name is required for legal-entity realms',
+        422
+      );
+    }
+    if (!ci.legalStructure || typeof ci.legalStructure !== 'string' || !ci.legalStructure.trim()) {
+      throw new ServiceError(
+        'companyInfo.legalStructure is required for legal-entity realms',
+        422
+      );
+    }
+    if (!ci.ein || typeof ci.ein !== 'string' || !ci.ein.trim()) {
+      throw new ServiceError(
+        'companyInfo.ein is required for legal-entity realms',
+        422
+      );
+    }
+  }
 }
 
 function _isNameAlreadyTaken(realm: AnyRecord, realms: AnyRecord[] = []): void {
