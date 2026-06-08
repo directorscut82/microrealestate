@@ -15,6 +15,8 @@ import {
   validateAllocationValues,
   validatePercentageAllocations,
   validateRatioAllocations,
+  isValidGreekPostalCode,
+  isValidIBAN,
   EXPENSE_TYPES,
   ALLOCATION_METHODS,
   REPAIR_STATUSES,
@@ -622,6 +624,13 @@ export async function add(req: Req, res: Res) {
   if (!addr.zipCode || typeof addr.zipCode !== 'string' || !addr.zipCode.trim()) {
     throw new ServiceError('address.zipCode is required', 422);
   }
+  // Tier C2 — Greek postal code format (5 digits).
+  if (!isValidGreekPostalCode(addr.zipCode.trim())) {
+    throw new ServiceError(
+      'address.zipCode must be 5 digits',
+      422
+    );
+  }
   validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
     min: 1800,
     max: 2099
@@ -641,6 +650,14 @@ export async function add(req: Req, res: Res) {
   validateArrayMaxLength(req.body.expenses, 100, 'expenses');
   validateArrayMaxLength(req.body.contractors, 50, 'contractors');
   validateArrayMaxLength(req.body.repairs, 100, 'repairs');
+
+  // Tier C3 — IBAN structural validation when present. bankInfo is
+  // optional at creation per the user matrix; if the user provides one
+  // it must be well-formed (mod-97 == 1).
+  const iban = req.body?.bankInfo?.iban;
+  if (typeof iban === 'string' && iban.trim() && !isValidIBAN(iban.trim())) {
+    throw new ServiceError('bankInfo.iban is not a valid IBAN', 422);
+  }
 
   const existing = await Collections.Building.findOne({
     realmId: realm!._id,

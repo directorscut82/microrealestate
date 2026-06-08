@@ -431,6 +431,115 @@ export function sanitizeMongoObject(
   return _sanitizeRecursive(obj) as Record<string, unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// Tier C — Greek-context format validators
+// ---------------------------------------------------------------------------
+
+/**
+ * Greek tax ID (ΑΦΜ): 9 digits + checksum (modulo-11 on weighted sum of the
+ * first 8 digits). The 9th digit is the check digit. Used by AADE for both
+ * natural persons and legal entities.
+ *
+ * Returns true iff `value` is exactly 9 digits AND the checksum is valid.
+ *
+ * Reference: https://el.wikipedia.org/wiki/Αριθμός_Φορολογικού_Μητρώου
+ *   - Sum = Σ digit[i] * 2^(8-i)  for i in 0..7
+ *   - check = (Sum mod 11) mod 10
+ *   - check must equal digit[8]
+ */
+export function isValidGreekAFM(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  if (!/^[0-9]{9}$/.test(value)) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(value[i], 10) * Math.pow(2, 8 - i);
+  }
+  const check = (sum % 11) % 10;
+  return check === parseInt(value[8], 10);
+}
+
+export function validateGreekAFM(
+  value: unknown,
+  fieldName = 'taxId'
+): string {
+  if (!isValidGreekAFM(value)) {
+    throw new ServiceError(
+      `${fieldName} is not a valid Greek AFM (9 digits + checksum)`,
+      422
+    );
+  }
+  return value as string;
+}
+
+/**
+ * AADE ATAK (ΑΤΑΚ): 11-digit cadastral identifier. No checksum — pure
+ * format check. Imports always carry a valid value; manual entry can
+ * mistype it.
+ */
+export function isValidATAK(value: unknown): boolean {
+  return typeof value === 'string' && /^[0-9]{11}$/.test(value);
+}
+
+/**
+ * DEH (ΔΕΗ) electricity supply number: 9 digits, no checksum.
+ */
+export function isValidDEH(value: unknown): boolean {
+  return typeof value === 'string' && /^[0-9]{9}$/.test(value);
+}
+
+/**
+ * Greek postal code: 5 digits, no further structure.
+ */
+export function isValidGreekPostalCode(value: unknown): boolean {
+  return typeof value === 'string' && /^[0-9]{5}$/.test(value);
+}
+
+/**
+ * IBAN structural validator — letters+digits, 15-34 length, mod-97 == 1.
+ * Greek IBANs are exactly 27 chars but the validator is generic so it
+ * accepts any country.
+ */
+export function isValidIBAN(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const v = value.replace(/\s+/g, '').toUpperCase();
+  if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/.test(v)) return false;
+  // Move first 4 chars to the end; replace each letter with its
+  // 0-indexed-from-A + 10 numeric value; result mod 97 must be 1.
+  const rearranged = v.slice(4) + v.slice(0, 4);
+  let n = '';
+  for (const ch of rearranged) {
+    if (/[A-Z]/.test(ch)) {
+      n += (ch.charCodeAt(0) - 'A'.charCodeAt(0) + 10).toString();
+    } else {
+      n += ch;
+    }
+  }
+  // mod-97 over arbitrary-length numeric string by chunks
+  let remainder = 0;
+  for (const digit of n) {
+    remainder = (remainder * 10 + parseInt(digit, 10)) % 97;
+  }
+  return remainder === 1;
+}
+
+/**
+ * Phone number — accept country-code prefix + digits/spaces/parens/hyphens.
+ * Length 6..30 chars total.
+ */
+export function isValidPhone(value: unknown): boolean {
+  return typeof value === 'string' && /^[+0-9\s()-]{6,30}$/.test(value);
+}
+
+/**
+ * Email — RFC-ish but pragmatic. Mirrors zod's email regex shape.
+ */
+export function isValidEmail(value: unknown): boolean {
+  return (
+    typeof value === 'string' &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  );
+}
+
 // Re-export constants for use in managers
 export {
   EXPENSE_TYPES,
