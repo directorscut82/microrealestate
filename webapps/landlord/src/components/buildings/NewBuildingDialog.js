@@ -1,5 +1,5 @@
 import { createBuilding, QueryKeys } from '../../utils/restcalls';
-import React, { useCallback, useContext, useRef, useState } from 'react';
+import { useCallback, useContext, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -13,9 +13,15 @@ import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
+// Greek postal code: 5 digits.
+const POSTAL_REGEX = /^[0-9]{5}$/;
+
 const schema = z.object({
-  name: z.string().min(1),
-  atakPrefix: z.string().min(1)
+  name: z.string().trim().min(1),
+  atakPrefix: z.string().trim().min(1),
+  street1: z.string().trim().min(1),
+  city: z.string().trim().min(1),
+  zipCode: z.string().trim().regex(POSTAL_REGEX, 'Postal code must be 5 digits')
 });
 
 export default function NewBuildingDialog({ open, setOpen }) {
@@ -46,7 +52,13 @@ export default function NewBuildingDialog({ open, setOpen }) {
     formState: { errors }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { name: '', atakPrefix: '' }
+    defaultValues: {
+      name: '',
+      atakPrefix: '',
+      street1: '',
+      city: '',
+      zipCode: ''
+    }
   });
 
   const handleClose = useCallback(() => {
@@ -58,7 +70,11 @@ export default function NewBuildingDialog({ open, setOpen }) {
     async (buildingPart) => {
       try {
         setIsLoading(true);
-        const data = await createMutation.mutateAsync(buildingPart);
+        const { street1, city, zipCode, ...rest } = buildingPart;
+        const data = await createMutation.mutateAsync({
+          ...rest,
+          address: { street1, city, zipCode }
+        });
         handleClose();
         const orgName =
           store.organization.selected?.name || router.query.organization;
@@ -112,6 +128,34 @@ export default function NewBuildingDialog({ open, setOpen }) {
                   {errors.atakPrefix.message}
                 </p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="street1">{t('Street 1')}</Label>
+              <Input id="street1" {...register('street1')} />
+              {errors.street1 && (
+                <p className="text-sm text-destructive">{errors.street1.message}</p>
+              )}
+            </div>
+            <div className="sm:flex sm:gap-2">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="zipCode">{t('Zip code')}</Label>
+                <Input
+                  id="zipCode"
+                  {...register('zipCode')}
+                  inputMode="numeric"
+                  maxLength={5}
+                />
+                {errors.zipCode && (
+                  <p className="text-sm text-destructive">{errors.zipCode.message}</p>
+                )}
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="city">{t('City')}</Label>
+                <Input id="city" {...register('city')} />
+                {errors.city && (
+                  <p className="text-sm text-destructive">{errors.city.message}</p>
+                )}
+              </div>
             </div>
           </div>
         </form>

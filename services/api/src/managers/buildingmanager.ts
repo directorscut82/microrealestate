@@ -601,6 +601,27 @@ export async function add(req: Req, res: Res) {
   if (!req.body.atakPrefix?.trim()) {
     throw new ServiceError('ATAK prefix is missing', 422);
   }
+
+  // Tier A3 — Building minimum-required at creation. Address fields
+  // (street1 + city + zipCode) become required so PDF receipts (which
+  // render the building address as the property's address fallback),
+  // E9 cross-reference, and the dashboard tile have something to show.
+  // The E9 import path creates Buildings directly via
+  // `new Collections.Building({...})` without going through this route
+  // and always carries the parsed address; imports remain unaffected.
+  // Units/manager/bankInfo intentionally stay optional — a building
+  // without those is allowed and surfaces an "Ελλειπή στοιχεία" warning
+  // on the tile (Tier B9), not a creation block.
+  const addr = req.body?.address || {};
+  if (!addr.street1 || typeof addr.street1 !== 'string' || !addr.street1.trim()) {
+    throw new ServiceError('address.street1 is required', 422);
+  }
+  if (!addr.city || typeof addr.city !== 'string' || !addr.city.trim()) {
+    throw new ServiceError('address.city is required', 422);
+  }
+  if (!addr.zipCode || typeof addr.zipCode !== 'string' || !addr.zipCode.trim()) {
+    throw new ServiceError('address.zipCode is required', 422);
+  }
   validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
     min: 1800,
     max: 2099
