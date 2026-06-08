@@ -39,10 +39,28 @@ const contactSchema = z.object({
   notes: z.string().trim().max(2000).optional()
 });
 
+// Greek AFM checksum (modulo-11). Mirrors the server validator at
+// services/api/src/validators.ts isValidGreekAFM.
+const AFM_REGEX = /^[0-9]{9}$/;
+function isValidAFM(value) {
+  if (typeof value !== 'string' || !AFM_REGEX.test(value)) return false;
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(value[i], 10) * Math.pow(2, 8 - i);
+  }
+  return ((sum % 11) % 10) === parseInt(value[8], 10);
+}
+
 const schema = z.object({
   firstName: z.string().trim().min(1).max(120),
   lastName: z.string().trim().min(1).max(120),
-  taxId: z.string().trim().max(60).optional(),
+  // Tier D-Q1 + Tier C1: AFM required at full save and must pass the
+  // checksum. The stepper auto-graduates to Tabs only when this validates.
+  taxId: z
+    .string()
+    .trim()
+    .regex(AFM_REGEX, 'AFM must be 9 digits')
+    .refine(isValidAFM, { message: 'Invalid AFM checksum' }),
   phone: optionalPhone,
   email: z
     .string()
