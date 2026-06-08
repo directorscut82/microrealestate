@@ -96,7 +96,17 @@ export default function SignIn() {
           }
           setOrganizationId(store.organization.selected._id);
           const orgLocale = store.organization.selected.locale;
+          // T2.2: write BOTH cookies. `locale` is read by our SSR
+          // redirects in signin.js / [organization]/index.js / index.js.
+          // `NEXT_LOCALE` is the canonical Next.js i18n cookie — with
+          // i18n routing active (next-translate-plugin injects the i18n
+          // block into next.config.js) and localeDetection on by default,
+          // Next.js will auto-redirect non-prefixed visits like
+          // `/landlord/<org>/dashboard` to `/landlord/<locale>/<org>/...`
+          // BEFORE the page SSRs. That closes the gap our SSR redirects
+          // can't reach (deep links to dashboard / rents / tenants etc.).
           document.cookie = `locale=${orgLocale};path=/landlord;max-age=31536000`;
+          document.cookie = `NEXT_LOCALE=${orgLocale};path=/;max-age=31536000`;
           router.push(
             `/${store.organization.selected.name}/dashboard`,
             undefined,

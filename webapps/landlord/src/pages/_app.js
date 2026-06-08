@@ -89,6 +89,28 @@ function MyApp(props) {
     }
   }, []);
 
+  // T2.2 bootstrap: existing sessions wrote a `locale` cookie but not the
+  // canonical Next.js `NEXT_LOCALE` cookie. Without `NEXT_LOCALE`, Next's
+  // built-in i18n locale detection falls back to Accept-Language and a
+  // Greek realm user with an English browser still gets redirected to
+  // `/en/...` until they sign in again. Mirror the legacy cookie into
+  // NEXT_LOCALE on first client render so the next non-prefixed deep
+  // link picks the realm's locale on the very first request.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const cookies = document.cookie || '';
+      const legacyMatch = cookies.match(/(?:^|; )locale=([^;]*)/);
+      const nextMatch = cookies.match(/(?:^|; )NEXT_LOCALE=([^;]*)/);
+      if (legacyMatch && legacyMatch[1] && !nextMatch) {
+        const value = legacyMatch[1];
+        document.cookie = `NEXT_LOCALE=${value};path=/;max-age=31536000`;
+      }
+    } catch {
+      // document.cookie may be unavailable in some sandboxed contexts.
+    }
+  }, []);
+
   return (
     <>
       <Head>
