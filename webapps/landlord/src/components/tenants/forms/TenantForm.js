@@ -277,7 +277,7 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
         </div>
         <div className="space-y-2 sm:w-1/2">
           <Label htmlFor="taxId">{t('Tax ID')}</Label>
-          <Input id="taxId" disabled={readOnly} {...register('taxId')} placeholder={t('e.g. ΑΦΜ')} />
+          <Input id="taxId" disabled={readOnly} {...register('taxId')} />
         </div>
         {visibleCoTenants.length > 0 && (
           <div className="space-y-2">
