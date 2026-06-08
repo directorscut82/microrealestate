@@ -1,5 +1,6 @@
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
+import { LuAlertTriangle } from 'react-icons/lu';
 import PropertyIcon from '../properties/PropertyIcon';
 
 import useTranslation from 'next-translate/useTranslation';
@@ -31,7 +32,31 @@ function Address({ address }) {
 export default function TenantPropertyList({ tenant, className }) {
   const { t } = useTranslation('common');
   if (!tenant.properties?.length) {
-    return null;
+    // T1.7: Surface a subtle amber warning in the address slot when the
+    // tenant has no property assigned. Without a property+lease the rent
+    // pipeline produces no rent records — the user needs to know they
+    // must finish setup before billing kicks in. Mirror the amber palette
+    // used by ChannelStatusBanners so the visual language is consistent.
+    return (
+      <div
+        role="status"
+        className={cn(
+          'flex items-start gap-2 px-2.5 py-1.5 border rounded-md text-xs',
+          'bg-amber-50 text-amber-700 border-amber-200',
+          className
+        )}
+      >
+        <LuAlertTriangle
+          className="size-3.5 shrink-0 mt-0.5"
+          aria-hidden="true"
+        />
+        <span className="leading-snug">
+          {t(
+            'No property assigned — set a property/lease for rent billing to start'
+          )}
+        </span>
+      </div>
+    );
   }
   // Wave-26 round-3b: removed the outer bordered container. Multiple
   // properties are separated only by a subtle bottom-divider on each row
