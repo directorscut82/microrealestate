@@ -629,6 +629,45 @@ function _validatePropertyWindows(
         422
       );
     }
+
+    // Tier A5 (B2) — Expense window validation. Each per-property expense
+    // must satisfy beginDate ≤ endDate (when both are set), AND its window
+    // must fit within the property's effective window (entry / exit). Without
+    // these guards an expense could persist with an inverted window and
+    // silently never appear on the rent ledger, or appear in the wrong
+    // months. amount must be non-negative.
+    const expenses = Array.isArray(p?.expenses) ? (p.expenses as AnyRecord[]) : [];
+    for (let j = 0; j < expenses.length; j++) {
+      const e = expenses[j];
+      if (e?.amount !== undefined && e.amount !== null && e.amount !== '') {
+        validateFiniteNumber(
+          e.amount,
+          `properties[${i}].expenses[${j}].amount`,
+          { min: 0, max: 10000000 }
+        );
+      }
+      const eBegin = e?.beginDate ? moment.utc(e.beginDate) : null;
+      const eEnd = e?.endDate ? moment.utc(e.endDate) : null;
+      if (eBegin && eEnd && eBegin.isAfter(eEnd)) {
+        throw new ServiceError(
+          `properties[${i}].expenses[${j}].beginDate must be on or before endDate`,
+          422
+        );
+      }
+      // Expense window must sit within the property's window.
+      if (entry && eBegin && eBegin.isBefore(entry)) {
+        throw new ServiceError(
+          `properties[${i}].expenses[${j}].beginDate cannot be before property entryDate`,
+          422
+        );
+      }
+      if (exit && eEnd && eEnd.isAfter(exit)) {
+        throw new ServiceError(
+          `properties[${i}].expenses[${j}].endDate cannot be after property exitDate`,
+          422
+        );
+      }
+    }
   }
 }
 
