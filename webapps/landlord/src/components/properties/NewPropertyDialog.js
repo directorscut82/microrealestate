@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useRef, useState } from 'react';
+import React, { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -15,6 +15,7 @@ import {
   SelectValue
 } from '../ui/select';
 import PropertyIcon from './PropertyIcon';
+import propertyTypeDefs from './types';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { StoreContext } from '../../store';
 import { toast } from 'sonner';
@@ -22,9 +23,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
+// Mirror PROPERTY_TYPES in services/api/src/validators.ts. The server rejects
+// any other value with 422 so we hard-gate the picker to this exact list.
+const PROPERTY_TYPES_ENUM = propertyTypeDefs.map((t) => t.id);
+
 const schema = z
   .object({
     name: z.string().min(1),
+    type: z.enum(PROPERTY_TYPES_ENUM),
     isCopyFrom: z.boolean(),
     copyFrom: z.string()
   })
@@ -69,10 +75,21 @@ export default function NewPropertyDialog({ open, setOpen }) {
     formState: { errors }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { name: '', copyFrom: '', isCopyFrom: false }
+    defaultValues: { name: '', type: 'apartment', copyFrom: '', isCopyFrom: false }
   });
 
   const isCopyFrom = watch('isCopyFrom');
+  const typeValue = watch('type');
+
+  const propertyTypes = useMemo(
+    () =>
+      propertyTypeDefs.map((pt) => ({
+        id: pt.id,
+        value: pt.id,
+        label: t(pt.labelId)
+      })),
+    [t]
+  );
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -101,15 +118,16 @@ export default function NewPropertyDialog({ open, setOpen }) {
         );
       } catch (error) {
         const status = error?.response?.status;
+        const message = error?.response?.data?.message;
         switch (status) {
           case 422:
-            return toast.error(t('Property name is missing'));
+            return toast.error(message || t('Property name is missing'));
           case 403:
             return toast.error(t('You are not allowed to add a property'));
           case 409:
             return toast.error(t('The property already exists'));
           default:
-            return toast.error(t('Something went wrong'));
+            return toast.error(message || t('Something went wrong'));
         }
       } finally {
         setIsLoading(false);
@@ -143,6 +161,30 @@ export default function NewPropertyDialog({ open, setOpen }) {
               <Input id="name" value={watch('name')} onChange={(e) => setValue('name', e.target.value)} name="name" />
               {errors.name && (
                 <p className="text-sm text-destructive">{errors.name.message}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>{t('Property Type')}</Label>
+              <Select
+                value={typeValue}
+                onValueChange={(val) => setValue('type', val)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t('Select a type')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {propertyTypes.map((pt) => (
+                    <SelectItem key={pt.id} value={pt.value}>
+                      <div className="flex items-center gap-2">
+                        <PropertyIcon type={pt.id} />
+                        {pt.label}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.type && (
+                <p className="text-sm text-destructive">{errors.type.message}</p>
               )}
             </div>
             <div className={properties?.length ? '' : 'hidden'}>
