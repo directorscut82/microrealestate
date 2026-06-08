@@ -103,6 +103,24 @@ export async function add(req: Req, res: Res) {
     min: _surfaceMinForType(req.body.type),
     max: 100000
   });
+
+  // Tier A2 — Property minimum-required at creation. Address fields
+  // (street1 + city + zipCode) become required so receipts, PDF exports,
+  // and E9 cross-reference tools all have something to render. The E9
+  // import path bypasses this route (creates via Collections.Property.create
+  // directly) and always carries address from the parsed building, so
+  // imports remain unaffected. The standalone NewPropertyDialog flow MUST
+  // surface address fields at creation; that's covered by the form gate.
+  const addr = req.body?.address || {};
+  if (!addr.street1 || typeof addr.street1 !== 'string' || !addr.street1.trim()) {
+    throw new ServiceError('address.street1 is required', 422);
+  }
+  if (!addr.city || typeof addr.city !== 'string' || !addr.city.trim()) {
+    throw new ServiceError('address.city is required', 422);
+  }
+  if (!addr.zipCode || typeof addr.zipCode !== 'string' || !addr.zipCode.trim()) {
+    throw new ServiceError('address.zipCode is required', 422);
+  }
   validateFiniteNumber(req.body.landSurface, 'landSurface', {
     min: 0,
     max: 1000000
