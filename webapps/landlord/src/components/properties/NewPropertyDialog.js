@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -27,10 +27,19 @@ import useTranslation from 'next-translate/useTranslation';
 // any other value with 422 so we hard-gate the picker to this exact list.
 const PROPERTY_TYPES_ENUM = propertyTypeDefs.map((t) => t.id);
 
+// Greek postal code: 5 digits.
+const POSTAL_REGEX = /^[0-9]{5}$/;
+
 const schema = z
   .object({
-    name: z.string().min(1),
+    name: z.string().trim().min(1),
     type: z.enum(PROPERTY_TYPES_ENUM),
+    street1: z.string().trim().min(1),
+    city: z.string().trim().min(1),
+    zipCode: z
+      .string()
+      .trim()
+      .regex(POSTAL_REGEX, 'Postal code must be 5 digits'),
     isCopyFrom: z.boolean(),
     copyFrom: z.string()
   })
@@ -67,7 +76,6 @@ export default function NewPropertyDialog({ open, setOpen }) {
   });
 
   const {
-    register,
     handleSubmit,
     reset,
     watch,
@@ -75,7 +83,15 @@ export default function NewPropertyDialog({ open, setOpen }) {
     formState: { errors }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { name: '', type: 'apartment', copyFrom: '', isCopyFrom: false }
+    defaultValues: {
+      name: '',
+      type: 'apartment',
+      street1: '',
+      city: '',
+      zipCode: '',
+      copyFrom: '',
+      isCopyFrom: false
+    }
   });
 
   const isCopyFrom = watch('isCopyFrom');
@@ -100,11 +116,18 @@ export default function NewPropertyDialog({ open, setOpen }) {
     async (propertyPart) => {
       try {
         setIsLoading(true);
-        let property = { ...propertyPart };
+        const { street1, city, zipCode, ...rest } = propertyPart;
+        let property = {
+          ...rest,
+          address: { street1, city, zipCode }
+        };
 
         if (propertyPart.isCopyFrom) {
           const { _id, ...originalProperty } =
             propertyItems.find(({ _id }) => propertyPart.copyFrom === _id) || {};
+          // Address typed in dialog wins; `address` from copy source is
+          // intentionally overridden so the new property gets the address
+          // the user just typed.
           property = { ...originalProperty, ...property };
         }
 
@@ -186,6 +209,46 @@ export default function NewPropertyDialog({ open, setOpen }) {
               {errors.type && (
                 <p className="text-sm text-destructive">{errors.type.message}</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="street1">{t('Street 1')}</Label>
+              <Input
+                id="street1"
+                value={watch('street1')}
+                onChange={(e) => setValue('street1', e.target.value)}
+                name="street1"
+              />
+              {errors.street1 && (
+                <p className="text-sm text-destructive">{errors.street1.message}</p>
+              )}
+            </div>
+            <div className="sm:flex sm:gap-2">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="zipCode">{t('Zip code')}</Label>
+                <Input
+                  id="zipCode"
+                  value={watch('zipCode')}
+                  onChange={(e) => setValue('zipCode', e.target.value)}
+                  name="zipCode"
+                  inputMode="numeric"
+                  maxLength={5}
+                />
+                {errors.zipCode && (
+                  <p className="text-sm text-destructive">{errors.zipCode.message}</p>
+                )}
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="city">{t('City')}</Label>
+                <Input
+                  id="city"
+                  value={watch('city')}
+                  onChange={(e) => setValue('city', e.target.value)}
+                  name="city"
+                />
+                {errors.city && (
+                  <p className="text-sm text-destructive">{errors.city.message}</p>
+                )}
+              </div>
             </div>
             <div className={properties?.length ? '' : 'hidden'}>
               <div className="flex items-center gap-2">
