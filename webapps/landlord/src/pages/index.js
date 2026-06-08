@@ -22,9 +22,17 @@ export async function getServerSideProps(context) {
     return { redirect: { destination: '/signin', permanent: false } };
   }
 
+  // T2.2: prepend the realm's locale to the redirect so next-translate
+  // applies it from the very first response. Without this prefix the URL
+  // is `/<org>/dashboard` (no locale segment) and next-translate falls
+  // back to defaultLocale='en' until the client-side router.push in
+  // signin.js re-routes — which only fires on the signin path. Direct
+  // visits to `/landlord/` therefore rendered English on a Greek realm.
+  const orgLocale = store.organization.selected?.locale;
+  const localePrefix = orgLocale ? `/${orgLocale}` : '';
   return {
     redirect: {
-      destination: `/${store.organization.selected.name}/dashboard`,
+      destination: `${localePrefix}/${store.organization.selected.name}/dashboard`,
       permanent: false
     }
   };

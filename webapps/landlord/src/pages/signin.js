@@ -19,6 +19,26 @@ const schema = z.object({
   password: z.string().min(1)
 });
 
+// T2.2: redirect SSR-side to the locale-prefixed signin path when the
+// `locale` cookie says the realm uses a non-default locale and the
+// current request didn't already land on that prefix. Without this, a
+// Greek realm user typing `/landlord/signin` reads the page in English
+// for one full render before the existing client-side useEffect bounces
+// the route. Bouncing pre-render is invisible.
+export async function getServerSideProps({ req, locale }) {
+  const cookieMatch = req?.headers?.cookie?.match(/(?:^|; )locale=([^;]+)/);
+  const cookieLocale = cookieMatch ? decodeURIComponent(cookieMatch[1]) : '';
+  if (cookieLocale && cookieLocale !== locale) {
+    return {
+      redirect: {
+        destination: `/${cookieLocale}/signin`,
+        permanent: false
+      }
+    };
+  }
+  return { props: {} };
+}
+
 export default function SignIn() {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
