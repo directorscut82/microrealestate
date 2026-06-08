@@ -28,7 +28,13 @@ export function create(contract: Contract): Contract {
   let momentTermination: moment.Moment | undefined;
   if (contract.termination) {
     momentTermination = moment.utc(contract.termination);
-    if (!momentTermination.isBetween(momentBegin, momentEnd, 'minutes', '[]')) {
+    // Tier D-B5: terminationDate must be STRICTLY AFTER beginDate. The
+    // legacy inclusive bracket on the begin side ('[]') accepted
+    // terminationDate === beginDate, which produced a zero-day contract
+    // — rent ledger had no terms but a tenant.terminated flag — and
+    // confused every downstream consumer (dashboard, accounting, PDF
+    // receipt). The end side stays inclusive so a same-day end is OK.
+    if (!momentTermination.isBetween(momentBegin, momentEnd, 'minutes', '(]')) {
       throw Error('termination date is out of the contract time frame');
     }
   }

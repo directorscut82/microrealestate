@@ -133,11 +133,22 @@ export async function add(req: Req, res: Res) {
     min: 0,
     max: 1000000
   });
-  // F5: reject energyCertificate.issueDate set in the future (>today+1 day to
-  // tolerate timezone drift).
+  // Tier D-B6 — Energy cert: distinguish "invalid date" from "future date"
+  // and lower the priority. Per user instruction this validator is the LAST
+  // priority and must NEVER block a creation when the value is simply
+  // empty/absent. The earlier shape collapsed both invalid-date and
+  // future-date into the same misleading error ("cannot be in the future"),
+  // confusing AADE PDF imports where the date string occasionally lacked a
+  // century and parsed as an out-of-range value.
   if (req.body?.energyCertificate?.issueDate) {
     const d = moment.utc(req.body.energyCertificate.issueDate);
-    if (!d.isValid() || d.isAfter(moment.utc().add(1, 'day'))) {
+    if (!d.isValid()) {
+      throw new ServiceError(
+        'energyCertificate.issueDate must be a valid date',
+        422
+      );
+    }
+    if (d.isAfter(moment.utc().add(1, 'day'))) {
       throw new ServiceError(
         'energyCertificate.issueDate cannot be in the future',
         422

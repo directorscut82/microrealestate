@@ -26,6 +26,7 @@ export function _isSettledByCarryForward(
     (a, b) => Number(a.term) - Number(b.term)
   );
   let running = 0;
+  let totalCashIn = 0;
   let reachedTarget = false;
   for (const r of sorted) {
     const grandTotal = Number(r?.total?.grandTotal) || 0;
@@ -40,10 +41,18 @@ export function _isSettledByCarryForward(
       .reduce((s: number, d: AnyRecord) => s + (Number(d.amount) || 0), 0);
     const cashIn = paymentsSum + settlementDiscounts;
     running += monthlyBill - cashIn;
+    totalCashIn += cashIn;
     if (Number(r.term) === Number(targetTerm)) {
       reachedTarget = true;
     }
-    if (reachedTarget && running <= 0.01) {
+    // Tier D-B1: settlement requires running deficit to be cleared AND
+    // SOME positive cash-in observed somewhere in the chain. The legacy
+    // shape returned true on (running <= 0.01) alone, which trivially
+    // matched zero-bill terms ("paid" with no money ever received) — a
+    // tenant with no property assigned showed every retroactive month as
+    // paid. The strict positive-cashIn precondition keeps the legitimate
+    // overpayment-cascade case (T4 D-8) and rejects the no-money-ever case.
+    if (reachedTarget && running <= 0.01 && totalCashIn > 0.005) {
       return true;
     }
   }
