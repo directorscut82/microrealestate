@@ -1796,11 +1796,26 @@ export async function overview(req: Req, res: Res) {
     // midnight on Athens (UTC+2/+3) — a tenant whose endDate is "today"
     // could flip between countActive and countInactive depending on the
     // server's local-time offset.
-    const endMoment = moment.utc(occupant.terminationDate || occupant.endDate);
-    if (endMoment.isBefore(currentDate, 'day')) {
-      acc.countInactive++;
-    } else {
+    //
+    // T2.1: also require a non-empty `properties` array and a valid end
+    // date for active. Without these guards `moment.utc(undefined)`
+    // resolves to "now", which made `isBefore(currentDate, 'day')` return
+    // false — so every property-less tenant with no endDate (i.e. an
+    // incomplete tenant record, the same setup-incomplete state T1.7's
+    // amber warning surfaces) inflated countActive. Use the same
+    // `terminationDate || endDate` pair the rest of the codebase reads.
+    const endValue = occupant.terminationDate || occupant.endDate;
+    const endMoment = endValue ? moment.utc(endValue) : null;
+    const dateOk = !!endMoment && endMoment.isValid();
+    const propertyOk = !!occupant.properties?.length;
+    if (
+      dateOk &&
+      propertyOk &&
+      !endMoment!.isBefore(currentDate, 'day')
+    ) {
       acc.countActive++;
+    } else {
+      acc.countInactive++;
     }
     return acc;
   }, result);
