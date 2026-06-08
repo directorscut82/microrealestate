@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { ensureSeed, ensureSeedProperty, ensureSeedLease } from './lib/api';
+import { ensureSeed, ensureSeedLease } from './lib/api';
 
 const GATEWAY = process.env.NAS_GATEWAY_URL || 'http://192.168.0.96:1350';
 
@@ -13,13 +13,28 @@ const VALID_AFM = '123456783'; // checksum-valid
 
 test.describe.serial('Tier D: cross-entity validators', () => {
   test('D-B5: rejects PATCH with terminationDate === beginDate', async ({ request }) => {
-    const seed = await ensureSeedProperty(request);
+    const seed = await ensureSeed(request);
     const lease = await ensureSeedLease(request);
     const auth = {
       Authorization: `Bearer ${seed.token}`,
       'Content-Type': 'application/json',
       organizationid: seed.realmId
     };
+    // Create a dedicated property so we don't collide with leftover
+    // tenant fixtures from prior runs holding E2E-Property.
+    const propUnique = `E2E-D5-Prop-${Math.floor(Math.random() * 100000)}`;
+    const propCreate = await request.post(`${GATEWAY}/api/v2/properties`, {
+      headers: auth,
+      data: {
+        name: propUnique,
+        type: 'apartment',
+        surface: 50,
+        address: { street1: 'Test', city: 'Athens', zipCode: '12345' }
+      }
+    });
+    expect(propCreate.status(), 'create dedicated property').toBe(200);
+    const propDoc = await propCreate.json();
+
     const unique = `E2E-D5-${Math.floor(Math.random() * 100000)}`;
     // Create a tenant first
     const create = await request.post(`${GATEWAY}/api/v2/tenants`, {
@@ -36,7 +51,7 @@ test.describe.serial('Tier D: cross-entity validators', () => {
         isCompany: false,
         properties: [
           {
-            propertyId: seed.propertyId,
+            propertyId: propDoc._id,
             entryDate: '01/01/2026',
             exitDate: '31/12/2026',
             rent: 100
@@ -58,10 +73,15 @@ test.describe.serial('Tier D: cross-entity validators', () => {
     expect(patch.status(), 'termination==begin').toBeGreaterThanOrEqual(400);
     expect([422, 400]).toContain(patch.status());
 
-    // Cleanup
+    // Cleanup tenant first (delete is denied if there are payments — none here)
     await request.delete(`${GATEWAY}/api/v2/tenants`, {
       headers: auth,
       data: { ids: [created._id] }
+    });
+    // Then the dedicated property
+    await request.delete(`${GATEWAY}/api/v2/properties`, {
+      headers: auth,
+      data: { ids: [propDoc._id] }
     });
   });
 
