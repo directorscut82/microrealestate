@@ -210,18 +210,7 @@ export default function LandlordForm({ organization, firstAccess }) {
         const isLocaleChanged =
           savedOrganization.locale !== initialValues.locale;
         if (isOrgNameChanged || isLocaleChanged) {
-          // T2.2: write BOTH cookies. `locale` is read by our existing
-          // SSR redirects (signin.js, [organization]/index.js, index.js).
-          // `NEXT_LOCALE` is the canonical Next.js i18n cookie; with
-          // i18n routing on (next-translate-plugin auto-injects the
-          // locales/defaultLocale into next.config.js i18n block) and
-          // localeDetection defaulting to true, Next.js will redirect
-          // non-prefixed visits like `/landlord/<org>/dashboard` to
-          // `/landlord/<locale>/<org>/dashboard` BEFORE the page
-          // renders. Without this, deep links rendered defaultLocale=en
-          // for one full SSR pass on a Greek realm.
           document.cookie = `locale=${savedOrganization.locale};path=/landlord;max-age=31536000`;
-          document.cookie = `NEXT_LOCALE=${savedOrganization.locale};path=/;max-age=31536000`;
           window.location.assign(
             `${config.BASE_PATH}/${savedOrganization.locale}/${savedOrganization.name}/settings/landlord`
           );

@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect } from 'react';
+import { useCallback, useContext, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -18,26 +18,6 @@ const schema = z.object({
   email: z.string().email().min(1),
   password: z.string().min(1)
 });
-
-// T2.2: redirect SSR-side to the locale-prefixed signin path when the
-// `locale` cookie says the realm uses a non-default locale and the
-// current request didn't already land on that prefix. Without this, a
-// Greek realm user typing `/landlord/signin` reads the page in English
-// for one full render before the existing client-side useEffect bounces
-// the route. Bouncing pre-render is invisible.
-export async function getServerSideProps({ req, locale }) {
-  const cookieMatch = req?.headers?.cookie?.match(/(?:^|; )locale=([^;]+)/);
-  const cookieLocale = cookieMatch ? decodeURIComponent(cookieMatch[1]) : '';
-  if (cookieLocale && cookieLocale !== locale) {
-    return {
-      redirect: {
-        destination: `/${cookieLocale}/signin`,
-        permanent: false
-      }
-    };
-  }
-  return { props: {} };
-}
 
 export default function SignIn() {
   const { t } = useTranslation('common');
@@ -96,17 +76,7 @@ export default function SignIn() {
           }
           setOrganizationId(store.organization.selected._id);
           const orgLocale = store.organization.selected.locale;
-          // T2.2: write BOTH cookies. `locale` is read by our SSR
-          // redirects in signin.js / [organization]/index.js / index.js.
-          // `NEXT_LOCALE` is the canonical Next.js i18n cookie — with
-          // i18n routing active (next-translate-plugin injects the i18n
-          // block into next.config.js) and localeDetection on by default,
-          // Next.js will auto-redirect non-prefixed visits like
-          // `/landlord/<org>/dashboard` to `/landlord/<locale>/<org>/...`
-          // BEFORE the page SSRs. That closes the gap our SSR redirects
-          // can't reach (deep links to dashboard / rents / tenants etc.).
           document.cookie = `locale=${orgLocale};path=/landlord;max-age=31536000`;
-          document.cookie = `NEXT_LOCALE=${orgLocale};path=/;max-age=31536000`;
           router.push(
             `/${store.organization.selected.name}/dashboard`,
             undefined,
