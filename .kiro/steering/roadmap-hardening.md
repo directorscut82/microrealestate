@@ -211,6 +211,29 @@ Changes are grouped into phases. Each phase should be completed before the next.
   - Remaining 4 of 5 high-value tests Pass-5 named (per-payment validation integration, backdate guard, toast logic, YearTotals math).
   - Sharing the auto-spread/prorated primitive between `paymentAllocation.js` and `_computePaidByBucket`. Documented inline as "different bucket spaces; revisit if a third caller appears".
 
+### 4.14 Concurrency Hardening + Receipt PDF Rebrand + Audit Sweeps ✅ COMPLETE (June 2026)
+- **Driven by:** Prifti June 2026 €35 grandTotal drift incident (concurrent payment PATCH + building-expense recompute racing on the same tenant doc), plus a 30-review audit of the May 2026 commits, plus deep audits of the import-PDF tenant and import-PDF building (E9) surfaces using user-supplied real AADE PDFs.
+- **Concurrency:**
+  - Added `optimisticConcurrency: true` to Building schema; mapped VersionError → 409 across the 22 Building.save() callsites.
+  - `__v` filter + `$inc` + retry-with-fresh-read on `_recomputeTenantsForProperty`, `_recomputeTenantsForBuilding`, occupantmanager sibling-recompute. Retry budget: 8 attempts × exponential backoff (50/100/200/400/800/800/800/800ms).
+  - All 4 rent-rebuilding paths now realm-scoped + `__v`-guarded.
+  - All other rent-rebuilding callsites (rentmanager._updateByTerm, occupantmanager.update) already had the guards; verified clean.
+  - Drift scanner sweep across all tenants returned 0 drift after fix.
+- **Receipt PDF rebrand + per-line label rule:**
+  - "Receipt" (was "Invoice") title in PDF — `t('Receipt')` → "ΑΠΟΔΕΙΞΗ ΕΙΣΠΡΑΞΗΣ" (uppercase no tonos). CSS `text-transform: uppercase` removed so locale string controls case.
+  - Receipt body excludes `rent.charges` (paid by tenant to a third party); rent-call/reminder bodies INCLUDE them. Per-template `_omitCharges` flag in `data/index.js`.
+  - Tenant block: ΑΦΜ + phone1/phone2/email surfaced; "ΕΝΟΙΚΙΑΣΤΗΣ" label.
+  - Issuer block: building.manager (διαχειριστής) preferred over realm (ιδιοκτήτης); fallback to realm.name when companyInfo/contacts absent. "ΙΔΙΟΚΤΗΤΗΣ"/"ΔΙΑΧΕΙΡΙΣΤΗΣ" labels.
+  - Per-line label rule applied identically to: Πρόγραμμα tile (`RentDetails.js`), MonthlyBreakdown tooltip (`RentTable.js`), saved-payment bullet (`PaymentTabs._allocationBullet`), AllocationBlock dropdown + Πριν/Μετά preview, PDF body (`invoicebody.ejs`).
+  - New shared util: `webapps/landlord/src/utils/lineLabels.js` (rentLineLabel, chargeLineLabel, buildingLineLabel, debtLineLabel).
+  - Status-pill labels: new keys `Rent paid`/`Rent partial`/`Rent owed` ("Εξοφλημένο"/"Μερικώς εξοφλημένο"/"Ανεξόφλητο") replace nouns-as-states.
+  - Per-month receipt picker on accounting page (popover with 12 months); 10-digit term endpoint.
+- **May 2026 audit batches A–H** — 41 findings across rent-call PDF math (was inconsistent for VAT realms), PDF locale gaps (23 keys × 5 locales), landlord-app locale gaps, OCC realmId scoping, retry budget, issuer key, and a long polish tail. All reproduced fixes verified live.
+- **Search/filter scenario catalog (specs 25–29)** — 40 scenarios authored per `test-running-guide.md` mandate; resolved D-6 (search clears on data refetch); subsequent test-side mop-up batches landed `T_M1..T_M5`.
+- **Import-PDF tenant audit** — 23 findings reproduced on real AADE lease PDFs at `~/Downloads/New folder/for_microestate/`: H1 dehNumber dropped without energy cert (between() end-anchor missing), H2 multi-property merge wipe, M2 atakPrefix collision recovery, M4 mark-past-paid `/rents/tenant/:id` (was 404 on `/rents/:year`), M6 non-AADE PDF rejection at server, M7 `Αποθήκη` → 'storage' (was 'store'), M8 Greek company-tenant detection (`Α.Ε./Ε.Π.Ε./Ι.Κ.Ε./Ο.Ε./Ε.Ε./ΑΕΒΕ`), N4 `parsed.landlords` → `units[].owners[]` (6 of 11 PDFs had 50% co-ownership silently dropped), plus pluralisation `_one` variants and 41 untranslated labels in 4 locales.
+- **Import-PDF E9 audit** — 47 findings on real `PeriousiakiKatastasi*.pdf` files: T0 owner.name compose + plural _one + FileDropZone i18n + surface server message; T1 multi-PDF preview dedup + empty-zip merge + cleanCity always + storage classification (cat 5/6) + auxSurface dup guard + yearBuilt 1600-2099 + cache invalidation + per-unit existing-property metadata + outcomes shape; T2 file cap + Promise.allSettled + transactional rollback + AbortController + co-owners + rightType + ΛΑΓΟΝΗΣΙ block-plot + force=false property overwrites + jest e9parser fixture suite (42 tests, 94% coverage); T3 blockStreets noise + ΑΓ. preservation + blockNumber aggregation + cleanState + district drop + error-shape + totalFloors/hasElevator auto-derive + idempotent re-import banner; L tier latents incl. fractional rights `1/2`, locale-aware floor names, legal-entity owner detection, KAEK schema field, rate-limit GC, accent-aware building dedup, ATAK regex extract, TOCTOU race recovery; L7 marker gate (with hotfix to accept genitive `ΠΕΡΙΟΥΣΙΑΚΗΣ`).
+- **No-fabrication steering doc** — `.kiro/steering/no-fabrication-do-not-skip.md` added (loads on every session); bans rendering ASCII/mockups/numbers without source citation.
+
 ### 4.11 Multi-Origin Self-Hosted Deployment ✅ COMPLETE (added May 2026)
 - **Purpose:** Serve the same landlord frontend simultaneously from LAN (`http://192.168.x.x:PORT`) and Tailscale IP (`http://100.x.x.x:PORT`) so family/staff can use the app over a shared Tailnet without DNS setup.
 - **Code changes (applied on `nas` branch only):**

@@ -273,9 +273,9 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Both the API and frontend containers must be on the same revision before re-running tests.
 
-## Known stable failures (June 2026 baseline = 133/155 pass)
+## Known stable failures (June 2026 baseline)
 
-The following 5 tests fail on the current `a9d3fbab` build and they are **test-side bugs**, not app bugs. Don't "fix" them by changing app code:
+The following tests fail on a green build and they are **test-side bugs**, not app bugs. Don't "fix" them by changing app code:
 
 - **spec 03 `tenant search by partial phone1`** — RESOLVED on master in `49040d15` (June 1 2026). Re-running this spec against any revision ≥ `49040d15` should pass. The note about the `fb024ed4` race is preserved for archaeology only — the resolved fix takes a different shape (delete the init useEffect rather than feed it current state).
 - **spec 15 S36/S37** — assert that a date `last day of current month` and `5 days into next month` pass the server's F3 guard. They pass when run near month-end but fail when run on day 1-22 of the month because the date is ≥7 days away → "too far in future" guard fires. Test should compute the date dynamically against `today + 5d` instead of "month end".

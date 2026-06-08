@@ -90,13 +90,18 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Run that to confirm NAS is on the commit you pushed BEFORE running tests.
 
-### Current state (June 1, 2026 — last suite #11)
+### Current state (June 8, 2026)
 
-- **Production NAS revision**: `a9d3fbab` (master). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200.
-- **Suite #11 result**: 133 passed / 5 failed / 1 skipped / 16 did not run (16.5 min wall time).
-- **The 5 failures are all test bugs, not app bugs** — see `documentation/E2E_TESTING.md` for the catalog.
-- **The 16 "did not run"** are spec 19 tests after L06 (serial mode bails on first failure).
-- App-side bugs fixed in this session and shipped:
+- **Production NAS revision**: `58f94315` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200.
+- **Recent shipped work (June 2-8 2026):**
+  - **`__v` concurrency hardening** (`f15949f0` / `fd6040bb` / `e8cbd830`) — building/property/sibling-recompute paths now use optimistic-lock + retry; closed the Prifti-June drift class of bugs. Building schema has `optimisticConcurrency:true`.
+  - **Receipt PDF rebrand + per-line label rule** (`f15949f0`/`57495a09`/`fd6040bb`) — Πρόγραμμα tile, saved-tile bullets, AllocationBlock dropdown/preview, PDF body all use the same `Ενοίκιο/Δαπάνη επί του ενοικίου/<TypeLabel>` rule. Receipt = "ΑΠΟΔΕΙΞΗ ΕΙΣΠΡΑΞΗΣ" (no tonos), excludes rent.charges, includes ΑΦΜ + property address.
+  - **May 2026 audit batches A–H** (`f315a66b` and predecessors) — 41 audit findings from the may-2026 audit fixed: PII redaction, rentcall label gate, locale gaps, `__v` hardening, optimistic-concurrency on Building, recompute retry budget, et al.
+  - **Search/filter scenario catalog** (`88587d13`) — specs 25–29, 40 scenarios, with the test-side mop-up at `5d038e4a`/`a3b71056`.
+  - **Import-PDF audit fixes — tenant-import** (`b0dece06` → `57de51aa`) — 23 findings reproduced on real AADE PDFs: H1 dehNumber dropped no-energy-cert, H2 multi-property merge, M2 atakPrefix collision recovery, M4 mark-past-paid `/rents/tenant/:id`, M6 non-AADE rejection, M7 Αποθήκη→storage, M8 company-tenant detection, N4 `parsed.landlords` → `units[].owners[]`, plus i18n + plural fixes.
+  - **Import-PDF audit fixes — E9 / building-import** (`231aff39` → `58f94315`) — 47 findings across T0–T3 + L tiers: owner.name compose, multi-PDF preview dedup, storage classification, auxSurface guard, yearBuilt 1600-2099, full cache invalidation, Promise.allSettled batch, AbortController cancel, co-owners + rightType, ΛΑΓΟΝΗΣΙ block-plot pattern, `force=false` for property overwrites, jest e9parser fixture suite (42 tests). The L7 marker gate accepts genitive `ΠΕΡΙΟΥΣΙΑΚΗΣ` (the hotfix at `58f94315`).
+
+- App-side bugs from earlier sessions still relevant:
   - `7d888322` — TenantPropertyList missing `useTranslation` (tenants page error boundary)
   - `69e98638` — FormatMenu missing `useTranslation` (RichTextEditor crash)
   - `669d8d75` — `frontdata.toRentData` JSON.parse undefined when PATCH-ing future term with no rent record (500 → graceful empty)
