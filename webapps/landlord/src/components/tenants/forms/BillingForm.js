@@ -19,15 +19,16 @@ const schema = z.object({
   // Empty is allowed — the server fills in a nanoid() when blank.
   reference: z.string().max(120).optional(),
   isVat: z.boolean(),
-  vatRatio: z.coerce.number().min(0).max(100).optional(),
-  discount: z.coerce.number().min(0).optional()
+  vatRatio: z.coerce.number().min(0).max(100).optional()
+  // Note: tenant.discount is still a writable field on the schema, but
+  // the per-tenant monthly discount UI was removed because in practice
+  // the data comes from the lease/import flow, not from this form.
 });
 
 const initValues = (tenant) => ({
   reference: tenant?.reference || '',
   isVat: !!tenant?.isVat,
-  vatRatio: tenant?.vatRatio * 100 || 0,
-  discount: tenant?.discount || 0
+  vatRatio: tenant?.vatRatio * 100 || 0
 });
 
 export const validate = (tenant) => {
@@ -61,8 +62,7 @@ const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
     await onSubmit({
       reference: billing.reference,
       isVat: billing.isVat,
-      vatRatio: billing.isVat ? billing.vatRatio / 100 : 0,
-      discount: billing.discount
+      vatRatio: billing.isVat ? billing.vatRatio / 100 : 0
     });
   };
 
@@ -105,21 +105,6 @@ const Billing = ({ tenant, organization, readOnly, onSubmit }) => {
             </div>
           </>
         )}
-        <div className="space-y-2">
-          <Label htmlFor="discount">{t('Monthly discount')}</Label>
-          <Input
-            id="discount"
-            type="number"
-            disabled={readOnly}
-            {...register('discount')}
-          />
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'A fixed amount in your local currency that is subtracted from this tenant\'s rent every cycle.'
-            )}
-          </p>
-        </div>
-
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger asChild>
             <Button
