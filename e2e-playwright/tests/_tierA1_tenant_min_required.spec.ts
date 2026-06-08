@@ -114,7 +114,7 @@ test.describe.serial('Tier A1: tenant min-required at creation', () => {
         name: unique,
         firstName: 'Tier',
         lastName: unique,
-        taxId: '111222333',
+        taxId: '123456783',
         manager: unique,
         beginDate: '01/01/2026',
         stepperMode: true,
@@ -139,7 +139,7 @@ test.describe.serial('Tier A1: tenant min-required at creation', () => {
     const tenantDoc = await got.json();
     expect(tenantDoc.firstName).toBe('Tier');
     expect(tenantDoc.lastName).toBe(unique);
-    expect(tenantDoc.taxId).toBe('111222333');
+    expect(tenantDoc.taxId).toBe('123456783');
 
     await request.delete(`${GATEWAY}/api/v2/tenants`, {
       headers: {
