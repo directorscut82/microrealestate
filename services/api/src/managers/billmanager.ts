@@ -236,6 +236,52 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       );
     }
 
+    // Tier A6 (B3) — Bill date validation. periodStart and periodEnd are
+    // required and must be valid dates with periodStart ≤ periodEnd.
+    // issueDate / dueDate are optional but, when set, must be valid and
+    // ordered (issueDate ≤ dueDate). Without these, a malformed
+    // periodStart pollutes the rent ledger silently (becomes Invalid Date,
+    // breaks getUTCFullYear()/getUTCMonth() in computeDefaultTerm, and
+    // computes an out-of-range term that lands on the wrong month).
+    if (!periodStart || !periodEnd) {
+      throw new ServiceError(
+        'Bill periodStart and periodEnd are required',
+        422
+      );
+    }
+    const _ps = new Date(periodStart);
+    const _pe = new Date(periodEnd);
+    if (Number.isNaN(_ps.getTime()) || Number.isNaN(_pe.getTime())) {
+      throw new ServiceError(
+        'Bill periodStart / periodEnd must be valid dates',
+        422
+      );
+    }
+    if (_ps.getTime() > _pe.getTime()) {
+      throw new ServiceError(
+        'Bill periodStart must be on or before periodEnd',
+        422
+      );
+    }
+    if (issueDate !== undefined && issueDate !== null && issueDate !== '') {
+      const _id = new Date(issueDate);
+      if (Number.isNaN(_id.getTime())) {
+        throw new ServiceError('Bill issueDate must be a valid date', 422);
+      }
+      if (dueDate !== undefined && dueDate !== null && dueDate !== '') {
+        const _dd = new Date(dueDate);
+        if (Number.isNaN(_dd.getTime())) {
+          throw new ServiceError('Bill dueDate must be a valid date', 422);
+        }
+        if (_id.getTime() > _dd.getTime()) {
+          throw new ServiceError(
+            'Bill issueDate must be on or before dueDate',
+            422
+          );
+        }
+      }
+    }
+
     // If replacing, remove existing bill for same term+expense
     if (replaceExisting) {
       await Collections.Bill.deleteMany({
