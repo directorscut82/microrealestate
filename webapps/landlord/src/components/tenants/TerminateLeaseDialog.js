@@ -47,7 +47,16 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
 
   const initialValues = useMemo(
     () => ({
-      tenantId: !tenantList && selected?._id ? selected._id : '',
+      // Dashboard "Terminate" shortcut passes a tenantList and no tenant.
+      // The Select is disabled when only one tenant is available, so we
+      // pre-populate tenantId so the form has a valid value out of the
+      // gate — otherwise the disabled empty-value Select rejects submit.
+      tenantId:
+        !tenantList && selected?._id
+          ? selected._id
+          : tenantList?.length === 1
+            ? tenantList[0]._id
+            : '',
       terminationDate:
         !tenantList && selected?.terminationDate
           ? moment(selected.terminationDate, 'DD/MM/YYYY').format('YYYY-MM-DD')
