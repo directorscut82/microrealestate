@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -189,6 +189,22 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
 
   const isCompany = watch('isCompany');
   const stepperMode = tenant?.stepperMode;
+
+  // Auto-prefill contact #1 with the primary tenant's name as the user
+  // types it. Only runs when contact[0].contact is currently empty so we
+  // never clobber a user edit (e.g. "Maria Mpimpika (mother)"). Skipped
+  // for company accounts — businesses identify by `company` not first/last.
+  const watchedFirstName = watch('firstName');
+  const watchedLastName = watch('lastName');
+  const watchedContact0 = watch('contacts.0.contact');
+  useEffect(() => {
+    if (isCompany === 'true') return;
+    if (watchedContact0 && watchedContact0.trim().length > 0) return;
+    const fullName = `${watchedFirstName || ''} ${watchedLastName || ''}`.trim();
+    if (!fullName) return;
+    setValue('contacts.0.contact', fullName, { shouldDirty: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedFirstName, watchedLastName, isCompany]);
 
   // Wave-26 round-3m: deduplicate the co-tenants list against the primary
   // tenant before rendering, so a single-renter case doesn't show the
