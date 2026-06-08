@@ -338,6 +338,116 @@ the regression you think you see is real. The audit waves spent a lot of
 time confirming these are correct; the cost of re-verification is
 cheaper than the cost of regressing them.
 
+## Canonical fix-and-test procedure (June 2026 onward) — READ BEFORE TOUCHING ANY CODE
+
+This is the protocol that every fix session in this codebase MUST follow. It exists because of a documented multi-month track record of agents shipping fixes that introduced regressions in adjacent surfaces, declaring "fixed" without driving the user flow, and skipping the read-existing-code step. The procedure is non-negotiable.
+
+### Phase 0 — Enumerate before touching anything
+
+1. **Run a read-only audit agent** that lists every form/dialog/edit-page touching the entity tree the user has reported a bug on. Output: a table of `{file, formName, entity, currentlyRequired, currentlyOptional, duplicateGuard, formatValidators, gapsVsMinimum, importPathCarriesField}`. The agent must check `webapps/landlord/src/components/**`, `webapps/landlord/src/pages/**`, `webapps/tenant/src/**`.
+2. **Cross-check every "required at creation" rule against the AADE PDF import paths** (`services/api/src/managers/pdfimportmanager.ts`, `greekleaseparser.ts`, `e9parser.ts`). If a field is NOT in the parsed import output, it cannot be required at entity creation — only at first manual edit, or as a tile warning. Phone, email, energy cert are NOT carried by AADE imports.
+3. **Compose the work-list** as one tier per fix-cluster (server validation, UI tile state, format validators, cross-entity bugs). Each tier is one PR, one deploy, one verification pass.
+
+### Per-tier verification — every tier must run all six steps
+
+Every tier deploys foreground (NOT backgrounded — `bash` returns exit 0 the moment it backgrounds the deploy script, but the deploy is still running). Then:
+
+1. **Build locally first.** `yarn workspace <package> build` for every package touched. Type errors and lint errors block deploy. No exceptions.
+2. **Deploy foreground.** `yarn deploy:nas` (no `&`). Wait for it to print the verification line.
+3. **Portainer revision check.** Run the revision-poll snippet in "Verifying a deploy actually landed" (above). Both the API and the frontend container must be on the commit you pushed before any test runs.
+4. **Tier-specific tests.** Per-entity validation: jest unit tests for the schema; UI test runs through the form; mongo readback to confirm the document state. Per-locale: `curl -s` the rendered URL, grep for the expected string. Per-format: run the validator with 3 valid + 5 invalid samples. Each tier's required tests are listed in the table below.
+5. **Lawnmower spec.** `e2e-playwright/tests/_lawnmower.spec.ts` — a broad sign-in-and-click-everywhere spec. Visits every top-level menu item, opens each "+" dialog, opens the first edit page for each entity. Asserts: no `{{...}}` template literals leak to DOM, no `lang="en"` on `/el/...` URLs, no console errors, no `500` responses, no broken images. **MUST pass after every tier deploy.** This is how we catch the "you fixed X but Y is now broken" class of regression.
+6. **Manual 5-minute browser drive.** Open `http://192.168.0.96:1350/landlord/`, sign in, navigate the surface that was changed AND two adjacent surfaces. Document what was clicked. Sign out, sign in as a fresh visitor on `/landlord/el/<...>`, repeat.
+
+A tier is not "done" until all six steps pass and a mongo readback confirms the persisted state.
+
+### Tier-by-tier verification matrix
+
+| Tier | Surface | Tier-specific tests | Mongo readback |
+|---|---|---|---|
+| **T2.2 cleanup** | Locale-prefixed URLs, signin, organization redirect | `curl -s /landlord/el/signin \| grep "Συνδεθείτε"` ≥1; `curl -sIL -b 'NEXT_LOCALE=el; locale=el' /landlord` redirect chain ≤2 hops; `curl -sI -b 'locale=../foo' /landlord/signin` does NOT interpolate `..`; `curl -sI -b 'locale=el' /landlord/<en-realm>` redirects via realm.locale not cookie | n/a — pure SSR redirect changes |
+| **A1 — Tenant min-required** | Server: occupantmanager.add; UI: NewTenantDialog + TenantForm | jest: POST tenant with each required field missing → 422 + missing-field name. UI: zod schema rejects bare `{name}` payload. Browser: try to save name-only stub → button disabled OR toast fires AND no network call (intercept). | `db.occupants.countDocuments({...})` before/after — confirm zero document inserted on invalid POST |
+| **A2 — Property min-required** | Server: propertymanager.add; UI: NewPropertyDialog + PropertyForm | jest: POST property without surface → 422 (when type is one that requires surface). UI: form blocks save without address.street1+city+zipCode. Rent stays optional per user decision. | `db.properties.findOne({_id})` after save — confirm address fields persisted |
+| **A3 — Building min-required** | Server: buildingmanager.add; UI: NewBuildingDialog + BuildingForm | jest: POST building without atakPrefix → 422. UI: form requires name+atakPrefix+address. Units optional. | `db.realms.findOne({_id})` — buildings array updated correctly |
+| **A4 — Lease min-required** | LeaseForm + NewLeaseDialog | jest: POST lease without numberOfTerms → 422. UI: form blocks save. Duplicate-guard already verified by T1.5. | `db.leases.findOne({_id, realmId})` — name unique within realm |
+| **A5 — Expense window** | propertymanager and tenant property expenses | jest: PATCH tenant.properties[0].expenses with beginDate > endDate → 422. UI: form rejects inverted dates. | `db.occupants.findOne({_id, "properties.expenses.beginDate": ...})` — invalid dates rejected at write |
+| **A6 — Bill date validity** | billmanager | jest: POST bill with periodStart > periodEnd → 422; with totalAmount ≤ 0 → 422. | `db.bills.findOne({_id})` — confirm valid dates persisted |
+| **B7/B8 — Tenant tile** | TenantListItem.js | UI: 3 fixtures (terminated, active, future-start). `expect(pill).toHaveAttribute('data-state', 'terminated')`. NEVER `toBeVisible()` on a row already in unfiltered list. | `db.occupants.findOne({_id, terminationDate: {$exists: true}})` — fixture confirmed terminated |
+| **B9 — Building tile warning** | BuildingListItem.js | UI: building with no units → `expect(warning).toHaveText('Ελλειπή στοιχεία (διαμερίσματα)')`. Building with no manager → `(...διαχειριστής)`. Building complete → warning has `toHaveCount(0)`. Refetch resilience: type in filter → wait → re-assert warning persists. | `db.realms.findOne({"buildings.units": {$size: 0}})` — confirm fixture has no units |
+| **C — Format validators** | All forms touching AFM/ATAK/DEH/postal/IBAN/phone/email/surface/money | Per format: 3 valid + 5 invalid samples in jest. Browser: type invalid value, blur → error in DOM. Type valid → error gone. AADE PDF re-import → import-only fields show warning on tile, NOT creation block. | n/a — pure validation changes; no schema changes |
+| **D-B1 — Retroactive zero-bill** | 1_base.ts + frontdata.ts | jest: tenant with beginDate 3 months past, no property → all 3 months exist with `totalAmount: 0`, NONE marked `paid`. Add property with entryDate=today → 3 months reflect rent value, NONE remain zero-paid. | `db.occupants.findOne({_id, "rents.paid": {$exists: false}})` |
+| **D-B5 — terminationDate ≠ beginDate** | contract.ts:29-33 | jest: PATCH tenant with terminationDate === beginDate → 422 with explicit message. | n/a |
+| **D-B6 — Energy cert** | propertymanager.ts validator | jest: POST property without energy cert → success (warning, not blocker). Server validation order verified energy cert is LAST in priority list. | n/a |
+| **D-Q1 — Stepper graduation** | TenantStepper, tenant.stepperMode flag | UI: create tenant → mongo `stepperMode: true`. Fill all 4 steps + Save on step 4 → mongo `stepperMode: false`. Reload page → `<TenantTabs />` rendered, NOT `<TenantStepper />`. | `db.occupants.findOne({_id})` before and after step-4 save |
+
+### Lawnmower spec — the regression backstop
+
+`e2e-playwright/tests/_lawnmower.spec.ts` is a single test that runs after every tier deploy. It MUST be kept up to date as new top-level surfaces are added. Skeleton:
+
+```ts
+import { test, expect } from '@playwright/test';
+import { signIn } from './lib/api';
+
+test('lawnmower: every top-level surface renders without literals or console errors', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  page.on('console', (msg) => { if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`); });
+
+  await signIn(page);
+
+  for (const path of ['/dashboard', '/tenants', '/properties', '/buildings', '/rents/2026.06', '/accounting/2026', '/settings/landlord', '/settings/billing', '/settings/leases', '/settings/members', '/settings/templates']) {
+    await page.goto(`/landlord/<test-realm>${path}`);
+    await expect(page.locator('html')).toHaveAttribute('lang', 'el');
+    const body = await page.content();
+    expect(body, `template literal leaked on ${path}`).not.toMatch(/\{\{[A-Z_]+\}\}/);
+    expect(body, `English bleed on ${path}`).not.toContain('Sign in to your account');
+  }
+
+  for (const dialogPath of ['/tenants', '/properties', '/buildings', '/settings/leases']) {
+    await page.goto(`/landlord/<test-realm>${dialogPath}`);
+    await page.locator('[data-cy="add"]').click();
+    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+  }
+
+  expect(errors, 'no console errors during lawnmower sweep').toEqual([]);
+});
+```
+
+Run before declaring any tier complete:
+
+```bash
+cd /Users/epitrogi/Development/microrealestate/e2e-playwright
+yarn playwright test tests/_lawnmower.spec.ts --reporter=list
+```
+
+If the lawnmower fails on a surface unrelated to your tier, **stop, investigate, fix in the same PR.** That's the bug you would have shipped if you didn't run it.
+
+### Full-sweep audit (June 2026 — June onward — every 2 months)
+
+Every two months, an audit-mode workflow MUST be run that re-reviews every commit landed in the prior 60 days for AI-introduced regressions. The mode is read-only; it produces a punch-list of suspect commits. Each suspect must be re-tested against the lawnmower + tier-specific tests. Skeleton in `documentation/AUDIT_PROCEDURE.md` (write it if missing); high-level shape:
+
+1. `git log --since='60 days ago' --pretty='%h %s'` — full commit list.
+2. For each commit: read the diff, identify the surface, run the corresponding tier-specific test on the current `nas` revision (NOT against the historic commit — what we care about is whether today's behavior is correct).
+3. Fail-list commits whose tier-specific test fails today get a fix in a new tier; pass-list commits are recorded in `verified-clean-summary.md` so the next sweep doesn't re-do the work.
+4. The sweep result is one report file per audit (`documentation/audit-2026-08.md` etc.) and one PR per fix.
+
+This 2-month cadence is the rule that catches the "T2.2 made signin worse" class of regression before the user finds it manually. **Skipping the sweep is not an option.**
+
+### Anti-patterns (banned, every session)
+
+- Pattern-matching on log lines instead of reading the file emitting the error
+- Treating "stale cookie / rate limit / cache" as default explanations without verifying with `curl` first
+- Claiming a fix worked without re-running the failing command end-to-end
+- Backgrounding `yarn deploy:nas` and trusting bash exit-0
+- Mixing `moment.utc(...)` and `moment(...)` in the same comparison
+- `hasText: '<name>'` substring-match selectors; use `:text-is("<name>")`
+- `toBeVisible()` on a row visible in the unfiltered list (tautology)
+- Skipping mongo readback after a write
+- Skipping the lawnmower spec because "the change was small"
+- Adding GSSP to a page without testing that next-translate-plugin's loader-injection wraps it (T2.2 R1 — the `pageProps:{}` failure mode)
+- Adding required-at-creation fields without cross-checking the PDF-import carrier (will block legitimate imports)
+
 ## Test inventory
 
 See `e2e-playwright/tests/`. Every spec file's leading comment names the wave-24 bug it covers and the trigger condition. The PR description on master (search PR title "Add Playwright E2E harness") summarizes coverage.
