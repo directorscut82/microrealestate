@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useMemo, useRef } from 'react';
+import { useCallback, useContext, useMemo, useRef } from 'react';
 import {
   createTenant,
   fetchLeases,
@@ -28,9 +28,19 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
+// Greek AFM: 9 digits with a checksum. Tier C1 enforces the checksum;
+// at the dialog level we require digits-only + length=9 so an obvious
+// typo is caught at creation. AADE PDF imports always carry a valid AFM.
+const AFM_REGEX = /^[0-9]{9}$/;
+
 const schema = z
   .object({
-    name: z.string().min(1),
+    firstName: z.string().trim().min(1).max(120),
+    lastName: z.string().trim().min(1).max(120),
+    taxId: z
+      .string()
+      .trim()
+      .regex(AFM_REGEX, 'AFM must be 9 digits'),
     isCopyFrom: z.boolean(),
     copyFrom: z.string()
   })
@@ -71,7 +81,6 @@ export default function NewTenantDialog({ open, setOpen }) {
   });
 
   const {
-    register,
     handleSubmit,
     reset,
     watch,
@@ -79,7 +88,13 @@ export default function NewTenantDialog({ open, setOpen }) {
     formState: { errors }
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { name: '', copyFrom: '', isCopyFrom: false }
+    defaultValues: {
+      firstName: '',
+      lastName: '',
+      taxId: '',
+      copyFrom: '',
+      isCopyFrom: false
+    }
   });
 
   const isCopyFrom = watch('isCopyFrom');
@@ -91,9 +106,14 @@ export default function NewTenantDialog({ open, setOpen }) {
 
   const _onSubmit = useCallback(
     async (tenantPart) => {
+      const fullName = `${tenantPart.firstName} ${tenantPart.lastName}`.trim();
       let tenant = {
-        name: tenantPart.name,
-        company: tenantPart.name,
+        name: fullName,
+        firstName: tenantPart.firstName,
+        lastName: tenantPart.lastName,
+        taxId: tenantPart.taxId,
+        manager: fullName,
+        isCompany: false,
         beginDate: moment().startOf('day').format('DD/MM/YYYY'),
         stepperMode: true
       };
@@ -104,6 +124,9 @@ export default function NewTenantDialog({ open, setOpen }) {
             _id,
             reference,
             name,
+            firstName: srcFirstName,
+            lastName: srcLastName,
+            taxId: srcTaxId,
             terminated,
             beginDate,
             endDate,
@@ -175,11 +198,44 @@ export default function NewTenantDialog({ open, setOpen }) {
           autoComplete="off"
         >
           <div className="pt-6 space-y-4">
+            <div className="sm:flex sm:gap-2">
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="firstName">{t('First name')}</Label>
+                <Input
+                  id="firstName"
+                  value={watch('firstName')}
+                  onChange={(e) => setValue('firstName', e.target.value)}
+                  name="firstName"
+                />
+                {errors.firstName && (
+                  <p className="text-sm text-destructive">{errors.firstName.message}</p>
+                )}
+              </div>
+              <div className="space-y-2 flex-1">
+                <Label htmlFor="lastName">{t('Last name')}</Label>
+                <Input
+                  id="lastName"
+                  value={watch('lastName')}
+                  onChange={(e) => setValue('lastName', e.target.value)}
+                  name="lastName"
+                />
+                {errors.lastName && (
+                  <p className="text-sm text-destructive">{errors.lastName.message}</p>
+                )}
+              </div>
+            </div>
             <div className="space-y-2">
-              <Label htmlFor="name">{t('Name')}</Label>
-              <Input id="name" value={watch('name')} onChange={(e) => setValue('name', e.target.value)} name="name" />
-              {errors.name && (
-                <p className="text-sm text-destructive">{errors.name.message}</p>
+              <Label htmlFor="taxId">{t('Tax ID')}</Label>
+              <Input
+                id="taxId"
+                value={watch('taxId')}
+                onChange={(e) => setValue('taxId', e.target.value)}
+                name="taxId"
+                inputMode="numeric"
+                maxLength={9}
+              />
+              {errors.taxId && (
+                <p className="text-sm text-destructive">{errors.taxId.message}</p>
               )}
             </div>
             <div className={tenants?.length ? '' : 'hidden'}>

@@ -871,6 +871,45 @@ export async function add(req: Req, res: Res) {
     logger.error('missing tenant name');
     throw new ServiceError('missing fields', 422);
   }
+
+  // Tier A1 — Tenant min-required at creation.
+  // Natural persons MUST carry firstName + lastName + taxId.
+  // Legal entities MUST carry company + taxId + legalForm.
+  // AADE PDF import paths (greekleaseparser / pdfimportmanager) supply these
+  // fields, so import flow is unaffected. Phone/email are intentionally NOT
+  // required at creation — the AADE PDF doesn't carry them, and the tile
+  // missing-info warning surfaces them post-create instead.
+  const isCompanyTenant = occupant.isCompany === true;
+  if (isCompanyTenant) {
+    if (!occupant.company || typeof occupant.company !== 'string' || !occupant.company.trim()) {
+      throw new ServiceError(
+        'company is required for legal-entity tenants',
+        422
+      );
+    }
+    if (!occupant.legalForm || typeof occupant.legalForm !== 'string' || !occupant.legalForm.trim()) {
+      throw new ServiceError(
+        'legalForm is required for legal-entity tenants',
+        422
+      );
+    }
+  } else {
+    if (!occupant.firstName || typeof occupant.firstName !== 'string' || !occupant.firstName.trim()) {
+      throw new ServiceError(
+        'firstName is required for natural-person tenants',
+        422
+      );
+    }
+    if (!occupant.lastName || typeof occupant.lastName !== 'string' || !occupant.lastName.trim()) {
+      throw new ServiceError(
+        'lastName is required for natural-person tenants',
+        422
+      );
+    }
+  }
+  if (!occupant.taxId || typeof occupant.taxId !== 'string' || !occupant.taxId.trim()) {
+    throw new ServiceError('taxId is required', 422);
+  }
   if (occupant.leaseId) {
     validateObjectId(occupant.leaseId, 'leaseId');
     const leaseExists = await Collections.Lease.exists({
