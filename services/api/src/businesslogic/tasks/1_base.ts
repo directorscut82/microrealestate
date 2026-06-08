@@ -315,9 +315,12 @@ function _computeBuildingChargeRaw(
     }
 
     case 'custom_percentage': {
-      // Custom percentage - value is already a percentage. Same
-      // carrier-remainder pattern as the others so 3 units at 33.33%
-      // each don't bill 99.99% of the expense.
+      // Custom percentage - value is already a percentage. Carrier-remainder
+      // pattern fires ONLY when multiple carriers + their percentages sum
+      // to exactly 100% (the "split" intent: 3 units at 33.33% must total
+      // 99.99% absorbed by carry-correction). When the percentages sum to
+      // less than 100% — including the single-carrier-at-35% case — each
+      // carrier bills its own percent directly with no carry math.
       const allocation = customAllocations?.find((a) => String(a.propertyId) === String(propertyId));
       if (!allocation) return 0;
       const pct = Number(allocation.value) || 0;
@@ -326,6 +329,15 @@ function _computeBuildingChargeRaw(
         .filter((a) => Number(a?.value) > 0)
         .map((a) => String(a.propertyId))
         .sort();
+      const totalPct = (customAllocations || [])
+        .reduce((s, a) => s + (Number(a?.value) || 0), 0);
+      // Only apply carry-remainder when the allocations are intended to
+      // sum to 100% (within rounding tolerance). Otherwise treat each
+      // entry as an independent percentage of the expense.
+      const isFullSplit = Math.abs(totalPct - 100) < 0.05;
+      if (!isFullSplit) {
+        return Math.round(((amount * pct) / 100) * 100) / 100;
+      }
       const myIdStr = String(propertyId);
       const isLast = _pctIds.length > 0 && myIdStr === _pctIds[_pctIds.length - 1];
       if (!isLast) return (amount * pct) / 100;
