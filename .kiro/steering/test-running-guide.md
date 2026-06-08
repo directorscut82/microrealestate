@@ -382,7 +382,17 @@ A tier is not "done" until all six steps pass and a mongo readback confirms the 
 
 ### Lawnmower spec — the regression backstop
 
-`e2e-playwright/tests/_lawnmower.spec.ts` is a single test that runs after every tier deploy. It MUST be kept up to date as new top-level surfaces are added. Skeleton:
+`e2e-playwright/tests/_lawnmower.spec.ts` is a single test that runs after every tier deploy. It MUST be kept up to date as new top-level surfaces are added.
+
+**Three known infra-noise classes are filtered** so the spec only fires on real regressions:
+
+| Noise | Why filtered | Where to escalate |
+|---|---|---|
+| React `#418` / `#423` / `#425` hydration mismatches | Pre-existing — `<Link>` SSR edge cases or moment.js relative time strings on first load. Reproduces on master without any change. | Separate cleanup task; do not block deploys |
+| `Failed to load resource: 401 (Unauthorized)` on `/api/v2/*` | Built-in axios interceptor in `webapps/landlord/src/utils/fetch.js` retries 401s after a token refresh. First call fails, refresh succeeds, retry succeeds — user experience is correct; browser console still logs the original 401. | Real bug only if non-401 / non-/api/v2 status appears |
+| favicon 404s | LAN IP vs Tailscale IP host mismatch | Ignore |
+
+**The actual spec is the source of truth** — `e2e-playwright/tests/_lawnmower.spec.ts`. The skeleton below documents the shape; do not duplicate.
 
 ```ts
 import { test, expect } from '@playwright/test';
@@ -395,8 +405,8 @@ test('lawnmower: every top-level surface renders without literals or console err
 
   await signIn(page);
 
-  for (const path of ['/dashboard', '/tenants', '/properties', '/buildings', '/rents/2026.06', '/accounting/2026', '/settings/landlord', '/settings/billing', '/settings/leases', '/settings/members', '/settings/templates']) {
-    await page.goto(`/landlord/<test-realm>${path}`);
+  for (const path of ['/dashboard', '/tenants', '/properties', '/buildings', '/rents/2026.06', '/accounting/2026', '/settings/landlord', '/settings/billing', '/settings/contracts', '/settings/access', '/settings/organizations']) {
+    await page.goto(`/landlord/el/<test-realm>${path}`);
     await expect(page.locator('html')).toHaveAttribute('lang', 'el');
     const body = await page.content();
     expect(body, `template literal leaked on ${path}`).not.toMatch(/\{\{[A-Z_]+\}\}/);
