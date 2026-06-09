@@ -258,10 +258,17 @@ export default function BuildingDashboard({ building }) {
     //     is NEVER persisted to ownerMonthlyExpenses (those rows are reserved
     //     for variable amounts). Without this projection the dashboard
     //     undercounts by the entire fixed owner share.
-    const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || []).reduce(
-      (sum, e) => sum + (Number(e.amount) || 0),
-      0
-    );
+    // Filter to current-calendar-year entries only — the headline copy reads
+    // "Annual projection", and ownerMonthlyExpenses accumulates across years
+    // (each MonthlyStatement save appends per-term rows but never expires
+    // historical ones). Without this filter, multi-year buildings see a
+    // monotonically-growing "Owner expenses" figure that overstates the
+    // current-year burden by the lifetime ratio. Term shape is YYYYMMDDHH;
+    // floor by 1e6 yields the year.
+    const currentYear = Math.floor(currentTerm / 1000000);
+    const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || [])
+      .filter((e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     const fixedOwnerMonthly = (building?.expenses || [])
       .filter(
         (e) =>

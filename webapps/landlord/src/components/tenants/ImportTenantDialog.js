@@ -737,9 +737,25 @@ export default function ImportTenantDialog({ open, setOpen }) {
           // new declaration's dates / declaration number. The parsed object
           // we POST is the same shape parseImportedPdf returned plus the
           // resolved leaseId so the server doesn't have to re-resolve.
+          //
+          // Refresh __v from a live GET before POSTing — the matchInfo
+          // snapshot may be minutes old (the dialog stays mounted) and the
+          // server's optimistic-lock guard 422s on stale __v. Same pattern
+          // as the replace branch below.
+          let extendVersion = matchInfo.matchedTenant.__v;
+          try {
+            const fresh = await fetchTenant(matchInfo.matchedTenant._id);
+            if (fresh && typeof fresh.__v === 'number') {
+              extendVersion = fresh.__v;
+            }
+          } catch {
+            // Fall through to the cached __v; server will 409 if it lost
+            // the race and the user can retry.
+          }
           tenant = await extendTenantLease(matchInfo.matchedTenant._id, {
             ...parsed,
-            leaseId
+            leaseId,
+            __v: extendVersion
           });
         } else if (canMergeIntoExisting && strategy === 'replace') {
           // P2.1 / H2: previously the PATCH overwrote properties[] with a

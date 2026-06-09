@@ -1964,6 +1964,18 @@ export async function extendLease(req: Req, res: Res) {
   const parsed: AnyRecord = req.body || {};
   const archivedAt = new Date(); // server-side timestamp captured here
 
+  // Optimistic-lock precondition. Mirror the `update` handler's contract:
+  // the client must echo back the document version it last read, so two
+  // concurrent extends (or extend racing with a payment write) cannot
+  // silently last-writer-win on the lease window.
+  const requestedVersion = Number(parsed.__v);
+  if (!Number.isFinite(requestedVersion)) {
+    throw new ServiceError(
+      'tenant __v is required on extend-lease (optimistic lock)',
+      422
+    );
+  }
+
   const existingDoc: any = await Collections.Tenant.findOne({
     _id: tenantId,
     realmId: realm!._id
@@ -2027,52 +2039,37 @@ export async function extendLease(req: Req, res: Res) {
       existingDoc.originalLeaseStartDate || existingDoc.beginDate
   };
 
-  // PATCH null does not $unset cleanly via the standard tenant update
-  // path; use a direct mongo update so terminationDate is actually
-  // removed when a previously-terminated tenant is re-extended.
-  const updated = await Collections.Tenant.findOneAndUpdate(
-    { _id: tenantId, realmId: realm!._id },
-    {
-      $push: { leaseHistory: historyEntry },
-      $set: setPatch,
-      $unset: { terminationDate: '' },
-      $inc: { __v: 1 }
-    },
-    { new: true }
-  ).lean();
-
-  if (!updated) {
-    throw new ServiceError('tenant not found', 404);
-  }
-
-  // Trigger the rent recompute pipeline for the new term. Only run when
-  // properties carry rent + entry/exit dates; otherwise the contract layer
-  // throws on incomplete inputs and an extension that simply moves the
-  // dates would 422.
-  const liveTenant: any = updated;
+  // Validate-then-write: run Contract.update on a clone BEFORE we touch
+  // mongo. Contract.update is a pure function (deep-clones inputs in
+  // contract.ts:83 and runs _checkLostPayments which throws if any paid
+  // term falls outside the new window). If it throws, no write has
+  // happened — the caller gets a 422 and the tenant doc is untouched.
+  // The newContract.rents result is then folded into the SAME atomic
+  // findOneAndUpdate that pushes leaseHistory + sets new dates.
+  let computedRents: any[] | null = null;
+  let propIds: string[] = [];
   if (
-    liveTenant.beginDate &&
-    liveTenant.endDate &&
-    _propertiesHaveRentData(liveTenant.properties)
+    existingDoc.beginDate &&
+    existingDoc.endDate &&
+    _propertiesHaveRentData(existingDoc.properties)
   ) {
     try {
-      const termFrequency = liveTenant.frequency || 'months';
-      const propIds = (liveTenant.properties as AnyRecord[])
+      const termFrequency = existingDoc.frequency || 'months';
+      propIds = (existingDoc.properties as AnyRecord[])
         .map((p) => p.propertyId)
         .filter(Boolean);
       const buildings = await _fetchBuildingsForProperties(
         realm!._id,
-        liveTenant.properties,
-        { _id: tenantId, properties: liveTenant.properties }
+        existingDoc.properties,
+        { _id: tenantId, properties: existingDoc.properties }
       );
-
       const contract = {
         begin: existingDoc.beginDate,
         end: existingDoc.endDate,
         frequency: termFrequency,
         terms: Math.ceil(
-          moment(existingDoc.endDate).diff(
-            moment(existingDoc.beginDate),
+          moment.utc(existingDoc.endDate).diff(
+            moment.utc(existingDoc.beginDate),
             termFrequency as moment.unitOfTime.Diff,
             true
           )
@@ -2087,26 +2084,63 @@ export async function extendLease(req: Req, res: Res) {
         begin: newBeginDate,
         end: newEndDate,
         termination: undefined,
-        properties: liveTenant.properties,
+        properties: existingDoc.properties,
         frequency: termFrequency
       });
-
-      await Collections.Tenant.updateOne(
-        { _id: tenantId, realmId: realm!._id },
-        { $set: { rents: newContract.rents }, $inc: { __v: 1 } }
-      );
-
-      // Sibling cohort (equal-allocation buildings) needs to recompute now
-      // that the lease window changed.
-      if (propIds.length) {
-        await _recomputeSiblingTenantsInBuildings(
-          realm!._id,
-          propIds,
-          tenantId
-        );
-      }
+      computedRents = newContract.rents;
     } catch (e) {
       throw new ServiceError(String(e), 422);
+    }
+  }
+
+  // Atomic single write: __v guard + history push + new dates +
+  // termination unset + (when applicable) regenerated rents. The follow-up
+  // updateOne is gone — there is one mongo round-trip and one __v bump.
+  const updateOps: AnyRecord = {
+    $push: { leaseHistory: historyEntry },
+    $set: { ...setPatch, ...(computedRents ? { rents: computedRents } : {}) },
+    $unset: { terminationDate: '' },
+    $inc: { __v: 1 }
+  };
+  const updated = await Collections.Tenant.findOneAndUpdate(
+    { _id: tenantId, realmId: realm!._id, __v: requestedVersion },
+    updateOps,
+    { new: true }
+  ).lean();
+
+  if (!updated) {
+    // Either the tenant doesn't exist or __v didn't match — distinguish.
+    const stillExists = await Collections.Tenant.exists({
+      _id: tenantId,
+      realmId: realm!._id
+    });
+    if (!stillExists) {
+      throw new ServiceError('tenant not found', 404);
+    }
+    throw new ServiceError(
+      'Update conflict: tenant was modified simultaneously. Please retry.',
+      409
+    );
+  }
+
+  // Sibling cohort (equal-allocation buildings) needs to recompute now
+  // that the lease window changed. This runs AFTER the atomic write so
+  // siblings see the new window. A failure here doesn't roll back the
+  // primary write — the rents will just be slightly stale on cohort
+  // members until the next mutation triggers a recompute.
+  if (computedRents && propIds.length) {
+    try {
+      await _recomputeSiblingTenantsInBuildings(
+        realm!._id,
+        propIds,
+        tenantId
+      );
+    } catch (e: any) {
+      logger.warn(
+        `extendLease: sibling-cohort recompute failed for tenant ${tenantId}: ${
+          e?.message || e
+        }`
+      );
     }
   }
 

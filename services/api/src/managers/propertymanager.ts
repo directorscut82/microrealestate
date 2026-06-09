@@ -1,6 +1,7 @@
 import * as FD from './frontdata.js';
 import {
   Collections,
+  logger,
   Pagination,
   ServiceError
 } from '@microrealestate/common';
@@ -423,7 +424,17 @@ function _zeroCategoryTotals(): CategoryTotals {
 }
 
 // Map a building expense schema `type` to one of the 7 panel categories.
-function _classifyExpenseType(type: string | undefined | null): ExpenseCategory {
+// The schema enum (services/common/src/collections/building.ts BuildingExpenseSchema.type)
+// has 11 values: heating, elevator, cleaning, water_common, electricity_common,
+// insurance, management_fee, garden, repairs_fund, pest_control, other.
+// Every enum value MUST be mapped explicitly here — silent fall-through to
+// 'other' would make the panel undercounting visible only when the user
+// happens to add an elevator/garden/pest_control expense. The jest unit at
+// services/api/src/__tests__/propertymanager.classifyExpense.test.js
+// asserts every schema enum value resolves to a non-default category.
+export function _classifyExpenseType(
+  type: string | undefined | null
+): ExpenseCategory {
   switch (type) {
     case 'heating':
       return 'heating';
@@ -434,11 +445,31 @@ function _classifyExpenseType(type: string | undefined | null): ExpenseCategory 
     case 'insurance':
       return 'insurance';
     case 'cleaning':
+    case 'garden':
+    case 'pest_control':
+      // garden + pest_control are common-area maintenance — group with cleaning
+      // for the panel headline. Each still appears as a separate line in
+      // currentMonth.lines so the user can disambiguate per row.
       return 'cleaning';
+    case 'elevator':
     case 'repairs_fund':
     case 'repair':
+      // elevator maintenance is mechanically-similar to repairs (irregular
+      // upkeep on building infrastructure); roll into 'repairs' rather than
+      // create a 4-row "elevator" category that doubles the panel size.
       return 'repairs';
+    case 'management_fee':
+    case 'other':
+    case undefined:
+    case null:
+    case '':
+      return 'other';
     default:
+      // Unknown enum value — treat as 'other' but warn so future schema
+      // additions are surfaced rather than silently miscategorised.
+      logger.warn(
+        `_classifyExpenseType: unmapped expense type "${type}" — defaulted to 'other'`
+      );
       return 'other';
   }
 }
@@ -609,22 +640,42 @@ export async function getExpenses(req: Req, res: Res) {
       }
 
       // 3. Owner monthly expenses for this term — these are already
-      //    materialised per-term so no allocation is needed. They land on
-      //    the OWNER side (not tenant), so categorise as 'other' unless
-      //    we can map the expenseId back to a typed building.expenses
-      //    entry.
+      //    materialised per-term so no allocation is needed. The schema
+      //    (services/common/src/collections/building.ts OwnerMonthlyExpense)
+      //    declares `source: 'expense' | 'repair'`. For source='repair'
+      //    `expenseId` holds a REPAIR _id (services/api/src/managers/buildingmanager.ts
+      //    _distributeRepairCharge writes ownerMonthlyExpenses with
+      //    source='repair' and expenseId = repair._id), so the building.expenses
+      //    lookup misses; categorise those directly as 'repairs'. For
+      //    source='expense' (or undefined for legacy rows) look up the source
+      //    expense type to classify correctly.
       if (Array.isArray(building.ownerMonthlyExpenses)) {
         for (const ownerEntry of building.ownerMonthlyExpenses as any[]) {
           if (ownerEntry.term !== term) continue;
           const amount = Number(ownerEntry.amount) || 0;
           if (amount <= 0) continue;
-          // Try to resolve the source expense type to classify correctly.
-          const sourceExpense = (building.expenses || []).find(
-            (e: any) => String(e._id) === String(ownerEntry.expenseId)
-          );
-          const category = _classifyExpenseType(sourceExpense?.type);
+          let category: ExpenseCategory;
+          let lineDescription: string;
+          if (ownerEntry.source === 'repair') {
+            // Try to enrich the description from building.repairs but the
+            // category is unconditionally 'repairs'.
+            const sourceRepair = (building.repairs || []).find(
+              (r: any) => String(r._id) === String(ownerEntry.expenseId)
+            );
+            category = 'repairs';
+            lineDescription =
+              ownerEntry.description ||
+              (sourceRepair?.title ? `Repair: ${sourceRepair.title}` : 'Owner repair');
+          } else {
+            const sourceExpense = (building.expenses || []).find(
+              (e: any) => String(e._id) === String(ownerEntry.expenseId)
+            );
+            category = _classifyExpenseType(sourceExpense?.type);
+            lineDescription =
+              ownerEntry.description || sourceExpense?.name || 'Owner expense';
+          }
           const line: ExpenseLine = {
-            description: ownerEntry.description || sourceExpense?.name || 'Owner expense',
+            description: lineDescription,
             amount,
             source: 'owner_monthly_expense'
           };

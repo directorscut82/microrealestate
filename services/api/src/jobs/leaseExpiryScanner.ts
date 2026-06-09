@@ -152,6 +152,14 @@ export async function checkExpiringLeases(
     }
 
     try {
+      // The /emailer route is gated by needAccessToken — the cron has no
+      // incoming request to forward, so mint a short-lived service token
+      // (30s, signed with ACCESS_TOKEN_SECRET) for each POST. The token
+      // carries the tenant's realmId so checkOrganization passes.
+      const serviceToken = await Service.getInstance().createServiceToken(
+        'administrator',
+        String(tenant.realmId)
+      );
       await postEmail(
         emailerUrl,
         {
@@ -163,6 +171,7 @@ export async function checkExpiringLeases(
           }
         },
         {
+          authorization: `Bearer ${serviceToken}`,
           organizationid: String(tenant.realmId)
         }
       );

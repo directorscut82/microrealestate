@@ -194,6 +194,13 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   // repeat sends within the configured cooldown window (25 days). null means
   // "never sent" — the next scan will deliver the first notice.
   lastExpiryNoticeSentAt: { type: Date, default: null }
+}, {
+  // Match Building/Realm: Mongoose enforces __v on save() paths. The
+  // findOneAndUpdate handlers (`update`, `extendLease`) still need to
+  // filter on __v explicitly — Mongoose only autoenforces on save() —
+  // but this provides defense-in-depth for any future code that uses
+  // tenant.save() and forgets to thread __v manually.
+  optimisticConcurrency: true
 });
 
 TenantSchema.index({ realmId: 1 });
