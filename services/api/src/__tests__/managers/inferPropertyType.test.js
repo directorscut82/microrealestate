@@ -1,7 +1,7 @@
 // Tier E4: lock the E9-based property type inference. AADE category
 // numbers + floor-only fallback rules per businesslogic/inferPropertyType.ts.
-
-const { inferPropertyType } = require('../../businesslogic/inferPropertyType.js');
+/* eslint-env node, mocha */
+import { inferPropertyType } from '../../businesslogic/inferPropertyType.js';
 
 const u = (over = {}) => ({
   category: null,
