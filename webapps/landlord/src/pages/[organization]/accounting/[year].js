@@ -115,17 +115,31 @@ function Accounting() {
     [t, year]
   );
 
-  // Wave-26 round-3u: per-month receipt download. The popover gives the
-  // user one button per month of the current accounting year; clicking
-  // a month fetches a single-page PDF via /documents/invoice/<tid>/<term>.
-  // The backend regex `^\d{4}(\d{6})?$` already accepts a 10-digit term.
+  // Q4 multi-month batch: the popover passes an array of selected months
+  // (1..12). Build a comma-separated list of 10-digit YYYYMMDDHH terms
+  // and hand it to /documents/invoice/<tid>/<csv-terms>. The backend
+  // regex accepts up to 12 comma-separated terms; the EJS template
+  // iterates `tenant.rents.forEach(...)` so a 3-month selection produces
+  // a stitched 3-section single PDF automatically.
   const getYearInvoices = useCallback(
-    (tenant) => (month) => {
-      const mm = String(month).padStart(2, '0');
-      const term = `${year}${mm}0100`;
+    (tenant) => (months) => {
+      const list = Array.isArray(months) ? months : [months];
+      if (!list.length) return;
+      const terms = list
+        .map((m) => `${year}${String(m).padStart(2, '0')}0100`)
+        .join(',');
+      // Filename: single-month → keep the existing `<name>-<YYYYMM>-receipt`
+      // shape; multi-month → `<name>-<YYYY>-receipts-<count>` so it stays
+      // legible at any selection size.
+      const documentName =
+        list.length === 1
+          ? `${tenant.name}-${year}${String(list[0]).padStart(2, '0')}-${t(
+              'receipt'
+            )}.pdf`
+          : `${tenant.name}-${year}-${t('Receipts')}-${list.length}.pdf`;
       downloadDocument({
-        endpoint: `/documents/invoice/${tenant._id}/${term}`,
-        documentName: `${tenant.name}-${year}${mm}-${t('receipt')}.pdf`
+        endpoint: `/documents/invoice/${tenant._id}/${terms}`,
+        documentName
       });
     },
     [year, t]

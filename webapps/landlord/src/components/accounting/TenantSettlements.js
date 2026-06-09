@@ -12,15 +12,51 @@ import useTranslation from 'next-translate/useTranslation';
 
 const months = moment.localeData().months();
 
-// Wave-26 round-3u: per-month receipt picker. Renders a Button that
-// opens a popover with 12 month buttons; selecting a month invokes the
-// caller's onPick(monthNumber) which builds the 10-digit term and
-// downloads the single-page PDF.
+// Q4 multi-month batch: per-month receipt picker. The popover renders a
+// 12-month checkbox grid plus an "All year" shortcut and a "Download N
+// receipts" submit button. On submit, the selected months are
+// concatenated into a comma-separated 10-digit term string
+// (e.g. "2026010100,2026020100,2026030100") and passed to onPick which
+// downloads a single multi-section PDF — the EJS template at
+// services/pdfgenerator/templates/invoice.ejs already iterates
+// `tenant.rents.forEach(...)` so a 3-month selection produces a stitched
+// 3-page receipt PDF without any template edits.
 function ReceiptMonthPicker({ onPick, t }) {
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState([]);
   const localeMonths = moment.localeData().months();
+
+  const toggleMonth = (month) => {
+    setSelected((prev) =>
+      prev.includes(month)
+        ? prev.filter((m) => m !== month)
+        : [...prev, month]
+    );
+  };
+
+  const allYear = () => {
+    const allSelected = selected.length === 12;
+    setSelected(allSelected ? [] : Array.from({ length: 12 }, (_, i) => i + 1));
+  };
+
+  const submit = () => {
+    if (!selected.length) return;
+    const sorted = [...selected].sort((a, b) => a - b);
+    onPick(sorted);
+    setOpen(false);
+    setSelected([]);
+  };
+
+  // When the popover closes without a submit, reset the selection so
+  // the next open starts clean. Without this the user would re-open
+  // and find their abandoned selections still ticked.
+  const handleOpenChange = (next) => {
+    setOpen(next);
+    if (!next) setSelected([]);
+  };
+
   return (
-    <Popover open={open} onOpenChange={setOpen} modal>
+    <Popover open={open} onOpenChange={handleOpenChange} modal>
       <PopoverTrigger asChild>
         <Button variant="secondary" className="flex items-center gap-1">
           <LuPaperclip /> {t('Receipt')}
@@ -28,26 +64,51 @@ function ReceiptMonthPicker({ onPick, t }) {
       </PopoverTrigger>
       <PopoverContent className="w-72 p-2" align="end">
         <div className="text-xs text-muted-foreground px-2 py-1 mb-1">
-          {t('Receipt')}
+          {t('Select months')}
         </div>
         <div className="grid grid-cols-3 gap-1">
           {localeMonths.map((monthName, idx) => {
             const month = idx + 1;
+            const isSelected = selected.includes(month);
             return (
-              <Button
+              <label
                 key={month}
-                variant="ghost"
-                size="sm"
-                className="text-xs h-8"
-                onClick={() => {
-                  onPick(month);
-                  setOpen(false);
-                }}
+                className={cn(
+                  'flex items-center gap-1 text-xs h-8 px-2 rounded cursor-pointer border',
+                  isSelected
+                    ? 'bg-primary/10 border-primary'
+                    : 'border-transparent hover:bg-accent'
+                )}
               >
-                {monthName.slice(0, 3)}
-              </Button>
+                <input
+                  type="checkbox"
+                  className="size-3"
+                  checked={isSelected}
+                  onChange={() => toggleMonth(month)}
+                />
+                <span>{monthName.slice(0, 3)}</span>
+              </label>
             );
           })}
+        </div>
+        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7"
+            onClick={allYear}
+          >
+            {t('All year')}
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            className="text-xs h-7"
+            disabled={!selected.length}
+            onClick={submit}
+          >
+            {t('Download {{count}} receipts', { count: selected.length })}
+          </Button>
         </div>
       </PopoverContent>
     </Popover>
@@ -169,7 +230,7 @@ export default function TenantSettlements({
               {moment(settlement.endDate).format('L')}
             </div>
             <div>
-              {months.map((m, index) => {
+              {months.map((_m, index) => {
                 return (
                   <SettlementList
                     key={`${settlement.tenantId}_${index}`}
