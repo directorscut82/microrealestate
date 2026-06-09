@@ -61,6 +61,25 @@ function _filterData(data = [], filters) {
         matchField(surface)
     );
   }
+
+  // Tier F2: sort by (buildingId, atakNumber) so a building's units stay
+  // adjacent in the data array. Without this, the upstream paginator
+  // (ResourceList List._computeChunks, page size 21) splits a building
+  // across pages — page 2 then sees a SOLO unit with that buildingId,
+  // which PropertyList still groups by buildingId but renders as a
+  // single-row 'group' OR (when the group renders empty) puts the lone
+  // property into ΛΟΙΠΑ. Sorting keeps each building contiguous and
+  // makes pagination boundaries fall between buildings most of the time.
+  // Properties without buildingId are pushed to the end so they always
+  // land in the ΛΟΙΠΑ section on the last page.
+  filteredItems = [...filteredItems].sort((a, b) => {
+    const ab = a.buildingId ? String(a.buildingId) : '￿';
+    const bb = b.buildingId ? String(b.buildingId) : '￿';
+    if (ab !== bb) return ab < bb ? -1 : 1;
+    const aa = String(a.atakNumber || a.name || '');
+    const ba = String(b.atakNumber || b.name || '');
+    return aa < ba ? -1 : aa > ba ? 1 : 0;
+  });
   return filteredItems;
 }
 

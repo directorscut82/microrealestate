@@ -64,4 +64,25 @@ describe('inferPropertyType', () => {
       expect(inferPropertyType(u({ category: 5, floor: 2 }))).toBe('storage');
     });
   });
+
+  describe('name-based fallback when category + floor null', () => {
+    it("name contains 'Υπόγειο' -> storage", () => {
+      expect(inferPropertyType({ category: null, floor: null, name: 'ΑΓ. ΑΝΑΡΓΥΡΩΝ 28 - Υπόγειο' })).toBe('storage');
+    });
+    it("name contains 'Αποθήκη' -> storage", () => {
+      expect(inferPropertyType({ category: null, floor: null, name: 'Αποθήκη Β1' })).toBe('storage');
+    });
+    it("name contains 'Πάρκινγκ' -> parking", () => {
+      expect(inferPropertyType({ category: null, floor: null, name: 'Πάρκινγκ Π2' })).toBe('parking');
+    });
+    it("plain name 'Όροφος 1' -> apartment", () => {
+      expect(inferPropertyType({ category: null, floor: null, name: 'ΣΠΑΡΤΙΑΤΩΝ 9 - Όροφος 1' })).toBe('apartment');
+    });
+    it("category overrides name pattern (cat=2 wins over 'Υπόγειο')", () => {
+      expect(inferPropertyType({ category: 2, floor: null, name: 'Υπόγειο' })).toBe('store');
+    });
+    it("floor overrides name pattern (floor=0 wins over apartment-named)", () => {
+      expect(inferPropertyType({ category: null, floor: 0, name: 'Όροφος 1' })).toBe('store');
+    });
+  });
 });

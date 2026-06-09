@@ -69,7 +69,7 @@ export default function PropertyListItem({ property }) {
             : null}
         </div>
         <Badge
-          variant={isVacant ? 'success' : 'secondary'}
+          variant={isVacant ? 'secondary' : 'success'}
           className="shrink-0 px-2 py-0 text-[11px] leading-none font-normal"
         >
           {isVacant ? t('Vacant') : t('Rented')}
