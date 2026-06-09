@@ -1,5 +1,6 @@
 import {
   addBuildingRepair,
+  fetchProperties,
   QueryKeys,
   removeBuildingRepair,
   updateBuildingRepair
@@ -21,7 +22,7 @@ import {
   TableRow
 } from '../ui/table';
 import { useCallback, useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import ConfirmDialog from '../ConfirmDialog';
@@ -276,7 +277,48 @@ export default function RepairList({ building }) {
   // pure tenants/owners cases).
   const showTenantSharePercentage = chargeableTo === 'split';
 
-  const buildingUnits = building?.units || [];
+  // Resolve unit.propertyId → property.name so the picker shows
+  // human-readable labels instead of bare ObjectIds. The properties index
+  // is shared across the app — react-query dedupes the request so this
+  // is free if any other surface already loaded it this session.
+  const { data: allPropertiesPage } = useQuery({
+    queryKey: [QueryKeys.PROPERTIES],
+    queryFn: fetchProperties,
+    staleTime: 60_000
+  });
+  const allProperties = useMemo(() => {
+    if (Array.isArray(allPropertiesPage)) return allPropertiesPage;
+    return allPropertiesPage?.items || [];
+  }, [allPropertiesPage]);
+  const propertyNameById = useMemo(() => {
+    const map = new Map();
+    for (const p of allProperties) {
+      if (p?._id) map.set(String(p._id), p.name || '');
+    }
+    return map;
+  }, [allProperties]);
+
+  const buildingUnits = useMemo(() => {
+    return (building?.units || []).map((u) => ({
+      ...u,
+      // Backfill propertyName + a friendly label even when the source
+      // unit doc lacks them. Floor "0" is meaningful (ground floor) so
+      // we surface it explicitly. The picker reads `propertyName` and
+      // `unitLabel` so this object stays drop-in compatible with the
+      // existing JSX below.
+      propertyName:
+        u.propertyName ||
+        propertyNameById.get(String(u.propertyId)) ||
+        '',
+      unitLabel:
+        u.unitLabel ||
+        u.name ||
+        (typeof u.floor === 'number'
+          ? `Όροφος ${u.floor}`
+          : '')
+    }));
+  }, [building?.units, propertyNameById]);
+
   // Tier I-3.f upload state: tracks the in-flight invoice upload so we can
   // disable the submit button + show progress in the helper text.
   const [invoiceUploading, setInvoiceUploading] = useState(false);
@@ -659,10 +701,20 @@ export default function RepairList({ building }) {
                         {buildingUnits.map((u) => {
                           const uid = String(u._id);
                           const checked = affectedUnitIds.includes(uid);
+                          // Build a label the user can actually match to
+                          // a real apartment: property name first
+                          // (most-recognizable), then floor + unit
+                          // label, ATAK last as a tiebreaker for units
+                          // sharing a floor.
+                          const floorPart =
+                            typeof u.floor === 'number'
+                              ? t('Floor {{n}}', { n: u.floor })
+                              : '';
                           const labelParts = [
-                            u.atakNumber,
-                            u.unitLabel || u.name,
-                            u.propertyName
+                            u.propertyName,
+                            floorPart,
+                            u.unitLabel,
+                            u.atakNumber ? `ATAK ${u.atakNumber}` : ''
                           ].filter(Boolean);
                           return (
                             <label
@@ -821,9 +873,34 @@ export default function RepairList({ building }) {
                   }}
                 />
                 {invoiceDocumentId ? (
-                  <p className="text-label text-ink-muted">
-                    {t('Invoice file uploaded')}
-                  </p>
+                  <div className="flex items-center justify-between gap-2 text-label">
+                    <span className="text-ink-muted truncate">
+                      {invoiceDocumentId.split('/').pop()}
+                    </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <a
+                        href={`/api/v2/documents/by-key?key=${encodeURIComponent(
+                          invoiceDocumentId
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-ink underline underline-offset-2 hover:no-underline"
+                      >
+                        {t('View invoice')}
+                      </a>
+                      <button
+                        type="button"
+                        className="text-oxide hover:underline"
+                        onClick={() =>
+                          setValue('invoiceDocumentId', null, {
+                            shouldDirty: true
+                          })
+                        }
+                      >
+                        {t('Remove')}
+                      </button>
+                    </div>
+                  </div>
                 ) : null}
               </div>
 

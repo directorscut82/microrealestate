@@ -43,6 +43,47 @@ export default function TenantListItem({ tenant }) {
     return 0;
   }, [tenant.beginDate, tenant.endDate, tenant.terminationDate]);
 
+  // Required-field gap detector: surface what the server-side Tier A1
+  // validators would reject on save. The list shows the user exactly
+  // which fields they need to fill in (firstName/lastName for naturals,
+  // company/legalForm for legal entities, taxId for both, plus a
+  // checksum-valid Greek AFM). Without this, a tenant created via the
+  // stepper or a partial PDF import LOOKS complete in the tile but
+  // 422s on the next manual save.
+  const missingFields = useMemo(() => {
+    const missing = [];
+    if (tenant.isCompany) {
+      if (!tenant.company || !String(tenant.company).trim()) missing.push('company');
+      if (!tenant.legalForm || !String(tenant.legalForm).trim()) missing.push('legalForm');
+    } else {
+      if (!tenant.firstName || !String(tenant.firstName).trim()) missing.push('firstName');
+      if (!tenant.lastName || !String(tenant.lastName).trim()) missing.push('lastName');
+    }
+    if (!tenant.taxId || !String(tenant.taxId).trim()) {
+      missing.push('taxId');
+    } else {
+      // Quick AFM checksum (matches services/api/src/validators.ts).
+      // Mark "taxIdInvalid" when present-but-bad so the user fixes the
+      // value rather than thinking the field is empty.
+      const t = String(tenant.taxId).trim();
+      if (/^\d{9}$/.test(t)) {
+        let s = 0;
+        for (let i = 0; i < 8; i++) s += Number(t[i]) * Math.pow(2, 8 - i);
+        if (((s % 11) % 10) !== Number(t[8])) missing.push('taxIdInvalid');
+      } else {
+        missing.push('taxIdInvalid');
+      }
+    }
+    return missing;
+  }, [
+    tenant.isCompany,
+    tenant.firstName,
+    tenant.lastName,
+    tenant.company,
+    tenant.legalForm,
+    tenant.taxId
+  ]);
+
   // Tier B8 — 3-state lease pill: terminated / future-start / running.
   // Previously a 2-state predicate ("Lease ended" vs "Lease running")
   // contradicted the no-property warning when the tenant had a future
@@ -116,6 +157,31 @@ export default function TenantListItem({ tenant }) {
       </CardContent>
 
       <CardFooter className="p-0 flex-col mt-auto">
+        {missingFields.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-1 w-full py-2 px-5 border-t border-stone-line/60"
+            data-cy="tenantMissingFields"
+            data-missing-fields={missingFields.join(',')}
+          >
+            <span className="text-label text-ink-muted shrink-0">
+              {t('Missing fields')}:
+            </span>
+            {missingFields.map((f) => (
+              <Badge
+                key={f}
+                variant="outline"
+                className="text-label border-amber-500 text-amber-700 leading-none"
+              >
+                {f === 'firstName' && t('First name')}
+                {f === 'lastName' && t('Last name')}
+                {f === 'company' && t('Company')}
+                {f === 'legalForm' && t('Legal structure')}
+                {f === 'taxId' && t('Tax ID')}
+                {f === 'taxIdInvalid' && t('Tax ID (invalid)')}
+              </Badge>
+            ))}
+          </div>
+        )}
         <div className="flex items-center justify-end w-full py-3 px-5">
           <Badge
             data-lease-state={leaseState}

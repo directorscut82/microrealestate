@@ -14,6 +14,7 @@ import Handlebars from 'handlebars';
 import moment from 'moment';
 import multer from 'multer';
 import path from 'path';
+import { sanitize } from '../utils/index.js';
 import uploadMiddleware from '../utils/uploadmiddelware.js';
 
 // MongoDB ObjectIds are 24-character lowercase hex strings. Validating
@@ -410,6 +411,95 @@ export default function () {
       }
 
       return res.status(200).json(documentsFound);
+    })
+  );
+
+  // Direct-key download: returns the file persisted at the given storage
+  // key. Used by repair-invoice retrieval (RepairList stores the upload's
+  // returned key as `repair.invoiceDocumentId` and does NOT open a
+  // Document collection record). Realm scoping is enforced by checking
+  // the key starts with the realm's `<orgName>-<orgId>/` prefix —
+  // /documents/upload writes every key under that prefix
+  // (uploadmiddelware.ts:62-73), so any key outside it could not have
+  // been produced by this realm.
+  documentsApi.get(
+    '/by-key',
+    Middlewares.asyncWrapper(async (req, res) => {
+      const realm = (req as any).realm;
+      if (!realm?._id) {
+        throw new ServiceError('organization required', 404);
+      }
+      const rawKey = req.query?.key;
+      if (typeof rawKey !== 'string' || !rawKey.length) {
+        throw new ServiceError('key required', 422);
+      }
+      // Reject control chars, backslashes, leading slashes, and any `..`
+      // segment before doing path resolution. The path.resolve check
+      // below is the second line of defence.
+      // eslint-disable-next-line no-control-regex
+      if (/\\|^\/+|(^|\/)\.\.(\/|$)|[\x00-\x1f]/.test(rawKey)) {
+        throw new ServiceError('invalid key', 422);
+      }
+      const expectedPrefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
+      if (!rawKey.startsWith(expectedPrefix)) {
+        // Either tampered key or a legacy upload from a different
+        // realm — refuse without leaking which case.
+        throw new ServiceError('forbidden', 403);
+      }
+
+      const { UPLOADS_DIRECTORY } = Service.getInstance().envConfig.getValues();
+      const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
+      const filePath = path.resolve(uploadsRoot, rawKey);
+      if (
+        filePath !== uploadsRoot &&
+        !filePath.startsWith(uploadsRoot + path.sep)
+      ) {
+        throw new ServiceError('forbidden', 403);
+      }
+
+      const baseName = path.basename(rawKey).replace(/[\r\n"]/g, '');
+      const asciiFallback = baseName.replace(/[^A-Za-z0-9._-]/g, '_');
+      const utf8Encoded = encodeURIComponent(baseName);
+      // Inline (not attachment) so the browser can preview PDFs/images
+      // when the user clicks "View invoice"; downloads still work via
+      // right-click → Save As.
+      const contentDisposition = `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
+
+      const ext = path.extname(rawKey).toLowerCase().replace(/^\./, '');
+      const mimeMap: Record<string, string> = {
+        pdf: 'application/pdf',
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        jpe: 'image/jpeg',
+        gif: 'image/gif'
+      };
+      const mimeType = mimeMap[ext] || 'application/octet-stream';
+
+      // Local-disk path first
+      if (fs.existsSync(filePath)) {
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', contentDisposition);
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        return fs.createReadStream(filePath).pipe(res);
+      }
+      // S3/B2 fallback
+      if (s3.isEnabled(realm?.thirdParties?.b2)) {
+        try {
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Disposition', contentDisposition);
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          return s3.downloadFile(realm.thirdParties.b2, rawKey).pipe(res);
+        } catch (err) {
+          logger.error(
+            `cannot download ${rawKey} from s3: ${
+              (err as Error)?.message || err
+            }`
+          );
+          throw new ServiceError('cannot download file', 404);
+        }
+      }
+      throw new ServiceError('file not found', 404);
     })
   );
 

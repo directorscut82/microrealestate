@@ -527,6 +527,40 @@ test('33D · POST extend-lease happy path: 200, endDate moves, leaseHistory grow
   if (!_seed) throw new Error('seed not ready');
   const api = await request.newContext();
   try {
+    // 33C left a recorded payment 2 months ago. The Mongoose update guard
+    // ("cannot clear rents: tenant has recorded payments") rejects PATCHes
+    // that would touch rents while a payment exists, AND the
+    // pre-termination PATCH below would 422. Clear ALL payments on this
+    // tenant so 33D starts from a known clean state. We GET the tenant's
+    // rents, find any term carrying payments, and PATCH each one with
+    // payments=[].
+    const rentsResp = await api.get(
+      `${GATEWAY}/api/v2/rents/tenant/${_seed.tenantId}`,
+      { headers: auth(_seed) }
+    );
+    if (rentsResp.status() === 200) {
+      const rentsBody = (await rentsResp.json()) as {
+        rents?: Array<{ term: number; payments?: Array<unknown> }>;
+      };
+      const termsWithPayments = (rentsBody.rents || [])
+        .filter((r) => Array.isArray(r.payments) && r.payments.length > 0)
+        .map((r) => r.term);
+      for (const term of termsWithPayments) {
+        await api
+          .patch(`${GATEWAY}/api/v2/rents/payment/${_seed.tenantId}/${term}`, {
+            headers: auth(_seed),
+            data: {
+              _id: _seed.tenantId,
+              payments: []
+            }
+          })
+          .catch(() => {
+            // Best-effort. If a clear fails the next assertion will surface
+            // the underlying issue with a clearer message.
+          });
+      }
+    }
+
     // Pre-state: set a terminationDate so we can prove $unset removes it.
     // Pull __v first; the update endpoint also enforces __v.
     const t1 = await api.get(`${GATEWAY}/api/v2/tenants/${_seed.tenantId}`, {

@@ -116,6 +116,12 @@ const BuildingExpenseSchema = new mongoose.Schema({
   endTerm: Number,
   trackOwnerExpense: { type: Boolean, default: false },
   ownerAmount: { type: Number, default: 0 },
+  // When TRUE, the share that would have been allocated to a vacant
+  // (unrented) unit gets routed to the owner instead of being silently
+  // dropped. Used for common-area utilities (electricity, lift, cleaning)
+  // where the bill is paid even when units are empty. Default FALSE
+  // preserves the historical behavior — only opt in per-expense.
+  chargeOwnerWhenVacant: { type: Boolean, default: false },
   notes: String,
   billingId: String
 });
