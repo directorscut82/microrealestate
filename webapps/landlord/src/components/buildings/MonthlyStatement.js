@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { LuInfo } from 'react-icons/lu';
 import {
   Tooltip,
   TooltipContent,
@@ -240,7 +241,24 @@ export default function MonthlyStatement({ building }) {
   }, [selectedTerm, tenantExpenses, ownerExpenses, amounts, ownerAmounts, mutation, t]);
 
   if (!hasAnyExpenses) {
-    return null;
+    return (
+      <div>
+        <h3 className="text-lg font-medium mb-4">
+          {t('Monthly Statement')}
+        </h3>
+        <div className="rounded-md border border-border/60 bg-muted/30 text-muted-foreground p-4 flex gap-3 items-start">
+          <LuInfo className="h-5 w-5 mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              {t('Monthly entry')}
+            </p>
+            <p className="text-sm leading-relaxed">
+              {t('Variable expense placeholder body')}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

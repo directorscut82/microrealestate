@@ -317,12 +317,29 @@ export default function () {
           throw new ServiceError('invalid tenant id', 422);
         }
         // Accept either a full 10-digit YYYYMMDDHH term (single-month
-        // invoice) or a 4-digit YYYY year (year-of-invoices). The data
-        // layer at services/pdfgenerator/data/index.js filters via
-        // `String(rent.term).startsWith(term)`, so a 4-digit prefix
-        // correctly selects every rent in that year.
-        if (!/^\d{4}(\d{6})?$/.test(String(term))) {
+        // invoice), a 4-digit YYYY year (year-of-invoices), OR a
+        // comma-separated list of up to 12 such terms (Q4 multi-month
+        // batch — used by the per-month picker in the landlord
+        // accounting page to stitch multiple receipt sections into a
+        // single PDF). The data layer at services/pdfgenerator/data/
+        // index.js filters via OR-of-startsWith across the comma-split
+        // sub-terms, so a 4-digit prefix still correctly selects every
+        // rent in that year.
+        const TERM_RE = /^(\d{4}(\d{6})?)(,\d{4}(\d{6})?){0,11}$/;
+        if (!TERM_RE.test(String(term))) {
           throw new ServiceError('invalid term format', 422);
+        }
+        // Defense-in-depth: split on `,` and re-validate each sub-term
+        // matches the single-term shape. The combined regex above
+        // already enforces this, but a per-element check makes intent
+        // explicit and protects against future regex regressions.
+        const termStr = String(term);
+        const subTerms = termStr.split(',');
+        const SINGLE_TERM_RE = /^\d{4}(\d{6})?$/;
+        for (const st of subTerms) {
+          if (!SINGLE_TERM_RE.test(st)) {
+            throw new ServiceError('invalid term format', 422);
+          }
         }
         const tenant = await Collections.Tenant.findOne({
           _id: tenantId,
@@ -331,17 +348,16 @@ export default function () {
         if (!tenant) {
           throw new ServiceError('tenant not found', 404);
         }
-        // Pre-flight: at least one rent in the requested term-prefix
-        // must exist. The data picker at pdfgenerator/data/index.js:47
-        // uses `String(rent.term).startsWith(term)`, so the same shape
-        // applies here — strict numeric equality would 404 every
-        // year-prefix request because rent.term is 10-digit
-        // YYYYMMDDHH while the year-of-invoices request passes the
-        // 4-digit YYYY prefix.
-        const termStr = String(term);
+        // Pre-flight: at least ONE sub-term must have a matching rent
+        // across all rents. The data picker at pdfgenerator/data/
+        // index.js uses `terms.some(t => String(rent.term).startsWith(t))`
+        // when filtering, so an all-miss request would render an empty
+        // PDF without this guard. We do NOT require every sub-term to
+        // match — partial matches still produce a useful multi-section
+        // PDF for the months that exist.
         const rents = (tenant as any).rents || [];
         const hasTerm = rents.some((r: any) =>
-          String(r.term).startsWith(termStr)
+          subTerms.some((st) => String(r.term).startsWith(st))
         );
         if (!hasTerm) {
           throw new ServiceError('rent not found for term', 404);

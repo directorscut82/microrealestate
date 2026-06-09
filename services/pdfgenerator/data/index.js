@@ -81,10 +81,18 @@ export async function getRentsData(params, documentId) {
   landlord.hasAddress = !!landlord.addresses?.length;
   landlord.hasContact = !!landlord.contacts?.length;
 
+  // Q4 multi-month batch: callers may pass either a single term/prefix
+  // ("2026", "2026040100") or a comma-separated list of up to 12 such
+  // terms ("2026010100,2026020100,2026030100"). The route validates
+  // shape and count; we just OR across sub-terms here so the data
+  // picker stays agnostic to single vs. batch callers.
+  const terms = String(term).split(',');
   let rents = [];
   if (dbTenant.rents.length) {
     rents = dbTenant.rents
-      .filter((rent) => String(rent.term).startsWith(term))
+      .filter((rent) =>
+        terms.some((t) => String(rent.term).startsWith(t))
+      )
       .map((rent) => ({
         ...rent,
         period: rent.term,
