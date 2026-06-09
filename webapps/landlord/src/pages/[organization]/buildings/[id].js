@@ -167,7 +167,7 @@ function Building() {
             {t('Repairs & Contractors')}
           </TabsTrigger>
           <TabsTrigger value="settings" className="w-1/5" data-cy="settingsTab">
-            {t('Settings')}
+            {t('Information')}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="overview">

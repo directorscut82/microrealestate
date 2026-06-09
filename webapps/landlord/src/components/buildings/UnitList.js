@@ -6,6 +6,7 @@ import {
   updateBuildingUnit
 } from '../../utils/restcalls';
 import { LuPencil, LuPlusCircle, LuTrash } from 'react-icons/lu';
+import { useRouter } from 'next/router';
 import {
   Table,
   TableBody,
@@ -316,11 +317,25 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
 
 export default function UnitList({ building }) {
   const { t } = useTranslation('common');
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [openUnitDialog, setOpenUnitDialog] = useState(false);
   const [selectedUnit, setSelectedUnit] = useState(null);
   const [openConfirmDelete, setOpenConfirmDelete] = useState(false);
   const [unitToDelete, setUnitToDelete] = useState(null);
+
+  // Tier E1 — clicking a unit row navigates to the linked property's
+  // detail page (the apartment view with the map). Only fires when the
+  // unit is linked to a property; unlinked rows stay inert.
+  const navigateToProperty = useCallback(
+    (unit) => {
+      if (!unit?.propertyId) return;
+      router.push(
+        `/${router.query.organization}/properties/${unit.propertyId}`
+      );
+    },
+    [router]
+  );
 
   const removeMutation = useMutation({
     mutationFn: (unitId) => removeBuildingUnit(building._id, unitId),
@@ -384,40 +399,54 @@ export default function UnitList({ building }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {units.map((unit) => (
-              <TableRow key={unit._id}>
-                <TableCell>
-                  {[unit.atakNumber, ...(unit.altAtakNumbers || [])]
-                    .join(', ')}
-                </TableCell>
-                <TableCell>{unit.floor ?? '-'}</TableCell>
-                <TableCell>{unit.surface || '-'}</TableCell>
-                <TableCell>{unit.generalThousandths || 0}</TableCell>
-                <TableCell>
-                  {unit.property?.name || unit.propertyId || '-'}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div className="flex gap-2 justify-end">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleEditUnit(unit)}
-                    aria-label={t('Edit')}
-                    >
-                      <LuPencil className="size-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDeleteUnit(unit)}
-                    aria-label={t('Delete')}
-                    >
-                      <LuTrash className="size-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+            {units.map((unit) => {
+              const isLinked = !!unit.propertyId;
+              return (
+                <TableRow
+                  key={unit._id}
+                  data-cy="buildingUnitRow"
+                  className={isLinked ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                  onClick={() => isLinked && navigateToProperty(unit)}
+                >
+                  <TableCell>
+                    {[unit.atakNumber, ...(unit.altAtakNumbers || [])]
+                      .join(', ')}
+                  </TableCell>
+                  <TableCell>{unit.floor ?? '-'}</TableCell>
+                  <TableCell>{unit.surface || '-'}</TableCell>
+                  <TableCell>{unit.generalThousandths || 0}</TableCell>
+                  <TableCell>
+                    {unit.property?.name || unit.propertyId || '-'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditUnit(unit);
+                        }}
+                        aria-label={t('Edit')}
+                      >
+                        <LuPencil className="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteUnit(unit);
+                        }}
+                        aria-label={t('Delete')}
+                      >
+                        <LuTrash className="size-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       ) : (

@@ -2,7 +2,6 @@ import { Collections, logger, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import type { CollectionTypes } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
-import type { ParsedE9Unit } from './e9parser.js';
 import * as Contract from './contract.js';
 import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
@@ -157,24 +156,11 @@ function _assertCustomAllocationPropertyIds(
   });
 }
 
-// Infer property type from E9 parsed unit data
-function _inferPropertyType(unit: ParsedE9Unit): string {
-  // Category from E9: 1=apartment, 2=store, 5/6=storage, 51=parking
-  if (unit.category !== null) {
-    // T1.P1.13: AADE categories 5 and 6 designate αποθήκη (storage) units —
-    // not parking, not apartment. Map them to the canonical 'storage'
-    // PROPERTY_TYPE so they don't masquerade as apartments and inherit
-    // surface-based defaults that don't apply (basements with 0 m²).
-    if (unit.category === 5 || unit.category === 6) return 'storage';
-    if (unit.category === 2) return 'store';
-    if (unit.category >= 50) return 'parking';
-  }
-  // Fallback heuristics when category not available
-  if (unit.floor === 0 && unit.category === null) return 'store';
-  if (unit.floor !== null && unit.floor < 0 && unit.category === null)
-    return 'parking';
-  return 'apartment';
-}
+// See businesslogic/inferPropertyType.ts for the documented mapping.
+// Re-exported here so external call sites continue to import from
+// './buildingmanager.js' if they were already doing so.
+import { inferPropertyType as _inferPropertyType } from '../businesslogic/inferPropertyType.js';
+export { _inferPropertyType };
 
 // Find the realm member ID for a given email
 function _findMemberIdByEmail(realm: any, email: string): string | undefined {
