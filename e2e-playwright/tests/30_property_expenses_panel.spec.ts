@@ -70,9 +70,13 @@ async function signIn(page: import('@playwright/test').Page) {
  * tenants, Property expenses).
  */
 function expensesCard(page: import('@playwright/test').Page) {
-  return page.locator('div.flex.flex-col', {
-    has: page.getByText(/^(Property expenses|Έξοδα ακινήτου)$/, { exact: true })
-  });
+  // DashboardCard renders <Card> = a div with role-less layout containing a
+  // CardTitle. We anchor on the title text and ascend to the nearest
+  // ancestor div that is the Card root. The Card has `flex-col` AND
+  // `border` (Tailwind shadcn pattern). Filter to get a single match.
+  return page
+    .getByText(/^(Property expenses|Έξοδα ακινήτου)$/, { exact: true })
+    .locator('xpath=ancestor::div[contains(@class, "rounded-lg") and contains(@class, "border")][1]');
 }
 
 /**

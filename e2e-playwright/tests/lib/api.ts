@@ -343,10 +343,20 @@ export async function ensureSeedLeasedTenant(
   let tenant = tenants.find((t) => t.name === 'E2E-LeasedTenant');
 
   if (!tenant) {
+    // Compute a checksum-valid Greek AFM (digits 1-8 + computed check
+    // digit per AADE algorithm, same algorithm used in
+    // _tierC_format_validators.spec.ts:62-70).
+    const afmDigits = [1, 2, 3, 4, 5, 6, 7, 8];
+    let afmSum = 0;
+    for (let i = 0; i < 8; i++) afmSum += afmDigits[i] * Math.pow(2, 8 - i);
+    const seedTaxId = afmDigits.join('') + (((afmSum % 11) % 10).toString());
     const created = await request.post(`${GATEWAY}/api/v2/tenants`, {
       headers: auth,
       data: {
         name: 'E2E-LeasedTenant',
+        firstName: 'E2E',
+        lastName: 'LeasedTenant',
+        taxId: seedTaxId,
         isCompany: false,
         manager: 'E2E-LeasedTenant',
         contacts: [{ contact: 'E2E-LeasedTenant', email: '', phone1: '6900000000', phone: '', phone2: '' }],

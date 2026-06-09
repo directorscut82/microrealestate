@@ -53,8 +53,16 @@ export default function ExpiringLeasesTile({ className }) {
     return tenants
       .filter((tn) => tn?.endDate && !tn.terminationDate && !tn.archived)
       .map((tn) => {
-        const end = moment.utc(tn.endDate);
-        const days = end.startOf('day').diff(today, 'days');
+        // The API returns endDate as a DD/MM/YYYY string (frontdata transform).
+        // moment.utc(string) without a format hint tries ISO 8601 first, then
+        // falls back to Date.parse which CANNOT parse "14/06/2026" — the
+        // resulting moment is Invalid and `days` becomes NaN, so the
+        // `days >= 0 && days <= HORIZON_DAYS` filter drops every row.
+        // Parse explicitly with the DD/MM/YYYY format.
+        const end = moment.utc(tn.endDate, 'DD/MM/YYYY', true);
+        const days = end.isValid()
+          ? end.startOf('day').diff(today, 'days')
+          : NaN;
         const propertyName =
           tn.properties?.[0]?.property?.name ||
           tn.properties?.[0]?.propertyName ||
@@ -68,7 +76,11 @@ export default function ExpiringLeasesTile({ className }) {
         };
       })
       .filter((row) => row.days >= 0 && row.days <= HORIZON_DAYS)
-      .sort((a, b) => moment(a.endDate).diff(moment(b.endDate)));
+      .sort((a, b) =>
+        moment.utc(a.endDate, 'DD/MM/YYYY', true).diff(
+          moment.utc(b.endDate, 'DD/MM/YYYY', true)
+        )
+      );
   }, [data]);
 
   if (isLoading) return null;
