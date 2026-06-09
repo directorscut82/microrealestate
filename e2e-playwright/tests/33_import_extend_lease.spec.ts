@@ -85,14 +85,36 @@ test.beforeAll(async () => {
   }
   const apiCtx = await request.newContext();
   try {
-    // Standard seed scaffolding (idempotent): realm + lease + property.
+    // Standard seed scaffolding (idempotent): realm + lease. The shared
+    // E2E-Property is occupied by E2E-LeasedTenant for overlapping windows,
+    // so spec 33 mints its own property to avoid the
+    // "Property is already assigned to another tenant" 422.
     const leaseSeed: LeaseSeed = await ensureSeedLease(apiCtx);
-    const propSeed = await ensureSeedProperty(apiCtx);
     const headers = {
       Authorization: `Bearer ${leaseSeed.token}`,
       'Content-Type': 'application/json',
       organizationid: leaseSeed.realmId
     };
+
+    // Create a dedicated property for this spec — sharing E2E-Property
+    // collides with E2E-LeasedTenant who occupies overlapping windows.
+    const propName = `E2E-ExtendLease-Prop-${Date.now()}`;
+    const propCreated = await apiCtx.post(`${GATEWAY}/api/v2/properties`, {
+      headers,
+      data: {
+        name: propName,
+        type: 'apartment',
+        rent: 500,
+        surface: 50,
+        address: { street1: 'Test 33', city: 'Test', zipCode: '00000' }
+      }
+    });
+    expect(
+      [200, 201],
+      `create disposable property (${propCreated.status()}: ${await propCreated.text().catch(() => '')})`
+    ).toContain(propCreated.status());
+    const propBody = (await propCreated.json()) as { _id: string };
+    const propSeed = { propertyId: propBody._id };
 
     // Disposable tenant — DO NOT touch the canonical E2E-LeasedTenant.
     // Lease window: 6 months ago → 6 months future, anchored to UTC so
@@ -109,10 +131,20 @@ test.beforeAll(async () => {
     const beginApi = toDDMMYYYY(beginIso);
     const endApi = toDDMMYYYY(endIso);
 
-    // Stable but unique-per-realm taxId so the classifyAgainstExisting
-    // taxId match in pdfimportmanager fires deterministically. Length 9
-    // matches Greek AFM length so any downstream validators won't reject.
-    const taxId = '900000033';
+    // Stable per-realm Greek AFM with valid checksum (digits 1-8 + AADE
+    // algorithm check digit). Same algo used by lib/api.ts
+    // ensureSeedLeasedTenant. Greek AFM validator rejects bad checksums
+    // at creation (Tier C1).
+    const _afmDigits = [1, 2, 3, 4, 5, 6, 7, 8];
+    let _afmSum = 0;
+    for (let i = 0; i < 8; i++) _afmSum += _afmDigits[i] * Math.pow(2, 8 - i);
+    // Spec 33 needs a DIFFERENT AFM than ensureSeedLeasedTenant's because
+    // we may run alongside other specs in the same realm — bump the leading
+    // digit so the checksum produces a different result.
+    const _afmDigits2 = [2, 3, 4, 5, 6, 7, 8, 9];
+    let _afmSum2 = 0;
+    for (let i = 0; i < 8; i++) _afmSum2 += _afmDigits2[i] * Math.pow(2, 8 - i);
+    const taxId = _afmDigits2.join('') + (((_afmSum2 % 11) % 10).toString());
     const tenantName = 'E2E-ExtendLease-Tenant';
 
     // Drop a stale fixture if it exists from a prior failed run, so this
@@ -131,6 +163,8 @@ test.beforeAll(async () => {
       headers,
       data: {
         name: tenantName,
+        firstName: 'E2E',
+        lastName: tenantName.replace(/^E2E-/, ''),
         isCompany: false,
         manager: tenantName,
         contacts: [
@@ -499,13 +533,27 @@ test('33D · POST extend-lease happy path: 200, endDate moves, leaseHistory grow
       headers: auth(_seed)
     });
     expect(t1.status(), 'fetch tenant for termination set').toBe(200);
-    const t1Doc = (await t1.json()) as { __v: number };
+    const t1Doc = (await t1.json()) as {
+      __v: number;
+      name: string;
+      firstName?: string;
+      lastName?: string;
+      taxId?: string;
+    };
     const termDateApi = _seed.endApi; // any valid date — we just need it set
     const termPatch = await api.patch(
       `${GATEWAY}/api/v2/tenants/${_seed.tenantId}`,
       {
         headers: auth(_seed),
+        // PATCH requires name + firstName + lastName + taxId on every save
+        // (Tier A1 / C1 hardening). Echo them through so we only mutate
+        // terminationDate.
         data: {
+          name: t1Doc.name,
+          firstName: t1Doc.firstName,
+          lastName: t1Doc.lastName,
+          taxId: t1Doc.taxId,
+          isCompany: false,
           terminationDate: termDateApi,
           guarantyPayback: 0,
           __v: t1Doc.__v
