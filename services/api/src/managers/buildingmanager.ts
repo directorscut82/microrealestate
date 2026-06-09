@@ -1399,13 +1399,18 @@ export async function importFromE9(req: Req, res: Res) {
           // ATAK, and proceed with the existing record so the user
           // sees the same outcome as a sequential re-import.
           try {
+            const computedName = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${_floorLabel(
+              parsedUnit.floor,
+              realm
+            )}`;
             property = await Collections.Property.create({
               realmId: realm!._id,
-              name: `${parsedUnit.street} ${parsedUnit.streetNumber} - ${_floorLabel(
-                parsedUnit.floor,
-                realm
-              )}`,
-              type: _inferPropertyType(parsedUnit),
+              name: computedName,
+              type: _inferPropertyType({
+                category: parsedUnit.category,
+                floor: parsedUnit.floor,
+                name: computedName
+              }),
               surface: parsedUnit.surface,
               atakNumber: parsedUnit.atakNumber,
               // L9: persist the cadastral code when E9 emitted one.

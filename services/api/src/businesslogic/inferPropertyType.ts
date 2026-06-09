@@ -22,6 +22,11 @@
 export type PropertyTypeInferenceInput = {
   category: number | null;
   floor: number | null;
+  // Optional Greek floor-label hint composed by the importer (e.g.
+  // "ΟΔΟΣ 9 - Υπόγειο" / "Ισόγειο" / "Όροφος 3"). When category is
+  // null AND floor is null, a name pattern still tells us 'storage'
+  // (basement) vs 'parking' (Πάρκινγκ) vs 'apartment'.
+  name?: string | null;
 };
 
 export function inferPropertyType(unit: PropertyTypeInferenceInput): string {
@@ -32,7 +37,15 @@ export function inferPropertyType(unit: PropertyTypeInferenceInput): string {
     if (unit.category >= 50) return 'parking';
     return 'apartment';
   }
+  // Floor-based fallback first.
   if (unit.floor !== null && unit.floor < 0) return 'storage';
   if (unit.floor === 0) return 'store';
+  // Name-based fallback when both category and floor are null/missing
+  // (occurs on E9 OCR loss, manual entry, or cross-PDF property merge).
+  if (typeof unit.name === 'string' && unit.name) {
+    if (/Υπόγειο|YPOGEIO/i.test(unit.name)) return 'storage';
+    if (/Πάρκινγκ|PARKING|Στάθμευσ/i.test(unit.name)) return 'parking';
+    if (/Αποθήκη|APOTHIKI|STORAGE/i.test(unit.name)) return 'storage';
+  }
   return 'apartment';
 }
