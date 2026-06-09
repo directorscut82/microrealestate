@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <%- include('../__content_parts/html/htmlhead.ejs') %>
+  <body>
+    <div class="email-body">
+      <div class="email-container">
+        <div class="bar"></div>
+        <div class="content">
+          <div class="header">
+            <div class="logo"><%= landlord.name %></div>
+          </div>
+          <div class="title"><%- _.t('Lease expiring soon') %></div>
+          <p><%- include('../__content_parts/html/greetings.ejs') %></p>
+          <p>
+            <%- _.t('The lease for <strong>{{name}}</strong> expires on <strong>{{date}}</strong> (in {{n}} days).', { name: tenant.name, date: endDateFormatted, n: daysUntilExpiry }) %>
+          </p>
+          <% if (property && property.name) { %>
+          <p>
+            <%- _.t('Property: <strong>{{name}}</strong>', { name: property.name }) %>
+            <% if (property.address) { %>
+              <br/><span style="color:#666;"><%= property.address %></span>
+            <% } %>
+          </p>
+          <% } %>
+          <p>
+            <a href="<%= landlordPanelUrl %>" style="background:#2563eb;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none;display:inline-block;"><%- _.t('Open in landlord panel') %></a>
+          </p>
+          <%- include('../__content_parts/html/signature.ejs') %>
+        </div>
+      </div>
+      <%- include('../__content_parts/html/landlordcontact.ejs') %>
+    </div>
+  </body>
+</html>

@@ -1777,19 +1777,55 @@ export async function remove(req: Req, res: Res) {
 
 export async function all(req: Req, res: Res) {
   const includeArchived = req.query?.includeArchived === 'true';
+
+  // Optional ?expiringWithin=N filter — restrict the response to tenants
+  // whose lease ends within the next N days, are not archived, and have no
+  // terminationDate. Used by the dashboard "Expiring leases" tile. Default
+  // response shape is preserved when the param is absent.
+  const expiringWithinRaw = req.query?.expiringWithin;
+  let expiringWithinDays: number | null = null;
+  if (typeof expiringWithinRaw === 'string' && expiringWithinRaw.length) {
+    const parsed = Number(expiringWithinRaw);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 3650) {
+      throw new ServiceError(
+        'expiringWithin must be a non-negative number of days <= 3650',
+        422
+      );
+    }
+    expiringWithinDays = Math.floor(parsed);
+  }
+
   const { page, limit, skip, isPaginated } = Pagination.parsePagination(req as any);
   const countFilter: AnyRecord = { realmId: req.realm!._id };
   if (!includeArchived) {
     countFilter.$or = [{ archived: { $exists: false } }, { archived: false }];
   }
 
+  // Helper applied client-side after the standard fetch so we don't need to
+  // duplicate the (heavier) _fetchTenants aggregation. The N parameter is a
+  // small bound (0..3650) so this is O(realm tenant count) which the rest of
+  // the code already iterates anyway.
+  const _isExpiringSoon = (t: AnyRecord, days: number): boolean => {
+    if (!t.endDate) return false;
+    if (t.archived) return false;
+    if (t.terminationDate) return false;
+    const today = moment.utc().startOf('day');
+    const horizon = moment.utc().add(days, 'days').endOf('day');
+    const end = moment.utc(t.endDate);
+    return end.isSameOrAfter(today, 'day') && end.isSameOrBefore(horizon, 'day');
+  };
+
   if (!isPaginated) {
     // No pagination params: return ALL items (backward compatible)
     const tenants = await _fetchTenants(req.realm!._id);
-    const filtered = includeArchived
+    let filtered = includeArchived
       ? tenants
       : tenants.filter((t) => !t.archived);
+    if (expiringWithinDays !== null) {
+      filtered = filtered.filter((t) => _isExpiringSoon(t, expiringWithinDays!));
+    }
     res.json(filtered.map((tenant) => FD.toOccupantData(tenant)));
+    return;
   } else {
     // Explicit pagination: apply skip/limit
     const [tenants, total] = await Promise.all([
@@ -1816,7 +1852,11 @@ export async function all(req: Req, res: Res) {
     const sorted = tenantIds
       .map((id) => tenantMap.get(id))
       .filter(Boolean) as AnyRecord[];
-    res.json(sorted.map((tenant) => FD.toOccupantData(tenant)));
+    const finalSorted =
+      expiringWithinDays !== null
+        ? sorted.filter((t) => _isExpiringSoon(t, expiringWithinDays!))
+        : sorted;
+    res.json(finalSorted.map((tenant) => FD.toOccupantData(tenant)));
   }
 }
 
@@ -1904,4 +1944,172 @@ export async function overview(req: Req, res: Res) {
   }, result);
 
   res.json(result);
+}
+
+// PDF-import-as-lease-extension handler. Snapshots the existing tenant's
+// root-level lease window into leaseHistory[] and overwrites the root with
+// the parsed PDF's new dates / declaration. Triggers the rent recompute
+// pipeline for the new term so the rent ledger picks up the extended end
+// date in a single round-trip.
+//
+// Body shape: parsed Greek lease PDF object — same shape as parseGreekLease
+// returns. The route handler captures the server-side timestamp and
+// classifyAgainstExisting must have already classified this row as
+// kind=extension before the client opted in.
+export async function extendLease(req: Req, res: Res) {
+  const realm = req.realm;
+  const tenantId = req.params.id;
+  validateObjectId(tenantId, 'tenant id');
+
+  const parsed: AnyRecord = req.body || {};
+  const archivedAt = new Date(); // server-side timestamp captured here
+
+  const existingDoc: any = await Collections.Tenant.findOne({
+    _id: tenantId,
+    realmId: realm!._id
+  }).lean();
+
+  if (!existingDoc) {
+    throw new ServiceError('tenant not found', 404);
+  }
+
+  const newBeginDate = _stringToDate(parsed.validityStart);
+  const newEndDate = _stringToDate(parsed.validityEnd);
+  if (!newBeginDate || !newEndDate) {
+    throw new ServiceError(
+      'Parsed lease is missing validityStart/validityEnd',
+      422
+    );
+  }
+  if (moment.utc(newEndDate).isSameOrBefore(moment.utc(newBeginDate))) {
+    throw new ServiceError('End date must be after begin date', 422);
+  }
+
+  // Resolve / preserve the leaseId. If the body explicitly carries a
+  // leaseId (e.g. dialog created a new Lease for this term) use it,
+  // otherwise keep the existing one.
+  const leaseId: string | undefined =
+    typeof parsed.leaseId === 'string' && parsed.leaseId
+      ? parsed.leaseId
+      : (existingDoc.leaseId as string) || undefined;
+  if (leaseId) {
+    validateObjectId(leaseId, 'leaseId');
+    const leaseExists = await Collections.Lease.exists({
+      _id: leaseId,
+      realmId: realm!._id
+    });
+    if (!leaseExists) {
+      throw new ServiceError('Lease not found', 404);
+    }
+  }
+
+  const historyEntry: AnyRecord = {
+    beginDate: existingDoc.beginDate,
+    endDate: existingDoc.endDate,
+    leaseId: existingDoc.leaseId,
+    declarationNumber: existingDoc.declarationNumber,
+    amendsDeclaration: existingDoc.amendsDeclaration,
+    originalLeaseStartDate: existingDoc.originalLeaseStartDate,
+    archivedAt,
+    supersededByDeclarationNumber: parsed.declarationNumber || undefined
+  };
+
+  const setPatch: AnyRecord = {
+    beginDate: newBeginDate,
+    endDate: newEndDate,
+    leaseId,
+    declarationNumber: parsed.declarationNumber || undefined,
+    amendsDeclaration: parsed.amendsDeclaration ?? null,
+    // Preserve the truly-original start date if we have one already on
+    // file; otherwise fall back to the existing beginDate which is what
+    // the original creation persisted.
+    originalLeaseStartDate:
+      existingDoc.originalLeaseStartDate || existingDoc.beginDate
+  };
+
+  // PATCH null does not $unset cleanly via the standard tenant update
+  // path; use a direct mongo update so terminationDate is actually
+  // removed when a previously-terminated tenant is re-extended.
+  const updated = await Collections.Tenant.findOneAndUpdate(
+    { _id: tenantId, realmId: realm!._id },
+    {
+      $push: { leaseHistory: historyEntry },
+      $set: setPatch,
+      $unset: { terminationDate: '' },
+      $inc: { __v: 1 }
+    },
+    { new: true }
+  ).lean();
+
+  if (!updated) {
+    throw new ServiceError('tenant not found', 404);
+  }
+
+  // Trigger the rent recompute pipeline for the new term. Only run when
+  // properties carry rent + entry/exit dates; otherwise the contract layer
+  // throws on incomplete inputs and an extension that simply moves the
+  // dates would 422.
+  const liveTenant: any = updated;
+  if (
+    liveTenant.beginDate &&
+    liveTenant.endDate &&
+    _propertiesHaveRentData(liveTenant.properties)
+  ) {
+    try {
+      const termFrequency = liveTenant.frequency || 'months';
+      const propIds = (liveTenant.properties as AnyRecord[])
+        .map((p) => p.propertyId)
+        .filter(Boolean);
+      const buildings = await _fetchBuildingsForProperties(
+        realm!._id,
+        liveTenant.properties,
+        { _id: tenantId, properties: liveTenant.properties }
+      );
+
+      const contract = {
+        begin: existingDoc.beginDate,
+        end: existingDoc.endDate,
+        frequency: termFrequency,
+        terms: Math.ceil(
+          moment(existingDoc.endDate).diff(
+            moment(existingDoc.beginDate),
+            termFrequency as moment.unitOfTime.Diff,
+            true
+          )
+        ),
+        properties: existingDoc.properties,
+        buildings,
+        vatRate: existingDoc.vatRatio,
+        discount: existingDoc.discount,
+        rents: existingDoc.rents || []
+      };
+      const newContract = Contract.update(contract as any, {
+        begin: newBeginDate,
+        end: newEndDate,
+        termination: undefined,
+        properties: liveTenant.properties,
+        frequency: termFrequency
+      });
+
+      await Collections.Tenant.updateOne(
+        { _id: tenantId, realmId: realm!._id },
+        { $set: { rents: newContract.rents }, $inc: { __v: 1 } }
+      );
+
+      // Sibling cohort (equal-allocation buildings) needs to recompute now
+      // that the lease window changed.
+      if (propIds.length) {
+        await _recomputeSiblingTenantsInBuildings(
+          realm!._id,
+          propIds,
+          tenantId
+        );
+      }
+    } catch (e) {
+      throw new ServiceError(String(e), 422);
+    }
+  }
+
+  const tenants = await _fetchTenants(realm!._id, tenantId);
+  res.json(FD.toOccupantData(tenants.length ? tenants[0] : (null as any)));
 }

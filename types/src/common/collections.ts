@@ -403,8 +403,22 @@ export namespace CollectionTypes {
       acceptanceDate?: Date;
     }[];
 
+    // Lease history snapshots written by extendLease when a PDF import is
+    // classified as an extension of an existing active lease.
+    leaseHistory?: {
+      beginDate?: Date;
+      endDate?: Date;
+      leaseId?: string;
+      declarationNumber?: string;
+      amendsDeclaration?: string;
+      originalLeaseStartDate?: Date;
+      archivedAt?: Date;
+      supersededByDeclarationNumber?: string;
+    }[];
+
     stepperMode: boolean;
     archived?: boolean;
+    lastExpiryNoticeSentAt?: Date | null;
     // Read-side enrichment fields produced by frontdata.toOccupantData on
     // the wire (NOT stored in mongo). Document them so the API
     // response shape is type-checked end-to-end.

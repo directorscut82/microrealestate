@@ -78,6 +78,15 @@ export async function fetchProperty(id) {
   return response.data;
 }
 
+export async function fetchPropertyExpenses(id, { from, to } = {}) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', String(from));
+  if (to) params.set('to', String(to));
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await apiFetcher().get(`/properties/${id}/expenses${query}`);
+  return response.data;
+}
+
 export async function createProperty(property) {
   const response = await apiFetcher().post('/properties', property);
   return response.data;
@@ -92,11 +101,19 @@ export async function deleteProperty(ids) {
   await apiFetcher().delete(`/properties/${ids.join(',')}`);
 }
 
-export async function fetchTenants({ includeArchived = false, page, limit } = {}) {
+export async function fetchTenants({
+  includeArchived = false,
+  page,
+  limit,
+  expiringWithin
+} = {}) {
   const params = new URLSearchParams();
   if (includeArchived) params.set('includeArchived', 'true');
   if (page) params.set('page', String(page));
   if (limit) params.set('limit', String(limit));
+  if (expiringWithin !== undefined && expiringWithin !== null) {
+    params.set('expiringWithin', String(expiringWithin));
+  }
   const query = params.toString() ? `?${params.toString()}` : '';
   const response = await apiFetcher().get(`/tenants${query}`);
   return response.data;
@@ -135,6 +152,14 @@ export async function importTenantPdf(file) {
   const formData = new FormData();
   formData.append('pdf', file);
   const response = await apiFetcher().post('/tenants/import-pdf', formData);
+  return response.data;
+}
+
+export async function extendTenantLease(tenantId, parsed) {
+  const response = await apiFetcher().post(
+    `/tenants/${tenantId}/extend-lease`,
+    parsed
+  );
   return response.data;
 }
 
