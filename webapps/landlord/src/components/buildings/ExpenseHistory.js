@@ -130,12 +130,6 @@ function formatTerm(term) {
   return m.isValid() ? m.format('MMM YYYY') : term;
 }
 
-function formatTermShort(term) {
-  const s = String(term).padEnd(10, '0');
-  const m = moment(s, 'YYYYMMDDHH');
-  return m.isValid() ? m.format('MMM') : term;
-}
-
 function getTermYear(term) {
   return String(term).slice(0, 4);
 }
@@ -155,13 +149,6 @@ export default function ExpenseHistory({ building }) {
         .sort((a, b) => Number(b) - Number(a)),
     [historyData]
   );
-
-  const availableYears = useMemo(() => {
-    const years = [...new Set(availableTerms.map(getTermYear))].sort(
-      (a, b) => Number(b) - Number(a)
-    );
-    return years.length > 0 ? years : [moment().format('YYYY')];
-  }, [availableTerms]);
 
   const termsForYear = useMemo(
     () => availableTerms.filter((term) => getTermYear(term) === visibleYear),
@@ -273,17 +260,23 @@ export default function ExpenseHistory({ building }) {
             const ownerEntries = entries.filter((e) => e.isOwner);
             const tenantTotal = tenantEntries.reduce((sum, e) => sum + e.total, 0);
             const ownerTotal = ownerEntries.reduce((sum, e) => sum + e.total, 0);
-            const total = tenantTotal + ownerTotal;
             return (
               <div
                 key={term}
                 className="rounded-lg border bg-card p-3"
               >
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-start justify-between mb-2">
                   <span className="text-sm font-medium">{label}</span>
-                  <span className="text-sm font-semibold tabular-nums">
-                    <NumberFormat value={total} />
-                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className="text-sm font-semibold tabular-nums">
+                      <NumberFormat value={tenantTotal} />
+                    </span>
+                    {ownerTotal !== 0 && (
+                      <span className="text-xs italic text-muted-foreground tabular-nums">
+                        {t('Owner subtotal')}: <NumberFormat value={ownerTotal} />
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <Separator className="mb-2" />
                 <div className="space-y-1">

@@ -33,6 +33,7 @@ import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
+import { uploadDocument } from '../../utils/fetch';
 import { useForm } from 'react-hook-form';
 import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
@@ -81,11 +82,17 @@ const schema = z.object({
   allocationMethod: z.string().optional(),
   chargeTerm: z.string().optional(),
   contractorId: z.string().optional(),
+  // Tier I-3.c: subdocument _ids of building.units that this repair is
+  // scoped to. Empty = applies to all units (legacy default).
+  affectedUnitIds: z.array(z.string()).optional(),
   reportedDate: z.string().optional(),
   startDate: z.string().optional(),
   completionDate: z.string().optional(),
   isPaidFromRepairsFund: z.boolean().optional(),
   invoiceReference: z.string().optional(),
+  // Tier I-3.d: storage key returned by /documents/upload after the
+  // landlord attaches an invoice scan.
+  invoiceDocumentId: z.string().nullable().optional(),
   notes: z.string().optional()
 });
 
@@ -228,6 +235,10 @@ export default function RepairList({ building }) {
         : '',
       isPaidFromRepairsFund: selectedRepair?.isPaidFromRepairsFund ?? false,
       invoiceReference: selectedRepair?.invoiceReference ?? '',
+      invoiceDocumentId: selectedRepair?.invoiceDocumentId ?? null,
+      affectedUnitIds: Array.isArray(selectedRepair?.affectedUnitIds)
+        ? selectedRepair.affectedUnitIds
+        : [],
       notes: selectedRepair?.notes ?? ''
     }),
     [selectedRepair]
@@ -254,8 +265,21 @@ export default function RepairList({ building }) {
   const chargeTerm = watch('chargeTerm');
   const contractorId = watch('contractorId');
   const isPaidFromRepairsFund = watch('isPaidFromRepairsFund');
+  const affectedUnitIds = watch('affectedUnitIds') || [];
+  const invoiceDocumentId = watch('invoiceDocumentId');
 
-  const showTenantFields = chargeableTo === 'tenants' || chargeableTo === 'split';
+  // Tier I-3.b: any chargeableTo value (owners / tenants / split) opens the
+  // allocation picker + chargeTerm. Owner-side now persists via
+  // ownerMonthlyExpenses[] (see buildingmanager._distributeRepairCharge).
+  const showAllocationFields = chargeableTo !== undefined;
+  // The tenant share input remains split-only (it's meaningless for the
+  // pure tenants/owners cases).
+  const showTenantSharePercentage = chargeableTo === 'split';
+
+  const buildingUnits = building?.units || [];
+  // Tier I-3.f upload state: tracks the in-flight invoice upload so we can
+  // disable the submit button + show progress in the helper text.
+  const [invoiceUploading, setInvoiceUploading] = useState(false);
 
   const handleAdd = useCallback(() => {
     setSelectedRepair(null);
@@ -297,9 +321,18 @@ export default function RepairList({ building }) {
             data.chargeableTo === 'split'
               ? data.tenantSharePercentage
               : undefined,
-          allocationMethod: showTenantFields
+          // Tier I-3.b: allocation method matters for any chargeableTo value
+          // because ownerMonthlyExpenses now also reads it (the owner-side
+          // entry uses the same method to size the per-unit owner share if
+          // we ever expand to per-unit owner billing). Preserve it across
+          // owner / tenants / split so an edit doesn't reset to default.
+          allocationMethod: data.chargeableTo
             ? data.allocationMethod
-            : undefined
+            : undefined,
+          affectedUnitIds: Array.isArray(data.affectedUnitIds)
+            ? data.affectedUnitIds.filter(Boolean)
+            : [],
+          invoiceDocumentId: data.invoiceDocumentId ?? null
         };
         if (selectedRepair?._id) {
           await updateMutation.mutateAsync({
@@ -314,7 +347,7 @@ export default function RepairList({ building }) {
         toast.error(t('Something went wrong'));
       }
     },
-    [selectedRepair, addMutation, updateMutation, handleClose, showTenantFields, t]
+    [selectedRepair, addMutation, updateMutation, handleClose, t]
   );
 
   return (
@@ -410,6 +443,7 @@ export default function RepairList({ building }) {
       <ResponsiveDialog
         open={openDialog}
         setOpen={setOpenDialog}
+        className="sm:max-w-3xl md:max-w-4xl"
         renderHeader={() =>
           selectedRepair ? t('Edit repair') : t('Add repair')
         }
@@ -518,6 +552,15 @@ export default function RepairList({ building }) {
                 </div>
               </div>
 
+              {/* Tier I-3.g: clarify which of (estimated, actual) drives
+                  the rent/owner ledger so users don't second-guess the
+                  field after entering both. */}
+              <p className="text-label text-ink-muted">
+                {t(
+                  'While pending, the estimated cost drives billing. Once an actual cost is entered, it replaces the estimate.'
+                )}
+              </p>
+
               <Separator />
 
               <div className="space-y-2">
@@ -539,7 +582,7 @@ export default function RepairList({ building }) {
                 </Select>
               </div>
 
-              {chargeableTo === 'split' && (
+              {showTenantSharePercentage && (
                 <div className="space-y-2">
                   <Label htmlFor="tenantSharePercentage">
                     {t('Tenant share')} (%)
@@ -554,7 +597,7 @@ export default function RepairList({ building }) {
                 </div>
               )}
 
-              {showTenantFields && (
+              {showAllocationFields && (
                 <>
                   <div className="sm:flex sm:gap-2">
                     <div className="space-y-2 flex-1">
@@ -597,6 +640,54 @@ export default function RepairList({ building }) {
                       </Select>
                     </div>
                   </div>
+
+                  {/* Tier I-3.c: per-unit scoping. Empty = all units, which
+                      preserves the legacy default. We list each unit by its
+                      most descriptive label (atak + label/name + property).
+                      A multi-select dropdown would obscure how many units
+                      are checked, so a checkbox list is preferred even at
+                      30+ units. */}
+                  {buildingUnits.length > 0 && (
+                    <div className="space-y-2">
+                      <Label>{t('Affected units')}</Label>
+                      <p className="text-label text-ink-muted">
+                        {t(
+                          'Affected units (optional — leave empty to charge all units)'
+                        )}
+                      </p>
+                      <div className="grid sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto border border-stone-line rounded-md p-2">
+                        {buildingUnits.map((u) => {
+                          const uid = String(u._id);
+                          const checked = affectedUnitIds.includes(uid);
+                          const labelParts = [
+                            u.atakNumber,
+                            u.unitLabel || u.name,
+                            u.propertyName
+                          ].filter(Boolean);
+                          return (
+                            <label
+                              key={uid}
+                              className="flex items-center gap-2 text-sm cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...affectedUnitIds, uid]
+                                    : affectedUnitIds.filter((x) => x !== uid);
+                                  setValue('affectedUnitIds', next, {
+                                    shouldDirty: true
+                                  });
+                                }}
+                              />
+                              <span>{labelParts.join(' — ')}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -613,7 +704,13 @@ export default function RepairList({ building }) {
                 </div>
 
                 <div className="space-y-2 flex-1">
-                  <Label htmlFor="startDate">{t('Start date')}</Label>
+                  {/* Tier I-3.e: keep the schema field name (startDate) but
+                      surface "Scheduled date" so the timeline reads
+                      reported -> scheduled -> completed. The Greek
+                      translation of "Start date" was clinically worse:
+                      "Ημερομηνία έναρξης" suggests work began, not that
+                      it was planned. */}
+                  <Label htmlFor="startDate">{t('Scheduled date')}</Label>
                   <Input
                     id="startDate"
                     type="date"
@@ -623,7 +720,7 @@ export default function RepairList({ building }) {
 
                 <div className="space-y-2 flex-1">
                   <Label htmlFor="completionDate">
-                    {t('Completion date')}
+                    {t('Completed date')}
                   </Label>
                   <Input
                     id="completionDate"
@@ -682,6 +779,54 @@ export default function RepairList({ building }) {
                 />
               </div>
 
+              {/* Tier I-3.d: optional invoice scan. Uploads to the same
+                  /documents/upload endpoint as the lease document attach
+                  flow; the returned storage key is persisted on the repair
+                  via invoiceDocumentId. We don't open a Document record —
+                  the repair owns the file lifecycle. */}
+              <div className="space-y-2">
+                <Label htmlFor="invoiceFile">{t('Invoice file')}</Label>
+                <Input
+                  id="invoiceFile"
+                  type="file"
+                  accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf"
+                  disabled={invoiceUploading}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    try {
+                      setInvoiceUploading(true);
+                      const folder = [
+                        building?.name?.replace(/[/\\]/g, '_') || 'building',
+                        'repair_invoices'
+                      ].join('/');
+                      const response = await uploadDocument({
+                        endpoint: '/documents/upload',
+                        documentName: f.name,
+                        file: f,
+                        folder
+                      });
+                      setValue(
+                        'invoiceDocumentId',
+                        response.data?.key || null,
+                        { shouldDirty: true }
+                      );
+                      toast.success(t('Invoice file uploaded'));
+                    } catch (err) {
+                      console.error(err);
+                      toast.error(t('Cannot upload document'));
+                    } finally {
+                      setInvoiceUploading(false);
+                    }
+                  }}
+                />
+                {invoiceDocumentId ? (
+                  <p className="text-label text-ink-muted">
+                    {t('Invoice file uploaded')}
+                  </p>
+                ) : null}
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="notes">{t('Notes')}</Label>
                 <Textarea id="notes" {...register('notes')} rows={2} />
@@ -696,7 +841,7 @@ export default function RepairList({ building }) {
             </Button>
             <Button
               onClick={handleSubmit(onSubmit)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || invoiceUploading}
               data-cy="submitRepair"
             >
               {selectedRepair ? t('Update') : t('Add')}

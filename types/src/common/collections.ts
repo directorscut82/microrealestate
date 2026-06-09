@@ -500,6 +500,7 @@ export namespace CollectionTypes {
     term: number;
     amount: number;
     description?: string;
+    source?: 'expense' | 'repair';
   };
 
   export type Contractor = {
@@ -530,6 +531,7 @@ export namespace CollectionTypes {
     affectedUnitIds: string[] | [];
     affectedArea?: string;
     invoiceReference?: string;
+    invoiceDocumentId?: string | null;
     notes?: string;
     chargeableTo?: 'tenants' | 'owners' | 'split';
     tenantSharePercentage?: number;

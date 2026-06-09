@@ -12,6 +12,7 @@ import {
   DrawerHeader,
   DrawerTitle
 } from './ui/drawer';
+import { cn } from '../utils';
 import Loading from './Loading';
 import { useMediaQuery } from 'usehooks-ts';
 import useTranslation from 'next-translate/useTranslation';
@@ -32,7 +33,8 @@ export default function ResponsiveDialog({
   renderHeader,
   renderContent,
   renderFooter,
-  isLoading
+  isLoading,
+  className
 }) {
   const isDesktop = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false
@@ -58,6 +60,7 @@ export default function ResponsiveDialog({
     return (
       <Dialog open={open} onOpenChange={handleOpenChange} modal={true}>
         <DialogContent
+          className={className}
           onInteractOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={handleEscape}
         >
@@ -85,7 +88,7 @@ export default function ResponsiveDialog({
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange} dismissible={false}>
-      <DrawerContent className="w-full">
+      <DrawerContent className={cn('w-full', className)}>
         {renderHeader ? (
           <DrawerHeader className="text-lg md:text-xl font-semibold leading-none tracking-tight px-4">
             <DrawerTitle className="hidden">Dialog</DrawerTitle>
@@ -94,7 +97,7 @@ export default function ResponsiveDialog({
         ) : null}
 
         {renderContent ? (
-          <div className="flex justify-center p-4 max-h-96 overflow-y-auto scrollbar-branded">
+          <div className="flex justify-center p-4 max-h-[85vh] overflow-y-auto scrollbar-branded">
             {renderContent()}
           </div>
         ) : null}

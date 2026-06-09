@@ -101,17 +101,46 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
 
   const updatedContract = create(modifiedContract);
 
-  // Freeze paid past terms: re-pricing already-paid bills (V9/V10) is wrong.
+  // Freeze past terms: re-pricing already-billed past rents is wrong.
   // After Contract.create rebuilt all rents from the new property/expense
-  // state, restore frozen past paid rents from the original document so
-  // their preTaxAmounts/charges/buildingCharges/discounts/vats/total stay
-  // pinned to what was billed. Non-frozen rents (current/future, or
-  // unpaid past) keep the recomputed base and replay settlements via
-  // payTerm so expense changes still take effect going forward.
+  // state, restore every past rent (paid OR unpaid) from the original
+  // document so their preTaxAmounts/charges/buildingCharges/discounts/
+  // vats/total stay pinned to what was billed. Tier I-1 (June 2026):
+  // past-unpaid rents are now also frozen — Greek tax norm treats closed
+  // months as immutable; arrears get adjusted via explicit credit/debit
+  // notes (existing debts[] settlement path), not by re-pricing on later
+  // edits to building expenses or property rent. Current/future rents
+  // keep the recomputed base and replay settlements via payTerm so
+  // expense changes still take effect going forward.
   const currentTerm = _currentTermFor(modifiedContract);
   if (inputContract.rents) {
+    // Pass 1: clone every past rent from inputContract by term-match.
+    // This covers both past-paid (frozen) AND past-unpaid (now frozen
+    // too) so an edit to a current building expense never reaches back
+    // and re-prices a closed month, even one with no recorded payments.
+    inputContract.rents.forEach((pastRent) => {
+      if (typeof pastRent.term !== 'number' || pastRent.term >= currentTerm) {
+        return;
+      }
+      const idx = updatedContract.rents.findIndex(
+        (r) => r.term === pastRent.term
+      );
+      if (idx > -1) {
+        updatedContract.rents[idx] = _.cloneDeep(pastRent);
+      }
+    });
+
+    // Pass 2: for rents at or after the current term that carry
+    // settlements (payments/discounts/debts/description), either freeze
+    // a fully-paid current term or replay via payTerm so the new
+    // pricing takes effect.
     inputContract.rents
-      .filter((rent) => _isPayment(rent))
+      .filter(
+        (rent) =>
+          typeof rent.term === 'number' &&
+          rent.term >= currentTerm &&
+          _isPayment(rent)
+      )
       .forEach((paidRent) => {
         if (_isFrozen(paidRent, currentTerm)) {
           const idx = updatedContract.rents.findIndex(
@@ -231,10 +260,13 @@ export function payTerm(
   const currentTerm = _currentTermFor(contract);
   contract.rents.forEach((rent, index) => {
     if (index > previousRentIndex) {
-      // Freeze: a paid past term that is NOT the term being paid must not
-      // be re-priced when a later term is paid. The act of paying the
-      // current term may walk the loop forward; that walk must skip
-      // already-frozen rents instead of overwriting their charges.
+      // Freeze: a past term (paid OR unpaid) that is NOT the term being
+      // paid must not be re-priced when a later term is paid. Tier I-1
+      // (June 2026): past-unpaid rents are now in scope of the freeze
+      // via _isFrozen — closed months stay immutable through any later
+      // settlement walk. The act of paying the current term may walk the
+      // loop forward; that walk must skip already-frozen rents instead
+      // of overwriting their charges.
       if (rent.term !== targetTerm && _isFrozen(rent, currentTerm)) {
         previousRent = contract.rents[index];
         current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
@@ -265,8 +297,14 @@ export function payTerm(
 // "Frozen" = a rent that must NOT be re-priced when expenses, properties,
 // or building charges change. Three regimes:
 //   - Future term: never frozen — landlord may still adjust pricing.
-//   - Past term with any settlement: frozen — historical bills are
-//     immutable once any settlement has been recorded against them.
+//   - Past term: ALWAYS frozen — paid or unpaid. Greek tax norm: closed
+//     months are immutable; arrears get adjusted via explicit credit/debit
+//     notes (existing debts[] settlement path), not by re-pricing on later
+//     edits to building expenses or property rent. Tier I-1 (June 2026)
+//     replaced the prior _isPayment(rent) check, which thawed past-unpaid
+//     terms and let a Feb expense edit retroactively raise an unpaid Feb
+//     bill — distorting historical aging and pushing the tenant deeper
+//     into arrears for an expense they were never billed.
 //   - Current term (Wave-17 B2): frozen ONLY if fully paid. The previous
 //     `<` check thawed the in-progress month even when the tenant had
 //     already paid in full, so editing a building expense after payment
@@ -277,7 +315,7 @@ export function payTerm(
 function _isFrozen(rent: Rent, currentTerm: number): boolean {
   if (!rent || typeof rent.term !== 'number') return false;
   if (rent.term > currentTerm) return false;
-  if (rent.term < currentTerm) return _isPayment(rent);
+  if (rent.term < currentTerm) return true;
   return _isFullyPaid(rent);
 }
 

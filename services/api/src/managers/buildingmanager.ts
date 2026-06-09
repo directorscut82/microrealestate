@@ -2658,6 +2658,17 @@ async function _removeRepairCharges(building: any, repair: any): Promise<void> {
       unit.monthlyCharges.pull(charge._id);
     }
   }
+  // Tier I-3.f: also strip any owner-side entries this repair created so a
+  // status flip to cancelled / a percentage edit / a cost change doesn't
+  // double-count on the owner ledger. Scope by expenseId === repair._id
+  // AND source === 'repair' so we never touch building-expense allocations.
+  const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
+    (e: any) =>
+      e.source === 'repair' && e.expenseId && String(e.expenseId) === repairIdStr
+  );
+  for (const e of ownerToRemove) {
+    (building as any).ownerMonthlyExpenses.pull(e._id);
+  }
 }
 
 async function _distributeRepairCharge(
@@ -2681,7 +2692,11 @@ async function _distributeRepairCharge(
     return;
   }
 
-  if (!repair.chargeableTo || repair.chargeableTo === 'owners') return;
+  // Tier I-3.f: owners-only repairs used to short-circuit here, leaving the
+  // owner ledger empty. We now keep going so an entry lands in
+  // ownerMonthlyExpenses[]. The chargeTerm guard still applies — without a
+  // term we don't know which month the entry belongs to.
+  if (!repair.chargeableTo) return;
   if (!repair.chargeTerm) return;
 
   const cost = repair.actualCost || repair.estimatedCost || 0;
@@ -2700,12 +2715,56 @@ async function _distributeRepairCharge(
     }
     return repair.chargeableTo === 'tenants' ? 100 : 0;
   })();
-  if (sharePercentage <= 0) return;
+
+  // Owner share is the inverse of the tenant share. 'owners' = 100% owner;
+  // 'split' with 60% tenant = 40% owner; 'tenants' = 0% owner.
+  const ownerPortion =
+    repair.chargeableTo === 'owners'
+      ? cost
+      : cost * (1 - sharePercentage / 100);
+
+  const term = Number(repair.chargeTerm);
+  const repairIdStr = String(repair._id);
+
+  // Always re-derive owner-side state from scratch — strip prior entries
+  // (also covered by _removeRepairCharges on cancelled, but here we cover
+  // the edit path that lands a new amount/term). Scope by expenseId+source.
+  const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
+    (e: any) =>
+      e.source === 'repair' &&
+      e.expenseId &&
+      String(e.expenseId) === repairIdStr
+  );
+  for (const e of ownerToRemove) {
+    (building as any).ownerMonthlyExpenses.pull(e._id);
+  }
+
+  if (ownerPortion > 0) {
+    (building as any).ownerMonthlyExpenses.push({
+      expenseId: repairIdStr,
+      term,
+      amount: Math.round(ownerPortion * 100) / 100,
+      source: 'repair',
+      description:
+        'Repair: ' + (repair.title || repair.description || 'untitled')
+    });
+  }
+
+  // If 100% owner-funded, skip the tenant-side distribution entirely.
+  if (sharePercentage <= 0) {
+    building.updatedDate = new Date();
+    await _saveBuildingWithVersionCheck(building);
+    const propertyIds = building.units
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    for (const propId of propertyIds) {
+      await _recomputeTenantsForProperty(realmId, propId);
+    }
+    return;
+  }
 
   const effectiveAmount = cost * (sharePercentage / 100);
   const allocationMethod = repair.allocationMethod || 'general_thousandths';
-  const term = Number(repair.chargeTerm);
-  const repairIdStr = String(repair._id);
 
   // F5 (mirrors saveMonthlyStatement / B2 fix at line 1604): the plain-
   // object snapshot must carry _tenantGroups so equal-allocation groups
@@ -2715,8 +2774,33 @@ async function _distributeRepairCharge(
   const buildingObj = building.toObject ? building.toObject() : building;
   await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
 
+  // Tier I-3.c: when affectedUnitIds is set, restrict the distribution to
+  // only those unit ids. Otherwise spread across all units (legacy).
+  // affectedUnitIds is a list of unit subdoc _ids — match against
+  // String(unit._id), NOT propertyId.
+  const restrictUnits =
+    Array.isArray(repair.affectedUnitIds) && repair.affectedUnitIds.length > 0
+      ? new Set(repair.affectedUnitIds.map((u: any) => String(u)))
+      : null;
+
   for (const unit of building.units) {
     if (!unit.propertyId) continue;
+    if (restrictUnits && !restrictUnits.has(String(unit._id))) {
+      // Unit was excluded — make sure we strip any prior charge in case it
+      // was previously included. Same scoping as the create path below.
+      const legacyDescription = `Repair: ${repair.title}`;
+      const stale = unit.monthlyCharges.filter(
+        (c: any) =>
+          (c.repairId && String(c.repairId) === repairIdStr) ||
+          (!c.repairId &&
+            c.term === term &&
+            c.description === legacyDescription)
+      );
+      for (const charge of stale) {
+        unit.monthlyCharges.pull(charge._id);
+      }
+      continue;
+    }
 
     const share = computeBuildingChargeForProperty(
       buildingObj,
@@ -2797,6 +2881,23 @@ export async function addRepair(req: Req, res: Res) {
       ALLOCATION_METHODS,
       'allocationMethod'
     );
+  }
+  // Tier I-3.c: affectedUnitIds is optional but when present must be an
+  // array of non-empty strings — Mongoose's [String] casts loosely.
+  if (req.body.affectedUnitIds !== undefined) {
+    if (!Array.isArray(req.body.affectedUnitIds)) {
+      throw new ServiceError('affectedUnitIds must be an array', 422);
+    }
+    if (
+      req.body.affectedUnitIds.some(
+        (u: any) => typeof u !== 'string' || !u.trim()
+      )
+    ) {
+      throw new ServiceError(
+        'affectedUnitIds must be non-empty strings',
+        422
+      );
+    }
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
@@ -2905,6 +3006,22 @@ export async function updateRepair(req: Req, res: Res) {
       ALLOCATION_METHODS,
       'allocationMethod'
     );
+  }
+  // Tier I-3.c: same shape guard as addRepair.
+  if (req.body.affectedUnitIds !== undefined) {
+    if (!Array.isArray(req.body.affectedUnitIds)) {
+      throw new ServiceError('affectedUnitIds must be an array', 422);
+    }
+    if (
+      req.body.affectedUnitIds.some(
+        (u: any) => typeof u !== 'string' || !u.trim()
+      )
+    ) {
+      throw new ServiceError(
+        'affectedUnitIds must be non-empty strings',
+        422
+      );
+    }
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');

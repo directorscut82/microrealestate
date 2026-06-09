@@ -191,6 +191,9 @@ const RepairSchema = new mongoose.Schema({
   affectedUnitIds: [String],
   affectedArea: String,
   invoiceReference: String,
+  // Tier I-3.d: holds the storage key (S3 / MinIO) returned by
+  // /documents/upload when the user attaches an invoice scan to a repair.
+  invoiceDocumentId: { type: String, default: null },
   notes: String,
   // Distribution to tenants
   chargeableTo: {
@@ -216,7 +219,15 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   expenseId: { type: String, required: true },
   term: { type: Number, required: true },
   amount: { type: Number, required: true },
-  description: String
+  description: String,
+  // Tier I-3.f: distinguishes recurring building-expense allocations from
+  // owner-side repair charges so the UI / reporting can show a per-source
+  // breakdown without inferring it from description text.
+  source: {
+    type: String,
+    enum: ['expense', 'repair'],
+    default: 'expense'
+  }
 });
 
 const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
