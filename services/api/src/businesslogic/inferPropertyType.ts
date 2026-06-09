@@ -37,15 +37,19 @@ export function inferPropertyType(unit: PropertyTypeInferenceInput): string {
     if (unit.category >= 50) return 'parking';
     return 'apartment';
   }
-  // Floor-based fallback first.
-  if (unit.floor !== null && unit.floor < 0) return 'storage';
-  if (unit.floor === 0) return 'store';
-  // Name-based fallback when both category and floor are null/missing
-  // (occurs on E9 OCR loss, manual entry, or cross-PDF property merge).
+  // Name-based fallback BEFORE floor-based: a unit named "Πάρκινγκ Υπογείου"
+  // is parking, not storage, even though it lives on a negative floor.
+  // Same for "Αποθήκη Ισογείου" — explicit storage on the ground floor
+  // beats the floor=0 → 'store' default. The token order inside the
+  // checks matters: parking match wins over generic basement/storage so
+  // a name carrying both "Υπόγειο" and "Πάρκινγκ" classifies as parking.
   if (typeof unit.name === 'string' && unit.name) {
-    if (/Υπόγειο|YPOGEIO/i.test(unit.name)) return 'storage';
     if (/Πάρκινγκ|PARKING|Στάθμευσ/i.test(unit.name)) return 'parking';
     if (/Αποθήκη|APOTHIKI|STORAGE/i.test(unit.name)) return 'storage';
+    if (/Υπόγειο|YPOGEIO/i.test(unit.name)) return 'storage';
   }
+  // Floor-based fallback last.
+  if (unit.floor !== null && unit.floor < 0) return 'storage';
+  if (unit.floor === 0) return 'store';
   return 'apartment';
 }

@@ -72,6 +72,7 @@ const expenseSchema = z.object({
   isRecurring: z.boolean(),
   trackOwnerExpense: z.boolean().optional().default(false),
   ownerAmount: z.coerce.number().min(0).max(10000000).optional().default(0),
+  chargeOwnerWhenVacant: z.boolean().optional().default(false),
   startFromCurrentMonth: z.boolean().optional().default(true),
   notes: z.string().max(5000).optional(),
   billingId: z.string().optional(),
@@ -326,6 +327,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       isRecurring: true,
       trackOwnerExpense: false,
       ownerAmount: 0,
+      chargeOwnerWhenVacant: false,
       startFromCurrentMonth: true,
       notes: '',
       customAllocations: buildDefaultAllocations([])
@@ -335,6 +337,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
           ...expense,
           trackOwnerExpense: expense.trackOwnerExpense ?? false,
           ownerAmount: expense.ownerAmount ?? 0,
+          chargeOwnerWhenVacant: expense.chargeOwnerWhenVacant ?? false,
           isRecurring: expense.isRecurring ?? true,
           startFromCurrentMonth: !expense.startTerm,
           customAllocations: buildDefaultAllocations(
@@ -586,6 +589,28 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               <Label htmlFor="trackOwnerExpense">
                 {t('Track owner expense')}
               </Label>
+            </div>
+
+            <div className="flex items-start gap-2">
+              <Switch
+                id="chargeOwnerWhenVacant"
+                checked={watch('chargeOwnerWhenVacant') || false}
+                onCheckedChange={(checked) =>
+                  setValue('chargeOwnerWhenVacant', checked, {
+                    shouldDirty: true
+                  })
+                }
+              />
+              <div className="flex flex-col gap-0.5">
+                <Label htmlFor="chargeOwnerWhenVacant">
+                  {t('Charge owner for vacant units')}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    "When a unit has no tenant, the share that would have been billed lands on the owner's monthly statement instead of being dropped."
+                  )}
+                </p>
+              </div>
             </div>
 
             {trackOwnerExpense && (

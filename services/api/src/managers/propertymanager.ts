@@ -754,6 +754,11 @@ export async function getExpenses(req: Req, res: Res) {
     propertyId: String(propertyId),
     currency: realm!.currency || '',
     currentTerm,
+    // Echo the window the panel covers so the UI can label "Current
+    // month (June 2026)" / "13-month total (Jun 2025 — Jun 2026)" with
+    // real dates instead of unanchored "Current month / Lifetime".
+    fromTerm,
+    toTerm,
     currentMonth: {
       byCategory: currentMonthByCategory,
       lines: currentMonthLines

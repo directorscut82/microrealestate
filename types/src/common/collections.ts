@@ -505,6 +505,7 @@ export namespace CollectionTypes {
     notes?: string;
     trackOwnerExpense?: boolean;
     ownerAmount?: number;
+    chargeOwnerWhenVacant?: boolean;
     billingId?: string;
   };
 

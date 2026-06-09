@@ -7,9 +7,18 @@ import { LuChevronsUpDown, LuReceipt } from 'react-icons/lu';
 import { useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { DashboardCard } from '../dashboard/DashboardCard';
+import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import useFetchPropertyExpenses from '../../hooks/useFetchPropertyExpenses';
 import useTranslation from 'next-translate/useTranslation';
+
+// YYYYMMDDHH integer → "MMM YYYY" string, localised via the active moment locale.
+function _formatTermShort(term, locale) {
+  if (!term) return '';
+  const m = moment.utc(String(term), 'YYYYMMDDHH');
+  if (!m.isValid()) return '';
+  return locale ? m.locale(locale).format('MMM YYYY') : m.format('MMM YYYY');
+}
 
 const CATEGORY_KEYS = [
   'heating',
@@ -114,11 +123,31 @@ function ExpenseLines({ lines, t }) {
 }
 
 export default function PropertyExpensesCard({ propertyId }) {
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
   const [openCurrent, setOpenCurrent] = useState(true);
   const [openLifetime, setOpenLifetime] = useState(false);
 
   const { data, isLoading } = useFetchPropertyExpenses(propertyId);
+
+  // Server returns currentTerm + fromTerm + toTerm as YYYYMMDDHH integers
+  // so the tile can label "Current month (June 2026)" and "13-month
+  // total (Jun 2025 — Jun 2026)" instead of bare unanchored text.
+  const currentMonthLabel = useMemo(() => {
+    const base = t('Current month');
+    const monthStr = data?.currentTerm
+      ? _formatTermShort(data.currentTerm, lang)
+      : '';
+    return monthStr ? `${base} (${monthStr})` : base;
+  }, [data?.currentTerm, lang, t]);
+
+  const lifetimeLabel = useMemo(() => {
+    const base = t('Lifetime total');
+    const fromStr = data?.fromTerm
+      ? _formatTermShort(data.fromTerm, lang)
+      : '';
+    const toStr = data?.toTerm ? _formatTermShort(data.toTerm, lang) : '';
+    return fromStr && toStr ? `${base} (${fromStr} — ${toStr})` : base;
+  }, [data?.fromTerm, data?.toTerm, lang, t]);
 
   const currentTotal = useMemo(() => {
     if (!data?.currentMonth?.byCategory) return 0;
@@ -164,7 +193,7 @@ export default function PropertyExpensesCard({ propertyId }) {
                   size="sm"
                   className="flex w-full justify-between px-2"
                 >
-                  <span className="font-medium">{t('Current month')}</span>
+                  <span className="font-medium">{currentMonthLabel}</span>
                   <span className="flex items-center gap-2">
                     <NumberFormat value={currentTotal} />
                     <LuChevronsUpDown className="size-4 text-muted-foreground" />
@@ -191,7 +220,7 @@ export default function PropertyExpensesCard({ propertyId }) {
                   size="sm"
                   className="flex w-full justify-between px-2"
                 >
-                  <span className="font-medium">{t('Lifetime total')}</span>
+                  <span className="font-medium">{lifetimeLabel}</span>
                   <span className="flex items-center gap-2">
                     <NumberFormat value={lifetimeTotal} />
                     <LuChevronsUpDown className="size-4 text-muted-foreground" />

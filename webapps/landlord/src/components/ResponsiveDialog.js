@@ -74,7 +74,15 @@ export default function ResponsiveDialog({
             </DialogHeader>
           ) : null}
 
-          {renderContent ? <div className="px-4">{renderContent()}</div> : null}
+          {/* Cap content height at 75vh and scroll inside the dialog
+              shell so tall forms (Repair edit, Building expense, etc.)
+              don't push the footer below the viewport. The mobile drawer
+              already does this — desktop should too. */}
+          {renderContent ? (
+            <div className="px-4 max-h-[75vh] overflow-y-auto scrollbar-branded">
+              {renderContent()}
+            </div>
+          ) : null}
 
           {renderFooter ? (
             <DialogFooter className="px-4">
