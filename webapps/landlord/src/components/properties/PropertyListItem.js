@@ -62,13 +62,16 @@ export default function PropertyListItem({ property }) {
         />
       </div>
 
-      <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-stone-line">
+      <div className="flex items-center justify-between gap-3 px-5 py-2 border-t border-stone-line">
         <div className="text-label text-ink-muted truncate">
           {!isVacant && property.occupantLabel
             ? t('Occupied by {{tenant}}', { tenant: property.occupantLabel })
             : null}
         </div>
-        <Badge variant={isVacant ? 'success' : 'secondary'} className="shrink-0">
+        <Badge
+          variant={isVacant ? 'success' : 'secondary'}
+          className="shrink-0 px-2 py-0 text-[11px] leading-none font-normal"
+        >
           {isVacant ? t('Vacant') : t('Rented')}
         </Badge>
       </div>
