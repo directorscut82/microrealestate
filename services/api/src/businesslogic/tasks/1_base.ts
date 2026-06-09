@@ -352,6 +352,17 @@ function _computeBuildingChargeRaw(
       return Math.round((amount - othersSum) * 100) / 100;
     }
 
+    case 'single_unit': {
+      // Bill the entire expense to one specific unit. The chosen
+      // propertyId lives in customAllocations[0].propertyId. The user
+      // picked a single apartment from the dropdown; every other
+      // property's share is 0.
+      const target = (customAllocations || [])[0];
+      if (!target?.propertyId) return 0;
+      if (String(target.propertyId) !== String(propertyId)) return 0;
+      return Math.round(amount * 100) / 100;
+    }
+
     default:
       return 0;
   }

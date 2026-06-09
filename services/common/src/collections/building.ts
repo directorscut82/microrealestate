@@ -106,7 +106,14 @@ const BuildingExpenseSchema = new mongoose.Schema({
       'by_surface',
       'fixed',
       'custom_ratio',
-      'custom_percentage'
+      'custom_percentage',
+      // "single_unit" — the entire expense is billed to one specific
+      // unit (e.g. a balcony repair charged to the apartment that
+      // benefits). The chosen unit lives in customAllocations[0].
+      // Functionally equivalent to custom_percentage with 100% on one
+      // unit and 0 on all others, but presented as a one-click choice
+      // so the user doesn't have to fill 0 in every other row.
+      'single_unit'
     ],
     required: true
   },
