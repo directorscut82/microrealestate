@@ -23,6 +23,7 @@ import NumberFormat from '../../../components/NumberFormat';
 import Page from '../../../components/Page';
 import PresenceBanner from '../../../components/PresenceBanner';
 import usePresence from '../../../hooks/usePresence';
+import PropertyExpensesCard from '../../../components/properties/PropertyExpensesCard';
 import PropertyForm from '../../../components/properties/PropertyForm';
 import { Button } from '../../../components/ui/button';
 import { toast } from 'sonner';
@@ -225,6 +226,7 @@ function Property() {
         <div className="hidden md:grid grid-cols-1 gap-4 h-fit">
           <PropertyOverviewCard property={property} />
           <OccupancyHistoryCard property={property} />
+          <PropertyExpensesCard propertyId={propertyId} />
         </div>
       </div>
       <ConfirmDialog

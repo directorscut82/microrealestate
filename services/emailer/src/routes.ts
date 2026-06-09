@@ -25,7 +25,8 @@ async function _send(req: Request, res: Response): Promise<void> {
         'invoice',
         'rentcall',
         'rentcall_last_reminder',
-        'rentcall_reminder'
+        'rentcall_reminder',
+        'lease_expiry_notice'
       ];
       break;
   }

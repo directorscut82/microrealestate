@@ -11,14 +11,38 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from '../ui/tooltip';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
+import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
+
+// Mirror services/api/src/businesslogic/tasks/1_base.ts :: isExpenseActiveForTerm —
+// must agree with the rent-pipeline check so the dashboard headline matches what
+// is actually being billed. Recurring expenses honor [startTerm, endTerm];
+// one-time expenses match by YYYYMM (Wave-18 B1).
+function isExpenseActiveForTerm(expense, term) {
+  if (!(expense.isRecurring ?? expense.recurring)) {
+    if (!expense.startTerm) return false;
+    if (Math.floor(expense.startTerm / 10000) !== Math.floor(term / 10000)) {
+      return false;
+    }
+    return true;
+  }
+  if (expense.startTerm && term < expense.startTerm) return false;
+  if (expense.endTerm && term > expense.endTerm) return false;
+  return true;
+}
 
 const OCCUPANCY_CONFIG = {
   rented: {
@@ -173,9 +197,14 @@ export default function BuildingDashboard({ building }) {
 
   // Annual esoda / eksoda summary for this building.
   // Esoda  = sum of monthly rent across all currently-rented units × 12.
-  // Eksoda = sum of recurring building expenses (×12) + one-time expenses
-  //          + sum of repair actualCost/estimatedCost + sum of all owner
-  //          monthly expense entries already recorded.
+  // Eksoda = recurring building expenses ×12 + one-time expenses
+  //          + tenant-distributed portion of repairs (from unit.monthlyCharges
+  //            with repairId set — owner-portion already lands in
+  //            ownerMonthlyExpenses via Stage 1 I-3.f, so we must NOT also
+  //            count repair.actualCost/estimatedCost wholesale)
+  //          + owner expenses (ownerMonthlyExpenses entries +
+  //            sum(BuildingExpense.ownerAmount) ×12 for recurring fixed
+  //            owner-tracked expenses active for the current period).
   // Owner-occupied + parking units contribute zero esoda but still incur
   // their share of any owner-tracked expenses.
   const finance = useMemo(() => {
@@ -189,6 +218,14 @@ export default function BuildingDashboard({ building }) {
       return sum + (Number(tenantInfo.rent) || 0);
     }, 0);
 
+    // Current term in YYYYMMDDHH so we can ask isExpenseActiveForTerm whether
+    // an expense's [startTerm, endTerm] window covers "now". Using local
+    // moment matches the rent-pipeline projection in 1_base.ts (which
+    // operates on rent.term).
+    const currentTerm = Number(
+      moment().startOf('month').format('YYYYMMDDHH')
+    );
+
     // Wave-24 A13: legacy seed data persists this flag as `recurring`
     // (without the is- prefix). Read both so existing buildings show the
     // correct totals after upgrade — the new schema field shadows the
@@ -199,16 +236,42 @@ export default function BuildingDashboard({ building }) {
     const oneTimeEksoda = (building?.expenses || [])
       .filter((e) => !(e.isRecurring ?? e.recurring) && e.amount > 0)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const repairEksoda = (building?.repairs || [])
-      .filter((r) => r.status !== 'cancelled')
-      .reduce(
-        (sum, r) => sum + (Number(r.actualCost) || Number(r.estimatedCost) || 0),
-        0
+    // Stage 1 I-3.f: tenant share of repairs is materialized as
+    // unit.monthlyCharges entries (one per unit per term, repairId set).
+    // Sum those instead of the raw repair cost — this stops the historical
+    // double-count where actualCost was added on top of the owner-portion
+    // already sitting in ownerMonthlyExpenses.
+    const repairEksoda = (building?.units || []).reduce((sum, unit) => {
+      const charges = unit.monthlyCharges || [];
+      return (
+        sum +
+        charges
+          .filter((c) => c.repairId)
+          .reduce((s, c) => s + (Number(c.amount) || 0), 0)
       );
-    const ownerEksoda = (building?.ownerMonthlyExpenses || []).reduce(
+    }, 0);
+    // Owner expenses comprise three additive streams (no overlap between them):
+    //  1. ownerMonthlyExpenses entries — variable owner amounts entered per
+    //     term via MonthlyStatement, plus owner-portion of repairs (Stage 1).
+    //  2. BuildingExpense.ownerAmount where trackOwnerExpense+isRecurring —
+    //     the fixed monthly owner-only portion of a recurring expense, which
+    //     is NEVER persisted to ownerMonthlyExpenses (those rows are reserved
+    //     for variable amounts). Without this projection the dashboard
+    //     undercounts by the entire fixed owner share.
+    const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || []).reduce(
       (sum, e) => sum + (Number(e.amount) || 0),
       0
     );
+    const fixedOwnerMonthly = (building?.expenses || [])
+      .filter(
+        (e) =>
+          e.trackOwnerExpense &&
+          (e.isRecurring ?? e.recurring) &&
+          Number(e.ownerAmount) > 0 &&
+          isExpenseActiveForTerm(e, currentTerm)
+      )
+      .reduce((sum, e) => sum + (Number(e.ownerAmount) || 0), 0);
+    const ownerEksoda = recordedOwnerEksoda + fixedOwnerMonthly * 12;
 
     const annualEsoda = monthlyEsoda * 12;
     const annualEksoda =
@@ -232,7 +295,7 @@ export default function BuildingDashboard({ building }) {
     propertyMap,
     tenantByPropertyId,
     building?.expenses,
-    building?.repairs,
+    building?.units,
     building?.ownerMonthlyExpenses
   ]);
 
@@ -299,7 +362,21 @@ export default function BuildingDashboard({ building }) {
               {t('Repairs')}: <NumberFormat value={finance.repairEksoda} showZero />
             </div>
             <div>
-              {t('Owner expenses')}:{' '}
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="border-b border-dotted border-muted-foreground/50 cursor-help">
+                      {t('Owner expenses')}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-[260px] text-xs">
+                    {t(
+                      'Includes fixed owner-only expenses, owner-portion of repairs, and direct owner monthly entries.'
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              :{' '}
               <NumberFormat value={finance.ownerEksoda} showZero />
             </div>
           </div>

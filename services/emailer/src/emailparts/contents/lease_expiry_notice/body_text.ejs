@@ -1,0 +1,14 @@
+<%- include('../__content_parts/text/header.ejs') %>
+<%- include('../__content_parts/text/greetings.ejs') %>
+<%- _.t('The lease for {{name}} expires on {{date}} (in {{n}} days).', { name: tenant.name, date: endDateFormatted, n: daysUntilExpiry }) %>
+<% if (property && property.name) { %>
+<%- _.t('Property: {{name}}', { name: property.name }) %>
+<% if (property.address) { %>
+<%- property.address %>
+<% } %>
+<% } %>
+
+<%- _.t('Open in landlord panel') %>: <%= landlordPanelUrl %>
+
+<%- include('../__content_parts/text/signature.ejs') %>
+<%- include('../__content_parts/text/landlordcontact.ejs') %>

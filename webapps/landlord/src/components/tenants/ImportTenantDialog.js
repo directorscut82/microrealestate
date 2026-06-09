@@ -3,6 +3,7 @@ import {
   createLease,
   createProperty,
   createTenant,
+  extendTenantLease,
   fetchBuildings,
   fetchLeases,
   fetchProperties,
@@ -31,6 +32,7 @@ import FileDropZone from '../ui/file-drop-zone';
 import { Label } from '../ui/label';
 import { LuCalendarClock } from 'react-icons/lu';
 import { LuAlertTriangle, LuBan, LuCheck, LuUser } from 'react-icons/lu';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 import moment from 'moment';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { StoreContext } from '../../store';
@@ -61,6 +63,14 @@ export default function ImportTenantDialog({ open, setOpen }) {
   // surface corrections, custom name, expense categories, etc. 4 duplicate
   // pairs in the user's PDF corpus would otherwise clobber edits.
   const [updatePropertyFlags, setUpdatePropertyFlags] = useState({});
+  // PDF-import-as-lease-extension: per-row merge strategy.
+  //   'extend'  → preserve history (push prior lease into leaseHistory[])
+  //   'replace' → in-place update of root fields (legacy behavior)
+  //   'new'     → bypass taxId guard, create a brand-new tenant
+  // The default per row is derived from the server-side classification
+  // (kind=extension → 'extend', kind=update → 'replace', kind=review →
+  //  'new', kind=new → 'new'). The user can override via the radio group.
+  const [importStrategies, setImportStrategies] = useState({});
 
   const { data: leases = [] } = useQuery({
     queryKey: [QueryKeys.LEASES],
@@ -171,16 +181,80 @@ export default function ImportTenantDialog({ open, setOpen }) {
       const dateInvalid =
         _vs.isValid() && _ve.isValid() ? !_ve.isAfter(_vs) : false;
 
+      // Server-side classification (services/api/src/managers/pdfimportmanager).
+      // Falls back to a client-side heuristic when older API responses don't
+      // carry the field — matches kind=extension if the parsed primary taxId
+      // matches an existing tenant whose endDate is within ~30 days of the
+      // parsed validityStart and validityEnd extends past it.
+      let classificationKind = parsed.classification?.kind;
+      if (!classificationKind) {
+        if (matchedTenant && firstTaxId && matchedTenant.taxId === firstTaxId) {
+          const existingEnd = matchedTenant.endDate
+            ? moment(matchedTenant.endDate)
+            : null;
+          const isExtension =
+            existingEnd &&
+            existingEnd.isValid() &&
+            !matchedTenant.terminationDate &&
+            _vs.isValid() &&
+            _ve.isValid() &&
+            _vs.diff(existingEnd, 'days') >= -30 &&
+            _ve.isAfter(existingEnd);
+          classificationKind = isExtension ? 'extension' : 'update';
+        } else if (
+          matchedTenant &&
+          firstTaxId &&
+          matchedTenant.taxId !== firstTaxId
+        ) {
+          classificationKind = 'review';
+        } else {
+          classificationKind = 'new';
+        }
+      }
+
       return {
         months,
         pastMonths,
         matchedProperty,
         matchedTenant,
         occupiedBy,
-        dateInvalid
+        dateInvalid,
+        classificationKind
       };
     });
   }, [parsedResults, existingProperties, existingTenants]);
+
+  // Default the per-row merge strategy from the classification kind, but
+  // only when the user has not yet picked an explicit choice for that row
+  // (otherwise toggling a Select / Checkbox elsewhere in the row would
+  // clobber the user's selection on every render).
+  useEffect(() => {
+    if (parsedResults.length === 0) return;
+    setImportStrategies((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      matchInfos.forEach((info, idx) => {
+        if (next[idx] !== undefined) return;
+        let def;
+        switch (info?.classificationKind) {
+          case 'extension':
+            def = 'extend';
+            break;
+          case 'update':
+            def = 'replace';
+            break;
+          case 'review':
+            def = 'new';
+            break;
+          default:
+            def = 'new';
+        }
+        next[idx] = def;
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [matchInfos, parsedResults.length]);
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -193,6 +267,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
     // flags re-apply to a different tenant/property.
     setMarkPaidFlags({});
     setUpdatePropertyFlags({});
+    setImportStrategies({});
   }, [setOpen]);
 
   const handleParse = useCallback(async () => {
@@ -649,7 +724,24 @@ export default function ImportTenantDialog({ open, setOpen }) {
         };
 
         let tenant;
-        if (matchInfo?.matchedTenant) {
+        const strategy = importStrategies[idx] || 'new';
+        // 'extend' and 'replace' both require an existing matched tenant.
+        // If the user picked one of those without a match (shouldn't be
+        // possible from the UI, but guard anyway), fall back to creating
+        // a new tenant rather than crashing on a null _id.
+        const canMergeIntoExisting =
+          !!matchInfo?.matchedTenant && strategy !== 'new';
+        if (canMergeIntoExisting && strategy === 'extend') {
+          // PDF-import-as-lease-extension: server snapshots the prior
+          // root-level lease window into leaseHistory[] before applying the
+          // new declaration's dates / declaration number. The parsed object
+          // we POST is the same shape parseImportedPdf returned plus the
+          // resolved leaseId so the server doesn't have to re-resolve.
+          tenant = await extendTenantLease(matchInfo.matchedTenant._id, {
+            ...parsed,
+            leaseId
+          });
+        } else if (canMergeIntoExisting && strategy === 'replace') {
           // P2.1 / H2: previously the PATCH overwrote properties[] with a
           // single-element array built from parsed.properties[0], wiping any
           // existing property entries on a multi-property tenant. GET the
@@ -877,7 +969,9 @@ export default function ImportTenantDialog({ open, setOpen }) {
                       </div>
                       {info?.matchedTenant && (
                         <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
-                          {t('Update')}
+                          {info.classificationKind === 'extension'
+                            ? t('Lease extension detected')
+                            : t('Update')}
                         </span>
                       )}
                       {info?.occupiedBy && (
@@ -890,8 +984,47 @@ export default function ImportTenantDialog({ open, setOpen }) {
                     {info?.matchedTenant && (
                       <div className="flex items-center gap-1 text-xs text-yellow-700">
                         <LuAlertTriangle className="size-3" />
-                        {t('Existing tenant found')}:{' '}
-                        {info.matchedTenant.name}
+                        {info.classificationKind === 'extension'
+                          ? t('Lease extension detected')
+                          : t('Tenant already exists')}
+                        :{' '}{info.matchedTenant.name}
+                      </div>
+                    )}
+
+                    {info?.matchedTenant && !info?.occupiedBy && (
+                      <div className="space-y-1 pt-2 p-2 bg-muted/50 rounded-md">
+                        <Label className="text-xs">
+                          {t('Lease extension detected')}
+                        </Label>
+                        <RadioGroup
+                          value={importStrategies[idx] || 'new'}
+                          onValueChange={(v) =>
+                            setImportStrategies((prev) => ({
+                              ...prev,
+                              [idx]: v
+                            }))
+                          }
+                          className="gap-1"
+                        >
+                          <RadioGroupItem
+                            id={`strategy-extend-${idx}`}
+                            value="extend"
+                          >
+                            {t('Extend lease')}
+                          </RadioGroupItem>
+                          <RadioGroupItem
+                            id={`strategy-replace-${idx}`}
+                            value="replace"
+                          >
+                            {t('Replace in place')}
+                          </RadioGroupItem>
+                          <RadioGroupItem
+                            id={`strategy-new-${idx}`}
+                            value="new"
+                          >
+                            {t('Create new tenant')}
+                          </RadioGroupItem>
+                        </RadioGroup>
                       </div>
                     )}
                     {info?.matchedProperty && (

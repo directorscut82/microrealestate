@@ -162,9 +162,38 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
     }
   ],
 
+  // Lease history: every time a PDF import is detected as an extension of
+  // an active lease (same primary taxId, end-date proximity match), the
+  // PRIOR lease window is archived here as a snapshot before the root-level
+  // lease fields are overwritten with the new declaration's values. This
+  // preserves the audit trail for the original term + declaration without
+  // bloating the rents[] embed.
+  leaseHistory: {
+    type: [
+      {
+        _id: false,
+        beginDate: Date,
+        endDate: Date,
+        leaseId: { type: String, ref: Lease },
+        declarationNumber: String,
+        amendsDeclaration: String,
+        originalLeaseStartDate: Date,
+        archivedAt: Date,
+        supersededByDeclarationNumber: String
+      }
+    ],
+    default: []
+  },
+
   // ui state
   stepperMode: { type: Boolean, default: false },
-  archived: { type: Boolean, default: false }
+  archived: { type: Boolean, default: false },
+
+  // Last time the lease-expiry-notice scanner emitted a reminder for this
+  // tenant. Used by services/api/src/jobs/leaseExpiryScanner.ts to debounce
+  // repeat sends within the configured cooldown window (25 days). null means
+  // "never sent" — the next scan will deliver the first notice.
+  lastExpiryNoticeSentAt: { type: Date, default: null }
 });
 
 TenantSchema.index({ realmId: 1 });

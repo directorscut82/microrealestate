@@ -2,6 +2,7 @@ import { EnvironmentConfig, logger, Service } from '@microrealestate/common';
 import { fileURLToPath } from 'url';
 import type { Application } from 'express';
 import i18n from 'i18n';
+import { startLeaseExpiryCron } from './jobs/leaseExpiryScanner.js';
 import migratedb from '../scripts/migration.js';
 import path from 'path';
 import { restoreDB } from '../scripts/dbbackup.js';
@@ -26,6 +27,11 @@ async function onStartUp(application: Application) {
   await migratedb();
 
   application.use(routes());
+
+  // Lease-expiry scanner — hourly tick, body runs at most once per UTC day.
+  // .unref()'d so it never blocks shutdown. See jobs/leaseExpiryScanner.ts
+  // for the full debounce / window logic.
+  startLeaseExpiryCron();
 }
 
 async function Main() {

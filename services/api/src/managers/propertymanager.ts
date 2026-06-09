@@ -14,6 +14,8 @@ import {
   isValidGreekPostalCode,
   PROPERTY_TYPES
 } from '../validators.js';
+import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
+import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 
 // Surface lower-bound depends on property type. A 0-surface apartment is
 // nonsensical; parking spots may legitimately have a tiny declared surface
@@ -382,4 +384,332 @@ export async function one(req: Req, res: Res) {
 
   const properties = await _toPropertiesData(realm, [dbProperty]);
   return res.json(properties[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Per-property expense panel
+// ---------------------------------------------------------------------------
+
+const EXPENSE_CATEGORIES = [
+  'heating',
+  'water',
+  'electricity',
+  'insurance',
+  'cleaning',
+  'repairs',
+  'other'
+] as const;
+
+type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+type CategoryTotals = Record<ExpenseCategory, number>;
+
+interface ExpenseLine {
+  description: string;
+  amount: number;
+  source: string;
+}
+
+function _zeroCategoryTotals(): CategoryTotals {
+  return {
+    heating: 0,
+    water: 0,
+    electricity: 0,
+    insurance: 0,
+    cleaning: 0,
+    repairs: 0,
+    other: 0
+  };
+}
+
+// Map a building expense schema `type` to one of the 7 panel categories.
+function _classifyExpenseType(type: string | undefined | null): ExpenseCategory {
+  switch (type) {
+    case 'heating':
+      return 'heating';
+    case 'water_common':
+      return 'water';
+    case 'electricity_common':
+      return 'electricity';
+    case 'insurance':
+      return 'insurance';
+    case 'cleaning':
+      return 'cleaning';
+    case 'repairs_fund':
+    case 'repair':
+      return 'repairs';
+    default:
+      return 'other';
+  }
+}
+
+// Parse YYYYMM and return a YYYYMMDDHH term (first day of month, hour 00)
+function _parseYYYYMM(value: string, fieldName: string): number {
+  const parsed = moment.utc(value, 'YYYYMM', true);
+  if (!parsed.isValid()) {
+    throw new ServiceError(
+      `Invalid ${fieldName}: expected YYYYMM (e.g. 202604)`,
+      422
+    );
+  }
+  return Number(parsed.startOf('month').format('YYYYMMDDHH'));
+}
+
+// Walk a YYYYMM range inclusive, yielding YYYYMMDDHH terms (one per month).
+function _enumerateTerms(fromTerm: number, toTerm: number): number[] {
+  const fromMoment = moment.utc(String(fromTerm), 'YYYYMMDDHH');
+  const toMoment = moment.utc(String(toTerm), 'YYYYMMDDHH');
+  const terms: number[] = [];
+  const cursor = fromMoment.clone();
+  // Cap at 240 months (20 years) to avoid unbounded iteration on bad input.
+  let safety = 0;
+  while (cursor.isSameOrBefore(toMoment, 'month') && safety < 240) {
+    terms.push(Number(cursor.format('YYYYMMDDHH')));
+    cursor.add(1, 'month');
+    safety++;
+  }
+  return terms;
+}
+
+function _isExpenseActiveForTerm(
+  expense: any,
+  term: number
+): boolean {
+  if (!expense) return false;
+  if (!expense.isRecurring) {
+    if (!expense.startTerm) return false;
+    return Math.floor(expense.startTerm / 10000) === Math.floor(term / 10000);
+  }
+  if (expense.startTerm && term < expense.startTerm) return false;
+  if (expense.endTerm && term > expense.endTerm) return false;
+  return true;
+}
+
+export async function getExpenses(req: Req, res: Res) {
+  const realm = req.realm;
+  const propertyId = req.params.id;
+  validateObjectId(propertyId, 'property id');
+
+  const dbProperty: any = await Collections.Property.findOne({
+    _id: propertyId,
+    realmId: realm!._id
+  }).lean();
+  if (!dbProperty) {
+    throw new ServiceError('Property does not exist', 404);
+  }
+
+  // Default range: past 12 months PLUS the current month (13 entries total).
+  const now = moment.utc().startOf('month');
+  const defaultTo = Number(now.format('YYYYMMDDHH'));
+  const defaultFrom = Number(
+    now.clone().subtract(12, 'months').format('YYYYMMDDHH')
+  );
+
+  const fromTerm = req.query?.from
+    ? _parseYYYYMM(String(req.query.from), 'from')
+    : defaultFrom;
+  const toTerm = req.query?.to
+    ? _parseYYYYMM(String(req.query.to), 'to')
+    : defaultTo;
+
+  if (fromTerm > toTerm) {
+    throw new ServiceError('"from" must be before or equal to "to"', 422);
+  }
+
+  const terms = _enumerateTerms(fromTerm, toTerm);
+  const currentTerm = Number(now.format('YYYYMMDDHH'));
+
+  // Locate the building that contains this property as a unit. Realm-scoped.
+  const building: any = await Collections.Building.findOne({
+    realmId: realm!._id,
+    'units.propertyId': String(propertyId)
+  }).lean();
+
+  // Attach _tenantGroups so the equal-allocation case in
+  // computeBuildingChargeForProperty can split per-tenant rather than
+  // per-unit (mirrors rentmanager / buildingmanager flow).
+  if (building) {
+    await _attachTenantGroupsToBuildings(String(realm!._id), [building]);
+  }
+
+  const lifetimeByCategory: CategoryTotals = _zeroCategoryTotals();
+  const lifetimeByYear: Record<string, number> = {};
+  let currentMonthByCategory: CategoryTotals = _zeroCategoryTotals();
+  let currentMonthLines: ExpenseLine[] = [];
+
+  if (building) {
+    const unit = (building.units || []).find(
+      (u: any) => String(u.propertyId) === String(propertyId)
+    );
+
+    for (const term of terms) {
+      const ymKey = String(Math.floor(term / 1000000)); // YYYY
+      const isCurrent = term === currentTerm;
+      const monthLines: ExpenseLine[] = [];
+      const monthByCategory = _zeroCategoryTotals();
+
+      // 1. Building expenses active for this term — but skip those
+      //    already overridden by a unit-level monthly charge (mirrors
+      //    1_base.ts behaviour to avoid double-counting).
+      const monthlyChargeExpenseIds = new Set<string>();
+      if (unit && Array.isArray(unit.monthlyCharges)) {
+        for (const charge of unit.monthlyCharges) {
+          if (charge.term === term && charge.expenseId) {
+            monthlyChargeExpenseIds.add(String(charge.expenseId));
+          }
+        }
+      }
+
+      for (const expense of (building.expenses || []) as any[]) {
+        if (!_isExpenseActiveForTerm(expense, term)) continue;
+        if (monthlyChargeExpenseIds.has(String(expense._id))) continue;
+        const share = computeBuildingChargeForProperty(
+          building,
+          String(propertyId),
+          expense,
+          term
+        );
+        if (share <= 0) continue;
+        const category = _classifyExpenseType(expense.type);
+        const line: ExpenseLine = {
+          description: expense.name || '',
+          amount: share,
+          source: 'building_expense'
+        };
+        monthByCategory[category] += share;
+        lifetimeByCategory[category] += share;
+        lifetimeByYear[ymKey] = (lifetimeByYear[ymKey] || 0) + share;
+        if (isCurrent) monthLines.push(line);
+        else if (terms.length === 1) monthLines.push(line);
+      }
+
+      // 2. Unit-level monthly charges for this term (manual entries +
+      //    repair-distributed lines; both already carry a final amount).
+      if (unit && Array.isArray(unit.monthlyCharges)) {
+        for (const charge of unit.monthlyCharges as any[]) {
+          if (charge.term !== term) continue;
+          const amount = Number(charge.amount) || 0;
+          if (amount <= 0) continue;
+          const isRepair = !!charge.repairId;
+          // Manual monthly_charge entries are categorised as 'other'
+          // unless we can hint otherwise; repair-distributed charges go
+          // into 'repairs'.
+          const category: ExpenseCategory = isRepair ? 'repairs' : 'other';
+          const line: ExpenseLine = {
+            description: charge.description || 'Monthly charge',
+            amount,
+            source: isRepair ? 'repair' : 'monthly_charge'
+          };
+          monthByCategory[category] += amount;
+          lifetimeByCategory[category] += amount;
+          lifetimeByYear[ymKey] = (lifetimeByYear[ymKey] || 0) + amount;
+          if (isCurrent) monthLines.push(line);
+          else if (terms.length === 1) monthLines.push(line);
+        }
+      }
+
+      // 3. Owner monthly expenses for this term — these are already
+      //    materialised per-term so no allocation is needed. They land on
+      //    the OWNER side (not tenant), so categorise as 'other' unless
+      //    we can map the expenseId back to a typed building.expenses
+      //    entry.
+      if (Array.isArray(building.ownerMonthlyExpenses)) {
+        for (const ownerEntry of building.ownerMonthlyExpenses as any[]) {
+          if (ownerEntry.term !== term) continue;
+          const amount = Number(ownerEntry.amount) || 0;
+          if (amount <= 0) continue;
+          // Try to resolve the source expense type to classify correctly.
+          const sourceExpense = (building.expenses || []).find(
+            (e: any) => String(e._id) === String(ownerEntry.expenseId)
+          );
+          const category = _classifyExpenseType(sourceExpense?.type);
+          const line: ExpenseLine = {
+            description: ownerEntry.description || sourceExpense?.name || 'Owner expense',
+            amount,
+            source: 'owner_monthly_expense'
+          };
+          monthByCategory[category] += amount;
+          lifetimeByCategory[category] += amount;
+          lifetimeByYear[ymKey] = (lifetimeByYear[ymKey] || 0) + amount;
+          if (isCurrent) monthLines.push(line);
+          else if (terms.length === 1) monthLines.push(line);
+        }
+      }
+
+      // 4. Repairs whose chargeTerm matches this term AND whose
+      //    affectedUnitIds includes the unit. Repair-distributed lines on
+      //    monthlyCharges (handled above) already cover the
+      //    chargeable-to-tenants split; a raw repair with no charge
+      //    distribution still counts toward the property's lifetime spend
+      //    (owner-borne portion). Skip if already counted via the
+      //    distribution path to avoid double-counting.
+      if (unit && Array.isArray(building.repairs)) {
+        const distributedRepairIds = new Set<string>();
+        if (Array.isArray(unit.monthlyCharges)) {
+          for (const charge of unit.monthlyCharges as any[]) {
+            if (charge.term === term && charge.repairId) {
+              distributedRepairIds.add(String(charge.repairId));
+            }
+          }
+        }
+        for (const repair of building.repairs as any[]) {
+          if (!repair) continue;
+          if (Number(repair.chargeTerm) !== term) continue;
+          const affected = (repair.affectedUnitIds || []).map((x: any) =>
+            String(x)
+          );
+          if (!affected.includes(String(unit._id))) continue;
+          if (distributedRepairIds.has(String(repair._id))) continue;
+          const cost =
+            Number(repair.actualCost) || Number(repair.estimatedCost) || 0;
+          if (cost <= 0) continue;
+          // Even split across affected units (owner-borne portion lands
+          // here). This is a coarse view — the precise allocation is
+          // handled by _distributeRepairCharge for tenant-charged repairs.
+          const share = Math.round((cost / affected.length) * 100) / 100;
+          if (share <= 0) continue;
+          const line: ExpenseLine = {
+            description: repair.title || 'Repair',
+            amount: share,
+            source: 'repair'
+          };
+          monthByCategory.repairs += share;
+          lifetimeByCategory.repairs += share;
+          lifetimeByYear[ymKey] = (lifetimeByYear[ymKey] || 0) + share;
+          if (isCurrent) monthLines.push(line);
+          else if (terms.length === 1) monthLines.push(line);
+        }
+      }
+
+      if (isCurrent) {
+        currentMonthByCategory = monthByCategory;
+        currentMonthLines = monthLines;
+      }
+    }
+  }
+
+  // Round all category totals to 2dp for stable display.
+  const _round2 = (n: number) => Math.round(n * 100) / 100;
+  for (const k of EXPENSE_CATEGORIES) {
+    currentMonthByCategory[k] = _round2(currentMonthByCategory[k]);
+    lifetimeByCategory[k] = _round2(lifetimeByCategory[k]);
+  }
+  const lifetimeByYearRounded: Record<string, number> = {};
+  for (const k of Object.keys(lifetimeByYear)) {
+    lifetimeByYearRounded[k] = _round2(lifetimeByYear[k]);
+  }
+
+  return res.json({
+    propertyId: String(propertyId),
+    currency: realm!.currency || '',
+    currentTerm,
+    currentMonth: {
+      byCategory: currentMonthByCategory,
+      lines: currentMonthLines
+    },
+    lifetime: {
+      byCategory: lifetimeByCategory,
+      byYear: lifetimeByYearRounded
+    }
+  });
 }

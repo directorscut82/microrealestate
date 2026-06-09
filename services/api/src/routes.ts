@@ -192,6 +192,13 @@ export default function routes(): express.Router {
     verifyPdfContent,
     Middlewares.asyncWrapper(parseImportedPdf as any)
   );
+  // PDF-import-as-lease-extension. Body is the parsed PDF (same shape
+  // parseImportedPdf returns); server snapshots existing root lease window
+  // into leaseHistory[] before overwriting with the new declaration.
+  occupantsRouter.post(
+    '/:id/extend-lease',
+    Middlewares.asyncWrapper(occupantManager.extendLease as any)
+  );
   occupantsRouter.get(
     '/',
     Middlewares.asyncWrapper(occupantManager.all as any)
@@ -257,6 +264,10 @@ export default function routes(): express.Router {
   propertiesRouter.get(
     '/:id',
     Middlewares.asyncWrapper(propertyManager.one as any)
+  );
+  propertiesRouter.get(
+    '/:id/expenses',
+    Middlewares.asyncWrapper(propertyManager.getExpenses as any)
   );
   propertiesRouter.post(
     '/',
