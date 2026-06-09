@@ -149,7 +149,8 @@ const allocationMethods = [
   { id: 'by_surface', labelId: 'By Surface' },
   { id: 'fixed', labelId: 'Fixed' },
   { id: 'custom_ratio', labelId: 'Custom Ratio' },
-  { id: 'custom_percentage', labelId: 'Custom Percentage' }
+  { id: 'custom_percentage', labelId: 'Custom Percentage' },
+  { id: 'single_unit', labelId: 'Single Unit' }
 ];
 
 const ALLOCATION_DESCRIPTIONS = {
@@ -160,20 +161,21 @@ const ALLOCATION_DESCRIPTIONS = {
   elevator_thousandths: 'Split by elevator thousandths (‰) — ground floor excluded',
   fixed: 'Each unit pays a fixed predefined amount',
   custom_ratio: 'Split by custom ratio shares you defined per unit',
-  custom_percentage: 'Each unit pays a custom percentage of the total'
+  custom_percentage: 'Each unit pays a custom percentage of the total',
+  single_unit: 'Bill the whole expense to one specific unit'
 };
 
 const ALLOCATION_METHODS_BY_TYPE = {
-  heating: ['heating_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  elevator: ['elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  cleaning: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  water_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  electricity_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  insurance: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  management_fee: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  garden: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  repairs_fund: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
-  pest_control: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage']
+  heating: ['heating_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  elevator: ['elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  cleaning: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  water_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  electricity_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  insurance: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  management_fee: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  garden: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  repairs_fund: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
+  pest_control: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit']
 };
 
 function getAllocationMethodsForType(expenseType) {
@@ -517,6 +519,56 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                 </p>
               )}
             </div>
+
+            {allocationMethod === 'single_unit' && unitsWithProperty.length > 0 && (
+              <div className="space-y-2">
+                <Label>{t('Pick the unit to bill')}</Label>
+                <Select
+                  value={
+                    watch('customAllocations')?.[0]?.propertyId || ''
+                  }
+                  onValueChange={(propertyId) => {
+                    setValue(
+                      'customAllocations',
+                      [{ propertyId, value: 100 }],
+                      { shouldDirty: true, shouldValidate: true }
+                    );
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue
+                      placeholder={t('Select a unit')}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {unitsWithProperty.map((u) => {
+                      const occ = occupantsByPropertyId[u.propertyId];
+                      const propertyName =
+                        u.property?.name ||
+                        `${t('Unit')} ${u.unitLabel || u.floor || ''}`;
+                      const parts = [
+                        propertyName,
+                        u.floor != null
+                          ? t('Floor {{n}}', { n: u.floor })
+                          : null,
+                        u.unitLabel,
+                        occ?.name ? `(${occ.name})` : `(${t('Vacant')})`
+                      ].filter(Boolean);
+                      return (
+                        <SelectItem key={u._id} value={u.propertyId}>
+                          {parts.join(' — ')}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'The full expense amount will be billed to this unit. If the unit is vacant, it lands on the owner instead.'
+                  )}
+                </p>
+              </div>
+            )}
 
             {needsAllocations && unitsWithProperty.length > 0 && (
               <div className="space-y-2">

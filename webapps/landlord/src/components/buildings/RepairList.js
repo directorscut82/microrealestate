@@ -602,6 +602,11 @@ export default function RepairList({ building }) {
                   'While pending, the estimated cost drives billing. Once an actual cost is entered, it replaces the estimate.'
                 )}
               </p>
+              <p className="text-label text-ink-muted">
+                {t(
+                  'When you change the cost, the charge for the chosen month is recomputed (delta = new − old). If tenants already paid, the difference appears as a debt or credit on the next rent statement for that month.'
+                )}
+              </p>
 
               <Separator />
 

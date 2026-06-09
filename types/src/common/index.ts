@@ -33,7 +33,8 @@ export type AllocationMethod =
   | 'by_surface'
   | 'fixed'
   | 'custom_ratio'
-  | 'custom_percentage';
+  | 'custom_percentage'
+  | 'single_unit';
 
 export type ExpenseType =
   | 'heating'
