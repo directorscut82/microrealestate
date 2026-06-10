@@ -145,6 +145,47 @@ export async function ensureSeed(request: APIRequestContext): Promise<SeedHandle
   return { token, realmId, realmName: realm.name, buildingId, expenseId: expense._id };
 }
 
+/**
+ * Bad-data tenant fixture via direct mongo insert (validators bypassed).
+ *
+ * Use this for any spec that needs a tenant with intentionally-missing or
+ * invalid fields — TenantListItem missing-fields warning badges, the
+ * Tax ID checksum-invalid path, legacy partially-imported tenants, etc.
+ *
+ * The API rejects POSTs of bad data (correct validator behaviour); the UI
+ * still has to display a sensible warning when bad data already exists in
+ * the database from before validators were added or via a corrupted
+ * import. THIS helper is the only correct way to test that path.
+ *
+ * Returns the inserted tenant _id, OR null if mongoExec is unavailable
+ * locally (no portainer-token). Specs that depend on this helper MUST
+ * gate with `test.skip(!id, 'mongoExec unavailable')` rather than throw.
+ *
+ * Cleanup: caller is responsible for `deleteTenantDirect(id)` in finally{}.
+ */
+export interface BadDataTenantSeed {
+  realmId: string;
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  company?: string;
+  legalForm?: string;
+  isCompany?: boolean;
+  taxId?: string;
+  archived?: boolean;
+  beginDate?: Date | string;
+  endDate?: Date | string;
+  terminationDate?: Date | string;
+}
+// Re-export so specs can `import { insertTenantDirect, deleteTenantDirect, readTenant } from './lib/api'`.
+export {
+  insertTenantDirect,
+  deleteTenantDirect,
+  readTenant,
+  readBuilding,
+  mongoExec
+} from './mongoExec';
+
 export interface UnitSeed extends SeedHandles {
   unitId: string;
 }
