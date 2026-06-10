@@ -131,7 +131,11 @@ export default function ExpiringLeasesTile({ className }) {
                   </TableCell>
                   <TableCell numeric>
                     <span className="font-mono tabular-nums text-ink">
-                      {moment(row.endDate).format('DD/MM/YY')}
+                      {/* row.endDate is the same DD/MM/YYYY string the
+                          parent filter parses — re-format to short
+                          DD/MM/YY here. moment(str) without a format hint
+                          returns Invalid Date for non-ISO inputs. */}
+                      {moment.utc(row.endDate, 'DD/MM/YYYY', true).format('DD/MM/YY')}
                     </span>
                   </TableCell>
                   <TableCell numeric>

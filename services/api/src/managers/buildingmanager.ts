@@ -2845,6 +2845,62 @@ async function _distributeRepairCharge(
   }
 }
 
+// Confirm whether ANY tenant LINKED TO THIS BUILDING has a paid rent for
+// the given term. Past-paid rents are frozen — repairs targeting those
+// terms would write a monthlyCharge that is silently ignored by the
+// already-issued bill. Building-scoped query: previously this checked
+// realm-wide, which falsely blocked repairs on building B because
+// building A had a paid past-month rent (F3-repair regression).
+async function _isPastPaidTermFrozenInBuilding(
+  realmId: string,
+  buildingPropertyIds: string[],
+  term: number
+): Promise<boolean> {
+  if (!buildingPropertyIds.length) return false;
+  return Boolean(
+    await Collections.Tenant.exists({
+      realmId,
+      'properties.propertyId': { $in: buildingPropertyIds },
+      rents: {
+        $elemMatch: {
+          term,
+          payments: { $elemMatch: { amount: { $gt: 0 } } }
+        }
+      }
+    } as any)
+  );
+}
+
+// Shared past-paid frozen-term guard for addRepair AND updateRepair.
+// Throws 422 when chargeTerm is in the past, the repair would charge
+// tenants (chargeableTo!=='owners' AND has cost), AND any tenant in this
+// building has paid rent for that term.
+async function _assertChargeTermNotFrozen(
+  realmId: string,
+  buildingPropertyIds: string[],
+  body: any
+): Promise<void> {
+  if (!body?.chargeTerm) return;
+  if (!body.chargeableTo || body.chargeableTo === 'owners') return;
+  const cost = Number(body.actualCost) || Number(body.estimatedCost) || 0;
+  if (cost <= 0) return;
+  const currentTerm = Number(
+    moment.utc().startOf('month').format('YYYYMMDDHH')
+  );
+  if (Number(body.chargeTerm) >= currentTerm) return;
+  const frozen = await _isPastPaidTermFrozenInBuilding(
+    realmId,
+    buildingPropertyIds,
+    Number(body.chargeTerm)
+  );
+  if (frozen) {
+    throw new ServiceError(
+      'Charge month is in the past and at least one tenant in this building has paid rent for that month. Past-paid rents are frozen — pick a current or future month.',
+      422
+    );
+  }
+}
+
 export async function addRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
@@ -2901,47 +2957,6 @@ export async function addRepair(req: Req, res: Res) {
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
-
-    // A repair targeting a paid past month would silently no-op: the rent
-    // is frozen (wave-13) so the new monthlyCharge gets written but the
-    // tenant ledger is never repriced. Refuse loudly instead of writing
-    // dead data.
-    if (
-      req.body.chargeableTo &&
-      req.body.chargeableTo !== 'owners' &&
-      (req.body.actualCost > 0 || req.body.estimatedCost > 0)
-    ) {
-      const currentTerm = Number(
-        moment.utc().startOf('month').format('YYYYMMDDHH')
-      );
-      if (Number(req.body.chargeTerm) < currentTerm) {
-        // Check whether ANY tenant in this building has a paid rent for
-        // that term. If yes, the bill is frozen and our charge would be
-        // invisible.
-        // E20: use $elemMatch so the term-match AND the
-        // payments.amount > 0 must both apply to the SAME rent entry.
-        // The previous shape (`'rents.term': N` + `'rents.payments.amount': {$gt: 0}`)
-        // used dot-paths that match ACROSS the rents[] array — a tenant
-        // with a paid rent in March 2026 AND an empty rent in May 2026
-        // would falsely report May 2026 as "frozen" and reject the
-        // legitimate charge.
-        const paidExists = await Collections.Tenant.exists({
-          realmId: realm!._id,
-          rents: {
-            $elemMatch: {
-              term: Number(req.body.chargeTerm),
-              payments: { $elemMatch: { amount: { $gt: 0 } } }
-            }
-          }
-        } as any);
-        if (paidExists) {
-          throw new ServiceError(
-            'Charge month is in the past and at least one tenant has paid rent for that month. Past-paid rents are frozen — pick a current or future month.',
-            422
-          );
-        }
-      }
-    }
   }
 
   const building = await Collections.Building.findOne({
@@ -2950,6 +2965,15 @@ export async function addRepair(req: Req, res: Res) {
   });
 
   _findBuilding(building, id);
+
+  // Past-paid frozen-term guard, scoped to THIS building's units only.
+  await _assertChargeTermNotFrozen(
+    String(realm!._id),
+    ((building as any).units || [])
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId)),
+    req.body
+  );
 
   (building as any).repairs.push(req.body);
   (building as any).updatedDate = new Date();
@@ -3038,6 +3062,25 @@ export async function updateRepair(req: Req, res: Res) {
   if (!repair) {
     throw new ServiceError('Repair does not exist', 404);
   }
+
+  // Past-paid frozen-term guard for the MERGED state (existing fields +
+  // PATCH overrides). Bypassable bug class: user creates the repair with
+  // chargeTerm=current then PATCHes chargeTerm to a past month with paid
+  // tenant rents — the new monthlyCharge would be silently no-op'd on
+  // already-frozen bills. Same scoping fix as addRepair (this building's
+  // tenants only).
+  await _assertChargeTermNotFrozen(
+    String(realm!._id),
+    ((building as any).units || [])
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId)),
+    {
+      chargeTerm: req.body.chargeTerm ?? repair.chargeTerm,
+      chargeableTo: req.body.chargeableTo ?? repair.chargeableTo,
+      actualCost: req.body.actualCost ?? repair.actualCost,
+      estimatedCost: req.body.estimatedCost ?? repair.estimatedCost
+    }
+  );
 
   repair.set(req.body);
   (building as any).updatedDate = new Date();

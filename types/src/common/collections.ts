@@ -419,6 +419,7 @@ export namespace CollectionTypes {
     stepperMode: boolean;
     archived?: boolean;
     lastExpiryNoticeSentAt?: Date | null;
+    expiryNoticesSent?: Array<{ window: number; sentAt: Date }>;
     // Read-side enrichment fields produced by frontdata.toOccupantData on
     // the wire (NOT stored in mongo). Document them so the API
     // response shape is type-checked end-to-end.

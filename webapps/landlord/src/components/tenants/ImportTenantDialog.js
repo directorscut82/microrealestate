@@ -852,10 +852,24 @@ export default function ImportTenantDialog({ open, setOpen }) {
           const startDate = moment(parsed.validityStart || parsed.originalStartDate, 'DD/MM/YYYY');
           const now = moment();
           let termDate = startDate.clone();
+          // Past-month settlement amount: prefer the existing rent's
+          // grandTotal (accurate ledger), then the sum of all resolved
+          // properties' monthlyRent (in-scope here — `prop` from the
+          // earlier per-property loop is NOT in scope at this point and
+          // referencing it threw ReferenceError on every settlement
+          // where grandTotal was falsy).
+          const sumPropertyRents = (resolvedProperties || []).reduce(
+            (s, rp) => s + (Number(rp.rent) || 0),
+            0
+          );
           while (termDate.isBefore(now, 'month')) {
             const term = termDate.format('YYYYMM') + '0100';
             const rentForTerm = tenantRents.find((r) => String(r.term) === term);
-            const amount = rentForTerm?.total?.grandTotal || prop.monthlyRent || parsed.totalMonthlyRent || 0;
+            const amount =
+              rentForTerm?.total?.grandTotal ||
+              sumPropertyRents ||
+              parsed.totalMonthlyRent ||
+              0;
             try {
               await apiFetcher().patch(
                 `/rents/payment/${tenant._id}/${term}`,
@@ -911,8 +925,35 @@ export default function ImportTenantDialog({ open, setOpen }) {
         );
       }
     },
-    onError: () => {
-      toast.error(t('Error creating tenant'));
+    onError: (err) => {
+      // Surface the server's actual error so the user can tell apart:
+      //   - 422 window-mismatch ("Some payments will be lost...")
+      //   - 409 stale __v ("Update conflict: tenant was modified...")
+      //   - 404 lease/tenant not found
+      //   - 500 backend down
+      // The previous flat 'Error creating tenant' hid all of these and
+      // left the user retrying the same broken click.
+      const status = err?.response?.status;
+      const serverMsg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message;
+      let copy;
+      if (status === 409) {
+        copy = t(
+          'This tenant was changed by another window. Reload the page and try again.'
+        );
+      } else if (status === 422 && serverMsg) {
+        // 422 messages from validators are user-actionable; show as-is.
+        copy = serverMsg;
+      } else if (status === 404 && serverMsg) {
+        copy = serverMsg;
+      } else if (serverMsg) {
+        copy = serverMsg;
+      } else {
+        copy = t('Error creating tenant');
+      }
+      toast.error(copy);
     }
   });
 

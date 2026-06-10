@@ -190,10 +190,26 @@ const TenantSchema = new mongoose.Schema<CollectionTypes.Tenant>({
   archived: { type: Boolean, default: false },
 
   // Last time the lease-expiry-notice scanner emitted a reminder for this
-  // tenant. Used by services/api/src/jobs/leaseExpiryScanner.ts to debounce
-  // repeat sends within the configured cooldown window (25 days). null means
-  // "never sent" — the next scan will deliver the first notice.
-  lastExpiryNoticeSentAt: { type: Date, default: null }
+  // tenant. Kept for backwards-compat / quick "was anything sent recently"
+  // checks; the authoritative debounce now uses expiryNoticesSent below.
+  lastExpiryNoticeSentAt: { type: Date, default: null },
+  // Per-window debounce. Each entry records a (window, sentAt) pair so the
+  // scanner can fire the 7-day reminder even when the 30-day was sent 23
+  // days ago (a flat 25-day debounce permanently suppressed it). The
+  // scanner now matches by `window` and only suppresses if the SAME window
+  // fired within the last (window + 1) days.
+  expiryNoticesSent: {
+    type: [
+      new mongoose.Schema(
+        {
+          window: { type: Number, required: true }, // 30 / 7 / 1
+          sentAt: { type: Date, required: true }
+        },
+        { _id: false }
+      )
+    ],
+    default: []
+  }
 }, {
   // Match Building/Realm: Mongoose enforces __v on save() paths. The
   // findOneAndUpdate handlers (`update`, `extendLease`) still need to

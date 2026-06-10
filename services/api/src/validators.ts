@@ -15,7 +15,8 @@ const EXPENSE_TYPES = [
 
 const ALLOCATION_METHODS = [
   'general_thousandths', 'heating_thousandths', 'elevator_thousandths',
-  'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'
+  'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage',
+  'single_unit'
 ] as const;
 
 const REPAIR_STATUSES = [
