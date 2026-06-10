@@ -9,11 +9,30 @@ import moment from 'moment';
 // isn't fired twice in the cooldown period for two adjacent windows.
 export const EXPIRY_DAY_WINDOWS: number[] = [30, 7, 1];
 
-// Debounce: skip a tenant whose most recent lease_expiry_notice was sent
-// within this many days. Picked to be < 30 (the longest window) so the next
-// scheduled notice isn't accidentally suppressed, and > 7 (the next window)
-// so the same window doesn't double-fire across two cron ticks.
+// Per-window debounce: each window (30/7/1) is tracked independently in
+// tenant.expiryNoticesSent[]. We suppress only if the SAME window fired
+// within the last (window + 1) days — long enough that a daily cron
+// can't double-fire the same window, short enough that the next window
+// isn't accidentally suppressed.
+//
+// Bug fix history: a flat 25-day cross-window debounce was previously
+// applied. With windows [30, 7, 1] and a 30-day notice fired at day-30,
+// the 7-day window arrives 23 days later and was permanently
+// suppressed. Per-window tracking eliminates that entire class.
+//
+// EXPIRY_DEBOUNCE_DAYS retained for backwards-compat with any caller
+// reading the constant; the live debounce path no longer uses it.
 export const EXPIRY_DEBOUNCE_DAYS = 25;
+
+function _windowDebounceCutoff(
+  now: Date,
+  windowDays: number
+): Date {
+  // Same-window suppression window. windowDays + 1 covers the day the
+  // tenant crosses into the next window (e.g. day-30 fires once across
+  // the 31-day window).
+  return moment.utc(now).subtract(windowDays + 1, 'days').toDate();
+}
 
 const TEMPLATE_NAME = 'lease_expiry_notice';
 
@@ -31,7 +50,7 @@ export interface ExpiryScanDeps {
     body: any,
     headers: Record<string, string>
   ) => Promise<any>;
-  markSent?: (tenantId: string, when: Date) => Promise<void>;
+  markSent?: (tenantId: string, when: Date, windowDays?: number) => Promise<void>;
   now?: () => Date;
 }
 
@@ -92,11 +111,6 @@ export async function checkExpiringLeases(
   const tenants = await findTenants(filter);
   result.scanned = tenants.length;
 
-  const debounceCutoff = moment
-    .utc(now)
-    .subtract(EXPIRY_DEBOUNCE_DAYS, 'days')
-    .toDate();
-
   const findRecentEmail =
     deps.findRecentEmail ||
     (async (tenantId: string, since: Date) =>
@@ -115,13 +129,21 @@ export async function checkExpiringLeases(
     (async (url: string, body: any, headers: Record<string, string>) =>
       axios.post(url, body, { headers, timeout: 30_000 }));
 
+  // Default markSent atomically records BOTH the legacy
+  // lastExpiryNoticeSentAt and a new entry in expiryNoticesSent[] for the
+  // window that just fired. Tests can override via deps.markSent.
   const markSent =
     deps.markSent ||
-    (async (tenantId: string, when: Date) => {
-      await Collections.Tenant.updateOne(
-        { _id: tenantId },
-        { $set: { lastExpiryNoticeSentAt: when } }
-      );
+    (async (tenantId: string, when: Date, windowDays?: number) => {
+      const update: Record<string, any> = {
+        $set: { lastExpiryNoticeSentAt: when }
+      };
+      if (typeof windowDays === 'number') {
+        update.$push = {
+          expiryNoticesSent: { window: windowDays, sentAt: when }
+        };
+      }
+      await Collections.Tenant.updateOne({ _id: tenantId }, update);
     });
 
   for (const tenant of tenants) {
@@ -135,17 +157,25 @@ export async function checkExpiringLeases(
       continue;
     }
 
-    // Debounce check (twofold): the in-row marker is the cheap path; the
-    // Email-collection lookup is the source-of-truth fallback if a previous
-    // run sent the email but failed to update the tenant doc.
-    if (
-      tenant.lastExpiryNoticeSentAt &&
-      new Date(tenant.lastExpiryNoticeSentAt) >= debounceCutoff
-    ) {
+    // Per-window debounce: only suppress this notice if the SAME window
+    // already fired within the last (window + 1) days. Cross-window
+    // sends never block each other — a tenant that received the 30-day
+    // notice still gets the 7-day reminder 23 days later.
+    const windowCutoff = _windowDebounceCutoff(now, daysUntil);
+    const sentForThisWindow = (tenant.expiryNoticesSent || []).find(
+      (e: any) =>
+        Number(e?.window) === daysUntil &&
+        e?.sentAt &&
+        new Date(e.sentAt) >= windowCutoff
+    );
+    if (sentForThisWindow) {
       result.skipped++;
       continue;
     }
-    const recent = await findRecentEmail(String(tenant._id), debounceCutoff);
+    // Source-of-truth fallback: if the per-window record is empty (e.g.
+    // the field was added in a migration after the email was sent), check
+    // the Email collection for a row in the same window-cutoff range.
+    const recent = await findRecentEmail(String(tenant._id), windowCutoff);
     if (recent) {
       result.skipped++;
       continue;
@@ -175,7 +205,7 @@ export async function checkExpiringLeases(
           organizationid: String(tenant.realmId)
         }
       );
-      await markSent(String(tenant._id), now);
+      await markSent(String(tenant._id), now, daysUntil);
       result.sent++;
       logger.info(
         `lease-expiry-notice sent to tenant ${tenant._id} (expires in ${daysUntil}d)`

@@ -187,7 +187,12 @@ function getAllocationMethodsForType(expenseType) {
 const METHODS_NEEDING_ALLOCATIONS = [
   'custom_percentage',
   'custom_ratio',
-  'fixed'
+  'fixed',
+  // single_unit stores the chosen target as customAllocations[0] with
+  // percentage=100. Without this entry, the submit handler wipes
+  // customAllocations to [] and the chosen unit is lost — every save
+  // becomes "bill nobody".
+  'single_unit'
 ];
 
 function UnitAllocationRow({ unit, occupant, index, register, method, t }) {
@@ -643,9 +648,10 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               </Label>
             </div>
 
-            <div className="flex items-start gap-2">
+            <div className="flex items-start gap-2 opacity-60" aria-disabled>
               <Switch
                 id="chargeOwnerWhenVacant"
+                disabled
                 checked={watch('chargeOwnerWhenVacant') || false}
                 onCheckedChange={(checked) =>
                   setValue('chargeOwnerWhenVacant', checked, {
@@ -655,11 +661,12 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               />
               <div className="flex flex-col gap-0.5">
                 <Label htmlFor="chargeOwnerWhenVacant">
-                  {t('Charge owner for vacant units')}
+                  {t('Charge owner for vacant units')} ·{' '}
+                  <span className="text-amber-600">{t('coming soon')}</span>
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   {t(
-                    "When a unit has no tenant, the share that would have been billed lands on the owner's monthly statement instead of being dropped."
+                    'Schema captures the intent today but the rent pipeline does not yet route the vacant share to the owner. Toggling this flag has no effect until the integration lands.'
                   )}
                 </p>
               </div>

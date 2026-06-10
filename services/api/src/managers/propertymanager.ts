@@ -621,19 +621,41 @@ export async function getExpenses(req: Req, res: Res) {
 
       // 2. Unit-level monthly charges for this term (manual entries +
       //    repair-distributed lines; both already carry a final amount).
+      //    When charge.expenseId is set, the line came from MonthlyStatement
+      //    distribution of a typed building.expense (heating/water/...). We
+      //    must inherit that expense's category so the panel's heating row
+      //    actually shows heating amounts — hardcoding 'other' silently
+      //    miscategorised every Monthly Statement entry as misc spend
+      //    (I2-02).
       if (unit && Array.isArray(unit.monthlyCharges)) {
         for (const charge of unit.monthlyCharges as any[]) {
           if (charge.term !== term) continue;
           const amount = Number(charge.amount) || 0;
           if (amount <= 0) continue;
           const isRepair = !!charge.repairId;
-          // Manual monthly_charge entries are categorised as 'other'
-          // unless we can hint otherwise; repair-distributed charges go
-          // into 'repairs'.
-          const category: ExpenseCategory = isRepair ? 'repairs' : 'other';
+          let category: ExpenseCategory;
+          let lineDescription: string;
+          if (isRepair) {
+            category = 'repairs';
+            lineDescription = charge.description || 'Monthly charge';
+          } else if (charge.expenseId) {
+            const sourceExpense = (building.expenses || []).find(
+              (e: any) => String(e._id) === String(charge.expenseId)
+            );
+            category = _classifyExpenseType(sourceExpense?.type);
+            lineDescription =
+              charge.description ||
+              sourceExpense?.name ||
+              'Monthly charge';
+          } else {
+            // Truly free-form unit-only charge — no link to a typed
+            // building expense. Land in 'other'.
+            category = 'other';
+            lineDescription = charge.description || 'Monthly charge';
+          }
           const line: ExpenseLine = {
             category,
-            description: charge.description || 'Monthly charge',
+            description: lineDescription,
             amount,
             source: isRepair ? 'repair' : 'monthly_charge'
           };
@@ -740,7 +762,13 @@ export async function getExpenses(req: Req, res: Res) {
         }
       }
 
-      if (isCurrent) {
+      // Flush "the active month" to the response. By default that's the
+      // current calendar month. When the caller picked a single-month
+      // window (?from=YYYYMM&to=YYYYMM), the panel should show THAT month
+      // as the active one — without this branch the response shipped
+      // currentMonth.lines:[] and zeroed byCategory even though entries
+      // existed for that term (I2-01 regression).
+      if (isCurrent || terms.length === 1) {
         currentMonthByCategory = monthByCategory;
         currentMonthLines = monthLines;
       }

@@ -226,27 +226,55 @@ export default function BuildingDashboard({ building }) {
       moment().startOf('month').format('YYYYMMDDHH')
     );
 
+    // The headline reads "Annual projection". Every additive stream below
+    // MUST be scoped to either (a) the current term (for the ×12 monthly
+    // streams) or (b) the current calendar year (for the lifetime
+    // ledgers). Without this scoping the figure becomes a hidden
+    // lifetime sum and inflates monotonically for multi-year buildings —
+    // a class of regression caught in the F1/F2/F3 dashboard audit.
+    // Term shape is YYYYMMDDHH; floor by 1e6 yields the year.
+    const currentYear = Math.floor(currentTerm / 1000000);
+
     // Wave-24 A13: legacy seed data persists this flag as `recurring`
     // (without the is- prefix). Read both so existing buildings show the
     // correct totals after upgrade — the new schema field shadows the
     // legacy one when both happen to be set.
+    //
+    // F2-buildingdash: gate recurring on isExpenseActiveForTerm — without
+    // this, terminated expenses (endTerm < currentTerm) and not-yet-started
+    // expenses (startTerm > currentTerm) inflate the headline.
     const recurringMonthlyEksoda = (building?.expenses || [])
-      .filter((e) => (e.isRecurring ?? e.recurring) && e.amount > 0)
+      .filter(
+        (e) =>
+          (e.isRecurring ?? e.recurring) &&
+          e.amount > 0 &&
+          isExpenseActiveForTerm(e, currentTerm)
+      )
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    // F3-buildingdash: gate one-time expenses on currentYear — a one-time
+    // expense saved in 2018 must not appear in the 2026 headline.
     const oneTimeEksoda = (building?.expenses || [])
-      .filter((e) => !(e.isRecurring ?? e.recurring) && e.amount > 0)
+      .filter(
+        (e) =>
+          !(e.isRecurring ?? e.recurring) &&
+          e.amount > 0 &&
+          Math.floor(Number(e.startTerm || 0) / 1000000) === currentYear
+      )
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     // Stage 1 I-3.f: tenant share of repairs is materialized as
     // unit.monthlyCharges entries (one per unit per term, repairId set).
-    // Sum those instead of the raw repair cost — this stops the historical
-    // double-count where actualCost was added on top of the owner-portion
-    // already sitting in ownerMonthlyExpenses.
+    // F1-buildingdash: filter to currentYear charges — without this the
+    // sum spans the lifetime per-unit ledger and inflates the headline.
     const repairEksoda = (building?.units || []).reduce((sum, unit) => {
       const charges = unit.monthlyCharges || [];
       return (
         sum +
         charges
-          .filter((c) => c.repairId)
+          .filter(
+            (c) =>
+              c.repairId &&
+              Math.floor(Number(c.term || 0) / 1000000) === currentYear
+          )
           .reduce((s, c) => s + (Number(c.amount) || 0), 0)
       );
     }, 0);
@@ -258,14 +286,6 @@ export default function BuildingDashboard({ building }) {
     //     is NEVER persisted to ownerMonthlyExpenses (those rows are reserved
     //     for variable amounts). Without this projection the dashboard
     //     undercounts by the entire fixed owner share.
-    // Filter to current-calendar-year entries only — the headline copy reads
-    // "Annual projection", and ownerMonthlyExpenses accumulates across years
-    // (each MonthlyStatement save appends per-term rows but never expires
-    // historical ones). Without this filter, multi-year buildings see a
-    // monotonically-growing "Owner expenses" figure that overstates the
-    // current-year burden by the lifetime ratio. Term shape is YYYYMMDDHH;
-    // floor by 1e6 yields the year.
-    const currentYear = Math.floor(currentTerm / 1000000);
     const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || [])
       .filter((e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);

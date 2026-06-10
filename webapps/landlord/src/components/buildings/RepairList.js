@@ -791,14 +791,22 @@ export default function RepairList({ building }) {
                 <div className="space-y-2">
                   <Label>{t('Contractor')}</Label>
                   <Select
-                    value={contractorId}
-                    onValueChange={(val) => setValue('contractorId', val)}
+                    // Radix Select forbids empty-string SelectItem values
+                    // (it crashes the dialog on open). Map the schema's
+                    // empty/null contractorId to a __none__ sentinel for
+                    // the UI, and translate back on change.
+                    value={contractorId || '__none__'}
+                    onValueChange={(val) =>
+                      setValue('contractorId', val === '__none__' ? '' : val, {
+                        shouldDirty: true
+                      })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder={t('Select contractor')} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">{t('None')}</SelectItem>
+                      <SelectItem value="__none__">{t('None')}</SelectItem>
                       {contractors.map((c) => (
                         <SelectItem key={c._id} value={c._id}>
                           {c.name} ({t(c.specialty)})

@@ -12,6 +12,10 @@ export type ImportClassificationKind =
 export interface ImportClassification {
   kind: ImportClassificationKind;
   matchedTenantId: string | null;
+  // Set ONLY when 2+ existing tenants share the parsed primary taxId.
+  // The dialog must let the user pick which tenant the PDF maps to —
+  // we won't auto-pick. Empty/undefined in the normal single-match case.
+  ambiguousMatchedTenantIds?: string[];
 }
 
 /**
@@ -60,9 +64,26 @@ export async function classifyAgainstExisting(
 
   // Prefer a primary-taxId match (kind=update or kind=extension). Otherwise
   // fall back to a coTenant-only match (kind=review).
-  const primaryMatch = matches.find(
+  //
+  // Ambiguity guard (F2-pdf): if MORE THAN ONE existing tenant has the
+  // same primary taxId (data error: should not happen but happens in the
+  // wild — corrupt imports, manual entry typos), return kind='review'
+  // instead of arbitrarily picking matches[0]. The user must resolve
+  // which tenant the PDF refers to. The tenants[] in the result lets the
+  // dialog list them all rather than hide the conflict.
+  const primaryMatches = matches.filter(
     (t: any) => typeof t.taxId === 'string' && t.taxId === primaryTaxId
   );
+  if (primaryMatches.length > 1) {
+    return {
+      kind: 'review',
+      matchedTenantId: String(primaryMatches[0]._id),
+      ambiguousMatchedTenantIds: primaryMatches.map((t: any) =>
+        String(t._id)
+      )
+    } as any;
+  }
+  const primaryMatch = primaryMatches[0];
 
   if (primaryMatch) {
     const existingEnd = primaryMatch.endDate
