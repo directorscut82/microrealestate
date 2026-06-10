@@ -478,6 +478,14 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
           payload.ownerAmount = 0;
         }
 
+        // Optimistic-lock token: thread the building's __v so the
+        // server can detect concurrent edits (two tabs / two
+        // landlords). On 409 the user gets a clear "modified
+        // concurrently" toast instead of silent data loss.
+        if (expense?._id && typeof building?.__v === 'number') {
+          payload.__v = building.__v;
+        }
+
         if (expense?._id) {
           await updateMutation.mutateAsync(payload);
         } else {
