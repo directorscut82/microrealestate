@@ -410,7 +410,18 @@ interface ExpenseLine {
   // repairs | other) so the UI can render "<Category> (<description>)"
   // and the user sees both the bucket and the actual entry name.
   category: ExpenseCategory;
+  // Free-form description from the underlying entry (charge.description,
+  // expense.name, repair.title, etc.) — empty when no user-supplied text
+  // exists. The UI is responsible for rendering a localised fallback
+  // when this is empty (see PropertyExpensesCard, descriptionKey below).
   description: string;
+  // i18n key for the localised fallback when description is empty:
+  //   'monthly_charge'   — manual unit charge / typed building expense override
+  //   'owner_repair'     — owner-side repair allocation with no title
+  //   'owner_expense'    — owner-side variable allocation with no description
+  //   'repair'           — repair without a title
+  // The UI looks up `t(descriptionKey)` only when description === ''.
+  descriptionKey?: string;
   amount: number;
   source: string;
 }
@@ -609,6 +620,9 @@ export async function getExpenses(req: Req, res: Res) {
         const line: ExpenseLine = {
           category,
           description: expense.name || '',
+          // Building expenses without a user-set name are rare but
+          // possible (legacy imports). Fall back to category-as-label.
+          descriptionKey: expense.name ? undefined : `category_${category}`,
           amount: share,
           source: 'building_expense'
         };
@@ -634,28 +648,31 @@ export async function getExpenses(req: Req, res: Res) {
           if (amount <= 0) continue;
           const isRepair = !!charge.repairId;
           let category: ExpenseCategory;
-          let lineDescription: string;
+          let lineDescription = '';
+          let descriptionKey: string | undefined;
           if (isRepair) {
             category = 'repairs';
-            lineDescription = charge.description || 'Monthly charge';
+            lineDescription = charge.description || '';
+            if (!lineDescription) descriptionKey = 'monthly_charge';
           } else if (charge.expenseId) {
             const sourceExpense = (building.expenses || []).find(
               (e: any) => String(e._id) === String(charge.expenseId)
             );
             category = _classifyExpenseType(sourceExpense?.type);
             lineDescription =
-              charge.description ||
-              sourceExpense?.name ||
-              'Monthly charge';
+              charge.description || sourceExpense?.name || '';
+            if (!lineDescription) descriptionKey = 'monthly_charge';
           } else {
             // Truly free-form unit-only charge — no link to a typed
             // building expense. Land in 'other'.
             category = 'other';
-            lineDescription = charge.description || 'Monthly charge';
+            lineDescription = charge.description || '';
+            if (!lineDescription) descriptionKey = 'monthly_charge';
           }
           const line: ExpenseLine = {
             category,
             description: lineDescription,
+            descriptionKey,
             amount,
             source: isRepair ? 'repair' : 'monthly_charge'
           };
@@ -683,28 +700,30 @@ export async function getExpenses(req: Req, res: Res) {
           const amount = Number(ownerEntry.amount) || 0;
           if (amount <= 0) continue;
           let category: ExpenseCategory;
-          let lineDescription: string;
+          let lineDescription = '';
+          let descriptionKey: string | undefined;
           if (ownerEntry.source === 'repair') {
-            // Try to enrich the description from building.repairs but the
-            // category is unconditionally 'repairs'.
             const sourceRepair = (building.repairs || []).find(
               (r: any) => String(r._id) === String(ownerEntry.expenseId)
             );
             category = 'repairs';
             lineDescription =
               ownerEntry.description ||
-              (sourceRepair?.title ? `Repair: ${sourceRepair.title}` : 'Owner repair');
+              (sourceRepair?.title ? `Repair: ${sourceRepair.title}` : '');
+            if (!lineDescription) descriptionKey = 'owner_repair';
           } else {
             const sourceExpense = (building.expenses || []).find(
               (e: any) => String(e._id) === String(ownerEntry.expenseId)
             );
             category = _classifyExpenseType(sourceExpense?.type);
             lineDescription =
-              ownerEntry.description || sourceExpense?.name || 'Owner expense';
+              ownerEntry.description || sourceExpense?.name || '';
+            if (!lineDescription) descriptionKey = 'owner_expense';
           }
           const line: ExpenseLine = {
             category,
             description: lineDescription,
+            descriptionKey,
             amount,
             source: 'owner_monthly_expense'
           };
@@ -750,7 +769,8 @@ export async function getExpenses(req: Req, res: Res) {
           if (share <= 0) continue;
           const line: ExpenseLine = {
             category: 'repairs',
-            description: repair.title || 'Repair',
+            description: repair.title || '',
+            descriptionKey: repair.title ? undefined : 'repair',
             amount: share,
             source: 'repair'
           };

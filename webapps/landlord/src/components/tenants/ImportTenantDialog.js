@@ -1028,7 +1028,9 @@ export default function ImportTenantDialog({ open, setOpen }) {
                         <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
                           {info.classificationKind === 'extension'
                             ? t('Lease extension detected')
-                            : t('Update')}
+                            : info.classificationKind === 'review'
+                              ? t('Possible co-tenant — please review')
+                              : t('Update')}
                         </span>
                       )}
                       {info?.occupiedBy && (
@@ -1043,7 +1045,9 @@ export default function ImportTenantDialog({ open, setOpen }) {
                         <LuAlertTriangle className="size-3" />
                         {info.classificationKind === 'extension'
                           ? t('Lease extension detected')
-                          : t('Tenant already exists')}
+                          : info.classificationKind === 'review'
+                            ? t('Possible co-tenant — please review')
+                            : t('Tenant already exists')}
                         :{' '}{info.matchedTenant.name}
                       </div>
                     )}
@@ -1051,7 +1055,11 @@ export default function ImportTenantDialog({ open, setOpen }) {
                     {info?.matchedTenant && !info?.occupiedBy && (
                       <div className="space-y-1 pt-2 p-2 bg-muted/50 rounded-md">
                         <Label className="text-xs">
-                          {t('Lease extension detected')}
+                          {info.classificationKind === 'extension'
+                            ? t('Lease extension detected')
+                            : info.classificationKind === 'review'
+                              ? t('Possible co-tenant — please review')
+                              : t('Existing tenant — choose merge strategy')}
                         </Label>
                         <RadioGroup
                           value={importStrategies[idx] || 'new'}
@@ -1066,12 +1074,20 @@ export default function ImportTenantDialog({ open, setOpen }) {
                           <RadioGroupItem
                             id={`strategy-extend-${idx}`}
                             value="extend"
+                            // F5-tenant: extend overwrites the existing
+                            // tenant's lease window. When this row matched
+                            // only via a co-tenant (kind=review) the
+                            // existing primary is NOT the parsed primary —
+                            // extend would overwrite the wrong tenant's
+                            // lease. Disable here AND server-side guard.
+                            disabled={info.classificationKind === 'review'}
                           >
                             {t('Extend lease')}
                           </RadioGroupItem>
                           <RadioGroupItem
                             id={`strategy-replace-${idx}`}
                             value="replace"
+                            disabled={info.classificationKind === 'review'}
                           >
                             {t('Replace in place')}
                           </RadioGroupItem>

@@ -1997,6 +1997,31 @@ export async function extendLease(req: Req, res: Res) {
     throw new ServiceError('End date must be after begin date', 422);
   }
 
+  // F5-tenant: refuse to extend onto a tenant whose primary taxId does
+  // NOT match the parsed PDF's primary tenant. classifyAgainstExisting
+  // returns kind='review' precisely because the parsed primary taxId
+  // matched only as a co-tenant on the existing record — extending in
+  // that case would overwrite the existing primary's lease window with
+  // a PDF that belongs to one of their co-tenants. The user must pick
+  // "Replace in place" or "Create new" for review-kind matches.
+  const parsedPrimaryTaxId =
+    parsed?.tenants?.[0]?.taxId ||
+    parsed?.taxId ||
+    null;
+  if (
+    typeof parsedPrimaryTaxId === 'string' &&
+    parsedPrimaryTaxId &&
+    typeof existingDoc.taxId === 'string' &&
+    existingDoc.taxId &&
+    String(parsedPrimaryTaxId).trim() !==
+      String(existingDoc.taxId).trim()
+  ) {
+    throw new ServiceError(
+      "Refusing to extend: the parsed PDF's primary taxId does not match this tenant. If the PDF refers to a co-tenant, use Replace in place or Create new.",
+      422
+    );
+  }
+
   // Resolve / preserve the leaseId. If the body explicitly carries a
   // leaseId (e.g. dialog created a new Lease for this term) use it,
   // otherwise keep the existing one.

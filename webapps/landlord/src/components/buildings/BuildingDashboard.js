@@ -12,11 +12,10 @@ import {
   TableRow
 } from '../ui/table';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from '../ui/tooltip';
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from '../ui/popover';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { cn } from '../../utils';
@@ -289,7 +288,12 @@ export default function BuildingDashboard({ building }) {
     const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || [])
       .filter((e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const fixedOwnerMonthly = (building?.expenses || [])
+    // F4-buildingdash: prorate by the months the expense is actually
+    // active in the current calendar year. A new owner-tracked expense
+    // starting in July must contribute 6 months × ownerAmount, not 12 ×.
+    // Same for an expense ending mid-year — only the months that fall
+    // inside [Jan 1 of currentYear .. Dec 31 of currentYear] count.
+    const fixedOwnerProrated = (building?.expenses || [])
       .filter(
         (e) =>
           e.trackOwnerExpense &&
@@ -297,8 +301,25 @@ export default function BuildingDashboard({ building }) {
           Number(e.ownerAmount) > 0 &&
           isExpenseActiveForTerm(e, currentTerm)
       )
-      .reduce((sum, e) => sum + (Number(e.ownerAmount) || 0), 0);
-    const ownerEksoda = recordedOwnerEksoda + fixedOwnerMonthly * 12;
+      .reduce((sum, e) => {
+        const startMonth = e.startTerm
+          ? Math.floor((Number(e.startTerm) % 1000000) / 10000) // YYYYMMDDHH → MM
+          : 1;
+        const endMonth = e.endTerm
+          ? Math.floor((Number(e.endTerm) % 1000000) / 10000)
+          : 12;
+        const startYear = e.startTerm
+          ? Math.floor(Number(e.startTerm) / 1000000)
+          : currentYear;
+        const endYear = e.endTerm
+          ? Math.floor(Number(e.endTerm) / 1000000)
+          : currentYear;
+        const fromMonth = startYear < currentYear ? 1 : startMonth;
+        const toMonth = endYear > currentYear ? 12 : endMonth;
+        const months = Math.max(0, toMonth - fromMonth + 1);
+        return sum + (Number(e.ownerAmount) || 0) * months;
+      }, 0);
+    const ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated;
 
     const annualEsoda = monthlyEsoda * 12;
     const annualEksoda =
@@ -368,7 +389,12 @@ export default function BuildingDashboard({ building }) {
               <div
                 className={cn(
                   'text-xl font-semibold',
-                  finance.net >= 0 ? 'text-olive' : 'text-oxide'
+                  // F6-buildingdash: break-even (net===0) shouldn't be
+                  // colored as profit. Three-way state — green for
+                  // positive, red for loss, neutral for zero.
+                  finance.net > 0 && 'text-olive',
+                  finance.net < 0 && 'text-oxide',
+                  finance.net === 0 && 'text-ink-muted'
                 )}
               >
                 <NumberFormat value={finance.net} showZero />
@@ -389,20 +415,27 @@ export default function BuildingDashboard({ building }) {
               {t('Repairs')}: <NumberFormat value={finance.repairEksoda} showZero />
             </div>
             <div>
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="border-b border-dotted border-muted-foreground/50 cursor-help">
-                      {t('Owner expenses')}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-[260px] text-xs">
-                    {t(
-                      'Includes fixed owner-only expenses, owner-portion of repairs, and direct owner monthly entries.'
-                    )}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {/* Popover (tap-to-open) instead of Tooltip (hover-only)
+                  so the breakdown is reachable on touch devices.
+                  asChild lets the trigger inherit normal text styling. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="border-b border-dotted border-muted-foreground/50 cursor-help text-left"
+                  >
+                    {t('Owner expenses')}
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="bottom"
+                  className="max-w-[260px] text-xs"
+                >
+                  {t(
+                    'Includes fixed owner-only expenses, owner-portion of repairs, and direct owner monthly entries.'
+                  )}
+                </PopoverContent>
+              </Popover>
               :{' '}
               <NumberFormat value={finance.ownerEksoda} showZero />
             </div>

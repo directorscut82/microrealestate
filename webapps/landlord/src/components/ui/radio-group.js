@@ -41,12 +41,15 @@ const RadioGroup = React.forwardRef(
 RadioGroup.displayName = 'RadioGroup';
 
 const RadioGroupItem = React.forwardRef(
-  ({ className, value, id, children, ...props }, ref) => {
+  ({ className, value, id, children, disabled, ...props }, ref) => {
     return (
       <label
         htmlFor={id}
         className={cn(
-          'flex items-start gap-2 cursor-pointer text-sm',
+          'flex items-start gap-2 text-sm',
+          disabled
+            ? 'cursor-not-allowed opacity-60'
+            : 'cursor-pointer',
           className
         )}
       >
@@ -55,7 +58,11 @@ const RadioGroupItem = React.forwardRef(
           type="radio"
           id={id}
           value={value}
-          className="mt-0.5 h-4 w-4 cursor-pointer accent-primary"
+          disabled={disabled}
+          className={cn(
+            'mt-0.5 h-4 w-4 accent-primary',
+            disabled ? 'cursor-not-allowed' : 'cursor-pointer'
+          )}
           {...props}
         />
         <span className="flex-1">{children}</span>
