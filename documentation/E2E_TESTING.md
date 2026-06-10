@@ -207,6 +207,60 @@ ordering doesn't matter.
    stop and re-read this doc.
 5. **Run the whole suite** to confirm no regressions, then commit.
 
+### Hard rule: a spec is not a spec until it runs green on real data
+
+This rule exists because the agent has a documented multi-session pattern of
+authoring specs that look complete but don't actually run cleanly against the
+deployed NAS. "Tests authored" without "tests passed" is a false positive;
+counting it as coverage is a documented failure mode that has burned weeks
+across multiple sessions.
+
+**Author-time gate (do this in the same session you write the spec):**
+
+- Run the new spec via `yarn playwright test tests/<file>` against deployed NAS.
+- Every test must PASS, or be explicitly `test.fixme(...)` with a one-line
+  reason naming WHAT infra is missing.
+- If a test fails, classify before adding more tests:
+  - **App bug** → fix the app code in the same PR.
+  - **Spec infra missing** → BUILD THE INFRA FIRST (mongo backdoor seeder,
+    real PDF fixture, ephemeral-realm-correct-signin pattern). Do NOT
+    ship a spec that depends on infra that doesn't exist yet.
+  - **Wrong selector / timing** → fix the spec.
+  - **Setup pattern broken** → fix the pattern across ALL specs that
+    share it.
+
+**Real-data scenarios are required for any spec touching:**
+
+- PDF parser flows (Greek leases, E9 imports) — use real fixture PDFs from
+  `e2e-playwright/fixtures/pdfs/` (commit small samples with PII redacted).
+  A spec that "would parse a PDF" without an actual PDF byte payload is
+  not a test.
+- Bad-data shapes the UI must already cope with in production
+  (multi-property, co-tenants, partially-corrupt legacy rows). The API
+  validator correctly rejects POSTs of bad data — that's the validator
+  doing its job. To create the bad-data fixture, use `mongoExec` direct
+  insert from `tests/lib/mongoExec.ts` (returns null without portainer
+  token; handle that branch with `test.skip(!result, '...')` rather than
+  throwing).
+
+**Anti-patterns to reject:**
+
+- Tests that create an ephemeral realm but sign in with the canonical
+  account — the canonical account can't see ephemeral data, so every
+  assertion fails. Fix: sign in to the ephemeral realm, OR don't use
+  ephemeral realms (use the canonical `CYPRESS-TEST-DO-NOT-USE` realm
+  which the auto-generated bot account already owns).
+- Tests with `{ ... }` placeholder bodies, `// TODO: implement`, or
+  function stubs without `expect()` calls — these are scaffolding, not
+  tests. Reject in review.
+- Tests counted in a "X tests added" claim that have not been run at
+  least once on the live NAS. Counting un-run tests is forbidden.
+
+**When a previously-passing spec starts failing**, the spec is the source
+of truth. Do not weaken the assertion. Either the app changed (fix app)
+or the realm got polluted (fix cleanup) or the feature was deliberately
+removed (delete the spec — never `test.skip` and forget).
+
 ## Common gotchas
 
 ### Timezone mismatches break date guards silently (June 2026 incident)
