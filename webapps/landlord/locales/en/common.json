@@ -863,6 +863,7 @@
   "Variable expense placeholder body": "Shows up here when you create a recurring expense with a variable amount (no preset value — e.g. electricity bill, water bill). Each month you enter here the amount on the invoice you received.",
   "Variable expense — enter actual amounts each month via Monthly Statement.": "Variable expense — enter actual amounts each month via Monthly Statement.",
   "View invoice": "View invoice",
+  "All in {{category}} during {{year}}": "All in {{category}} during {{year}}",
   "Warning: The lease is still active.": "Warning: The lease is still active.",
   "Warning: This tenant has recorded payments.": "Warning: This tenant has recorded payments.",
   "Water": "Water",
