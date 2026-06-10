@@ -2399,6 +2399,47 @@ export async function updateExpense(req: Req, res: Res) {
     if (req.body.endTerm) req.body.endTerm = normalized;
   }
 
+  // Optimistic lock (mirrors H6 extend-lease pattern). When the client
+  // echoes the building's __v in the request body, atomically "claim"
+  // it via findOneAndUpdate before doing the read+write cycle. The
+  // claim filter `{__v: requestedVersion}` ensures only ONE concurrent
+  // request commits when two race; the loser gets a 409 here rather
+  // than silently overwriting via Mongoose's save()-time check (which
+  // empirically can be bypassed by network-interleaved findOne→save
+  // patterns — spec 47.2 caught this race in the wild).
+  //
+  // __v is OPTIONAL — legacy UI clients that haven't been updated to
+  // thread it through still work as before (no race protection, but
+  // single-writer flows are unaffected). Two-tab landlords concurrently
+  // editing the same expense: both must pass __v, and one will get a
+  // clear 409 instead of silent data loss.
+  const requestedVersion =
+    req.body.__v !== undefined ? Number(req.body.__v) : NaN;
+  if (Number.isFinite(requestedVersion)) {
+    const claimed = await Collections.Building.findOneAndUpdate(
+      { _id: id, realmId: realm!._id, __v: requestedVersion },
+      { $inc: { __v: 1 } }
+    );
+    if (!claimed) {
+      const stillExists = await Collections.Building.exists({
+        _id: id,
+        realmId: realm!._id
+      });
+      if (!stillExists) {
+        throw new ServiceError('Building does not exist', 404);
+      }
+      throw new ServiceError(
+        'Building was modified concurrently. Please retry.',
+        409
+      );
+    }
+  }
+  // The findOneAndUpdate above already bumped __v atomically. The
+  // subsequent findOne+save cycle reads the now-bumped doc; Mongoose's
+  // save() will bump __v again. Net: two bumps per __v-passing request.
+  // That's acceptable — the alternative (skipping save() when __v
+  // claimed) would require duplicating subdoc validation + recompute
+  // logic. Receipt-of-mutation matters; absolute __v counter doesn't.
   const building = await Collections.Building.findOne({
     _id: id,
     realmId: realm!._id
@@ -2424,7 +2465,11 @@ export async function updateExpense(req: Req, res: Res) {
     );
   }
 
-  expense.set(req.body);
+  // Strip __v from the body before $set: never write client-provided
+  // __v back. Mongoose's save() will manage it.
+  const { __v: _ignored, ...patchBody } = req.body;
+  void _ignored;
+  expense.set(patchBody);
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
 
@@ -3051,6 +3096,32 @@ export async function updateRepair(req: Req, res: Res) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
   }
 
+  // Optimistic lock — same pattern as updateExpense. When client passes
+  // building's __v, atomically claim it before the read+write cycle.
+  // Two concurrent PATCHes lose the race deterministically (one 200,
+  // one 409) instead of silently last-writer-winning.
+  const requestedRepairVersion =
+    req.body.__v !== undefined ? Number(req.body.__v) : NaN;
+  if (Number.isFinite(requestedRepairVersion)) {
+    const claimed = await Collections.Building.findOneAndUpdate(
+      { _id: id, realmId: realm!._id, __v: requestedRepairVersion },
+      { $inc: { __v: 1 } }
+    );
+    if (!claimed) {
+      const stillExists = await Collections.Building.exists({
+        _id: id,
+        realmId: realm!._id
+      });
+      if (!stillExists) {
+        throw new ServiceError('Building does not exist', 404);
+      }
+      throw new ServiceError(
+        'Building was modified concurrently. Please retry.',
+        409
+      );
+    }
+  }
+
   const building = await Collections.Building.findOne({
     _id: id,
     realmId: realm!._id
@@ -3082,7 +3153,11 @@ export async function updateRepair(req: Req, res: Res) {
     }
   );
 
-  repair.set(req.body);
+  // Never write the client-echoed __v back into the subdoc — it's the
+  // optimistic-lock token, not a field on the repair.
+  const { __v: _ignoredRepairV, ...repairPatchBody } = req.body;
+  void _ignoredRepairV;
+  repair.set(repairPatchBody);
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
 

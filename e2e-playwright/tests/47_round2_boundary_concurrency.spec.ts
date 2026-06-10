@@ -266,11 +266,7 @@ test('47.1 · extend-lease concurrency · same __v → one 200 one 409, leaseHis
 
 // --- 47.2 ------------------------------------------------------------------
 
-// 47.2: BuildingExpense PATCH endpoint does not yet enforce optimistic
-// locking via __v. Concurrent saves last-writer-win silently. Adding
-// the __v guard to expensemanager.update is a future enhancement;
-// fixme'd until that lands so this spec doesn't block green runs.
-test.fixme('47.2 · expense save concurrency · two tabs different targetUnitId → one 200 one 409', async () => {
+test('47.2 · expense save concurrency · two tabs different targetUnitId → one 200 one 409', async () => {
   test.setTimeout(180_000);
   const api = await request.newContext();
   try {
@@ -286,11 +282,32 @@ test.fixme('47.2 · expense save concurrency · two tabs different targetUnitId 
       __v: number;
       expenses: Array<{ _id: string; name: string; amount: number; type: string; allocationMethod: string; isRecurring: boolean }>;
     };
-    const cleaningExp = beforeBuilding.expenses.find((e) => e.name === 'E2E-Cleaning');
+    const cleaningExp = beforeBuilding.expenses.find(
+      (e) => e.name === 'E2E-Cleaning'
+    ) as
+      | {
+          _id: string;
+          name: string;
+          amount: number;
+          type: string;
+          allocationMethod: string;
+          isRecurring: boolean;
+          startTerm?: number;
+        }
+      | undefined;
     if (!cleaningExp) throw new Error('E2E-Cleaning not present');
 
     // Two parallel PATCHes both racing on the same __v. Each carries a
     // different amount so we can distinguish which one won post-race.
+    // startTerm is required by the validator (validator was hardened in
+    // batch B6 to reject recurring expenses without anchor); thread it
+    // through from the existing doc.
+    const fallbackStart = Number(
+      `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(
+        2,
+        '0'
+      )}0100`
+    );
     const fire = (amount: number) =>
       api.patch(
         `${GATEWAY}/api/v2/buildings/${seed.buildingId}/expenses/${cleaningExp._id}`,
@@ -302,7 +319,8 @@ test.fixme('47.2 · expense save concurrency · two tabs different targetUnitId 
             type: cleaningExp.type,
             amount,
             allocationMethod: cleaningExp.allocationMethod,
-            isRecurring: cleaningExp.isRecurring
+            isRecurring: cleaningExp.isRecurring,
+            startTerm: cleaningExp.startTerm || fallbackStart
           }
         }
       );
@@ -332,9 +350,7 @@ test.fixme('47.2 · expense save concurrency · two tabs different targetUnitId 
 
 // --- 47.3 ------------------------------------------------------------------
 
-// 47.3: Repair PATCH endpoint similarly lacks __v locking. Same future
-// fix as 47.2.
-test.fixme('47.3 · repair update concurrency · two PATCH chargeTerm → one 200 one 409', async () => {
+test('47.3 · repair update concurrency · two PATCH chargeTerm → one 200 one 409', async () => {
   test.setTimeout(180_000);
   const api = await request.newContext();
   let createdRepairId: string | null = null;
@@ -353,17 +369,21 @@ test.fixme('47.3 · repair update concurrency · two PATCH chargeTerm → one 20
       '0100';
     const description = `E2E-S47-3-Repair-${Date.now()}`;
 
-    // Create a repair against the seeded property.
+    // Create a repair on the BUILDING (not the property — repairs nest
+    // under building.repairs[]). Schema requires title + category +
+    // chargeableTo; chargeableTo='owners' avoids the past-paid frozen
+    // guard (only fires when chargeableTo!='owners' AND chargeTerm < now).
     const repairCreate = await api.post(
-      `${GATEWAY}/api/v2/properties/${seed.propertyId}/repairs`,
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}/repairs`,
       {
         headers,
         data: {
-          description,
-          amount: 100,
-          paidByOwner: true,
-          paidDate: toDDMMYYYY(now.toISOString().substring(0, 10)),
-          chargeToTenant: false
+          title: description,
+          category: 'general',
+          status: 'completed',
+          chargeableTo: 'owners',
+          actualCost: 100,
+          chargeTerm: Number(chargeTerm)
         }
       }
     );
@@ -371,64 +391,62 @@ test.fixme('47.3 · repair update concurrency · two PATCH chargeTerm → one 20
       [200, 201],
       `create repair (status=${repairCreate.status()}, body=${await repairCreate.text().catch(() => '')})`
     ).toContain(repairCreate.status());
-    const repair = (await repairCreate.json()) as { _id: string; __v?: number };
-    createdRepairId = repair._id;
-
-    // Snapshot pre-PATCH version.
-    const before = await api.get(
-      `${GATEWAY}/api/v2/properties/${seed.propertyId}/repairs/${repair._id}`,
-      { headers }
+    // POST /buildings/:id/repairs returns the FULL building doc with
+    // the new repair embedded. Find ours by title.
+    const buildingAfterCreate = (await repairCreate.json()) as {
+      __v: number;
+      repairs?: Array<{ _id: string; title?: string }>;
+    };
+    const newRepair = (buildingAfterCreate.repairs || []).find(
+      (r) => r.title === description
     );
-    // Endpoint may not exist for individual repair GET; fall back to property GET.
-    let preVersion: number | undefined;
-    if (before.status() === 200) {
-      preVersion = ((await before.json()) as { __v?: number }).__v;
-    } else {
-      const prop = await api.get(`${GATEWAY}/api/v2/properties/${seed.propertyId}`, {
-        headers
-      });
-      expect(prop.status()).toBe(200);
-      const propBody = (await prop.json()) as {
-        repairs?: Array<{ _id: string; __v?: number }>;
-      };
-      const found = (propBody.repairs || []).find((r) => r._id === repair._id);
-      preVersion = found?.__v ?? 0;
-    }
+    if (!newRepair) throw new Error('created repair not in response');
+    createdRepairId = newRepair._id;
 
-    const fire = (amount: number) =>
+    // The optimistic-lock token IS the building's __v (Building schema
+    // has optimisticConcurrency:true; repairs are subdocs).
+    const preBuildingV = buildingAfterCreate.__v;
+
+    const fire = (cost: number) =>
       api.patch(
-        `${GATEWAY}/api/v2/properties/${seed.propertyId}/repairs/${repair._id}`,
+        `${GATEWAY}/api/v2/buildings/${seed.buildingId}/repairs/${newRepair._id}`,
         {
           headers,
           data: {
-            __v: preVersion,
-            description,
-            amount,
-            paidByOwner: true,
-            paidDate: toDDMMYYYY(now.toISOString().substring(0, 10)),
-            chargeToTenant: true,
-            chargeTerm
+            actualCost: cost,
+            chargeTerm: Number(chargeTerm)
           }
         }
       );
 
     const [a, b] = await Promise.all([fire(150), fire(160)]);
-    const statuses = [a.status(), b.status()].sort();
-    // Concurrent PATCHes must split. The exact failure code for the loser
-    // depends on the optimistic-concurrency layer; accept 409 (version
-    // mismatch) as the canonical conflict signal.
+    const statuses = [a.status(), b.status()].sort((x, y) => x - y);
     expect(
-      statuses[0],
-      `at least one repair PATCH must succeed — got [${statuses.join(', ')}]`
-    ).toBe(200);
+      statuses,
+      `concurrent repair PATCHes must split into [200, 409] — got [${statuses.join(', ')}]`
+    ).toEqual([200, 409]);
+
+    // Confirm __v advanced by exactly 1 — only one PATCH committed.
+    const after = await api.get(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}`,
+      { headers }
+    );
+    expect(after.status()).toBe(200);
+    const afterBuilding = (await after.json()) as { __v: number };
     expect(
-      statuses[1],
-      `the other repair PATCH must conflict with 409 — got [${statuses.join(', ')}]`
-    ).toBe(409);
+      afterBuilding.__v,
+      '__v advanced by exactly 1 (one PATCH committed)'
+    ).toBe(preBuildingV + 1);
   } finally {
     if (createdRepairId && cleanupHeaders && cleanupBuildingId) {
-      // Repair cleanup is best-effort; the harness re-uses E2E-S47-3-* so
-      // a stale repair from a prior aborted run is harmless.
+      // Best-effort cleanup — the unique RUN suffix and timestamp prevent
+      // cross-run conflicts even if this leaks.
+      await api
+        .delete(
+          `${GATEWAY}/api/v2/buildings/${cleanupBuildingId}/repairs/${createdRepairId}`,
+          { headers: cleanupHeaders }
+        )
+        .catch(() => {});
     }
     await api.dispose();
   }

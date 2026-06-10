@@ -408,9 +408,14 @@ export default function RepairList({ building }) {
           invoiceDocumentId: data.invoiceDocumentId ?? null
         };
         if (selectedRepair?._id) {
+          // Thread the building's __v so the server can detect
+          // concurrent repair edits (two tabs racing).
           await updateMutation.mutateAsync({
             ...payload,
-            _id: selectedRepair._id
+            _id: selectedRepair._id,
+            ...(typeof building?.__v === 'number'
+              ? { __v: building.__v }
+              : {})
           });
         } else {
           await addMutation.mutateAsync(payload);
