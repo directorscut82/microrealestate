@@ -287,7 +287,10 @@ test('43.2 · save round-trip for each of 9 allocation methods (server 200 + reo
       );
       await clickSave(page);
       const postResp = await postPromise;
-      expect(postResp.status(), `POST status for ${method}`).toBe(200);
+      expect(
+        postResp.status(),
+        `POST status for ${method} (resp=${(await postResp.text().catch(() => '')).slice(0, 200)})`
+      ).toBe(200);
       await waitDialogClosed(page);
 
       const row = page.locator('tr', { has: page.locator('td', { hasText: name }) });

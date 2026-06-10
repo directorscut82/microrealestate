@@ -197,10 +197,15 @@ async function getBuilding(api: APIRequestContext, base: BaseSeed, buildingId: s
 }
 
 async function uploadInvoice(api: APIRequestContext, base: BaseSeed, folder: string, fileName: string): Promise<string> {
+  // The upload middleware reads `req.body.folder` (NOT `s3Dir`) to
+  // build the realm-prefixed storage key. Passing s3Dir directly skips
+  // the realm prefix and the resulting key 403s on every by-key GET
+  // (the realm-prefix guard refuses keys outside <realmName>-<realmId>/).
+  // See uploadmiddelware.ts:62-72.
   const r = await api.post(`${GATEWAY}/api/v2/documents/upload`, {
     headers: { Authorization: `Bearer ${base.token}`, organizationid: base.realmId },
     multipart: {
-      s3Dir: folder,
+      folder,
       fileName,
       file: { name: fileName, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%MOCK_INVOICE_S42\n', 'utf8') }
     }
@@ -333,7 +338,14 @@ test('42.3 · edit existing repair — all fields round-trip through dialog', as
   const row = page.locator('tr', { hasText: repairTitle });
   await expect(row).toHaveCount(1);
   await row.locator('button[aria-label="Edit"], button[aria-label="Επεξεργασία"]').first().click();
-  await expect(page.locator('text=/^(Edit repair|Επεξεργασία επισκευής)$/').first()).toBeVisible({ timeout: 10_000 });
+  // Dialog renders inside Radix DialogContent (role=dialog). Match the
+  // header text via getByText (substring) so a slight wrapping change
+  // (extra whitespace, span nesting) doesn't break the match. The
+  // realm locale is 'el' but the URL has no /el/ prefix, so the page
+  // renders in the i18n default (en) — both labels accepted.
+  await expect(
+    page.getByRole('dialog').getByText(/Edit repair|Επεξεργασία επισκευής/).first()
+  ).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('input#title')).toHaveValue(repairTitle);
   await expect(page.locator('textarea#description')).toHaveValue(seedPayload.description);
   await expect(page.locator('input#estimatedCost')).toHaveValue(String(seedPayload.estimatedCost));
