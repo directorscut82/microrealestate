@@ -77,6 +77,11 @@ async function driveImportDialogWithMock(
   realmName: string,
   mockedResponse: unknown
 ): Promise<void> {
+  // Clear any route registered by a prior test in this serial file —
+  // page.route stacks handlers and a leftover from the previous test's
+  // mock could (LIFO) still intercept if the newest unregisters. Start
+  // from a clean slate every call.
+  await page.unroute((url) => url.pathname.endsWith('/api/v2/tenants/import-pdf')).catch(() => {});
   await page.route(
     (url) => url.pathname.endsWith('/api/v2/tenants/import-pdf'),
     async (route) => {
