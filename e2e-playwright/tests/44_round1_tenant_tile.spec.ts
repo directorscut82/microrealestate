@@ -49,7 +49,7 @@ import type {
   Locator,
   Page
 } from '@playwright/test';
-import { ensureSeed } from './lib/api';
+import { ensureSeedProperty } from './lib/api';
 import { mongoExec } from './lib/mongoExec';
 
 const TEST_EMAIL = process.env.TEST_EMAIL ?? '';
@@ -71,6 +71,7 @@ interface SeedHandles {
   token: string;
   realmId: string;
   realmName: string;
+  propertyId?: string;
 }
 
 let _seed: SeedHandles | null = null;
@@ -83,11 +84,17 @@ test.beforeAll(async () => {
     throw new Error('Missing TEST_EMAIL/TEST_PASSWORD');
   }
   const apiCtx = await request.newContext();
-  const seed = await ensureSeed(apiCtx);
+  // ensureSeedProperty gives a REAL propertyId — needed for the
+  // "running" pill fixture (44.10), which now requires an assigned
+  // property to be a genuine running lease. A dangling propertyId
+  // breaks the tenant-list property enrichment and the row never
+  // renders.
+  const seed = await ensureSeedProperty(apiCtx);
   _seed = {
     token: seed.token,
     realmId: seed.realmId,
-    realmName: seed.realmName
+    realmName: seed.realmName,
+    propertyId: seed.propertyId
   };
   await apiCtx.dispose();
 });
@@ -591,7 +598,7 @@ test('44.10 — running tenant pill is "Lease running" with olive dot', async ({
     apiCtx,
     'Run',
     validNaturalPayload(`${PREFIX}-Run-${RUN}`),
-    `{$set: {beginDate: new Date('${past.toISOString()}'), endDate: new Date('${future.toISOString()}'), properties: [{propertyId: '000000000000000000000099', rent: 500, expenses: []}]}}`
+    `{$set: {beginDate: new Date('${past.toISOString()}'), endDate: new Date('${future.toISOString()}'), properties: [{propertyId: '${_seed!.propertyId}', rent: 500, expenses: []}]}}`
   );
   await apiCtx.dispose();
 
@@ -673,7 +680,11 @@ test('44.12 — Greek locale renders Greek badge labels with no English bleed', 
     .locator('input[placeholder*="Search" i], input[placeholder*="Αναζήτηση" i], input[type=search]')
     .first();
   await expect(search).toBeVisible({ timeout: 15_000 });
-  await search.fill(RUN);
+  // Search by the FULL fixture name, not the shared RUN suffix — every
+  // test in this serial file shares one RUN value, so filtering by RUN
+  // alone surfaces every prior test's leftover fixture and the page
+  // can be slow to settle. The exact name narrows to one card.
+  await search.fill(fx.name);
   const title = page.locator('[data-cy=openResourceButton]', {
     hasText: new RegExp(`^${fx.name.replace(/[-]/g, '\\-')}$`)
   });
