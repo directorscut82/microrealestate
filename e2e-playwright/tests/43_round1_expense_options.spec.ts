@@ -295,8 +295,21 @@ test('43.2 · save round-trip for each of 9 allocation methods (server 200 + reo
 
       const row = page.locator('tr', { has: page.locator('td', { hasText: name }) });
       await expect(row).toBeVisible({ timeout: 10_000 });
-      await row.locator('button').first().click();
+      // Anchor on the Edit aria-label so we don't accidentally click
+      // Delete (row has 2+ buttons). The realm renders el for the bot
+      // account but URL doesn't carry the /el/ prefix → button reads
+      // English "Edit". Accept both for portability.
+      await row
+        .locator('button[aria-label="Edit"], button[aria-label="Επεξεργασία"]')
+        .first()
+        .click();
       await expect(page.locator('[role=dialog]')).toBeVisible({ timeout: 10_000 });
+      // The form needs a tick to populate via the `values: expense ? {...}`
+      // RHF reset path. Wait for the Allocation Method trigger to show
+      // the persisted method (not the placeholder) before reading.
+      await expect
+        .poll(() => readTriggerLabel(dialogCombobox(page, 1)), { timeout: 8_000 })
+        .toMatch(METHOD_LABEL_REGEX[method]);
       const methodLabel = await readTriggerLabel(dialogCombobox(page, 1));
       expect(methodLabel).toMatch(METHOD_LABEL_REGEX[method]);
       await page.locator('[role=dialog]').getByRole('button', { name: /^(Cancel|Άκυρο)$/ }).click();
