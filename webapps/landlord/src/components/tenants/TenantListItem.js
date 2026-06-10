@@ -10,6 +10,7 @@ import _ from 'lodash';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
+import { LuAlertTriangle, LuCalendarClock } from 'react-icons/lu';
 import moment from 'moment';
 import { Progress } from '../ui/progress';
 import TenantAvatar from './TenantAvatar';
@@ -56,8 +57,23 @@ export default function TenantListItem({ tenant }) {
       if (!tenant.company || !String(tenant.company).trim()) missing.push('company');
       if (!tenant.legalForm || !String(tenant.legalForm).trim()) missing.push('legalForm');
     } else {
-      if (!tenant.firstName || !String(tenant.firstName).trim()) missing.push('firstName');
-      if (!tenant.lastName || !String(tenant.lastName).trim()) missing.push('lastName');
+      const hasFirst = !!(tenant.firstName && String(tenant.firstName).trim());
+      const hasLast = !!(tenant.lastName && String(tenant.lastName).trim());
+      const hasName = !!(tenant.name && String(tenant.name).trim());
+      // New tenants (post Tier A1, 2026-06-08) always carry split
+      // firstName + lastName because NewTenantDialog requires both and
+      // composes name = "first last". A record with a display `name`
+      // but missing split fields is a PRE-validation legacy leftover.
+      // Showing "First name missing" next to a visible name reads as a
+      // contradiction to the user (they see the name right there). For
+      // that legacy case surface ONE honest "incomplete name" badge
+      // instead of two contradictory First/Last badges.
+      if (hasName && (!hasFirst || !hasLast)) {
+        missing.push('nameIncomplete');
+      } else {
+        if (!hasFirst) missing.push('firstName');
+        if (!hasLast) missing.push('lastName');
+      }
     }
     if (!tenant.taxId || !String(tenant.taxId).trim()) {
       missing.push('taxId');
@@ -79,6 +95,7 @@ export default function TenantListItem({ tenant }) {
     tenant.isCompany,
     tenant.firstName,
     tenant.lastName,
+    tenant.name,
     tenant.company,
     tenant.legalForm,
     tenant.taxId
@@ -186,10 +203,19 @@ export default function TenantListItem({ tenant }) {
               <Badge
                 key={f}
                 variant="outline"
-                className="text-label border-amber-500 text-amber-700 leading-none"
+                // Match the lease pill's footprint: label type (11px),
+                // font-normal (same weight as the lease pill — the
+                // previous font-medium read as a heavier, larger chip),
+                // and a softened amber border so the "needs attention"
+                // signal doesn't render as a thick box. No `leading-none`
+                // here: text-label already carries lineHeight 1.4, and
+                // forcing 1.0 clipped Greek descenders (η, μ, ρ, γ) on
+                // the longer labels like "Tax ID (invalid)".
+                className="text-label font-normal border-amber-500/50 text-amber-700"
               >
                 {f === 'firstName' && t('First name')}
                 {f === 'lastName' && t('Last name')}
+                {f === 'nameIncomplete' && t('Incomplete name')}
                 {f === 'company' && t('Company')}
                 {f === 'legalForm' && t('Legal structure')}
                 {f === 'taxId' && t('Tax ID')}
@@ -208,18 +234,42 @@ export default function TenantListItem({ tenant }) {
                   ? 'outline'
                   : 'success'
             }
-            className="font-normal text-label leading-none"
+            className={cn(
+              'font-normal text-label leading-none',
+              // 'incomplete' is the only ACTIONABLE state of the four —
+              // it means billing literally can't start (no property /
+              // no begin date). Tint it oxide (warning) so it doesn't
+              // read as the benign amber 'future' pill. The other three
+              // keep the default outline/secondary/success treatment.
+              leaseState === 'incomplete' && 'border-oxide/40 text-oxide'
+            )}
           >
-            <span
-              aria-hidden="true"
-              className={cn(
-                'size-1.5 rounded-pill shrink-0',
-                leaseState === 'terminated' && 'bg-ink-muted',
-                leaseState === 'future' && 'bg-amber-500',
-                leaseState === 'incomplete' && 'bg-amber-500',
-                leaseState === 'running' && 'bg-olive'
-              )}
-            />
+            {/* Pair-Color-With-Glyph: 'future' (benign, lease starts
+                later) and 'incomplete' (action needed, no property) must
+                be distinguishable without relying on color alone — a
+                screenshot caught them sharing one amber dot. Distinct
+                glyphs: calendar-clock vs alert-triangle. The remaining
+                states keep the plain status dot. */}
+            {leaseState === 'future' ? (
+              <LuCalendarClock
+                aria-hidden="true"
+                className="size-3 shrink-0 text-amber-500"
+              />
+            ) : leaseState === 'incomplete' ? (
+              <LuAlertTriangle
+                aria-hidden="true"
+                className="size-3 shrink-0 text-oxide"
+              />
+            ) : (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'size-1.5 rounded-pill shrink-0',
+                  leaseState === 'terminated' && 'bg-ink-muted',
+                  leaseState === 'running' && 'bg-olive'
+                )}
+              />
+            )}
             {leaseState === 'terminated' && t('Lease ended')}
             {leaseState === 'future' && t('Lease starts in the future')}
             {leaseState === 'incomplete' && t('Setup incomplete')}

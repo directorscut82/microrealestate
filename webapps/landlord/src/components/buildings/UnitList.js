@@ -324,6 +324,25 @@ export default function UnitList({ building }) {
   const [openConfirmDelete, setOpenConfirmDelete] = useState(false);
   const [unitToDelete, setUnitToDelete] = useState(null);
 
+  // data-001: the Property column used to fall back to `unit.propertyId`
+  // (a raw 24-hex ObjectId) whenever the backend hadn't hydrated
+  // `unit.property`. That happens for orphaned references (the linked
+  // property was deleted) or any path that returns units without the
+  // joined property. Resolve the name client-side from the realm's
+  // property list; only when even that lookup fails do we show a clear
+  // "deleted property" marker instead of leaking the ObjectId.
+  const { data: properties } = useQuery({
+    queryKey: [QueryKeys.PROPERTIES],
+    queryFn: fetchProperties
+  });
+  const propertyNameById = useMemo(() => {
+    const map = new Map();
+    (properties || []).forEach((p) => {
+      if (p?._id) map.set(String(p._id), p.name || p.atakNumber || null);
+    });
+    return map;
+  }, [properties]);
+
   // Tier E1 — clicking a unit row navigates to the linked property's
   // detail page (the apartment view with the map). Only fires when the
   // unit is linked to a property; unlinked rows stay inert.
@@ -416,7 +435,26 @@ export default function UnitList({ building }) {
                   <TableCell>{unit.surface || '-'}</TableCell>
                   <TableCell>{unit.generalThousandths || 0}</TableCell>
                   <TableCell>
-                    {unit.property?.name || unit.propertyId || '-'}
+                    {(() => {
+                      // Prefer the hydrated join, then a client-side
+                      // lookup over the realm's properties. Never render
+                      // the raw ObjectId: a linked-but-unresolvable id
+                      // means the property was deleted out from under the
+                      // unit (orphan) — say so plainly.
+                      const resolved =
+                        unit.property?.name ||
+                        (unit.propertyId &&
+                          propertyNameById.get(String(unit.propertyId)));
+                      if (resolved) return resolved;
+                      if (unit.propertyId) {
+                        return (
+                          <span className="text-oxide italic">
+                            {t('Linked property not found')}
+                          </span>
+                        );
+                      }
+                      return '-';
+                    })()}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex gap-2 justify-end">
