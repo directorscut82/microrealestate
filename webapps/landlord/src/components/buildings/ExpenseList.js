@@ -626,6 +626,13 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                     'The full expense amount will be billed to this unit. If the unit is vacant, it lands on the owner instead.'
                   )}
                 </p>
+                {errors.customAllocations && (
+                  <p className="text-sm text-destructive">
+                    {errors.customAllocations.message ||
+                      errors.customAllocations.root?.message ||
+                      t('Pick a unit to bill')}
+                  </p>
+                )}
               </div>
             )}
 
@@ -649,6 +656,12 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                     </span>
                   )}
                 </Label>
+                {errors.customAllocations && (
+                  <p className="text-sm text-destructive">
+                    {errors.customAllocations.message ||
+                      errors.customAllocations.root?.message}
+                  </p>
+                )}
                 <div className="border rounded-md p-3 max-h-64 overflow-y-auto">
                   {unitsWithProperty.map((unit, index) => (
                     <UnitAllocationRow
