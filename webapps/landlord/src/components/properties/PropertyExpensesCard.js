@@ -50,6 +50,24 @@ function _categoryLabel(t, key) {
   }
 }
 
+// I2-06: server-side English fallback strings ('Monthly charge',
+// 'Owner repair', 'Owner expense', 'Repair') used to bleed into the
+// Greek UI when a row lacked a user-supplied description. The server
+// now ships an empty `description` plus a `descriptionKey` token; this
+// helper translates the token client-side via the active locale.
+function _resolveDescriptionKey(t, key) {
+  if (!key) return '';
+  if (key === 'monthly_charge') return t('Monthly charge');
+  if (key === 'owner_repair') return t('Owner repair');
+  if (key === 'owner_expense') return t('Owner expense');
+  if (key === 'repair') return t('Repair');
+  if (typeof key === 'string' && key.startsWith('category_')) {
+    const panel = key.slice('category_'.length);
+    return _categoryLabel(t, panel);
+  }
+  return '';
+}
+
 function CategoryBreakdown({ byCategory, t }) {
   const rows = CATEGORY_KEYS.filter((k) => Number(byCategory?.[k] || 0) !== 0);
   if (!rows.length) {
@@ -116,7 +134,15 @@ function ExpenseLines({ lines, t }) {
         const categoryLabel = line.category
           ? _categoryLabel(t, line.category)
           : '';
-        const desc = line.description || '';
+        // I2-06: server emits empty description for legacy/unnamed
+        // entries plus a descriptionKey ('monthly_charge', 'owner_repair',
+        // 'owner_expense', 'repair', 'category_<panel>') that the client
+        // resolves to the active locale. Without this, English fallback
+        // strings bled into the Greek UI.
+        let desc = line.description || '';
+        if (!desc && line.descriptionKey) {
+          desc = _resolveDescriptionKey(t, line.descriptionKey);
+        }
         const display =
           categoryLabel && desc && desc !== categoryLabel
             ? `${categoryLabel} (${desc})`

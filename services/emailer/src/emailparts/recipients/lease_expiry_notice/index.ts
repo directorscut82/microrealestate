@@ -40,9 +40,15 @@ export async function get(_recordId: string, _params: any, data: any) {
     .map((m) => m.email.toLowerCase());
 
   if (!toEmails.length) {
-    throw new Error(
-      'no registered realm members for lease_expiry_notice'
+    // J1C-004: a realm with zero registered members is a structural
+    // skip (admin hasn't invited anyone), NOT an error worth retrying
+    // every cron tick. Return an empty recipient list so the scanner
+    // logs "no recipients" once and moves on. Throwing here previously
+    // produced an unbounded retry loop with no surfaced signal.
+    logger.warn(
+      `lease_expiry_notice: realm ${data?.landlord?._id || '<unknown>'} has zero registered members — skipping`
     );
+    return [];
   }
 
   const bccEmail = await _resolveManagerBcc(data, fromEmail);

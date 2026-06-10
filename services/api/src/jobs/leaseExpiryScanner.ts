@@ -211,6 +211,29 @@ export async function checkExpiringLeases(
         `lease-expiry-notice sent to tenant ${tenant._id} (expires in ${daysUntil}d)`
       );
     } catch (err: any) {
+      // J1C-004: distinguish a structural skip ("no registered realm
+      // members" — admin hasn't invited anyone) from a real failure.
+      // The recipient resolver returns an empty array in that case and
+      // the emailer 422s with "missing recipient list". Mark this
+      // tenant's window as sent so we stop retrying every cron tick;
+      // there's nobody to email and that won't change without admin
+      // action.
+      const status = err?.response?.status;
+      const body = err?.response?.data;
+      const reason =
+        typeof body === 'string'
+          ? body
+          : body?.error || body?.message || err?.message || '';
+      const isStructuralSkip =
+        status === 422 && /missing recipient list/i.test(String(reason));
+      if (isStructuralSkip) {
+        await markSent(String(tenant._id), now, daysUntil);
+        result.skipped++;
+        logger.warn(
+          `lease-expiry-notice: tenant ${tenant._id} realm has no recipients — marked window ${daysUntil} as sent to avoid retry loop`
+        );
+        continue;
+      }
       result.errors++;
       logger.error(
         `lease-expiry-notice failed for tenant ${tenant._id}: ${

@@ -437,7 +437,8 @@ export default function () {
       // segment before doing path resolution. The path.resolve check
       // below is the second line of defence.
       // eslint-disable-next-line no-control-regex
-      if (/\\|^\/+|(^|\/)\.\.(\/|$)|[\x00-\x1f]/.test(rawKey)) {
+      // eslint-disable-next-line no-control-regex
+      if (/\\|^\/+|(^|\/)\.\.(\/|$)|[ -]/.test(rawKey)) {
         throw new ServiceError('invalid key', 422);
       }
       const expectedPrefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
@@ -500,6 +501,68 @@ export default function () {
         }
       }
       throw new ServiceError('file not found', 404);
+    })
+  );
+
+  // Direct-key delete: removes a file persisted via /documents/upload.
+  // Used to clean up repair invoices when the user clicks "Remove" on
+  // the upload widget OR cancels the dialog before save (F4-repair).
+  // Same realm-prefix guard as the GET — keys outside the realm's
+  // `<orgName>-<orgId>/` prefix are rejected. Returns 204 even if the
+  // file is already gone (idempotent), so a Cancel handler can fire
+  // unconditionally without race-related 404s.
+  documentsApi.delete(
+    '/by-key',
+    Middlewares.asyncWrapper(async (req, res) => {
+      const realm = (req as any).realm;
+      if (!realm?._id) {
+        throw new ServiceError('organization required', 404);
+      }
+      const rawKey = req.query?.key;
+      if (typeof rawKey !== 'string' || !rawKey.length) {
+        throw new ServiceError('key required', 422);
+      }
+      // eslint-disable-next-line no-control-regex
+      if (/[\\ -]|^\/+|(^|\/)\.\.(\/|$)/.test(rawKey)) {
+        throw new ServiceError('invalid key', 422);
+      }
+      const expectedPrefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
+      if (!rawKey.startsWith(expectedPrefix)) {
+        throw new ServiceError('forbidden', 403);
+      }
+      const { UPLOADS_DIRECTORY } = Service.getInstance().envConfig.getValues();
+      const uploadsRoot = path.resolve(UPLOADS_DIRECTORY as string);
+      const filePath = path.resolve(uploadsRoot, rawKey);
+      if (
+        filePath !== uploadsRoot &&
+        !filePath.startsWith(uploadsRoot + path.sep)
+      ) {
+        throw new ServiceError('forbidden', 403);
+      }
+      try {
+        if (fs.existsSync(filePath)) {
+          await fs.remove(filePath);
+        }
+      } catch (err) {
+        logger.warn(
+          `delete /by-key: filesystem remove failed for ${rawKey}: ${
+            (err as Error)?.message || err
+          }`
+        );
+      }
+      // S3/B2 best-effort cleanup
+      if (s3.isEnabled(realm?.thirdParties?.b2)) {
+        try {
+          await s3.deleteFiles(realm.thirdParties.b2, [{ url: rawKey }]);
+        } catch (err) {
+          logger.warn(
+            `delete /by-key: s3 remove failed for ${rawKey}: ${
+              (err as Error)?.message || err
+            }`
+          );
+        }
+      }
+      return res.status(204).send();
     })
   );
 

@@ -95,8 +95,12 @@ export default function ExpiringLeasesTile({ className }) {
               {t('Expiring leases')}
             </CardTitle>
             <CardDescription>
-              {t('Lease expires on {{date}}', {
-                date: moment().add(HORIZON_DAYS, 'days').format('DD/MM/YYYY')
+              {/* J1C-005: was rendering a single fixed end-of-window date
+                  ("Lease expires on DD/MM/YYYY") that bore no relation to
+                  the rows below. Replaced with a horizon-describing
+                  string so the description matches what the table shows. */}
+              {t('Tenants whose lease ends within the next {{n}} days', {
+                n: HORIZON_DAYS
               })}
             </CardDescription>
           </div>
@@ -149,14 +153,20 @@ export default function ExpiringLeasesTile({ className }) {
                     </span>
                   </TableCell>
                   <TableCell numeric>
+                    {/* J1C-003: button used to deep-link with
+                        ?action=renew, but the tenant detail page never
+                        wired that up so the click had no visible effect.
+                        Relabeled to match what actually happens
+                        (navigation only); a future pass will land an
+                        in-page renew/extend affordance. */}
                     {organization ? (
                       <Link
-                        href={`/${organization}/tenants/${row._id}?action=renew`}
+                        href={`/${organization}/tenants/${row._id}`}
                         passHref
                         legacyBehavior
                       >
                         <Button asChild size="sm" variant="secondary">
-                          <a>{t('Renew lease')}</a>
+                          <a>{t('Open tenant')}</a>
                         </Button>
                       </Link>
                     ) : null}

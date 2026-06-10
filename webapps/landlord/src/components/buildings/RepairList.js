@@ -1,5 +1,6 @@
 import {
   addBuildingRepair,
+  deleteDocumentByKey,
   fetchProperties,
   QueryKeys,
   removeBuildingRepair,
@@ -21,7 +22,7 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -322,6 +323,14 @@ export default function RepairList({ building }) {
   // Tier I-3.f upload state: tracks the in-flight invoice upload so we can
   // disable the submit button + show progress in the helper text.
   const [invoiceUploading, setInvoiceUploading] = useState(false);
+  // Ref to the file input so we can reset it after upload+remove (F6-repair).
+  // Without this, the same file cannot be re-picked after Remove because the
+  // input retains the prior selection and onChange does not fire for the
+  // same value.
+  const invoiceFileInputRef = useRef(null);
+  // Track keys uploaded BUT not yet committed to a saved repair so we can
+  // best-effort delete them when the dialog is cancelled (F4-repair).
+  const pendingInvoiceKeyRef = useRef(null);
 
   const handleAdd = useCallback(() => {
     setSelectedRepair(null);
@@ -341,6 +350,14 @@ export default function RepairList({ building }) {
 
   const handleConfirmDelete = useCallback(async () => {
     try {
+      // F4-repair: clean up the invoice file BEFORE removing the
+      // repair record so a network failure between the two doesn't
+      // orphan the file. Best-effort — server endpoint is idempotent
+      // and the repair delete is the user-visible primary action.
+      const orphanInvoiceKey = selectedRepair?.invoiceDocumentId;
+      if (orphanInvoiceKey) {
+        await deleteDocumentByKey(orphanInvoiceKey).catch(() => {});
+      }
       await removeMutation.mutateAsync(selectedRepair._id);
     } catch (error) {
       toast.error(t('Failed to remove repair'));
@@ -348,10 +365,24 @@ export default function RepairList({ building }) {
   }, [selectedRepair, removeMutation, t]);
 
   const handleClose = useCallback(() => {
+    // F4-repair: if the user uploaded an invoice in this session but is
+    // closing the dialog WITHOUT saving (Cancel / Esc / outside-click),
+    // delete the orphaned file. Skip if the upload happened on an
+    // already-saved repair (we'd be deleting the saved invoice — only
+    // discard NEW uploads that never reached the database).
+    const pending = pendingInvoiceKeyRef.current;
+    const wasOnExistingRepair = !!selectedRepair?.invoiceDocumentId;
+    if (
+      pending &&
+      (!wasOnExistingRepair || pending !== selectedRepair.invoiceDocumentId)
+    ) {
+      deleteDocumentByKey(pending).catch(() => {});
+    }
+    pendingInvoiceKeyRef.current = null;
     setOpenDialog(false);
     setSelectedRepair(null);
     reset();
-  }, [reset]);
+  }, [reset, selectedRepair]);
 
   const onSubmit = useCallback(
     async (data) => {
@@ -384,6 +415,9 @@ export default function RepairList({ building }) {
         } else {
           await addMutation.mutateAsync(payload);
         }
+        // The invoice is now committed; clear the pending-upload ref so
+        // handleClose doesn't try to delete the freshly-saved file.
+        pendingInvoiceKeyRef.current = null;
         handleClose();
       } catch (error) {
         toast.error(t('Something went wrong'));
@@ -853,12 +887,24 @@ export default function RepairList({ building }) {
                 <Label htmlFor="invoiceFile">{t('Invoice file')}</Label>
                 <Input
                   id="invoiceFile"
+                  ref={invoiceFileInputRef}
                   type="file"
                   accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf"
                   disabled={invoiceUploading}
                   onChange={async (e) => {
                     const f = e.target.files?.[0];
                     if (!f) return;
+                    // If there's already a pending (unsaved) upload, delete
+                    // it before replacing so the old file doesn't orphan
+                    // (F4-repair edit-replace path).
+                    if (
+                      pendingInvoiceKeyRef.current &&
+                      pendingInvoiceKeyRef.current !== invoiceDocumentId
+                    ) {
+                      deleteDocumentByKey(pendingInvoiceKeyRef.current).catch(
+                        () => {}
+                      );
+                    }
                     try {
                       setInvoiceUploading(true);
                       const folder = [
@@ -871,17 +917,35 @@ export default function RepairList({ building }) {
                         file: f,
                         folder
                       });
-                      setValue(
-                        'invoiceDocumentId',
-                        response.data?.key || null,
-                        { shouldDirty: true }
-                      );
+                      const newKey = response.data?.key || null;
+                      // If we are REPLACING an already-saved invoice (the
+                      // form has invoiceDocumentId AND the user picked a
+                      // new file), the OLD key is now orphaned. Best-effort
+                      // delete (F4-repair edit-replace).
+                      if (
+                        invoiceDocumentId &&
+                        invoiceDocumentId !== newKey
+                      ) {
+                        deleteDocumentByKey(invoiceDocumentId).catch(
+                          () => {}
+                        );
+                      }
+                      pendingInvoiceKeyRef.current = newKey;
+                      setValue('invoiceDocumentId', newKey, {
+                        shouldDirty: true
+                      });
                       toast.success(t('Invoice file uploaded'));
                     } catch (err) {
                       console.error(err);
                       toast.error(t('Cannot upload document'));
                     } finally {
                       setInvoiceUploading(false);
+                      // F6-repair: clear input value so the same file can
+                      // be re-picked after Remove. onChange does not fire
+                      // when the user selects the same file twice.
+                      if (invoiceFileInputRef.current) {
+                        invoiceFileInputRef.current.value = '';
+                      }
                     }
                   }}
                 />
@@ -904,11 +968,25 @@ export default function RepairList({ building }) {
                       <button
                         type="button"
                         className="text-oxide hover:underline"
-                        onClick={() =>
+                        onClick={() => {
+                          // F4-repair: best-effort delete the orphaned
+                          // file from storage so we don't leak. The
+                          // server endpoint is idempotent (204 even when
+                          // file is gone) so a network blip doesn't
+                          // matter.
+                          if (invoiceDocumentId) {
+                            deleteDocumentByKey(invoiceDocumentId).catch(
+                              () => {}
+                            );
+                          }
+                          pendingInvoiceKeyRef.current = null;
                           setValue('invoiceDocumentId', null, {
                             shouldDirty: true
-                          })
-                        }
+                          });
+                          if (invoiceFileInputRef.current) {
+                            invoiceFileInputRef.current.value = '';
+                          }
+                        }}
                       >
                         {t('Remove')}
                       </button>

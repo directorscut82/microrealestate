@@ -35,7 +35,7 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -124,6 +124,34 @@ const expenseSchema = z.object({
         path: ['customAllocations']
       });
     }
+  }
+  // F4-expense: single_unit MUST have a target unit picked. Without
+  // this guard the form passes zod with customAllocations=[] and the
+  // expense persists with nobody to bill. The pipeline at
+  // 1_base.ts:355-364 returns 0 share for every unit silently.
+  if (data.allocationMethod === 'single_unit') {
+    const target = data.customAllocations?.[0];
+    if (!target?.propertyId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Pick a unit to bill',
+        path: ['customAllocations']
+      });
+    }
+  }
+  // F6-expense: custom_percentage / custom_ratio with empty
+  // customAllocations should also fail validation (the existing checks
+  // gate on length > 0, so length=0 silently bypassed both branches).
+  if (
+    (data.allocationMethod === 'custom_percentage' ||
+      data.allocationMethod === 'custom_ratio') &&
+    !(data.customAllocations?.length > 0)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Custom allocations require at least one positive entry',
+      path: ['customAllocations']
+    });
   }
 });
 
@@ -374,6 +402,32 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
       }
     }
   }, [expenseType, allocationMethod, setValue]);
+
+  // F5-expense: switching allocation methods leaves customAllocations in
+  // a corrupted partial state (a custom_percentage with values 30/40/30
+  // becomes a single_unit with the first row pre-selected at 30 — wrong).
+  // Reset to a method-appropriate default whenever allocationMethod
+  // changes.
+  const previousAllocationMethodRef = useRef(allocationMethod);
+  useEffect(() => {
+    const previous = previousAllocationMethodRef.current;
+    if (previous && previous !== allocationMethod) {
+      if (allocationMethod === 'single_unit') {
+        // Start with no target; the user MUST pick one (zod enforces).
+        setValue('customAllocations', [], { shouldDirty: true });
+      } else if (METHODS_NEEDING_ALLOCATIONS.includes(allocationMethod)) {
+        // custom_percentage / custom_ratio / fixed → fresh default rows.
+        setValue('customAllocations', buildDefaultAllocations([]), {
+          shouldDirty: true
+        });
+      } else {
+        // Methods that don't use customAllocations (general_thousandths,
+        // equal, by_surface, etc.) — clear so submit doesn't ship stale rows.
+        setValue('customAllocations', [], { shouldDirty: true });
+      }
+    }
+    previousAllocationMethodRef.current = allocationMethod;
+  }, [allocationMethod, setValue, buildDefaultAllocations]);
 
   const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
     allocationMethod

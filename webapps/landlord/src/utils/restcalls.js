@@ -259,6 +259,13 @@ export async function deleteTemplate(ids) {
   await apiFetcher().delete(`/templates/${ids.join(',')}`);
 }
 
+export async function deleteDocumentByKey(key) {
+  if (!key) return;
+  await apiFetcher().delete(
+    `/documents/by-key?key=${encodeURIComponent(key)}`
+  );
+}
+
 export async function fetchDocuments() {
   const response = await apiFetcher().get('/documents');
   return response.data;
