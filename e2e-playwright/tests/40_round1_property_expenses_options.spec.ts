@@ -279,7 +279,16 @@ test('40.5 · Greek locale page load → tile heading uses Greek "Έξοδα α�
   const seed = await ensureSeedRichBuilding(apiCtx);
   await apiCtx.dispose();
   await signIn(page);
-  await page.goto(`${encodeURIComponent(seed.realmName)}/properties/${seed.propertyId}`);
+  // i18n.js: defaultLocale='en'. Greek requires the explicit /el/ URL
+  // prefix; without it the page renders with the default locale even
+  // though the realm's stored locale is 'el'. Mirror the pattern used
+  // in 44.12 + the existing _regression_i18n_probe spec.
+  const baseOrigin = new URL(page.url()).origin;
+  const orgPath = encodeURIComponent(seed.realmName);
+  await page.goto(
+    `${baseOrigin}/landlord/el/${orgPath}/properties/${seed.propertyId}`,
+    { waitUntil: 'domcontentloaded' }
+  );
   await expect(page.locator('[data-cy=propertyPage]')).toBeVisible({ timeout: 20_000 });
   const greekHeading = page.getByText('Έξοδα ακινήτου', { exact: true });
   await expect(greekHeading, 'Greek tile heading present').toHaveCount(1, { timeout: 15_000 });
@@ -319,32 +328,46 @@ test('40.7 · owner monthly expense source=repair → byCategory.repairs > 0, by
   const apiCtx = await request.newContext();
   try {
     const seed = await ensureSeedRichBuilding(apiCtx);
-    const auth = { Authorization: `Bearer ${seed.token}`, 'Content-Type': 'application/json', organizationid: seed.realmId };
-    const buildingResp = await apiCtx.get(`${GATEWAY}/api/v2/buildings/${seed.buildingId}`, { headers: auth });
-    expect(buildingResp.status(), 'fetch building').toBe(200);
-    const building = (await buildingResp.json()) as any;
     const term = currentTermUtc();
     const ownerLabel = `E2E-40_7-OwnerRepair-${Date.now()}`;
-    const filtered = (building.ownerMonthlyExpenses || []).filter((e: any) => !(e.description && e.description.startsWith('E2E-40_7-OwnerRepair-')));
-    const newOwnerEntry = { term, amount: 77, source: 'repair', expenseId: '000000000000000000000000', description: ownerLabel };
-    const ownerExpenses = [...filtered, newOwnerEntry];
-    const patchResp = await apiCtx.patch(`${GATEWAY}/api/v2/buildings/${seed.buildingId}`, {
-      headers: auth,
-      data: { __v: building.__v, ownerMonthlyExpenses: ownerExpenses }
-    });
-    if (patchResp.status() >= 500) {
-      throw new Error(`owner-expense PATCH 5xx (${patchResp.status()}: ${await patchResp.text().catch(() => '')})`);
-    }
-    if (patchResp.status() >= 400) {
-      const { status, body } = await fetchExpenses(apiCtx, seed.token, seed.realmId, seed.propertyId);
-      expect(status, 'GET expenses post failed PATCH still 200').toBe(200);
-      expect(Number.isFinite(Number(body.currentMonth.byCategory.repairs)), 'repairs total finite').toBe(true);
+    // PATCH /buildings/:id rejects ownerMonthlyExpenses (those are
+    // managed via the dedicated /monthly-statement route + the recompute
+    // pipeline). Seed directly via mongo using the standard infra
+    // helper. mongoExec returns null when portainer-token is missing —
+    // skip with a clear annotation.
+    const { mongoExec } = await import('./lib/mongoExec');
+    const mongoOk = mongoExec(`db.buildings.findOne({_id: ObjectId('${seed.buildingId}')}) ? 'ok' : 'null'`);
+    if (!mongoOk) {
+      test.skip(true, 'mongoExec unavailable (no portainer-token)');
       return;
     }
+    // Snapshot pre-state.
+    const before = await fetchExpenses(apiCtx, seed.token, seed.realmId, seed.propertyId);
+    expect(before.status, 'pre-snapshot GET').toBe(200);
+    const beforeRepairs = Number(before.body.currentMonth.byCategory.repairs) || 0;
+    const beforeOther = Number(before.body.currentMonth.byCategory.other) || 0;
+    // Direct $push of the source=repair entry via mongo (bypasses the
+    // PATCH validators that don't accept ownerMonthlyExpenses on the
+    // generic building update route).
+    mongoExec(`
+      db.buildings.updateOne(
+        {_id: ObjectId('${seed.buildingId}')},
+        {$push: {ownerMonthlyExpenses: {term: ${term}, amount: 77, source: 'repair', expenseId: ObjectId('000000000000000000000000'), description: '${ownerLabel}'}}}
+      );
+    `);
+
     const after = await fetchExpenses(apiCtx, seed.token, seed.realmId, seed.propertyId);
     expect(after.status, `GET expenses (body=${after.raw.slice(0, 200)})`).toBe(200);
-    expect(Number(after.body.currentMonth.byCategory.repairs), 'repairs > 0').toBeGreaterThan(0);
-    expect(Number(after.body.currentMonth.byCategory.other), 'other === 0').toBe(0);
+    // Tolerant snapshot assertion that captures the intent: the new
+    // 77-EUR owner-repair line bumped 'repairs' (not 'other').
+    expect(
+      Number(after.body.currentMonth.byCategory.repairs) - beforeRepairs,
+      'new line bumped repairs by exactly the seeded amount'
+    ).toBeCloseTo(77, 1);
+    expect(
+      Number(after.body.currentMonth.byCategory.other) - beforeOther,
+      "new line did NOT bump 'other'"
+    ).toBeCloseTo(0, 1);
     const matchingLine = (after.body.currentMonth.lines as Array<any>).find(
       (l) => l.description === ownerLabel || (l.source === 'owner_monthly_expense' && Number(l.amount) === 77)
     );
@@ -353,15 +376,13 @@ test('40.7 · owner monthly expense source=repair → byCategory.repairs > 0, by
       expect(matchingLine.category, 'line.category === repairs').toBe('repairs');
       expect(matchingLine.source, 'line.source === owner_monthly_expense').toBe('owner_monthly_expense');
     }
-    const cleanup = await apiCtx.get(`${GATEWAY}/api/v2/buildings/${seed.buildingId}`, { headers: auth });
-    if (cleanup.status() === 200) {
-      const fresh = (await cleanup.json()) as any;
-      const stripped = (fresh.ownerMonthlyExpenses || []).filter((e: any) => !(e.description && e.description.startsWith('E2E-40_7-OwnerRepair-')));
-      await apiCtx.patch(`${GATEWAY}/api/v2/buildings/${seed.buildingId}`, {
-        headers: auth,
-        data: { __v: fresh.__v, ownerMonthlyExpenses: stripped }
-      }).catch(() => {});
-    }
+    // Cleanup via mongo direct $pull (symmetric with insert).
+    mongoExec(`
+      db.buildings.updateOne(
+        {_id: ObjectId('${seed.buildingId}')},
+        {$pull: {ownerMonthlyExpenses: {description: '${ownerLabel}'}}}
+      );
+    `);
   } finally {
     await apiCtx.dispose();
   }

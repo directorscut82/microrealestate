@@ -214,6 +214,14 @@ async function createRentedProperty(
     headers,
     data: {
       name: tenantName,
+      // Server-side Tier A1 validators require firstName, lastName, and
+      // a checksum-valid Greek AFM for natural-person tenants. Without
+      // them every POST returns 422 — the test never reaches the
+      // dashboard-headline assertions it actually wants to exercise.
+      // checksum-valid AFM: weighted-sum of 12345678 = 9, mod 11 mod 10 = 3.
+      firstName: 'E2E',
+      lastName: tenantName,
+      taxId: '123456783',
       isCompany: false,
       manager: tenantName,
       contacts: [
@@ -986,10 +994,14 @@ test('41.11 · expense form chargeOwnerWhenVacant Switch is disabled with "comin
       .click();
   }
 
-  // Open the "Add expense" / "Προσθήκη εξόδου" dialog.
+  // Open the "Add Expense" dialog. ExpenseList uses t('Add Expense')
+  // (capital E) which translates to "Προσθήκη Δαπάνης" in el — NOT
+  // "Προσθήκη Εξόδου" (different key, different word). Match both
+  // capitalisations and either Greek noun for robustness across locales.
   const addExpenseBtn = page
     .locator('button', {
-      hasText: /Add expense|Προσθήκη εξόδου|Προσθήκη Εξόδου/
+      hasText:
+        /Add Expense|Add expense|Προσθήκη Δαπάνης|Προσθήκη δαπάνης|Προσθήκη εξόδου|Προσθήκη Εξόδου/
     })
     .first();
   await expect(addExpenseBtn, 'Add expense button visible').toBeVisible({

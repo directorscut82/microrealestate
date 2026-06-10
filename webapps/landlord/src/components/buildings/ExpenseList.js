@@ -463,12 +463,31 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
         // On EDIT, preserve the persisted startTerm (RHF only carries registered
         // fields, so without this the PATCH would strip it and the API would
         // reject with "startTerm is required for recurring expenses").
-        if (data.startFromCurrentMonth) {
-          const now = new Date();
-          const term = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}0100`;
-          payload.startTerm = Number(term);
-        } else if (expense?.startTerm) {
-          payload.startTerm = expense.startTerm;
+        //
+        // Anchoring rule:
+        //  - On CREATE: if user opted "start from current month" (default),
+        //    use this month. Otherwise we need a startTerm anyway since
+        //    the API rejects recurring expenses without one — fall back
+        //    to current month (the Switch is informational, not a way to
+        //    skip the anchor).
+        //  - On EDIT: preserve the persisted startTerm, but if the user
+        //    flipped startFromCurrentMonth on, advance to current month.
+        const currentMonthTerm = Number(
+          `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}0100`
+        );
+        if (expense?._id) {
+          if (data.startFromCurrentMonth) {
+            payload.startTerm = currentMonthTerm;
+          } else if (expense?.startTerm) {
+            payload.startTerm = expense.startTerm;
+          }
+        } else {
+          // CREATE: always send a startTerm. The Switch defaults to true
+          // and if zod's .optional().default() races with the resolver
+          // (RHF + zodResolver edge case where `data.startFromCurrentMonth`
+          // ends up undefined despite the form-state default), we still
+          // anchor to this month rather than 422 the user.
+          payload.startTerm = currentMonthTerm;
         }
         if (expense?.endTerm) {
           payload.endTerm = expense.endTerm;
