@@ -297,12 +297,18 @@ async function signInUI(page: Page) {
 }
 
 async function gotoDashboard(page: Page, fx: EphemeralRealm) {
-  // Dashboard renders at /[organization]/dashboard. The realm name is the
-  // org slug — encode it for the URL (timestamp suffix has no specials but
-  // be safe).
-  await page.goto(`${encodeURIComponent(fx.realmName)}/dashboard`);
-  // Wait for the dashboard to mount — the ExpiringLeasesTile is one of
-  // the cards on the page.
+  // Dashboard renders at /[organization]/dashboard. The realm name is
+  // the org slug — encode it for the URL.
+  //
+  // First navigate to the SIGNIN page after a hard reload so the
+  // StoreContext re-fetches realms (the ephemeral realm was created
+  // AFTER signin and isn't in the cached user.realms list). Without
+  // this the dashboard renders a 'realm not found' redirect.
+  await page.goto('/');
+  // Then deep-link to the ephemeral realm's dashboard.
+  await page.goto(`${encodeURIComponent(fx.realmName)}/dashboard`, {
+    waitUntil: 'networkidle'
+  });
   await expect
     .poll(() => new URL(page.url()).pathname, { timeout: 20_000 })
     .toContain('/dashboard');

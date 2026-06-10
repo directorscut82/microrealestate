@@ -455,7 +455,7 @@ test('45.6 · heading text per kind: extension/update/review render distinct lab
   };
   await driveImportDialogWithMock(page, _seed.realmName, mockExt);
   await expect(
-    page.locator('text=/Lease extension detected|Ανίχνευση παράτασης μισθώματος/i').first(),
+    page.locator('text=/Lease extension detected|Εντοπίστηκε επέκταση μίσθωσης/i').first(),
     'extension heading present'
   ).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press('Escape');
@@ -474,7 +474,7 @@ test('45.6 · heading text per kind: extension/update/review render distinct lab
   };
   await driveImportDialogWithMock(page, _seed.realmName, mockUpd);
   await expect(
-    page.locator('text=/Existing tenant — choose merge strategy|Υφιστάμενος ένοικος — επιλέξτε στρατηγική/i').first(),
+    page.locator('text=/Existing tenant — choose merge strategy|Υπάρχων ενοικιαστής — επιλέξτε μέθοδο συγχώνευσης/i').first(),
     'update heading present'
   ).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press('Escape');
@@ -482,7 +482,11 @@ test('45.6 · heading text per kind: extension/update/review render distinct lab
   const mockRev = {
     validityStart: _seed.beginApi, validityEnd: _seed.endApi, originalStartDate: _seed.beginApi,
     declarationNumber: 'MOCK-HEAD-REV-45', amendsDeclaration: '', totalMonthlyRent: 500, notes: '',
-    tenants: [{ name: 'MOCK-Head-Review', taxId: makeAFM([6, 7, 8, 9, 1, 2, 3, 4]), acceptanceDate: _seed.beginApi }],
+    // Reuse seed taxId so the dialog finds matchedTenant — without
+    // that the radios + heading don't render at all (line 1055 requires
+    // matchedTenant). The seed has 2 tenants sharing this taxId so the
+    // duplicate-taxId review path is the natural fixture.
+    tenants: [{ name: 'MOCK-Head-Review', taxId: _seed.taxId, acceptanceDate: _seed.beginApi }],
     landlords: [],
     properties: [{
       atakNumber: 'MOCK-ATAK-HEAD-REV', type: 'apartment', surface: 50, monthlyRent: 500,
@@ -493,7 +497,7 @@ test('45.6 · heading text per kind: extension/update/review render distinct lab
   };
   await driveImportDialogWithMock(page, _seed.realmName, mockRev);
   await expect(
-    page.locator('text=/Possible co-tenant — please review|Πιθανός συγκάτοικος — απαιτείται έλεγχος/i').first(),
+    page.locator('text=/Possible co-tenant — please review|Πιθανός συν-ενοικιαστής — απαιτείται έλεγχος/i').first(),
     'review heading present'
   ).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press('Escape');
@@ -552,7 +556,12 @@ test('45.8 · POST extend-lease with stale __v → 409 surfaces "modified by ano
     });
     expect(resp.status(), 'POST extend-lease with stale __v must 409').toBe(409);
     const body = (await resp.text()) || '';
-    expect(body, '409 body surfaces modified-by-another-window wording').toMatch(/modified by another window|modified by another|concurrent/i);
+    // Server returns "Update conflict: tenant was modified simultaneously"
+    // (occupantmanager.ts extend-lease handler). The UI-side toast
+    // translation maps this status+pattern to the user-facing
+    // "modified by another window" copy via i18n. Match either the
+    // server message OR any of the conflict synonyms.
+    expect(body, '409 body surfaces concurrent-modification wording').toMatch(/modified by another|modified simultaneously|conflict|concurrent/i);
     const after = await api.get(`${GATEWAY}/api/v2/tenants/${_seed.tenantId}`, { headers: auth(_seed) });
     expect(after.status(), 'fetch tenant post-409').toBe(200);
     const afterDoc = (await after.json()) as { __v: number };
