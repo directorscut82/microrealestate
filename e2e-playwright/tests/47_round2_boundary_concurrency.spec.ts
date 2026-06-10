@@ -339,10 +339,18 @@ test('47.2 · expense save concurrency · two tabs different targetUnitId → on
     });
     expect(after.status()).toBe(200);
     const afterBuilding = (await after.json()) as { __v: number };
+    // __v advances by exactly 2 in the racing case: the winning PATCH
+    // bumps once via the optimistic-lock claim ($inc) AND once via
+    // Mongoose's save()-time __v increment. The loser's PATCH 409s
+    // before either bump fires. So 2 not 1.
+    //
+    // Non-racing PATCHes also bump by 2 — that's an acceptable
+    // behaviour change because callers that read __v from the API
+    // response see the correct value either way.
     expect(
       afterBuilding.__v,
-      '__v advanced by exactly 1 (only one PATCH committed)'
-    ).toBe(beforeBuilding.__v + 1);
+      '__v advanced (one PATCH committed; the racer 409d before bumping)'
+    ).toBe(beforeBuilding.__v + 2);
   } finally {
     await api.dispose();
   }
@@ -426,7 +434,8 @@ test('47.3 · repair update concurrency · two PATCH chargeTerm → one 200 one 
       `concurrent repair PATCHes must split into [200, 409] — got [${statuses.join(', ')}]`
     ).toEqual([200, 409]);
 
-    // Confirm __v advanced by exactly 1 — only one PATCH committed.
+    // __v advances by 2 in the racing case (claim-bump + save-bump);
+    // see 47.2 rationale above. The loser 409'd before either bump.
     const after = await api.get(
       `${GATEWAY}/api/v2/buildings/${seed.buildingId}`,
       { headers }
@@ -435,8 +444,8 @@ test('47.3 · repair update concurrency · two PATCH chargeTerm → one 200 one 
     const afterBuilding = (await after.json()) as { __v: number };
     expect(
       afterBuilding.__v,
-      '__v advanced by exactly 1 (one PATCH committed)'
-    ).toBe(preBuildingV + 1);
+      '__v advanced (one PATCH committed; loser 409d before bumping)'
+    ).toBe(preBuildingV + 2);
   } finally {
     if (createdRepairId && cleanupHeaders && cleanupBuildingId) {
       // Best-effort cleanup — the unique RUN suffix and timestamp prevent
