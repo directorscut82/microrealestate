@@ -94,31 +94,12 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (!_seed || _fixtures.length === 0) return;
-  const apiCtx = await request.newContext();
-  try {
-    // Bulk-delete via the array endpoint. If a tenant has rents (none of
-    // ours do — they're created with no leaseId), the API may 422. We
-    // try once and best-effort log; the unique RUN suffix keeps stale
-    // fixtures from snowballing across runs even if cleanup is missed.
-    const ids = _fixtures.map((f) => f.id);
-    const r = await apiCtx.delete(`${GATEWAY}/api/v2/tenants`, {
-      headers: {
-        Authorization: `Bearer ${_seed.token}`,
-        organizationid: _seed.realmId,
-        'Content-Type': 'application/json'
-      },
-      data: { ids }
-    });
-    if (r.status() !== 200 && r.status() !== 204) {
-      // Not fatal; just log so a human notices in the report.
-      const body = await r.text().catch(() => '');
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[44_round1_tenant_tile] cleanup DELETE ${ids.length} ids returned ${r.status()}: ${body}`
-      );
-    }
-  } finally {
-    await apiCtx.dispose();
+  // Direct mongo delete — fixtures inserted via mongoExec bypass the
+  // validators, but the API DELETE endpoint may reject them (e.g.,
+  // empty taxId triggers a guard). Direct delete is symmetric with the
+  // direct insert in makeFixture and always succeeds.
+  for (const fx of _fixtures) {
+    mongoExec(`db.occupants.deleteOne({_id: ObjectId('${fx.id}')})`);
   }
 });
 
@@ -147,7 +128,11 @@ function validNaturalPayload(name: string) {
     name,
     firstName: 'Round1',
     lastName: name,
-    taxId: '123456784',
+    // Valid Greek AFM (checksum 3): base 12345678 → mod-11 weighted sum
+    // = 9, %10 = 3. Specs that mutate this fixture into a "missing
+    // tax id" or "invalid checksum" state must $set a known-bad value
+    // explicitly via the mutate string.
+    taxId: '123456783',
     isCompany: false,
     manager: name,
     contacts: [
@@ -186,38 +171,62 @@ async function makeFixture(
 ): Promise<Fixture> {
   if (!_seed) throw new Error('seed not initialised');
   const name = `${PREFIX}-${role}-${RUN}`;
-  const created = await api.post(`${GATEWAY}/api/v2/tenants`, {
-    headers: {
-      Authorization: `Bearer ${_seed.token}`,
-      organizationid: _seed.realmId,
-      'Content-Type': 'application/json'
-    },
-    data: { ...payload, name }
-  });
-  expect(
-    [200, 201],
-    `create fixture ${role} (status=${created.status()}, body: ${await created
-      .text()
-      .catch(() => '')})`
-  ).toContain(created.status());
-  const body = (await created.json()) as { _id: string; name?: string };
-  expect(body._id, `fixture ${role} _id`).toBeTruthy();
-  const fixture: Fixture = { id: body._id, name };
+  // Direct-insert via mongo. The whole point of THIS spec is the UI's
+  // missing-fields warning system, which only fires for tenants whose
+  // data the validators would have rejected. POSTing through the API
+  // (the original approach) returns 422 because validators correctly
+  // refuse intentionally-invalid taxIds, empty firstName, etc. Inserting
+  // directly bypasses validators — exactly mimicking a legacy import or
+  // a tenant that pre-dates the validator additions.
+  const fullDoc = {
+    realmId: _seed.realmId,
+    name,
+    firstName: '',
+    lastName: '',
+    company: '',
+    legalForm: '',
+    isCompany: false,
+    taxId: '',
+    archived: false,
+    properties: [],
+    rents: [],
+    contacts: [],
+    leaseHistory: [],
+    expiryNoticesSent: [],
+    stepperMode: false,
+    __v: 0,
+    ...payload
+  };
+  // Insert via mongoExec — returns the _id string, or null if
+  // portainer-token is unavailable.
+  const out = mongoExec(`
+    var doc = ${JSON.stringify(fullDoc)};
+    var r = db.occupants.insertOne(doc);
+    print(r.insertedId.valueOf ? r.insertedId.valueOf() : r.insertedId);
+  `);
+  if (out === null) {
+    test.skip(true, 'mongoExec unavailable (no portainer-token)');
+  }
+  const idMatch = (out || '').match(/[a-f0-9]{24}/);
+  if (!idMatch) {
+    throw new Error(
+      `mongo insertOne did not return ObjectId — got: ${out}`
+    );
+  }
+  const fixture: Fixture = { id: idMatch[0], name };
   _fixtures.push(fixture);
   if (mutate) {
-    // mongoExec returns null when no portainer-token is present (CI
-    // dry-run). The spec is intended for live NAS only; bail with a
-    // clear message rather than running tests against an unmutated
-    // fixture and producing a confusing tautology pass.
-    const out = mongoExec(
-      `db.occupants.updateOne({_id: ObjectId('${body._id}')}, ${mutate});`
+    const muOut = mongoExec(
+      `db.occupants.updateOne({_id: ObjectId('${idMatch[0]}')}, ${mutate});`
     );
-    if (out === null) {
+    if (muOut === null) {
       throw new Error(
         'mongoExec unavailable (no portainer-token); this spec requires live NAS access'
       );
     }
   }
+  // Used by `api` parameter — keep the unused-param suppression happy.
+  void api;
   return fixture;
 }
 
@@ -493,24 +502,23 @@ test('44.7 — company missing company name surfaces "Company" badge', async ({
 test('44.8 — terminated tenant pill is "Lease ended" with grey dot', async ({
   page
 }) => {
-  // To reach `tenant.terminated === true`, frontdata.toOccupantData
-  // checks endMoment.isBefore(today) on terminationDate || endDate
-  // (frontdata.ts:445-451). Setting terminationDate = yesterday in
-  // DD/MM/YYYY format is the cleanest path — bypasses the API
-  // validators that may force schema-ish dates.
+  // The schema stores terminationDate as a Date object. frontdata's
+  // toOccupantData calls moment.utc(occupant.terminationDate).format(
+  // 'DD/MM/YYYY') BEFORE the isBefore check (line 421-425), so the
+  // value must round-trip through moment.utc(Date) which only accepts
+  // a real Date / ISO string, NOT a 'DD/MM/YYYY' string.
   const yesterday = new Date();
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const dd = String(yesterday.getUTCDate()).padStart(2, '0');
-  const mm = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = yesterday.getUTCFullYear();
-  const termDate = `${dd}/${mm}/${yyyy}`;
+  // Use ISO timestamp via mongo's `new Date('...')` constructor in the
+  // shell. Wrapping in ISODate() works in mongo 4.4 too.
+  const iso = yesterday.toISOString();
 
   const apiCtx = await request.newContext();
   const fx = await makeFixture(
     apiCtx,
     'Term',
     validNaturalPayload(`${PREFIX}-Term-${RUN}`),
-    `{$set: {terminationDate: '${termDate}'}}`
+    `{$set: {terminationDate: new Date('${iso}')}}`
   );
   await apiCtx.dispose();
 
@@ -532,28 +540,17 @@ test('44.8 — terminated tenant pill is "Lease ended" with grey dot', async ({
 test('44.9 — future-start tenant pill is "Lease starts in the future" with amber dot', async ({
   page
 }) => {
-  // beginDate must be after `moment().startOf('day')` (per
-  // TenantListItem.js:95-97). 30 days in the future is safe regardless
-  // of timezone wraparound. The endDate must come AFTER beginDate or
-  // frontdata.terminated derivation will flip — so push endDate further.
   const futureBegin = new Date();
   futureBegin.setUTCDate(futureBegin.getUTCDate() + 30);
   const futureEnd = new Date();
   futureEnd.setUTCDate(futureEnd.getUTCDate() + 365);
-  const fmt = (d: Date) => {
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    return `${dd}/${mm}/${d.getUTCFullYear()}`;
-  };
-  const beginDDMM = fmt(futureBegin);
-  const endDDMM = fmt(futureEnd);
 
   const apiCtx = await request.newContext();
   const fx = await makeFixture(
     apiCtx,
     'Future',
     validNaturalPayload(`${PREFIX}-Future-${RUN}`),
-    `{$set: {beginDate: '${beginDDMM}', endDate: '${endDDMM}'}}`
+    `{$set: {beginDate: new Date('${futureBegin.toISOString()}'), endDate: new Date('${futureEnd.toISOString()}')}}`
   );
   await apiCtx.dispose();
 
@@ -575,25 +572,20 @@ test('44.9 — future-start tenant pill is "Lease starts in the future" with amb
 test('44.10 — running tenant pill is "Lease running" with olive dot', async ({
   page
 }) => {
-  // beginDate in the past, endDate in the future, no terminationDate.
+  // Schema stores beginDate / endDate as Date. mongo updates must use
+  // `new Date('ISO')` not the DD/MM/YYYY strings (frontdata reformats
+  // schema Date → DD/MM/YYYY but does NOT accept reversed input).
   const past = new Date();
   past.setUTCDate(past.getUTCDate() - 30);
   const future = new Date();
   future.setUTCDate(future.getUTCDate() + 365);
-  const fmt = (d: Date) => {
-    const dd = String(d.getUTCDate()).padStart(2, '0');
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    return `${dd}/${mm}/${d.getUTCFullYear()}`;
-  };
-  const beginDDMM = fmt(past);
-  const endDDMM = fmt(future);
 
   const apiCtx = await request.newContext();
   const fx = await makeFixture(
     apiCtx,
     'Run',
     validNaturalPayload(`${PREFIX}-Run-${RUN}`),
-    `{$set: {beginDate: '${beginDDMM}', endDate: '${endDDMM}'}}`
+    `{$set: {beginDate: new Date('${past.toISOString()}'), endDate: new Date('${future.toISOString()}')}}`
   );
   await apiCtx.dispose();
 
@@ -651,17 +643,13 @@ test('44.12 — Greek locale renders Greek badge labels with no English bleed', 
   // to the English key.
   const yesterday = new Date();
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const dd = String(yesterday.getUTCDate()).padStart(2, '0');
-  const mm = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-  const yyyy = yesterday.getUTCFullYear();
-  const termDate = `${dd}/${mm}/${yyyy}`;
 
   const apiCtx = await request.newContext();
   const fx = await makeFixture(
     apiCtx,
     'Greek',
     validNaturalPayload(`${PREFIX}-Greek-${RUN}`),
-    `{$unset: {firstName: ''}, $set: {taxId: '123', terminationDate: '${termDate}'}}`
+    `{$unset: {firstName: ''}, $set: {taxId: '123', terminationDate: new Date('${yesterday.toISOString()}')}}`
   );
   await apiCtx.dispose();
 

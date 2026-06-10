@@ -76,7 +76,10 @@ for c in data:
 export function mongoExec(script: string): string | null {
   if (!PORTAINER_TOKEN) return null;
   const cid = _resolveMongoCid();
-  const escaped = script.replace(/"/g, '\\"');
+  // Escape both " (for the --eval double-quoted wrapper) AND $ (the inner
+  // shell that runs the docker exec sees the script and would expand
+  // $set as variable-substitution → syntax error in mongo shell).
+  const escaped = script.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
   const cmd = `mongo mongodb://localhost:27017/mredb --quiet --eval "${escaped}"`;
   return execSync(
     `python3 -c "${PY_HELPER.replace(/"/g, '\\"')}" '${cmd.replace(/'/g, "'\\''")}'`,
@@ -130,4 +133,124 @@ export function readRent(
   `);
   if (!out || out === 'null') return null;
   return JSON.parse(out);
+}
+
+/**
+ * Direct-insert a tenant via mongo, bypassing API validators. Used by
+ * specs that need to test the UI's bad-data handling — e.g.,
+ * TenantListItem missing-fields warning badges. The API correctly
+ * rejects taxId='123' (not a valid AFM), so the only way to test the
+ * "tenant exists with bad data" UI path is to put bad data directly in
+ * mongo, simulating a legacy import or partially-completed entry.
+ *
+ * Returns the inserted _id (string), or null if portainer-token is
+ * missing locally (graceful skip — tests should `test.skip(!id, '...')`
+ * not throw).
+ */
+export interface MongoTenantSeed {
+  realmId: string;
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  company?: string;
+  legalForm?: string;
+  isCompany?: boolean;
+  taxId?: string;
+  archived?: boolean;
+  beginDate?: Date | string;
+  endDate?: Date | string;
+  terminationDate?: Date | string;
+}
+
+export function insertTenantDirect(seed: MongoTenantSeed): string | null {
+  const doc = {
+    realmId: seed.realmId,
+    name: seed.name,
+    firstName: seed.firstName ?? '',
+    lastName: seed.lastName ?? '',
+    company: seed.company ?? '',
+    legalForm: seed.legalForm ?? '',
+    isCompany: seed.isCompany ?? false,
+    taxId: seed.taxId ?? '',
+    archived: seed.archived ?? false,
+    properties: [],
+    rents: [],
+    contacts: [],
+    leaseHistory: [],
+    expiryNoticesSent: [],
+    stepperMode: false,
+    __v: 0
+  };
+  if (seed.beginDate)
+    (doc as any).beginDate = new Date(seed.beginDate as any);
+  if (seed.endDate) (doc as any).endDate = new Date(seed.endDate as any);
+  if (seed.terminationDate)
+    (doc as any).terminationDate = new Date(seed.terminationDate as any);
+  // Mongo legacy collection name is `occupants`.
+  const out = mongoExec(`
+    var doc = ${JSON.stringify(doc)};
+    var r = db.occupants.insertOne(doc);
+    print(r.insertedId.valueOf ? r.insertedId.valueOf() : r.insertedId);
+  `);
+  if (!out) return null;
+  // mongo 4.4 prints ObjectId("...") — strip the wrapper.
+  const m = out.match(/[a-f0-9]{24}/);
+  return m ? m[0] : null;
+}
+
+/**
+ * Delete a tenant by _id via direct mongo. Used to clean up
+ * bad-data fixtures inserted via insertTenantDirect since the API
+ * tenant-delete endpoint requires a valid taxId for some checks.
+ */
+export function deleteTenantDirect(id: string): boolean {
+  const out = mongoExec(`
+    var r = db.occupants.deleteOne({_id: ObjectId("${id}")});
+    print(r.deletedCount);
+  `);
+  return out === '1';
+}
+
+/**
+ * Read a tenant doc by name (in a given realm) — for round-trip
+ * assertions on schema-only fields like expiryNoticesSent that the
+ * API doesn't surface in the JSON response.
+ */
+export function readTenant(
+  realmId: string,
+  name: string
+): Record<string, any> | null {
+  const out = mongoExec(`
+    var t = db.occupants.findOne({realmId: "${realmId}", name: "${name.replace(/"/g, '\\"')}"});
+    if (!t) { print("null"); quit(); }
+    print(JSON.stringify(t));
+  `);
+  if (!out || out === 'null') return null;
+  try {
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a building doc by name + realmId — used for verifying
+ * customAllocations[0].propertyId, monthlyCharges, etc. on the
+ * persisted shape.
+ */
+export function readBuilding(
+  realmId: string,
+  name: string
+): Record<string, any> | null {
+  const out = mongoExec(`
+    var b = db.buildings.findOne({realmId: "${realmId}", name: "${name.replace(/"/g, '\\"')}"});
+    if (!b) { print("null"); quit(); }
+    print(JSON.stringify(b));
+  `);
+  if (!out || out === 'null') return null;
+  try {
+    return JSON.parse(out);
+  } catch {
+    return null;
+  }
 }
