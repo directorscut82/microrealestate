@@ -717,6 +717,7 @@
   "Settings": "Ρυθμίσεις",
   "Settled": "Εισπράξεις",
   "Settlement": "Καταβολή",
+  "Setup incomplete": "Ημιτελής ρύθμιση",
   "Settlement #{{count}}": "Καταβολή #{{count}}",
   "Settlements": "Καταβολές",
   "Settlements - {{year}}.csv": "Καταβολές - {{year}}.csv",

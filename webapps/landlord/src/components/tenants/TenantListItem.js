@@ -84,19 +84,35 @@ export default function TenantListItem({ tenant }) {
     tenant.taxId
   ]);
 
-  // Tier B8 — 3-state lease pill: terminated / future-start / running.
-  // Previously a 2-state predicate ("Lease ended" vs "Lease running")
-  // contradicted the no-property warning when the tenant had a future
-  // beginDate but no termination. Compute the state once here and use a
-  // single attribute hook for tests (data-lease-state).
+  // Tier B8 — 4-state lease pill: terminated / future-start / incomplete /
+  // running.
+  //
+  // 'incomplete' (added after a screenshot showed the contradiction):
+  // a tenant with NO property/contract assigned cannot have a "running"
+  // lease — rent billing literally cannot start (TenantPropertyList shows
+  // the "No property assigned" warning in that case). Previously the pill
+  // defaulted to 'running' (green) while the body said "no property set",
+  // which is incoherent. A tenant with no beginDate OR no properties is
+  // 'incomplete', not running.
   const leaseState = useMemo(() => {
     if (tenant.terminated) return 'terminated';
+    const hasProperty = Array.isArray(tenant.properties)
+      ? tenant.properties.length > 0
+      : false;
+    // Future-dated lease: surface 'future' even if the property isn't
+    // linked yet — "starts later" is the dominant fact the user needs.
     if (tenant.beginDate) {
       const begin = moment(tenant.beginDate, 'DD/MM/YYYY').startOf('day');
       if (begin.isAfter(moment().startOf('day'))) return 'future';
     }
+    // For a lease whose window has begun (or has no begin date), a
+    // missing contract window OR missing property means billing can't
+    // run — that's 'incomplete', NOT 'running'. This is the bug a real
+    // screenshot surfaced: a no-property tenant showing a green
+    // "Lease running" pill while the body warned "no property set".
+    if (!tenant.beginDate || !hasProperty) return 'incomplete';
     return 'running';
-  }, [tenant.terminated, tenant.beginDate]);
+  }, [tenant.terminated, tenant.beginDate, tenant.properties]);
 
   // Tier B7 — alignment: make the Card a flex column with CardContent
   // expanding to fill available space, so cards on the same row line up
@@ -188,7 +204,7 @@ export default function TenantListItem({ tenant }) {
             variant={
               leaseState === 'terminated'
                 ? 'secondary'
-                : leaseState === 'future'
+                : leaseState === 'future' || leaseState === 'incomplete'
                   ? 'outline'
                   : 'success'
             }
@@ -200,11 +216,13 @@ export default function TenantListItem({ tenant }) {
                 'size-1.5 rounded-pill shrink-0',
                 leaseState === 'terminated' && 'bg-ink-muted',
                 leaseState === 'future' && 'bg-amber-500',
+                leaseState === 'incomplete' && 'bg-amber-500',
                 leaseState === 'running' && 'bg-olive'
               )}
             />
             {leaseState === 'terminated' && t('Lease ended')}
             {leaseState === 'future' && t('Lease starts in the future')}
+            {leaseState === 'incomplete' && t('Setup incomplete')}
             {leaseState === 'running' && t('Lease running')}
           </Badge>
         </div>
