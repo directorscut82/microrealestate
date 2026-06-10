@@ -287,9 +287,17 @@ async function missingFieldsKeys(card: Locator): Promise<string> {
 }
 
 // ============================================================
-// Test 1: natural person missing firstName → "First name" badge
+// Test 1: natural person WITH a display name but missing the split
+// firstName → single "Incomplete name" badge (NOT "First name").
+//
+// This is the real-world legacy/import case the user flagged on a
+// screenshot: the tile title shows a name (e.g. "3ed3ed") while the
+// footer claimed "First name missing", which reads as a contradiction
+// (the name is right there). TenantListItem now collapses
+// "name present + a split field missing" into one honest
+// `nameIncomplete` badge. See the data-001/TENANT-004 audit finding.
 // ============================================================
-test('44.1 — natural person missing firstName surfaces "First name" badge', async ({
+test('44.1 — name present but firstName missing surfaces single "Incomplete name" badge', async ({
   page
 }) => {
   const apiCtx = await request.newContext();
@@ -304,24 +312,30 @@ test('44.1 — natural person missing firstName surfaces "First name" badge', as
   await signIn(page);
   const card = await findTenantTile(page, _seed!.realmName, fx);
   const keys = await missingFieldsKeys(card);
-  expect(keys.split(','), 'data-missing-fields contains firstName').toContain(
-    'firstName'
-  );
-  // Badge label is locale-dependent (el: "Όνομα", en: "First name").
-  // Anchor on either; the realm is el so we expect the Greek label.
-  const firstNameBadge = card
+  // The fixture carries a display `name` (makeFixture always sets it),
+  // so the contradiction-avoiding `nameIncomplete` badge fires instead
+  // of a bare `firstName` badge.
+  expect(
+    keys.split(','),
+    'data-missing-fields contains nameIncomplete'
+  ).toContain('nameIncomplete');
+  expect(
+    keys.split(','),
+    'must NOT show the contradictory bare firstName badge'
+  ).not.toContain('firstName');
+  // Badge label is locale-dependent (el: "Ελλιπές όνομα", en:
+  // "Incomplete name"). The realm is el so we expect the Greek label.
+  const badge = card
     .locator('[data-cy=tenantMissingFields]')
-    .getByText(/^(First name|Όνομα)$/);
-  await expect(firstNameBadge, '"First name" badge present').toBeVisible();
-  // Outline-amber styling — class includes border-amber-500 (per
-  // TenantListItem.js:173).
-  await expect(firstNameBadge).toHaveClass(/border-amber-500/);
+    .getByText(/^(Incomplete name|Ελλιπές όνομα)$/);
+  await expect(badge, '"Incomplete name" badge present').toBeVisible();
+  await expect(badge).toHaveClass(/border-amber-500/);
 });
 
 // ============================================================
-// Test 2: natural person missing lastName → "Last name" badge
+// Test 2: same collapse for a missing lastName when a name is present.
 // ============================================================
-test('44.2 — natural person missing lastName surfaces "Last name" badge', async ({
+test('44.2 — name present but lastName missing surfaces single "Incomplete name" badge', async ({
   page
 }) => {
   const apiCtx = await request.newContext();
@@ -336,14 +350,68 @@ test('44.2 — natural person missing lastName surfaces "Last name" badge', asyn
   await signIn(page);
   const card = await findTenantTile(page, _seed!.realmName, fx);
   const keys = await missingFieldsKeys(card);
-  expect(keys.split(','), 'data-missing-fields contains lastName').toContain(
-    'lastName'
-  );
-  const lastNameBadge = card
+  expect(
+    keys.split(','),
+    'data-missing-fields contains nameIncomplete'
+  ).toContain('nameIncomplete');
+  expect(
+    keys.split(','),
+    'must NOT show the contradictory bare lastName badge'
+  ).not.toContain('lastName');
+  const badge = card
     .locator('[data-cy=tenantMissingFields]')
-    .getByText(/^(Last name|Επώνυμο)$/);
-  await expect(lastNameBadge, '"Last name" badge present').toBeVisible();
-  await expect(lastNameBadge).toHaveClass(/border-amber-500/);
+    .getByText(/^(Incomplete name|Ελλιπές όνομα)$/);
+  await expect(badge, '"Incomplete name" badge present').toBeVisible();
+  await expect(badge).toHaveClass(/border-amber-500/);
+});
+
+// ============================================================
+// Test 2b: genuinely empty name (no display name AND no split fields)
+// still surfaces the explicit First name + Last name badges — the
+// collapse only applies when a name IS present.
+// ============================================================
+test('44.2b — empty name and empty split fields surface both First name + Last name badges', async ({
+  page
+}) => {
+  const apiCtx = await request.newContext();
+  const fx = await makeFixture(
+    apiCtx,
+    'NoNameNoSplit',
+    validNaturalPayload(`${PREFIX}-NoNameNoSplit-${RUN}`),
+    `{$set: {name: '', firstName: '', lastName: ''}}`
+  );
+  await apiCtx.dispose();
+
+  await signIn(page);
+  // The tile title is empty here, so search/anchor by name won't find an
+  // openResourceButton with the run suffix. Anchor instead via the
+  // missing-fields footer's data attribute, scoped to this run by the
+  // contact name (which makeFixture seeds from the fixture name).
+  await page.goto(`${encodeURIComponent(_seed!.realmName)}/tenants`);
+  const search = page
+    .locator('input[placeholder*="Search" i], input[placeholder*="Αναζήτηση" i], input[type=search]')
+    .first();
+  await expect(search).toBeVisible({ timeout: 15_000 });
+  // Empty name → search by the contact (seeded with the fixture name).
+  await search.fill(fx.name);
+  const footer = page
+    .locator('[data-cy=tenantMissingFields]')
+    .filter({ has: page.locator('[data-missing-fields*="firstName"]') })
+    .first();
+  // Fall back: just assert at least one footer carries both keys.
+  const anyFooter = page.locator(
+    '[data-cy=tenantMissingFields][data-missing-fields*="firstName"][data-missing-fields*="lastName"]'
+  );
+  await expect(anyFooter.first()).toBeVisible({ timeout: 15_000 });
+  const keys =
+    (await anyFooter.first().getAttribute('data-missing-fields')) ?? '';
+  expect(keys.split(','), 'contains firstName').toContain('firstName');
+  expect(keys.split(','), 'contains lastName').toContain('lastName');
+  expect(
+    keys.split(','),
+    'must NOT collapse to nameIncomplete when name is empty'
+  ).not.toContain('nameIncomplete');
+  void footer;
 });
 
 // ============================================================
@@ -544,7 +612,7 @@ test('44.8 — terminated tenant pill is "Lease ended" with grey dot', async ({
 // ============================================================
 // Test 9: future-start tenant → "Lease starts in the future" pill amber
 // ============================================================
-test('44.9 — future-start tenant pill is "Lease starts in the future" with amber dot', async ({
+test('44.9 — future-start tenant pill is "Lease starts in the future" with amber calendar-clock glyph', async ({
   page
 }) => {
   const futureBegin = new Date();
@@ -569,8 +637,54 @@ test('44.9 — future-start tenant pill is "Lease starts in the future" with amb
   await expect(pill).toHaveText(
     /Lease starts in the future|Μελλοντική μίσθωση/
   );
-  const dot = pill.locator('span[aria-hidden="true"]').first();
-  await expect(dot).toHaveClass(/bg-amber-500/);
+  // ux-001: 'future' now carries an amber calendar-clock SVG glyph
+  // (Pair-Color-With-Glyph rule) instead of a bare amber dot, so it's
+  // visually distinct from the oxide alert-triangle on 'incomplete'.
+  const glyph = pill.locator('svg[aria-hidden="true"]').first();
+  await expect(glyph, 'future pill renders an SVG glyph').toBeVisible();
+  await expect(glyph).toHaveClass(/text-amber-500/);
+  // The bare-dot span path must NOT be taken for 'future'.
+  await expect(pill.locator('span[aria-hidden="true"]')).toHaveCount(0);
+});
+
+// ============================================================
+// Test 9b: a tenant with a begun lease window but NO property is
+// 'incomplete' (billing can't start) and renders an oxide
+// alert-triangle glyph — visually distinct from the amber 'future'
+// calendar-clock. This is the ux-001 confirmed finding: the two states
+// previously shared one amber dot and were indistinguishable by colour.
+// ============================================================
+test('44.9b — no-property tenant pill is "Setup incomplete" with oxide alert glyph (distinct from future)', async ({
+  page
+}) => {
+  const past = new Date();
+  past.setUTCDate(past.getUTCDate() - 30);
+  const future = new Date();
+  future.setUTCDate(future.getUTCDate() + 365);
+
+  const apiCtx = await request.newContext();
+  // Begun window but properties: [] → 'incomplete', not 'running'.
+  const fx = await makeFixture(
+    apiCtx,
+    'Incomplete',
+    validNaturalPayload(`${PREFIX}-Incomplete-${RUN}`),
+    `{$set: {beginDate: new Date('${past.toISOString()}'), endDate: new Date('${future.toISOString()}'), properties: []}}`
+  );
+  await apiCtx.dispose();
+
+  await signIn(page);
+  const card = await findTenantTile(page, _seed!.realmName, fx);
+  const pill = card.locator('[data-lease-state]');
+  await expect(pill, 'pill present on tile').toHaveCount(1);
+  await expect(pill).toHaveAttribute('data-lease-state', 'incomplete');
+  await expect(pill).toHaveText(/Setup incomplete|Ημιτελής ρύθμιση/);
+  // Distinct glyph + colour from 'future': oxide alert-triangle SVG.
+  const glyph = pill.locator('svg[aria-hidden="true"]').first();
+  await expect(glyph, 'incomplete pill renders an SVG glyph').toBeVisible();
+  await expect(glyph).toHaveClass(/text-oxide/);
+  // The pill itself is oxide-tinted, not amber.
+  await expect(pill).toHaveClass(/text-oxide/);
+  await expect(pill.locator('span[aria-hidden="true"]')).toHaveCount(0);
 });
 
 // ============================================================
@@ -698,10 +812,12 @@ test('44.12 — Greek locale renders Greek badge labels with no English bleed', 
   await expect(footer, 'missing-fields footer present').toHaveCount(1);
   await expect(footer).toContainText('Λείπουν στοιχεία');
 
-  // 2. Greek badges present.
+  // 2. Greek badges present. The fixture has a display `name` but an
+  // unset firstName, so the collapse rule fires the single Greek
+  // "Ελλιπές όνομα" badge (NOT a bare "Όνομα" first-name badge).
   await expect(
-    footer.getByText('Όνομα', { exact: true }),
-    '"Όνομα" (First name) badge present'
+    footer.getByText('Ελλιπές όνομα', { exact: true }),
+    '"Ελλιπές όνομα" (Incomplete name) badge present'
   ).toBeVisible();
   await expect(
     footer.getByText('ΑΦΜ (μη έγκυρο)', { exact: true }),
@@ -719,6 +835,7 @@ test('44.12 — Greek locale renders Greek badge labels with no English bleed', 
   // the page.
   const englishStrings = [
     'First name',
+    'Incomplete name',
     'Tax ID (invalid)',
     'Lease ended',
     'Missing fields'
