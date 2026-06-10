@@ -48,6 +48,10 @@ For a general "HTTP 500 from gateway" decision tree, see `.kiro/steering/test-ru
 
 If you find yourself saying "the suite passes, it's working" — open the app in a browser first. The user has had to ask for this >20 times in this codebase. Don't make it 21.
 
+### A spec is not a spec until it has run green on the live NAS
+
+This rule exists because the cycle "agent claims X tests written → 50% fail when run → agent says it's spec infra issues → next session repeats" has burned weeks across multiple sessions. Read `.kiro/steering/test-running-guide.md` "MANDATORY pre-merge checklist for every new spec" and `documentation/E2E_TESTING.md` "Hard rule: a spec is not a spec until it runs green on real data" BEFORE authoring any test. Counting un-run tests as coverage is forbidden. If a test needs infra that doesn't exist (mongo backdoor seeder, real PDF fixtures, ephemeral-realm-with-correct-signin pattern), BUILD THE INFRA FIRST — do not paper over its absence with stub specs. **Real-data scenarios (multi-property tenants, partially-corrupt legacy rows) MUST seed via `mongoExec` direct insert, not via API POST — the API correctly rejects bad data, that's the validators doing their job.**
+
 ## June 2026 — Recent state of play
 
 Multi-day debugging session left the following lessons that future agents must internalize before changing anything:

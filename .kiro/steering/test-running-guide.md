@@ -3,6 +3,16 @@ inclusion: always
 ---
 # MRE — Test Running Guide
 
+## STOP — pre-flight rule for any test work in this session
+
+If your task involves writing new tests, modifying tests, or judging test coverage:
+
+1. **Read the "MANDATORY pre-merge checklist for every new spec" section in this file FIRST.** Not later, not after authoring, NOW.
+2. **A spec is not a spec until it has run green at least once on the live NAS.** Counting "tests authored" without running them is a documented multi-session failure pattern; don't repeat it.
+3. **If you cannot run a spec to green in the same session** (because infra is missing, fixtures don't exist, the canonical seed doesn't fit your case) — BUILD THE INFRA FIRST. Mongo backdoor seeder, real PDF fixtures, ephemeral-realm-with-correct-signin pattern — all live in `tests/lib/`. Extend them; do not paper over their absence with stub specs.
+4. **Real-data scenarios** (multi-property tenants, partially-corrupt legacy data, unusual PDF shapes) MUST seed via `mongoExec` direct insert, not via API POST. The API correctly rejects bad data — that's the point of validators. The point of the test is that the UI handles bad data that already exists in production.
+5. The cycle "agent claims X tests written → agent runs them → 50% fail → agent says they're spec infra problems → next session repeats" has burned multiple weeks. The rule that breaks the cycle is "no claim of coverage without a green run."
+
 ## Two test surfaces
 
 1. **Unit tests** — `services/<svc>/jest` per service. Run on local Node, no containers needed.
@@ -174,6 +184,42 @@ Use the canonical example: `e2e-playwright/tests/01_expense_edit.spec.ts`. The p
 1. **Arrange** — call an `ensureSeedX` helper from `tests/lib/api.ts` to set up test data idempotently. Add a new helper if no existing one fits; don't inline 50 lines of seed code per spec.
 2. **Act** — sign in via UI (or call `getAccessToken` for API-only specs), navigate, perform the user action.
 3. **Assert** — status code on the response, then a round-trip read-back of the persisted state.
+
+### MANDATORY pre-merge checklist for every new spec — DO NOT SKIP
+
+This rule exists because the agent has a documented multi-session pattern of authoring specs that **never run cleanly on real data**, then claiming "X tests authored" as if that were coverage. Specs that pass-on-paper but fail-on-execution are worse than no specs because they create a false sense of safety. **A spec is not a spec until it runs green at least once on the live NAS against the canonical test realm.**
+
+For every NEW spec file, in the same session you author it:
+
+1. **Run the spec against deployed NAS** (`yarn playwright test tests/<file>`). Every test must either PASS or be explicitly marked `test.fixme(...)` with a one-line reason. **Author-time pass count is the only number that counts — counting "tests written" without running them is forbidden.**
+2. **If a test fails, classify it before adding any new test:**
+   - **App bug** → fix the app code in the same PR; re-run.
+   - **Spec infra missing** (e.g., needs a fixture helper that doesn't exist, a backdoor seeder, a real PDF fixture, mongo direct access) → BUILD THE INFRA FIRST, then re-run. Do NOT ship a spec that depends on infra you didn't build.
+   - **Wrong selector / timing** → fix the spec; re-run.
+   - **Setup pattern broken** (e.g., signs in to account A but creates ephemeral realm B that A can't see) → fix the pattern across ALL specs that share it; re-run all of them.
+3. **Required helpers — use these or extend, never re-implement inline:**
+   - `getAccessToken(request)` — authenticator signin
+   - `ensureSeed(request)` — base realm + building + expense (CYPRESS-TEST-DO-NOT-USE realm)
+   - `ensureSeedRichBuilding`, `ensureSeedLeasedTenant`, `ensureSeedLeasedTenantWithPayment` — common shapes
+   - `mongoExec(script)` from `tests/lib/mongoExec.ts` — direct mongo readback / backdoor seeding for cases the API can't express (e.g., creating a tenant with intentionally-invalid data so a "missing-fields" warning can be tested). Returns `null` if `.secrets/portainer-token` is missing — handle that branch with `test.skip(!result, '...')` rather than throwing.
+4. **Real-data scenarios are required for any spec touching:**
+   - PDF parser (Greek leases, E9) — must use real fixture PDFs from `e2e-playwright/fixtures/pdfs/` (commit small samples with PII redacted) OR call the parser via mock-data injection if the parser exposes one. Tests that "would parse a PDF" without an actual PDF do not count.
+   - Real-tenant data shapes (multi-property, co-tenants, partial-data legacy rows) — seed via `mongoExec` direct insert, not via API POST (which validators correctly reject). The point of the spec is to verify the UI handles the bad-data case it must already cope with in production.
+5. **Anti-patterns that cause silent test rot — REJECT in review:**
+   - Tests that create an ephemeral realm but sign in with the canonical account → canonical account can't see ephemeral data, every assertion fails. If a spec needs ephemerality, sign in to the ephemeral realm, OR don't use ephemeral realms.
+   - Tests that try to POST data the server validator rejects (intentional bad-data fixtures) — use `mongoExec` instead.
+   - Tests that mock the network for a UI flow that exists to catch real-network bugs — drive the real endpoint or skip the test.
+   - Tests with `{ ... }` placeholder bodies, `// TODO: implement`, or function stubs without `expect()` — these are not tests, they're scaffolding.
+   - Tests counted in a "X tests added" claim that have not passed at least once on the live NAS.
+
+### When a previously-passing spec starts failing
+
+The spec is the source of truth, not the app. If a spec that was green last week is red today:
+
+1. Classify per step 2 above.
+2. If app bug — fix the app; do not weaken the assertion.
+3. If spec infra drifted (e.g., the realm got polluted, a fixture leaked) — fix the cleanup, not the spec.
+4. If the test is genuinely stale (the feature was intentionally removed) — DELETE the spec. Don't disable it with `test.skip` and forget; that compounds.
 
 ### Test categories — UI vs API-only
 
