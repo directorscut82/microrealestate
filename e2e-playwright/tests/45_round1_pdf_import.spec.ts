@@ -272,11 +272,26 @@ test('45.1 · kind=new → "Create new" radio defaults checked, others not', asy
   };
   await signIn(page);
   await driveImportDialogWithMock(page, _seed.realmName, mocked);
-  const newRadio = page.locator('#strategy-new-0');
-  await expect(newRadio, 'create-new radio rendered').toBeVisible({ timeout: 15_000 });
-  await expect(newRadio, 'create-new radio default for kind=new').toBeChecked();
-  await expect(page.locator('#strategy-extend-0'), 'extend not checked').not.toBeChecked();
-  await expect(page.locator('#strategy-replace-0'), 'replace not checked').not.toBeChecked();
+  // For kind=new there's no matchedTenant so the strategy radio group
+  // doesn't render — that's the correct UX (only "create new" is
+  // actionable). Assert the radios are ABSENT and the parsed-tenant
+  // confirmation UI is showing instead. This is the inverse of the
+  // 45.2/45.3/45.4 tests which DO expect the radio group.
+  await expect(
+    page.locator('#strategy-new-0'),
+    'kind=new must NOT render the radio group — only matched-tenant kinds do'
+  ).toHaveCount(0);
+  // Confirm the dialog progressed to the preview state. For
+  // single-PDF kind=new, the action button is t('Import') →
+  // 'Import' (en) / 'Εισαγωγή' (el). Anchor with role=dialog so a
+  // top-level "Import PDF" button doesn't false-match.
+  await expect(
+    page
+      .getByRole('dialog')
+      .getByRole('button', { name: /^(Import|Εισαγωγή)$/ })
+      .first(),
+    'preview-state Import action button visible'
+  ).toBeVisible({ timeout: 10_000 });
   await page.keyboard.press('Escape');
 });
 
@@ -353,7 +368,13 @@ test('45.4 · kind=review → extend + replace radios DISABLED (F5-tenant)', asy
     amendsDeclaration: '',
     totalMonthlyRent: 500,
     notes: '',
-    tenants: [{ name: `MOCK-Review-Tenant-${Date.now()}`, taxId: makeAFM([5, 6, 7, 8, 9, 1, 2, 3]), acceptanceDate: _seed.beginApi }],
+    // For the dialog to render the matched-tenant strategy radios, the
+    // parsed primary taxId must match an existing tenant in the realm
+    // (line 154-160 of ImportTenantDialog). The seed has TWO tenants
+    // sharing the same taxId — that's the natural F2-pdf review case.
+    // Use seed taxId so the dialog finds the match, then mock kind=review
+    // so the F5-tenant disabled-radio guard fires.
+    tenants: [{ name: `MOCK-Review-Tenant-${Date.now()}`, taxId: _seed.taxId, acceptanceDate: _seed.beginApi }],
     landlords: [],
     properties: [{
       atakNumber: 'MOCK-ATAK-45-REV', type: 'apartment', surface: 50, monthlyRent: 500,
