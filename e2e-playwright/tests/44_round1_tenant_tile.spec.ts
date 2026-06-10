@@ -581,11 +581,17 @@ test('44.10 — running tenant pill is "Lease running" with olive dot', async ({
   future.setUTCDate(future.getUTCDate() + 365);
 
   const apiCtx = await request.newContext();
+  // A genuinely "running" lease needs BOTH a contract window AND at
+  // least one assigned property — otherwise rent billing can't start
+  // and the tile correctly shows 'incomplete' (the bug a real
+  // screenshot surfaced: no-property tenant showing a green "running"
+  // pill). Inject a minimal property entry so this fixture is a true
+  // running lease, not a half-set-up one.
   const fx = await makeFixture(
     apiCtx,
     'Run',
     validNaturalPayload(`${PREFIX}-Run-${RUN}`),
-    `{$set: {beginDate: new Date('${past.toISOString()}'), endDate: new Date('${future.toISOString()}')}}`
+    `{$set: {beginDate: new Date('${past.toISOString()}'), endDate: new Date('${future.toISOString()}'), properties: [{propertyId: '000000000000000000000099', rent: 500, expenses: []}]}}`
   );
   await apiCtx.dispose();
 
