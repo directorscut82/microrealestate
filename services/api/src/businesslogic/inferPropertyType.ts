@@ -1,19 +1,26 @@
 /**
- * AADE E9-derived property type inference.
+ * AADE E9 property type inference. Catalog verified against real user
+ * E9 PDFs (PeriousiakiKatastasi*.pdf) and the official AADE form
+ * column "ΚΑΤΗΓΟΡΙΑ ΑΚΙΝΗΤΟΥ":
  *
- * AADE E9 building categories (Πίνακας 1 — Κατηγορίες κτισμάτων):
- *   1   Κατοικία (residence)            -> 'apartment'
- *   2   Επαγγελματική στέγη (commercial) -> 'store'
- *   3   Γραφείο (office)                -> 'office'
- *   4   Γεωργική / κτηνοτροφική στέγη   -> 'apartment' (rare; no better mapping)
- *   5/6 Αποθήκη / κάθετη ιδιοκτησία υπόγειου χώρου (storage) -> 'storage'
- *   7   Στάσιμη (vacant lot)            -> not a unit, never produced
- *   ≥50 Θέση στάθμευσης (parking)        -> 'parking'
+ *   1  Κατοικία ή διαμέρισμα           -> 'apartment'
+ *   2  Μονοκατοικία (single-family)    -> 'apartment'
+ *   3  Επαγγελματική στέγη / γραφείο   -> 'office'
+ *   4  Οικόπεδα εντός σχεδίου (lot)    -> 'apartment' (rare; no good mapping
+ *                                         — ΠΙΝΑΚΑΣ 2 lots are skipped at
+ *                                         the parser layer so this almost
+ *                                         never reaches us)
+ *   5  Αποθήκη                         -> 'storage'
+ *   6  Θέση στάθμευσης (parking)       -> 'parking'   ← NOT storage
+ *   7  Κτίσματα εκτός σχεδίου          -> 'apartment'
+ *   8  Πλεωβολές / λοιπά               -> 'apartment'
+ *   ≥50 Special-use codes (Πίνακας 2)  -> 'parking' for ≥51 (Greek deeds
+ *                                         encode underground parking as 51,
+ *                                         52 etc. in some forms)
  *
- * Floor-based fallbacks fire only when category is null. Negative floors
- * map to 'storage' (basement/cellar — Greek residential buildings store
- * cellars as αποθήκη more often than as parking). Ground floor without
- * category maps to 'store' (shop-front pattern).
+ * Floor-based fallbacks fire only when category is null. The order of
+ * the name-fallback regexes matters: a unit named "Πάρκινγκ Υπογείου"
+ * is parking, not storage, even though the basement keyword matches.
  *
  * Extracted to its own module so the inference can be unit-tested without
  * loading the full buildingmanager dependency chain.
@@ -31,8 +38,14 @@ export type PropertyTypeInferenceInput = {
 
 export function inferPropertyType(unit: PropertyTypeInferenceInput): string {
   if (unit.category !== null) {
-    if (unit.category === 5 || unit.category === 6) return 'storage';
-    if (unit.category === 2) return 'store';
+    // AADE Πίνακας 1 catalog (verified against real E9 PDFs):
+    //   1, 2, 4, 7, 8 -> residential or generic building -> 'apartment'
+    //   3            -> professional space              -> 'office'
+    //   5            -> αποθήκη                          -> 'storage'
+    //   6            -> θέση στάθμευσης                  -> 'parking'
+    //   ≥50          -> special parking codes            -> 'parking'
+    if (unit.category === 5) return 'storage';
+    if (unit.category === 6) return 'parking';
     if (unit.category === 3) return 'office';
     if (unit.category >= 50) return 'parking';
     return 'apartment';
