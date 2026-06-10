@@ -107,17 +107,34 @@ function ExpenseLines({ lines, t }) {
   }
   return (
     <div className="space-y-1">
-      {lines.map((line, idx) => (
-        <div
-          key={`${line.source}-${idx}-${line.description}`}
-          className="flex justify-between gap-2 text-sm"
-        >
-          <span className="text-muted-foreground truncate">
-            {line.description}
-          </span>
-          <NumberFormat value={Number(line.amount || 0)} />
-        </div>
-      ))}
+      {lines.map((line, idx) => {
+        // Render "<Category> (<description>)" so the user sees BOTH the
+        // panel bucket AND the actual expense entry name. When the
+        // server didn't tag a category (legacy line), or the description
+        // is empty / equal to the category label, collapse to whatever
+        // is informative.
+        const categoryLabel = line.category
+          ? _categoryLabel(t, line.category)
+          : '';
+        const desc = line.description || '';
+        const display =
+          categoryLabel && desc && desc !== categoryLabel
+            ? `${categoryLabel} (${desc})`
+            : desc || categoryLabel || t('Other');
+        return (
+          <div
+            key={`${line.source}-${idx}-${line.description}`}
+            className="flex justify-between gap-2 text-sm"
+          >
+            <span className="text-muted-foreground break-words min-w-0 flex-1">
+              {display}
+            </span>
+            <span className="shrink-0">
+              <NumberFormat value={Number(line.amount || 0)} />
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -191,25 +208,53 @@ export default function PropertyExpensesCard({ propertyId }) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="flex w-full justify-between px-2"
+                  className="flex w-full justify-between gap-2 px-2 h-auto py-1.5"
                 >
-                  <span className="font-medium">{currentMonthLabel}</span>
-                  <span className="flex items-center gap-2">
+                  <span className="font-medium text-left whitespace-normal break-words min-w-0 flex-1">
+                    {currentMonthLabel}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
                     <NumberFormat value={currentTotal} />
                     <LuChevronsUpDown className="size-4 text-muted-foreground" />
                   </span>
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pt-2 pb-1">
-                <CategoryBreakdown
-                  byCategory={data.currentMonth?.byCategory}
-                  t={t}
-                />
-                {data.currentMonth?.lines?.length ? (
-                  <div className="mt-3">
-                    <ExpenseLines lines={data.currentMonth.lines} t={t} />
-                  </div>
-                ) : null}
+                {/* When the same N entries land in both byCategory and lines
+                    (one entry → one category total → same value as the line),
+                    rendering both is double-vision. Show category breakdown
+                    when there are >1 line OR when at least one category total
+                    differs from a single line's amount. Otherwise just show
+                    the lines (they're more specific). */}
+                {(() => {
+                  const lines = data.currentMonth?.lines || [];
+                  const cats = data.currentMonth?.byCategory || {};
+                  const nonZeroCats = CATEGORY_KEYS.filter(
+                    (k) => Number(cats[k] || 0) !== 0
+                  );
+                  const showBoth = lines.length > 1 || nonZeroCats.length > 1;
+                  return (
+                    <>
+                      {showBoth && (
+                        <CategoryBreakdown
+                          byCategory={data.currentMonth?.byCategory}
+                          t={t}
+                        />
+                      )}
+                      {lines.length > 0 ? (
+                        <div className={showBoth ? 'mt-3' : ''}>
+                          <ExpenseLines lines={lines} t={t} />
+                        </div>
+                      ) : (
+                        !showBoth && (
+                          <div className="text-sm text-muted-foreground">
+                            {t('No expenses for this period')}
+                          </div>
+                        )
+                      )}
+                    </>
+                  );
+                })()}
               </CollapsibleContent>
             </Collapsible>
 
@@ -218,21 +263,61 @@ export default function PropertyExpensesCard({ propertyId }) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="flex w-full justify-between px-2"
+                  className="flex w-full justify-between gap-2 px-2 h-auto py-1.5"
                 >
-                  <span className="font-medium">{lifetimeLabel}</span>
-                  <span className="flex items-center gap-2">
+                  <span className="font-medium text-left whitespace-normal break-words min-w-0 flex-1">
+                    {lifetimeLabel}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
                     <NumberFormat value={lifetimeTotal} />
                     <LuChevronsUpDown className="size-4 text-muted-foreground" />
                   </span>
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pt-2 pb-1">
-                <CategoryBreakdown
-                  byCategory={data.lifetime?.byCategory}
-                  t={t}
-                />
-                <YearBreakdown byYear={data.lifetime?.byYear} t={t} />
+                {/* Hide redundant single-row breakdowns. With one expense in
+                    one year, both ANA KATHGORIA and ANA ETOS have a single
+                    row that equals the total — duplicated information.
+                    Only render a section when it adds info (>1 row). */}
+                {(() => {
+                  const cats = data.lifetime?.byCategory || {};
+                  const years = data.lifetime?.byYear || {};
+                  const nonZeroCats = CATEGORY_KEYS.filter(
+                    (k) => Number(cats[k] || 0) !== 0
+                  );
+                  const nonZeroYears = Object.keys(years).filter(
+                    (y) => Number(years[y] || 0) !== 0
+                  );
+                  const showCats = nonZeroCats.length > 1;
+                  const showYears = nonZeroYears.length > 1;
+                  if (!showCats && !showYears) {
+                    // Single category × single year: just say what it is
+                    // and stop. Redundant breakdown removed.
+                    return (
+                      <div className="text-sm text-muted-foreground">
+                        {nonZeroCats.length === 1 && nonZeroYears.length === 1
+                          ? t(
+                              'All in {{category}} during {{year}}',
+                              {
+                                category: _categoryLabel(t, nonZeroCats[0]),
+                                year: nonZeroYears[0]
+                              }
+                            )
+                          : t('No expenses for this period')}
+                      </div>
+                    );
+                  }
+                  return (
+                    <>
+                      {showCats && (
+                        <CategoryBreakdown byCategory={cats} t={t} />
+                      )}
+                      {showYears && (
+                        <YearBreakdown byYear={years} t={t} />
+                      )}
+                    </>
+                  );
+                })()}
               </CollapsibleContent>
             </Collapsible>
           </div>

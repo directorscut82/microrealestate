@@ -406,6 +406,10 @@ type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 type CategoryTotals = Record<ExpenseCategory, number>;
 
 interface ExpenseLine {
+  // Panel category (heating | water | electricity | insurance | cleaning |
+  // repairs | other) so the UI can render "<Category> (<description>)"
+  // and the user sees both the bucket and the actual entry name.
+  category: ExpenseCategory;
   description: string;
   amount: number;
   source: string;
@@ -603,6 +607,7 @@ export async function getExpenses(req: Req, res: Res) {
         if (share <= 0) continue;
         const category = _classifyExpenseType(expense.type);
         const line: ExpenseLine = {
+          category,
           description: expense.name || '',
           amount: share,
           source: 'building_expense'
@@ -627,6 +632,7 @@ export async function getExpenses(req: Req, res: Res) {
           // into 'repairs'.
           const category: ExpenseCategory = isRepair ? 'repairs' : 'other';
           const line: ExpenseLine = {
+            category,
             description: charge.description || 'Monthly charge',
             amount,
             source: isRepair ? 'repair' : 'monthly_charge'
@@ -675,6 +681,7 @@ export async function getExpenses(req: Req, res: Res) {
               ownerEntry.description || sourceExpense?.name || 'Owner expense';
           }
           const line: ExpenseLine = {
+            category,
             description: lineDescription,
             amount,
             source: 'owner_monthly_expense'
@@ -720,6 +727,7 @@ export async function getExpenses(req: Req, res: Res) {
           const share = Math.round((cost / affected.length) * 100) / 100;
           if (share <= 0) continue;
           const line: ExpenseLine = {
+            category: 'repairs',
             description: repair.title || 'Repair',
             amount: share,
             source: 'repair'
