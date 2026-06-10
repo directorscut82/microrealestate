@@ -35,6 +35,18 @@ function computeActiveTenants(allTenants, now) {
   });
 }
 
+// GEN-001 fix: this mirror drifted out of sync with the production
+// emit in dashboardmanager.ts. The "Top 5 unpaid" tile emits the
+// remaining-owed as a POSITIVE amount (`Math.max(0, grandTotal -
+// payment)`), keeps only rows where remaining > 0.005, and sorts
+// DESCENDING (biggest debtor first). The previous version of this
+// helper computed a SIGNED balance (`payment - grandTotal`) and
+// filtered `< 0` — pre-Wave-26 semantics that no longer match what
+// the API ships, so the suite was green while validating the wrong
+// contract. Realigned below. (The production path also drops tenants
+// settled by a future-month overpayment via _isSettledByCarryForward;
+// that needs the full ledger helper and is exercised by the E2E
+// suite, not this pure-function mirror.)
 function computeTopUnpaid(activeTenants, beginOfTheMonth, endOfTheMonth) {
   return activeTenants
     .reduce((acc, tenant) => {
@@ -46,18 +58,21 @@ function computeTopUnpaid(activeTenants, beginOfTheMonth, endOfTheMonth) {
         );
       });
       if (currentRent) {
-        const balance =
-          (currentRent.total?.payment || 0) -
-          (currentRent.total?.grandTotal || 0);
-        acc.push({
-          tenant: { _id: tenant._id, name: _tenantName(tenant) },
-          balance
-        });
+        const remaining = Math.max(
+          0,
+          (currentRent.total?.grandTotal || 0) -
+            (currentRent.total?.payment || 0)
+        );
+        if (remaining > 0.005) {
+          acc.push({
+            tenant: { _id: tenant._id, name: _tenantName(tenant) },
+            balance: remaining
+          });
+        }
       }
       return acc;
     }, [])
-    .sort((t1, t2) => t1.balance - t2.balance)
-    .filter((t) => t.balance < 0)
+    .sort((t1, t2) => t2.balance - t1.balance)
     .slice(0, 5);
 }
 
@@ -403,7 +418,7 @@ describe('Dashboard computation logic', () => {
   });
 
   describe('computeTopUnpaid', () => {
-    it('should return top 5 tenants with negative balance sorted most negative first', () => {
+    it('should return top 5 tenants by remaining owed, biggest debtor first', () => {
       const now = moment.utc();
       const beginOfMonth = moment.utc(now).startOf('month');
       const endOfMonth = moment.utc(now).endOf('month');
@@ -424,8 +439,9 @@ describe('Dashboard computation logic', () => {
 
       const result = computeTopUnpaid(tenants, beginOfMonth, endOfMonth);
       expect(result).toHaveLength(5);
-      // Most negative balance first
-      expect(result[0].balance).toBeLessThan(result[1].balance);
+      // Largest POSITIVE remaining first (Tenant 6 owes 700, the most).
+      expect(result[0].balance).toBeGreaterThan(result[1].balance);
+      expect(result[0].balance).toBe(700);
       expect(result[0].tenant.name).toBe('Tenant 6');
     });
 
@@ -443,7 +459,7 @@ describe('Dashboard computation logic', () => {
 
       const result = computeTopUnpaid([tenant], beginOfMonth, endOfMonth);
       expect(result[0].tenant).toEqual({ _id: 't1', name: 'Debtor' });
-      expect(result[0].balance).toBe(-1000);
+      expect(result[0].balance).toBe(1000);
       expect(result[0].rent).toBeUndefined();
     });
 

@@ -86,6 +86,11 @@ export default function NewTenantDialog({ open, setOpen }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      // When the new tenant claims one or more properties in this dialog,
+      // those properties flip from vacant to occupied. Without this the
+      // Properties screen keeps showing them as unassigned until a hard
+      // refresh (TENANT-INVALIDATION-MISSING-PROPERTIES).
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.PROPERTIES] });
     }
   });
 
