@@ -47,6 +47,12 @@ docker-compose.nas.yml
 
 # Deploy script secrets (GitHub PAT, Portainer token)
 .secrets/
+# e2e symlink that points at the repo-root .secrets/ — never track it
+e2e-playwright/.secrets
+# Scratch / diagnostic specs (underscore-prefixed, not part of the suite)
+e2e-playwright/tests/_*.spec.ts
+# TS incremental build cache
+*.tsbuildinfo
 
 # Local VS Code multi-root workspace file
 *.code-workspace
