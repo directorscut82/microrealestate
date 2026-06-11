@@ -1,4 +1,5 @@
 import { Collections, logger, Service } from '@microrealestate/common';
+import type { ConnectionRole } from '@microrealestate/types';
 import axios from 'axios';
 import moment from 'moment';
 
@@ -52,6 +53,11 @@ export interface ExpiryScanDeps {
   ) => Promise<any>;
   markSent?: (tenantId: string, when: Date, windowDays?: number) => Promise<void>;
   now?: () => Date;
+  // Mints the short-lived service token used to authenticate the POST to
+  // the emailer. Defaults to the live Service call; injectable so the test
+  // suite can drive the send path without a Service bootstrap (otherwise
+  // createServiceToken throws and every send silently lands in the catch).
+  mintToken?: (role: ConnectionRole, realmId: string) => Promise<string>;
 }
 
 interface ScanResult {
@@ -146,6 +152,11 @@ export async function checkExpiringLeases(
       await Collections.Tenant.updateOne({ _id: tenantId }, update);
     });
 
+  const mintToken =
+    deps.mintToken ||
+    ((role: ConnectionRole, realmId: string) =>
+      Service.getInstance().createServiceToken(role, realmId));
+
   for (const tenant of tenants) {
     if (!tenant.endDate) {
       result.skipped++;
@@ -186,7 +197,7 @@ export async function checkExpiringLeases(
       // incoming request to forward, so mint a short-lived service token
       // (30s, signed with ACCESS_TOKEN_SECRET) for each POST. The token
       // carries the tenant's realmId so checkOrganization passes.
-      const serviceToken = await Service.getInstance().createServiceToken(
+      const serviceToken = await mintToken(
         'administrator',
         String(tenant.realmId)
       );

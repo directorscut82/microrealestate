@@ -44,7 +44,13 @@ function makeDeps({ tenants, recentEmails }) {
     }),
     markSent: jest.fn(async (tenantId, when) => {
       marked.push({ tenantId, when });
-    })
+    }),
+    // Inject the token minter so the send path doesn't reach into
+    // Service.getInstance() (no service bootstrap in jest — the real call
+    // throws and every send would silently land in the catch, leaving
+    // result.sent at 0). Mirrors the production seam added to
+    // leaseExpiryScanner.ts ExpiryScanDeps.mintToken.
+    mintToken: jest.fn(async () => 'test-service-token')
   };
   return { deps, sent, marked };
 }
@@ -124,9 +130,21 @@ describe('leaseExpiryScanner', () => {
     );
   });
 
-  test('tenant whose lastExpiryNoticeSentAt is 22 days ago is skipped (debounce 25d)', async () => {
-    const lastSent = moment.utc(FIXED_NOW).subtract(22, 'days').toDate();
-    const tenants = [tenant({ _id: 't7-recent', daysFromNow: 7, lastSent })];
+  // Debounce is PER-WINDOW (expiryNoticesSent[]), not a flat 25-day
+  // cross-window suppression on lastExpiryNoticeSentAt. The scanner was
+  // deliberately changed from the flat model (see leaseExpiryScanner.ts
+  // header: a 30-day notice used to permanently suppress the later 7-day
+  // reminder). The suppression cutoff is (windowDays + 1) days for the
+  // SAME window. These tests assert that contract.
+  test('SAME-window notice within (window+1) days is suppressed', async () => {
+    // 7-day window: a prior 7-day notice sent 3 days ago (< 7+1) suppresses.
+    const recentSameWindow = moment.utc(FIXED_NOW).subtract(3, 'days').toDate();
+    const tenants = [
+      {
+        ...tenant({ _id: 't7-samewindow', daysFromNow: 7 }),
+        expiryNoticesSent: [{ window: 7, sentAt: recentSameWindow }]
+      }
+    ];
     const { deps, sent, marked } = makeDeps({ tenants });
     const r = await checkExpiringLeases(deps);
     expect(r.sent).toBe(0);
@@ -135,9 +153,31 @@ describe('leaseExpiryScanner', () => {
     expect(marked).toHaveLength(0);
   });
 
-  test('tenant whose lastExpiryNoticeSentAt is 27 days ago fires (debounce window passed)', async () => {
-    const lastSent = moment.utc(FIXED_NOW).subtract(27, 'days').toDate();
-    const tenants = [tenant({ _id: 't7-stale', daysFromNow: 7, lastSent })];
+  test('a DIFFERENT window does not suppress (30-day notice does not block the 7-day reminder)', async () => {
+    // The class the per-window model fixed: a 30-day notice fired 23 days
+    // ago must NOT block today's 7-day reminder.
+    const old30 = moment.utc(FIXED_NOW).subtract(23, 'days').toDate();
+    const tenants = [
+      {
+        ...tenant({ _id: 't7-diffwindow', daysFromNow: 7 }),
+        expiryNoticesSent: [{ window: 30, sentAt: old30 }]
+      }
+    ];
+    const { deps, sent } = makeDeps({ tenants });
+    const r = await checkExpiringLeases(deps);
+    expect(r.sent).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('SAME-window notice older than (window+1) days fires again', async () => {
+    // A 7-day notice from 10 days ago (> 7+1) is stale → fire.
+    const stale = moment.utc(FIXED_NOW).subtract(10, 'days').toDate();
+    const tenants = [
+      {
+        ...tenant({ _id: 't7-stale', daysFromNow: 7 }),
+        expiryNoticesSent: [{ window: 7, sentAt: stale }]
+      }
+    ];
     const { deps, sent } = makeDeps({ tenants });
     const r = await checkExpiringLeases(deps);
     expect(r.sent).toBe(1);
@@ -163,11 +203,15 @@ describe('leaseExpiryScanner', () => {
       tenant({ _id: 'hit-7', daysFromNow: 7 }),
       tenant({ _id: 'hit-1', daysFromNow: 1 }),
       tenant({ _id: 'skip-31', daysFromNow: 31 }),
-      tenant({
-        _id: 'skip-recent',
-        daysFromNow: 7,
-        lastSent: moment.utc(FIXED_NOW).subtract(10, 'days').toDate()
-      })
+      // skip-recent: a 7-day-window tenant whose SAME (7-day) window
+      // already fired 3 days ago (< 7+1) → suppressed per the per-window
+      // debounce.
+      {
+        ...tenant({ _id: 'skip-recent', daysFromNow: 7 }),
+        expiryNoticesSent: [
+          { window: 7, sentAt: moment.utc(FIXED_NOW).subtract(3, 'days').toDate() }
+        ]
+      }
     ];
     const { deps, sent } = makeDeps({ tenants });
     const r = await checkExpiringLeases(deps);

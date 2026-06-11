@@ -35,7 +35,8 @@ import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
-import { uploadDocument } from '../../utils/fetch';
+import { apiFetcher, uploadDocument } from '../../utils/fetch';
+import FileDownload from 'js-file-download';
 import { useForm } from 'react-hook-form';
 import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
@@ -364,6 +365,39 @@ export default function RepairList({ building }) {
     }
   }, [selectedRepair, removeMutation, t]);
 
+  // View an attached invoice. A raw <a href> navigation to the gateway
+  // sends only cookies — never the in-memory Authorization / organizationId
+  // headers — so the document endpoint (needAccessToken) always 401s and
+  // the invoice was unviewable. Fetch the blob through apiFetcher (which
+  // carries both headers) and open it in a new tab. Open the tab
+  // synchronously before the await so the popup blocker treats it as a
+  // user-gesture, then point it at the blob URL once it resolves.
+  const handleViewInvoice = useCallback(
+    async (key) => {
+      if (!key) return;
+      const win = window.open('', '_blank');
+      try {
+        const res = await apiFetcher().get(
+          `/documents/by-key?key=${encodeURIComponent(key)}`,
+          { responseType: 'blob' }
+        );
+        const url = URL.createObjectURL(res.data);
+        if (win) {
+          win.location = url;
+        } else {
+          // Popup blocked — fall back to a download.
+          FileDownload(res.data, key.split('/').pop() || 'invoice');
+        }
+        // Revoke after a delay so the new tab has time to load the blob.
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } catch (e) {
+        if (win) win.close();
+        toast.error(t('Something went wrong'));
+      }
+    },
+    [t]
+  );
+
   const handleClose = useCallback(() => {
     // F4-repair: if the user uploaded an invoice in this session but is
     // closing the dialog WITHOUT saving (Cancel / Esc / outside-click),
@@ -523,7 +557,12 @@ export default function RepairList({ building }) {
 
       <ResponsiveDialog
         open={openDialog}
-        setOpen={setOpenDialog}
+        // Route ALL close paths (Esc, the X button, programmatic) through
+        // handleClose so the orphan-invoice cleanup + form reset always
+        // run. Wiring the bare setOpenDialog here let Esc/X dismiss the
+        // dialog without deleting a freshly-uploaded-but-unsaved invoice,
+        // leaking the file in storage.
+        setOpen={(v) => (v ? setOpenDialog(true) : handleClose())}
         className="sm:max-w-3xl md:max-w-4xl"
         renderHeader={() =>
           selectedRepair ? t('Edit repair') : t('Add repair')
@@ -752,7 +791,7 @@ export default function RepairList({ building }) {
                           // name doesn't already carry one. ATAK stays as
                           // the tiebreaker for units sharing a floor.
                           const nameHasFloor =
-                            /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stock/i.test(
+                            /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stockwerk/i.test(
                               u.propertyName || ''
                             );
                           const floorPart =
@@ -965,16 +1004,13 @@ export default function RepairList({ building }) {
                       {invoiceDocumentId.split('/').pop()}
                     </span>
                     <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href={`/api/v2/documents/by-key?key=${encodeURIComponent(
-                          invoiceDocumentId
-                        )}`}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
                         className="text-ink underline underline-offset-2 hover:no-underline"
+                        onClick={() => handleViewInvoice(invoiceDocumentId)}
                       >
                         {t('View invoice')}
-                      </a>
+                      </button>
                       <button
                         type="button"
                         className="text-oxide hover:underline"

@@ -639,7 +639,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                         u.property?.name ||
                         `${t('Unit')} ${u.unitLabel || u.floor || ''}`;
                       const nameHasFloor =
-                        /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stock/i.test(
+                        /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stockwerk/i.test(
                           propertyName
                         );
                       const parts = [

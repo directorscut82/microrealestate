@@ -11,29 +11,15 @@
 // re-pricing an unpaid bill. This spec pins the new behavior so a
 // later regression can't quietly thaw past-unpaid rents again.
 //
-// NOTE: this test deliberately mocks @microrealestate/common BEFORE
-// importing the contract manager. Without the mock, the import chain
-// transitively pulls in `services/common/dist/utils/service.js` which
-// requires express-winston — a CommonJS module that calls require()
-// against a winston mock declared as ESM. Jest with VM Modules cannot
-// satisfy that require() and the entire suite fails to load. The
-// businesslogic layer (contract.ts → tasks/1_base.ts) only consumes
-// `logger` from @microrealestate/common; mocking just that surface
-// keeps the unit test self-contained.
-
-import { jest } from '@jest/globals';
-
-jest.unstable_mockModule('@microrealestate/common', () => ({
-  logger: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-    silly: jest.fn()
-  }
-}));
-
-const Contract = await import('../../managers/contract.js');
+// Imports the contract manager directly (same plain-import pattern as the
+// passing managers/contract.test.js). The previous top-level `await
+// import()` + jest.unstable_mockModule pattern could not be parsed by this
+// project's @swc/jest transform ("await is only valid in async functions"),
+// so this entire suite SILENTLY FAILED TO LOAD — it never actually ran.
+// contract.ts → businesslogic → tasks/1_base.ts pulls `logger` from
+// @microrealestate/common, which resolves fine via the built dist in jest
+// (the same chain contract.test.js imports without any mock).
+import * as Contract from '../../managers/contract.js';
 
 const FEB_TERM = 2026020100;
 const APR_TERM = 2026040100;
@@ -67,10 +53,10 @@ function buildInputContract() {
   // keeps the carry-in chain simple: Apr's frozen-aware balance comes
   // from Mar (paid → balance 0 going into Apr) plus Feb's unpaid
   // 400€ that still walks forward through the carry-in sweep.
-  Contract.payTerm(contract, '202601010000', {
+  Contract.payTerm(contract, '2026010100', {
     payments: [{ amount: 400 }]
   });
-  Contract.payTerm(contract, '202603010000', {
+  Contract.payTerm(contract, '2026030100', {
     payments: [{ amount: 400 }]
   });
 
