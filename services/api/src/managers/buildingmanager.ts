@@ -135,7 +135,12 @@ function _assertCustomAllocationPropertyIds(
   const allocationKinds = new Set([
     'custom_percentage',
     'custom_ratio',
-    'fixed'
+    'fixed',
+    // single_unit also carries a propertyId target in customAllocations[0].
+    // Without validating it here, a stale/foreign propertyId saves a
+    // well-formed expense that the pipeline (1_base.ts single_unit branch)
+    // matches to no real unit and silently bills €0 every term.
+    'single_unit'
   ]);
   if (!allocationMethod || !allocationKinds.has(allocationMethod)) return;
 

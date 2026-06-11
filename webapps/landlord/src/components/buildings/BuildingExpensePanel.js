@@ -2,7 +2,7 @@ import {
   QueryKeys,
   saveMonthlyStatement
 } from '../../utils/restcalls';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../../utils';
 import {
@@ -54,6 +54,13 @@ const ALLOCATION_LABELS = {
   heating_thousandths: 'Heating ‰',
   elevator_thousandths: 'Elevator ‰',
   fixed: 'Fixed',
+  // single_unit is a real, selectable method (ExpenseList offers it for
+  // most expense types). Reuse the SAME label/description strings
+  // ExpenseList uses so the two surfaces stay consistent — both keys
+  // already exist in every locale, so no locale-file edit is needed.
+  // Omitting it made BuildingExpensePanel render the raw '(single_unit)'
+  // token with a blank tooltip.
+  single_unit: 'Single Unit',
   custom_ratio: 'Custom Ratio',
   custom_percentage: 'Custom Percentage'
 };
@@ -65,6 +72,7 @@ const ALLOCATION_DESCRIPTIONS = {
   heating_thousandths: 'Split by heating thousandths (‰) from E9',
   elevator_thousandths: 'Split by elevator thousandths (‰) — ground floor excluded',
   fixed: 'Each unit pays a fixed predefined amount',
+  single_unit: 'Bill the whole expense to one specific unit',
   custom_ratio: 'Split by custom ratio shares you defined per unit',
   custom_percentage: 'Each unit pays a custom percentage of the total'
 };
@@ -171,10 +179,25 @@ function termsWithData(building) {
   for (const e of ownerEntries) {
     if (e.term) set.add(String(e.term));
   }
-  // Recurring/fixed expenses project across their active range.
-  const currentTerm = Number(moment.utc().startOf('month').format('YYYYMMDDHH'));
+  // Recurring/fixed expenses project across their active range. Use LOCAL
+  // moment() for the current-month cap so it matches the calendar grid and
+  // selection (which are local) — mixing moment.utc() here lagged the dot
+  // by a month during the first 2-3h of a month in Athens (UTC+2/+3).
+  const currentTerm = Number(moment().startOf('month').format('YYYYMMDDHH'));
   for (const expense of expenses) {
     if (!expense.startTerm) continue;
+    // A VARIABLE recurring expense (recurring, no fixed amount on either
+    // side) has NO data until the landlord enters a monthly amount — that
+    // entry is persisted as a unit.monthlyCharge / ownerMonthlyExpense and
+    // already dotted by the loops above. Projecting it here would dot every
+    // active month unconditionally, destroying the filled-vs-blank signal
+    // the calendar dots exist to give. Skip the projection for it; only its
+    // real saved entries should dot.
+    const isVariable =
+      expense.isRecurring &&
+      !Number(expense.amount) &&
+      !Number(expense.ownerAmount);
+    if (isVariable) continue;
     const start = Number(expense.startTerm);
     const end = expense.endTerm
       ? Number(expense.endTerm)
@@ -266,6 +289,15 @@ export default function BuildingExpensePanel({ building }) {
   );
   // Draft amounts for variable rows, keyed `${tenant|owner}:${expenseId}`.
   const [drafts, setDrafts] = useState({});
+  // Keys the user has typed into but not yet saved. A background building
+  // refetch (e.g. editing another expense in the sibling ExpenseList)
+  // changes the `building` reference and re-fires the seed effect; without
+  // this guard that re-seed would silently wipe a typed-but-unsaved amount
+  // back to its persisted value (blank). We re-seed only NON-dirty keys on
+  // a row change, and fully reset (clearing dirty) only when the selected
+  // month changes.
+  const dirtyKeys = useRef(new Set());
+  const prevTermRef = useRef(selectedTerm);
 
   const dataTerms = useMemo(() => termsWithData(building), [building]);
 
@@ -280,16 +312,33 @@ export default function BuildingExpensePanel({ building }) {
 
   const hasAnyConfiguredExpense = (building?.expenses || []).length > 0;
 
-  // Seed drafts from persisted amounts whenever the selected month changes.
+  // Seed drafts from persisted amounts. On a month change: full reset and
+  // clear dirty tracking. On a row-identity change within the same month
+  // (background refetch): preserve dirty (unsaved) keys; re-seed the rest.
   useEffect(() => {
-    const seed = {};
+    const monthChanged = prevTermRef.current !== selectedTerm;
+    prevTermRef.current = selectedTerm;
+    const persisted = {};
     for (const r of tenantRows) {
-      if (r.kind === 'variable') seed[`tenant:${r.expenseId}`] = r.amount;
+      if (r.kind === 'variable') persisted[`tenant:${r.expenseId}`] = r.amount;
     }
     for (const r of ownerRows) {
-      if (r.kind === 'variable') seed[`owner:${r.expenseId}`] = r.amount;
+      if (r.kind === 'variable') persisted[`owner:${r.expenseId}`] = r.amount;
     }
-    setDrafts(seed);
+    if (monthChanged) {
+      dirtyKeys.current = new Set();
+      setDrafts(persisted);
+      return;
+    }
+    // Same month, rows changed: keep dirty keys as the user typed them,
+    // refresh everything else from the persisted values.
+    setDrafts((prev) => {
+      const next = { ...persisted };
+      for (const k of dirtyKeys.current) {
+        if (k in prev) next[k] = prev[k];
+      }
+      return next;
+    });
   }, [selectedTerm, tenantRows, ownerRows]);
 
   const mutation = useMutation({
@@ -307,6 +356,7 @@ export default function BuildingExpensePanel({ building }) {
 
   const handleDraftChange = useCallback((expenseId, value, isOwner) => {
     const key = `${isOwner ? 'owner' : 'tenant'}:${expenseId}`;
+    dirtyKeys.current.add(key);
     setDrafts((prev) => ({
       ...prev,
       [key]: value === '' ? '' : Number(value)
@@ -344,6 +394,10 @@ export default function BuildingExpensePanel({ building }) {
           expenses: buildEntries(tenantRows, false),
           ownerExpenses: buildEntries(ownerRows, true)
         });
+        // All variable drafts for this term were just persisted — clear
+        // the dirty set so the post-save refetch re-seeds them with the
+        // server-normalized (rounded) values rather than the raw typed ones.
+        dirtyKeys.current = new Set();
         toast.success(t('Monthly statement saved'));
       } catch (e) {
         toast.error(t('Something went wrong'));
@@ -465,11 +519,24 @@ export default function BuildingExpensePanel({ building }) {
 
       <Separator className="mb-4" />
 
-      {/* Selected month detail */}
+      {/* Selected month detail. The headline figure is the TENANT total
+          (the money billed to tenants), matching the ExpenseHistory tile's
+          convention. When owner-tracked amounts also exist they are
+          additional money, not a sub-split — so label the headline
+          explicitly as the tenant total and surface the owner subtotal
+          below, rather than letting a bare number ambiguously understate
+          the full month. */}
       <div className="flex items-baseline justify-between mb-3">
         <span className="text-sm font-medium">{monthLabel}</span>
-        <span className="text-sm font-semibold tabular-nums">
-          <NumberFormat value={tenantTotal} />
+        <span className="text-right">
+          <span className="text-sm font-semibold tabular-nums">
+            <NumberFormat value={tenantTotal} />
+          </span>
+          {ownerTotal !== 0 && (
+            <span className="block text-xs text-muted-foreground">
+              {t('Tenant share')}
+            </span>
+          )}
         </span>
       </div>
 

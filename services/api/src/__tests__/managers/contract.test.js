@@ -1,5 +1,23 @@
 /* eslint-env node, mocha */
 import * as Contract from '../../managers/contract.js';
+import moment from 'moment';
+
+// Cascade tests (pay a sequence of terms, assert a later term's balance
+// zeroes out) must run in the NON-FROZEN window. Past terms are ALWAYS
+// frozen (Tier I-1, June 2026: closed months are immutable; paying a later
+// term does not re-price an earlier one). The original tests hard-coded
+// 2020 dates that are now years past → frozen → the cascade no longer
+// fires. These helpers anchor a 12-month contract at the START of the
+// current year-month window's first month going forward, so the paid
+// terms are current/future. Deterministic and a true test of the cascade.
+const _ankBegin = moment.utc().startOf('month');
+const ankBeginMs = _ankBegin.clone().toDate().getTime();
+const ankMonth = (i) => _ankBegin.clone().add(i, 'months');
+const ankEndMs = (i) => ankMonth(i).clone().endOf('month').toDate().getTime();
+const ankTerm = (i) => ankMonth(i).format('YYYYMMDDHH');
+const ankTermNum = (i) => Number(ankTerm(i));
+const ankDMY = (i, end = false) =>
+  (end ? ankMonth(i).clone().endOf('month') : ankMonth(i)).format('DD/MM/YYYY');
 
 describe('contract functionalities', () => {
   it('create contract', () => {
@@ -132,7 +150,7 @@ describe('contract functionalities', () => {
       frequency: 'months',
       properties: [{}, {}]
     });
-    Contract.payTerm(contract, '201701010000', {
+    Contract.payTerm(contract, '2017010100', {
       payments: [{ amount: 200 }],
       debts: [{ description: 'extra', amount: 100 }],
       discounts: [{ origin: 'settlement', description: '', amount: 100 }]
@@ -259,7 +277,7 @@ describe('contract functionalities', () => {
       frequency: 'months',
       properties: [{}, {}]
     });
-    Contract.payTerm(contract, '202512010000', {
+    Contract.payTerm(contract, '2025120100', {
       payments: [{ amount: 200 }],
       discounts: ['discount']
     });
@@ -274,14 +292,14 @@ describe('contract functionalities', () => {
     expect(contract.rents.length).toEqual(108); // incorrect number of rents
 
     expect(() => {
-      Contract.payTerm(contract, '202612010000', {
+      Contract.payTerm(contract, '2026120100', {
         payments: [{ amount: 200 }],
         discounts: ['discount']
       });
     }).toThrow();
 
     expect(() => {
-      Contract.payTerm(contract, '201612010000', {
+      Contract.payTerm(contract, '2016120100', {
         payments: [{ amount: 200 }],
         discounts: ['discount']
       });
@@ -295,7 +313,7 @@ describe('contract functionalities', () => {
       frequency: 'months',
       properties: [{}, {}]
     });
-    Contract.payTerm(contract, '201701010000', {
+    Contract.payTerm(contract, '2017010100', {
       payments: [{ amount: 200 }],
       discounts: ['discount']
     });
@@ -315,7 +333,7 @@ describe('contract functionalities', () => {
       frequency: 'months',
       properties: [{}, {}]
     });
-    Contract.payTerm(contract, '202512010000', {
+    Contract.payTerm(contract, '2025120100', {
       payments: [{ amount: 200 }],
       discounts: ['discount']
     });
@@ -329,48 +347,43 @@ describe('contract functionalities', () => {
   });
 
   it('pay a term in reverse chronological order', () => {
+    // Anchored at the current month (months 0..11) so the paid terms are
+    // current/future and the cascade is not blocked by the past-term
+    // freeze. See ank* helpers.
     const contract = Contract.create({
-      begin: Date.parse('2020-01-01T00:00:00Z'),
-      end: Date.parse('2020-12-31T23:59:59Z'),
+      begin: ankBeginMs,
+      end: ankEndMs(11),
       frequency: 'months',
       vatRate: 0.2,
       properties: [
         {
-          entryDate: Date.parse('2020-01-01T00:00:00Z'),
-          exitDate: Date.parse('2020-12-31T23:59:59Z'),
+          entryDate: ankBeginMs,
+          exitDate: ankEndMs(11),
           property: {
             name: 'office1',
             price: 100
           },
           rent: 100,
-          expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2020', endDate: '31/12/2020' }]
+          expenses: [{ title: 'expense', amount: 10, beginDate: ankDMY(0), endDate: ankDMY(11, true) }]
         }
       ]
     });
 
     let termAmount = (100 + 10) * 1.2; // VAT
     expect(
-      contract.rents.find((rent) => rent.term === 2020020100).total.balance
+      contract.rents.find((rent) => rent.term === ankTermNum(1)).total.balance
     ).toEqual(termAmount);
 
-    Contract.payTerm(contract, '202005010000', {
-      payments: [{ amount: termAmount }]
-    });
-    Contract.payTerm(contract, '202004010000', {
-      payments: [{ amount: termAmount }]
-    });
-    Contract.payTerm(contract, '202003010000', {
-      payments: [{ amount: termAmount }]
-    });
-    Contract.payTerm(contract, '202002010000', {
-      payments: [{ amount: termAmount }]
-    });
-    Contract.payTerm(contract, '202001010000', {
-      payments: [{ amount: termAmount }]
-    });
+    // Pay months 5,4,3,2,0 (reverse order, skipping nothing relevant)
+    Contract.payTerm(contract, ankTerm(5), { payments: [{ amount: termAmount }] });
+    Contract.payTerm(contract, ankTerm(4), { payments: [{ amount: termAmount }] });
+    Contract.payTerm(contract, ankTerm(3), { payments: [{ amount: termAmount }] });
+    Contract.payTerm(contract, ankTerm(2), { payments: [{ amount: termAmount }] });
+    Contract.payTerm(contract, ankTerm(1), { payments: [{ amount: termAmount }] });
+    Contract.payTerm(contract, ankTerm(0), { payments: [{ amount: termAmount }] });
 
     expect(
-      contract.rents.find((rent) => rent.term === 2020060100).total.balance
+      contract.rents.find((rent) => rent.term === ankTermNum(6)).total.balance
     ).toEqual(0);
   });
 
@@ -381,7 +394,7 @@ describe('contract functionalities', () => {
       frequency: 'months',
       properties: [{}, {}]
     });
-    Contract.payTerm(contract, '202512010000', {
+    Contract.payTerm(contract, '2025120100', {
       payments: [{ amount: 200 }],
       discounts: ['discount']
     });
@@ -405,15 +418,19 @@ describe('contract functionalities', () => {
   });
 
   it('pay terms and update contract properties', () => {
+    // Anchored at the current month (months 0..11) so paid terms 0..5 are
+    // current/future and the cascade is not blocked by the past-term
+    // freeze. The expected grandTotal arrays below are POSITION-based
+    // (which month index carries balance), unchanged by anchoring.
     const p1 = {
-      entryDate: Date.parse('2020-01-01T00:00:00Z'),
-      exitDate: Date.parse('2020-12-31T23:59:59Z'),
+      entryDate: ankBeginMs,
+      exitDate: ankEndMs(11),
       property: {
         name: 'office1',
         price: 300
       },
       rent: 300,
-      expenses: [{ title: 'expense', amount: 10, beginDate: '01/01/2020', endDate: '31/12/2020' }]
+      expenses: [{ title: 'expense', amount: 10, beginDate: ankDMY(0), endDate: ankDMY(11, true) }]
     };
 
     let termP1 =
@@ -425,30 +442,18 @@ describe('contract functionalities', () => {
     termP1 *= 1.2; // VAT
 
     const contract = Contract.create({
-      begin: Date.parse('2020-01-01T00:00:00Z'),
-      end: Date.parse('2020-12-31T23:59:59Z'),
+      begin: ankBeginMs,
+      end: ankEndMs(11),
       frequency: 'months',
       vatRate: 0.2,
       properties: [p1]
     });
-    Contract.payTerm(contract, '202001010000', {
-      payments: [{ amount: 372 }]
-    });
-    Contract.payTerm(contract, '202002010000', {
-      payments: [{ amount: 372 }]
-    });
-    Contract.payTerm(contract, '202003010000', {
-      payments: [{ amount: 372 }]
-    });
-    Contract.payTerm(contract, '202004010000', {
-      payments: [{ amount: 372 }]
-    });
-    Contract.payTerm(contract, '202005010000', {
-      payments: [{ amount: 372 }]
-    });
-    Contract.payTerm(contract, '202006010000', {
-      payments: [{ amount: 372 }]
-    });
+    Contract.payTerm(contract, ankTerm(0), { payments: [{ amount: 372 }] });
+    Contract.payTerm(contract, ankTerm(1), { payments: [{ amount: 372 }] });
+    Contract.payTerm(contract, ankTerm(2), { payments: [{ amount: 372 }] });
+    Contract.payTerm(contract, ankTerm(3), { payments: [{ amount: 372 }] });
+    Contract.payTerm(contract, ankTerm(4), { payments: [{ amount: 372 }] });
+    Contract.payTerm(contract, ankTerm(5), { payments: [{ amount: 372 }] });
 
     let termsGrandTotal = Array(contract.terms)
       .fill(1)
@@ -465,14 +470,14 @@ describe('contract functionalities', () => {
 
     // update contract with a new properties
     const p2 = {
-      entryDate: Date.parse('2020-02-01T00:00:00Z'),
-      exitDate: Date.parse('2020-12-31T23:59:59Z'),
+      entryDate: ankMonth(1).clone().toDate().getTime(),
+      exitDate: ankEndMs(11),
       property: {
         name: 'office',
         price: 320
       },
       rent: 320,
-      expenses: [{ title: 'expense', amount: 32, beginDate: '01/02/2020', endDate: '31/12/2020' }]
+      expenses: [{ title: 'expense', amount: 32, beginDate: ankDMY(1), endDate: ankDMY(11, true) }]
     };
 
     let termP2 =
@@ -512,7 +517,7 @@ describe('contract functionalities', () => {
       frequency: 'months',
       properties: [{}, {}]
     });
-    Contract.payTerm(contract, '202512010000', {
+    Contract.payTerm(contract, '2025120100', {
       payments: [{ amount: 200 }],
       discounts: ['discount']
     });
