@@ -745,19 +745,24 @@ export default function RepairList({ building }) {
                         {buildingUnits.map((u) => {
                           const uid = String(u._id);
                           const checked = affectedUnitIds.includes(uid);
-                          // Build a label the user can actually match to
-                          // a real apartment: property name first
-                          // (most-recognizable), then floor + unit
-                          // label, ATAK last as a tiebreaker for units
-                          // sharing a floor.
+                          // The property name already encodes the floor
+                          // ("ΑΓ. ΑΝΑΡΓΥΡΩΝ 28 - Υπόγειο" / "- Όροφος 1"),
+                          // so appending floor + unitLabel repeated it up
+                          // to 3×. Only add a floor/unit suffix when the
+                          // name doesn't already carry one. ATAK stays as
+                          // the tiebreaker for units sharing a floor.
+                          const nameHasFloor =
+                            /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stock/i.test(
+                              u.propertyName || ''
+                            );
                           const floorPart =
-                            typeof u.floor === 'number'
+                            !nameHasFloor && typeof u.floor === 'number'
                               ? t('Floor {{n}}', { n: u.floor })
                               : '';
                           const labelParts = [
                             u.propertyName,
                             floorPart,
-                            u.unitLabel,
+                            !nameHasFloor ? u.unitLabel : '',
                             u.atakNumber ? `ATAK ${u.atakNumber}` : ''
                           ].filter(Boolean);
                           return (

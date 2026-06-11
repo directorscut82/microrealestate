@@ -50,8 +50,7 @@ import {
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
-import ExpenseHistory from './ExpenseHistory';
-import MonthlyStatement from './MonthlyStatement';
+import BuildingExpensePanel from './BuildingExpensePanel';
 import BillImportDialog from './BillImportDialog';
 import PaymentReceiptDialog from './PaymentReceiptDialog';
 import ResponsiveDialog from '../ResponsiveDialog';
@@ -629,15 +628,27 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                   <SelectContent>
                     {unitsWithProperty.map((u) => {
                       const occ = occupantsByPropertyId[u.propertyId];
+                      // The property name already encodes the floor
+                      // ("ΑΓ. ΑΝΑΡΓΥΡΩΝ 28 - Υπόγειο" / "- Όροφος 1"), so
+                      // appending t('Floor {{n}}') AND unitLabel repeated
+                      // the floor up to 3× ("Υπόγειο — Όροφος -1 — Όροφος
+                      // -1"). Only add a floor/unit suffix when the name
+                      // does NOT already carry one. ATAK is the real
+                      // tiebreaker for units sharing a floor.
                       const propertyName =
                         u.property?.name ||
                         `${t('Unit')} ${u.unitLabel || u.floor || ''}`;
+                      const nameHasFloor =
+                        /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stock/i.test(
+                          propertyName
+                        );
                       const parts = [
                         propertyName,
-                        u.floor != null
+                        !nameHasFloor && u.floor != null
                           ? t('Floor {{n}}', { n: u.floor })
                           : null,
-                        u.unitLabel,
+                        !nameHasFloor ? u.unitLabel : null,
+                        u.atakNumber ? `ATAK ${u.atakNumber}` : null,
                         occ?.name ? `(${occ.name})` : `(${t('Vacant')})`
                       ].filter(Boolean);
                       return (
@@ -1122,16 +1133,8 @@ export default function ExpenseList({ building }) {
 
       {expenses.length > 0 && (
         <>
-        <Separator className="mt-8 mb-8" />
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1px_1fr] gap-8">
-          <div>
-            <MonthlyStatement building={building} />
-          </div>
-          <Separator orientation="vertical" className="hidden lg:block h-full" />
-          <div>
-            <ExpenseHistory building={building} />
-          </div>
-        </div>
+          <Separator className="mt-8 mb-8" />
+          <BuildingExpensePanel building={building} />
         </>
       )}
 
