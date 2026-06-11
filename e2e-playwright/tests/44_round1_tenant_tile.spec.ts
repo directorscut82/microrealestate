@@ -847,3 +847,48 @@ test('44.12 — Greek locale renders Greek badge labels with no English bleed', 
     ).toHaveCount(0);
   }
 });
+
+// ============================================================
+// Test 13: pill font size is the 11px label scale — COMPUTED, not class.
+//
+// This asserts getComputedStyle().fontSize, NOT toHaveClass(). The
+// "pills are huge" bug recurred 4× because the class string `text-label`
+// was present in the source AND passed a toHaveClass assertion, but
+// tailwind-merge silently dropped it before it reached the DOM (it didn't
+// know `text-label` was a font-size class, so it treated it as conflicting
+// with the sibling text-{color} and removed it) — the element rendered at
+// the 16px browser default. A class-presence check can NEVER catch that;
+// only a computed-size measurement can. The cn() util now registers the
+// custom font sizes with tailwind-merge; this test guards the regression.
+// ============================================================
+test('44.13 — missing-field badge AND lease pill render at the 11px label scale (computed)', async ({
+  page
+}) => {
+  const apiCtx = await request.newContext();
+  // A no-property tenant with a missing taxId gives BOTH a missing-field
+  // badge AND the oxide "incomplete" lease pill on one tile.
+  const fx = await makeFixture(
+    apiCtx,
+    'PillSize',
+    validNaturalPayload(`${PREFIX}-PillSize-${RUN}`),
+    `{$set: {taxId: ''}, $unset: {firstName: ''}}`
+  );
+  await apiCtx.dispose();
+
+  await signIn(page);
+  const card = await findTenantTile(page, _seed!.realmName, fx);
+
+  // Missing-field badge computed font-size must be 11px (0.6875rem), NOT
+  // the 16px browser default that twMerge-dropped text-label left behind.
+  const badge = card.locator('[data-cy=tenantMissingFields] div').first();
+  await expect(badge).toBeVisible();
+  const badgeSize = await badge.evaluate(
+    (el) => getComputedStyle(el).fontSize
+  );
+  expect(badgeSize, 'missing-field badge must render at 11px').toBe('11px');
+
+  // Lease pill too.
+  const pill = card.locator('[data-lease-state]');
+  const pillSize = await pill.evaluate((el) => getComputedStyle(el).fontSize);
+  expect(pillSize, 'lease pill must render at 11px').toBe('11px');
+});
