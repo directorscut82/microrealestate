@@ -193,14 +193,35 @@ function _computeBuildingChargeRaw(
           (g.propertyIds || []).includes(String(propertyId))
         );
         if (!myGroup) return 0;
-        const carrier = (myGroup.propertyIds || [])[0];
-        if (String(propertyId) !== carrier) return 0;
+        // Carrier = the lex-min member that is ACTIVE this term, not the
+        // static group lex-min. A group survives `activeGroups` if ANY
+        // member is active, so a multi-unit tenant whose lex-min unit has
+        // exited (but a sibling is still active) used to compute its share
+        // into the denominator yet emit it on the exited carrier — which
+        // the outer loop never bills — so the whole share silently
+        // vanished. Selecting the active carrier emits it on the unit the
+        // outer loop actually visits. (term may be falsy in the
+        // non-term-scoped path; then all members count as active.)
+        const _activeCarrier = (g: any): string | undefined =>
+          (g.propertyIds || [])
+            .filter((pid: string) =>
+              term ? _isGroupActiveForTerm(g, term, String(pid)) : true
+            )
+            .map((pid: string) => String(pid))
+            .sort()[0];
+        const carrier = _activeCarrier(myGroup);
+        if (!carrier || String(propertyId) !== carrier) return 0;
         const totalGroups = activeGroups.length;
         if (totalGroups === 0) return 0;
         const base = Math.round((amount / totalGroups) * 100) / 100;
-        // Push rounding remainder onto the LAST group (lex-max by carrier
-        // id) so totals reconcile (100/3 → 33.33+33.33+33.34 = 100.00).
-        const carriers = activeGroups.map((g: any) => g.propertyIds[0]).sort();
+        // Push rounding remainder onto the LAST group (lex-max by active
+        // carrier id) so totals reconcile (100/3 → 33.33+33.33+33.34 =
+        // 100.00). Use the same active-member carrier selection so the
+        // remainder lands on a unit that is actually billed.
+        const carriers = activeGroups
+          .map((g: any) => _activeCarrier(g))
+          .filter(Boolean)
+          .sort();
         if (carrier === carriers[carriers.length - 1]) {
           return Math.round((amount - base * (totalGroups - 1)) * 100) / 100;
         }
@@ -387,8 +408,19 @@ function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: 
     }
     return true;
   }
-  if (expense.startTerm && term < expense.startTerm) return false;
-  if (expense.endTerm && term > expense.endTerm) return false;
+  // Recurring: a falsy startTerm must be rejected, NOT treated as
+  // active-since-epoch (the comment above documents this intent, but the
+  // recurring branch previously skipped the lower-bound when startTerm was
+  // falsy — so a legacy/seeded recurring expense with no startTerm billed
+  // every tenant back to the beginning of time, invisible in the UI which
+  // already guards `!startTerm`). Compare at YYYYMM granularity so a
+  // mid-month startTerm (day != 01) still bills its own start month.
+  if (!expense.startTerm) return false;
+  const ymTerm = Math.floor(term / 10000);
+  if (ymTerm < Math.floor(expense.startTerm / 10000)) return false;
+  if (expense.endTerm && ymTerm > Math.floor(expense.endTerm / 10000)) {
+    return false;
+  }
   return true;
 }
 

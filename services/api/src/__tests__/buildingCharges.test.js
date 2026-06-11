@@ -43,6 +43,11 @@ describe('Building Charges Integration', () => {
     amount,
     allocationMethod: method,
     isRecurring: true,
+    // Recurring expenses MUST carry a startTerm — the rent engine now
+    // rejects a falsy startTerm rather than billing back to epoch. Default
+    // well before the 2024 terms these tests use; cases that assert the
+    // start-bound override it explicitly.
+    startTerm: 2020010100,
     customAllocations: [],
     ...overrides
   });
