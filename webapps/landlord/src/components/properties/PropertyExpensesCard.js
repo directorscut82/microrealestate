@@ -246,33 +246,44 @@ export default function PropertyExpensesCard({ propertyId }) {
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pt-2 pb-1">
-                {/* When the same N entries land in both byCategory and lines
-                    (one entry → one category total → same value as the line),
-                    rendering both is double-vision. Show category breakdown
-                    when there are >1 line OR when at least one category total
-                    differs from a single line's amount. Otherwise just show
-                    the lines (they're more specific). */}
+                {/* The per-line list and the by-category rollup carry the
+                    SAME numbers whenever every category maps to exactly one
+                    line (e.g. Θέρμανση 0,05 + Ασφάλιση 0,04 appears once as a
+                    category and once as a line — double-vision). The category
+                    rollup only ADDS information when at least one category
+                    aggregates 2+ lines. So: prefer the line list (it's the
+                    most specific, and shows descriptions); show the category
+                    breakdown ONLY when it's a genuine rollup of multiple lines
+                    into fewer categories. */}
                 {(() => {
                   const lines = data.currentMonth?.lines || [];
                   const cats = data.currentMonth?.byCategory || {};
                   const nonZeroCats = CATEGORY_KEYS.filter(
                     (k) => Number(cats[k] || 0) !== 0
                   );
-                  const showBoth = lines.length > 1 || nonZeroCats.length > 1;
+                  // A rollup is only additive when there are strictly more
+                  // lines than non-zero categories (i.e. some category bundles
+                  // multiple lines). Equal counts → 1:1 → redundant.
+                  const categoryAddsInfo =
+                    lines.length > 0 && lines.length > nonZeroCats.length;
+                  // No lines at all but we do have category totals (legacy
+                  // data without per-line detail): fall back to the rollup.
+                  const showCategoryOnly =
+                    lines.length === 0 && nonZeroCats.length > 0;
                   return (
                     <>
-                      {showBoth && (
+                      {(categoryAddsInfo || showCategoryOnly) && (
                         <CategoryBreakdown
                           byCategory={data.currentMonth?.byCategory}
                           t={t}
                         />
                       )}
                       {lines.length > 0 ? (
-                        <div className={showBoth ? 'mt-3' : ''}>
+                        <div className={categoryAddsInfo ? 'mt-3' : ''}>
                           <ExpenseLines lines={lines} t={t} />
                         </div>
                       ) : (
-                        !showBoth && (
+                        !showCategoryOnly && (
                           <div className="text-sm text-muted-foreground">
                             {t('No expenses for this period')}
                           </div>
