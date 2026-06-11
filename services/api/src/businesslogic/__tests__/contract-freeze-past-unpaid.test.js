@@ -84,6 +84,13 @@ function buildBuilding(extraExpenseAmount) {
     amount: extraExpenseAmount,
     allocationMethod: 'general_thousandths',
     isRecurring: true,
+    // A recurring expense MUST carry a startTerm — the rent engine (and the
+    // write-time validators) now reject a falsy startTerm rather than
+    // billing back to epoch. Jan 2026 keeps it active for the Feb/Apr/Dec
+    // terms this test asserts. (Previously omitted, which modeled exactly
+    // the misconfigured row the validators reject; that no-anchor design
+    // was itself stale.)
+    startTerm: 2026010100,
     customAllocations: []
   };
 

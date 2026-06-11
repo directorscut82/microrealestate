@@ -488,7 +488,20 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
           // anchor to this month rather than 422 the user.
           payload.startTerm = currentMonthTerm;
         }
-        if (expense?.endTerm) {
+        // endTerm: soft-delete stamps endTerm = previous month (always a
+        // PAST value) to kill a recurring expense. Re-editing it must not
+        // blindly copy that stale kill-date back, or the expense can never
+        // be revived from this form. Preserve ONLY a FUTURE endTerm (a real
+        // scheduled end); otherwise send explicit null so the server clears
+        // it and the expense becomes active again. (Today no future endTerm
+        // is creatable via the UI, so this effectively always revives on
+        // edit — matching the "edit = intent to keep active" semantics.)
+        if (expense?._id) {
+          payload.endTerm =
+            expense?.endTerm && Number(expense.endTerm) >= currentMonthTerm
+              ? expense.endTerm
+              : null;
+        } else if (expense?.endTerm) {
           payload.endTerm = expense.endTerm;
         }
         // Owner expense tracking
@@ -511,7 +524,17 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
         }
         handleClose();
       } catch (error) {
-        toast.error(t('Something went wrong'));
+        // A 409 means another tab/landlord changed this building between
+        // our load and save (optimistic lock). It is RETRYABLE and no data
+        // was lost — tell the user that specifically instead of a generic
+        // failure that reads like data loss.
+        if (error?.response?.status === 409) {
+          toast.error(
+            t('This expense was changed in another tab — please reopen and retry')
+          );
+        } else {
+          toast.error(t('Something went wrong'));
+        }
       } finally {
         setIsLoading(false);
       }
@@ -661,7 +684,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {t(
-                    'The full expense amount will be billed to this unit. If the unit is vacant, it lands on the owner instead.'
+                    'The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).'
                   )}
                 </p>
                 {errors.customAllocations && (

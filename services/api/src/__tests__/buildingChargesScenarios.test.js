@@ -41,6 +41,12 @@ describe('Building Charges — Real-World Scenarios', () => {
     amount,
     allocationMethod: method,
     isRecurring: true,
+    // Recurring expenses MUST carry a startTerm — the rent engine (and the
+    // write-time validators) now reject a falsy startTerm rather than
+    // billing back to epoch. Default well before the 2024 terms these
+    // scenarios use; individual cases override it where they assert the
+    // start-bound itself.
+    startTerm: 2020010100,
     customAllocations: [],
     ...overrides
   });

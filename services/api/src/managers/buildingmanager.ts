@@ -2474,6 +2474,14 @@ export async function updateExpense(req: Req, res: Res) {
   // __v back. Mongoose's save() will manage it.
   const { __v: _ignored, ...patchBody } = req.body;
   void _ignored;
+  // Reviving a soft-deleted expense: the client sends endTerm: null to
+  // CLEAR the kill-date. Mongoose's .set(obj) only assigns present keys and
+  // never unsets, so an explicit null/0 must be turned into a real unset —
+  // otherwise the past endTerm sticks and the expense stays dead.
+  if (patchBody.endTerm === null || patchBody.endTerm === 0) {
+    expense.set({ endTerm: undefined });
+    delete patchBody.endTerm;
+  }
   expense.set(patchBody);
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);

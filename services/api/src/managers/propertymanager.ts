@@ -526,8 +526,16 @@ function _isExpenseActiveForTerm(
     if (!expense.startTerm) return false;
     return Math.floor(expense.startTerm / 10000) === Math.floor(term / 10000);
   }
-  if (expense.startTerm && term < expense.startTerm) return false;
-  if (expense.endTerm && term > expense.endTerm) return false;
+  // Recurring: reject a falsy startTerm (don't bill back to epoch) and
+  // compare at YYYYMM granularity. Mirrors the rent-engine predicate in
+  // businesslogic/tasks/1_base.ts so the property-side expense view agrees
+  // with what actually gets billed.
+  if (!expense.startTerm) return false;
+  const ymTerm = Math.floor(term / 10000);
+  if (ymTerm < Math.floor(expense.startTerm / 10000)) return false;
+  if (expense.endTerm && ymTerm > Math.floor(expense.endTerm / 10000)) {
+    return false;
+  }
   return true;
 }
 

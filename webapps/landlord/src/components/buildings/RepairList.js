@@ -171,7 +171,23 @@ export default function RepairList({ building }) {
 
   const repairs = building?.repairs || [];
   const contractors = building?.contractors || [];
-  const termOptions = useMemo(() => generateTermOptions(), []);
+
+  // Charge-month options are a fixed relative window (now-12..now+24). A
+  // repair can legitimately carry a chargeTerm OUTSIDE that window (a
+  // backdated late invoice, or drift as wall-clock advances). When editing
+  // such a repair the controlled Select had no matching SelectItem and
+  // rendered BLANK — looking broken and tempting the user to pick a wrong
+  // in-window month. Union the selected repair's stored term into the list
+  // so it always has a labeled option. Keyed on selectedRepair so it
+  // refreshes when switching between repairs.
+  const termOptions = useMemo(() => {
+    const opts = generateTermOptions();
+    const stored = selectedRepair?.chargeTerm;
+    if (stored && !opts.some((o) => o.term === String(stored))) {
+      opts.unshift({ term: String(stored), label: formatTerm(stored) });
+    }
+    return opts;
+  }, [selectedRepair]);
 
   // Repairs that distribute charges to tenant rents change rent ledgers
   // — the next payment dialog or rent listing must see the updated state.
