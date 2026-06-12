@@ -636,6 +636,33 @@ export default function BuildingExpensePanel({ building }) {
  * server-side with the real billing engine so it always matches what is
  * actually charged.
  */
+// Render the structured ShareBasis (from the server) as a localized,
+// short calc explanation. Returns '' when there is nothing to explain
+// (fixed/custom/single_unit have no per-unit formula; 'none' = stored
+// amount). Greek-safe: no raw English words leak in.
+function formatBasis(t, basis) {
+  if (!basis || typeof basis !== 'object') return '';
+  switch (basis.kind) {
+    case 'equal':
+      return t('{{total}} ÷ {{count}}', {
+        total: basis.total,
+        count: basis.count
+      });
+    case 'surface':
+      return t('{{part}}m² of {{whole}}m²', {
+        part: basis.part,
+        whole: basis.whole
+      });
+    case 'thousandths':
+      return t('{{part}}‰ of {{whole}}‰', {
+        part: basis.part,
+        whole: basis.whole
+      });
+    default:
+      return '';
+  }
+}
+
 function ChargeBreakdown({ breakdown, t }) {
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
@@ -704,13 +731,11 @@ function ChargeBreakdown({ breakdown, t }) {
             >
               <span className="truncate mr-2">
                 {it.expenseName}
-                {it.basis &&
-                  it.basis !== 'entered amount' &&
-                  it.basis !== 'repair' && (
-                    <span className="ml-1 text-muted-foreground/60">
-                      ({it.basis})
-                    </span>
-                  )}
+                {formatBasis(t, it.basis) && (
+                  <span className="ml-1 text-muted-foreground/60">
+                    ({formatBasis(t, it.basis)})
+                  </span>
+                )}
               </span>
               <span className="tabular-nums whitespace-nowrap">
                 <NumberFormat value={it.amount} />

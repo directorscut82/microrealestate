@@ -27,12 +27,7 @@ export default function ShortcutButton({
         // Vertical icon-above-label layout in every viewport. Greek labels
         // get up to 2 lines instead of truncating mid-word.
         'group relative flex flex-col items-center justify-start gap-2 h-full min-h-[80px] w-full px-2 py-3',
-        // Action-label size (14px), NOT text-label (11px, the pill token).
-        // The design-refresh wrongly assigned text-label here; tailwind-merge
-        // was silently dropping it so it rendered at the 16px default, which
-        // masked the wrong token until the cn() fix made text-label actually
-        // apply (→ 11px, far too small for a primary action card).
-        'text-sm font-medium text-ink-soft text-center leading-tight',
+        'text-label font-medium text-ink-soft text-center leading-tight',
         'rounded-md border border-stone-line bg-bone',
         'transition-colors duration-base ease-out-quart',
         'hover:bg-cream hover:text-ink',

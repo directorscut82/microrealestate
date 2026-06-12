@@ -1,5 +1,8 @@
 {
   "(unlinked)": "(μη συνδεδεμένο)",
+  "{{total}} ÷ {{count}}": "{{total}} ÷ {{count}}",
+  "{{part}}m² of {{whole}}m²": "{{part}}τ.μ. από {{whole}}τ.μ.",
+  "{{part}}‰ of {{whole}}‰": "{{part}}‰ από {{whole}}‰",
   "+{{surplus}}€ credit": "+{{surplus}}€ πίστωση",
   "1st notice sent on {{date}}": "1η ειδοποίηση στάλθηκε στις {{date}}",
   "2nd notice sent on {{date}}": "2η ειδοποίηση στάλθηκε στις {{date}}",
