@@ -360,6 +360,11 @@ export default function routes(): express.Router {
     '/:id/monthly-statement',
     Middlewares.asyncWrapper(buildingManager.saveMonthlyStatement as any)
   );
+  // Per-recipient expense breakdown for a term (who is charged what).
+  buildingsRouter.get(
+    '/:id/expense-breakdown',
+    Middlewares.asyncWrapper(buildingManager.getExpenseBreakdown as any)
+  );
   buildingsRouter.patch(
     '/:id/contractors/:contractorId',
     Middlewares.asyncWrapper(buildingManager.updateContractor as any)

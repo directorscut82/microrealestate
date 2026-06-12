@@ -21,7 +21,10 @@ import {
   REPAIR_STATUSES,
   CHARGEABLE_TO
 } from '../validators.js';
-import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
+import {
+  computeBuildingChargeForProperty,
+  computeBuildingExpenseBreakdown
+} from '../businesslogic/tasks/1_base.js';
 import moment from 'moment';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2226,6 +2229,68 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
   return res.json(result[0]);
+}
+
+// GET /buildings/:id/expense-breakdown?term=YYYYMMDDHH
+// Returns the authoritative per-recipient breakdown for the term: for each
+// active expense and managed unit, the share + whether it bills a renter or
+// falls on the owner (vacant). Computed with the real billing engine
+// (computeBuildingExpenseBreakdown → computeBuildingChargeForProperty) so
+// the breakdown the landlord sees on the Expenses tab matches what is
+// actually charged.
+export async function getExpenseBreakdown(req: Req, res: Res) {
+  const realm = req.realm;
+  const { id } = req.params;
+  const term = Number(req.query.term);
+  if (!term || !/^\d{10}$/.test(String(req.query.term))) {
+    throw new ServiceError('Invalid term format (expected YYYYMMDDHH)', 422);
+  }
+
+  const building = await Collections.Building.findOne({
+    _id: id,
+    realmId: realm!._id
+  });
+  _findBuilding(building, id);
+
+  // Hydrate units[].property + units[].tenant and attach _tenantGroups,
+  // exactly as the Expenses tab's building payload does, so the breakdown
+  // engine sees the same shape it relies on for recipient labeling and
+  // equal-split grouping.
+  const [hydrated] = await _toBuildingData(realm!._id, [
+    (building as any).toObject()
+  ]);
+  await _attachTenantGroupsToBuildings(realm!._id as string, [hydrated]);
+
+  const breakdown = computeBuildingExpenseBreakdown(hydrated as any, term);
+
+  // Owner monthly expenses (separate stream) for this term — surfaced so
+  // the breakdown also shows owner-direct charges, not only tenant shares.
+  const ownerEntries = ((hydrated as any).ownerMonthlyExpenses || []).filter(
+    (e: any) => Number(e.term) === term
+  );
+  const ownerDirect = ownerEntries.map((e: any) => {
+    const exp = ((hydrated as any).expenses || []).find(
+      (x: any) => String(x._id) === String(e.expenseId)
+    );
+    return {
+      expenseId: String(e.expenseId),
+      expenseName: exp?.name || e.description || '',
+      amount: Math.round((Number(e.amount) || 0) * 100) / 100
+    };
+  });
+  const ownerDirectTotal =
+    Math.round(
+      ownerDirect.reduce((s: number, e: any) => s + e.amount, 0) * 100
+    ) / 100;
+
+  return res.json({
+    term,
+    rows: breakdown.rows,
+    ownerDirect,
+    tenantTotal: breakdown.tenantTotal,
+    ownerUnbilledTotal: breakdown.ownerUnbilledTotal,
+    ownerDirectTotal
+  });
 }
 
 // ---------------------------------------------------------------------------

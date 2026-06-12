@@ -429,6 +429,13 @@ export async function saveMonthlyStatement(buildingId, data) {
   return response.data;
 }
 
+export async function fetchExpenseBreakdown(buildingId, term) {
+  const response = await apiFetcher().get(
+    `/buildings/${buildingId}/expense-breakdown?term=${encodeURIComponent(term)}`
+  );
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // Bills
 // ---------------------------------------------------------------------------
