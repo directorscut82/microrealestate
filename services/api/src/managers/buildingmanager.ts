@@ -23,7 +23,8 @@ import {
 } from '../validators.js';
 import {
   computeBuildingChargeForProperty,
-  computeBuildingExpenseBreakdown
+  computeBuildingExpenseBreakdown,
+  isExpenseActiveForTerm
 } from '../businesslogic/tasks/1_base.js';
 import moment from 'moment';
 
@@ -110,6 +111,12 @@ function _findBuilding(building: any, _id: string) {
 // 409 ("Building was modified concurrently. Please retry.") instead of
 // letting one writer silently overwrite the other or leaking a generic
 // 500. Mirrors realmmanager.ts:430-443.
+// Current month as a YYYYMMDDHH term — the open billing period that
+// vacant-owner recompute targets when expenses change.
+function _currentTerm(): number {
+  return Number(moment().startOf('month').format('YYYYMMDDHH'));
+}
+
 async function _saveBuildingWithVersionCheck(b: any): Promise<void> {
   try {
     await b.save();
@@ -2265,8 +2272,11 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
 
   // Owner monthly expenses (separate stream) for this term — surfaced so
   // the breakdown also shows owner-direct charges, not only tenant shares.
+  // EXCLUDE source:'vacant' entries — those are vacant-unit shares routed
+  // to the owner and are already represented in breakdown.rows as
+  // recipient:'owner' rows (showing them here too would double-count).
   const ownerEntries = ((hydrated as any).ownerMonthlyExpenses || []).filter(
-    (e: any) => Number(e.term) === term
+    (e: any) => Number(e.term) === term && e.source !== 'vacant'
   );
   const ownerDirect = ownerEntries.map((e: any) => {
     const exp = ((hydrated as any).expenses || []).find(
@@ -2396,6 +2406,11 @@ export async function addExpense(req: Req, res: Res) {
 
   (building as any).expenses.push(req.body);
   (building as any).updatedDate = new Date();
+  await _recomputeVacantOwnerCharges(
+    building,
+    realm!._id as string,
+    _currentTerm()
+  );
   await _saveBuildingWithVersionCheck(building!);
 
   // Wave-14 F6: recompute every tenant linked to the building exactly once.
@@ -2554,6 +2569,11 @@ export async function updateExpense(req: Req, res: Res) {
   }
   expense.set(patchBody);
   (building as any).updatedDate = new Date();
+  await _recomputeVacantOwnerCharges(
+    building,
+    realm!._id as string,
+    _currentTerm()
+  );
   await _saveBuildingWithVersionCheck(building!);
 
   // Wave-14 F6: recompute every tenant linked to the building exactly once.
@@ -2970,6 +2990,99 @@ async function _distributeRepairCharge(
     .map((u: any) => String(u.propertyId));
   for (const propId of propertyIds) {
     await _recomputeTenantsForProperty(realmId, propId);
+  }
+}
+
+// #2/#3 — owner billing for VACANT units (per-expense toggle
+// chargeOwnerWhenVacant). For each active building expense that opts in,
+// any unit with NO tenant covering the term has its computed share routed
+// to the owner ledger (ownerMonthlyExpenses, source:'vacant') instead of
+// silently evaporating. Without the flag the share stays uncollected
+// (split-among-renters is the implicit current behavior since the rent
+// engine only bills contracted properties). Replaces all prior
+// source:'vacant' entries each run so it is idempotent on re-save.
+//
+// Occupancy is per-term: a propertyId is occupied for term T when a
+// non-terminated tenant's lease window (and per-property window) covers T.
+// We resolve that from the realm's tenants rather than units[].tenant
+// (which is any-linked, not term-aware).
+async function _recomputeVacantOwnerCharges(
+  building: any,
+  realmId: string,
+  term: number
+): Promise<void> {
+  const expenses = (building.expenses || []) as any[];
+  const optInExpenses = expenses.filter(
+    (e) => e.chargeOwnerWhenVacant && isExpenseActiveForTerm(e, term)
+  );
+
+  // Strip prior vacant entries for this term — full re-derive.
+  const stale = (building.ownerMonthlyExpenses || []).filter(
+    (e: any) => e.source === 'vacant' && Number(e.term) === term
+  );
+  for (const e of stale) building.ownerMonthlyExpenses.pull(e._id);
+
+  if (optInExpenses.length === 0) {
+    return; // nothing opts in; prior entries (if any) already stripped
+  }
+
+  // Determine per-term occupancy: collect propertyIds covered by an active
+  // tenant lease for this term.
+  const ymTerm = Math.floor(term / 10000);
+  const toYM = (d: any): number | null => {
+    if (!d) return null;
+    const m = moment.utc(d);
+    return m.isValid() ? m.year() * 100 + (m.month() + 1) : null;
+  };
+  const buildingUnitPropIds = (building.units || [])
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  const tenants = await Collections.Tenant.find({
+    realmId,
+    'properties.propertyId': { $in: buildingUnitPropIds }
+  }).lean();
+  const occupied = new Set<string>();
+  for (const tn of tenants as any[]) {
+    const begin = toYM(tn.beginDate);
+    const end = toYM(tn.terminationDate || tn.endDate);
+    if (begin !== null && ymTerm < begin) continue;
+    if (end !== null && ymTerm > end) continue;
+    for (const tp of tn.properties || []) {
+      if (!tp.propertyId) continue;
+      const pEntry = toYM(tp.entryDate);
+      const pExit = toYM(tp.exitDate);
+      if (pEntry !== null && ymTerm < pEntry) continue;
+      if (pExit !== null && ymTerm > pExit) continue;
+      occupied.add(String(tp.propertyId));
+    }
+  }
+
+  // For each opt-in expense, write each vacant unit's share to the owner.
+  const buildingObj = building.toObject ? building.toObject() : building;
+  await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
+  for (const expense of optInExpenses) {
+    // Variable expenses (amount 0) have no live share — their per-unit
+    // amounts live in monthlyCharges and are handled at statement time.
+    if (!(Number(expense.amount) > 0)) continue;
+    for (const unit of building.units) {
+      if (!unit.propertyId) continue;
+      if (occupied.has(String(unit.propertyId))) continue; // billed to renter
+      const share = computeBuildingChargeForProperty(
+        buildingObj,
+        String(unit.propertyId),
+        expense,
+        term
+      );
+      if (share <= 0) continue;
+      building.ownerMonthlyExpenses.push({
+        expenseId: String(expense._id),
+        term,
+        amount: Math.round(share * 100) / 100,
+        propertyId: String(unit.propertyId),
+        source: 'vacant',
+        description: expense.name || ''
+      });
+    }
   }
 }
 

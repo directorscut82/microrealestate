@@ -793,10 +793,9 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               </Label>
             </div>
 
-            <div className="flex items-start gap-2 opacity-60" aria-disabled>
+            <div className="flex items-start gap-2">
               <Switch
                 id="chargeOwnerWhenVacant"
-                disabled
                 checked={watch('chargeOwnerWhenVacant') || false}
                 onCheckedChange={(checked) =>
                   setValue('chargeOwnerWhenVacant', checked, {
@@ -806,12 +805,11 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               />
               <div className="flex flex-col gap-0.5">
                 <Label htmlFor="chargeOwnerWhenVacant">
-                  {t('Charge owner for vacant units')} ·{' '}
-                  <span className="text-amber-600">{t('coming soon')}</span>
+                  {t('Charge owner for vacant units')}
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   {t(
-                    'Schema captures the intent today but the rent pipeline does not yet route the vacant share to the owner. Toggling this flag has no effect until the integration lands.'
+                    "When a unit has no tenant for a month, route its share of this expense to the owner instead of leaving it uncollected. Off: the vacant unit's share is not billed to anyone."
                   )}
                 </p>
               </div>

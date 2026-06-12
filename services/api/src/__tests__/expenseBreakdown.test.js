@@ -68,4 +68,24 @@ describe('computeBuildingExpenseBreakdown', () => {
     expect(r.tenantTotal).toBe(52);
     expect(r.ownerUnbilledTotal).toBe(0);
   });
+
+  // #2/#3: chargeOwnerWhenVacant routes a vacant unit's share to the owner
+  // (ownerBilled) instead of leaving it uncollected.
+  it('vacant share is OWNER-BILLED when chargeOwnerWhenVacant is on, UNCOLLECTED when off', () => {
+    const mk = (chargeOwnerWhenVacant) => ({
+      _id: 'b3', name: 'B3', atakPrefix: '005578',
+      units: [
+        { ...makeUnit('r1'), property: { name: 'A' }, tenant: { _id: 't1', name: 'A' } },
+        { ...makeUnit('r2'), property: { name: 'B' }, tenant: null } // vacant
+      ],
+      expenses: [{ _id: 'e1', name: 'Cleaning', type: 'common', amount: 100, allocationMethod: 'equal', isRecurring: true, startTerm: 2024010100, chargeOwnerWhenVacant, customAllocations: [] }],
+      address: {}, blockStreets: [], contractors: [], repairs: [], ownerMonthlyExpenses: []
+    });
+    const on = computeBuildingExpenseBreakdown(mk(true), 2024060100);
+    expect(on.ownerBilledTotal).toBe(50);   // vacant r2 share → owner
+    expect(on.ownerUnbilledTotal).toBe(0);
+    const off = computeBuildingExpenseBreakdown(mk(false), 2024060100);
+    expect(off.ownerBilledTotal).toBe(0);
+    expect(off.ownerUnbilledTotal).toBe(50); // vacant r2 share uncollected
+  });
 });

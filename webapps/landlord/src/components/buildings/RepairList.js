@@ -97,6 +97,33 @@ const schema = z.object({
   // landlord attaches an invoice scan.
   invoiceDocumentId: z.string().nullable().optional(),
   notes: z.string().optional()
+}).superRefine((data, ctx) => {
+  // A COMPLETED repair that is meant to be charged must carry both a
+  // charge month AND a cost — otherwise _distributeRepairCharge silently
+  // returns (no chargeTerm / cost<=0) and the repair bills NOBODY, showing
+  // up nowhere in rents, the apartment tile, or the breakdown. Planned /
+  // in-progress repairs may legitimately lack a final cost/term, and a
+  // reserve-funded repair intentionally doesn't bill, so scope the guard
+  // to completed + not-reserve-funded.
+  const isChargeable =
+    data.status === 'completed' && !data.isPaidFromRepairsFund;
+  if (!isChargeable) return;
+  const cost =
+    (Number(data.actualCost) || 0) || (Number(data.estimatedCost) || 0);
+  if (cost <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A completed repair needs a cost to be charged',
+      path: ['actualCost']
+    });
+  }
+  if (!data.chargeTerm) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Pick the month this repair is charged',
+      path: ['chargeTerm']
+    });
+  }
 });
 
 function getStatusBadgeVariant(status) {
