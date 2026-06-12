@@ -1,9 +1,10 @@
 import {
   QueryKeys,
+  fetchExpenseBreakdown,
   saveMonthlyStatement
 } from '../../utils/restcalls';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../../utils';
 import {
   LuChevronLeft,
@@ -359,6 +360,16 @@ export default function BuildingExpensePanel({ building }) {
     });
   }, [selectedTerm, tenantRows, ownerRows]);
 
+  // Authoritative per-recipient breakdown for the selected month — who is
+  // charged what (each unit's renter, or the owner when vacant). Computed
+  // server-side with the real billing engine so it matches what is actually
+  // charged. Refetched whenever the month or the building data changes.
+  const { data: breakdown } = useQuery({
+    queryKey: ['expense-breakdown', building?._id, selectedTerm, building?.__v],
+    queryFn: () => fetchExpenseBreakdown(building._id, selectedTerm),
+    enabled: !!building?._id && !!selectedTerm && hasAnyConfiguredExpense
+  });
+
   const mutation = useMutation({
     mutationFn: (payload) => saveMonthlyStatement(building._id, payload),
     onSuccess: () => {
@@ -369,6 +380,7 @@ export default function BuildingExpensePanel({ building }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
     }
   });
 
@@ -602,6 +614,136 @@ export default function BuildingExpensePanel({ building }) {
               ))}
             </>
           )}
+        </div>
+      )}
+
+      <ChargeBreakdown breakdown={breakdown} t={t} />
+    </div>
+  );
+}
+
+/*
+ * ChargeBreakdown — the "who gets charged what" view the landlord asked
+ * for: for the selected month, every per-unit share grouped by recipient
+ * (the unit's renter, or the OWNER when the unit is vacant and the share is
+ * therefore not billed to anyone), plus owner-direct entries. Computed
+ * server-side with the real billing engine so it always matches what is
+ * actually charged.
+ */
+function ChargeBreakdown({ breakdown, t }) {
+  if (!breakdown || !Array.isArray(breakdown.rows)) return null;
+  const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
+  const ownerVacantRows = breakdown.rows.filter((r) => r.recipient === 'owner');
+  const ownerDirect = breakdown.ownerDirect || [];
+  if (
+    renterRows.length === 0 &&
+    ownerVacantRows.length === 0 &&
+    ownerDirect.length === 0
+  ) {
+    return null;
+  }
+
+  // Group renter rows by property so each apartment shows its renter + the
+  // expenses charged to them.
+  const byProperty = new Map();
+  for (const r of renterRows) {
+    if (!byProperty.has(r.propertyId)) {
+      byProperty.set(r.propertyId, {
+        propertyName: r.propertyName,
+        recipientName: r.recipientName,
+        items: [],
+        total: 0
+      });
+    }
+    const g = byProperty.get(r.propertyId);
+    g.items.push(r);
+    g.total += r.amount;
+  }
+
+  return (
+    <div className="mt-4 rounded-md border border-stone-line/60 bg-muted/20 p-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
+        {t('Who is charged')}
+      </div>
+
+      {/* Per-apartment → renter */}
+      {Array.from(byProperty.values()).map((g, gi) => (
+        <div key={`p-${gi}`} className="mb-2 last:mb-0">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-medium truncate mr-2">
+              {g.propertyName}
+              <span className="ml-1 font-normal text-muted-foreground">
+                ·{' '}
+                {g.recipientName
+                  ? t('Renter: {{name}}', { name: g.recipientName })
+                  : t('Renter')}
+              </span>
+            </span>
+            <span className="tabular-nums font-medium whitespace-nowrap">
+              <NumberFormat value={g.total} />
+            </span>
+          </div>
+          {g.items.map((it, ii) => (
+            <div
+              key={`pi-${gi}-${ii}`}
+              className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+            >
+              <span className="truncate mr-2">{it.expenseName}</span>
+              <span className="tabular-nums whitespace-nowrap">
+                <NumberFormat value={it.amount} />
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Owner-direct (owner-tracked expenses) */}
+      {ownerDirect.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-stone-line/50">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-medium text-ink-muted">{t('Owner')}</span>
+            <span className="tabular-nums font-medium">
+              <NumberFormat value={breakdown.ownerDirectTotal || 0} />
+            </span>
+          </div>
+          {ownerDirect.map((e, i) => (
+            <div
+              key={`od-${i}`}
+              className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+            >
+              <span className="truncate mr-2">{e.expenseName}</span>
+              <span className="tabular-nums whitespace-nowrap">
+                <NumberFormat value={e.amount} />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Vacant units → uncollected (the money that evaporates today) */}
+      {ownerVacantRows.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-stone-line/50">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-medium text-oxide">
+              {t('Vacant — not billed to anyone')}
+            </span>
+            <span className="tabular-nums font-medium text-oxide">
+              <NumberFormat value={breakdown.ownerUnbilledTotal || 0} />
+            </span>
+          </div>
+          {ownerVacantRows.map((r, i) => (
+            <div
+              key={`ov-${i}`}
+              className="flex items-baseline justify-between text-xs text-oxide/80 pl-3"
+            >
+              <span className="truncate mr-2">
+                {r.propertyName} · {r.expenseName}
+              </span>
+              <span className="tabular-nums whitespace-nowrap">
+                <NumberFormat value={r.amount} />
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>

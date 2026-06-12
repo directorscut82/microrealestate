@@ -124,6 +124,23 @@ const expenseSchema = z.object({
       });
     }
   }
+  // 'fixed' bills each unit a predefined per-unit amount (the
+  // customAllocations values ARE euros, not %/ratio). A fixed expense with
+  // no allocations, or all-zero values, charges nobody — a 'σταθερό' with
+  // zero ποσό is meaningless. Require at least one positive per-unit amount.
+  if (data.allocationMethod === 'fixed') {
+    const total = (data.customAllocations || []).reduce(
+      (s, a) => s + (Number(a.value) || 0),
+      0
+    );
+    if (!(total > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Fixed allocation needs at least one unit with a non-zero amount',
+        path: ['customAllocations']
+      });
+    }
+  }
   // F4-expense: single_unit MUST have a target unit picked. Without
   // this guard the form passes zod with customAllocations=[] and the
   // expense persists with nobody to bill. The pipeline at

@@ -66,6 +66,83 @@ export function computeBuildingChargeForProperty(
   return Math.round(_computeBuildingChargeRaw(building, propertyId, expense, term) * 100) / 100;
 }
 
+// Per-recipient breakdown of who gets charged what for a building's
+// expenses in a given term. Uses the SAME computeBuildingChargeForProperty
+// engine that does the real rent billing, so the breakdown the landlord
+// sees can never drift from what is actually charged.
+//
+// For each active building expense and each managed unit, emits the unit's
+// share and labels the recipient:
+//   - renter: a tenant whose lease covers this term (the share lands on
+//     their rent bill)
+//   - owner: the unit has no tenant for this term — the share is currently
+//     NOT billed to anyone (the vacant-unit gap), surfaced explicitly so
+//     the landlord sees the money that evaporates instead of it being
+//     silent.
+// `building` must carry units[].property + units[].tenant (as attached by
+// buildingmanager._toBuildingData) and _tenantGroups (for equal-split).
+export type ExpenseBreakdownRow = {
+  expenseId: string;
+  expenseName: string;
+  allocationMethod: string;
+  propertyId: string;
+  propertyName: string;
+  recipient: 'renter' | 'owner';
+  recipientName: string | null;
+  amount: number;
+};
+
+export function computeBuildingExpenseBreakdown(
+  building: any,
+  term: number
+): { rows: ExpenseBreakdownRow[]; tenantTotal: number; ownerUnbilledTotal: number } {
+  const rows: ExpenseBreakdownRow[] = [];
+  const units = (building?.units || []) as any[];
+  const expenses = (building?.expenses || []) as any[];
+
+  for (const expense of expenses) {
+    if (!isExpenseActiveForTerm(expense, term)) continue;
+    for (const unit of units) {
+      if (!unit.propertyId) continue;
+      const share = computeBuildingChargeForProperty(
+        building,
+        String(unit.propertyId),
+        expense,
+        term
+      );
+      if (share <= 0) continue;
+      // A unit is "billed to a renter" only when it carries a tenant for
+      // this term. units[].tenant is attached by _toBuildingData from the
+      // tenant whose lease references the property; treat its presence as
+      // the renter. Otherwise the share is uncollected (owner-side gap).
+      const tenant = unit.tenant || null;
+      rows.push({
+        expenseId: String(expense._id),
+        expenseName: expense.name || '',
+        allocationMethod: expense.allocationMethod || 'equal',
+        propertyId: String(unit.propertyId),
+        propertyName: unit.property?.name || unit.name || String(unit.propertyId),
+        recipient: tenant ? 'renter' : 'owner',
+        recipientName: tenant ? tenant.name : null,
+        amount: share
+      });
+    }
+  }
+
+  const tenantTotal = rows
+    .filter((r) => r.recipient === 'renter')
+    .reduce((s, r) => s + r.amount, 0);
+  const ownerUnbilledTotal = rows
+    .filter((r) => r.recipient === 'owner')
+    .reduce((s, r) => s + r.amount, 0);
+
+  return {
+    rows,
+    tenantTotal: Math.round(tenantTotal * 100) / 100,
+    ownerUnbilledTotal: Math.round(ownerUnbilledTotal * 100) / 100
+  };
+}
+
 // Wave-18 B4: group is "active" for `term` when the tenant's lease window
 // (clamped by terminationDate) AND the per-property entry/exit window both
 // cover the rent term. Term is YYYYMMDDHH; we compare in YYYYMM granularity
