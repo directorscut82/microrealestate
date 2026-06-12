@@ -491,7 +491,9 @@ export default function BuildingExpensePanel({ building }) {
   }
 
   return (
-    <div className="max-w-xl mx-auto">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-start">
+      {/* LEFT column — calendar + month total + variable-amount entry rows */}
+      <div className="min-w-0">
       {/* Centered year navigator */}
       <div className="flex items-center justify-center gap-6 mb-3">
         <button
@@ -616,8 +618,12 @@ export default function BuildingExpensePanel({ building }) {
           )}
         </div>
       )}
+      </div>
 
-      <ChargeBreakdown breakdown={breakdown} t={t} />
+      {/* RIGHT column — who is charged (the breakdown), beside the calendar */}
+      <div className="min-w-0">
+        <ChargeBreakdown breakdown={breakdown} t={t} />
+      </div>
     </div>
   );
 }
@@ -663,7 +669,7 @@ function ChargeBreakdown({ breakdown, t }) {
   return (
     <div className="mt-4 rounded-md border border-stone-line/60 bg-muted/20 p-3">
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-        {t('Who is charged')}
+        {t('Charges')}
       </div>
 
       {/* Per-apartment → renter */}
@@ -688,7 +694,16 @@ function ChargeBreakdown({ breakdown, t }) {
               key={`pi-${gi}-${ii}`}
               className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
             >
-              <span className="truncate mr-2">{it.expenseName}</span>
+              <span className="truncate mr-2">
+                {it.expenseName}
+                {it.basis &&
+                  it.basis !== 'entered amount' &&
+                  it.basis !== 'repair' && (
+                    <span className="ml-1 text-muted-foreground/60">
+                      ({it.basis})
+                    </span>
+                  )}
+              </span>
               <span className="tabular-nums whitespace-nowrap">
                 <NumberFormat value={it.amount} />
               </span>
@@ -725,7 +740,7 @@ function ChargeBreakdown({ breakdown, t }) {
         <div className="mt-2 pt-2 border-t border-stone-line/50">
           <div className="flex items-baseline justify-between text-sm">
             <span className="font-medium text-oxide">
-              {t('Vacant — not billed to anyone')}
+              {t('Uncollected (vacant units)')}
             </span>
             <span className="tabular-nums font-medium text-oxide">
               <NumberFormat value={breakdown.ownerUnbilledTotal || 0} />
