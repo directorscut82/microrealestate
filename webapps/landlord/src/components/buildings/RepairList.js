@@ -987,11 +987,32 @@ export default function RepairList({ building }) {
                   the repair owns the file lifecycle. */}
               <div className="space-y-2">
                 <Label htmlFor="invoiceFile">{t('Invoice file')}</Label>
+                {/* The native file input's button label ('Browse'/'Choose
+                    File') is browser-rendered and cannot be translated, so
+                    it showed English on the Greek realm. Hide it and drive
+                    it from a translated Button (mirrors ui/file-drop-zone). */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={invoiceUploading}
+                    onClick={() => invoiceFileInputRef.current?.click()}
+                  >
+                    {t('Choose file')}
+                  </Button>
+                  <span className="text-label text-ink-muted truncate">
+                    {invoiceDocumentId
+                      ? invoiceDocumentId.split('/').pop()
+                      : t('No file selected')}
+                  </span>
+                </div>
                 <Input
                   id="invoiceFile"
                   ref={invoiceFileInputRef}
                   type="file"
                   accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf"
+                  className="hidden"
                   disabled={invoiceUploading}
                   onChange={async (e) => {
                     const f = e.target.files?.[0];

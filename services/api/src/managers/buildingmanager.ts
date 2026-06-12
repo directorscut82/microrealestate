@@ -3146,6 +3146,61 @@ async function _recomputeVacantOwnerCharges(
   }
 }
 
+// Exported lifecycle hook: recompute vacant-owner charges for every
+// building containing the given propertyIds, across a bounded term window
+// (trailing 12 months through the current month). Called when TENANCY
+// changes (move-in/out, terminate, extend) — not just on expense edits —
+// so a unit going vacant mid-year immediately accrues the owner's share
+// for the now-vacant months instead of waiting for a manual expense edit.
+// occupantmanager invokes this via dynamic import to avoid a static import
+// cycle (buildingmanager already imports occupantmanager).
+export async function recomputeVacantOwnerForProperties(
+  realmId: string,
+  propertyIds: string[]
+): Promise<void> {
+  if (!propertyIds || propertyIds.length === 0) return;
+  const buildings = await Collections.Building.find({
+    realmId,
+    'units.propertyId': { $in: propertyIds.map((p) => String(p)) }
+  });
+  if (!buildings.length) return;
+
+  // Term window: 12 months back through the current month (covers
+  // already-elapsed vacant months + the current open term). Forward terms
+  // are recomputed lazily on the next expense edit / read.
+  const now = moment().startOf('month');
+  const terms: number[] = [];
+  for (let i = 11; i >= 0; i--) {
+    terms.push(
+      Number(moment(now).subtract(i, 'months').format('YYYYMMDDHH'))
+    );
+  }
+
+  for (const building of buildings as any[]) {
+    let changed = false;
+    for (const term of terms) {
+      const before = JSON.stringify(
+        (building.ownerMonthlyExpenses || [])
+          .filter((e: any) => e.source === 'vacant' && Number(e.term) === term)
+          .map((e: any) => [String(e.expenseId), e.amount])
+          .sort()
+      );
+      await _recomputeVacantOwnerCharges(building, realmId, term);
+      const after = JSON.stringify(
+        (building.ownerMonthlyExpenses || [])
+          .filter((e: any) => e.source === 'vacant' && Number(e.term) === term)
+          .map((e: any) => [String(e.expenseId), e.amount])
+          .sort()
+      );
+      if (before !== after) changed = true;
+    }
+    if (changed) {
+      building.updatedDate = new Date();
+      await _saveBuildingWithVersionCheck(building);
+    }
+  }
+}
+
 // Confirm whether ANY tenant LINKED TO THIS BUILDING has a paid rent for
 // the given term. Past-paid rents are frozen — repairs targeting those
 // terms would write a monthlyCharge that is silently ignored by the

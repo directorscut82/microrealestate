@@ -287,6 +287,13 @@ export default function BuildingDashboard({ building }) {
     //     undercounts by the entire fixed owner share.
     const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || [])
       .filter((e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
+      // EXCLUDE source:'vacant' rows: a vacant unit's share is routed to the
+      // owner (chargeOwnerWhenVacant / vacant repair), but that euro is
+      // ALREADY counted once in the full expense amount below
+      // (recurringMonthlyEksoda * 12 / repairEksoda). Routing changes WHO
+      // pays, not the building total — counting it here too double-counts
+      // the annual eksoda headline.
+      .filter((e) => e.source !== 'vacant')
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     // F4-buildingdash: prorate by the months the expense is actually
     // active in the current calendar year. A new owner-tracked expense
