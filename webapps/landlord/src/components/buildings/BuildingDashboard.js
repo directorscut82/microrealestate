@@ -335,6 +335,20 @@ export default function BuildingDashboard({ building }) {
       repairEksoda +
       ownerEksoda;
     const net = annualEsoda - annualEksoda;
+    // Repairs OPERATIONAL state (not just billed euros) — the overview
+    // never surfaced building.repairs, so planned/in-progress/emergency
+    // work was invisible until you opened the Repairs tab.
+    const repairsList = building?.repairs || [];
+    const repairStats = {
+      planned: repairsList.filter((r) => r.status === 'planned').length,
+      inProgress: repairsList.filter((r) => r.status === 'in_progress').length,
+      emergencies: repairsList.filter(
+        (r) =>
+          r.urgency === 'emergency' &&
+          (r.status === 'planned' || r.status === 'in_progress')
+      ).length
+    };
+    repairStats.open = repairStats.planned + repairStats.inProgress;
     return {
       monthlyEsoda,
       annualEsoda,
@@ -343,7 +357,8 @@ export default function BuildingDashboard({ building }) {
       repairEksoda,
       ownerEksoda,
       annualEksoda,
-      net
+      net,
+      repairStats
     };
   }, [
     sortedUnits,
@@ -351,7 +366,8 @@ export default function BuildingDashboard({ building }) {
     tenantByPropertyId,
     building?.expenses,
     building?.units,
-    building?.ownerMonthlyExpenses
+    building?.ownerMonthlyExpenses,
+    building?.repairs
   ]);
 
   if (!building) return null;
@@ -479,6 +495,38 @@ export default function BuildingDashboard({ building }) {
           </div>
         </Card>
       </div>
+
+      {/* Repairs operational summary — open (planned + in-progress) repairs
+          and any emergencies, so scheduled work is visible on the overview
+          instead of only inside the Repairs tab. */}
+      {(building?.repairs || []).length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <span className="text-sm font-medium">
+              {t('Repairs / scheduled work')}
+            </span>
+            <div className="flex items-center gap-6 text-sm">
+              <span className="text-muted-foreground">
+                {t('Open')}:{' '}
+                <span className="font-semibold text-ink">
+                  {finance.repairStats.open}
+                </span>
+              </span>
+              <span className="text-muted-foreground">
+                {t('In progress')}:{' '}
+                <span className="font-semibold text-ink">
+                  {finance.repairStats.inProgress}
+                </span>
+              </span>
+              {finance.repairStats.emergencies > 0 && (
+                <span className="text-oxide font-medium">
+                  {t('Emergencies')}: {finance.repairStats.emergencies}
+                </span>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Floor-by-floor table */}
       <div className="rounded-md border">
