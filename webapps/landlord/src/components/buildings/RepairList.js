@@ -712,6 +712,11 @@ export default function RepairList({ building }) {
                     step="0.01"
                     {...register('actualCost')}
                   />
+                  {errors.actualCost && (
+                    <p className="text-label text-oxide">
+                      {t(errors.actualCost.message)}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -806,6 +811,11 @@ export default function RepairList({ building }) {
                           ))}
                         </SelectContent>
                       </Select>
+                      {errors.chargeTerm && (
+                        <p className="text-label text-oxide">
+                          {t(errors.chargeTerm.message)}
+                        </p>
+                      )}
                     </div>
                   </div>
 

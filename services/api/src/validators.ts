@@ -382,6 +382,35 @@ export function validateRatioAllocations(
 }
 
 /**
+ * Validate 'fixed' allocations: each unit pays a predefined per-unit euro
+ * amount via customAllocations. A fixed expense with no allocations, or
+ * all-zero values, bills NOBODY (the rent pipeline exempts 'fixed' from the
+ * amount>0 gate, so a €0 fixed expense persists and silently charges no
+ * one). The client zod guard catches this in the form, but a direct REST
+ * caller bypasses it — enforce server-side too, mirroring
+ * validatePercentageAllocations / validateRatioAllocations.
+ */
+export function validateFixedAllocations(
+  allocations: Array<{ propertyId?: string; value?: number }> | undefined,
+  allocationMethod: string
+): void {
+  if (allocationMethod !== 'fixed') return;
+  if (!allocations || allocations.length === 0) {
+    throw new ServiceError(
+      'fixed allocation requires at least one unit with a non-zero amount',
+      422
+    );
+  }
+  const total = allocations.reduce((s, a) => s + (Number(a.value) || 0), 0);
+  if (total <= 0) {
+    throw new ServiceError(
+      'fixed allocation requires at least one unit with a non-zero amount',
+      422
+    );
+  }
+}
+
+/**
  * Validate individual allocation values are non-negative numbers
  */
 export function validateAllocationValues(
