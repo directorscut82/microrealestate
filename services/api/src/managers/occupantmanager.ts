@@ -403,6 +403,33 @@ async function _recomputeSiblingTenantsInBuildings(
   }
 }
 
+// Tenancy changed → a unit may have gone vacant/occupied. Recompute
+// owner-billed vacant shares (chargeOwnerWhenVacant) for the affected
+// buildings so a tenant moving out immediately accrues the owner's share
+// of the now-vacant months — not only when an expense is next edited.
+// Separate from _recomputeSiblingTenantsInBuildings because that function
+// early-returns when there are no remaining siblings — which is EXACTLY
+// the full-vacancy case we must still handle. Dynamic import avoids a
+// static cycle (buildingmanager imports this module). Best-effort: a
+// failure here must not fail the lifecycle write.
+async function _recomputeVacantOwnerForProperties(
+  realmId: string,
+  propertyIds: string[]
+): Promise<void> {
+  if (!propertyIds || !propertyIds.length) return;
+  try {
+    const buildingManager = await import('./buildingmanager.js');
+    if (typeof buildingManager.recomputeVacantOwnerForProperties === 'function') {
+      await buildingManager.recomputeVacantOwnerForProperties(
+        realmId,
+        propertyIds
+      );
+    }
+  } catch (error) {
+    logger.error(`vacant-owner recompute failed for buildings: ${error}`);
+  }
+}
+
 // Update building unit occupancyType based on tenant assignments.
 // Call after tenant add/update/delete to keep building overview in sync.
 async function _syncOccupancyForProperties(
@@ -1106,6 +1133,7 @@ export async function add(req: Req, res: Res) {
       linkedPropIds,
       String(newOccupant._id)
     );
+    await _recomputeVacantOwnerForProperties(realm!._id, linkedPropIds);
   }
 
   const occupants = await _fetchTenants(req.realm!._id, newOccupant._id);
@@ -1540,6 +1568,9 @@ export async function update(req: Req, res: Res) {
       allTouchedPropIds,
       occupantId
     );
+    // Termination / property change may have vacated a unit — accrue the
+    // owner's vacant share for the affected buildings.
+    await _recomputeVacantOwnerForProperties(realm!._id, allTouchedPropIds);
   }
 
   const newOccupants = await _fetchTenants(req.realm!._id, occupantId);
@@ -1739,6 +1770,9 @@ export async function remove(req: Req, res: Res) {
       removedPropIds,
       undefined
     );
+    // Deleting the tenant left these units vacant — accrue the owner's
+    // vacant share for chargeOwnerWhenVacant expenses in those buildings.
+    await _recomputeVacantOwnerForProperties(realm!._id, removedPropIds);
   }
 
   // E16: if any side-step (documents cascade) failed, surface a 500 so
@@ -2160,6 +2194,9 @@ export async function extendLease(req: Req, res: Res) {
         propIds,
         tenantId
       );
+      // Extending a lease changes which months a unit is occupied vs
+      // vacant — recompute owner vacant shares for the affected buildings.
+      await _recomputeVacantOwnerForProperties(realm!._id, propIds);
     } catch (e: any) {
       logger.warn(
         `extendLease: sibling-cohort recompute failed for tenant ${tenantId}: ${

@@ -51,6 +51,7 @@ export default function UploadDialog({ open, setOpen, data: selectedTemplate, on
   const { t } = useTranslation('common');
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef();
+  const fileInputRef = useRef();
 
   const templates = useMemo(() =>
     allTemplates
@@ -126,7 +127,23 @@ export default function UploadDialog({ open, setOpen, data: selectedTemplate, on
             )}
             <div className="space-y-2">
               <Label htmlFor="file">{t('File')}</Label>
-              <Input id="file" type="file" accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf" onChange={(e) => setValue('file', e.target.files?.[0], { shouldValidate: true })} />
+              {/* Native file input's button is browser-rendered ('Browse')
+                  and untranslatable → showed English on the Greek realm.
+                  Hide it, drive from a translated Button. */}
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {t('Choose file')}
+                </Button>
+                <span className="text-label text-ink-muted truncate">
+                  {watch('file')?.name || t('No file selected')}
+                </span>
+              </div>
+              <Input id="file" ref={fileInputRef} type="file" className="hidden" accept=".gif,.png,.jpg,.jpeg,.jpe,.pdf" onChange={(e) => setValue('file', e.target.files?.[0], { shouldValidate: true })} />
               {errors.file && <p className="text-sm text-destructive">{translateFileError(t, errors.file.message)}</p>}
             </div>
           </div>
