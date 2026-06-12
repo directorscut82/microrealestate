@@ -150,7 +150,7 @@ export default function TenantListItem({ tenant }) {
               {tenant.name}
             </Button>
             {tenant.archived && (
-              <Badge variant="secondary" className="ml-1 text-label">{t('Archived')}</Badge>
+              <Badge variant="secondary" className="ml-1">{t('Archived')}</Badge>
             )}
             <div className="text-label font-normal text-ink-muted">
               {tenant.isCompany
@@ -203,15 +203,11 @@ export default function TenantListItem({ tenant }) {
               <Badge
                 key={f}
                 variant="outline"
-                // Match the lease pill's footprint: label type (11px),
-                // font-normal (same weight as the lease pill — the
-                // previous font-medium read as a heavier, larger chip),
-                // and a softened amber border so the "needs attention"
-                // signal doesn't render as a thick box. No `leading-none`
-                // here: text-label already carries lineHeight 1.4, and
-                // forcing 1.0 clipped Greek descenders (η, μ, ρ, γ) on
-                // the longer labels like "Tax ID (invalid)".
-                className="text-label font-normal border-amber-500/50 text-amber-700"
+                // Size comes from the Badge base (text-[0.6875rem]); only
+                // override weight + colour here. font-normal matches the
+                // lease pill; softened amber border so it doesn't read as a
+                // thick box. No leading-none (it clipped Greek descenders).
+                className="font-normal border-amber-500/50 text-amber-700"
               >
                 {f === 'firstName' && t('First name')}
                 {f === 'lastName' && t('Last name')}
@@ -235,7 +231,8 @@ export default function TenantListItem({ tenant }) {
                   : 'success'
             }
             className={cn(
-              'font-normal text-label leading-none',
+              // Size from the Badge base (text-[0.6875rem]); weight only.
+              'font-normal',
               // 'incomplete' is the only ACTIONABLE state of the four —
               // it means billing literally can't start (no property /
               // no begin date). Tint it oxide (warning) so it doesn't

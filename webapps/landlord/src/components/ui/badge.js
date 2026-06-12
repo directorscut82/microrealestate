@@ -21,7 +21,14 @@ import { cva } from 'class-variance-authority';
  *   default, secondary, success, destructive, outline.
  */
 const badgeVariants = cva(
-  'inline-flex items-center gap-1.5 rounded-pill px-2.5 py-0.5 text-label font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-sea focus:ring-offset-2 focus:ring-offset-cream',
+  // Size uses the ARBITRARY value text-[0.6875rem] (== the text-label
+  // token: 0.6875rem) instead of the named token, because callers add a
+  // text-{colour} via cn() and stock tailwind-merge would drop a NAMED
+  // custom size token (text-label) as a conflicting text-* utility,
+  // leaving the badge at the 16px browser default (the recurring
+  // "pills huge" bug). Stock tailwind-merge keeps an arbitrary-value size
+  // alongside the colour, so this survives without any global cn() change.
+  'inline-flex items-center gap-1.5 rounded-pill px-2.5 py-0.5 text-[0.6875rem] leading-[1.4] tracking-[0.04em] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-sea focus:ring-offset-2 focus:ring-offset-cream',
   {
     variants: {
       variant: {

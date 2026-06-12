@@ -1,27 +1,17 @@
 import { clsx } from 'clsx';
 import moment from 'moment';
-import { extendTailwindMerge } from 'tailwind-merge';
+import { twMerge } from 'tailwind-merge';
 
-// The Tailwind config defines CUSTOM font-size keys (label/body/title/
-// headline/display/display-lg). Stock tailwind-merge only knows the
-// built-in scale (xs/sm/base/...), so it treats e.g. `text-label` and
-// `text-amber-700` as two conflicting `text-*` utilities and SILENTLY
-// DROPS `text-label` — leaving the element at the browser-default 16px.
-// That made every pill/badge that combined a custom size with a text
-// colour via cn() render huge (the recurring "pill fonts are huge" bug).
-// Teach tailwind-merge the custom font-size keys so size + colour coexist.
-const twMerge = extendTailwindMerge({
-  extend: {
-    classGroups: {
-      'font-size': [
-        {
-          text: ['label', 'body', 'title', 'headline', 'display', 'display-lg']
-        }
-      ]
-    }
-  }
-});
-
+// NOTE: stock tailwind-merge (not extended). An earlier attempt to teach
+// it the custom font-size tokens (text-label/title/...) was correct in
+// isolation but had APP-WIDE blast radius: dozens of components had been
+// silently rendering a dropped custom size at the 16px browser default
+// for months, and "fixing" the merge made every one of them snap to its
+// real (smaller) size at once — the whole UI looked tiny. We do NOT make
+// global cn() changes to solve local sizing. Components that must combine
+// a custom size with a text-colour use an arbitrary-value size class
+// (e.g. text-[0.6875rem]), which stock tailwind-merge keeps alongside the
+// colour. See badge.js / TenantListItem pills.
 export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }

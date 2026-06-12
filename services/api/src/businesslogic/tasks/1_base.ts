@@ -90,23 +90,36 @@ export type ExpenseBreakdownRow = {
   recipient: 'renter' | 'owner';
   recipientName: string | null;
   amount: number;
-  // Human-readable "how this share was computed" so the landlord can see
-  // the πράξη υπολογισμού per unit (e.g. "by surface: 80m² / 200m² × 120").
-  basis: string;
+  // Structured "how this share was computed" (πράξη υπολογισμού); the
+  // frontend renders it via i18n. See ShareBasis.
+  basis: ShareBasis;
   // For owner (vacant) rows: true when the expense has
   // chargeOwnerWhenVacant — the share is BILLED to the owner; false when
   // it is simply uncollected. Undefined for renter rows.
   ownerBilled?: boolean;
 };
 
-// Build a short explanation of how a unit's share was derived for a given
-// allocation method. Mirrors the formulas in _computeBuildingChargeRaw.
-function _shareBasis(
-  building: any,
-  unit: any,
-  expense: any,
-  total: number
-): string {
+// Build a STRUCTURED explanation of how a unit's share was derived. The
+// frontend renders it via i18n (the old free-text string leaked English
+// words like "units" into the Greek UI). `kind` selects the template;
+// `share`/`whole`/`part`/`total` fill its numbers.
+export type ShareBasis = {
+  kind:
+    | 'equal'
+    | 'surface'
+    | 'thousandths'
+    | 'fixed'
+    | 'single_unit'
+    | 'custom_ratio'
+    | 'custom_percentage'
+    | 'none';
+  count?: number; // equal: number of units
+  part?: number; // surface m² / thousandths ‰ for this unit
+  whole?: number; // total surface / total thousandths
+  total?: number; // the expense amount being split
+};
+
+function _shareBasis(building: any, unit: any, expense: any, total: number): ShareBasis {
   const method = expense.allocationMethod || 'equal';
   const managed = (building.units || []).filter((u: any) => u.propertyId);
   const fmt = (n: number) => Math.round(n * 100) / 100;
@@ -116,7 +129,7 @@ function _shareBasis(
         (s: number, u: any) => s + (Number(u.surface) || 0),
         0
       );
-      return `${fmt(unit.surface || 0)}m² / ${fmt(sumS)}m² × ${fmt(total)}`;
+      return { kind: 'surface', part: fmt(unit.surface || 0), whole: fmt(sumS), total: fmt(total) };
     }
     case 'general_thousandths':
     case 'heating_thousandths':
@@ -131,18 +144,20 @@ function _shareBasis(
         (s: number, u: any) => s + (Number(u[key]) || 0),
         0
       );
-      return `${fmt(unit[key] || 0)}‰ / ${fmt(sumT)}‰ × ${fmt(total)}`;
+      return { kind: 'thousandths', part: fmt(unit[key] || 0), whole: fmt(sumT), total: fmt(total) };
     }
-    case 'equal': {
-      return `${fmt(total)} / ${managed.length} units`;
-    }
+    case 'equal':
+      return { kind: 'equal', count: managed.length, total: fmt(total) };
     case 'fixed':
+      return { kind: 'fixed' };
     case 'single_unit':
+      return { kind: 'single_unit' };
     case 'custom_ratio':
+      return { kind: 'custom_ratio' };
     case 'custom_percentage':
-      return `${method}`;
+      return { kind: 'custom_percentage' };
     default:
-      return '';
+      return { kind: 'none' };
   }
 }
 
@@ -243,7 +258,9 @@ export function computeBuildingExpenseBreakdown(
         recipient,
         recipientName,
         amount: Math.round(amt * 100) / 100,
-        basis: c.repairId ? 'repair' : 'entered amount'
+        // Variable statement amounts + repair distributions are stored
+        // directly (no split formula to explain) → no calc basis.
+        basis: { kind: 'none' }
       });
     }
   }
