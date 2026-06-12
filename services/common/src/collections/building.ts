@@ -22,7 +22,15 @@ const UnitOwnerSchema = new mongoose.Schema(
 
 const MonthlyChargeSchema = new mongoose.Schema({
   term: { type: Number, required: true },
+  // `amount` is the per-unit ALLOCATED SHARE that flows into rent billing.
+  // `inputAmount` is the full statement figure the landlord typed for the
+  // expense that month (before allocation). Storing it separately lets the
+  // monthly-statement form read back the entered figure instead of summing
+  // the per-unit shares — that sum under-reports whenever a unit is vacant
+  // or a share rounds, which made repeated saves erode the amount toward
+  // zero. Nullable for legacy rows written before this field existed.
   amount: { type: Number, required: true },
+  inputAmount: { type: Number, default: null },
   description: String,
   expenseId: { type: String, default: null },
   repairId: { type: String, default: null }

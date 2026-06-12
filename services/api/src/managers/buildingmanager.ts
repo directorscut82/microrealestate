@@ -2179,6 +2179,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
           unit.monthlyCharges.push({
             term: Number(term),
             amount: Math.round(share * 100) / 100,
+            // Stamp the full entered statement figure on every per-unit
+            // share so the form can read back what the landlord typed
+            // (summing shares under-reports when a unit is vacant / a
+            // share rounds, eroding the value on re-save).
+            inputAmount: Math.round(Number(entry.amount) * 100) / 100,
             description,
             expenseId: entry.expenseId
           });
