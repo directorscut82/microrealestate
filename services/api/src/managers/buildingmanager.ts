@@ -14,6 +14,7 @@ import {
   validateAllocationValues,
   validatePercentageAllocations,
   validateRatioAllocations,
+  validateFixedAllocations,
   isValidGreekPostalCode,
   isValidIBAN,
   EXPENSE_TYPES,
@@ -2385,6 +2386,10 @@ export async function addExpense(req: Req, res: Res) {
     req.body.customAllocations,
     req.body.allocationMethod
   );
+  validateFixedAllocations(
+    req.body.customAllocations,
+    req.body.allocationMethod
+  );
   validateArrayMaxLength(req.body.customAllocations, 200, 'customAllocations');
 
   const building = await Collections.Building.findOne({
@@ -2476,6 +2481,10 @@ export async function updateExpense(req: Req, res: Res) {
       req.body.allocationMethod
     );
     validateRatioAllocations(
+      req.body.customAllocations,
+      req.body.allocationMethod
+    );
+    validateFixedAllocations(
       req.body.customAllocations,
       req.body.allocationMethod
     );
@@ -2922,6 +2931,29 @@ async function _distributeRepairCharge(
   const buildingObj = building.toObject ? building.toObject() : building;
   await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
 
+  // Which units are occupied for the charge term. A repair share for a
+  // VACANT unit must NOT be written as a tenant monthlyCharge — that gets
+  // stranded (no rent term exists for a unit with no tenant that month, so
+  // it bills nobody and silently vanishes). Instead it goes to the owner
+  // ledger, like the vacant-owner-expense path. This is the fix for the
+  // "repair charged to a tenant who left before the charge term vanishes".
+  const occupiedForRepair = await _occupiedPropertyIdsForTerm(
+    building,
+    realmId,
+    term
+  );
+  // Strip prior owner-side repair-vacant entries for this repair+term so a
+  // re-distribution (edit / occupancy change) doesn't accumulate.
+  const staleRepairVacant = ((building as any).ownerMonthlyExpenses || []).filter(
+    (e: any) =>
+      e.source === 'vacant' &&
+      String(e.expenseId) === repairIdStr &&
+      Number(e.term) === term
+  );
+  for (const e of staleRepairVacant) {
+    (building as any).ownerMonthlyExpenses.pull(e._id);
+  }
+
   // Tier I-3.c: when affectedUnitIds is set, restrict the distribution to
   // only those unit ids. Otherwise spread across all units (legacy).
   // affectedUnitIds is a list of unit subdoc _ids — match against
@@ -2972,12 +3004,27 @@ async function _distributeRepairCharge(
     }
 
     if (share > 0) {
-      unit.monthlyCharges.push({
-        term,
-        amount: Math.round(share * 100) / 100,
-        description: `Repair: ${repair.title}`,
-        repairId: repairIdStr
-      });
+      if (occupiedForRepair.has(String(unit.propertyId))) {
+        // Occupied this term → bill the tenant via a monthlyCharge.
+        unit.monthlyCharges.push({
+          term,
+          amount: Math.round(share * 100) / 100,
+          description: `Repair: ${repair.title}`,
+          repairId: repairIdStr
+        });
+      } else {
+        // VACANT this term → the tenant share would be stranded (no rent
+        // term to attach to). Route it to the owner ledger so the repair
+        // cost lands somewhere instead of vanishing.
+        (building as any).ownerMonthlyExpenses.push({
+          expenseId: repairIdStr,
+          term,
+          amount: Math.round(share * 100) / 100,
+          propertyId: String(unit.propertyId),
+          source: 'vacant',
+          description: 'Repair: ' + (repair.title || repair.description || 'untitled')
+        });
+      }
     }
   }
 
@@ -3006,28 +3053,17 @@ async function _distributeRepairCharge(
 // non-terminated tenant's lease window (and per-property window) covers T.
 // We resolve that from the realm's tenants rather than units[].tenant
 // (which is any-linked, not term-aware).
-async function _recomputeVacantOwnerCharges(
+// Resolve which of a building's unit propertyIds are OCCUPIED for a term:
+// a propertyId is occupied when a tenant's lease window (clamped by
+// terminationDate) AND the per-property entry/exit window both cover the
+// term (compared at YYYYMM granularity). Shared by vacant-owner billing
+// and repair distribution so "is this unit vacant this month" is computed
+// one way everywhere.
+async function _occupiedPropertyIdsForTerm(
   building: any,
   realmId: string,
   term: number
-): Promise<void> {
-  const expenses = (building.expenses || []) as any[];
-  const optInExpenses = expenses.filter(
-    (e) => e.chargeOwnerWhenVacant && isExpenseActiveForTerm(e, term)
-  );
-
-  // Strip prior vacant entries for this term — full re-derive.
-  const stale = (building.ownerMonthlyExpenses || []).filter(
-    (e: any) => e.source === 'vacant' && Number(e.term) === term
-  );
-  for (const e of stale) building.ownerMonthlyExpenses.pull(e._id);
-
-  if (optInExpenses.length === 0) {
-    return; // nothing opts in; prior entries (if any) already stripped
-  }
-
-  // Determine per-term occupancy: collect propertyIds covered by an active
-  // tenant lease for this term.
+): Promise<Set<string>> {
   const ymTerm = Math.floor(term / 10000);
   const toYM = (d: any): number | null => {
     if (!d) return null;
@@ -3056,6 +3092,30 @@ async function _recomputeVacantOwnerCharges(
       occupied.add(String(tp.propertyId));
     }
   }
+  return occupied;
+}
+
+async function _recomputeVacantOwnerCharges(
+  building: any,
+  realmId: string,
+  term: number
+): Promise<void> {
+  const expenses = (building.expenses || []) as any[];
+  const optInExpenses = expenses.filter(
+    (e) => e.chargeOwnerWhenVacant && isExpenseActiveForTerm(e, term)
+  );
+
+  // Strip prior vacant entries for this term — full re-derive.
+  const stale = (building.ownerMonthlyExpenses || []).filter(
+    (e: any) => e.source === 'vacant' && Number(e.term) === term
+  );
+  for (const e of stale) building.ownerMonthlyExpenses.pull(e._id);
+
+  if (optInExpenses.length === 0) {
+    return; // nothing opts in; prior entries (if any) already stripped
+  }
+
+  const occupied = await _occupiedPropertyIdsForTerm(building, realmId, term);
 
   // For each opt-in expense, write each vacant unit's share to the owner.
   const buildingObj = building.toObject ? building.toObject() : building;

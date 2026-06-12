@@ -2,7 +2,7 @@
 jest.mock('winston');
 jest.mock('express-winston');
 
-import { sanitizeMongoObject, validateAllocationValues, validateEnum, validateFiniteNumber, validateObjectId, validatePercentageAllocations, validateRatioAllocations, validateStringLength, validateTerm } from '../validators.js';
+import { sanitizeMongoObject, validateAllocationValues, validateEnum, validateFiniteNumber, validateFixedAllocations, validateObjectId, validatePercentageAllocations, validateRatioAllocations, validateStringLength, validateTerm } from '../validators.js';
 
 describe('validators', () => {
   describe('validateObjectId', () => {
@@ -136,6 +136,30 @@ describe('validators', () => {
 
     it('should skip validation for other methods', () => {
       expect(() => validatePercentageAllocations([], 'equal')).not.toThrow();
+    });
+  });
+
+  describe('validateFixedAllocations', () => {
+    it('should pass with at least one non-zero fixed amount', () => {
+      expect(() =>
+        validateFixedAllocations([{ value: 50 }, { value: 0 }], 'fixed')
+      ).not.toThrow();
+    });
+
+    it('should throw when no allocations for fixed', () => {
+      expect(() => validateFixedAllocations([], 'fixed')).toThrow(
+        'at least one unit with a non-zero amount'
+      );
+    });
+
+    it('should throw when all fixed amounts are zero (bills nobody)', () => {
+      expect(() =>
+        validateFixedAllocations([{ value: 0 }, { value: 0 }], 'fixed')
+      ).toThrow('at least one unit with a non-zero amount');
+    });
+
+    it('should skip for other methods', () => {
+      expect(() => validateFixedAllocations([], 'equal')).not.toThrow();
     });
   });
 
