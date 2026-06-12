@@ -241,12 +241,19 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   term: { type: Number, required: true },
   amount: { type: Number, required: true },
   description: String,
+  // The vacant unit whose share this owner charge represents (source
+  // 'vacant' only). Lets the recompute replace exactly the right entries
+  // and the UI attribute the charge to a unit.
+  propertyId: { type: String, default: null },
   // Tier I-3.f: distinguishes recurring building-expense allocations from
   // owner-side repair charges so the UI / reporting can show a per-source
   // breakdown without inferring it from description text.
+  //   'vacant' = a building-expense share for a unit with no tenant this
+  //   term, routed to the owner because the expense has
+  //   chargeOwnerWhenVacant=true (otherwise the share is uncollected).
   source: {
     type: String,
-    enum: ['expense', 'repair'],
+    enum: ['expense', 'repair', 'vacant'],
     default: 'expense'
   }
 });

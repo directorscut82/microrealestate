@@ -639,10 +639,18 @@ export default function BuildingExpensePanel({ building }) {
 function ChargeBreakdown({ breakdown, t }) {
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
-  const ownerVacantRows = breakdown.rows.filter((r) => r.recipient === 'owner');
+  // Vacant-unit shares split by whether the expense routes them to the
+  // owner (chargeOwnerWhenVacant on) or leaves them uncollected.
+  const ownerBilledRows = breakdown.rows.filter(
+    (r) => r.recipient === 'owner' && r.ownerBilled
+  );
+  const ownerVacantRows = breakdown.rows.filter(
+    (r) => r.recipient === 'owner' && !r.ownerBilled
+  );
   const ownerDirect = breakdown.ownerDirect || [];
   if (
     renterRows.length === 0 &&
+    ownerBilledRows.length === 0 &&
     ownerVacantRows.length === 0 &&
     ownerDirect.length === 0
   ) {
@@ -729,6 +737,33 @@ function ChargeBreakdown({ breakdown, t }) {
               <span className="truncate mr-2">{e.expenseName}</span>
               <span className="tabular-nums whitespace-nowrap">
                 <NumberFormat value={e.amount} />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Vacant units billed TO THE OWNER (chargeOwnerWhenVacant on) */}
+      {ownerBilledRows.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-stone-line/50">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-medium text-ink-muted">
+              {t('Owner (vacant units)')}
+            </span>
+            <span className="tabular-nums font-medium">
+              <NumberFormat value={breakdown.ownerBilledTotal || 0} />
+            </span>
+          </div>
+          {ownerBilledRows.map((r, i) => (
+            <div
+              key={`ob-${i}`}
+              className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+            >
+              <span className="truncate mr-2">
+                {r.propertyName} · {r.expenseName}
+              </span>
+              <span className="tabular-nums whitespace-nowrap">
+                <NumberFormat value={r.amount} />
               </span>
             </div>
           ))}

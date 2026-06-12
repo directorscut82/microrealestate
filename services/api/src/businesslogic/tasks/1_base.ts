@@ -93,6 +93,10 @@ export type ExpenseBreakdownRow = {
   // Human-readable "how this share was computed" so the landlord can see
   // the πράξη υπολογισμού per unit (e.g. "by surface: 80m² / 200m² × 120").
   basis: string;
+  // For owner (vacant) rows: true when the expense has
+  // chargeOwnerWhenVacant — the share is BILLED to the owner; false when
+  // it is simply uncollected. Undefined for renter rows.
+  ownerBilled?: boolean;
 };
 
 // Build a short explanation of how a unit's share was derived for a given
@@ -160,7 +164,12 @@ function _shareBasis(
 export function computeBuildingExpenseBreakdown(
   building: any,
   term: number
-): { rows: ExpenseBreakdownRow[]; tenantTotal: number; ownerUnbilledTotal: number } {
+): {
+  rows: ExpenseBreakdownRow[];
+  tenantTotal: number;
+  ownerBilledTotal: number;
+  ownerUnbilledTotal: number;
+} {
   const rows: ExpenseBreakdownRow[] = [];
   const units = (building?.units || []) as any[];
   const expenses = (building?.expenses || []) as any[];
@@ -208,7 +217,10 @@ export function computeBuildingExpenseBreakdown(
         recipient,
         recipientName,
         amount: share,
-        basis: _shareBasis(building, unit, expense, total)
+        basis: _shareBasis(building, unit, expense, total),
+        ...(recipient === 'owner'
+          ? { ownerBilled: !!expense.chargeOwnerWhenVacant }
+          : {})
       });
     }
 
@@ -239,13 +251,19 @@ export function computeBuildingExpenseBreakdown(
   const tenantTotal = rows
     .filter((r) => r.recipient === 'renter')
     .reduce((s, r) => s + r.amount, 0);
+  // Owner (vacant) shares split by whether the expense bills them to the
+  // owner (chargeOwnerWhenVacant on) or leaves them uncollected (off).
+  const ownerBilledTotal = rows
+    .filter((r) => r.recipient === 'owner' && r.ownerBilled)
+    .reduce((s, r) => s + r.amount, 0);
   const ownerUnbilledTotal = rows
-    .filter((r) => r.recipient === 'owner')
+    .filter((r) => r.recipient === 'owner' && !r.ownerBilled)
     .reduce((s, r) => s + r.amount, 0);
 
   return {
     rows,
     tenantTotal: Math.round(tenantTotal * 100) / 100,
+    ownerBilledTotal: Math.round(ownerBilledTotal * 100) / 100,
     ownerUnbilledTotal: Math.round(ownerUnbilledTotal * 100) / 100
   };
 }
@@ -574,7 +592,7 @@ function _computeBuildingChargeRaw(
 }
 
 // Check if expense is active for the given term
-function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: number): boolean {
+export function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense, term: number): boolean {
   // Non-recurring expenses MUST have an explicit startTerm — without one
   // they would otherwise be treated as "active forever" by the date-range
   // checks below, which is the opposite of the intended behavior. Reject
