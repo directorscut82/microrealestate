@@ -127,6 +127,15 @@ function buildRowsForTerm(building, term, isOwnerSide) {
           hasPersisted = true;
         }
       } else {
+        // Read back the ENTERED statement figure (inputAmount), not the
+        // sum of per-unit shares. Summing shares under-reports whenever a
+        // unit is vacant or a share rounds, so re-saving the summed value
+        // eroded the amount toward zero. Every per-unit charge for this
+        // expense+term carries the same inputAmount, so take the first.
+        // Fall back to summing shares only for legacy rows written before
+        // inputAmount existed (inputAmount == null).
+        let legacyShareSum = 0;
+        let sawLegacy = false;
         for (const unit of units) {
           if (!unit.monthlyCharges) continue;
           for (const c of unit.monthlyCharges) {
@@ -135,10 +144,19 @@ function buildRowsForTerm(building, term, isOwnerSide) {
               (String(c.expenseId) === String(expense._id) ||
                 c.description === expense.name)
             ) {
-              persisted += c.amount || 0;
-              hasPersisted = true;
+              if (c.inputAmount != null) {
+                persisted = c.inputAmount;
+                hasPersisted = true;
+              } else {
+                legacyShareSum += c.amount || 0;
+                sawLegacy = true;
+              }
             }
           }
+        }
+        if (!hasPersisted && sawLegacy) {
+          persisted = legacyShareSum;
+          hasPersisted = true;
         }
       }
       rows.push({

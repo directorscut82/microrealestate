@@ -229,3 +229,59 @@ test('48.3 — the single-charge unit picker never repeats the floor/label token
     `no picker label may repeat a token across "—" (Όροφος ×3 bug). Offenders: ${JSON.stringify(repeated)}`
   ).toEqual([]);
 });
+
+test('48.4 — a saved variable amount survives reload AND a second save (no erosion to zero)', async ({
+  page
+}) => {
+  // The kymainomeno save-erosion bug: the panel used to store per-unit
+  // ALLOCATED SHARES and read them back by SUMMING — which under-reports
+  // when a unit is vacant or a share rounds, so the displayed value shrank
+  // on every reload/re-save and drifted toward zero. The fix stores the
+  // entered statement figure (inputAmount) and reads THAT back. This test
+  // drives the real save → reload → save flow and asserts the value holds.
+  await signIn(page);
+  await openExpensesTab(page, _seed!.realmName, _seed!.buildingId);
+
+  const ENTERED = '73'; // a non-round figure unlikely to coincide with a share
+
+  // Enter the amount on the variable row and save it.
+  const input = page.locator('input[type="number"]').first();
+  await expect(input).toBeVisible({ timeout: 15_000 });
+  await input.fill(ENTERED);
+  // The per-row save button is the icon button next to the input.
+  await input
+    .locator('xpath=following::button[1]')
+    .click();
+  // Wait for the save to round-trip (toast or settle).
+  await page.waitForTimeout(2500);
+
+  // Reload the page fully and reopen the tab — this is where erosion showed.
+  await openExpensesTab(page, _seed!.realmName, _seed!.buildingId);
+  await page.waitForTimeout(2500);
+  const afterReload = await page
+    .locator('input[type="number"]')
+    .first()
+    .inputValue();
+  expect(
+    Number(afterReload),
+    `entered ${ENTERED}, after reload the field shows ${afterReload} — must equal the entered amount, not an eroded share`
+  ).toBe(Number(ENTERED));
+
+  // Save a SECOND time without changing it, reload again — still holds.
+  await page
+    .locator('input[type="number"]')
+    .first()
+    .locator('xpath=following::button[1]')
+    .click();
+  await page.waitForTimeout(2500);
+  await openExpensesTab(page, _seed!.realmName, _seed!.buildingId);
+  await page.waitForTimeout(2500);
+  const afterSecond = await page
+    .locator('input[type="number"]')
+    .first()
+    .inputValue();
+  expect(
+    Number(afterSecond),
+    `after a second save+reload the field shows ${afterSecond} — must still equal ${ENTERED} (no erosion)`
+  ).toBe(Number(ENTERED));
+});
