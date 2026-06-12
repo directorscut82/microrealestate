@@ -34,4 +34,38 @@ describe('computeBuildingExpenseBreakdown', () => {
     expect(b.tenantTotal).toBe(60);        // p1 + p2 billed
     expect(b.ownerUnbilledTotal).toBe(30); // p3 vacant share evaporates
   });
+
+  // Regression for #1 (variable) + #8 (repair): a VARIABLE expense stores
+  // its amount in unit.monthlyCharges (expense.amount is 0), and a repair
+  // distribution also lands in monthlyCharges with a repairId. The old
+  // breakdown iterated building.expenses only → both were INVISIBLE. The
+  // rewrite reads monthlyCharges too.
+  it('surfaces VARIABLE statement charges and REPAIR charges from monthlyCharges', () => {
+    const b2 = {
+      _id: 'b2', name: 'B2', atakPrefix: '005578',
+      units: [
+        {
+          ...makeUnit('q1'),
+          property: { name: 'Apt Q1' },
+          tenant: { _id: 't9', name: 'Carol' },
+          monthlyCharges: [
+            // variable expense share (expenseId, no repairId)
+            { term: 2024060100, amount: 12, inputAmount: 12, description: 'Water', expenseId: 'var1' },
+            // repair distribution (repairId)
+            { term: 2024060100, amount: 40, description: 'Repair: Elevator', repairId: 'rep1' }
+          ]
+        }
+      ],
+      // var1 exists as a variable expense (amount 0 → not billed via path #1)
+      expenses: [{ _id: 'var1', name: 'Water', type: 'water_common', amount: 0, allocationMethod: 'equal', isRecurring: true, startTerm: 2024010100, customAllocations: [] }],
+      address: {}, blockStreets: [], contractors: [], repairs: [], ownerMonthlyExpenses: []
+    };
+    const r = computeBuildingExpenseBreakdown(b2, 2024060100);
+    const names = r.rows.map((x) => x.expenseName).sort();
+    expect(names).toContain('Water');          // #1 variable now visible
+    expect(names).toContain('Repair: Elevator'); // #8 repair now visible
+    // Both billed to the renter (unit has a tenant), total 52.
+    expect(r.tenantTotal).toBe(52);
+    expect(r.ownerUnbilledTotal).toBe(0);
+  });
 });

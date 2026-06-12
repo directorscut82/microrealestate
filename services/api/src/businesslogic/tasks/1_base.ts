@@ -90,8 +90,73 @@ export type ExpenseBreakdownRow = {
   recipient: 'renter' | 'owner';
   recipientName: string | null;
   amount: number;
+  // Human-readable "how this share was computed" so the landlord can see
+  // the πράξη υπολογισμού per unit (e.g. "by surface: 80m² / 200m² × 120").
+  basis: string;
 };
 
+// Build a short explanation of how a unit's share was derived for a given
+// allocation method. Mirrors the formulas in _computeBuildingChargeRaw.
+function _shareBasis(
+  building: any,
+  unit: any,
+  expense: any,
+  total: number
+): string {
+  const method = expense.allocationMethod || 'equal';
+  const managed = (building.units || []).filter((u: any) => u.propertyId);
+  const fmt = (n: number) => Math.round(n * 100) / 100;
+  switch (method) {
+    case 'by_surface': {
+      const sumS = managed.reduce(
+        (s: number, u: any) => s + (Number(u.surface) || 0),
+        0
+      );
+      return `${fmt(unit.surface || 0)}m² / ${fmt(sumS)}m² × ${fmt(total)}`;
+    }
+    case 'general_thousandths':
+    case 'heating_thousandths':
+    case 'elevator_thousandths': {
+      const key =
+        method === 'general_thousandths'
+          ? 'generalThousandths'
+          : method === 'heating_thousandths'
+            ? 'heatingThousandths'
+            : 'elevatorThousandths';
+      const sumT = managed.reduce(
+        (s: number, u: any) => s + (Number(u[key]) || 0),
+        0
+      );
+      return `${fmt(unit[key] || 0)}‰ / ${fmt(sumT)}‰ × ${fmt(total)}`;
+    }
+    case 'equal': {
+      return `${fmt(total)} / ${managed.length} units`;
+    }
+    case 'fixed':
+    case 'single_unit':
+    case 'custom_ratio':
+    case 'custom_percentage':
+      return `${method}`;
+    default:
+      return '';
+  }
+}
+
+// Authoritative per-recipient breakdown of who gets charged what for a
+// building in a given term. Reads from the SAME sources the rent engine
+// bills from, so it can never drift from the actual charges:
+//   1. Recurring / fixed building.expenses → recomputed live via
+//      computeBuildingChargeForProperty (their amount lives on the expense).
+//   2. Persisted unit.monthlyCharges → VARIABLE statement amounts AND
+//      repair distributions (their per-unit share is already stored; the
+//      expense itself carries no amount, so #1 would miss them). When a
+//      monthlyCharge carries an expenseId, it OVERRIDES the live expense
+//      for that term (mirrors 1_base's suppression to avoid double-count).
+//   3. ownerMonthlyExpenses → owner-direct + owner-portion of repairs.
+//
+// Recipient: a unit with a tenant this term → 'renter' (billed); a unit
+// with no tenant → 'owner' (currently uncollected; surfaced explicitly).
+// `building` must carry units[].property + units[].tenant + _tenantGroups.
 export function computeBuildingExpenseBreakdown(
   building: any,
   term: number
@@ -99,11 +164,34 @@ export function computeBuildingExpenseBreakdown(
   const rows: ExpenseBreakdownRow[] = [];
   const units = (building?.units || []) as any[];
   const expenses = (building?.expenses || []) as any[];
+  const expenseById = new Map(
+    expenses.map((e: any) => [String(e._id), e])
+  );
 
-  for (const expense of expenses) {
-    if (!isExpenseActiveForTerm(expense, term)) continue;
-    for (const unit of units) {
-      if (!unit.propertyId) continue;
+  for (const unit of units) {
+    if (!unit.propertyId) continue;
+    const tenant = unit.tenant || null;
+    const recipient: 'renter' | 'owner' = tenant ? 'renter' : 'owner';
+    const recipientName = tenant ? tenant.name : null;
+    const propertyName =
+      unit.property?.name || unit.name || String(unit.propertyId);
+
+    // Which expenseIds are overridden by a persisted monthlyCharge for this
+    // term — those are billed from the stored share, not recomputed.
+    const overridden = new Set<string>();
+    for (const c of unit.monthlyCharges || []) {
+      if (Number(c.term) === term && c.expenseId) {
+        overridden.add(String(c.expenseId));
+      }
+    }
+
+    // 1. Live recurring/fixed expenses (skip those overridden by a stored
+    //    monthlyCharge so we don't double-count).
+    for (const expense of expenses) {
+      if (!isExpenseActiveForTerm(expense, term)) continue;
+      if (overridden.has(String(expense._id))) continue;
+      const total = Number(expense.amount) || 0;
+      if (total <= 0) continue; // variable expenses (amount 0) come from #2
       const share = computeBuildingChargeForProperty(
         building,
         String(unit.propertyId),
@@ -111,20 +199,39 @@ export function computeBuildingExpenseBreakdown(
         term
       );
       if (share <= 0) continue;
-      // A unit is "billed to a renter" only when it carries a tenant for
-      // this term. units[].tenant is attached by _toBuildingData from the
-      // tenant whose lease references the property; treat its presence as
-      // the renter. Otherwise the share is uncollected (owner-side gap).
-      const tenant = unit.tenant || null;
       rows.push({
         expenseId: String(expense._id),
         expenseName: expense.name || '',
         allocationMethod: expense.allocationMethod || 'equal',
         propertyId: String(unit.propertyId),
-        propertyName: unit.property?.name || unit.name || String(unit.propertyId),
-        recipient: tenant ? 'renter' : 'owner',
-        recipientName: tenant ? tenant.name : null,
-        amount: share
+        propertyName,
+        recipient,
+        recipientName,
+        amount: share,
+        basis: _shareBasis(building, unit, expense, total)
+      });
+    }
+
+    // 2. Persisted per-unit monthly charges (variable statement amounts +
+    //    repair distributions). These already hold the final per-unit share.
+    for (const c of unit.monthlyCharges || []) {
+      if (Number(c.term) !== term) continue;
+      const amt = Number(c.amount) || 0;
+      if (amt <= 0) continue;
+      const srcExpense = c.expenseId
+        ? expenseById.get(String(c.expenseId))
+        : null;
+      rows.push({
+        expenseId: String(c.expenseId || c.repairId || ''),
+        expenseName:
+          c.description || srcExpense?.name || (c.repairId ? 'Repair' : ''),
+        allocationMethod: srcExpense?.allocationMethod || 'equal',
+        propertyId: String(unit.propertyId),
+        propertyName,
+        recipient,
+        recipientName,
+        amount: Math.round(amt * 100) / 100,
+        basis: c.repairId ? 'repair' : 'entered amount'
       });
     }
   }
