@@ -213,6 +213,48 @@ confirmation?) and must not reopen the re-pricing hazard the freeze closes.
 - `services/api/src/businesslogic/tasks/5_balance.ts` — already supports
   negative balance; no change needed there.
 
+## D-9 — Receipt-driven both-sides expense settlement (owner-debt batch, June 2026)
+
+**Current behavior.** The building PDF "payment receipt" flow
+(`PaymentReceiptDialog` → `confirmBillPayment` →
+`billManager.confirmPayment`, `services/api/src/managers/billmanager.ts:467`)
+only flips a standalone `Bill` document's `status` from `'pending'` to
+`'paid'`, matched purely by RF code. It is **structurally disjoint** from the
+expense ledgers: it does NOT touch `ownerMonthlyExpenses.paid`, the tenant
+`monthlyCharges` (which have no `paid` field at all), or any rent payment.
+The `Bill` collection (`services/common/src/collections/bill.ts`) references an
+expense by `expenseId`/`billingId` but has no hooks and no settlement linkage.
+
+**What the user wants (deferred).** When a κοινόχρηστα bill is split between
+renters and the owner and a receipt PDF proves the whole bill is paid, BOTH
+the owner-side charge (`ownerMonthlyExpenses`) AND the renter-side share
+should be markable paid from that one receipt (or a deliberate one-side
+choice).
+
+**Why deferred (out of scope for the owner-καταβολές batch).** Wiring this
+needs net-new infrastructure the owner-debt feature does not otherwise
+require:
+1. A `Bill → expense` join (a paid Bill has no path back to the
+   `ownerMonthlyExpenses`/`monthlyCharges` rows its `expenseId+term` generated).
+2. A **renter-side per-expense paid field** — the tenant `monthlyCharges`
+   subdoc has none today (`building.ts` MonthlyChargeSchema); the renter
+   portion only settles by paying the whole rent term in the tenant ledger.
+3. A matching policy: RF-code-only today; both-sides settlement would need
+   amount/term/expense matching and a both-vs-one-side UX choice.
+
+**Decision (June 2026):** build owner καταβολές standalone first; the owner
+ledger settles via its own payments. Receipt-driven both-sides settlement is a
+follow-on once (1) and (2) exist. A UI TODO marker sits on the building
+PDF-import / receipt surface pointing here.
+
+**Hooks.**
+- `services/api/src/managers/billmanager.ts:467` — `confirmPayment` (the
+  bill-status flip; where a fan-out to expense ledgers would hook in).
+- `services/common/src/collections/bill.ts` — `Bill` schema (needs an expense
+  back-link for D-9).
+- `services/common/src/collections/building.ts` MonthlyChargeSchema — the
+  renter-side `paid` field that does not yet exist.
+
 ---
 
 When a deferred decision becomes urgent, move it from this file to an

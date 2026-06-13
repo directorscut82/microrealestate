@@ -57,108 +57,150 @@ There is no owner PAYMENT record, no owner-level aggregation across buildings,
 no owner detail page, no owner payment dialog. The `ownerAmount` projection
 cannot be settled.
 
+## Locked decisions (user, 2026-06-13)
+
+- **Q1 — Owner-scoped payments + allocation.** A καταβολή is recorded against
+  an OWNER and split across that owner's outstanding charges (auto oldest-first
+  / specific / custom), mirroring the tenant rent payment dialog exactly.
+- **Q2 — Everything settleable.** ALL owner-borne amounts must be payable via
+  owner καταβολές — including the fixed `ownerAmount` ("Καταγραφή εξόδων
+  ιδιοκτήτη"), which today is a live projection and the ONE owner charge that
+  can't be paid. It will be MATERIALISED into a real monthly owner ledger row.
+  Repairs included.
+- **Q3 — Main landlord dashboard.** Add the esoda/eksoda summary on the right
+  with progress bars underneath, across all buildings/tenants. The owner-side
+  bar is owner-expenses paid-vs-unpaid driven by καταβολές, mirroring the
+  renter bar. ALL expenses including επισκευές.
+- **D-9 deferred** (see `documentation/DEFERRED_DECISIONS.md`): receipt-driven
+  both-sides settlement (a PDF receipt fanning "paid" to both owner AND renter
+  shares) is OUT of scope — the receipt flow is structurally disjoint
+  (`Bill.status` flip only, RF-code matched, no expense linkage) and the renter
+  side has no per-charge paid field. Owner καταβολές are built standalone; a UI
+  TODO marker points to D-9.
+
 ## Proposed design
 
 ### 1. Data model — owner payments on the ledger
 
 Add a `payments[]` array to `OwnerMonthlyExpenseSchema` (per liability row),
-mirroring the tenant payment shape:
+mirroring the persisted tenant payment shape:
 
 ```
 payments: [{
-  date: Date,
+  date: Date,            // stored DD/MM/YYYY like rents, or Date — match rents
   amount: Number,
-  type: enum ['cash','transfer','cheque'],   // reuse PAYMENT_TYPES minus levy/import
+  type: enum ['cash','transfer','cheque'],   // PAYMENT_TYPES minus levy/import
   reference: String,
   description: String
 }]
 ```
 
-Settlement is then DERIVED: `paidAmount = Σ payments.amount`,
-`outstanding = amount − paidAmount`, `paid = outstanding <= 0.005`. The existing
-`paid` boolean becomes a derived convenience (kept for the dashboard tile;
-recomputed on every payment write). This avoids a parallel truth.
+Settlement is DERIVED, not stored as truth: `paidAmount = Σ payments.amount`,
+`outstanding = amount − paidAmount`, and the existing `paid` boolean +
+`paidDate` are RECOMPUTED from payments on every write (kept so the dashboard
+tile + breakdown read a simple flag). One source of truth = the payments array.
 
-OPEN QUESTION FOR USER: allocation granularity. The tenant model allocates a
-payment across MANY owed lines (rent/charges/building/vat). An owner liability
-row is a SINGLE charge, so per-row a payment is trivially "this charge". The
-"allocation like rent" decision most likely means: at the OWNER level, a single
-payment can be split across that owner's MULTIPLE outstanding charges (across
-units/terms/buildings). That implies the payment is recorded at owner scope and
-allocated down to specific `ownerMonthlyExpenses` rows. Two model options:
+**Owner-scoped recording with allocation (Q1).** A payment is entered against
+an owner and carries `allocation:[{ownerExpenseId, amount}]` resolving to
+specific `ownerMonthlyExpenses` rows (across the owner's units/terms/buildings).
+When allocation is omitted, the server auto-spreads oldest-term-first across the
+owner's outstanding rows — mirroring `rentmanager._computeAutoSpreadLines`.
+The payment objects are pushed onto the matched rows' `payments[]` (each row
+records the slice allocated to it), so the per-row derived `paid` stays correct
+and the building document remains the single home (no new collection).
 
-- **Option A (owner-scoped payments, recommended):** a payment is recorded
-  against an OWNER (memberId/owner identity) with `allocation:[{ownerExpenseId,
-  amount}]`; the engine settles oldest-first when allocation omitted. Requires
-  resolving owner identity across buildings (units[].owners[].memberId/name).
-- **Option B (row-scoped payments):** payments attach to each
-  ownerMonthlyExpenses row; "allocation" is just which rows a lump sum covers,
-  recorded by splitting at entry time. Simpler; less like the rent dialog.
+Carry-forward note: all four owner sources already preserve `paid` across their
+rebuilds (commit `6e1fae9a`). The `payments[]` array must likewise be carried
+forward by every rebuild (`_recomputeVacantOwnerCharges`,
+`_distributeRepairCharge`, `saveMonthlyStatement`, and the new ownerAmount
+materialiser) — same snapshot-by-(expenseId|propertyId|term) pattern, extended
+to carry `payments` not just `paid`. This is a load-bearing invariant; the
+adversarial gate must probe payment-loss-on-rebuild.
 
-This is the one decision that materially changes the schema; flagged for the
-user. The rest of the design is identical either way.
+### 2. Materialise the fixed ownerAmount (Q2)
 
-### 2. Owner identity
+A new recompute (or an extension of `_recomputeVacantOwnerCharges`) writes, for
+each active month, a `source:'expense'` owner ledger row of `amount =
+expense.ownerAmount` for every expense with `trackOwnerExpense && ownerAmount>0`
+— so the fixed owner portion becomes a real, payable, settleable charge instead
+of a display-only projection. The dashboard's `fixedOwnerProrated` projection is
+then REMOVED (it would double-count once the rows exist) and the dashboard reads
+the materialised rows like every other owner charge. Idempotent strip+rebuild,
+carrying `paid`/`payments` forward.
 
-Owners are not first-class documents — they live as `units[].owners[]`
+### 3. Owner identity
+
+Owners live as `units[].owners[]`
 (`{type:'member'|'external', memberId, name, taxId, percentage, ...}`). An
-"owner" for the page = a distinct owner identity (by memberId when present,
-else by name+taxId) aggregated across every unit/building they own. The Owners
-list = that aggregation; each owner's outstanding = Σ unpaid
-ownerMonthlyExpenses across their units.
+"owner" for the page = a distinct identity (by memberId when present, else
+name+taxId) aggregated across every unit/building they own. An owner's
+outstanding = Σ (charge.amount − Σ charge.payments) across their units' ledger
+rows. Co-ownership (percentage) is a display concern for v1 (the ledger row's
+amount is the unit's whole owner share; per-owner % split is a follow-on if the
+user wants it).
 
-### 3. API
+### 4. API (mirror the rents router)
 
-- `GET /owners` — aggregated owner list (name, taxId, # units, total
-  outstanding, # buildings). Server-paginated like `/tenants`.
-- `GET /owners/:ownerKey` — one owner: their units, their ledger rows grouped
-  by building/term, their payment history.
-- `PATCH /owners/:ownerKey/payment` (or per-row) — record a payment with
-  allocation, mirroring `PATCH /rents/payment/:id/:term` semantics (replace
-  payments, `__v` lock). Recompute derived `paid`/`paidAmount`.
+- `GET /owners` — aggregated owner list (name, taxId, # units, # buildings,
+  total outstanding, total paid). Server-paginated like `/tenants`.
+- `GET /owners/:ownerKey` — one owner: units, ledger rows grouped by
+  building/term, payment history, occupancy (does this owner also RENT a unit →
+  pill).
+- `POST /owners/:ownerKey/payment` — record an owner payment with allocation,
+  mirroring `PATCH /rents/payment/:id/:term` semantics (`__v` optimistic lock;
+  recompute derived paid). Owner-scoped; the handler fans the allocation onto
+  the right buildings' `ownerMonthlyExpenses[].payments`.
 
-### 4. UI — mirror the tenant surface
+### 5. UI — mirror the tenant surface
 
 - Top-level **Owners** page (`pages/[organization]/owners/index.js`) — list with
   occupancy/status pills (owner who ALSO rents a unit gets a pill, per the
-  user's note), search + filter chips (has-outstanding / settled), reusing the
-  `ResourceList` shell.
-- Owner **detail** page (`owners/[id].js`) — owner info + ledger table grouped
-  by building/term + payment history, side cards mirroring
+  user), search + filter chips (has-outstanding / settled), reusing the
+  `ResourceList` shell exactly like `tenants/index.js`.
+- Owner **detail** page (`owners/[id].js`) — owner info + ledger grouped by
+  building/term + payment history; side cards mirroring
   RentOverviewCard/ContractOverviewCard.
 - **Payment dialog** — a parallel of `components/payment/` (PaymentTabs +
-  AllocationBlock) but for owner charges: fields date/amount/type/reference/
-  description + allocation across the owner's outstanding rows.
-- Shared: a `useFetchOwners`/restcalls additions; a `QueryKeys.OWNERS` key.
+  AllocationBlock) for owner charges: date/amount/type/reference/description +
+  allocation across the owner's outstanding rows (auto/specific/custom). A
+  shared allocation util mirroring `paymentAllocation.js` keyed by
+  `ownerExpenseId`.
+- Shared: `restcalls.js` additions (`fetchOwnersPage`, `fetchOwner`,
+  `payOwner`), a `QueryKeys.OWNERS` key.
 
-### 5. Overview wiring (the user's "extra stuff on episkopisi")
+### 6. Overview wiring (Q3)
 
-- Building Επισκόπηση: the owner paid/unpaid progress tile already exists and is
-  correct as of batch 1; verify its numbers now derive from
-  `Σ payments` not just the boolean once payments land.
-- Global/main dashboard: add the esoda/eksoda + progress-bar treatment the user
-  asked for (right side, bars underneath). Scope TBD with user.
+- **Main landlord dashboard** (the landing dashboard): add an esoda/eksoda
+  summary on the right with progress bars underneath — rent collected vs owed
+  (renter), and owner-expenses paid vs unpaid (driven by καταβολές), across all
+  buildings/tenants. Mirror the renter bar's computation for the owner bar. ALL
+  expenses incl. repairs.
+- **Building Επισκόπηση**: the owner paid/unpaid tile already exists; once
+  payments land, its `ownerPaid`/`ownerUnpaid` derive from `Σ payments` (the
+  derived paid recompute), not the lone boolean. Verify the numbers.
 
 ## Testing
 
-- jest: owner aggregation, payment settlement math (oldest-first + allocation),
-  derived paid recompute, paid-survives-rebuild (extends 49.x).
-- e2e (NAS): Owners list renders + pills; record an owner payment via the
-  dialog → mongo readback confirms payments[] + derived paid; Overview tile
-  moves by the paid amount. Non-vacuous (assert the positive + the delta).
+- jest: owner aggregation; allocation settlement math (auto oldest-first +
+  specific + custom); derived `paid`/`paidAmount` recompute; **payments survive
+  every rebuild** (extends 49.5/49.7 to cover payments, not just the flag);
+  ownerAmount materialisation is idempotent + carries payments.
+- e2e (NAS): Owners list renders + pills (owner-who-rents); record an owner
+  payment via the dialog with a specific allocation → mongo readback confirms
+  the slice landed on the right row's `payments[]` + derived paid; main
+  dashboard owner bar moves by the paid amount (value-delta, non-vacuous).
 - Adversarial refute every sub-batch before deploy (standing rule).
 
-## Risk / sequencing
+## Risk / sequencing — sub-batches, each spec→plan→ship→verify
 
-This is multi-day. Suggested sub-batches, each its own spec→plan→ship→verify:
-1. Owner payments model + settlement engine + API (no UI) — jest-provable.
-2. Owners list page + pills.
-3. Owner detail + payment dialog + allocation.
-4. Overview extras (global esoda/eksoda + bars).
+1. **Owner payments model + settlement engine + ownerAmount materialiser + API**
+   (no UI) — jest-provable, the riskiest money logic; ships + verifies first.
+2. **Owners list page + pills.**
+3. **Owner detail + payment dialog + allocation** (mirror rent dialog).
+4. **Main dashboard esoda/eksoda + owner paid/unpaid bars.**
 
-## Decisions needed from user before build
+## Follow-ons (explicitly deferred)
 
-1. **Allocation model: Option A (owner-scoped, recommended) vs B (row-scoped).**
-2. Should the unsettleable `ownerAmount` fixed projection become a real
-   materialised ledger row so it can be paid? (Currently it can't.)
-3. Global-dashboard Overview scope (what exactly goes "on the right + bars").
+- D-9 receipt-driven both-sides settlement (see DEFERRED_DECISIONS.md).
+- Per-owner percentage split of a co-owned unit's share (v1 attributes the
+  whole unit owner-share to the unit; co-owner % is display-only).
