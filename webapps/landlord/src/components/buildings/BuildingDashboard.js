@@ -465,7 +465,12 @@ export default function BuildingDashboard({ building }) {
               {t('One-time')}: <NumberFormat value={finance.oneTimeEksoda} showZero />
             </div>
             <div>
-              {t('Repairs')}: <NumberFormat value={finance.repairEksoda} showZero />
+              {/* This sums the TENANT-billed repair share (unit.monthlyCharges
+                  with a repairId). The owner-borne repair portion is counted
+                  separately under "Owner expenses". Labeling it explicitly so
+                  the two repair streams aren't conflated. */}
+              {t('Tenant repairs')}:{' '}
+              <NumberFormat value={finance.repairEksoda} showZero />
             </div>
             <div>
               {/* Popover (tap-to-open) instead of Tooltip (hover-only)

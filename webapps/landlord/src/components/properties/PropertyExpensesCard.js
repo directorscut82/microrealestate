@@ -68,6 +68,17 @@ function _resolveDescriptionKey(t, key) {
   return '';
 }
 
+// A description that is a bare id-like token ('d6aa8660a511') is meaningless
+// to a human — the expense was named with an id. Treat it as "no real name"
+// so the line falls back to its category label instead of printing the hash.
+// Mirrors expenseDisplayLabel in BuildingExpensePanel.
+function _looksLikeId(name) {
+  if (!name || typeof name !== 'string') return false;
+  const s = name.trim();
+  if (!s) return false;
+  return /^[0-9a-f]{8,}$/i.test(s) || /^[0-9a-f]{24}$/i.test(s);
+}
+
 function CategoryBreakdown({ byCategory, t }) {
   const rows = CATEGORY_KEYS.filter((k) => Number(byCategory?.[k] || 0) !== 0);
   if (!rows.length) {
@@ -140,6 +151,10 @@ function ExpenseLines({ lines, t }) {
         // resolves to the active locale. Without this, English fallback
         // strings bled into the Greek UI.
         let desc = line.description || '';
+        // An id-named expense ('d6aa8660a511') carries no human meaning —
+        // suppress it so the line shows its category ('Ύδρευση') instead of
+        // "Ύδρευση (d6aa8660a511)". Real descriptions still append.
+        if (_looksLikeId(desc)) desc = '';
         if (!desc && line.descriptionKey) {
           desc = _resolveDescriptionKey(t, line.descriptionKey);
         }

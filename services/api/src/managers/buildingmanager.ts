@@ -2295,24 +2295,139 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   // rows (showing them here too would double-count). 'repair-vacant' (a
   // vacant unit's repair share) and 'repair'/'expense' ARE owner-direct
   // liabilities not in breakdown.rows, so they belong here.
+  // ALL persisted owner liabilities for the term, EVERY source
+  // (expense / repair / vacant / repair-vacant). The UI renders these as one
+  // consolidated "Έξοδα ιδιοκτήτη" block where each row carries a paid toggle
+  // (the subdoc _id is the PATCH handle). Previously source:'vacant' was
+  // excluded here and re-derived live in breakdown.rows — but the live rows
+  // have no persisted _id, so they could not carry a paid toggle. Sourcing
+  // the whole block from the persisted ledger gives every owner liability a
+  // paid handle, which is what the landlord needs to monitor settlement.
+  // The persisted vacant rows are kept fresh by _recomputeVacantOwnerCharges
+  // (expense edits + tenant lifecycle, ±12-month window) so for the current
+  // and recent terms they equal the live computation.
+  // Validate persisted source:'vacant' rows against CURRENT live state at read
+  // time. The vacant recompute only re-derives the current term, so flipping
+  // chargeOwnerWhenVacant OFF (or an expense going inactive) leaves orphaned
+  // source:'vacant' rows for OTHER terms. If we surfaced those, the same euro
+  // would show twice — once here (owner block, "owed") and once in the live
+  // engine's Αχρέωτα "uncollected" section — with contradictory meaning
+  // (adversarial finding, June 2026 round-2). Drop a source:'vacant' row whose
+  // expense no longer exists / no longer opts in / isn't active for the term.
+  // 'repair-vacant' rows are validated against repairs separately below (they
+  // are stripped wholesale by _removeRepairCharges on cancel, so a surviving
+  // one is genuine). 'expense'/'repair' owner-direct rows are landlord-entered
+  // and always shown.
+  const liveExpenseById = new Map<string, any>(
+    ((hydrated as any).expenses || []).map((e: any) => [String(e._id), e])
+  );
   const ownerEntries = ((hydrated as any).ownerMonthlyExpenses || []).filter(
-    (e: any) => Number(e.term) === term && e.source !== 'vacant'
+    (e: any) => {
+      if (Number(e.term) !== term) return false;
+      if (e.source === 'vacant') {
+        const src = liveExpenseById.get(String(e.expenseId));
+        // Stale: source expense gone, flag turned off, or inactive this term.
+        if (!src || !src.chargeOwnerWhenVacant) return false;
+        if (!isExpenseActiveForTerm(src as any, term)) return false;
+      }
+      return true;
+    }
+  );
+  const hydratedUnits = ((hydrated as any).units || []) as any[];
+  const unitByPropId = new Map(
+    hydratedUnits
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => [String(u.propertyId), u])
   );
   const ownerDirect = ownerEntries.map((e: any) => {
+    // 'expense' source → id is a building expense; 'repair'/'repair-vacant'
+    // → id is a repair. Resolve type + a human label from the right list so
+    // an id-named row still shows its type ("Κοιν. Νερό") in the UI.
     const exp = ((hydrated as any).expenses || []).find(
       (x: any) => String(x._id) === String(e.expenseId)
     );
+    const rep =
+      !exp &&
+      ((hydrated as any).repairs || []).find(
+        (r: any) => String(r._id) === String(e.expenseId)
+      );
+    const unit = e.propertyId
+      ? unitByPropId.get(String(e.propertyId))
+      : undefined;
+    const ownerName =
+      unit &&
+      ((unit.owners || []).find((o: any) => o && o.name) || {}).name;
     return {
       // ownerExpenseId is the subdoc _id — the handle the UI PATCHes to
       // toggle paid. expenseId still points at the source expense/repair.
       ownerExpenseId: String(e._id),
       expenseId: String(e.expenseId),
-      expenseName: exp?.name || e.description || '',
+      expenseName: exp?.name || rep?.title || e.description || '',
+      // type drives the localized fallback label; repairs use 'repair'.
+      expenseType: exp?.type || (rep ? 'repair' : undefined),
+      // propertyName + ownerName so a vacant-routed / repair-vacant row says
+      // WHICH unit and WHOSE charge it is, not a bare id.
+      propertyName: unit
+        ? unit.property?.name || unit.name || String(e.propertyId)
+        : null,
+      ownerName: ownerName || null,
       amount: Math.round((Number(e.amount) || 0) * 100) / 100,
       source: e.source || 'expense',
       paid: !!e.paid
     };
   });
+  // RECONCILE the live engine's owner-BILLED vacant rows against the
+  // persisted ledger, so the owner block is COMPLETE without double-counting:
+  //
+  //  - The live engine (computeBuildingExpenseBreakdown) emits a
+  //    recipient:'owner', ownerBilled:true row for every vacant unit whose
+  //    expense has chargeOwnerWhenVacant ON — for the requested term, even
+  //    terms OUTSIDE the ±12-month recompute window that never got a persisted
+  //    source:'vacant' row.
+  //  - ownerDirect (above) already contains the PERSISTED source:'vacant'
+  //    rows (which carry the paid handle).
+  //
+  // For each live owner-billed row, if a persisted vacant row already covers
+  // the same expenseId+propertyId we DROP the live one (the persisted row is
+  // authoritative and toggle-able — prevents the double-count the adversarial
+  // review found). If NO persisted row exists (out-of-window term), we
+  // synthesize a read-only ownerDirect entry (no ownerExpenseId → no paid
+  // toggle) so the owner-billed money is still VISIBLE instead of vanishing.
+  const persistedVacantKeys = new Set(
+    ownerEntries
+      .filter((e: any) => e.source === 'vacant')
+      .map((e: any) => `${String(e.expenseId)}|${String(e.propertyId)}`)
+  );
+  const ownerBilledLive = (breakdown.rows || []).filter(
+    (r: any) => r.recipient === 'owner' && r.ownerBilled
+  );
+  for (const r of ownerBilledLive) {
+    const key = `${String(r.expenseId)}|${String(r.propertyId)}`;
+    if (persistedVacantKeys.has(key)) continue; // covered by a persisted row
+    const unit = unitByPropId.get(String(r.propertyId));
+    const ownerName =
+      unit && ((unit.owners || []).find((o: any) => o && o.name) || {}).name;
+    ownerDirect.push({
+      ownerExpenseId: null, // not persisted → read-only (no paid toggle)
+      expenseId: String(r.expenseId),
+      expenseName: r.expenseName || '',
+      expenseType: r.expenseType,
+      propertyName: r.propertyName || null,
+      ownerName: ownerName || null,
+      amount: Math.round((Number(r.amount) || 0) * 100) / 100,
+      source: 'vacant',
+      paid: false
+    });
+  }
+
+  // Strip the owner-billed live rows from `rows` before returning, so the
+  // frontend's "uncollected" filter (recipient:'owner' && !ownerBilled) is the
+  // ONLY thing left from owner rows there — owner-billed shares now live solely
+  // in ownerDirect. This removes the dual-source double-count entirely.
+  const rowsOut = (breakdown.rows || []).filter(
+    (r: any) => !(r.recipient === 'owner' && r.ownerBilled)
+  );
+
   const ownerDirectTotal =
     Math.round(
       ownerDirect.reduce((s: number, e: any) => s + e.amount, 0) * 100
@@ -2320,10 +2435,11 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
 
   return res.json({
     term,
-    rows: breakdown.rows,
+    rows: rowsOut,
     ownerDirect,
     tenantTotal: breakdown.tenantTotal,
     ownerUnbilledTotal: breakdown.ownerUnbilledTotal,
+    ownerBilledTotal: breakdown.ownerBilledTotal,
     ownerDirectTotal
   });
 }
@@ -3031,6 +3147,29 @@ async function _distributeRepairCharge(
     realmId,
     term
   );
+  // Snapshot landlord-set paid/paidDate on repair-vacant rows before the
+  // strip below regenerates them (same carry-forward rationale as
+  // _recomputeVacantOwnerCharges: `paid` is user state, the rebuild must not
+  // reset it). Keyed by propertyId+term within this repair.
+  const repairVacantPaidKey = (e: any) =>
+    `${String(e.propertyId)}|${Number(e.term)}`;
+  const priorRepairVacantPaid = new Map<
+    string,
+    { paid: boolean; paidDate: any }
+  >();
+  for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
+    if (
+      e.source === 'repair-vacant' &&
+      String(e.expenseId) === repairIdStr &&
+      e.paid
+    ) {
+      priorRepairVacantPaid.set(repairVacantPaidKey(e), {
+        paid: true,
+        paidDate: e.paidDate || null
+      });
+    }
+  }
+
   // Strip prior owner-side repair-vacant entries for this repair across ALL
   // terms (not just the current chargeTerm) so editing chargeTerm A→B does
   // not orphan the term-A row. Mirrors the source:'repair' strip above which
@@ -3110,13 +3249,19 @@ async function _distributeRepairCharge(
         // strips+rebuilds source:'vacant' rows from building.expenses only,
         // never touches it — otherwise this euro would silently disappear on
         // the next unrelated tenancy change (REPAIR-VACANT-VANISHES).
+        const restoredRV = priorRepairVacantPaid.get(
+          `${String(unit.propertyId)}|${term}`
+        );
         (building as any).ownerMonthlyExpenses.push({
           expenseId: repairIdStr,
           term,
           amount: Math.round(share * 100) / 100,
           propertyId: String(unit.propertyId),
           source: 'repair-vacant',
-          description: 'Repair: ' + (repair.title || repair.description || 'untitled')
+          description: 'Repair: ' + (repair.title || repair.description || 'untitled'),
+          // Carry the landlord's paid flag across the rebuild.
+          paid: restoredRV ? restoredRV.paid : false,
+          paidDate: restoredRV ? restoredRV.paidDate : null
         });
       }
     }
@@ -3199,6 +3344,23 @@ async function _recomputeVacantOwnerCharges(
     (e) => e.chargeOwnerWhenVacant && isExpenseActiveForTerm(e, term)
   );
 
+  // Snapshot the landlord-set `paid`/`paidDate` BEFORE stripping. These rows
+  // are strip-and-rebuilt every recompute (so the amount stays live), but
+  // `paid` is USER STATE the landlord toggled — it must survive the rebuild.
+  // Without this carry-forward, any unrelated expense edit or tenancy change
+  // silently reverted a paid vacant-owner charge to unpaid, corrupting the
+  // Overview paid/outstanding tile (adversarial finding, June 2026). Keyed by
+  // expenseId+propertyId+term — the natural identity of a vacant share (the
+  // _id is regenerated on rebuild, so it can't be the key).
+  const paidKey = (e: any) =>
+    `${String(e.expenseId)}|${String(e.propertyId)}|${Number(e.term)}`;
+  const priorPaid = new Map<string, { paid: boolean; paidDate: any }>();
+  for (const e of (building.ownerMonthlyExpenses || []) as any[]) {
+    if (e.source === 'vacant' && Number(e.term) === term && e.paid) {
+      priorPaid.set(paidKey(e), { paid: true, paidDate: e.paidDate || null });
+    }
+  }
+
   // Strip prior vacant entries for this term — full re-derive.
   const stale = (building.ownerMonthlyExpenses || []).filter(
     (e: any) => e.source === 'vacant' && Number(e.term) === term
@@ -3228,13 +3390,19 @@ async function _recomputeVacantOwnerCharges(
         term
       );
       if (share <= 0) continue;
+      const restored = priorPaid.get(
+        `${String(expense._id)}|${String(unit.propertyId)}|${term}`
+      );
       building.ownerMonthlyExpenses.push({
         expenseId: String(expense._id),
         term,
         amount: Math.round(share * 100) / 100,
         propertyId: String(unit.propertyId),
         source: 'vacant',
-        description: expense.name || ''
+        description: expense.name || '',
+        // Carry the landlord's paid flag across the rebuild (see snapshot above).
+        paid: restored ? restored.paid : false,
+        paidDate: restored ? restored.paidDate : null
       });
     }
   }

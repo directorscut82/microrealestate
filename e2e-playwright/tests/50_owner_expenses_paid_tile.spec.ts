@@ -197,12 +197,14 @@ test('50.3 — marking the unpaid charge paid in the breakdown moves the tile to
   await expect(expTab).toBeVisible({ timeout: 15_000 });
   await expTab.click();
 
-  // The breakdown's owner-direct section lists E2E50-Management (unpaid) with
-  // a checkbox. Find the row and its checkbox.
+  // The consolidated owner block lists E2E50-Management (unpaid) as a row with
+  // a labeled paid pill button ("Απλήρωτο"/"Unpaid"). The row is a flex div,
+  // not a <label>; the toggle is a <button>, not a checkbox. Find the row by
+  // its expense text, then click the pill within it.
   const mgmtRow = page
-    .locator('label')
+    .locator('div')
     .filter({ hasText: 'E2E50-Management' })
-    .first();
+    .last();
   // The breakdown only renders when the term has owner-direct rows; the
   // current term does. Wait for it.
   await expect(mgmtRow, 'unpaid owner-direct row visible in breakdown').toBeVisible({
@@ -212,8 +214,11 @@ test('50.3 — marking the unpaid charge paid in the breakdown moves the tile to
   const before = readPaidTotal();
   expect(before, 'paid total readable before toggle').toBe(PAID_AMOUNT);
 
-  // Click the checkbox inside the management row.
-  await mgmtRow.locator('button[role="checkbox"], input[type="checkbox"]').first().click();
+  // Click the paid pill (Unpaid → Paid) in the management row.
+  await mgmtRow
+    .getByRole('button', { name: /Unpaid|Απλήρωτο|Paid|Πληρωμένο/ })
+    .first()
+    .click();
 
   // Wait for the PATCH to round-trip and the mongo flag to flip.
   await expect
