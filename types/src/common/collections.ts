@@ -510,6 +510,14 @@ export namespace CollectionTypes {
     billingId?: string;
   };
 
+  export type OwnerExpensePayment = {
+    date: Date;
+    amount: number;
+    type: 'cash' | 'transfer' | 'cheque';
+    reference?: string;
+    description?: string;
+  };
+
   export type OwnerMonthlyExpense = {
     _id: string;
     expenseId: string;
@@ -525,9 +533,12 @@ export namespace CollectionTypes {
     // 'repair-vacant' = REPAIR share of a vacant unit, routed to owner
     //                   (expenseId = repair id). Distinct from 'vacant' so the
     //                   expense recompute does not strip it.
-    source?: 'expense' | 'repair' | 'vacant' | 'repair-vacant';
-    // Whether the owner has paid this owner-side charge (drives the building
-    // Overview "owner expenses paid vs unpaid" tile).
+    // 'owner-fixed'   = materialised fixed owner-only monthly amount
+    //                   (BuildingExpense.ownerAmount), payable like any other.
+    source?: 'expense' | 'repair' | 'vacant' | 'repair-vacant' | 'owner-fixed';
+    // Owner payments (καταβολές) recorded against this charge. Settlement is
+    // DERIVED from this array; `paid`/`paidDate` are a cached convenience.
+    payments?: OwnerExpensePayment[];
     paid?: boolean;
     paidDate?: Date | null;
   };

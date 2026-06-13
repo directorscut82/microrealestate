@@ -317,7 +317,13 @@ export default function BuildingDashboard({ building }) {
       //   old `source !== 'vacant'` was written before the two vacant kinds
       //   were disambiguated) dropped the vacant unit's repair cost from
       //   annualEksoda and over-reported Net (DASH-REPAIR-UNDERCOUNT).
-      .filter((e) => e.source !== 'vacant')
+      //   ALSO exclude source:'owner-fixed': the fixed owner-only amount is
+      //   materialised into owner ledger rows (per term, for settlement /
+      //   καταβολές), but the ANNUAL headline counts it via the
+      //   fixedOwnerProrated projection below — a complete projection that
+      //   does NOT depend on whether the materialiser has run for every month
+      //   of the year. Counting both would double-count.
+      .filter((e) => e.source !== 'vacant' && e.source !== 'owner-fixed')
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     // F4-buildingdash: prorate by the months the expense is actually
     // active in the current calendar year. A new owner-tracked expense
@@ -353,23 +359,40 @@ export default function BuildingDashboard({ building }) {
     const ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated;
 
     // Owner-side paid vs unpaid (current calendar year). Drives the progress
-    // tile under the income card. Only ownerMonthlyExpenses carry a `paid`
-    // flag (the landlord toggles it per row); the fixed prorated owner share
-    // is a projection, not a settleable line, so it is excluded from the
-    // paid/unpaid split but still shown in the annual total. We count the two
-    // vacant-derived sources too (a vacant unit's expense/repair share IS an
-    // owner liability) — only the building-expense 'vacant' double-count was
-    // stripped from annualEksoda, not from "what the owner still owes".
+    // tile under the income card. Settlement is DERIVED from each row's
+    // καταβολές: paidAmount = Σ payments.amount (partial payments count), and
+    // the row's outstanding = amount − paidAmount. Every owner-liability source
+    // is settleable now (expense, repair, vacant, repair-vacant, AND the
+    // materialised owner-fixed) — they all appear in the ledger and the owner
+    // pays them via owner καταβολές. ownerLedgerTotal is the sum of the rows'
+    // amounts; ownerPaid the sum of payments; ownerUnpaid the remainder.
     const ownerLedgerThisYear = (building?.ownerMonthlyExpenses || []).filter(
       (e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear
     );
-    const ownerPaid = ownerLedgerThisYear
-      .filter((e) => e.paid)
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const ownerUnpaid = ownerLedgerThisYear
-      .filter((e) => !e.paid)
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-    const ownerLedgerTotal = ownerPaid + ownerUnpaid;
+    // Per-row paid amount = Σ recorded καταβολές, OR the full amount when the
+    // row carries the manual paid flag (paid:true) with no payment record.
+    // Bridging both keeps old checkbox-marked-paid rows (paid via the now-
+    // removed breakdown toggle, flag carried forward, no payments[]) counted
+    // as paid alongside new payment-recorded settlements — no interim
+    // regression while the owner-debt tab (which records καταβολές) is built.
+    const _rowAmount = (e) => Number(e.amount) || 0;
+    const _rowPaidAmount = (e) => {
+      const fromPayments = (e.payments || []).reduce(
+        (s, p) => s + (Number(p.amount) || 0),
+        0
+      );
+      const fromFlag = e.paid ? _rowAmount(e) : 0;
+      return Math.min(Math.max(fromPayments, fromFlag), _rowAmount(e));
+    };
+    const ownerLedgerTotal = ownerLedgerThisYear.reduce(
+      (sum, e) => sum + _rowAmount(e),
+      0
+    );
+    const ownerPaid = ownerLedgerThisYear.reduce(
+      (sum, e) => sum + _rowPaidAmount(e),
+      0
+    );
+    const ownerUnpaid = Math.max(0, ownerLedgerTotal - ownerPaid);
 
     const annualEsoda = monthlyEsoda * 12;
     const annualEksoda =

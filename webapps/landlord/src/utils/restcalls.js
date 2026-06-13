@@ -8,12 +8,38 @@ export const QueryKeys = {
   DASHBOARD: 'dashboard',
   DOCUMENTS: 'documents',
   ORGANIZATIONS: 'organizations',
+  OWNERS: 'owners',
   PROPERTIES: 'properties',
   TENANTS: 'tenants',
   TEMPLATES: 'templates',
   RENTS: 'rents',
   LEASES: 'leases'
 };
+
+// Owner-debt ledger (καταβολές ιδιοκτητών). Owners are aggregated server-side
+// across buildings; their liabilities are the buildings' ownerMonthlyExpenses.
+export async function fetchOwners() {
+  const response = await apiFetcher().get('/owners');
+  return response.data;
+}
+
+export async function fetchOwner(ownerKey) {
+  const response = await apiFetcher().get(
+    `/owners/${encodeURIComponent(ownerKey)}`
+  );
+  return response.data;
+}
+
+// Record an owner καταβολή. payment = { date, amount, type, reference,
+// description, allocation?: [{ ownerExpenseId, amount }] }. Omit allocation to
+// auto-spread oldest-term-first across the owner's outstanding charges.
+export async function payOwner(ownerKey, payment) {
+  const response = await apiFetcher().post(
+    `/owners/${encodeURIComponent(ownerKey)}/payment`,
+    { payment }
+  );
+  return response.data;
+}
 
 export async function fetchDashboard() {
   const response = await apiFetcher().get('/dashboard');
