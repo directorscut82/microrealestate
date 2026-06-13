@@ -1055,6 +1055,7 @@
   "split": "Μοιρασμένο",
   "sunset": "Ηλιοβασίλεμα",
   "system": "Σύστημα",
+  "tenant": "ενοικιαστής",
   "tenant pays in advance — pick a future date (up to +7 days from today).": "Για πληρωμή που εισπράχθηκε προκαταβολικά, επιλέξτε μελλοντική ημερομηνία έως 7 ημέρες από σήμερα.",
   "tenant_address_city": "tenant.address.city",
   "tenant_address_country": "tenant.address.country",

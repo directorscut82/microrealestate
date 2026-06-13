@@ -2339,6 +2339,31 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       .filter((u: any) => u.propertyId)
       .map((u: any) => [String(u.propertyId), u])
   );
+  // Owner display name for a unit. A unit can be CO-owned (units[].owners is
+  // an array with per-owner percentage); showing only the first owner's name
+  // silently hides co-owners. Show the first named owner and, when more than
+  // one owner carries a name, append a "+N" indicator so co-ownership is
+  // visible rather than misattributed to one person.
+  const _ownerDisplayName = (unit: any): string | null => {
+    const named = ((unit?.owners || []) as any[]).filter(
+      (o: any) => o && o.name
+    );
+    if (named.length === 0) return null;
+    return named.length === 1
+      ? named[0].name
+      : `${named[0].name} +${named.length - 1}`;
+  };
+  // Index the engine's per-row ShareBasis by expenseId+propertyId so an owner
+  // row can show the SAME calculation explanation a renter row shows (e.g.
+  // "1,70 € ÷ 11 μονάδες = 0,15 €"). The basis is computed by the live engine
+  // on breakdown.rows; the persisted ownerDirect rows don't carry it, so we
+  // graft it on by matching the unit + source expense.
+  const basisByKey = new Map<string, any>();
+  for (const r of (breakdown.rows || []) as any[]) {
+    if (r.basis) {
+      basisByKey.set(`${String(r.expenseId)}|${String(r.propertyId)}`, r.basis);
+    }
+  }
   const ownerDirect = ownerEntries.map((e: any) => {
     // 'expense' source → id is a building expense; 'repair'/'repair-vacant'
     // → id is a repair. Resolve type + a human label from the right list so
@@ -2354,14 +2379,15 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
     const unit = e.propertyId
       ? unitByPropId.get(String(e.propertyId))
       : undefined;
-    const ownerName =
-      unit &&
-      ((unit.owners || []).find((o: any) => o && o.name) || {}).name;
+    const ownerName = unit ? _ownerDisplayName(unit) : null;
     return {
       // ownerExpenseId is the subdoc _id — the handle the UI PATCHes to
       // toggle paid. expenseId still points at the source expense/repair.
       ownerExpenseId: String(e._id),
       expenseId: String(e.expenseId),
+      // propertyId so the UI groups owner rows by UNIT (not by the non-unique
+      // propertyName — two same-named units must not merge into one owner).
+      propertyId: e.propertyId ? String(e.propertyId) : null,
       expenseName: exp?.name || rep?.title || e.description || '',
       // type drives the localized fallback label; repairs use 'repair'.
       expenseType: exp?.type || (rep ? 'repair' : undefined),
@@ -2372,6 +2398,13 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
         : null,
       ownerName: ownerName || null,
       amount: Math.round((Number(e.amount) || 0) * 100) / 100,
+      // Calc basis (same shape renter rows carry) so the UI can render the
+      // "÷ units = share" explanation on owner rows too. Only present for the
+      // vacant sources (an allocated share); owner-direct flat entries have
+      // none, which the UI renders as no-basis (like a manual entry).
+      basis:
+        basisByKey.get(`${String(e.expenseId)}|${String(e.propertyId)}`) ||
+        null,
       source: e.source || 'expense',
       paid: !!e.paid
     };
@@ -2405,16 +2438,17 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
     const key = `${String(r.expenseId)}|${String(r.propertyId)}`;
     if (persistedVacantKeys.has(key)) continue; // covered by a persisted row
     const unit = unitByPropId.get(String(r.propertyId));
-    const ownerName =
-      unit && ((unit.owners || []).find((o: any) => o && o.name) || {}).name;
+    const ownerName = unit ? _ownerDisplayName(unit) : null;
     ownerDirect.push({
       ownerExpenseId: null, // not persisted → read-only (no paid toggle)
       expenseId: String(r.expenseId),
+      propertyId: r.propertyId ? String(r.propertyId) : null,
       expenseName: r.expenseName || '',
       expenseType: r.expenseType,
       propertyName: r.propertyName || null,
       ownerName: ownerName || null,
       amount: Math.round((Number(r.amount) || 0) * 100) / 100,
+      basis: r.basis || null, // live row carries its own calc basis
       source: 'vacant',
       paid: false
     });

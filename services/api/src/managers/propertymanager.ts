@@ -424,6 +424,12 @@ interface ExpenseLine {
   descriptionKey?: string;
   amount: number;
   source: string;
+  // Who bears this line for THIS property: 'renter' = billed to the tenant
+  // (the unit's allocated share of a building expense / a tenant-charged
+  // repair), 'owner' = an owner-side liability attributed to this unit (a
+  // vacant/repair-vacant share routed to the owner). Lets the property tile
+  // split each category into renter-vs-owner instead of an opaque sum.
+  payer: 'renter' | 'owner';
 }
 
 function _zeroCategoryTotals(): CategoryTotals {
@@ -613,10 +619,34 @@ export async function getExpenses(req: Req, res: Res) {
           }
         }
       }
+      // DOUBLE-COUNT FIX: when this unit is vacant for the term, the expense's
+      // share is routed to the OWNER and materialised as a source:'vacant'
+      // ownerMonthlyExpense (section 3 emits it with payer:'owner'). Section 1
+      // is occupancy-blind (computeBuildingChargeForProperty returns a vacant
+      // unit's positive share by design), so without this guard the SAME euro
+      // is emitted here as payer:'renter' AND in section 3 as payer:'owner' —
+      // the property tile then showed €60 for a €30 share. Skip any expense
+      // already owned by a source:'vacant' owner row for this propertyId+term;
+      // section 3 is the single home for it (mirrors the breakdown engine's
+      // tenant ? 'renter' : 'owner' single-row decision).
+      const vacantOwnedExpenseIds = new Set<string>();
+      if (Array.isArray(building.ownerMonthlyExpenses)) {
+        for (const oe of building.ownerMonthlyExpenses as any[]) {
+          if (
+            oe.source === 'vacant' &&
+            Number(oe.term) === term &&
+            String(oe.propertyId || '') === String(propertyId) &&
+            oe.expenseId
+          ) {
+            vacantOwnedExpenseIds.add(String(oe.expenseId));
+          }
+        }
+      }
 
       for (const expense of (building.expenses || []) as any[]) {
         if (!_isExpenseActiveForTerm(expense, term)) continue;
         if (monthlyChargeExpenseIds.has(String(expense._id))) continue;
+        if (vacantOwnedExpenseIds.has(String(expense._id))) continue;
         const share = computeBuildingChargeForProperty(
           building,
           String(propertyId),
@@ -632,7 +662,12 @@ export async function getExpenses(req: Req, res: Res) {
           // possible (legacy imports). Fall back to category-as-label.
           descriptionKey: expense.name ? undefined : `category_${category}`,
           amount: share,
-          source: 'building_expense'
+          // The unit's allocated share of a building expense is billed to the
+          // tenant (renter). A vacant unit's share is excluded above (it lands
+          // in section 3 as an owner liability), so a row here is genuinely a
+          // renter charge.
+          source: 'building_expense',
+          payer: 'renter'
         };
         monthByCategory[category] += share;
         lifetimeByCategory[category] += share;
@@ -682,6 +717,9 @@ export async function getExpenses(req: Req, res: Res) {
             description: lineDescription,
             descriptionKey,
             amount,
+            // Persisted unit-level charges (tenant-charged repair share or a
+            // monthly-statement allocation) are billed to the tenant.
+            payer: 'renter',
             source: isRepair ? 'repair' : 'monthly_charge'
           };
           monthByCategory[category] += amount;
@@ -707,6 +745,19 @@ export async function getExpenses(req: Req, res: Res) {
           if (ownerEntry.term !== term) continue;
           const amount = Number(ownerEntry.amount) || 0;
           if (amount <= 0) continue;
+          // SCOPE FIX: an owner monthly expense only belongs on THIS
+          // property's tile when its propertyId matches. The vacant /
+          // repair-vacant sources carry the propertyId of the unit whose
+          // share was routed to the owner; without this guard the tile summed
+          // EVERY unit's owner charges onto every unit's page (a vacant
+          // basement's €40 share inflated each apartment's tile). Owner-direct
+          // rows (source 'expense'/'repair' from saveMonthlyStatement / the
+          // repair owner-portion) carry NO propertyId — they are building-wide
+          // owner costs, not attributable to one unit, so they are NOT shown
+          // on a single property's tile (they live on the building Έξοδα tab).
+          if (String(ownerEntry.propertyId || '') !== String(propertyId)) {
+            continue;
+          }
           let category: ExpenseCategory;
           let lineDescription = '';
           let descriptionKey: string | undefined;
@@ -742,6 +793,9 @@ export async function getExpenses(req: Req, res: Res) {
             description: lineDescription,
             descriptionKey,
             amount,
+            // An owner monthly expense scoped to this unit (vacant /
+            // repair-vacant share routed to the owner) is an OWNER liability.
+            payer: 'owner',
             source: 'owner_monthly_expense'
           };
           monthByCategory[category] += amount;
@@ -806,6 +860,8 @@ export async function getExpenses(req: Req, res: Res) {
             description: repair.title || '',
             descriptionKey: repair.title ? undefined : 'repair',
             amount: share,
+            // Owner-borne portion of a raw repair (the comment above) → owner.
+            payer: 'owner',
             source: 'repair'
           };
           monthByCategory.repairs += share;
