@@ -247,6 +247,34 @@ describe('validators', () => {
     it('should pass for undefined allocations', () => {
       expect(() => validateAllocationValues(undefined)).not.toThrow();
     });
+
+    // Round-3 adversarial finding: duplicate propertyIds let a payload pass
+    // validateFixedAllocations (which summed per-row) while the pipeline's
+    // .find() honored only the first row → silent €0. Duplicates are now
+    // rejected so validator + pipeline agree.
+    it('should throw on duplicate propertyId entries', () => {
+      expect(() =>
+        validateAllocationValues([
+          { propertyId: 'p1', value: 0.004 },
+          { propertyId: 'p1', value: 0.006 }
+        ])
+      ).toThrow('duplicate entry for propertyId');
+    });
+
+    it('should pass distinct propertyIds (no false duplicate flag)', () => {
+      expect(() =>
+        validateAllocationValues([
+          { propertyId: 'p1', value: 10 },
+          { propertyId: 'p2', value: 20 }
+        ])
+      ).not.toThrow();
+    });
+
+    it('should not treat allocations without propertyId as duplicates', () => {
+      expect(() =>
+        validateAllocationValues([{ value: 1 }, { value: 2 }])
+      ).not.toThrow();
+    });
   });
 
   describe('sanitizeMongoObject', () => {

@@ -446,6 +446,7 @@ export function validateAllocationValues(
   allocations: Array<{ propertyId?: string; value?: number }> | undefined
 ): void {
   if (!allocations) return;
+  const seenPropertyIds = new Set<string>();
   for (let i = 0; i < allocations.length; i++) {
     const a = allocations[i];
     const v = Number(a.value);
@@ -454,6 +455,23 @@ export function validateAllocationValues(
         `Allocation value at index ${i} must be a non-negative number`,
         422
       );
+    }
+    // Reject DUPLICATE propertyIds. The rent pipeline resolves a unit's share
+    // via customAllocations.find(propertyId) — it honors only the FIRST row
+    // per unit. A second row for the same unit is silently ignored by billing
+    // but WAS summed by validateFixedAllocations, so a payload like
+    // [{P,0.004},{P,0.006}] passed the >= €0.01 check yet billed €0 (the first
+    // row, 0.004, rounds to 0). Duplicates are never legitimate (the UI emits
+    // one row per unit); reject them so validator and pipeline agree.
+    if (a?.propertyId) {
+      const pid = String(a.propertyId);
+      if (seenPropertyIds.has(pid)) {
+        throw new ServiceError(
+          `customAllocations has a duplicate entry for propertyId ${pid}`,
+          422
+        );
+      }
+      seenPropertyIds.add(pid);
     }
   }
 }
