@@ -8,6 +8,7 @@ import {
 import dynamic from 'next/dynamic';
 import ExpiringLeasesTile from '../../components/dashboard/ExpiringLeasesTile';
 import GeneralFigures from '../../components/dashboard/GeneralFigures';
+import OwnerExpensesFigures from '../../components/dashboard/OwnerExpensesFigures';
 import Page from '../../components/Page';
 import PendingBills from '../../components/dashboard/PendingBills';
 import Shortcuts from '../../components/dashboard/Shortcuts';
@@ -91,10 +92,13 @@ function Dashboard() {
               className="md:col-span-3"
               dashboardData={dashboardData}
             />
-            <GeneralFigures
-              className="md:col-span-2"
-              dashboardData={dashboardData}
-            />
+            {/* Right column: overview figures + the owner-expenses paid/unpaid
+                bar (the eksoda counterpart to the rent esoda pie on the left),
+                driven by owner καταβολές across all buildings. */}
+            <div className="md:col-span-2 flex flex-col gap-4">
+              <GeneralFigures dashboardData={dashboardData} />
+              <OwnerExpensesFigures dashboardData={dashboardData} />
+            </div>
             <YearFigures
               className="md:col-span-5"
               dashboardData={dashboardData}
