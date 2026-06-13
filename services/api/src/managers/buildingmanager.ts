@@ -2273,9 +2273,11 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
 
   // Owner monthly expenses (separate stream) for this term — surfaced so
   // the breakdown also shows owner-direct charges, not only tenant shares.
-  // EXCLUDE source:'vacant' entries — those are vacant-unit shares routed
-  // to the owner and are already represented in breakdown.rows as
-  // recipient:'owner' rows (showing them here too would double-count).
+  // EXCLUDE source:'vacant' entries ONLY — those building-EXPENSE vacant
+  // shares are already represented in breakdown.rows as recipient:'owner'
+  // rows (showing them here too would double-count). 'repair-vacant' (a
+  // vacant unit's repair share) and 'repair'/'expense' ARE owner-direct
+  // liabilities not in breakdown.rows, so they belong here.
   const ownerEntries = ((hydrated as any).ownerMonthlyExpenses || []).filter(
     (e: any) => Number(e.term) === term && e.source !== 'vacant'
   );
@@ -2284,9 +2286,14 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       (x: any) => String(x._id) === String(e.expenseId)
     );
     return {
+      // ownerExpenseId is the subdoc _id — the handle the UI PATCHes to
+      // toggle paid. expenseId still points at the source expense/repair.
+      ownerExpenseId: String(e._id),
       expenseId: String(e.expenseId),
       expenseName: exp?.name || e.description || '',
-      amount: Math.round((Number(e.amount) || 0) * 100) / 100
+      amount: Math.round((Number(e.amount) || 0) * 100) / 100,
+      source: e.source || 'expense',
+      paid: !!e.paid
     };
   });
   const ownerDirectTotal =
@@ -2302,6 +2309,37 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
     ownerUnbilledTotal: breakdown.ownerUnbilledTotal,
     ownerDirectTotal
   });
+}
+
+// PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid  { paid: boolean }
+// Toggle an owner-side monthly-expense row's paid flag. Drives the Overview
+// "owner expenses paid vs unpaid" progress tile. Only the four owner-side
+// sources are togglable (every ownerMonthlyExpenses row is owner-side, so no
+// source filter is needed — but tenant-billed shares never live here). The
+// paidDate is stamped on transition to paid and cleared on un-pay.
+export async function setOwnerExpensePaid(req: Req, res: Res) {
+  const realm = req.realm;
+  const { id, ownerExpenseId } = req.params;
+  validateObjectId(ownerExpenseId, 'ownerExpenseId');
+  const paid = req.body?.paid === true;
+
+  const building = await Collections.Building.findOne({
+    _id: id,
+    realmId: realm!._id
+  });
+  _findBuilding(building, id);
+
+  const entry = (building as any).ownerMonthlyExpenses.id(ownerExpenseId);
+  if (!entry) {
+    throw new ServiceError('Owner expense entry does not exist', 404);
+  }
+  entry.paid = paid;
+  entry.paidDate = paid ? new Date() : null;
+  (building as any).updatedDate = new Date();
+  await _saveBuildingWithVersionCheck(building!);
+
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
+  return res.json(result[0]);
 }
 
 // ---------------------------------------------------------------------------
@@ -2475,20 +2513,15 @@ export async function updateExpense(req: Req, res: Res) {
     validateTerm(req.body.endTerm, 'endTerm');
   }
   validateAllocationValues(req.body.customAllocations);
-  if (req.body.allocationMethod) {
-    validatePercentageAllocations(
-      req.body.customAllocations,
-      req.body.allocationMethod
-    );
-    validateRatioAllocations(
-      req.body.customAllocations,
-      req.body.allocationMethod
-    );
-    validateFixedAllocations(
-      req.body.customAllocations,
-      req.body.allocationMethod
-    );
-  }
+  // NOTE: the method-specific allocation validators (percentage / ratio /
+  // fixed) are NOT run here. They were previously gated on
+  // `if (req.body.allocationMethod)`, which let a partial PATCH that sends
+  // only customAllocations (without echoing allocationMethod) bypass the
+  // fixed-zero guard entirely — re-opening the silent-€0 money bug on a
+  // fixed expense (FIXED-ZERO-PATCH). They now run AFTER the persisted
+  // expense is loaded, against the MERGED (effective) allocation method, so
+  // a partial PATCH is validated against the rule that will actually apply.
+  // See the validation block just after `expense` is resolved below.
 
   // Wave-18 B1: keep one-time updates aligned to YYYYMM0100 (mirror addExpense).
   if (req.body.isRecurring === false && req.body.startTerm) {
@@ -2559,6 +2592,24 @@ export async function updateExpense(req: Req, res: Res) {
   if (req.body.customAllocations !== undefined) {
     _assertCustomAllocationPropertyIds(
       building,
+      req.body.customAllocations,
+      effectiveAllocationMethod
+    );
+    // FIXED-ZERO-PATCH fix: validate the (possibly-merged) allocation rule
+    // whenever customAllocations is being written, regardless of whether the
+    // request also echoes allocationMethod. A PATCH of {customAllocations: []}
+    // or all-zero values against a persisted allocationMethod:'fixed' must
+    // 422 here — otherwise expense.set() replaces the allocations while
+    // 'fixed' stays intact and the rent pipeline bills €0 to every unit.
+    validatePercentageAllocations(
+      req.body.customAllocations,
+      effectiveAllocationMethod
+    );
+    validateRatioAllocations(
+      req.body.customAllocations,
+      effectiveAllocationMethod
+    );
+    validateFixedAllocations(
       req.body.customAllocations,
       effectiveAllocationMethod
     );
@@ -2817,11 +2868,16 @@ async function _removeRepairCharges(building: any, repair: any): Promise<void> {
   }
   // Tier I-3.f: also strip any owner-side entries this repair created so a
   // status flip to cancelled / a percentage edit / a cost change doesn't
-  // double-count on the owner ledger. Scope by expenseId === repair._id
-  // AND source === 'repair' so we never touch building-expense allocations.
+  // double-count on the owner ledger. Scope by expenseId === repair._id AND
+  // a REPAIR source ('repair' = owner-borne portion, 'repair-vacant' = a
+  // vacant unit's tenant-portion share routed to the owner) so we never touch
+  // building-expense allocations. Without the 'repair-vacant' clause a
+  // cancel/delete left that row a permanent orphan on the owner ledger.
   const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
     (e: any) =>
-      e.source === 'repair' && e.expenseId && String(e.expenseId) === repairIdStr
+      (e.source === 'repair' || e.source === 'repair-vacant') &&
+      e.expenseId &&
+      String(e.expenseId) === repairIdStr
   );
   for (const e of ownerToRemove) {
     (building as any).ownerMonthlyExpenses.pull(e._id);
@@ -2942,13 +2998,14 @@ async function _distributeRepairCharge(
     realmId,
     term
   );
-  // Strip prior owner-side repair-vacant entries for this repair+term so a
-  // re-distribution (edit / occupancy change) doesn't accumulate.
+  // Strip prior owner-side repair-vacant entries for this repair across ALL
+  // terms (not just the current chargeTerm) so editing chargeTerm A→B does
+  // not orphan the term-A row. Mirrors the source:'repair' strip above which
+  // also matches by repairId across all terms. Scoped by the distinct
+  // source:'repair-vacant' so building-EXPENSE vacant shares are untouched.
   const staleRepairVacant = ((building as any).ownerMonthlyExpenses || []).filter(
     (e: any) =>
-      e.source === 'vacant' &&
-      String(e.expenseId) === repairIdStr &&
-      Number(e.term) === term
+      e.source === 'repair-vacant' && String(e.expenseId) === repairIdStr
   );
   for (const e of staleRepairVacant) {
     (building as any).ownerMonthlyExpenses.pull(e._id);
@@ -3015,13 +3072,17 @@ async function _distributeRepairCharge(
       } else {
         // VACANT this term → the tenant share would be stranded (no rent
         // term to attach to). Route it to the owner ledger so the repair
-        // cost lands somewhere instead of vanishing.
+        // cost lands somewhere instead of vanishing. Tagged 'repair-vacant'
+        // (NOT 'vacant') so the building-expense vacant recompute, which
+        // strips+rebuilds source:'vacant' rows from building.expenses only,
+        // never touches it — otherwise this euro would silently disappear on
+        // the next unrelated tenancy change (REPAIR-VACANT-VANISHES).
         (building as any).ownerMonthlyExpenses.push({
           expenseId: repairIdStr,
           term,
           amount: Math.round(share * 100) / 100,
           propertyId: String(unit.propertyId),
-          source: 'vacant',
+          source: 'repair-vacant',
           description: 'Repair: ' + (repair.title || repair.description || 'untitled')
         });
       }
@@ -3165,9 +3226,15 @@ export async function recomputeVacantOwnerForProperties(
   });
   if (!buildings.length) return;
 
-  // Term window: 12 months back through the current month (covers
-  // already-elapsed vacant months + the current open term). Forward terms
-  // are recomputed lazily on the next expense edit / read.
+  // Term window: 12 months back through the current month PLUS a bounded
+  // forward window (now+1 .. now+12). The trailing months cover
+  // already-elapsed vacant periods + the current open term; the forward
+  // months cover a unit that goes vacant for FUTURE months (e.g. a tenant
+  // terminated with an end date months out). The previous code only iterated
+  // the trailing window and a stale comment claimed forward terms were
+  // "recomputed lazily on the next expense edit / read" — but no read path
+  // ever writes vacant-owner rows, so future vacant months were never billed
+  // to the owner (VAC-FORWARD-TERMS).
   const now = moment().startOf('month');
   const terms: number[] = [];
   for (let i = 11; i >= 0; i--) {
@@ -3175,23 +3242,35 @@ export async function recomputeVacantOwnerForProperties(
       Number(moment(now).subtract(i, 'months').format('YYYYMMDDHH'))
     );
   }
+  for (let i = 1; i <= 12; i++) {
+    terms.push(Number(moment(now).add(i, 'months').format('YYYYMMDDHH')));
+  }
 
   for (const building of buildings as any[]) {
     let changed = false;
     for (const term of terms) {
-      const before = JSON.stringify(
-        (building.ownerMonthlyExpenses || [])
-          .filter((e: any) => e.source === 'vacant' && Number(e.term) === term)
-          .map((e: any) => [String(e.expenseId), e.amount])
-          .sort()
-      );
+      // VAC-CHANGE-DETECT-EDGE: the before/after fingerprint must include
+      // propertyId. Without it, an occupancy swap between two units with an
+      // identical rounded share within a term produces before===after, so
+      // `changed` stays false and the correct in-memory mutation (which now
+      // references the OTHER unit's propertyId) is discarded. Keying on
+      // [expenseId, propertyId, amount] detects the swap.
+      const fingerprint = () =>
+        JSON.stringify(
+          (building.ownerMonthlyExpenses || [])
+            .filter(
+              (e: any) => e.source === 'vacant' && Number(e.term) === term
+            )
+            .map((e: any) => [
+              String(e.expenseId),
+              String(e.propertyId),
+              e.amount
+            ])
+            .sort()
+        );
+      const before = fingerprint();
       await _recomputeVacantOwnerCharges(building, realmId, term);
-      const after = JSON.stringify(
-        (building.ownerMonthlyExpenses || [])
-          .filter((e: any) => e.source === 'vacant' && Number(e.term) === term)
-          .map((e: any) => [String(e.expenseId), e.amount])
-          .sort()
-      );
+      const after = fingerprint();
       if (before !== after) changed = true;
     }
     if (changed) {

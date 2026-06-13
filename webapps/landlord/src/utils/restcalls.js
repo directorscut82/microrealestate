@@ -436,6 +436,16 @@ export async function fetchExpenseBreakdown(buildingId, term) {
   return response.data;
 }
 
+// Toggle an owner-side monthly-expense row's paid flag. Returns the updated
+// building so React Query can refresh the Overview paid/unpaid tile.
+export async function setOwnerExpensePaid(buildingId, ownerExpenseId, paid) {
+  const response = await apiFetcher().patch(
+    `/buildings/${buildingId}/owner-expense/${ownerExpenseId}/paid`,
+    { paid }
+  );
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // Bills
 // ---------------------------------------------------------------------------

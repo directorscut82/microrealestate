@@ -1,4 +1,6 @@
 /* eslint-env node, jest */
+// `type: module` package → `jest` is not a global under ESM; import it.
+import { jest } from '@jest/globals';
 import moment from 'moment';
 
 // We test the scanner via its dependency-injection hooks (findTenants /

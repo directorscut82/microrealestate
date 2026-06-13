@@ -710,7 +710,16 @@ export async function getExpenses(req: Req, res: Res) {
           let category: ExpenseCategory;
           let lineDescription = '';
           let descriptionKey: string | undefined;
-          if (ownerEntry.source === 'repair') {
+          if (
+            ownerEntry.source === 'repair' ||
+            ownerEntry.source === 'repair-vacant'
+          ) {
+            // Both repair sources reference a REPAIR _id in expenseId, so the
+            // building.expenses lookup misses; classify as 'repairs' directly.
+            // 'repair-vacant' = a vacant unit's tenant-portion share routed to
+            // the owner — without this branch it fell to the else-branch,
+            // looked up a repair id in building.expenses (miss → undefined →
+            // 'other'), and silently mis-bucketed the owner repair cost.
             const sourceRepair = (building.repairs || []).find(
               (r: any) => String(r._id) === String(ownerEntry.expenseId)
             );
@@ -756,6 +765,23 @@ export async function getExpenses(req: Req, res: Res) {
           for (const charge of unit.monthlyCharges as any[]) {
             if (charge.term === term && charge.repairId) {
               distributedRepairIds.add(String(charge.repairId));
+            }
+          }
+        }
+        // A repair whose cost already landed on the owner ledger (source
+        // 'repair' = owner-borne portion, 'repair-vacant' = a vacant unit's
+        // tenant share routed to the owner) was counted in section 3 above.
+        // Add its repair id here so the raw-repair fallback below does NOT
+        // count it a second time. Without this, a 100%-owner repair and a
+        // repair-vacant share were each double-counted (section 3 + section 4).
+        if (Array.isArray(building.ownerMonthlyExpenses)) {
+          for (const oe of building.ownerMonthlyExpenses as any[]) {
+            if (
+              Number(oe.term) === term &&
+              (oe.source === 'repair' || oe.source === 'repair-vacant') &&
+              oe.expenseId
+            ) {
+              distributedRepairIds.add(String(oe.expenseId));
             }
           }
         }

@@ -408,10 +408,6 @@ function _computeBuildingChargeRaw(
             )
           : normalized;
 
-        const myGroup = activeGroups.find((g: any) =>
-          (g.propertyIds || []).includes(String(propertyId))
-        );
-        if (!myGroup) return 0;
         // Carrier = the lex-min member that is ACTIVE this term, not the
         // static group lex-min. A group survives `activeGroups` if ANY
         // member is active, so a multi-unit tenant whose lex-min unit has
@@ -428,21 +424,71 @@ function _computeBuildingChargeRaw(
             )
             .map((pid: string) => String(pid))
             .sort()[0];
-        const carrier = _activeCarrier(myGroup);
-        if (!carrier || String(propertyId) !== carrier) return 0;
-        const totalGroups = activeGroups.length;
-        if (totalGroups === 0) return 0;
-        const base = Math.round((amount / totalGroups) * 100) / 100;
-        // Push rounding remainder onto the LAST group (lex-max by active
-        // carrier id) so totals reconcile (100/3 → 33.33+33.33+33.34 =
-        // 100.00). Use the same active-member carrier selection so the
-        // remainder lands on a unit that is actually billed.
-        const carriers = activeGroups
-          .map((g: any) => _activeCarrier(g))
+
+        // VAC-EQUAL-NOOP fix: a VACANT managed unit is its own equal-split
+        // PARTY, exactly like a hypothetical solo tenant occupying it. The
+        // old code counted only occupied tenant-groups toward the
+        // denominator, so a 3-unit/1-vacant building with a €90 "equal"
+        // expense billed the two remaining tenants €45 each (90/2) and the
+        // vacant unit's share returned 0 — the owner was never charged
+        // (chargeOwnerWhenVacant was a no-op for the most common method) and
+        // the renters silently absorbed the empty unit's cost. Now the
+        // vacant unit counts as a party: €90/3 = €30 each, and the vacant
+        // unit's €30 is returned so _recomputeVacantOwnerCharges can route it
+        // to the owner ledger. This mirrors the thousandths/surface methods,
+        // whose denominators already span ALL units including vacant ones.
+        const occupiedThisTerm = new Set<string>(
+          activeGroups.flatMap((g: any) =>
+            (g.propertyIds || [])
+              .filter((pid: string) =>
+                term ? _isGroupActiveForTerm(g, term, String(pid)) : true
+              )
+              .map((pid: string) => String(pid))
+          )
+        );
+        const vacantManagedIds = managedUnits
+          .map((u) => String(u.propertyId))
+          .filter((pid) => !occupiedThisTerm.has(pid));
+
+        // The queried unit's carrier identity. The discriminator is whether
+        // this propertyId is an ACTIVE member this term (occupiedThisTerm) —
+        // NOT merely whether some active group lists it. A multi-unit tenant
+        // who gave up one unit (its per-property window no longer covers the
+        // term) leaves that unit vacant even though the group is still active
+        // for the retained unit; that unit must be treated as a vacant party,
+        // not silently zeroed.
+        //   Occupied → its group's active carrier (only that one propertyId
+        //   emits the group's share; the group's other active units return 0
+        //   so a multi-unit tenant isn't double-billed).
+        //   Vacant managed → the unit is its own party carrier.
+        let myCarrier: string | undefined;
+        if (occupiedThisTerm.has(String(propertyId))) {
+          const myGroup = activeGroups.find((g: any) =>
+            (g.propertyIds || []).includes(String(propertyId))
+          );
+          myCarrier = myGroup ? _activeCarrier(myGroup) : undefined;
+          if (!myCarrier || String(propertyId) !== myCarrier) return 0;
+        } else if (vacantManagedIds.includes(String(propertyId))) {
+          myCarrier = String(propertyId);
+        } else {
+          return 0; // unmanaged / not a party this term
+        }
+
+        // All parties' carriers (one per active tenant-group + one per vacant
+        // managed unit), sorted. These are disjoint propertyIds. The rounding
+        // remainder lands on the lex-max carrier so the per-unit shares
+        // reconcile to the full amount (100/3 → 33.33+33.33+33.34 = 100.00).
+        const carriers = [
+          ...activeGroups.map((g: any) => _activeCarrier(g)),
+          ...vacantManagedIds
+        ]
           .filter(Boolean)
           .sort();
-        if (carrier === carriers[carriers.length - 1]) {
-          return Math.round((amount - base * (totalGroups - 1)) * 100) / 100;
+        const partyCount = carriers.length;
+        if (partyCount === 0) return 0;
+        const base = Math.round((amount / partyCount) * 100) / 100;
+        if (myCarrier === carriers[carriers.length - 1]) {
+          return Math.round((amount - base * (partyCount - 1)) * 100) / 100;
         }
         return base;
       }

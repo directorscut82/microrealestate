@@ -248,14 +248,36 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   // Tier I-3.f: distinguishes recurring building-expense allocations from
   // owner-side repair charges so the UI / reporting can show a per-source
   // breakdown without inferring it from description text.
-  //   'vacant' = a building-expense share for a unit with no tenant this
-  //   term, routed to the owner because the expense has
-  //   chargeOwnerWhenVacant=true (otherwise the share is uncollected).
+  //   'expense'       = a non-vacant owner-side share of a recurring building
+  //                     expense (the fixed ownerAmount path / variable owner
+  //                     entries).
+  //   'repair'        = the owner-borne portion of a repair (chargeableTo
+  //                     'owners' or the owner slice of a 'split'). expenseId
+  //                     holds the REPAIR _id.
+  //   'vacant'        = a building-EXPENSE share for a unit with no tenant
+  //                     this term, routed to the owner because the expense has
+  //                     chargeOwnerWhenVacant=true. Re-derived wholesale every
+  //                     run by _recomputeVacantOwnerCharges (which strips all
+  //                     source:'vacant' rows for the term then rebuilds them
+  //                     from building.expenses).
+  //   'repair-vacant' = the tenant-portion share of a REPAIR that fell on a
+  //                     VACANT unit (no rent term to attach a monthlyCharge
+  //                     to), routed to the owner. expenseId holds the REPAIR
+  //                     _id. MUST be a distinct source from 'vacant': the
+  //                     expense recompute would otherwise strip it (it lives
+  //                     outside building.expenses so it'd never be re-added),
+  //                     silently re-opening the "repair vanishes" bug on the
+  //                     next unrelated tenancy change.
   source: {
     type: String,
-    enum: ['expense', 'repair', 'vacant'],
+    enum: ['expense', 'repair', 'vacant', 'repair-vacant'],
     default: 'expense'
-  }
+  },
+  // Whether the owner has paid this owner-side charge. Drives the building
+  // Overview "owner expenses paid vs unpaid" progress tile. Defaults to
+  // unpaid; the landlord toggles it. paidDate is stamped when marked paid.
+  paid: { type: Boolean, default: false },
+  paidDate: { type: Date, default: null }
 });
 
 const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
