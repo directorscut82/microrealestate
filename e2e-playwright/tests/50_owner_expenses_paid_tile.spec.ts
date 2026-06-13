@@ -185,7 +185,12 @@ test('50.2 — the tile value is refetch-resilient (navigate away + back)', asyn
   ).toBeVisible();
 });
 
-test('50.3 — marking the unpaid charge paid in the breakdown moves the tile to €500 / €500', async ({
+// MOVED TO BATCH 2 (owner tab). The paid/unpaid toggle was REMOVED from the
+// building Έξοδα breakdown — owner settlement (καταβολές, paid/unpaid) now
+// lives on the dedicated owner-debt tab. The PATCH /owner-expense/:id/paid
+// endpoint + the server-side paid carry-forward remain (covered by 49.5);
+// this UI-toggle test will be re-homed against the owner tab when it ships.
+test.skip('50.3 — [moved to owner tab] marking the unpaid charge paid in the breakdown moves the tile to €500 / €500', async ({
   page
 }) => {
   // Drive the real toggle: Expenses tab → breakdown → check the unpaid row's
