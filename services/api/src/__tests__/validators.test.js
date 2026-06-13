@@ -6,7 +6,7 @@ import { jest } from '@jest/globals';
 jest.mock('winston');
 jest.mock('express-winston');
 
-import { sanitizeMongoObject, validateAllocationValues, validateEnum, validateFiniteNumber, validateFixedAllocations, validateObjectId, validatePercentageAllocations, validateRatioAllocations, validateStringLength, validateTerm } from '../validators.js';
+import { sanitizeMongoObject, validateAllocationValues, validateEnum, validateFiniteNumber, validateFixedAllocations, validateObjectId, validatePercentageAllocations, validateRatioAllocations, validateSingleUnitAllocations, validateStringLength, validateTerm } from '../validators.js';
 
 describe('validators', () => {
   describe('validateObjectId', () => {
@@ -164,6 +164,50 @@ describe('validators', () => {
 
     it('should skip for other methods', () => {
       expect(() => validateFixedAllocations([], 'equal')).not.toThrow();
+    });
+
+    // Adversarial re-verify finding: an all-sub-cent allocation set has a raw
+    // sum > 0 but every per-unit share rounds (Math.round(v*100)/100) to €0,
+    // so the expense bills nobody. The validator now sums ROUNDED shares.
+    it('should throw when every fixed value rounds to zero cents (sub-cent)', () => {
+      expect(() =>
+        validateFixedAllocations(
+          [{ value: 0.0001 }, { value: 0.004 }],
+          'fixed'
+        )
+      ).toThrow('at least one unit with a non-zero amount');
+    });
+
+    it('should pass when at least one value rounds to >= 1 cent', () => {
+      expect(() =>
+        validateFixedAllocations([{ value: 0.005 }, { value: 0 }], 'fixed')
+      ).not.toThrow();
+    });
+  });
+
+  describe('validateSingleUnitAllocations', () => {
+    it('should pass when a target propertyId is present', () => {
+      expect(() =>
+        validateSingleUnitAllocations(
+          [{ propertyId: 'p1', value: 0 }],
+          'single_unit'
+        )
+      ).not.toThrow();
+    });
+
+    it('should throw when single_unit has no target unit', () => {
+      expect(() =>
+        validateSingleUnitAllocations([], 'single_unit')
+      ).toThrow('single_unit allocation requires a target unit');
+      expect(() =>
+        validateSingleUnitAllocations([{ value: 5 }], 'single_unit')
+      ).toThrow('single_unit allocation requires a target unit');
+    });
+
+    it('should skip for other methods', () => {
+      expect(() =>
+        validateSingleUnitAllocations([], 'fixed')
+      ).not.toThrow();
     });
   });
 

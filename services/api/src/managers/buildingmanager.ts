@@ -15,6 +15,7 @@ import {
   validatePercentageAllocations,
   validateRatioAllocations,
   validateFixedAllocations,
+  validateSingleUnitAllocations,
   isValidGreekPostalCode,
   isValidIBAN,
   EXPENSE_TYPES,
@@ -664,6 +665,7 @@ export async function add(req: Req, res: Res) {
       validateFixedAllocations(e?.customAllocations, e?.allocationMethod);
       validatePercentageAllocations(e?.customAllocations, e?.allocationMethod);
       validateRatioAllocations(e?.customAllocations, e?.allocationMethod);
+      validateSingleUnitAllocations(e?.customAllocations, e?.allocationMethod);
     }
   }
 
@@ -2442,6 +2444,10 @@ export async function addExpense(req: Req, res: Res) {
     req.body.customAllocations,
     req.body.allocationMethod
   );
+  validateSingleUnitAllocations(
+    req.body.customAllocations,
+    req.body.allocationMethod
+  );
   validateArrayMaxLength(req.body.customAllocations, 200, 'customAllocations');
 
   const building = await Collections.Building.findOne({
@@ -2609,31 +2615,37 @@ export async function updateExpense(req: Req, res: Res) {
     req.body.customAllocations !== undefined
       ? req.body.customAllocations
       : (expense as any).customAllocations;
-  // Property-id validation only makes sense for NEWLY-supplied ids.
-  if (req.body.customAllocations !== undefined) {
-    _assertCustomAllocationPropertyIds(
-      building,
-      req.body.customAllocations,
-      effectiveAllocationMethod
-    );
-  }
-  // FIXED-ZERO-PATCH fix: validate the EFFECTIVE allocation rule
-  // UNCONDITIONALLY (against the merged method + merged allocations), not only
-  // when the body carries customAllocations. Two bypasses this closes:
-  //   (a) PATCH {customAllocations: []} (no allocationMethod) on a persisted
+  // Validate the EFFECTIVE allocation rule UNCONDITIONALLY (merged method +
+  // merged allocations), not only when the body carries customAllocations.
+  // Bypasses this closes:
+  //   (a) PATCH {customAllocations: []} (no allocationMethod) on a stored
   //       fixed expense — caught because effectiveMethod resolves to 'fixed'.
   //   (b) PATCH {allocationMethod: 'fixed'} with NO customAllocations key, on
   //       an expense whose stored customAllocations is empty — the method
-  //       flips to fixed while allocations stay [], so the rent pipeline bills
-  //       €0 to every unit. The old `if (customAllocations !== undefined)`
-  //       gate skipped validation entirely for this shape.
+  //       flips to fixed while allocations stay [], billing €0 every term.
+  //   (c) single_unit / fixed / custom_* expense whose referenced propertyId
+  //       was later removed (the unit deleted): a partial PATCH that omits
+  //       customAllocations used to skip the propertyId check, leaving a
+  //       well-formed expense that the pipeline matches to no unit → €0. Run
+  //       _assertCustomAllocationPropertyIds against the EFFECTIVE (persisted)
+  //       allocations so a stale target is caught even when the body doesn't
+  //       resend them.
   // Each validator is a no-op unless the effective method matches its rule.
+  _assertCustomAllocationPropertyIds(
+    building,
+    effectiveCustomAllocations,
+    effectiveAllocationMethod
+  );
   validatePercentageAllocations(
     effectiveCustomAllocations,
     effectiveAllocationMethod
   );
   validateRatioAllocations(effectiveCustomAllocations, effectiveAllocationMethod);
   validateFixedAllocations(effectiveCustomAllocations, effectiveAllocationMethod);
+  validateSingleUnitAllocations(
+    effectiveCustomAllocations,
+    effectiveAllocationMethod
+  );
 
   // Strip __v from the body before $set: never write client-provided
   // __v back. Mongoose's save() will manage it.
