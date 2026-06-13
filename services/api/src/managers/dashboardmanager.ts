@@ -566,12 +566,62 @@ export async function all(req: Req, res: Res) {
     logger.error(`Failed to fetch pending bills: ${String(error)}`);
   }
 
+  // Owner-expenses rollup (current year, across ALL buildings). Drives the
+  // dashboard "owner expenses paid vs unpaid" bar — the owner counterpart to
+  // the rent-collected-vs-owed figures. paid is derived from Σ καταβολές OR
+  // the manual paid flag (same bridge as BuildingDashboard so old
+  // checkbox-marked rows count), capped at the charge amount.
+  let ownerExpenses = { total: 0, paid: 0, outstanding: 0 };
+  try {
+    ownerExpenses = await _ownerExpensesRollup(String(realmId), now.year());
+  } catch (error) {
+    logger.error(`Failed to compute owner-expenses rollup: ${String(error)}`);
+  }
+
   res.json({
     overview,
     topUnpaid,
     revenues,
-    pendingBills
+    pendingBills,
+    ownerExpenses
   });
+}
+
+// Sum the current-year owner ledger across every building in the realm.
+// total = Σ row.amount; paid = Σ min(max(Σ payments, paid?amount:0), amount);
+// outstanding = total − paid. Mirrors BuildingDashboard's per-row derivation
+// so the dashboard bar and the building tiles agree.
+async function _ownerExpensesRollup(
+  realmId: string,
+  year: number
+): Promise<{ total: number; paid: number; outstanding: number; year: number }> {
+  const buildings: AnyRecord[] = await Collections.Building.find(
+    { realmId },
+    { ownerMonthlyExpenses: 1 }
+  ).lean();
+  let total = 0;
+  let paid = 0;
+  for (const b of buildings) {
+    for (const e of (b.ownerMonthlyExpenses || []) as AnyRecord[]) {
+      if (Math.floor(Number(e.term || 0) / 1000000) !== year) continue;
+      const amount = Number(e.amount) || 0;
+      if (!(amount > 0)) continue;
+      const fromPayments = ((e.payments || []) as AnyRecord[]).reduce(
+        (s, p) => s + (Number(p.amount) || 0),
+        0
+      );
+      const fromFlag = e.paid ? amount : 0;
+      const rowPaid = Math.min(Math.max(fromPayments, fromFlag), amount);
+      total += amount;
+      paid += rowPaid;
+    }
+  }
+  total = _round(total);
+  paid = _round(paid);
+  // Return the year the rollup actually filtered by (UTC), so the UI labels
+  // the figure with the SAME clock the data was selected on — avoids the
+  // UTC-vs-local year mismatch at the Jan-1 boundary (CLAUDE.md #1 gotcha).
+  return { total, paid, outstanding: _round(Math.max(0, total - paid)), year };
 }
 
 function _tenantName(tenant: AnyRecord): string {

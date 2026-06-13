@@ -637,4 +637,78 @@ describe('Dashboard computation logic', () => {
       expect(_tenantName({})).toBe('');
     });
   });
+
+  // Mirror of dashboardmanager._ownerExpensesRollup per-row derivation: a
+  // row's paid = min(max(Σ payments, paid?amount:0), amount), summed over the
+  // current-year owner ledger across buildings. Bridges old checkbox-paid
+  // rows + new καταβολές without double-counting or exceeding the amount.
+  describe('owner-expenses rollup math', () => {
+    const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const rowPaid = (e) => {
+      const amount = Number(e.amount) || 0;
+      const fromPayments = (e.payments || []).reduce(
+        (s, p) => s + (Number(p.amount) || 0),
+        0
+      );
+      const fromFlag = e.paid ? amount : 0;
+      return Math.min(Math.max(fromPayments, fromFlag), amount);
+    };
+    const rollup = (rows, year) => {
+      let total = 0;
+      let paid = 0;
+      for (const e of rows) {
+        if (Math.floor(Number(e.term || 0) / 1000000) !== year) continue;
+        const amount = Number(e.amount) || 0;
+        if (!(amount > 0)) continue;
+        total += amount;
+        paid += rowPaid(e);
+      }
+      total = round(total);
+      paid = round(paid);
+      return { total, paid, outstanding: round(Math.max(0, total - paid)) };
+    };
+
+    it('sums current-year rows; payment-derived paid', () => {
+      const r = rollup(
+        [
+          { term: 2026010100, amount: 100, payments: [{ amount: 100 }] },
+          { term: 2026020100, amount: 50, payments: [{ amount: 20 }] }
+        ],
+        2026
+      );
+      expect(r).toEqual({ total: 150, paid: 120, outstanding: 30 });
+    });
+    it('bridges a manual paid flag with empty payments', () => {
+      const r = rollup(
+        [{ term: 2026010100, amount: 80, paid: true, payments: [] }],
+        2026
+      );
+      expect(r).toEqual({ total: 80, paid: 80, outstanding: 0 });
+    });
+    it('caps paid at the amount (overpayment cannot inflate paid)', () => {
+      const r = rollup(
+        [{ term: 2026010100, amount: 60, payments: [{ amount: 90 }] }],
+        2026
+      );
+      expect(r).toEqual({ total: 60, paid: 60, outstanding: 0 });
+    });
+    it('excludes other-year rows', () => {
+      const r = rollup(
+        [
+          { term: 2025010100, amount: 100, payments: [{ amount: 100 }] },
+          { term: 2026010100, amount: 40, payments: [] }
+        ],
+        2026
+      );
+      expect(r).toEqual({ total: 40, paid: 0, outstanding: 40 });
+    });
+    it('payment flag OR payments, whichever is higher (no double count)', () => {
+      // paid:true AND a partial payment → counts amount once, not amount+payment
+      const r = rollup(
+        [{ term: 2026010100, amount: 100, paid: true, payments: [{ amount: 30 }] }],
+        2026
+      );
+      expect(r).toEqual({ total: 100, paid: 100, outstanding: 0 });
+    });
+  });
 });
