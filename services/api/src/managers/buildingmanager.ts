@@ -2420,14 +2420,16 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
     });
   }
 
-  // Strip the owner-billed live rows from `rows` before returning, so the
-  // frontend's "uncollected" filter (recipient:'owner' && !ownerBilled) is the
-  // ONLY thing left from owner rows there — owner-billed shares now live solely
-  // in ownerDirect. This removes the dual-source double-count entirely.
-  const rowsOut = (breakdown.rows || []).filter(
-    (r: any) => !(r.recipient === 'owner' && r.ownerBilled)
-  );
-
+  // NOTE: `rows` is returned INTACT (owner-billed rows included). The engine's
+  // row set is the authoritative breakdown; consumers that want the per-unit
+  // owner-billed shares (and the spec that asserts the equal-vacant party
+  // lands as a recipient:'owner', ownerBilled:true row) read it here. The
+  // frontend does NOT double-render: ChargeBreakdown renders the owner block
+  // from `ownerDirect` (persisted/paid-toggleable) and reads `rows` only for
+  // renter rows and the uncollected filter (recipient:'owner' && !ownerBilled),
+  // so owner-billed `rows` entries are simply not rendered there. The earlier
+  // attempt to STRIP owner-billed rows from `rows` broke that engine contract
+  // (spec 49.1) for no rendering benefit — removed.
   const ownerDirectTotal =
     Math.round(
       ownerDirect.reduce((s: number, e: any) => s + e.amount, 0) * 100
@@ -2435,7 +2437,7 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
 
   return res.json({
     term,
-    rows: rowsOut,
+    rows: breakdown.rows,
     ownerDirect,
     tenantTotal: breakdown.tenantTotal,
     ownerUnbilledTotal: breakdown.ownerUnbilledTotal,
