@@ -562,3 +562,90 @@ test('49.6 STALE-VACANT — getExpenseBreakdown drops a no-longer-opted-in sourc
     print("CLEANED");
   `);
 });
+
+test('49.7 SAVE-STATEMENT-PRESERVES-OTHER-SOURCES — POST monthly-statement strips ONLY source:expense rows (repair-vacant survives; paid carries forward)', async ({
+  request: req
+}) => {
+  // Adversarial map finding: saveMonthlyStatement (W1) stripped EVERY
+  // ownerMonthlyExpense for the term (source-blind) then re-added only the
+  // source:'expense' rows — so saving a statement DELETED the vacant /
+  // repair-vacant / repair owner charges for that term (data loss), and reset
+  // the paid flag on the expense rows. The fix scopes the strip to
+  // source:'expense' and carries paid forward.
+  //
+  // Seed: a repair-vacant row (must SURVIVE) + a paid source:'expense' row for
+  // EXPENSE2 (its paid flag must SURVIVE a re-save).
+  const EXPENSE2 = 'aa00000000000000000000e2';
+  const seeded = mongoExec(`
+    var b = db.buildings.findOne({_id: ObjectId("${BID}")});
+    if (!b) { print("NO_BLDG"); quit(); }
+    // ensure a second building expense EXPENSE2 (variable owner-tracked) exists
+    var ex = (b.expenses||[]).filter(function(e){ return String(e._id.valueOf()) !== "${EXPENSE2}"; });
+    ex.push({ _id: ObjectId("${EXPENSE2}"), name: "E2E49-OwnerVar", type: "management_fee", amount: 0, allocationMethod: "equal", isRecurring: true, startTerm: ${YEAR}010100, customAllocations: [], trackOwnerExpense: true });
+    // owner ledger: a repair-vacant row (other source) + a PAID expense row.
+    var ome = (b.ownerMonthlyExpenses||[]).filter(function(e){
+      return !(Number(e.term)===${TERM} && (String(e.expenseId)==="${REPAIR_ID}" || String(e.expenseId)==="${EXPENSE2}"));
+    });
+    ome.push({ _id: ObjectId(), expenseId: "${REPAIR_ID}", term: ${TERM}, amount: 77, propertyId: "${P3}", source: "repair-vacant", description: "Repair: E2E49-Elevator", paid: false, paidDate: null });
+    ome.push({ _id: ObjectId(), expenseId: "${EXPENSE2}", term: ${TERM}, amount: 25, source: "expense", description: "E2E49-OwnerVar", paid: true, paidDate: new Date() });
+    db.buildings.updateOne({_id: ObjectId("${BID}")}, {$set: {expenses: ex, ownerMonthlyExpenses: ome}});
+    print("SEEDED");
+  `);
+  expect(seeded && seeded.includes('SEEDED'), 'seed ok').toBeTruthy();
+
+  // POST a monthly-statement for the term that re-submits the owner-var
+  // expense (W1). Pre-fix this wiped the repair-vacant row and reset the paid.
+  const post = await req.post(
+    `${GATEWAY}/api/v2/buildings/${BID}/monthly-statement`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        organizationid: realmId,
+        'Content-Type': 'application/json'
+      },
+      data: {
+        term: TERM,
+        ownerExpenses: [
+          { expenseId: EXPENSE2, amount: 25, description: 'E2E49-OwnerVar' }
+        ]
+      }
+    }
+  );
+  expect(
+    [200, 201],
+    `monthly-statement status ${post.status()}: ${await post.text().catch(() => '')}`
+  ).toContain(post.status());
+
+  await new Promise((r) => setTimeout(r, 1500));
+
+  const after = readOwnerExpenses();
+  expect(after, 'owner expenses readable').toBeTruthy();
+  // The repair-vacant row (DIFFERENT source) MUST survive W1's strip.
+  const repairVacant = after!.find(
+    (e) =>
+      e.source === 'repair-vacant' &&
+      e.expenseId === REPAIR_ID &&
+      e.term === TERM
+  );
+  expect(
+    repairVacant,
+    'repair-vacant row MUST survive a monthly-statement save (W1 must not strip other sources)'
+  ).toBeTruthy();
+  // The source:'expense' row's paid flag MUST carry forward across the re-save.
+  const ownerVar = after!.find(
+    (e) =>
+      e.source === 'expense' && e.expenseId === EXPENSE2 && e.term === TERM
+  );
+  expect(ownerVar, 'owner-var expense row present after save').toBeTruthy();
+  expect(
+    ownerVar!.paid,
+    'paid flag on source:expense row MUST carry forward across a monthly-statement re-save'
+  ).toBe(true);
+
+  // Cleanup the seeded EXPENSE2 + its rows.
+  mongoExec(`
+    db.buildings.updateOne({_id: ObjectId("${BID}")}, {$pull: {ownerMonthlyExpenses: {expenseId: "${EXPENSE2}"}}});
+    db.buildings.updateOne({_id: ObjectId("${BID}")}, {$pull: {expenses: {_id: ObjectId("${EXPENSE2}")}}});
+    print("CLEANED");
+  `);
+});
