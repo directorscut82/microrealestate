@@ -162,6 +162,16 @@ function ExpenseLines({ lines, t }) {
           categoryLabel && desc && desc !== categoryLabel
             ? `${categoryLabel} (${desc})`
             : desc || categoryLabel || t('Other');
+        // Who bears this line — renter (billed to the tenant) vs owner (an
+        // owner-side liability attributed to this unit, e.g. a vacant-month
+        // share). Surfaced as a small tag so the user sees the split the
+        // category total is composed of, instead of an opaque sum.
+        const payerLabel =
+          line.payer === 'owner'
+            ? t('owner')
+            : line.payer === 'renter'
+              ? t('tenant')
+              : '';
         return (
           <div
             key={`${line.source}-${idx}-${line.description}`}
@@ -169,6 +179,11 @@ function ExpenseLines({ lines, t }) {
           >
             <span className="text-muted-foreground break-words min-w-0 flex-1">
               {display}
+              {payerLabel && (
+                <span className="ml-1 text-xs text-muted-foreground/60">
+                  ({payerLabel})
+                </span>
+              )}
             </span>
             <span className="shrink-0">
               <NumberFormat value={Number(line.amount || 0)} />

@@ -243,24 +243,40 @@ export default function BuildingDashboard({ building }) {
     // F2-buildingdash: gate recurring on isExpenseActiveForTerm — without
     // this, terminated expenses (endTerm < currentTerm) and not-yet-started
     // expenses (startTerm > currentTerm) inflate the headline.
+    // The effective monthly cost of an expense. For most methods this is
+    // `amount`. For a FIXED expense `amount` is 0 (it's a placeholder) and the
+    // real monthly cost is the SUM of its per-unit customAllocations — that is
+    // exactly what the rent engine bills (1_base.ts 'fixed' case returns each
+    // unit's customAllocations value). Without this, a fixed expense (e.g.
+    // Ρεύμα split €40+€10 per unit) contributed €0 to the headline and the
+    // building under-reported its annual expenses by the entire fixed cost.
+    const _expenseMonthlyCost = (e) => {
+      if (e.allocationMethod === 'fixed') {
+        return (e.customAllocations || []).reduce(
+          (s, a) => s + (Number(a.value) || 0),
+          0
+        );
+      }
+      return Number(e.amount) || 0;
+    };
     const recurringMonthlyEksoda = (building?.expenses || [])
       .filter(
         (e) =>
           (e.isRecurring ?? e.recurring) &&
-          e.amount > 0 &&
+          _expenseMonthlyCost(e) > 0 &&
           isExpenseActiveForTerm(e, currentTerm)
       )
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      .reduce((sum, e) => sum + _expenseMonthlyCost(e), 0);
     // F3-buildingdash: gate one-time expenses on currentYear — a one-time
     // expense saved in 2018 must not appear in the 2026 headline.
     const oneTimeEksoda = (building?.expenses || [])
       .filter(
         (e) =>
           !(e.isRecurring ?? e.recurring) &&
-          e.amount > 0 &&
+          _expenseMonthlyCost(e) > 0 &&
           Math.floor(Number(e.startTerm || 0) / 1000000) === currentYear
       )
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      .reduce((sum, e) => sum + _expenseMonthlyCost(e), 0);
     // Stage 1 I-3.f: tenant share of repairs is materialized as
     // unit.monthlyCharges entries (one per unit per term, repairId set).
     // F1-buildingdash: filter to currentYear charges — without this the

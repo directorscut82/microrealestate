@@ -1,8 +1,7 @@
 import {
   QueryKeys,
   fetchExpenseBreakdown,
-  saveMonthlyStatement,
-  setOwnerExpensePaid
+  saveMonthlyStatement
 } from '../../utils/restcalls';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -385,21 +384,6 @@ export default function BuildingExpensePanel({ building }) {
     }
   });
 
-  // Toggle an owner-side charge paid/unpaid. Invalidate the building +
-  // dashboard so the Overview paid/unpaid progress tile updates immediately.
-  const paidMutation = useMutation({
-    mutationFn: ({ ownerExpenseId, paid }) =>
-      setOwnerExpensePaid(building._id, ownerExpenseId, paid),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [QueryKeys.BUILDINGS, building._id]
-      });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
-      queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
-    }
-  });
-
   const handleDraftChange = useCallback((expenseId, value, isOwner) => {
     const key = `${isOwner ? 'owner' : 'tenant'}:${expenseId}`;
     dirtyKeys.current.add(key);
@@ -638,14 +622,7 @@ export default function BuildingExpensePanel({ building }) {
 
       {/* RIGHT column — who is charged (the breakdown), beside the calendar */}
       <div className="min-w-0">
-        <ChargeBreakdown
-          breakdown={breakdown}
-          t={t}
-          onTogglePaid={(ownerExpenseId, paid) =>
-            paidMutation.mutate({ ownerExpenseId, paid })
-          }
-          paidPending={paidMutation.isPending}
-        />
+        <ChargeBreakdown breakdown={breakdown} t={t} />
       </div>
     </div>
   );
@@ -752,28 +729,20 @@ function OwnerName({ name, t }) {
   );
 }
 
-function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
+function ChargeBreakdown({ breakdown, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
-  // The ONLY owner rows we still take from breakdown.rows are the UNCOLLECTED
-  // ones (vacant unit, chargeOwnerWhenVacant OFF): they are not persisted to
-  // the owner ledger (no one pays them), so they have no paid toggle and live
-  // in the warning section. Everything the owner actually OWES — owner-tracked
-  // expenses, repair owner-portions, AND vacant shares billed to the owner —
-  // now comes from breakdown.ownerDirect (persisted, paid-toggleable),
-  // consolidated into ONE block. This replaces the old three-tile sprawl.
+  // The ONLY owner rows we take from breakdown.rows are the UNCOLLECTED ones
+  // (vacant unit, chargeOwnerWhenVacant OFF) → the Αχρέωτα warning. Everything
+  // the owner is actually CHARGED — owner-tracked expenses, repair
+  // owner-portions, and vacant shares billed to the owner — comes from
+  // breakdown.ownerDirect, consolidated into one block. Settlement (paid /
+  // καταβολές) is NOT shown here; it lives on the dedicated owner tab.
   const ownerVacantRows = breakdown.rows.filter(
     (r) => r.recipient === 'owner' && !r.ownerBilled
   );
   const ownerLiabilities = breakdown.ownerDirect || [];
-  const ownerLiabilitiesTotal = ownerLiabilities.reduce(
-    (s, e) => s + (Number(e.amount) || 0),
-    0
-  );
-  const ownerPaidTotal = ownerLiabilities
-    .filter((e) => e.paid)
-    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
   const uncollectedTotal = ownerVacantRows.reduce(
     (s, r) => s + (Number(r.amount) || 0),
     0
@@ -799,13 +768,6 @@ function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
     g.items.push(r);
     g.total += r.amount;
   }
-
-  // One owner attribution name for the section header, if all liabilities
-  // share an owner (common case: single-owner building). Otherwise omit.
-  const ownerNames = Array.from(
-    new Set(ownerLiabilities.map((e) => e.ownerName).filter(Boolean))
-  );
-  const headerOwnerName = ownerNames.length === 1 ? ownerNames[0] : null;
 
   return (
     <div className="mt-4 rounded-md border border-stone-line/60 bg-muted/20 p-3">
@@ -856,77 +818,71 @@ function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
         </div>
       ))}
 
-      {/* ONE consolidated owner block. Every row is a real owner liability
-          with a labeled paid/unpaid pill. Header shows paid-vs-total so the
-          landlord can monitor settlement at a glance. */}
+      {/* ONE consolidated owner block. Grouped by property and labeled with
+          the OWNER NAME exactly like the renter rows ("property · Ιδιοκτήτης:
+          <name>"), so each owner charge is attributed to a person, not left
+          anonymous. Owner-direct rows that carry no propertyId (building-wide
+          owner costs) fall under a nameless "Owner expenses" group. NO
+          paid/settlement controls here — settlement (καταβολές, paid/unpaid)
+          lives on the dedicated owner tab. */}
       {ownerLiabilities.length > 0 && (
         <div className="mt-3 pt-2 border-t border-stone-line/50">
-          <div className="flex items-baseline justify-between text-sm mb-0.5">
-            <span className="font-medium text-ink-muted truncate mr-2">
-              {t('Owner expenses')}
-              {headerOwnerName && <OwnerName name={headerOwnerName} t={t} />}
-            </span>
-            <span className="tabular-nums font-medium whitespace-nowrap">
-              <NumberFormat value={ownerLiabilitiesTotal} />
-            </span>
+          <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
+            {t('Owner expenses')}
           </div>
-          <div className="text-xs text-muted-foreground mb-1">
-            <span className="text-olive">
-              {t('Paid')}: <NumberFormat value={ownerPaidTotal} />
-            </span>
-            {' · '}
-            <span className="text-oxide">
-              {t('Outstanding')}:{' '}
-              <NumberFormat value={ownerLiabilitiesTotal - ownerPaidTotal} />
-            </span>
-          </div>
-          {ownerLiabilities.map((e, i) => (
-            <div
-              key={`ol-${i}`}
-              className="flex items-center justify-between gap-2 text-xs pl-3 py-0.5"
-            >
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
-                {e.propertyName && (
-                  <span className="text-muted-foreground/60">
-                    {' · '}
-                    {e.propertyName}
-                  </span>
-                )}
-              </span>
-              <span
-                className={cn(
-                  'tabular-nums whitespace-nowrap',
-                  e.paid ? 'text-olive' : 'text-oxide'
-                )}
-              >
-                <NumberFormat value={e.amount} />
-              </span>
-              {/* Labeled paid pill — NOT a bare circle. One tap toggles. */}
-              {e.ownerExpenseId && onTogglePaid ? (
-                <button
-                  type="button"
-                  disabled={paidPending}
-                  onClick={() => onTogglePaid(e.ownerExpenseId, !e.paid)}
-                  className={cn(
-                    'shrink-0 rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors',
-                    e.paid
-                      ? 'border-olive/40 bg-olive/10 text-olive'
-                      : 'border-oxide/40 bg-oxide/10 text-oxide hover:bg-oxide/20',
-                    paidPending && 'opacity-50'
-                  )}
-                  aria-label={e.paid ? t('Paid') : t('Unpaid')}
-                >
-                  {e.paid ? `✓ ${t('Paid')}` : t('Unpaid')}
-                </button>
-              ) : (
-                // Synthesized (out-of-window) vacant share: not persisted, so
-                // no paid handle. Show a muted "auto" tag so the missing pill
-                // reads as intentional, not broken.
-                <span className="shrink-0 text-[0.6875rem] text-muted-foreground/50 italic">
-                  {t('auto')}
+          {Array.from(
+            // Group by propertyId (NOT the non-unique propertyName) so two
+            // same-named units never merge into one owner with a mis-summed
+            // total. propertyName/ownerName are display labels only. Rows with
+            // no propertyId (building-wide owner-direct costs) collapse under a
+            // single nameless group.
+            ownerLiabilities
+              .reduce((map, e) => {
+                const key = e.propertyId || '__nameless__';
+                if (!map.has(key)) {
+                  map.set(key, {
+                    propertyName: e.propertyName || null,
+                    ownerName: e.ownerName || null,
+                    items: [],
+                    total: 0
+                  });
+                }
+                const g = map.get(key);
+                g.items.push(e);
+                g.total += Number(e.amount) || 0;
+                if (!g.ownerName && e.ownerName) g.ownerName = e.ownerName;
+                return map;
+              }, new Map())
+              .values()
+          ).map((g, gi) => (
+            <div key={`og-${gi}`} className="mb-2 last:mb-0">
+              <div className="flex items-baseline justify-between text-sm">
+                <span className="font-medium truncate mr-2 text-ink-muted">
+                  {g.propertyName || t('Owner expenses')}
+                  <OwnerName name={g.ownerName} t={t} />
                 </span>
-              )}
+                <span className="tabular-nums font-medium whitespace-nowrap">
+                  <NumberFormat value={g.total} />
+                </span>
+              </div>
+              {g.items.map((e, ii) => (
+                <div
+                  key={`oi-${gi}-${ii}`}
+                  className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+                >
+                  <span className="truncate mr-2">
+                    {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
+                    {formatBasis(t, e.basis) && (
+                      <span className="ml-1 text-muted-foreground/60">
+                        ({formatBasis(t, e.basis)})
+                      </span>
+                    )}
+                  </span>
+                  <span className="tabular-nums whitespace-nowrap">
+                    <NumberFormat value={e.amount} />
+                  </span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

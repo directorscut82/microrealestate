@@ -334,23 +334,36 @@ async function fetchBuildingFinance(
     monthlyEsoda += tenantRentByPropertyId.get(String(pid)) || 0;
   }
 
+  // Mirror of BuildingDashboard._expenseMonthlyCost: a FIXED expense's monthly
+  // cost is the SUM of its per-unit customAllocations (its `amount` is a 0
+  // placeholder); every other method uses `amount`.
+  const expenseMonthlyCost = (e: any): number => {
+    if (e.allocationMethod === 'fixed') {
+      return (e.customAllocations || []).reduce(
+        (s: number, a: any) => s + (Number(a.value) || 0),
+        0
+      );
+    }
+    return Number(e.amount) || 0;
+  };
+
   const recurringMonthlyEksoda = (building.expenses || [])
     .filter(
       (e: any) =>
         (e.isRecurring ?? e.recurring) &&
-        Number(e.amount) > 0 &&
+        expenseMonthlyCost(e) > 0 &&
         isExpenseActive(e, currentTerm)
     )
-    .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+    .reduce((s: number, e: any) => s + expenseMonthlyCost(e), 0);
 
   const oneTimeEksoda = (building.expenses || [])
     .filter(
       (e: any) =>
         !(e.isRecurring ?? e.recurring) &&
-        Number(e.amount) > 0 &&
+        expenseMonthlyCost(e) > 0 &&
         Math.floor(Number(e.startTerm || 0) / 1000000) === currentYear
     )
-    .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+    .reduce((s: number, e: any) => s + expenseMonthlyCost(e), 0);
 
   const repairEksoda = (building.units || []).reduce((sum: number, unit: any) => {
     const charges = unit.monthlyCharges || [];
@@ -368,6 +381,10 @@ async function fetchBuildingFinance(
 
   const recordedOwnerEksoda = (building.ownerMonthlyExpenses || [])
     .filter((e: any) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
+    // Mirror production: exclude source:'vacant' (the building-expense vacant
+    // share is already counted whole in recurringMonthlyEksoda*12); keep
+    // 'repair-vacant'/'repair'/'expense' which are counted nowhere else.
+    .filter((e: any) => e.source !== 'vacant')
     .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
 
   const fixedOwnerProrated = (building.expenses || [])
@@ -863,6 +880,78 @@ test('41.9 · repair monthlyCharges spanning 18 months → repairEksoda only cur
       finance.repairEksoda,
       'F1 — must NOT equal the unfiltered 18-month sum (900)'
     ).not.toBe(900);
+  } finally {
+    await api.dispose();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 41.12 — A FIXED expense's monthly cost is the SUM of its per-unit
+//         customAllocations (its `amount` is a 0 placeholder). The headline
+//         must include it; the pre-fix code filtered `amount > 0` and so
+//         counted a fixed expense as €0, under-reporting the building's
+//         annual expenses by the entire fixed cost.
+// ---------------------------------------------------------------------------
+test('41.12 · fixed expense (amount 0, customAllocations €40+€10) counts €50/mo in headline, not €0', async () => {
+  test.setTimeout(120_000);
+  const api = await request.newContext();
+  try {
+    const base = await getBaseSeed(api);
+    const buildingId = await createFreshBuilding(api, base, 'fixed');
+    // Two managed units so the fixed allocation has real propertyIds to bind
+    // to (the validator rejects an empty/zero fixed allocation).
+    const { propertyId: p1 } = await createRentedProperty(
+      api,
+      base,
+      'fixed-u1',
+      300
+    );
+    const { propertyId: p2 } = await createRentedProperty(
+      api,
+      base,
+      'fixed-u2',
+      300
+    );
+    await addUnit(api, base, buildingId, {
+      atakNumber: 'S41-FIX-U1',
+      isManaged: true,
+      occupancyType: 'rented',
+      propertyId: p1,
+      generalThousandths: 500
+    });
+    await addUnit(api, base, buildingId, {
+      atakNumber: 'S41-FIX-U2',
+      isManaged: true,
+      occupancyType: 'rented',
+      propertyId: p2,
+      generalThousandths: 500
+    });
+    const today = new Date();
+    await addExpense(api, base, buildingId, {
+      name: `S41-FIXED-${RUN_ID}`,
+      type: 'electricity_common',
+      amount: 0, // fixed → real cost lives in customAllocations
+      allocationMethod: 'fixed',
+      isRecurring: true,
+      startTerm: yyyymmddhh(today.getFullYear() - 1, today.getMonth() + 1),
+      customAllocations: [
+        { propertyId: p1, value: 40 },
+        { propertyId: p2, value: 10 }
+      ]
+    });
+    const { finance } = await fetchBuildingFinance(api, base, buildingId);
+    expect(
+      finance.recurringMonthlyEksoda,
+      'fixed expense monthly cost = sum(customAllocations) = 40 + 10 = 50 (pre-fix: 0)'
+    ).toBe(50);
+    expect(
+      finance.annualEksoda,
+      'annualEksoda includes the fixed expense 50 × 12 = 600 (pre-fix: 0)'
+    ).toBe(600);
+    expect(
+      finance.annualEksoda,
+      'must NOT be 0 — the pre-fix amount>0 filter excluded the fixed expense entirely'
+    ).not.toBe(0);
   } finally {
     await api.dispose();
   }
