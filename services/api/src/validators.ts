@@ -401,10 +401,39 @@ export function validateFixedAllocations(
       422
     );
   }
-  const total = allocations.reduce((s, a) => s + (Number(a.value) || 0), 0);
-  if (total <= 0) {
+  // Sum the PER-UNIT ROUNDED shares, not the raw values. The rent pipeline
+  // bills each unit Math.round(value * 100) / 100, so an all-sub-cent
+  // allocation set (e.g. every value 0.0001) has a raw total > 0 yet rounds
+  // to €0 on every unit — the silent-€0 bug the raw `total <= 0` check let
+  // through. Require at least one cent of actually-billable money.
+  const billableTotal = allocations.reduce(
+    (s, a) => s + Math.round((Number(a.value) || 0) * 100) / 100,
+    0
+  );
+  if (billableTotal < 0.01) {
     throw new ServiceError(
       'fixed allocation requires at least one unit with a non-zero amount',
+      422
+    );
+  }
+}
+
+/**
+ * Validate 'single_unit' allocations: the whole expense is billed to ONE unit
+ * named in customAllocations[0].propertyId. Without a target propertyId the
+ * rent pipeline's single_unit branch (1_base.ts) matches no unit and silently
+ * bills €0 every term. The propertyId-is-in-this-building check lives in
+ * _assertCustomAllocationPropertyIds; this guards the missing/empty target.
+ */
+export function validateSingleUnitAllocations(
+  allocations: Array<{ propertyId?: string; value?: number }> | undefined,
+  allocationMethod: string
+): void {
+  if (allocationMethod !== 'single_unit') return;
+  const target = (allocations || [])[0];
+  if (!target?.propertyId) {
+    throw new ServiceError(
+      'single_unit allocation requires a target unit',
       422
     );
   }
