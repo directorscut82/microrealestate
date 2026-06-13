@@ -2220,23 +2220,53 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     }
   }
 
-  // Handle owner expenses
+  // Handle owner expenses (the landlord-typed VARIABLE owner amounts for this
+  // term → source:'expense' rows). This writer OWNS only source:'expense'
+  // rows; it must NOT touch the other sources that share the term:
+  //   - 'vacant' / 'repair-vacant' are re-derived by their own recomputes,
+  //   - 'repair' is owned by _distributeRepairCharge.
+  // The previous code stripped EVERY ownerMonthlyExpense for the term
+  // (source-blind) and re-added only the expense ones, so saving a monthly
+  // statement DELETED the vacant / repair-vacant / repair owner charges for
+  // that term (data loss). Scope the strip to source:'expense' only.
   if (ownerExpensesProvided) {
-    // Remove existing owner expenses for this term
+    // Snapshot landlord-set paid/paidDate on the expense rows before the
+    // strip+rebuild so re-saving a statement doesn't reset a paid charge to
+    // unpaid (mirrors the carry-forward in _recomputeVacantOwnerCharges /
+    // _distributeRepairCharge). Keyed by expenseId (these rows carry no
+    // propertyId; one owner-direct row per expense per term).
+    const priorExpensePaid = new Map<string, { paid: boolean; paidDate: any }>();
+    for (const e of (building as any).ownerMonthlyExpenses as any[]) {
+      const src = e.source || 'expense';
+      if (src === 'expense' && Number(e.term) === Number(term) && e.paid) {
+        priorExpensePaid.set(String(e.expenseId), {
+          paid: true,
+          paidDate: e.paidDate || null
+        });
+      }
+    }
+    // Strip ONLY source:'expense' rows for this term.
     const idsToRemove = (building as any).ownerMonthlyExpenses
-      .filter((e: any) => e.term === Number(term))
+      .filter(
+        (e: any) =>
+          (e.source || 'expense') === 'expense' && e.term === Number(term)
+      )
       .map((e: any) => e._id);
     for (const eid of idsToRemove) {
       (building as any).ownerMonthlyExpenses.pull(eid);
     }
-    // Add new owner expenses
+    // Add new owner expenses, carrying the paid flag forward.
     for (const entry of ownerExpenses) {
       if (!entry.amount || entry.amount <= 0) continue;
+      const restored = priorExpensePaid.get(String(entry.expenseId));
       (building as any).ownerMonthlyExpenses.push({
         expenseId: entry.expenseId,
         term: Number(term),
         amount: entry.amount,
-        description: entry.description || ''
+        description: entry.description || '',
+        source: 'expense',
+        paid: restored ? restored.paid : false,
+        paidDate: restored ? restored.paidDate : null
       });
     }
   }
@@ -3127,6 +3157,22 @@ async function _distributeRepairCharge(
   // Always re-derive owner-side state from scratch — strip prior entries
   // (also covered by _removeRepairCharges on cancelled, but here we cover
   // the edit path that lands a new amount/term). Scope by expenseId+source.
+  // Snapshot the landlord-set paid flag first so editing a repair doesn't
+  // reset a paid owner-portion to unpaid (mirrors the repair-vacant carry
+  // forward below). Keyed by term (one source:'repair' row per repair+term).
+  const priorRepairPaid = new Map<number, { paid: boolean; paidDate: any }>();
+  for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
+    if (
+      e.source === 'repair' &&
+      String(e.expenseId) === repairIdStr &&
+      e.paid
+    ) {
+      priorRepairPaid.set(Number(e.term), {
+        paid: true,
+        paidDate: e.paidDate || null
+      });
+    }
+  }
   const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
     (e: any) =>
       e.source === 'repair' &&
@@ -3138,13 +3184,16 @@ async function _distributeRepairCharge(
   }
 
   if (ownerPortion > 0) {
+    const restoredRepairPaid = priorRepairPaid.get(term);
     (building as any).ownerMonthlyExpenses.push({
       expenseId: repairIdStr,
       term,
       amount: Math.round(ownerPortion * 100) / 100,
       source: 'repair',
       description:
-        'Repair: ' + (repair.title || repair.description || 'untitled')
+        'Repair: ' + (repair.title || repair.description || 'untitled'),
+      paid: restoredRepairPaid ? restoredRepairPaid.paid : false,
+      paidDate: restoredRepairPaid ? restoredRepairPaid.paidDate : null
     });
   }
 
