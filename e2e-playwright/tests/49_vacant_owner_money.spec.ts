@@ -41,6 +41,7 @@ const P1 = 'aa0000000000000000000101'; // occupied
 const P2 = 'aa0000000000000000000102'; // occupied
 const P3 = 'aa0000000000000000000103'; // vacant
 const REPAIR_ID = 'aa00000000000000000000d1'; // 24 hex (ObjectId-valid)
+const EXPENSE_ID = 'aa00000000000000000000e1'; // the equal Cleaning expense
 
 // June term is in the past relative to "now" only if we're past June; use a
 // FIXED current-year term well inside the recompute window. Pick the current
@@ -82,7 +83,7 @@ function seedBuilding() {
         { _id: ObjectId(), atakNumber: "E2E49-U3", isManaged: true, occupancyType: "vacant",  propertyId: "${P3}", generalThousandths: 334, heatingThousandths: 0, elevatorThousandths: 0, surface: 50, monthlyCharges: [] }
       ],
       expenses: [
-        { _id: ObjectId(), name: "E2E49-Cleaning", type: "cleaning", amount: 90, allocationMethod: "equal", isRecurring: true, startTerm: ${YEAR}010100, customAllocations: [], chargeOwnerWhenVacant: true }
+        { _id: ObjectId("${EXPENSE_ID}"), name: "E2E49-Cleaning", type: "cleaning", amount: 90, allocationMethod: "equal", isRecurring: true, startTerm: ${YEAR}010100, customAllocations: [], chargeOwnerWhenVacant: true }
       ],
       repairs: [
         { _id: ObjectId("${REPAIR_ID}"), title: "E2E49-Elevator", category: "elevator", status: "completed", urgency: "normal", actualCost: 300, chargeableTo: "tenants", tenantSharePercentage: 100, allocationMethod: "equal", chargeTerm: ${TERM}, affectedUnitIds: [] }
@@ -324,4 +325,82 @@ test('49.3 BUG5 — cancelling the repair strips its repair-vacant owner row (no
     orphan,
     'cancelled repair must leave NO repair-vacant orphan row (BUG5)'
   ).toBeFalsy();
+});
+
+test('49.4 BUG3 (method-flip) — PATCH allocationMethod:fixed with NO/empty customAllocations must 422 (not bill €0)', async ({
+  request: req
+}) => {
+  // The adversarial second-batch challenge confirmed a bypass: flipping a
+  // persisted expense to allocationMethod:'fixed' WITHOUT supplying
+  // customAllocations (which stay empty []) skipped the fixed-zero guard,
+  // persisting a fixed expense that bills €0 to every unit. The fix
+  // validates the EFFECTIVE method against the EFFECTIVE (merged) allocations
+  // unconditionally. The seeded E2E49-Cleaning is 'equal' with [] allocations.
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    organizationid: realmId,
+    'Content-Type': 'application/json'
+  };
+
+  // (a) flip to fixed, omit customAllocations entirely → must 422.
+  const flip = await req.patch(
+    `${GATEWAY}/api/v2/buildings/${BID}/expenses/${EXPENSE_ID}`,
+    { headers, data: { allocationMethod: 'fixed' } }
+  );
+  expect(
+    flip.status(),
+    `flip-to-fixed-without-allocations must be rejected, got ${flip.status()}: ${await flip
+      .text()
+      .catch(() => '')}`
+  ).toBe(422);
+
+  // (b) flip to fixed with all-zero customAllocations → must also 422.
+  const flipZero = await req.patch(
+    `${GATEWAY}/api/v2/buildings/${BID}/expenses/${EXPENSE_ID}`,
+    {
+      headers,
+      data: {
+        allocationMethod: 'fixed',
+        customAllocations: [{ propertyId: P1, value: 0 }]
+      }
+    }
+  );
+  expect(
+    flipZero.status(),
+    `flip-to-fixed-with-zero-allocations must be rejected, got ${flipZero.status()}`
+  ).toBe(422);
+
+  // The persisted expense must remain 'equal' (the rejected PATCHes did not
+  // mutate it) — confirm via mongo so a 422 that still wrote is caught.
+  const persistedMethod = mongoExec(`
+    var b = db.buildings.findOne({_id: ObjectId("${BID}")});
+    var e = (b.expenses||[]).find(function(x){ return String(x._id.valueOf()) === "${EXPENSE_ID}"; });
+    print(e ? e.allocationMethod : "null");
+  `);
+  expect(
+    persistedMethod,
+    'rejected PATCH must NOT have flipped the persisted method to fixed'
+  ).toBe('equal');
+
+  // (c) a VALID fixed PATCH (non-zero allocation) still succeeds (no regression).
+  const ok = await req.patch(
+    `${GATEWAY}/api/v2/buildings/${BID}/expenses/${EXPENSE_ID}`,
+    {
+      headers,
+      data: {
+        allocationMethod: 'fixed',
+        customAllocations: [
+          { propertyId: P1, value: 30 },
+          { propertyId: P2, value: 30 },
+          { propertyId: P3, value: 30 }
+        ]
+      }
+    }
+  );
+  expect(
+    [200, 201],
+    `valid fixed PATCH must succeed, got ${ok.status()}: ${await ok
+      .text()
+      .catch(() => '')}`
+  ).toContain(ok.status());
 });
