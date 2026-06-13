@@ -662,6 +662,7 @@ export async function add(req: Req, res: Res) {
   // ratio expense here too. Each validator is a no-op for other methods.
   if (Array.isArray(req.body.expenses)) {
     for (const e of req.body.expenses) {
+      validateAllocationValues(e?.customAllocations);
       validateFixedAllocations(e?.customAllocations, e?.allocationMethod);
       validatePercentageAllocations(e?.customAllocations, e?.allocationMethod);
       validateRatioAllocations(e?.customAllocations, e?.allocationMethod);
