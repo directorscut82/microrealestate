@@ -84,6 +84,10 @@ export function computeBuildingChargeForProperty(
 export type ExpenseBreakdownRow = {
   expenseId: string;
   expenseName: string;
+  // The expense's schema `type` (e.g. 'water_common'). The UI shows the
+  // localized type label when `expenseName` is a meaningless id-like string,
+  // so a row never renders a raw hash with no human-readable context.
+  expenseType?: string;
   allocationMethod: string;
   propertyId: string;
   propertyName: string;
@@ -113,13 +117,26 @@ export type ShareBasis = {
     | 'custom_ratio'
     | 'custom_percentage'
     | 'none';
-  count?: number; // equal: number of units
+  count?: number; // equal: number of PARTIES splitting (tenants + vacant units)
   part?: number; // surface m² / thousandths ‰ for this unit
   whole?: number; // total surface / total thousandths
   total?: number; // the expense amount being split
+  share?: number; // the resulting per-unit euro amount (the "= X €" tail)
 };
 
-function _shareBasis(building: any, unit: any, expense: any, total: number): ShareBasis {
+// `partyCount` is the actual divisor the equal-allocation engine uses for
+// `term` (active tenant-groups + vacant managed units). Passing it in lets
+// the basis text show the SAME number the money was divided by, instead of
+// the raw managed-unit count (they differ once a multi-unit tenant or a
+// vacant unit is involved — that mismatch is the "(1.7 ÷ 11)" confusion).
+function _shareBasis(
+  building: any,
+  unit: any,
+  expense: any,
+  total: number,
+  share: number,
+  partyCount?: number
+): ShareBasis {
   const method = expense.allocationMethod || 'equal';
   const managed = (building.units || []).filter((u: any) => u.propertyId);
   const fmt = (n: number) => Math.round(n * 100) / 100;
@@ -129,7 +146,13 @@ function _shareBasis(building: any, unit: any, expense: any, total: number): Sha
         (s: number, u: any) => s + (Number(u.surface) || 0),
         0
       );
-      return { kind: 'surface', part: fmt(unit.surface || 0), whole: fmt(sumS), total: fmt(total) };
+      return {
+        kind: 'surface',
+        part: fmt(unit.surface || 0),
+        whole: fmt(sumS),
+        total: fmt(total),
+        share: fmt(share)
+      };
     }
     case 'general_thousandths':
     case 'heating_thousandths':
@@ -144,21 +167,76 @@ function _shareBasis(building: any, unit: any, expense: any, total: number): Sha
         (s: number, u: any) => s + (Number(u[key]) || 0),
         0
       );
-      return { kind: 'thousandths', part: fmt(unit[key] || 0), whole: fmt(sumT), total: fmt(total) };
+      return {
+        kind: 'thousandths',
+        part: fmt(unit[key] || 0),
+        whole: fmt(sumT),
+        total: fmt(total),
+        share: fmt(share)
+      };
     }
     case 'equal':
-      return { kind: 'equal', count: managed.length, total: fmt(total) };
+      // count = the real divisor (parties), not managed.length. Falls back to
+      // managed.length only when partyCount wasn't resolved (legacy callers).
+      return {
+        kind: 'equal',
+        count: partyCount != null ? partyCount : managed.length,
+        total: fmt(total),
+        share: fmt(share)
+      };
     case 'fixed':
-      return { kind: 'fixed' };
+      return { kind: 'fixed', share: fmt(share) };
     case 'single_unit':
-      return { kind: 'single_unit' };
+      return { kind: 'single_unit', share: fmt(share) };
     case 'custom_ratio':
-      return { kind: 'custom_ratio' };
+      return { kind: 'custom_ratio', share: fmt(share) };
     case 'custom_percentage':
-      return { kind: 'custom_percentage' };
+      return { kind: 'custom_percentage', share: fmt(share) };
     default:
-      return { kind: 'none' };
+      return { kind: 'none', share: fmt(share) };
   }
+}
+
+// Resolve the equal-allocation PARTY COUNT for a term: the number of distinct
+// shares the pool is split into (active tenant-groups + vacant managed units),
+// matching the divisor computeBuildingChargeForProperty uses. Mirrors the
+// logic in _computeBuildingChargeRaw's 'equal' branch so the basis text's
+// "÷ N" equals the real division. Returns managed-unit count as a safe
+// fallback when no tenant groups are attached (un-grouped/legacy path).
+function _equalPartyCount(building: any, term?: number): number {
+  const managed = (building.units || []).filter((u: any) => u.propertyId);
+  const rawGroups = (building as any)._tenantGroups as any[] | undefined;
+  if (!rawGroups || rawGroups.length === 0) return managed.length;
+  const isNewShape = !Array.isArray(rawGroups[0]);
+  const normalized = isNewShape
+    ? rawGroups
+    : (rawGroups as unknown as string[][]).map((ids) => ({
+        propertyIds: ids,
+        properties: ids.map((id) => ({ propertyId: id })),
+        beginDate: null,
+        endDate: null,
+        terminationDate: null
+      }));
+  const activeGroups = term
+    ? normalized.filter((g: any) =>
+        (g.propertyIds || []).some((pid: string) =>
+          _isGroupActiveForTerm(g, term, pid)
+        )
+      )
+    : normalized;
+  const occupied = new Set<string>(
+    activeGroups.flatMap((g: any) =>
+      (g.propertyIds || [])
+        .filter((pid: string) =>
+          term ? _isGroupActiveForTerm(g, term, String(pid)) : true
+        )
+        .map((pid: string) => String(pid))
+    )
+  );
+  const vacantCount = managed.filter(
+    (u: any) => !occupied.has(String(u.propertyId))
+  ).length;
+  return activeGroups.length + vacantCount;
 }
 
 // Authoritative per-recipient breakdown of who gets charged what for a
@@ -196,7 +274,12 @@ export function computeBuildingExpenseBreakdown(
     if (!unit.propertyId) continue;
     const tenant = unit.tenant || null;
     const recipient: 'renter' | 'owner' = tenant ? 'renter' : 'owner';
-    const recipientName = tenant ? tenant.name : null;
+    // recipientName: the tenant's name when occupied; otherwise the unit's
+    // OWNER name (first owner with a name) so an owner row is attributed to a
+    // human, not left blank. Falls back to null when no owner name exists.
+    const ownerName =
+      ((unit.owners || []).find((o: any) => o && o.name) || {}).name || null;
+    const recipientName = tenant ? tenant.name : ownerName;
     const propertyName =
       unit.property?.name || unit.name || String(unit.propertyId);
 
@@ -226,13 +309,23 @@ export function computeBuildingExpenseBreakdown(
       rows.push({
         expenseId: String(expense._id),
         expenseName: expense.name || '',
+        expenseType: expense.type || undefined,
         allocationMethod: expense.allocationMethod || 'equal',
         propertyId: String(unit.propertyId),
         propertyName,
         recipient,
         recipientName,
         amount: share,
-        basis: _shareBasis(building, unit, expense, total),
+        basis: _shareBasis(
+          building,
+          unit,
+          expense,
+          total,
+          share,
+          (expense.allocationMethod || 'equal') === 'equal'
+            ? _equalPartyCount(building, term)
+            : undefined
+        ),
         ...(recipient === 'owner'
           ? { ownerBilled: !!expense.chargeOwnerWhenVacant }
           : {})
@@ -252,6 +345,7 @@ export function computeBuildingExpenseBreakdown(
         expenseId: String(c.expenseId || c.repairId || ''),
         expenseName:
           c.description || srcExpense?.name || (c.repairId ? 'Repair' : ''),
+        expenseType: srcExpense?.type || (c.repairId ? 'repair' : undefined),
         allocationMethod: srcExpense?.allocationMethod || 'equal',
         propertyId: String(unit.propertyId),
         propertyName,

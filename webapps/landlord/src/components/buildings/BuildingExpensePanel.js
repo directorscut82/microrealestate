@@ -20,7 +20,6 @@ import {
   TooltipTrigger
 } from '../ui/tooltip';
 import { Button } from '../ui/button';
-import { Checkbox } from '../ui/checkbox';
 import { Input } from '../ui/input';
 import { Separator } from '../ui/separator';
 import NumberFormat from '../NumberFormat';
@@ -660,51 +659,127 @@ export default function BuildingExpensePanel({ building }) {
  * server-side with the real billing engine so it always matches what is
  * actually charged.
  */
+// Map an expense schema `type` to its localized label, reusing the SAME
+// keys ExpenseList defines (so the two surfaces never drift). 'repair' is a
+// synthetic type the breakdown attaches to repair-sourced rows.
+const EXPENSE_TYPE_LABEL = {
+  heating: 'Heating',
+  elevator: 'Elevator',
+  cleaning: 'Cleaning',
+  water_common: 'Water Common',
+  electricity_common: 'Electricity Common',
+  insurance: 'Insurance',
+  management_fee: 'Management Fee',
+  garden: 'Garden',
+  repairs_fund: 'Repairs Fund',
+  pest_control: 'Pest Control',
+  repair: 'Repair',
+  other: 'Other'
+};
+
+// A name "looks like an id" when it's a bare hex/objectid-ish token with no
+// spaces — e.g. 'd6aa8660a511'. Such names are meaningless to a human, so the
+// UI shows the expense TYPE label instead (per the user's decision: show type
+// when the name is a hash, append the real name only when it's real).
+function _looksLikeId(name) {
+  if (!name || typeof name !== 'string') return true;
+  const s = name.trim();
+  if (!s) return true;
+  // 8+ chars, hex-only, no spaces → an id, not a human label.
+  return /^[0-9a-f]{8,}$/i.test(s) || /^[0-9a-f]{24}$/i.test(s);
+}
+
+// The human label for an expense/owner/repair row: prefer the TYPE label;
+// append the user-given name only when it's a real name (not an id, not equal
+// to the type label). So 'Κοιν. Νερό' for an id-named water expense, and
+// 'Κοιν. Νερό (ΔΕΗ Ιουνίου)' when a real name adds information.
+function expenseDisplayLabel(t, name, type) {
+  const typeLabel = type && EXPENSE_TYPE_LABEL[type] ? t(EXPENSE_TYPE_LABEL[type]) : '';
+  const realName = !_looksLikeId(name) ? String(name).trim() : '';
+  if (typeLabel && realName && realName !== typeLabel) {
+    return `${typeLabel} (${realName})`;
+  }
+  return typeLabel || realName || t('Expense');
+}
+
 // Render the structured ShareBasis (from the server) as a localized,
-// short calc explanation. Returns '' when there is nothing to explain
-// (fixed/custom/single_unit have no per-unit formula; 'none' = stored
-// amount). Greek-safe: no raw English words leak in.
+// HUMAN-READABLE calc explanation showing the full operation:
+//   equal:       1,70 € ÷ 11 μονάδες = 0,15 €
+//   surface:     50 τ.μ. ÷ 600 τ.μ. × 120 € = 10 €
+//   thousandths: 150‰ ÷ 1000‰ × 120 € = 18 €
+//   fixed:       σταθερό ποσό μονάδας
+//   single_unit: όλο το ποσό σε μία μονάδα
+// Returns '' only when there is genuinely nothing to explain ('none').
 function formatBasis(t, basis) {
   if (!basis || typeof basis !== 'object') return '';
   switch (basis.kind) {
     case 'equal':
-      return t('{{total}} ÷ {{count}}', {
+      return t('{{total}} € ÷ {{count}} units = {{share}} €', {
         total: basis.total,
-        count: basis.count
+        count: basis.count,
+        share: basis.share
       });
     case 'surface':
-      return t('{{part}}m² of {{whole}}m²', {
+      return t('{{part}} m² ÷ {{whole}} m² × {{total}} € = {{share}} €', {
         part: basis.part,
-        whole: basis.whole
+        whole: basis.whole,
+        total: basis.total,
+        share: basis.share
       });
     case 'thousandths':
-      return t('{{part}}‰ of {{whole}}‰', {
+      return t('{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €', {
         part: basis.part,
-        whole: basis.whole
+        whole: basis.whole,
+        total: basis.total,
+        share: basis.share
       });
+    case 'fixed':
+      return t('fixed amount for this unit');
+    case 'single_unit':
+      return t('whole amount on one unit');
     default:
       return '';
   }
 }
 
+function OwnerName({ name, t }) {
+  // Small attribution line: "Ιδιοκτήτης: <name>" or just "Ιδιοκτήτης".
+  return (
+    <span className="font-normal text-muted-foreground">
+      ·{' '}
+      {name ? t('Owner: {{name}}', { name }) : t('Owner')}
+    </span>
+  );
+}
+
 function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
+  const [showUncollected, setShowUncollected] = useState(false);
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
-  // Vacant-unit shares split by whether the expense routes them to the
-  // owner (chargeOwnerWhenVacant on) or leaves them uncollected.
-  const ownerBilledRows = breakdown.rows.filter(
-    (r) => r.recipient === 'owner' && r.ownerBilled
-  );
+  // The ONLY owner rows we still take from breakdown.rows are the UNCOLLECTED
+  // ones (vacant unit, chargeOwnerWhenVacant OFF): they are not persisted to
+  // the owner ledger (no one pays them), so they have no paid toggle and live
+  // in the warning section. Everything the owner actually OWES — owner-tracked
+  // expenses, repair owner-portions, AND vacant shares billed to the owner —
+  // now comes from breakdown.ownerDirect (persisted, paid-toggleable),
+  // consolidated into ONE block. This replaces the old three-tile sprawl.
   const ownerVacantRows = breakdown.rows.filter(
     (r) => r.recipient === 'owner' && !r.ownerBilled
   );
-  const ownerDirect = breakdown.ownerDirect || [];
-  if (
-    renterRows.length === 0 &&
-    ownerBilledRows.length === 0 &&
-    ownerVacantRows.length === 0 &&
-    ownerDirect.length === 0
-  ) {
+  const ownerLiabilities = breakdown.ownerDirect || [];
+  const ownerLiabilitiesTotal = ownerLiabilities.reduce(
+    (s, e) => s + (Number(e.amount) || 0),
+    0
+  );
+  const ownerPaidTotal = ownerLiabilities
+    .filter((e) => e.paid)
+    .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const uncollectedTotal = ownerVacantRows.reduce(
+    (s, r) => s + (Number(r.amount) || 0),
+    0
+  );
+
+  if (renterRows.length === 0 && ownerLiabilities.length === 0 && ownerVacantRows.length === 0) {
     return null;
   }
 
@@ -725,13 +800,25 @@ function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
     g.total += r.amount;
   }
 
+  // One owner attribution name for the section header, if all liabilities
+  // share an owner (common case: single-owner building). Otherwise omit.
+  const ownerNames = Array.from(
+    new Set(ownerLiabilities.map((e) => e.ownerName).filter(Boolean))
+  );
+  const headerOwnerName = ownerNames.length === 1 ? ownerNames[0] : null;
+
   return (
     <div className="mt-4 rounded-md border border-stone-line/60 bg-muted/20 p-3">
       <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
         {t('Charges')}
       </div>
 
-      {/* Per-apartment → renter */}
+      {/* Renters → per apartment */}
+      {byProperty.size > 0 && (
+        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
+          {t('Tenants')}
+        </div>
+      )}
       {Array.from(byProperty.values()).map((g, gi) => (
         <div key={`p-${gi}`} className="mb-2 last:mb-0">
           <div className="flex items-baseline justify-between text-sm">
@@ -754,7 +841,7 @@ function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
               className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
             >
               <span className="truncate mr-2">
-                {it.expenseName}
+                {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
                 {formatBasis(t, it.basis) && (
                   <span className="ml-1 text-muted-foreground/60">
                     ({formatBasis(t, it.basis)})
@@ -769,107 +856,125 @@ function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
         </div>
       ))}
 
-      {/* Owner-direct (owner-tracked expenses) */}
-      {ownerDirect.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-stone-line/50">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-ink-muted">{t('Owner')}</span>
-            <span className="tabular-nums font-medium">
-              <NumberFormat value={breakdown.ownerDirectTotal || 0} />
+      {/* ONE consolidated owner block. Every row is a real owner liability
+          with a labeled paid/unpaid pill. Header shows paid-vs-total so the
+          landlord can monitor settlement at a glance. */}
+      {ownerLiabilities.length > 0 && (
+        <div className="mt-3 pt-2 border-t border-stone-line/50">
+          <div className="flex items-baseline justify-between text-sm mb-0.5">
+            <span className="font-medium text-ink-muted truncate mr-2">
+              {t('Owner expenses')}
+              {headerOwnerName && <OwnerName name={headerOwnerName} t={t} />}
+            </span>
+            <span className="tabular-nums font-medium whitespace-nowrap">
+              <NumberFormat value={ownerLiabilitiesTotal} />
             </span>
           </div>
-          {ownerDirect.map((e, i) => (
+          <div className="text-xs text-muted-foreground mb-1">
+            <span className="text-olive">
+              {t('Paid')}: <NumberFormat value={ownerPaidTotal} />
+            </span>
+            {' · '}
+            <span className="text-oxide">
+              {t('Outstanding')}:{' '}
+              <NumberFormat value={ownerLiabilitiesTotal - ownerPaidTotal} />
+            </span>
+          </div>
+          {ownerLiabilities.map((e, i) => (
             <div
-              key={`od-${i}`}
-              className="flex items-center justify-between text-xs text-muted-foreground pl-3 py-0.5"
+              key={`ol-${i}`}
+              className="flex items-center justify-between gap-2 text-xs pl-3 py-0.5"
             >
-              <label className="flex items-center gap-2 min-w-0 cursor-pointer">
-                {/* Paid toggle — only when the row carries an ownerExpenseId
-                    (a persisted ownerMonthlyExpenses subdoc). Drives the
-                    Overview paid/unpaid tile. */}
-                {e.ownerExpenseId && onTogglePaid && (
-                  <Checkbox
-                    checked={!!e.paid}
-                    disabled={paidPending}
-                    onCheckedChange={(v) =>
-                      onTogglePaid(e.ownerExpenseId, v === true)
-                    }
-                    aria-label={t('Mark paid')}
-                  />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
+                {e.propertyName && (
+                  <span className="text-muted-foreground/60">
+                    {' · '}
+                    {e.propertyName}
+                  </span>
                 )}
-                <span
-                  className={cn(
-                    'truncate',
-                    e.paid && 'line-through text-muted-foreground/60'
-                  )}
-                >
-                  {e.expenseName}
-                </span>
-              </label>
+              </span>
               <span
                 className={cn(
-                  'tabular-nums whitespace-nowrap ml-2',
+                  'tabular-nums whitespace-nowrap',
                   e.paid ? 'text-olive' : 'text-oxide'
                 )}
               >
                 <NumberFormat value={e.amount} />
               </span>
+              {/* Labeled paid pill — NOT a bare circle. One tap toggles. */}
+              {e.ownerExpenseId && onTogglePaid ? (
+                <button
+                  type="button"
+                  disabled={paidPending}
+                  onClick={() => onTogglePaid(e.ownerExpenseId, !e.paid)}
+                  className={cn(
+                    'shrink-0 rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium transition-colors',
+                    e.paid
+                      ? 'border-olive/40 bg-olive/10 text-olive'
+                      : 'border-oxide/40 bg-oxide/10 text-oxide hover:bg-oxide/20',
+                    paidPending && 'opacity-50'
+                  )}
+                  aria-label={e.paid ? t('Paid') : t('Unpaid')}
+                >
+                  {e.paid ? `✓ ${t('Paid')}` : t('Unpaid')}
+                </button>
+              ) : (
+                // Synthesized (out-of-window) vacant share: not persisted, so
+                // no paid handle. Show a muted "auto" tag so the missing pill
+                // reads as intentional, not broken.
+                <span className="shrink-0 text-[0.6875rem] text-muted-foreground/50 italic">
+                  {t('auto')}
+                </span>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Vacant units billed TO THE OWNER (chargeOwnerWhenVacant on) */}
-      {ownerBilledRows.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-stone-line/50">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-ink-muted">
-              {t('Owner (vacant units)')}
-            </span>
-            <span className="tabular-nums font-medium">
-              <NumberFormat value={breakdown.ownerBilledTotal || 0} />
-            </span>
-          </div>
-          {ownerBilledRows.map((r, i) => (
-            <div
-              key={`ob-${i}`}
-              className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
-            >
-              <span className="truncate mr-2">
-                {r.propertyName} · {r.expenseName}
-              </span>
-              <span className="tabular-nums whitespace-nowrap">
-                <NumberFormat value={r.amount} />
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Vacant units → uncollected (the money that evaporates today) */}
+      {/* Uncollected (vacant units, chargeOwnerWhenVacant OFF) — money that
+          nobody pays. Collapsed by default into a single warning line so it
+          doesn't dominate as a wall of identical rows; expandable for detail.
+          Prompts the landlord to enable owner-billing if they want it charged. */}
       {ownerVacantRows.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-stone-line/50">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium text-oxide">
-              {t('Uncollected (vacant units)')}
+        <div className="mt-3 pt-2 border-t border-stone-line/50">
+          <button
+            type="button"
+            onClick={() => setShowUncollected((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-sm text-left"
+          >
+            <span className="font-medium text-oxide truncate mr-2">
+              ⚠ {t('Uncollected (vacant units)')}
             </span>
-            <span className="tabular-nums font-medium text-oxide">
-              <NumberFormat value={breakdown.ownerUnbilledTotal || 0} />
+            <span className="tabular-nums font-medium text-oxide whitespace-nowrap">
+              <NumberFormat value={uncollectedTotal} />
+              {showUncollected ? (
+                <LuChevronRight className="inline size-3 ml-1 rotate-90" />
+              ) : (
+                <LuChevronRight className="inline size-3 ml-1" />
+              )}
             </span>
-          </div>
-          {ownerVacantRows.map((r, i) => (
-            <div
-              key={`ov-${i}`}
-              className="flex items-baseline justify-between text-xs text-oxide/80 pl-3"
-            >
-              <span className="truncate mr-2">
-                {r.propertyName} · {r.expenseName}
-              </span>
-              <span className="tabular-nums whitespace-nowrap">
-                <NumberFormat value={r.amount} />
-              </span>
-            </div>
-          ))}
+          </button>
+          <p className="text-xs text-muted-foreground mt-1">
+            {t(
+              'Enable "Charge owner for vacant units" on these expenses to bill the owner instead of leaving them uncollected.'
+            )}
+          </p>
+          {showUncollected &&
+            ownerVacantRows.map((r, i) => (
+              <div
+                key={`ov-${i}`}
+                className="flex items-baseline justify-between text-xs text-oxide/80 pl-3 mt-0.5"
+              >
+                <span className="truncate mr-2">
+                  {r.propertyName} ·{' '}
+                  {expenseDisplayLabel(t, r.expenseName, r.expenseType)}
+                </span>
+                <span className="tabular-nums whitespace-nowrap">
+                  <NumberFormat value={r.amount} />
+                </span>
+              </div>
+            ))}
         </div>
       )}
     </div>

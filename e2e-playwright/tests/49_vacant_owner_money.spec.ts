@@ -126,7 +126,7 @@ function readOwnerExpenses() {
     var b = db.buildings.findOne({_id: ObjectId("${BID}")});
     if (!b) { print("null"); quit(); }
     print(JSON.stringify((b.ownerMonthlyExpenses||[]).map(function(e){
-      return { expenseId: String(e.expenseId), term: e.term, amount: e.amount, source: e.source, propertyId: e.propertyId };
+      return { expenseId: String(e.expenseId), term: e.term, amount: e.amount, source: e.source, propertyId: e.propertyId, paid: !!e.paid };
     })));
   `);
   if (!out || out === 'null') return null;
@@ -136,6 +136,7 @@ function readOwnerExpenses() {
     amount: number;
     source: string;
     propertyId: string;
+    paid: boolean;
   }>;
 }
 
@@ -327,6 +328,74 @@ test('49.3 BUG5 — cancelling the repair strips its repair-vacant owner row (no
   ).toBeFalsy();
 });
 
+test('49.5 PAID-SURVIVES-RECOMPUTE — a landlord-set paid flag on a source:vacant owner row survives the strip+rebuild', async ({
+  request: req
+}) => {
+  // Adversarial finding (June 2026): vacant-owner rows are strip-and-rebuilt
+  // by _recomputeVacantOwnerCharges on every expense edit / tenancy change,
+  // and the rebuild minted a NEW _id with paid reset to the schema default
+  // (false) — so any unrelated edit silently reverted a paid vacant charge to
+  // unpaid, corrupting the Overview paid/outstanding tile. The fix snapshots
+  // paid/paidDate by expenseId+propertyId+term before the strip and restores
+  // it on rebuild. This proves it end-to-end on the deployed engine.
+  //
+  // Seed: mark P3's source:'vacant' share for EXPENSE_ID/TERM as PAID directly
+  // in mongo (it is recomputed, so we set the flag the recompute must carry).
+  const seeded = mongoExec(`
+    var b = db.buildings.findOne({_id: ObjectId("${BID}")});
+    if (!b) { print("NO_BLDG"); quit(); }
+    // ensure a source:'vacant' row exists for P3/EXPENSE_ID/TERM, paid:true.
+    var ome = (b.ownerMonthlyExpenses||[]).filter(function(e){
+      return !(String(e.expenseId)==="${EXPENSE_ID}" && e.source==="vacant" && Number(e.term)===${TERM} && String(e.propertyId)==="${P3}");
+    });
+    ome.push({ _id: ObjectId(), expenseId: "${EXPENSE_ID}", term: ${TERM}, amount: 30, propertyId: "${P3}", source: "vacant", description: "E2E49-Cleaning", paid: true, paidDate: new Date() });
+    db.buildings.updateOne({_id: ObjectId("${BID}")}, {$set: {ownerMonthlyExpenses: ome}});
+    print("SEEDED");
+  `);
+  expect(seeded && seeded.includes('SEEDED'), 'paid vacant row seeded').toBeTruthy();
+
+  // Confirm pre-state: the vacant row is paid:true.
+  const before = readOwnerExpenses();
+  const paidBefore = before!.find(
+    (e) => e.source === 'vacant' && e.expenseId === EXPENSE_ID && e.propertyId === P3
+  );
+  expect(paidBefore, 'seeded paid vacant row present').toBeTruthy();
+  expect(paidBefore!.paid, 'seeded vacant row is paid before recompute').toBe(true);
+
+  // Trigger a recompute via a harmless expense edit (touch the name). An
+  // expense PATCH calls _recomputeVacantOwnerCharges(current term) which
+  // strips+rebuilds the source:'vacant' rows for that term.
+  const touch = await req.patch(
+    `${GATEWAY}/api/v2/buildings/${BID}/expenses/${EXPENSE_ID}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        organizationid: realmId,
+        'Content-Type': 'application/json'
+      },
+      data: { name: 'E2E49-Cleaning' }
+    }
+  );
+  expect(
+    [200, 201],
+    `expense touch status ${touch.status()}: ${await touch.text().catch(() => '')}`
+  ).toContain(touch.status());
+
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // The vacant row must STILL be paid:true after the rebuild (the fix carries
+  // the flag forward). Pre-fix, the rebuild reset it to false.
+  const after = readOwnerExpenses();
+  const paidAfter = after!.find(
+    (e) => e.source === 'vacant' && e.expenseId === EXPENSE_ID && e.propertyId === P3
+  );
+  expect(paidAfter, 'vacant row still present after recompute').toBeTruthy();
+  expect(
+    paidAfter!.paid,
+    'paid flag MUST survive the vacant-owner recompute (carry-forward fix)'
+  ).toBe(true);
+});
+
 test('49.4 BUG3 (method-flip) — PATCH allocationMethod:fixed with NO/empty customAllocations must 422 (not bill €0)', async ({
   request: req
 }) => {
@@ -403,4 +472,93 @@ test('49.4 BUG3 (method-flip) — PATCH allocationMethod:fixed with NO/empty cus
       .text()
       .catch(() => '')}`
   ).toContain(ok.status());
+});
+
+test('49.6 STALE-VACANT — getExpenseBreakdown drops a no-longer-opted-in source:vacant row but KEEPS a valid one (read-time validation, no double-count)', async ({
+  request: req
+}) => {
+  // Adversarial finding (round 2): the vacant recompute only re-derives the
+  // CURRENT term, so a source:'vacant' row can persist for a term whose
+  // expense is no longer active / no longer opts in. If surfaced, the same
+  // euro shows in BOTH the owner block (owed) AND the Αχρέωτα/uncollected
+  // section (nobody pays) — a contradictory double-count. getExpenseBreakdown
+  // now validates each source:'vacant' row against live state at READ time and
+  // drops the stale ones.
+  //
+  // This test must NOT be vacuous (round-3 finding): the pre-fix code blanket-
+  // excluded ALL source:'vacant' rows from ownerDirect, so a negative-only
+  // assertion would pass even unfixed. We therefore exercise BOTH paths with a
+  // PURPOSE-BUILT expense (not the EXPENSE_ID that 49.4 mutated):
+  //   - INACTIVE term  → stale row DROPPED (negative)
+  //   - ACTIVE  term   → valid row KEPT   (positive — fails on pre-fix code,
+  //                      which excluded all vacant rows)
+  // The expense keeps chargeOwnerWhenVacant:true throughout, so the drop is
+  // attributable purely to isExpenseActiveForTerm (term < startTerm), exactly
+  // the mechanism under test — not to the flag.
+  const VAC_EXP = '6a0000000000000000004906';
+  const startTerm = YEAR * 1000000 + 60100; // YYYY060100 (June this year)
+  const activeTerm = startTerm; // active: term === startTerm
+  const staleTerm = (YEAR - 1) * 1000000 + 10100; // YYYY-1 0100 → before startTerm → inactive
+
+  const seeded = mongoExec(`
+    var b = db.buildings.findOne({_id: ObjectId("${BID}")});
+    if (!b) { print("NO_BLDG"); quit(); }
+    var ex = (b.expenses||[]).filter(function(e){ return String(e._id.valueOf()) !== "${VAC_EXP}"; });
+    // A recurring expense, active from ${startTerm}, that DOES opt into
+    // vacant-owner billing. P3 is vacant, so the engine emits an owner-billed
+    // vacant share for it.
+    ex.push({ _id: ObjectId("${VAC_EXP}"), name: "E2E49-VacOptIn", type: "cleaning", amount: 90, allocationMethod: "equal", isRecurring: true, startTerm: ${startTerm}, customAllocations: [], chargeOwnerWhenVacant: true });
+    // Persisted source:'vacant' rows for BOTH terms (same expense+unit). Only
+    // the active-term one is legitimate; the stale-term one must be dropped.
+    var ome = (b.ownerMonthlyExpenses||[]).filter(function(e){ return String(e.expenseId) !== "${VAC_EXP}"; });
+    ome.push({ _id: ObjectId(), expenseId: "${VAC_EXP}", term: ${activeTerm}, amount: 30, propertyId: "${P3}", source: "vacant", description: "E2E49-VacOptIn", paid: false, paidDate: null });
+    ome.push({ _id: ObjectId(), expenseId: "${VAC_EXP}", term: ${staleTerm},  amount: 30, propertyId: "${P3}", source: "vacant", description: "E2E49-VacOptIn", paid: false, paidDate: null });
+    db.buildings.updateOne({_id: ObjectId("${BID}")}, {$set: {expenses: ex, ownerMonthlyExpenses: ome}});
+    print("SEEDED");
+  `);
+  expect(seeded && seeded.includes('SEEDED'), 'vac-opt-in expense + rows seeded').toBeTruthy();
+
+  const headers = { Authorization: `Bearer ${token}`, organizationid: realmId };
+  const getOwnerDirect = async (term: number) => {
+    const resp = await req.get(
+      `${GATEWAY}/api/v2/buildings/${BID}/expense-breakdown?term=${term}`,
+      { headers }
+    );
+    expect(resp.status(), await resp.text().catch(() => '')).toBe(200);
+    const body = (await resp.json()) as {
+      ownerDirect: Array<{ expenseId: string; source: string; amount: number }>;
+    };
+    return (body.ownerDirect || []).filter((e) => e.expenseId === VAC_EXP);
+  };
+
+  // NEGATIVE: the stale-term row (term before startTerm → inactive) must NOT
+  // surface — dropped by the read-time isExpenseActiveForTerm guard.
+  const staleRows = await getOwnerDirect(staleTerm);
+  expect(
+    staleRows.length,
+    'stale source:vacant row (inactive term) must be dropped from ownerDirect'
+  ).toBe(0);
+
+  // POSITIVE: the active-term row MUST surface (it is a real owner liability).
+  // This is the assertion that FAILS on the pre-fix code (which excluded every
+  // source:'vacant' row), so the test is not vacuous.
+  const activeRows = await getOwnerDirect(activeTerm);
+  expect(
+    activeRows.length,
+    'valid current-term source:vacant row MUST appear in ownerDirect (owner liability)'
+  ).toBeGreaterThanOrEqual(1);
+  expect(activeRows.some((r) => r.source === 'vacant')).toBe(true);
+
+  // Cleanup the purpose-built expense + its rows.
+  mongoExec(`
+    db.buildings.updateOne(
+      {_id: ObjectId("${BID}")},
+      {$pull: {ownerMonthlyExpenses: {expenseId: "${VAC_EXP}"}}}
+    );
+    db.buildings.updateOne(
+      {_id: ObjectId("${BID}")},
+      {$pull: {expenses: {_id: ObjectId("${VAC_EXP}")}}}
+    );
+    print("CLEANED");
+  `);
 });
