@@ -331,27 +331,26 @@ test('owner-expenses headline = fixedOwner*12 + currentYear, prior-year EXCLUDED
   });
 
   // ----- assert: card visible with the breakdown row -----
-  // Find the "Owner expenses" label by its translated text. Default test
-  // realm locale is 'el' → "Έξοδα ιδιοκτήτη"; en-fallback is "Owner
-  // expenses". Match either so the spec is locale-tolerant.
+  // The income-tile "Owner expenses" breakdown label is a Popover trigger
+  // BUTTON (tap-to-open explanation), with text exactly "Owner expenses"
+  // (el: "Έξοδα ιδιοκτήτη"). Anchor on the button with an EXACT-text match so
+  // it does NOT collide with the separate "Owner expenses paid" progress tile
+  // added below the income card. Default test realm locale is 'el'.
   const ownerLabel = page
-    .locator('span', { hasText: /^(Owner expenses|Έξοδα ιδιοκτήτη)$/ })
+    .getByRole('button', { name: /^(Owner expenses|Έξοδα ιδιοκτήτη)$/ })
     .first();
   await expect(
     ownerLabel,
-    'Owner expenses label must be rendered (annualEksoda must be > 0 in the seeded fixture)'
+    'Owner expenses breakdown label must be rendered (annualEksoda must be > 0 in the seeded fixture)'
   ).toBeVisible({ timeout: 20_000 });
 
-  // The label sits inside a wrapping <div> that also contains the amount
-  // node (NumberFormat <span>). Read the amount by walking up to the
-  // wrapper, then taking the trailing numeric text.
-  const ownerWrapper = ownerLabel.locator(
-    'xpath=ancestor::div[1]'
-  );
-  // The wrapper renders as: <div><TooltipProvider><Tooltip><TooltipTrigger
-  // asChild><span ...>{label}</span></TooltipTrigger>...</Tooltip>
-  // </TooltipProvider>:&nbsp;<NumberFormat /></div>
-  // → innerText holds "<label>: 1.013,00 €" (or el equivalent).
+  // The breakdown cell <div> contains: <Popover><button>{label}</button>
+  // </Popover>: <NumberFormat/>. Walk up to the grid-cell div that also
+  // holds the amount text (the nearest ancestor div whose text contains '€'),
+  // then read its innerText → "<label>: 1.013,00 €".
+  const ownerWrapper = ownerLabel
+    .locator('xpath=ancestor::div[contains(., "€")][1]')
+    .first();
   const wrapperText = (await ownerWrapper.innerText()).trim();
   const ownerEksodaDisplayed = numberFromText(wrapperText);
 
@@ -378,12 +377,11 @@ test('owner-expenses headline = fixedOwner*12 + currentYear, prior-year EXCLUDED
       `displayed=${ownerEksodaDisplayed} matches the prior-year-leak value of ${POISONED_OWNER_EKSODA}.`
   ).toBeGreaterThan(0.5);
 
-  // ----- assert: tooltip renders on hover -----
-  // The Owner expenses label is wrapped in a Tooltip with a 200ms delay
-  // (see BuildingDashboard.js — `delayDuration={200}`). Hover the dotted-
-  // underline label and poll for the tooltip body text. Use the el or en
-  // tooltip text (same line of code, two locales).
-  await ownerLabel.hover();
+  // ----- assert: popover explanation opens on click -----
+  // The "Owner expenses" label is a Popover trigger (tap-to-open, replacing
+  // the old hover Tooltip so it's reachable on touch). Click it and poll for
+  // the explanation body text (el or en — same line of code, two locales).
+  await ownerLabel.click();
   await expect
     .poll(
       async () => {
@@ -395,11 +393,13 @@ test('owner-expenses headline = fixedOwner*12 + currentYear, prior-year EXCLUDED
       {
         timeout: 5_000,
         message:
-          'Tooltip body text must appear after hover. The Tooltip wrapper around the ' +
+          'Popover body text must appear after click. The Popover around the ' +
           '"Owner expenses" label is the surface that explains the breakdown to the user.'
       }
     )
     .toBe(true);
+  // Close the popover so it doesn't intercept the next interaction.
+  await page.keyboard.press('Escape');
 
   // ----- assert: refetch resilience -----
   // Re-render the dashboard from a fresh fetch and confirm the same
@@ -418,11 +418,14 @@ test('owner-expenses headline = fixedOwner*12 + currentYear, prior-year EXCLUDED
     timeout: 20_000
   });
   const ownerLabelAgain = page
-    .locator('span', { hasText: /^(Owner expenses|Έξοδα ιδιοκτήτη)$/ })
+    .getByRole('button', { name: /^(Owner expenses|Έξοδα ιδιοκτήτη)$/ })
     .first();
   await expect(ownerLabelAgain).toBeVisible({ timeout: 20_000 });
   const wrapperText2 = (
-    await ownerLabelAgain.locator('xpath=ancestor::div[1]').innerText()
+    await ownerLabelAgain
+      .locator('xpath=ancestor::div[contains(., "€")][1]')
+      .first()
+      .innerText()
   ).trim();
   const ownerEksodaAfterRefetch = numberFromText(wrapperText2);
   expect(

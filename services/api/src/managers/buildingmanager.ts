@@ -653,6 +653,20 @@ export async function add(req: Req, res: Res) {
   validateArrayMaxLength(req.body.contractors, 50, 'contractors');
   validateArrayMaxLength(req.body.repairs, 100, 'repairs');
 
+  // FIXED-ZERO-PATCH (bulk path): the building-create expenses[] array
+  // bypassed per-expense allocation validation (only array length was
+  // checked), so a fixed expense with empty/zero customAllocations could be
+  // created and then bill €0 to every unit — the same silent-money bug the
+  // single-expense add/update paths guard. Validate each fixed/percentage/
+  // ratio expense here too. Each validator is a no-op for other methods.
+  if (Array.isArray(req.body.expenses)) {
+    for (const e of req.body.expenses) {
+      validateFixedAllocations(e?.customAllocations, e?.allocationMethod);
+      validatePercentageAllocations(e?.customAllocations, e?.allocationMethod);
+      validateRatioAllocations(e?.customAllocations, e?.allocationMethod);
+    }
+  }
+
   // Tier C3 — IBAN structural validation when present. bankInfo is
   // optional at creation per the user matrix; if the user provides one
   // it must be well-formed (mod-97 == 1).
@@ -2589,31 +2603,37 @@ export async function updateExpense(req: Req, res: Res) {
   // (allocationMethod unchanged) still validate against the right rule.
   const effectiveAllocationMethod =
     req.body.allocationMethod || (expense as any).allocationMethod;
+  // The allocations that will be PERSISTED after this PATCH: the body's if it
+  // supplied them, otherwise the already-stored ones.
+  const effectiveCustomAllocations =
+    req.body.customAllocations !== undefined
+      ? req.body.customAllocations
+      : (expense as any).customAllocations;
+  // Property-id validation only makes sense for NEWLY-supplied ids.
   if (req.body.customAllocations !== undefined) {
     _assertCustomAllocationPropertyIds(
       building,
       req.body.customAllocations,
       effectiveAllocationMethod
     );
-    // FIXED-ZERO-PATCH fix: validate the (possibly-merged) allocation rule
-    // whenever customAllocations is being written, regardless of whether the
-    // request also echoes allocationMethod. A PATCH of {customAllocations: []}
-    // or all-zero values against a persisted allocationMethod:'fixed' must
-    // 422 here — otherwise expense.set() replaces the allocations while
-    // 'fixed' stays intact and the rent pipeline bills €0 to every unit.
-    validatePercentageAllocations(
-      req.body.customAllocations,
-      effectiveAllocationMethod
-    );
-    validateRatioAllocations(
-      req.body.customAllocations,
-      effectiveAllocationMethod
-    );
-    validateFixedAllocations(
-      req.body.customAllocations,
-      effectiveAllocationMethod
-    );
   }
+  // FIXED-ZERO-PATCH fix: validate the EFFECTIVE allocation rule
+  // UNCONDITIONALLY (against the merged method + merged allocations), not only
+  // when the body carries customAllocations. Two bypasses this closes:
+  //   (a) PATCH {customAllocations: []} (no allocationMethod) on a persisted
+  //       fixed expense — caught because effectiveMethod resolves to 'fixed'.
+  //   (b) PATCH {allocationMethod: 'fixed'} with NO customAllocations key, on
+  //       an expense whose stored customAllocations is empty — the method
+  //       flips to fixed while allocations stay [], so the rent pipeline bills
+  //       €0 to every unit. The old `if (customAllocations !== undefined)`
+  //       gate skipped validation entirely for this shape.
+  // Each validator is a no-op unless the effective method matches its rule.
+  validatePercentageAllocations(
+    effectiveCustomAllocations,
+    effectiveAllocationMethod
+  );
+  validateRatioAllocations(effectiveCustomAllocations, effectiveAllocationMethod);
+  validateFixedAllocations(effectiveCustomAllocations, effectiveAllocationMethod);
 
   // Strip __v from the body before $set: never write client-provided
   // __v back. Mongoose's save() will manage it.
