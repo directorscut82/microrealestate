@@ -6,6 +6,7 @@ import * as dashboardManager from './managers/dashboardmanager.js';
 import * as emailManager from './managers/emailmanager.js';
 import * as leaseManager from './managers/leasemanager.js';
 import * as occupantManager from './managers/occupantmanager.js';
+import * as ownerManager from './managers/ownermanager.js';
 import * as propertyManager from './managers/propertymanager.js';
 import * as realmManager from './managers/realmmanager.js';
 import * as rentManager from './managers/rentmanager.js';
@@ -393,6 +394,21 @@ export default function routes(): express.Router {
     Middlewares.asyncWrapper(buildingManager.removeRepair as any)
   );
   router.use('/buildings', buildingsRouter);
+
+  // Owners — owner-debt ledger (καταβολές ιδιοκτητών). Owners are aggregated
+  // across buildings from units[].owners[]; their liabilities are the
+  // buildings' ownerMonthlyExpenses[] rows, settled via owner payments.
+  const ownersRouter = express.Router();
+  ownersRouter.get('/', Middlewares.asyncWrapper(ownerManager.all as any));
+  ownersRouter.get(
+    '/:ownerKey',
+    Middlewares.asyncWrapper(ownerManager.one as any)
+  );
+  ownersRouter.post(
+    '/:ownerKey/payment',
+    Middlewares.asyncWrapper(ownerManager.pay as any)
+  );
+  router.use('/owners', ownersRouter);
 
   // Bills
   const billsRouter = express.Router();

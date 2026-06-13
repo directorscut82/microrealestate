@@ -5,6 +5,10 @@ import { parseE9 } from './e9parser.js';
 import * as Contract from './contract.js';
 import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
+  carryOwnerPayments,
+  applyCarriedSettlement
+} from './ownermanager.js';
+import {
   validateObjectId,
   validateTerm,
   validateFiniteNumber,
@@ -2230,19 +2234,16 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   // statement DELETED the vacant / repair-vacant / repair owner charges for
   // that term (data loss). Scope the strip to source:'expense' only.
   if (ownerExpensesProvided) {
-    // Snapshot landlord-set paid/paidDate on the expense rows before the
-    // strip+rebuild so re-saving a statement doesn't reset a paid charge to
-    // unpaid (mirrors the carry-forward in _recomputeVacantOwnerCharges /
+    // Snapshot the landlord-recorded SETTLEMENT (payments + derived paid)
+    // on the expense rows before the strip+rebuild so re-saving a statement
+    // doesn't wipe recorded καταβολές (mirrors _recomputeVacantOwnerCharges /
     // _distributeRepairCharge). Keyed by expenseId (these rows carry no
     // propertyId; one owner-direct row per expense per term).
-    const priorExpensePaid = new Map<string, { paid: boolean; paidDate: any }>();
+    const priorExpenseSettle = new Map<string, any>();
     for (const e of (building as any).ownerMonthlyExpenses as any[]) {
       const src = e.source || 'expense';
-      if (src === 'expense' && Number(e.term) === Number(term) && e.paid) {
-        priorExpensePaid.set(String(e.expenseId), {
-          paid: true,
-          paidDate: e.paidDate || null
-        });
+      if (src === 'expense' && Number(e.term) === Number(term)) {
+        priorExpenseSettle.set(String(e.expenseId), e);
       }
     }
     // Strip ONLY source:'expense' rows for this term.
@@ -2255,19 +2256,22 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     for (const eid of idsToRemove) {
       (building as any).ownerMonthlyExpenses.pull(eid);
     }
-    // Add new owner expenses, carrying the paid flag forward.
+    // Add new owner expenses, carrying recorded καταβολές forward.
     for (const entry of ownerExpenses) {
       if (!entry.amount || entry.amount <= 0) continue;
-      const restored = priorExpensePaid.get(String(entry.expenseId));
-      (building as any).ownerMonthlyExpenses.push({
+      const carried = carryOwnerPayments(
+        priorExpenseSettle.get(String(entry.expenseId))
+      );
+      const arr = (building as any).ownerMonthlyExpenses;
+      arr.push({
         expenseId: entry.expenseId,
         term: Number(term),
         amount: entry.amount,
         description: entry.description || '',
         source: 'expense',
-        paid: restored ? restored.paid : false,
-        paidDate: restored ? restored.paidDate : null
+        payments: carried.payments
       });
+      applyCarriedSettlement(arr[arr.length - 1], carried);
     }
   }
 
@@ -3157,20 +3161,14 @@ async function _distributeRepairCharge(
   // Always re-derive owner-side state from scratch — strip prior entries
   // (also covered by _removeRepairCharges on cancelled, but here we cover
   // the edit path that lands a new amount/term). Scope by expenseId+source.
-  // Snapshot the landlord-set paid flag first so editing a repair doesn't
-  // reset a paid owner-portion to unpaid (mirrors the repair-vacant carry
-  // forward below). Keyed by term (one source:'repair' row per repair+term).
-  const priorRepairPaid = new Map<number, { paid: boolean; paidDate: any }>();
+  // Snapshot the landlord-recorded settlement (payments + derived paid) first
+  // so editing a repair doesn't wipe recorded καταβολές on the owner-portion
+  // (mirrors the repair-vacant carry forward below). Keyed by term (one
+  // source:'repair' row per repair+term).
+  const priorRepairSettle = new Map<number, any>();
   for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
-    if (
-      e.source === 'repair' &&
-      String(e.expenseId) === repairIdStr &&
-      e.paid
-    ) {
-      priorRepairPaid.set(Number(e.term), {
-        paid: true,
-        paidDate: e.paidDate || null
-      });
+    if (e.source === 'repair' && String(e.expenseId) === repairIdStr) {
+      priorRepairSettle.set(Number(e.term), e);
     }
   }
   const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
@@ -3184,17 +3182,18 @@ async function _distributeRepairCharge(
   }
 
   if (ownerPortion > 0) {
-    const restoredRepairPaid = priorRepairPaid.get(term);
-    (building as any).ownerMonthlyExpenses.push({
+    const carriedRepair = carryOwnerPayments(priorRepairSettle.get(term));
+    const arr = (building as any).ownerMonthlyExpenses;
+    arr.push({
       expenseId: repairIdStr,
       term,
       amount: Math.round(ownerPortion * 100) / 100,
       source: 'repair',
       description:
         'Repair: ' + (repair.title || repair.description || 'untitled'),
-      paid: restoredRepairPaid ? restoredRepairPaid.paid : false,
-      paidDate: restoredRepairPaid ? restoredRepairPaid.paidDate : null
+      payments: carriedRepair.payments
     });
+    applyCarriedSettlement(arr[arr.length - 1], carriedRepair);
   }
 
   // If 100% owner-funded, skip the tenant-side distribution entirely.
@@ -3232,26 +3231,20 @@ async function _distributeRepairCharge(
     realmId,
     term
   );
-  // Snapshot landlord-set paid/paidDate on repair-vacant rows before the
-  // strip below regenerates them (same carry-forward rationale as
-  // _recomputeVacantOwnerCharges: `paid` is user state, the rebuild must not
-  // reset it). Keyed by propertyId+term within this repair.
+  // Snapshot landlord-recorded settlement (payments + derived paid) on
+  // repair-vacant rows before the strip below regenerates them (same
+  // carry-forward rationale as _recomputeVacantOwnerCharges: recorded
+  // καταβολές are user state the rebuild must not wipe). Keyed by
+  // propertyId+term within this repair.
   const repairVacantPaidKey = (e: any) =>
     `${String(e.propertyId)}|${Number(e.term)}`;
-  const priorRepairVacantPaid = new Map<
-    string,
-    { paid: boolean; paidDate: any }
-  >();
+  const priorRepairVacantSettle = new Map<string, any>();
   for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
     if (
       e.source === 'repair-vacant' &&
-      String(e.expenseId) === repairIdStr &&
-      e.paid
+      String(e.expenseId) === repairIdStr
     ) {
-      priorRepairVacantPaid.set(repairVacantPaidKey(e), {
-        paid: true,
-        paidDate: e.paidDate || null
-      });
+      priorRepairVacantSettle.set(repairVacantPaidKey(e), e);
     }
   }
 
@@ -3334,20 +3327,21 @@ async function _distributeRepairCharge(
         // strips+rebuilds source:'vacant' rows from building.expenses only,
         // never touches it — otherwise this euro would silently disappear on
         // the next unrelated tenancy change (REPAIR-VACANT-VANISHES).
-        const restoredRV = priorRepairVacantPaid.get(
-          `${String(unit.propertyId)}|${term}`
+        const carriedRV = carryOwnerPayments(
+          priorRepairVacantSettle.get(`${String(unit.propertyId)}|${term}`)
         );
-        (building as any).ownerMonthlyExpenses.push({
+        const rvArr = (building as any).ownerMonthlyExpenses;
+        rvArr.push({
           expenseId: repairIdStr,
           term,
           amount: Math.round(share * 100) / 100,
           propertyId: String(unit.propertyId),
           source: 'repair-vacant',
           description: 'Repair: ' + (repair.title || repair.description || 'untitled'),
-          // Carry the landlord's paid flag across the rebuild.
-          paid: restoredRV ? restoredRV.paid : false,
-          paidDate: restoredRV ? restoredRV.paidDate : null
+          // Carry recorded καταβολές across the rebuild; paid re-derived below.
+          payments: carriedRV.payments
         });
+        applyCarriedSettlement(rvArr[rvArr.length - 1], carriedRV);
       }
     }
   }
@@ -3428,32 +3422,66 @@ async function _recomputeVacantOwnerCharges(
   const optInExpenses = expenses.filter(
     (e) => e.chargeOwnerWhenVacant && isExpenseActiveForTerm(e, term)
   );
+  // Owner-fixed: expenses that track a FIXED owner-only monthly amount. These
+  // are materialised into real payable owner rows (source:'owner-fixed') so
+  // the fixed owner portion is settleable via owner καταβολές like every other
+  // charge (was previously a display-only dashboard projection). One row per
+  // such expense per active term.
+  const ownerFixedExpenses = expenses.filter(
+    (e) =>
+      e.trackOwnerExpense &&
+      Number(e.ownerAmount) > 0 &&
+      isExpenseActiveForTerm(e, term)
+  );
 
-  // Snapshot the landlord-set `paid`/`paidDate` BEFORE stripping. These rows
-  // are strip-and-rebuilt every recompute (so the amount stays live), but
-  // `paid` is USER STATE the landlord toggled — it must survive the rebuild.
-  // Without this carry-forward, any unrelated expense edit or tenancy change
-  // silently reverted a paid vacant-owner charge to unpaid, corrupting the
-  // Overview paid/outstanding tile (adversarial finding, June 2026). Keyed by
-  // expenseId+propertyId+term — the natural identity of a vacant share (the
-  // _id is regenerated on rebuild, so it can't be the key).
-  const paidKey = (e: any) =>
-    `${String(e.expenseId)}|${String(e.propertyId)}|${Number(e.term)}`;
-  const priorPaid = new Map<string, { paid: boolean; paidDate: any }>();
+  // Snapshot the landlord-recorded SETTLEMENT (payments + derived paid/paidDate)
+  // BEFORE stripping. These rows are strip-and-rebuilt every recompute (so the
+  // amount stays live), but the recorded καταβολές are USER STATE that must
+  // survive the rebuild. Without this carry-forward, any unrelated expense edit
+  // or tenancy change silently wiped recorded owner payments (adversarial-class
+  // finding). Keyed by expenseId+propertyId+term — the natural identity of a
+  // recomputed row (the _id is regenerated on rebuild). Covers BOTH the vacant
+  // and owner-fixed sources this function owns.
+  const settleKey = (e: any) =>
+    `${String(e.expenseId)}|${String(e.propertyId || '')}|${Number(e.term)}`;
+  const priorSettle = new Map<string, any>();
   for (const e of (building.ownerMonthlyExpenses || []) as any[]) {
-    if (e.source === 'vacant' && Number(e.term) === term && e.paid) {
-      priorPaid.set(paidKey(e), { paid: true, paidDate: e.paidDate || null });
+    if (
+      (e.source === 'vacant' || e.source === 'owner-fixed') &&
+      Number(e.term) === term
+    ) {
+      priorSettle.set(settleKey(e), e);
     }
   }
 
-  // Strip prior vacant entries for this term — full re-derive.
+  // Strip prior vacant + owner-fixed entries for this term — full re-derive.
   const stale = (building.ownerMonthlyExpenses || []).filter(
-    (e: any) => e.source === 'vacant' && Number(e.term) === term
+    (e: any) =>
+      (e.source === 'vacant' || e.source === 'owner-fixed') &&
+      Number(e.term) === term
   );
   for (const e of stale) building.ownerMonthlyExpenses.pull(e._id);
 
+  // Materialise the fixed owner-only amount rows (independent of vacancy).
+  for (const expense of ownerFixedExpenses) {
+    const carried = carryOwnerPayments(
+      priorSettle.get(`${String(expense._id)}||${term}`)
+    );
+    const arr = building.ownerMonthlyExpenses;
+    arr.push({
+      expenseId: String(expense._id),
+      term,
+      amount: Math.round(Number(expense.ownerAmount) * 100) / 100,
+      propertyId: null,
+      source: 'owner-fixed',
+      description: expense.name || '',
+      payments: carried.payments
+    });
+    applyCarriedSettlement(arr[arr.length - 1], carried);
+  }
+
   if (optInExpenses.length === 0) {
-    return; // nothing opts in; prior entries (if any) already stripped
+    return; // no vacant opt-ins; owner-fixed already (re)materialised above
   }
 
   const occupied = await _occupiedPropertyIdsForTerm(building, realmId, term);
@@ -3475,20 +3503,23 @@ async function _recomputeVacantOwnerCharges(
         term
       );
       if (share <= 0) continue;
-      const restored = priorPaid.get(
-        `${String(expense._id)}|${String(unit.propertyId)}|${term}`
+      const carried = carryOwnerPayments(
+        priorSettle.get(
+          `${String(expense._id)}|${String(unit.propertyId)}|${term}`
+        )
       );
-      building.ownerMonthlyExpenses.push({
+      const arr = building.ownerMonthlyExpenses;
+      arr.push({
         expenseId: String(expense._id),
         term,
         amount: Math.round(share * 100) / 100,
         propertyId: String(unit.propertyId),
         source: 'vacant',
         description: expense.name || '',
-        // Carry the landlord's paid flag across the rebuild (see snapshot above).
-        paid: restored ? restored.paid : false,
-        paidDate: restored ? restored.paidDate : null
+        // Carry recorded καταβολές across the rebuild; paid re-derived below.
+        payments: carried.payments
       });
+      applyCarriedSettlement(arr[arr.length - 1], carried);
     }
   }
 }

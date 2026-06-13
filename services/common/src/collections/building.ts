@@ -236,6 +236,27 @@ const RepairSchema = new mongoose.Schema({
   chargeTerm: Number
 });
 
+// A single owner payment (καταβολή) slice allocated to one owner charge.
+// Mirrors the persisted tenant rent payment shape (tenant.rents[].payments[]):
+// date/amount/type/reference/description. The owner-scoped payment dialog
+// records ONE payment against an owner and fans an allocated slice onto each
+// covered charge's `payments[]` — so per-row settlement (paidAmount = Σ
+// payments.amount) stays correct and the building doc remains the single home.
+const OwnerExpensePaymentSchema = new mongoose.Schema(
+  {
+    date: { type: Date, required: true },
+    amount: { type: Number, required: true },
+    type: {
+      type: String,
+      enum: ['cash', 'transfer', 'cheque'],
+      default: 'transfer'
+    },
+    reference: { type: String, default: '' },
+    description: { type: String, default: '' }
+  },
+  { _id: false }
+);
+
 const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   expenseId: { type: String, required: true },
   term: { type: Number, required: true },
@@ -268,14 +289,27 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   //                     outside building.expenses so it'd never be re-added),
   //                     silently re-opening the "repair vanishes" bug on the
   //                     next unrelated tenancy change.
+  //   'owner-fixed'   = the fixed owner-only monthly amount (BuildingExpense
+  //                     ownerAmount where trackOwnerExpense=true), MATERIALISED
+  //                     per active month into a real payable row so it can be
+  //                     settled via owner καταβολές like every other owner
+  //                     charge (was previously a display-only projection).
+  //                     expenseId holds the building expense _id.
   source: {
     type: String,
-    enum: ['expense', 'repair', 'vacant', 'repair-vacant'],
+    enum: ['expense', 'repair', 'vacant', 'repair-vacant', 'owner-fixed'],
     default: 'expense'
   },
-  // Whether the owner has paid this owner-side charge. Drives the building
-  // Overview "owner expenses paid vs unpaid" progress tile. Defaults to
-  // unpaid; the landlord toggles it. paidDate is stamped when marked paid.
+  // Owner payments (καταβολές) recorded against THIS charge. The owner-scoped
+  // payment dialog fans an allocated slice onto each covered charge. Settlement
+  // is DERIVED from this array (paidAmount = Σ payments.amount); `paid`/
+  // `paidDate` below are recomputed from it on every write — they are a cached
+  // convenience for the dashboard tile, NOT an independent source of truth.
+  payments: { type: [OwnerExpensePaymentSchema], default: [] },
+  // DERIVED from `payments` (paid = outstanding <= 0.005). Kept as a cached
+  // flag the dashboard/breakdown read directly. Every recompute that strips +
+  // rebuilds an owner row MUST carry `payments` (and hence paid) forward —
+  // mirroring the paid carry-forward added in 6e1fae9a, extended to payments.
   paid: { type: Boolean, default: false },
   paidDate: { type: Date, default: null }
 });
