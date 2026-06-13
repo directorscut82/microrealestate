@@ -63,7 +63,7 @@ The Playwright suite, the seed helpers, the form-side date guards, and the serve
 **Rule:** if you see two `moment(...)` calls in the same comparison, BOTH must use `moment.utc(...)` OR neither — never mix. Anchors:
 
 - `services/api/src/managers/rentmanager.ts` F3 guard — uses `moment.utc(p.date, 'DD/MM/YYYY', true)` AND `moment.utc(termFirstDay,'YYYY-MM-DD', true)` — consistent ✓
-- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` (around line 316) — fixed in `a9d3fbab`: `_parsed = moment.utc(...)`, `_termFirstDay = moment.utc(...)` ✓
+- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` (now ~line 457; `_parsed = moment.utc(...)` ~503, `_termFirstDay = moment.utc(...)` ~489) — fixed in `a9d3fbab`: both sides UTC ✓
 - `e2e-playwright/tests/lib/api.ts` `ensureSeedLeasedTenantWithPayment` — uses `getMonth()` / `getFullYear()` (LOCAL) so the URL term matches the test's UI navigation (also LOCAL) ✓
 
 If any of those drift back to mismatch, **every payment dialog test will time out at 15-22s** because the client-side guard fires a "Payment date is before this rent month" toast and the PATCH never goes out. That's exactly what happened in suites #7-#10 (June 1).
@@ -94,9 +94,24 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Run that to confirm NAS is on the commit you pushed BEFORE running tests.
 
-### Current state (June 8, 2026)
+### Current state (June 13, 2026)
 
-- **Production NAS revision**: `58f94315` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200.
+- **Production NAS revision**: `4a55ddc4` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200. (`58f94315` is still an ancestor but is ~24 commits behind.)
+- **Jest now requires node@20.** `services/api` is `type: module`; the system node drifted to v25 which breaks the suite (`ERR_REQUIRE_ESM` on the winston mock). node@20 lives at `/usr/local/opt/node@20/bin/node`. Run the suite as:
+  ```bash
+  export PATH="/usr/local/opt/node@20/bin:$PATH"
+  cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage
+  ```
+  The winston / express-winston / jsonwebtoken mocks are now `.cjs` (`src/__mocks__/*.cjs`) mapped via `moduleNameMapper`; `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Full suite: **431 passed, 15 skipped, 1 skipped suite** (e9parser /tmp fixtures), 0 failed. Repaired in `6cf15c26`. See [`project_jest_node20_cjs_mocks` in memory] and `documentation/E2E_TESTING.md`.
+- **Recent shipped work (June 9-13 2026) — building-domain / money-correctness / vacant-owner billing (all on `nas`, deployed at `4a55ddc4`):**
+  - **Owner-billing for vacant units** (`978bf92b` → `4a55ddc4`) — an empty managed unit's building-expense share now routes to the OWNER when the expense has `chargeOwnerWhenVacant=true` (was a "coming soon" stub for months). `equal` allocation now counts vacant units as parties (`1_base.ts`); `OwnerMonthlyExpenseSchema` gained `source: 'repair-vacant'` (distinct from `'vacant'`) + `paid`/`paidDate`. Five workflow-confirmed money bugs fixed across the batch + three adversarial-round follow-ups: fixed-zero server guard (`5a14bee6`), method-flip bypass (`42b7860e`), single_unit/sub-cent (`182c3d4d`), duplicate-propertyId (`4a55ddc4`). New `validateSingleUnitAllocations` + duplicate-propertyId rejection in `validators.ts`.
+  - **Owner-expenses paid/unpaid tile** (`6cf15c26`) — building Overview shows a paid-vs-outstanding progress tile under the income tile; each owner-side charge has a paid checkbox in the Expenses breakdown. New route `PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid` → `setOwnerExpensePaid`.
+  - **Eksoda 'who is charged' breakdown** (`6211dc9f`/`61963e71`) — the month-picker breakdown shows renter / owner(vacant-billed) / uncollected / owner-direct sections with per-unit calc basis + Greek naming.
+  - **kymainomeno (variable) statement amount eroding to zero on re-save — FIXED** (`22316220`) — `MonthlyChargeSchema` gained `inputAmount` to preserve the landlord-typed full statement figure across recompute (the per-unit shares no longer sum-erode).
+  - **'huge pills' root cause — FIXED** (`77a9e921`, supporting `620a4a64`/`f3f47614`/`9b65b157`) — stock tailwind-merge silently DROPPED the custom font-size tokens (`text-label` etc.) when combined with a colour via `cn()`, rendering at the 16px browser default. Fix is contained to `badge.js` (arbitrary-value size) — do NOT extend `cn()` globally (it made the whole app tiny once; see the comment in `webapps/landlord/src/utils/index.js`).
+  - **Unified building-expense tile + audit batches** (`39a91cbd`/`5d19f0b2`/`243db1e7`) — merged the side-by-side monthly-statement/history split into one calendar-driven tile, fixed the Όροφος-printed-3× label dup and double-eksoda, building-domain audit batches 1-3.
+  - **Building overview repairs/scheduled-work tile** (`b218f09f`) + **vacant-owner lifecycle trigger + dashboard double-count fix + browse i18n** (`bba9c74c`).
+  - **New NAS specs**: `48_building_expense_panel`, `49_vacant_owner_money` (BUG1 equal-vacant party, BUG2 repair-vacant survives recompute, BUG3 method-flip 422, BUG5 cancel strips orphan), `50_owner_expenses_paid_tile`.
 - **Recent shipped work (June 2-8 2026):**
   - **`__v` concurrency hardening** (`f15949f0` / `fd6040bb` / `e8cbd830`) — building/property/sibling-recompute paths now use optimistic-lock + retry; closed the Prifti-June drift class of bugs. Building schema has `optimisticConcurrency:true`.
   - **Receipt PDF rebrand + per-line label rule** (`f15949f0`/`57495a09`/`fd6040bb`) — Πρόγραμμα tile, saved-tile bullets, AllocationBlock dropdown/preview, PDF body all use the same `Ενοίκιο/Δαπάνη επί του ενοικίου/<TypeLabel>` rule. Receipt = "ΑΠΟΔΕΙΞΗ ΕΙΣΠΡΑΞΗΣ" (no tonos), excludes rent.charges, includes ΑΦΜ + property address.
@@ -259,7 +274,11 @@ For the complete endpoint reference, read `services/api/src/routes.ts` and the m
 - `docker-compose.microservices.test.yml` — adds resetservice
 - `docker-compose.yml` — standalone with Caddy (auto HTTPS)
 
-**CI** (`.github/workflows/ci.yml`): push to `master` → lint → build & push 8 Docker images to GHCR (parallel). The fork strips upstream's deploy and e2e jobs; the canonical upstream pipeline (9 images including tenant-frontend, plus deploy → health check → Cypress E2E) is preserved on `microrealestate/microrealestate`. **E2E on this fork** is Playwright at `e2e-playwright/`, runs against the live NAS (not CI) — see [`documentation/E2E_TESTING.md`](documentation/E2E_TESTING.md).
+**CI** — two workflows build images to GHCR (9 each, parallel matrix: gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice, landlord-frontend, tenant-frontend):
+- `.github/workflows/ci.yml` — push to `master` → lint → build & push the 9 images tagged `:<sha>` + `:latest`. The fork strips upstream's deploy → health-check → Cypress E2E jobs.
+- `.github/workflows/nas-ci.yml` ("NAS Branch CI") — push to **`nas`** → lint → build the same 9 images tagged `:nas` (always-latest) + `:nas-<sha>` (pinned for rollback). **This — not ci.yml — is the workflow that produces the images the NAS deploy pulls** (`scripts/deploy-nas.sh` waits on it). Other workflows present: `pr-ci.yml`, `release.yml`, `codeql-analysis.yml`.
+
+**E2E on this fork** is Playwright at `e2e-playwright/`, runs against the live NAS (not CI) — see [`documentation/E2E_TESTING.md`](documentation/E2E_TESTING.md).
 
 For NAS deployment specifics, see `documentation/DEV_AND_DEPLOY.md`.
 

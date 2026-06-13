@@ -90,8 +90,9 @@ inlined. This file is gitignored — it never leaves your Mac.
 
 ## Validation checks that run before every deploy
 
-Defined in `scripts/validate-nas-deploy.sh`. All 22 must pass before the push
-happens. Highlights:
+Defined in `scripts/validate-nas-deploy.sh`. All 23 must pass before the push
+happens (13 standalone `check`s plus a per-service loop over 10 services).
+Highlights:
 
 - Images come from `ghcr.io/directorscut82/microrealestate/*` (your fork)
 - All images pin to `:nas` tag (not `:latest`)
@@ -147,7 +148,7 @@ Find previous SHAs at https://github.com/directorscut82/microrealestate/actions.
 | Dev gateway crashes with `[HPM] Missing "target" option` | `API_URL` missing from `.env` | Already fixed in `cli/src/commands.js` on master. If it ever comes back: `echo 'API_URL=http://api:8200/api/v2' >> .env` |
 | Sign-in works on LAN but fails from phone via Tailscale | `APP_DOMAIN` in compose doesn't include the Tailscale IP | Edit `docker-compose.nas.yml`, add the IP to the comma-list in both gateway and authenticator services, redeploy |
 | NAS CI fails on a single image with `ERROR: failed to build: unknown blob` while pushing to GHCR | Transient registry/CDN error on GitHub's side. The blob was uploaded but not yet visible when the manifest write looked it up. Fail-fast cancels the other 7 image builds. | Push an empty commit and the next CI run usually succeeds: `git commit --allow-empty -m "ci: retry NAS image build (transient GHCR unknown blob)" && git push origin nas`. No code change required. |
-| After a NAS redeploy, browsers show the old design (Incognito too) | **Stale Docker image cache on the NAS.** Portainer's `PullImage: true` flag is unreliable with mutable tags like `:nas` — the Synology Docker daemon may consider the existing local image "up to date" even when GHCR has a new digest, leaving the stack on the previous image. Containers report "Up X minutes" but are running stale code. | The deploy script (since `<this commit>`) now force-pulls each `:nas` image explicitly via the Docker API and verifies each container's `org.opencontainers.image.revision` label matches the just-pushed `$NEW_SHA` before declaring success. If you ever see this manually: `curl -X POST -H "X-API-Key: $TOKEN" "$PORTAINER/api/endpoints/3/docker/images/create?fromImage=ghcr.io/.../landlord-frontend&tag=nas"` for each image, then trigger a stack update. |
+| After a NAS redeploy, browsers show the old design (Incognito too) | **Stale Docker image cache on the NAS.** Portainer's `PullImage: true` flag is unreliable with mutable tags like `:nas` — the Synology Docker daemon may consider the existing local image "up to date" even when GHCR has a new digest, leaving the stack on the previous image. Containers report "Up X minutes" but are running stale code. | The deploy script (since `c2245673` / `d0d0e160`) now force-pulls each `:nas` image explicitly via the Docker API and verifies each container's `org.opencontainers.image.revision` label matches the just-pushed `$NEW_SHA` before declaring success. If you ever see this manually: `curl -X POST -H "X-API-Key: $TOKEN" "$PORTAINER/api/endpoints/3/docker/images/create?fromImage=ghcr.io/.../landlord-frontend&tag=nas"` for each image, then trigger a stack update. |
 | Even after a verified-fresh redeploy, browsers still show old design | Stale browser cache. The landlord HTML uses `cache-control: s-maxage=31536000, stale-while-revalidate`; `_next/static/*` chunks are `immutable, max-age=31536000` (1 year). | Hard reload (`Ctrl+Shift+R` / `Cmd+Shift+R`), or open the URL in an Incognito/Private window. The deploy script prints a reminder at the end of every redeploy. |
 
 ## Historical gotchas (already fixed, here for context)

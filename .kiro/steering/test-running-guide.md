@@ -144,7 +144,9 @@ These scenarios are NOT optional. If you change anything in `ResourceList/List.j
 cd /Users/epitrogi/Development/microrealestate/e2e-playwright
 yarn test:nas
 # script chains: backup-nas-before-tests.sh && playwright test
-# typical runtime: ~17s, 17 passed + 1 fixme as of June 2026
+# 38 non-scratch numbered specs (00..50 with gaps) as of June 2026; running
+# the WHOLE fleet takes minutes, not seconds — usually run one spec at a time.
+# Requires node@20: export PATH="/usr/local/opt/node@20/bin:$PATH" first.
 ```
 
 ### Run a single spec
@@ -236,19 +238,28 @@ The API's `_stringToDate` parser is strict on `DD/MM/YYYY`. ISO `YYYY-MM-DD` wil
 
 ## Running unit tests
 
+> **⚠️ The suite requires node@20.** `services/api` is `type: module`; the system node has drifted to v25, which breaks jest with `ERR_REQUIRE_ESM` on the winston mock the moment any suite imports `@microrealestate/common` (i.e. nearly all of them). node@20 is installed at `/usr/local/opt/node@20/bin/node`. Running `npx jest` under v25 will fail — this is NOT a code problem, it is the node version. (Infra repaired in commit `6cf15c26`.)
+
 ```bash
-cd services/api && npx jest --no-coverage
+export PATH="/usr/local/opt/node@20/bin:$PATH"
+cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage
 ```
 
-Per-service jest, no Docker. Run from the service directory.
+(The `test` npm script is `node --experimental-vm-modules ../../node_modules/jest/bin/jest.js`, so `yarn workspace @microrealestate/api test` works too — but only under node@20.)
 
-**Notable suites under `services/api/src/businesslogic/__tests__/`:**
+Per-service jest, no Docker. Full suite: **431 passed, 15 skipped, 1 skipped suite** (e9parser, /tmp fixtures absent), 0 failed.
 
-- `rent.test.js` — full computation pipeline (taskBase → taskDebts → taskDiscounts → taskVATs → taskBalance → taskPayments → taskTotal)
-- `paymentEdgeCases.test.js` — settlement edge cases, allocation surplus, partial-payment carry-forward
-- `dashboardManagerComputePaidByBucket.test.js` — round-3i accuracy: walks `rent.payments[]` with allocation-aware spreading or oldest-debt-first auto-spread, distributes per `rent` / `charges` / `building:<type>` buckets. Run when changing `dashboardmanager.ts:_computePaidByBucket()` or the rent-pipeline category mapping.
+**Jest mock infra (don't regress this):** the winston / express-winston / jsonwebtoken mocks are `.cjs` (`services/api/src/__mocks__/*.cjs`) mapped via `moduleNameMapper` — a `.js` mock is loaded as ESM under `type: module` and the real CJS express-winston cannot `require()` it. `jest.mock`-using suites need `import { jest } from '@jest/globals'` (jest is not an ambient global under ESM). Factory-mock suites (`realmmanager.test.js`, `propertymanager.classifyExpense.test.js`) use `jest.unstable_mockModule` + dynamic `import()` inside `beforeAll`. ESM test files use `import.meta.url`, not `__dirname`.
 
-Imports in the test files reference the **source** TS files (`../../managers/dashboardmanager.js`); jest resolves them through the workspace's TS preset, no separate build step needed.
+**Notable suites:**
+
+- `src/businesslogic/__tests__/rent.test.js` — full computation pipeline (taskBase → taskDebts → taskDiscounts → taskVATs → taskBalance → taskPayments → taskTotal)
+- `src/businesslogic/__tests__/dashboardManagerComputePaidByBucket.test.js` — round-3i accuracy: walks `rent.payments[]` with allocation-aware spreading or oldest-debt-first auto-spread, distributes per `rent` / `charges` / `building:<type>` buckets. Run when changing `dashboardmanager.ts:_computePaidByBucket()` or the rent-pipeline category mapping.
+- `src/businesslogic/__tests__/contract-freeze-past-unpaid.test.js` — past-unpaid-month freeze (term-based `_isFrozen`).
+- `src/__tests__/managers/paymentEdgeCases.test.js` — settlement edge cases, allocation surplus, partial-payment carry-forward. (Manager tests live under `src/__tests__/managers/`, not `businesslogic/__tests__/`.)
+- `src/__tests__/expenseBreakdown.test.js`, `buildingChargesScenarios.test.js`, `buildingChargesGroupCarrier.test.js`, `repairCharges.test.js`, `moneyFlowLifecycle.test.js`, `validators.test.js` — building-expense allocation + vacant-owner billing + allocation validators.
+
+Imports in the test files reference the **source** TS files (`../../managers/dashboardmanager.js`); jest resolves them through `@swc/jest`, no separate build step needed.
 
 ## Production database protection
 
@@ -341,20 +352,24 @@ and don't accidentally regress it during cleanup work.
 **Behaviors verified correct as-is (do NOT change without re-running the
 relevant probe first):**
 
-- **Past-month overpayment propagation** — has two regimes documented in
-  `documentation/DEFERRED_DECISIONS.md` D-8. T4 probes confirmed:
-  surplus DOES cascade through unfrozen downstream months naturally;
-  surplus is locked in the touched term only when downstream months
-  have their own settlements (the `_isFrozen` guard in
-  `services/api/src/managers/contract.ts:271-276` is intentional and
-  load-bearing).
+- **Past-month overpayment propagation** — `_isFrozen` is now purely
+  TERM-based (Tier I-1, commit `01d48c46`): a future term is never frozen,
+  a PAST term is always frozen (paid OR unpaid), and the current term is
+  frozen only if fully paid. So an overpayment in a past month no longer
+  propagates forward — every past term is locked regardless of settlements
+  (the old "two regimes" in `documentation/DEFERRED_DECISIONS.md` D-8 have
+  collapsed). The `_isFrozen` function is at
+  `services/api/src/managers/contract.ts:315`; the guard call inside the
+  pay path is ~line 270. This guard is intentional and load-bearing.
 - **Payment dialog `submittingRef` 80ms reset fallback** — load-bearing.
   Several attempts to tighten or remove this timeout broke the entire
   dialog flow. The C28 double-click race remains a known test flake;
   accept it. See AGENTS.md "saga" section.
 - **Greek lease parser, IRIS QR generation, RF payment codes** — covered
-  by the 13 unit tests in `services/api/src/managers/__tests__/`. Don't
-  rewrite the parser regexes without re-running those.
+  by the manager unit tests under `services/api/src/__tests__/managers/`
+  (`greekleaseparser.test.js` 20 tests, `e9parser.test.js` 13, `contract.test.js`
+  17, `inferPropertyType.test.js` 23). Don't rewrite the parser regexes
+  without re-running those.
 - **Frontend store reactivity (`InjectStoreContext` /
   `useSyncExternalStore`)** — current shape (subscribe + notify, plain
   classes) is a deliberate replacement for MobX. Don't reintroduce

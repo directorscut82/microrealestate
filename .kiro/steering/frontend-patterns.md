@@ -14,6 +14,24 @@ Use **shadcn/ui + Tailwind CSS** (already configured in `components.json`).
 - Style with Tailwind utility classes, not CSS-in-JS or MUI's `sx`/`makeStyles`
 - Do NOT import from `@material-ui/*`
 
+### Styling: `cn()` and tailwind-merge — DO NOT extend globally
+
+`cn()` (`src/components/ui/../utils` → `webapps/landlord/src/utils/index.js`) is
+`twMerge(clsx(inputs))` using **stock** tailwind-merge. Stock tailwind-merge does
+NOT know this project's custom font-size tokens (`text-label`, `text-title`,
+`text-headline`, etc.), so when a custom size is combined with a text-colour via
+`cn()`/`cva`, twMerge silently DROPS the size and the element renders at the 16px
+browser default.
+
+**The rule (learned the hard way — the "huge pills" saga, June 2026):** do NOT
+"teach" `cn()` the custom tokens globally. Dozens of components had been silently
+rendering a dropped custom size at 16px for months; extending the merge made every
+one of them snap to its real (smaller) size at once and the whole UI looked tiny.
+When a component must combine a custom font-size with a colour, use an
+**arbitrary-value** size class (e.g. `text-[0.6875rem]`) — stock tailwind-merge
+keeps that alongside the colour. See `badge.js` and the tenant-tile pills, and the
+load-bearing comment at the top of `webapps/landlord/src/utils/index.js`.
+
 ## State Management
 
 | Concern | Use | Do NOT use |
@@ -50,7 +68,7 @@ function MyForm({ onSubmit }) {
 }
 ```
 
-Do NOT use Formik, `<Field>`, `<Form>`, Yup, or components from `src/components/formfields/`.
+Do NOT use Formik, `<Field>`, `<Form>`, or Yup. (The legacy `src/components/formfields/` directory was deleted along with the formik/yup/@material-ui deps.)
 
 ## API Calls
 
@@ -226,7 +244,7 @@ Long content inside a Drawer/Dialog body should opt into the branded scrollbar u
 <div className="overflow-y-auto scrollbar-branded ...">
 ```
 
-Currently applied in `NewPaymentDialog` body and `ResponsiveDialog` content. New scrollable surfaces inside dialogs should use it.
+Applied across the payment dialogs and dashboard figure panels (`NewPaymentDialog`, `ResponsiveDialog`, `dashboard/MonthFigures.js`, `rents/ExpressPaymentDialog.js`). New scrollable surfaces inside dialogs should use it.
 
 ### Per-payment fields (note / discount / extra-charge)
 

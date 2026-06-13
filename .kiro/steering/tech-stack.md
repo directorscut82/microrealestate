@@ -55,7 +55,7 @@ inclusion: always
 - shadcn/ui pattern (components.json, `src/components/ui/`)
 - Tailwind CSS 3.4 with CSS variables for theming
 - TipTap 2.6 — rich text editor for contract templates
-- react-hook-form + zod — form handling and validation (all 22 forms)
+- react-hook-form + zod — form handling and validation (all forms)
 - next-translate — i18n (locales in `locales/` directory)
 - next-themes — dark mode support
 - Recharts — dashboard charts
@@ -89,11 +89,12 @@ inclusion: always
 
 ## Testing
 
-- Jest 29.7 — unit tests (api service, common library, landlord frontend)
-  - 14 suites, 319 tests (as of May 2026)
-  - Frontend: 4 test files (ErrorBoundary, token refresh, payment double-submit, fetch errors)
+- Jest 29.7 (with `@swc/jest`) — unit tests (api service, common library, landlord frontend)
+  - api suite: 24 test files, full run **431 passed / 15 skipped / 0 failed** (June 2026)
+  - ⚠️ Runs ONLY under **node@20** (system node drifted to v25 and breaks the suite; node@20 at `/usr/local/opt/node@20/bin/node`). `services/api` is `type: module`, so the winston/express-winston/jsonwebtoken mocks are `.cjs` and `jest.mock` suites import `jest` from `@jest/globals`. See `documentation/E2E_TESTING.md` / test-running-guide.
+  - Frontend: a handful of test files (ErrorBoundary, token refresh, payment double-submit, fetch errors)
 - Playwright 1.60 — end-to-end tests, NAS-targeted
-  - 17 specs (UI + API), `e2e-playwright/` workspace
+  - 38 non-scratch specs (numbered 00..50 with gaps), `e2e-playwright/` workspace
   - Replaced the 68-spec Cypress 14 suite in May 2026 — see `documentation/E2E_TESTING.md`
 - supertest — HTTP assertion testing (api service unit tests)
 

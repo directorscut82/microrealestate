@@ -1,11 +1,36 @@
 # UI Coverage Backlog (from workflow ww0gn2vsh)
 
-## Summary
+> **Baseline:** this catalog was generated ~2026-06-01 (commit `887a2ca0`).
+> Current HEAD is `4a55ddc4` (2026-06-13). It predates specs 25-50 and the
+> June 8-13 building-expense / vacant-owner work, so several "not covered /
+> never clicked" rationales below are now stale — see the Status update.
+
+## Status update (June 13, 2026) — scenarios since written/covered or obsoleted
+
+- **Covered by the search/filter catalog (specs 25-29):** U12 (rents tenant
+  search — `28.29`), U13/U14/U15 (rents arrears/partial/settled chips —
+  `28.30/31/32`), U22 ("Lease running" tenant filter — `25.4/25.5`).
+- **Covered by round-1 catalogs (specs 44-46):** U20 (Import-PDF dialog —
+  `45_round1_pdf_import`); tenant lease-pill states (`44_round1_tenant_tile`:
+  44.8 ended, 44.9 future-start, 44.10 running) — re-audit the `UC04`-`UC30`
+  "never clicked" lease-lifecycle rationales against `19_lifecycle_ui_scenarios`
+  too.
+- **OBSOLETE — cannot be authored as written:** `UC25` (BillingForm "Monthly
+  discount" input) — the per-tenant monthly-discount UI was removed from
+  `BillingForm.js`; only a comment remains. `tenant.discount` is still a
+  schema field but has no form input.
+- **NOT in this catalog at all (new domain, now has UI + specs):** building
+  expense panel + ChargeBreakdown paid checkbox (specs `48`, `50.3`);
+  BuildingDashboard owner paid/unpaid progress tile (`50.1`/`50.2`); vacant-owner
+  money correctness (`49`). Add these surfaces when this backlog is regenerated.
+
+## Summary (as of the 2026-06-01 baseline — counts now partly stale)
 
 - 622 UI controls enumerated
 - 391 gaps
 - CRITICAL: 36, HIGH: 44
-- 70 scenarios designed (not yet written as specs)
+- 70 scenarios designed — a substantial subset (the U12-15/U20/U22 group above
+  and the round-1 catalogs) has since been written as specs.
 
 ## Per surface coverage gaps
 

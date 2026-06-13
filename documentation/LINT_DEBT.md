@@ -4,10 +4,16 @@ During the rush to get CI green for NAS deployment, I took shortcuts that avoide
 fixing real code issues by relaxing or disabling lint rules. This document
 tracks every shortcut so they can be reversed and the underlying issues fixed.
 
-**Commit where debt was introduced:** to be filled when pushed.
+**Commit where debt was introduced:** `4891d26a` ("fix: pass lint in CI (partial
+fixes + temporary debt for NAS deploy)").
 
-**Priority:** Fix all items before merging any new feature work. These are not
-blockers for running the app, but they hide real style/quality issues.
+**Priority:** Originally "fix all items before merging any new feature work" —
+that precondition has since been overtaken by events (NAS shipped long ago; HEAD
+is `4a55ddc4` with ~170 commits of feature work merged). Treat this as a standing
+cleanup backlog, not a merge gate. Note: `yarn lint` currently passes clean, and
+the non-test `any` count has GROWN (now ~611, bulk in `services/api`), not
+shrunk, since this doc was written — re-enabling `no-explicit-any` is a larger
+job than the 383-figure snapshot below implies.
 
 ---
 

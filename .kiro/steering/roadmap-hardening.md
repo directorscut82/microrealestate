@@ -73,11 +73,19 @@ Changes are grouped into phases. Each phase should be completed before the next.
 ### 4.2 Building Services (κοινόχρηστα) ✅ COMPLETE
 - Monthly statement generation with expense allocation per unit
 - Owner expense tracking per building expense with monthly amounts
-- 8 allocation methods: general/heating/elevator thousandths, equal, by_surface, fixed, custom_ratio, custom_percentage
+- 9 allocation methods: general/heating/elevator thousandths, equal, by_surface, fixed, custom_ratio, custom_percentage, single_unit
 - Variable vs recurring expense distinction with Ναι(κυμαινόμενο) badge
-- Expense history panel with month picker and allocation tooltips
+- Unified expense panel: one calendar-driven tile (monthly statement + history merged) with per-month "who is charged" breakdown (renter / owner-vacant-billed / uncollected / owner-direct)
 - Safe expense deletion dialog with soft/hard delete and impact warning
 - Retroactive rent recalculation on expense changes
+
+#### 4.2.1 Building-domain hardening wave (June 2026) ✅ COMPLETE
+Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `58f94315`.
+- **Owner-billing for vacant managed units** — a unit with no tenant covering the term has its building-expense share routed to the OWNER when the expense opts in via `chargeOwnerWhenVacant` (per-expense toggle; previously a disabled "coming soon" stub). `equal` allocation now counts vacant managed units as parties (`1_base.ts`), matching the thousandths/surface methods. `OwnerMonthlyExpenseSchema` gained `source` enum `['expense','repair','vacant','repair-vacant']` (the distinct `repair-vacant` source prevents the expense-recompute from wiping a vacant unit's repair share) plus `paid`/`paidDate`. `MonthlyChargeSchema` gained `inputAmount`.
+- **Money-correctness bugs fixed** (adversarially verified across 3 rounds): kymainomeno (variable) statement amount eroding to zero on re-save (`22316220` — `inputAmount` preserves the entered figure); fixed-zero server guard (`5a14bee6`) + method-flip bypass (`42b7860e`) + single_unit/sub-cent (`182c3d4d`) + duplicate-propertyId (`4a55ddc4`). New `validateSingleUnitAllocations` + duplicate-propertyId rejection + per-unit-rounded fixed check in `validators.ts`.
+- **Owner-expenses paid/unpaid Overview tile** (`6cf15c26`) — progress tile under the income tile; per-charge paid checkbox in the breakdown; route `PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid` → `setOwnerExpensePaid`.
+- **Repairs/scheduled-work summary tile** on the building Overview (`b218f09f`); vacant-owner lifecycle recompute trigger + dashboard double-count fix (`bba9c74c`).
+- **NAS specs**: `48_building_expense_panel`, `49_vacant_owner_money`, `50_owner_expenses_paid_tile`.
 
 ### 4.3 Event/Webhook system — NOT STARTED
 - **Purpose:** Receive notifications from external services (payment gateways, OCR services)
@@ -251,17 +259,16 @@ Changes are grouped into phases. Each phase should be completed before the next.
 ## Phase 5 — Quality & Operations
 
 ### 5.1 Unit tests for critical paths — IN PROGRESS
-- **Current state:** 14 suites, 319 tests (309 passing, 10 failing)
-- **Covered:** Rent computation pipeline, building expense allocation, dashboard aggregation, PDF parsers, auth token refresh, payment double-submit, ErrorBoundary
-- **Frontend tests:** 4 test files in webapps/landlord/src/__tests__/
-- **Remaining:** Auth flows (JWT refresh full cycle, OTP, M2M)
+- **Current state (June 2026):** 24 `services/api` jest test files; full suite **431 passed, 15 skipped, 1 skipped suite** (e9parser /tmp fixtures), 0 failed. New suites since the prior count include `repairCharges`, `expenseBreakdown`, `buildingChargesScenarios`, `buildingChargesGroupCarrier`, `dashboardManagerComputePaidByBucket`, `contract-freeze-past-unpaid`, `moneyFlowLifecycle`.
+- **⚠️ Jest infra (repaired in `6cf15c26`):** `services/api` is `type: module`, so the suite ONLY runs under **node@20** (system node drifted to v25 and breaks it with `ERR_REQUIRE_ESM`; node@20 is at `/usr/local/opt/node@20/bin/node`). The winston/express-winston/jsonwebtoken mocks are `.cjs` under `services/api/src/__mocks__/*.cjs` (via `moduleNameMapper`); `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Run: `export PATH="/usr/local/opt/node@20/bin:$PATH"; cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage`.
+- **Covered:** Rent computation pipeline, building expense allocation (incl. vacant-owner billing + repair distribution), dashboard aggregation, PDF parsers (lease + E9), auth token refresh, payment double-submit, ErrorBoundary, allocation validators.
+- **Remaining:** Auth flows (JWT refresh full cycle, OTP, M2M).
 
 ### 5.2 E2E test coverage — REBUILT (May–June 2026)
-- **Current state:** 17 Playwright specs (UI + API), `e2e-playwright/`, 17 passed + 1 fixme, ~17s against live NAS
+- **Current state (June 2026):** **38 non-scratch Playwright specs** (numbered 00..50 with gaps), `e2e-playwright/`, against the live NAS. Run from `e2e-playwright/` with `export PATH="/usr/local/opt/node@20/bin:$PATH"` then `npx playwright test --project=chromium tests/NN_*.spec.ts` (or `yarn test:nas` which backs up NAS first).
 - **Replaced** the 68-spec Cypress 14 suite, which was structurally incapable of catching API failures (only 3% asserted HTTP status codes; pattern of weakening tests rather than fixing them — see `documentation/E2E_TESTING.md` § "Why Playwright?").
-- **Coverage so far:** signin, expense edit (bug 1), unit occupancy (bug 9), tenant phone search, property energy cert, rent tile dimming (bug 8), dashboard finance card (bug 10), repair past-term guard (bug 4), lease URL :id authoritative, last-admin guard, tenantapi auth chain, validators (capital/email/year).
-- **Known fixme:** `tenantapi/tenant/me` body-shape test — needs OTP plumbing not currently reachable from NAS.
-- **Roadmap:** ~20–30 more specs before Page-Object extraction. CI integration deferred until ≥50 specs (would need self-hosted runner with LAN access to NAS).
+- **Coverage:** signin; expense edit; unit occupancy; tenant/property/building/rent search-filter catalog (specs 25-29); property energy cert; rent tile dimming; dashboard finance; repair past-term guard; lease URL :id authoritative; last-admin guard; tenantapi auth chain; validators; payment matrices (15-17); lifecycle UI scenarios (19); round-1 option catalogs (40-46); boundary/concurrency (47); building-domain money (48 expense panel, 49 vacant-owner money, 50 owner-expenses paid/unpaid tile).
+- **Roadmap:** the fleet has passed the ~50-spec threshold the doc once gated CI integration on; CI integration still deferred (would need a self-hosted runner with LAN access to NAS). Page-Object extraction remains a candidate refactor.
 
 ### 5.3 API documentation — NOT STARTED
 - **Tool:** OpenAPI/Swagger

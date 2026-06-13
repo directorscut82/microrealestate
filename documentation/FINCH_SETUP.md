@@ -90,13 +90,19 @@ Why each is needed:
 
 The email configuration (`GMAIL_EMAIL`, `SMTP_*`, etc.) can be left as defaults for local testing — email features just won't work.
 
-> **Note on the reset service (dev/CI only).** The reset service no longer returns the OTP in its HTTP response — it logs it and emails it the same way as the production flow. Test/dev code that scraped OTPs from the response body must read them from container logs or the test mailbox now. The reset service is never deployed to the NAS.
+> **Note on the reset service (dev/CI only).** `POST /reset/otp` returns the OTP in its HTTP response body **when `NODE_ENV` is `development` or `test`** (`services/resetservice/src/routes.ts` — `if (isDev) return res.json({ success, otp, email })`); in any other env it returns only `{ success }`. So test/dev code may still scrape the OTP from the response. The reset service is never deployed to the NAS.
 
 ## 4. Start the Application
 
 ```shell
 APP_PORT=8080 /Applications/Finch/bin/finch compose --profile local up
 ```
+
+> Note: `docker-compose.yml` has no profile literally named `local` (the only
+> `profiles:` entry is `['']` on the Caddy reverse-proxy). `--profile local`
+> matches nothing and is effectively a no-op — the non-profiled services start
+> regardless, so the command still works. (For the microservices dev stack with
+> hot-reload, the project uses the `finch compose -f docker-compose.microservices.base.yml -f docker-compose.microservices.dev.yml up` overlays instead.)
 
 The first run pulls all container images (MongoDB, Redis, app services) which can take several minutes depending on your connection.
 

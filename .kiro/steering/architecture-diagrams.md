@@ -36,7 +36,7 @@ graph TB
     end
 
     subgraph DataStores["Data Stores"]
-        MONGO[("MongoDB 7<br/>:27017")]
+        MONGO[("MongoDB 4.4<br/>:27017")]
         REDIS[("Redis 7.4<br/>:6379")]
     end
 
@@ -303,7 +303,11 @@ erDiagram
 
 ## 5. CI/CD Pipeline
 
-This diagram represents the **upstream canonical** pipeline. The directorscut82 NAS fork strips Deploy + E2E from CI and replaces them with `yarn deploy:nas` (manual on-Mac) plus Playwright run on the developer Mac against the live NAS. See `documentation/E2E_TESTING.md`.
+This diagram represents the **upstream canonical** pipeline. The directorscut82 NAS fork strips Deploy + E2E from CI and replaces them with `bash scripts/deploy-nas.sh` (manual on-Mac) plus Playwright run on the developer Mac against the live NAS. See `documentation/E2E_TESTING.md`.
+
+The fork has TWO image-build workflows (each a 9-image parallel matrix: gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice, landlord-frontend, tenant-frontend):
+- `.github/workflows/ci.yml` — push to `master` → lint → build/push images tagged `:<sha>` + `:latest`.
+- `.github/workflows/nas-ci.yml` ("NAS Branch CI") — push to **`nas`** → lint → build/push the same 9 images tagged `:nas` + `:nas-<sha>`. This is the workflow whose images the NAS deploy pulls.
 
 ```mermaid
 graph LR
