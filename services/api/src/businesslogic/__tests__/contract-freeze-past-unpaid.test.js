@@ -19,6 +19,9 @@
 // contract.ts → businesslogic → tasks/1_base.ts pulls `logger` from
 // @microrealestate/common, which resolves fine via the built dist in jest
 // (the same chain contract.test.js imports without any mock).
+// `type: module` package → `jest` is not a global under ESM; import it
+// (this suite uses jest.useFakeTimers()).
+import { jest } from '@jest/globals';
 import * as Contract from '../../managers/contract.js';
 
 const FEB_TERM = 2026020100;

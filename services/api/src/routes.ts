@@ -365,6 +365,12 @@ export default function routes(): express.Router {
     '/:id/expense-breakdown',
     Middlewares.asyncWrapper(buildingManager.getExpenseBreakdown as any)
   );
+  // Mark an owner-side monthly expense paid / unpaid (drives the Overview
+  // "owner expenses paid vs unpaid" progress tile).
+  buildingsRouter.patch(
+    '/:id/owner-expense/:ownerExpenseId/paid',
+    Middlewares.asyncWrapper(buildingManager.setOwnerExpensePaid as any)
+  );
   buildingsRouter.patch(
     '/:id/contractors/:contractorId',
     Middlewares.asyncWrapper(buildingManager.updateContractor as any)

@@ -110,7 +110,15 @@ describe('Building charges — equal allocation group carrier (active-member)', 
   });
 
   it('emits the group share on the still-active sibling when the lex-min carrier has exited', () => {
-    const expense = makeExpense('Cleaning', 120, 'equal'); // 2 groups → 60 each
+    // 3 managed units. p1 exited in March → VACANT in June. p2 (tenant T)
+    // and p3 (tenant U) are occupied. With the VAC-EQUAL-NOOP fix the empty
+    // p1 is its own equal-split party, so €120 ÷ 3 parties = €40 each (NOT
+    // €120 ÷ 2 occupied = €60 — that old number silently made the two
+    // remaining tenants absorb the empty unit's share). The carrier-vanish
+    // property under test still holds: the live share lands on the ACTIVE
+    // sibling p2, not on the exited lex-min carrier p1 (which would bill
+    // nobody), and it is €40, not €0.
+    const expense = makeExpense('Cleaning', 120, 'equal'); // 3 parties → 40 each
     const building = makeBuildingWithGroups(expense);
 
     // Tenant T's contract now only carries the still-active p2 (p1 exited).
@@ -124,17 +132,20 @@ describe('Building charges — equal allocation group carrier (active-member)', 
     };
     const rent = BL.computeRent(makeContract([propP2], building), TERM, null);
 
-    // Before the fix: carrier was p1 (exited, never billed) → p2 got 0,
-    // the whole 60 vanished. After: p2 (active lex-min of the group) is
-    // the carrier and is billed the full group share.
     const cleaning = (rent.buildingCharges || []).find(
-      (c) => c.description === 'Cleaning' || c.amount === 60
+      (c) => c.description === 'Cleaning'
     );
+    // The share is billed to p2 (active sibling) and is non-zero — the
+    // carrier did not vanish onto exited p1.
     expect(cleaning).toBeTruthy();
-    expect(cleaning.amount).toBe(60);
+    expect(cleaning.amount).toBe(40);
   });
 
-  it('still bills the lone active group (p3) its half', () => {
+  it('bills the lone active group (p3) one equal party-share (vacant p1 counted)', () => {
+    // Same building: p1 vacant, p2 + p3 occupied. p3's share is €120 ÷ 3 = €40
+    // (p3 is the lex-max party carrier, so it also absorbs the rounding
+    // remainder — here exact). NOT €60: the vacant p1 is a party, its share
+    // is owner-borne, not redistributed to the remaining tenants.
     const expense = makeExpense('Cleaning', 120, 'equal');
     const building = makeBuildingWithGroups(expense);
     const propP3 = {
@@ -146,9 +157,11 @@ describe('Building charges — equal allocation group carrier (active-member)', 
       property: { name: 'Prop p3' }
     };
     const rent = BL.computeRent(makeContract([propP3], building), TERM, null);
-    const cleaning = (rent.buildingCharges || []).find((c) => c.amount === 60);
+    const cleaning = (rent.buildingCharges || []).find(
+      (c) => c.description === 'Cleaning'
+    );
     expect(cleaning).toBeTruthy();
-    expect(cleaning.amount).toBe(60);
+    expect(cleaning.amount).toBe(40);
   });
 
   // Audit finding #6: a recurring expense with a FALSY startTerm must bill

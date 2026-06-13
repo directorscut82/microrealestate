@@ -516,7 +516,20 @@ export namespace CollectionTypes {
     term: number;
     amount: number;
     description?: string;
-    source?: 'expense' | 'repair';
+    // The vacant unit whose share this owner charge represents (the two
+    // vacant sources only). null/absent for the owner-direct sources.
+    propertyId?: string | null;
+    // 'expense'       = owner-side share of a recurring building expense.
+    // 'repair'        = owner-borne portion of a repair (expenseId = repair id).
+    // 'vacant'        = building-EXPENSE share of a vacant unit, routed to owner.
+    // 'repair-vacant' = REPAIR share of a vacant unit, routed to owner
+    //                   (expenseId = repair id). Distinct from 'vacant' so the
+    //                   expense recompute does not strip it.
+    source?: 'expense' | 'repair' | 'vacant' | 'repair-vacant';
+    // Whether the owner has paid this owner-side charge (drives the building
+    // Overview "owner expenses paid vs unpaid" tile).
+    paid?: boolean;
+    paidDate?: Date | null;
   };
 
   export type Contractor = {

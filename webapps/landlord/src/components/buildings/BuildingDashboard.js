@@ -18,6 +18,7 @@ import {
 } from '../ui/popover';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
+import { Progress } from '../ui/progress';
 import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
@@ -287,12 +288,19 @@ export default function BuildingDashboard({ building }) {
     //     undercounts by the entire fixed owner share.
     const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || [])
       .filter((e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
-      // EXCLUDE source:'vacant' rows: a vacant unit's share is routed to the
-      // owner (chargeOwnerWhenVacant / vacant repair), but that euro is
-      // ALREADY counted once in the full expense amount below
-      // (recurringMonthlyEksoda * 12 / repairEksoda). Routing changes WHO
-      // pays, not the building total — counting it here too double-counts
-      // the annual eksoda headline.
+      // EXCLUDE source:'vacant' rows ONLY: a vacant unit's share of a
+      // recurring building EXPENSE is routed to the owner, but that euro is
+      // ALREADY counted once in recurringMonthlyEksoda * 12 (the full expense
+      // amount). Routing changes WHO pays, not the building total — counting
+      // it here too would double-count the headline.
+      //   We deliberately do NOT exclude source:'repair-vacant' (a vacant
+      //   unit's tenant-portion share of a REPAIR routed to the owner):
+      //   repairEksoda above sums only unit.monthlyCharges with a repairId,
+      //   and the repair-vacant euro lives in ownerMonthlyExpenses, not
+      //   monthlyCharges — so it is counted NOWHERE else. Excluding it (the
+      //   old `source !== 'vacant'` was written before the two vacant kinds
+      //   were disambiguated) dropped the vacant unit's repair cost from
+      //   annualEksoda and over-reported Net (DASH-REPAIR-UNDERCOUNT).
       .filter((e) => e.source !== 'vacant')
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     // F4-buildingdash: prorate by the months the expense is actually
@@ -328,6 +336,25 @@ export default function BuildingDashboard({ building }) {
       }, 0);
     const ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated;
 
+    // Owner-side paid vs unpaid (current calendar year). Drives the progress
+    // tile under the income card. Only ownerMonthlyExpenses carry a `paid`
+    // flag (the landlord toggles it per row); the fixed prorated owner share
+    // is a projection, not a settleable line, so it is excluded from the
+    // paid/unpaid split but still shown in the annual total. We count the two
+    // vacant-derived sources too (a vacant unit's expense/repair share IS an
+    // owner liability) — only the building-expense 'vacant' double-count was
+    // stripped from annualEksoda, not from "what the owner still owes".
+    const ownerLedgerThisYear = (building?.ownerMonthlyExpenses || []).filter(
+      (e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear
+    );
+    const ownerPaid = ownerLedgerThisYear
+      .filter((e) => e.paid)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const ownerUnpaid = ownerLedgerThisYear
+      .filter((e) => !e.paid)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    const ownerLedgerTotal = ownerPaid + ownerUnpaid;
+
     const annualEsoda = monthlyEsoda * 12;
     const annualEksoda =
       recurringMonthlyEksoda * 12 +
@@ -358,7 +385,10 @@ export default function BuildingDashboard({ building }) {
       ownerEksoda,
       annualEksoda,
       net,
-      repairStats
+      repairStats,
+      ownerPaid,
+      ownerUnpaid,
+      ownerLedgerTotal
     };
   }, [
     sortedUnits,
@@ -465,6 +495,56 @@ export default function BuildingDashboard({ building }) {
           </div>
         )}
       </Card>
+
+      {/* Owner expenses paid vs unpaid — directly under the income card, the
+          eksoda counterpart to the esoda headline. Only shown when the owner
+          ledger has entries this year. The landlord marks each owner-side
+          charge paid from the building Expenses → breakdown; this tile rolls
+          them up so "how much of this year's owner expenses have I settled?"
+          is answerable at a glance. */}
+      {finance.ownerLedgerTotal > 0 && (
+        <Card className="p-4">
+          <div className="flex items-end justify-between gap-4 mb-2">
+            <div>
+              <div className="text-label text-muted-foreground uppercase tracking-wide">
+                {t('Owner expenses paid')}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {t('Owner-side charges for {{year}}: paid vs outstanding.', {
+                  year: new Date().getFullYear()
+                })}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xl font-medium">
+                <NumberFormat value={finance.ownerPaid} showZero />
+                <span className="text-sm text-muted-foreground">
+                  {' / '}
+                  <NumberFormat value={finance.ownerLedgerTotal} showZero />
+                </span>
+              </div>
+            </div>
+          </div>
+          <Progress
+            value={
+              finance.ownerLedgerTotal > 0
+                ? Math.round(
+                    (finance.ownerPaid / finance.ownerLedgerTotal) * 100
+                  )
+                : 0
+            }
+          />
+          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+            <span className="text-olive">
+              {t('Paid')}: <NumberFormat value={finance.ownerPaid} showZero />
+            </span>
+            <span className="text-oxide">
+              {t('Outstanding')}:{' '}
+              <NumberFormat value={finance.ownerUnpaid} showZero />
+            </span>
+          </div>
+        </Card>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

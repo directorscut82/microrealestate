@@ -19,6 +19,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { parseE9 } from '../../managers/e9parser.ts';
 import { inferPropertyType } from '../../businesslogic/inferPropertyType.ts';
 
@@ -206,8 +207,11 @@ skipIfNoFixtures('parseE9 — T2 regressions', () => {
 // silently skips wherever those local dumps are absent (the gap that let
 // the parking misclassification ship). Falls back to the /tmp dump if the
 // committed one is somehow missing.
+// This package is `type: module`, so `__dirname` is not defined — derive the
+// test-file directory from import.meta.url instead.
+const __testDir = path.dirname(fileURLToPath(import.meta.url));
 const COMMITTED_E9 = path.resolve(
-  __dirname,
+  __testDir,
   '../fixtures/e9/anargyron-redacted.txt'
 );
 function readAnargyron() {

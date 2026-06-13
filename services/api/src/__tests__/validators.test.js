@@ -1,4 +1,8 @@
 /* eslint-env node */
+// This package is `type: module`, so test files run as ESM where `jest` is
+// NOT a global — it must be imported explicitly. (jest.config.js uses the
+// es6 transform so @microrealestate/common's ESM dist resolves.)
+import { jest } from '@jest/globals';
 jest.mock('winston');
 jest.mock('express-winston');
 

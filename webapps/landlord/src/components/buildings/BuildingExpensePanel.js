@@ -1,7 +1,8 @@
 import {
   QueryKeys,
   fetchExpenseBreakdown,
-  saveMonthlyStatement
+  saveMonthlyStatement,
+  setOwnerExpensePaid
 } from '../../utils/restcalls';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -19,6 +20,7 @@ import {
   TooltipTrigger
 } from '../ui/tooltip';
 import { Button } from '../ui/button';
+import { Checkbox } from '../ui/checkbox';
 import { Input } from '../ui/input';
 import { Separator } from '../ui/separator';
 import NumberFormat from '../NumberFormat';
@@ -384,6 +386,21 @@ export default function BuildingExpensePanel({ building }) {
     }
   });
 
+  // Toggle an owner-side charge paid/unpaid. Invalidate the building +
+  // dashboard so the Overview paid/unpaid progress tile updates immediately.
+  const paidMutation = useMutation({
+    mutationFn: ({ ownerExpenseId, paid }) =>
+      setOwnerExpensePaid(building._id, ownerExpenseId, paid),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: [QueryKeys.BUILDINGS, building._id]
+      });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+    }
+  });
+
   const handleDraftChange = useCallback((expenseId, value, isOwner) => {
     const key = `${isOwner ? 'owner' : 'tenant'}:${expenseId}`;
     dirtyKeys.current.add(key);
@@ -622,7 +639,14 @@ export default function BuildingExpensePanel({ building }) {
 
       {/* RIGHT column — who is charged (the breakdown), beside the calendar */}
       <div className="min-w-0">
-        <ChargeBreakdown breakdown={breakdown} t={t} />
+        <ChargeBreakdown
+          breakdown={breakdown}
+          t={t}
+          onTogglePaid={(ownerExpenseId, paid) =>
+            paidMutation.mutate({ ownerExpenseId, paid })
+          }
+          paidPending={paidMutation.isPending}
+        />
       </div>
     </div>
   );
@@ -663,7 +687,7 @@ function formatBasis(t, basis) {
   }
 }
 
-function ChargeBreakdown({ breakdown, t }) {
+function ChargeBreakdown({ breakdown, t, onTogglePaid, paidPending }) {
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
   // Vacant-unit shares split by whether the expense routes them to the
@@ -757,10 +781,37 @@ function ChargeBreakdown({ breakdown, t }) {
           {ownerDirect.map((e, i) => (
             <div
               key={`od-${i}`}
-              className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+              className="flex items-center justify-between text-xs text-muted-foreground pl-3 py-0.5"
             >
-              <span className="truncate mr-2">{e.expenseName}</span>
-              <span className="tabular-nums whitespace-nowrap">
+              <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                {/* Paid toggle — only when the row carries an ownerExpenseId
+                    (a persisted ownerMonthlyExpenses subdoc). Drives the
+                    Overview paid/unpaid tile. */}
+                {e.ownerExpenseId && onTogglePaid && (
+                  <Checkbox
+                    checked={!!e.paid}
+                    disabled={paidPending}
+                    onCheckedChange={(v) =>
+                      onTogglePaid(e.ownerExpenseId, v === true)
+                    }
+                    aria-label={t('Mark paid')}
+                  />
+                )}
+                <span
+                  className={cn(
+                    'truncate',
+                    e.paid && 'line-through text-muted-foreground/60'
+                  )}
+                >
+                  {e.expenseName}
+                </span>
+              </label>
+              <span
+                className={cn(
+                  'tabular-nums whitespace-nowrap ml-2',
+                  e.paid ? 'text-olive' : 'text-oxide'
+                )}
+              >
                 <NumberFormat value={e.amount} />
               </span>
             </div>

@@ -1,25 +1,33 @@
-jest.mock('@microrealestate/common', () => {
+// This package is `type: module`, so test files run as ESM. The legacy
+// hoisted `jest.mock(factory)` API does NOT work under ESM (swc only hoists
+// when `jest` is an ambient global, and `jest` must be imported here) — the
+// factory would run AFTER the mocked module already loaded. Use the supported
+// ESM API instead: jest.unstable_mockModule + a dynamic import() of the unit
+// under test, both inside beforeAll so the mock is registered first.
+import { jest } from '@jest/globals';
+
+const m = {
+  tenantCount: jest.fn(),
+  propertyCount: jest.fn(),
+  leaseCount: jest.fn(),
+  buildingCount: jest.fn(),
+  templateDelete: jest.fn(),
+  documentDelete: jest.fn(),
+  emailDelete: jest.fn(),
+  billDelete: jest.fn(),
+  realmDelete: jest.fn()
+};
+
+let realmManager;
+
+beforeAll(async () => {
   class ServiceError extends Error {
     constructor(message, status) {
       super(message);
       this.status = status;
     }
   }
-
-  global.__realmMocks = {
-    tenantCount: jest.fn(),
-    propertyCount: jest.fn(),
-    leaseCount: jest.fn(),
-    buildingCount: jest.fn(),
-    templateDelete: jest.fn(),
-    documentDelete: jest.fn(),
-    emailDelete: jest.fn(),
-    billDelete: jest.fn(),
-    realmDelete: jest.fn()
-  };
-
-  const m = global.__realmMocks;
-  return {
+  jest.unstable_mockModule('@microrealestate/common', () => ({
     Collections: {
       Tenant: { countDocuments: (...args) => m.tenantCount(...args) },
       Property: { countDocuments: (...args) => m.propertyCount(...args) },
@@ -33,20 +41,19 @@ jest.mock('@microrealestate/common', () => {
     },
     ServiceError,
     Crypto: { encrypt: (v) => `enc_${v}`, decrypt: (v) => v },
-    logger: { info: jest.fn(), error: jest.fn(), debug: jest.fn(), warn: jest.fn() },
+    logger: {
+      info: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn()
+    },
     Middlewares: {}
-  };
+  }));
+  // validators.js is pure (no winston/DB) — let the real module load rather
+  // than maintain an exhaustive mock surface (it exports CURRENCIES, LOCALES,
+  // validateStringField, … that realmmanager imports).
+  realmManager = await import('../managers/realmmanager.js');
 });
-
-jest.mock('../validators.js', () => ({
-  validateEnum: jest.fn(),
-  validateArrayMaxLength: jest.fn(),
-  LOCALES: ['en', 'fr-FR']
-}));
-
-import * as realmManager from '../managers/realmmanager.js';
-
-const m = global.__realmMocks;
 
 function makeReq(overrides = {}) {
   return {

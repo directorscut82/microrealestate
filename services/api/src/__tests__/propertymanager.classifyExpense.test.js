@@ -28,19 +28,23 @@
 // propertymanager pulls in transitively (occupantmanager via mongoose, etc.)
 // don't touch winston once Collections/logger are stubbed.
 
-jest.mock('@microrealestate/common', () => {
+// `type: module` package → test files run as ESM. The legacy hoisted
+// `jest.mock(factory)` API does not work under ESM (the factory runs after
+// the mocked module already loaded). Use jest.unstable_mockModule + a dynamic
+// import() inside beforeAll so the mocks register first.
+import { jest } from '@jest/globals';
+
+const warnMock = jest.fn();
+let _classifyExpenseType;
+
+beforeAll(async () => {
   class ServiceError extends Error {
     constructor(message, status) {
       super(message);
       this.status = status;
     }
   }
-  // The mock factory is hoisted ABOVE any top-level `const` in this file
-  // (Jest does this for `jest.mock` calls). So we cannot close over a
-  // top-level `warnMock` const. Stash the spy on `global` instead and pull
-  // it into a local alias once the `import` statement below has resolved.
-  global.__classifyExpenseWarnMock = jest.fn();
-  return {
+  jest.unstable_mockModule('@microrealestate/common', () => ({
     Collections: {
       Realm: {},
       Tenant: {},
@@ -59,44 +63,34 @@ jest.mock('@microrealestate/common', () => {
       info: jest.fn(),
       error: jest.fn(),
       debug: jest.fn(),
-      warn: global.__classifyExpenseWarnMock
+      warn: warnMock
     },
-    Pagination: {
-      paginate: jest.fn(),
-      defaultPageSize: 50
-    },
+    Pagination: { paginate: jest.fn(), defaultPageSize: 50 },
     Middlewares: {},
     Service: { getInstance: jest.fn() }
-  };
+  }));
+  // Stub validators.js — propertymanager.ts imports several helpers from it at
+  // module-eval time. No-ops keep the import cheap and avoid dragging in
+  // ServiceError-throwing paths that aren't under test.
+  jest.unstable_mockModule('../validators.js', () => ({
+    validateObjectId: jest.fn(),
+    validateFiniteNumber: jest.fn(),
+    validateEnum: jest.fn(),
+    sanitizeMongoObject: jest.fn((v) => v),
+    isValidGreekPostalCode: jest.fn(() => true),
+    PROPERTY_TYPES: ['apartment', 'store', 'office', 'storage', 'parking']
+  }));
+  // Stub occupantmanager.js — it imports axios/nanoid and is irrelevant to a
+  // pure classification helper.
+  jest.unstable_mockModule('../managers/occupantmanager.js', () => ({
+    _attachTenantGroupsToBuildings: jest.fn()
+  }));
+  // Stub businesslogic — same rationale.
+  jest.unstable_mockModule('../businesslogic/tasks/1_base.js', () => ({
+    computeBuildingChargeForProperty: jest.fn(() => 0)
+  }));
+  ({ _classifyExpenseType } = await import('../managers/propertymanager.js'));
 });
-
-// Stub validators.js — propertymanager.ts imports several helpers from it at
-// module-eval time. Replacing them with no-ops keeps the import cheap and
-// avoids dragging in ServiceError-throwing code paths that aren't under test.
-jest.mock('../validators.js', () => ({
-  validateObjectId: jest.fn(),
-  validateFiniteNumber: jest.fn(),
-  validateEnum: jest.fn(),
-  sanitizeMongoObject: jest.fn((v) => v),
-  isValidGreekPostalCode: jest.fn(() => true),
-  PROPERTY_TYPES: ['apartment', 'store', 'office', 'storage', 'parking']
-}));
-
-// Stub occupantmanager.js — it imports axios/nanoid and is irrelevant to a
-// pure classification helper. Without this stub the module graph still
-// resolves, but the stub makes the unit's dependencies explicit.
-jest.mock('../managers/occupantmanager.js', () => ({
-  _attachTenantGroupsToBuildings: jest.fn()
-}));
-
-// Stub businesslogic — same rationale.
-jest.mock('../businesslogic/tasks/1_base.js', () => ({
-  computeBuildingChargeForProperty: jest.fn(() => 0)
-}));
-
-import { _classifyExpenseType } from '../managers/propertymanager.js';
-
-const warnMock = global.__classifyExpenseWarnMock;
 
 // Mirror of services/common/src/collections/building.ts BuildingExpenseSchema.type.
 // If a new value lands in the schema and a developer forgets to update
