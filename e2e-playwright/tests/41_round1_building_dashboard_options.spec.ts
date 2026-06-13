@@ -23,9 +23,9 @@
  *       6×ownerAmount (Jul–Dec), not 12×.
  *   F5: the "Owner expenses" trigger is a Popover (tap-to-open) so the
  *       breakdown reaches touch contexts; Tooltip would be hover-only.
- *   F3-expense: the chargeOwnerWhenVacant Switch in the expense form is
- *       disabled and labelled "coming soon" until the rent pipeline routes
- *       the vacant share.
+ *   F3-expense: the chargeOwnerWhenVacant Switch in the expense form is now
+ *       ENABLED (vacant-owner billing shipped) — 41.11 asserts it toggles and
+ *       no longer carries a "coming soon" marker.
  *
  * Strategy: every test owns a FRESH building (unique atakPrefix per RUN_ID)
  * so cross-contamination between scenarios is impossible. The test account
@@ -1046,7 +1046,7 @@ test('41.10 · tooltip Popover tap shows content (F5 — Popover, not hover-only
 // 41.11 — F3-expense: chargeOwnerWhenVacant Switch in the expense form is
 //          rendered, disabled, and labelled with "coming soon".
 // ---------------------------------------------------------------------------
-test('41.11 · expense form chargeOwnerWhenVacant Switch is disabled with "coming soon" (F3-expense)', async ({
+test('41.11 · expense form chargeOwnerWhenVacant Switch is ENABLED (vacant-owner billing shipped; no longer "coming soon")', async ({
   page
 }) => {
   test.setTimeout(180_000);
@@ -1107,37 +1107,33 @@ test('41.11 · expense form chargeOwnerWhenVacant Switch is disabled with "comin
     'F3-expense — chargeOwnerWhenVacant Switch must be present in the expense form'
   ).toBeVisible({ timeout: 15_000 });
 
-  // Radix Switch renders <button role="switch" data-state="..." disabled>;
-  // the disabled prop maps to the `disabled` attribute. Assert via the
-  // attribute since `toBeDisabled()` also accepts `aria-disabled`.
+  // Vacant-owner billing SHIPPED (978bf92b → current). The Switch is now
+  // ENABLED and the landlord can toggle it; the old "coming soon" stub is
+  // gone. Radix Switch renders <button role="switch" data-state>; assert it
+  // is NOT disabled.
   await expect(
     switchEl,
-    'F3-expense — Switch must be disabled until rent pipeline integration lands'
-  ).toBeDisabled();
+    'F3-expense — chargeOwnerWhenVacant Switch must be ENABLED (feature shipped)'
+  ).toBeEnabled();
 
-  // The accompanying Label must include the "coming soon" / "σύντομα" mark.
-  // The label text is t('Charge owner for vacant units') · t('coming soon').
-  // The exact translation differs by locale; accept either side of the dot.
+  // The label must NOT carry a "coming soon" / "σύντομα" marker anymore.
   const label = page.locator('label[for="chargeOwnerWhenVacant"]');
   await expect(
     label,
     'F3-expense — label[for=chargeOwnerWhenVacant] is rendered'
   ).toBeVisible();
   const labelText = (await label.innerText()).toLowerCase();
-  // Set-narrowing assertion: label must contain the "coming soon" marker
-  // text in some form (en or el). We check substrings — toMatch on inner
-  // text would also pass against an unfiltered element, this is scoped.
   expect(
     labelText.includes('coming soon') ||
       labelText.includes('σύντομα') ||
       labelText.includes('συντομα'),
-    `F3-expense — label must carry the "coming soon" marker; got: ${labelText}`
-  ).toBe(true);
+    `F3-expense — label must NOT carry a "coming soon" marker anymore; got: ${labelText}`
+  ).toBe(false);
 
-  // Set-narrowing: ensure the Switch is the ONLY disabled Switch with that
-  // specific id in the form (no duplicate enabled instance shadowing it).
-  await expect(
-    page.locator('#chargeOwnerWhenVacant[disabled], #chargeOwnerWhenVacant:disabled'),
-    'F3-expense — exactly one disabled #chargeOwnerWhenVacant element'
-  ).toHaveCount(1);
+  // The Switch must be toggleable: click it and confirm the state flips.
+  const before = await switchEl.getAttribute('data-state');
+  await switchEl.click();
+  await expect
+    .poll(() => switchEl.getAttribute('data-state'), { timeout: 5_000 })
+    .not.toBe(before);
 });
