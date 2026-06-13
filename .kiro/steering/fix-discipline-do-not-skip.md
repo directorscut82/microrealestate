@@ -119,7 +119,7 @@ unless you have personally driven the user-reported flow through the deployed UI
 | "I'll deploy to verify" | Deploys are the user's call. |
 | "All tests green" | One test (spec 03) was a tautology for two months. Tests can be green and meaningless. |
 | "I introduced a new bucket / enum / type" | Other surfaces don't know about your new concept. You created chaos to "fix" something. |
-| "Quick patch" | The deferred-decisions doc has six entries that started as "quick patches". |
+| "Quick patch" | The deferred-decisions doc has a growing list of entries (D-1…D-8, two now resolved) that started as "quick patches". |
 
 ## What the user has explicitly said that overrides any other instruction
 

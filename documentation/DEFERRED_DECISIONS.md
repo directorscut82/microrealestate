@@ -35,17 +35,19 @@ also billed in full.
    bills would need a decision: leave alone, or re-price (would mutate
    historical ledger).
 
-**Hooks the audit identified if we eventually do this.**
-- `services/api/src/businesslogic/tasks/1_base.ts:315` — explicit
-  comment stating proration is not implemented.
-- `services/api/src/managers/occupantmanager.ts:47` —
+**Hooks the audit identified if we eventually do this.** (line anchors as of
+HEAD `4a55ddc4`; code drifts — grep the symbol if a number is off.)
+- `services/api/src/businesslogic/tasks/1_base.ts:~705` — the `startOf('month')`
+  NOTE block stating proration is not implemented (normalization at ~712).
+- `services/api/src/managers/occupantmanager.ts` —
   `property.exitDate` defaults to `tenant.endDate` without considering
   `terminationDate`.
-- `services/api/src/managers/occupantmanager.ts:1337` —
-  `_syncOccupancyForProperties` is only called for added/removed
-  properties, not for `terminationDate` changes (separate occupancy
-  metric bug; a property terminated mid-cycle stays marked `rented`
-  and the dashboard `occupancyRate` is inflated).
+- `services/api/src/managers/occupantmanager.ts` —
+  `_syncOccupancyForProperties` (defined ~line 435, called ~1126/1555/1718
+  on link/unlink) is only invoked for added/removed properties, not for
+  `terminationDate` changes (separate occupancy metric bug; a property
+  terminated mid-cycle stays marked `rented` and the dashboard
+  `occupancyRate` is inflated).
 
 ## D-2 — VAT on κοινόχρηστα (building charges)
 
@@ -66,26 +68,18 @@ correct treatment for *their* leases. Then either:
   is treated), or
 - Add an opt-in flag at the building or expense level.
 
-## D-3 — Repair charges flow as `monthly_charge` not `repair` (lifecycle L-3/L-4)
+## D-3 — Repair charges flow as `monthly_charge` not `repair` (lifecycle L-3/L-4) — ✅ RESOLVED
 
-**Current behavior.** `_distributeRepairCharge` pushes
-`unit.monthlyCharges` entries with no `type` field. The pipeline at
-`1_base.ts:427` then hardcodes `type: 'monthly_charge'` on those
-entries when promoting them to `rent.buildingCharges`.
-
-**Effects.**
-- `rentmanager.ts:108`'s repair bucket
-  (`buildingCharges.filter(c => c.type === 'repair')`) is permanently
-  empty. The whole `repairs` allocation category in
-  `_computeOwedByCategory` and the `'repairs'` arm of auto-spread are
-  dead code.
-- Dashboard pie shows the repair charge under the slate "monthly_charge"
-  color instead of the copper "repair" color.
-
-**Why deferred.** Real fix needs three coordinated changes (schema +
-distribute + pipeline) and a migration to re-tag historical
-`unit.monthlyCharges` entries that originated from repairs. Best done
-in one sequenced commit with a verification script.
+**Resolution (June 2026).** `_distributeRepairCharge` now sets `repairId`
+on each `unit.monthlyCharges` entry (`buildingmanager.ts`). The pipeline
+no longer hardcodes `monthly_charge`: `1_base.ts:820-825` reads
+`const _isRepair = !!charge.repairId` and emits `type: _isRepair ? 'repair'
+: 'monthly_charge'`. Downstream, `rentmanager.ts:_computeOwedLines`
+(formerly `_computeOwedByCategory`) at lines 151-153 does
+`const isRepair = c?.type === 'repair'` → `category: isRepair ? 'repair'
+: 'buildingCharge'`, so the repair bucket is populated and the dashboard
+pie shows the copper "repair" colour. No migration was needed (existing
+distributions already carry `repairId`).
 
 ## D-4 — Edit of expense `startTerm` after distribution (lifecycle L-9)
 
@@ -99,10 +93,11 @@ decision and a confirmation modal.
 
 ## D-5 — Revenue aggregate clamp + balance subtraction interaction (L-10)
 
-**Current behavior.** `dashboardmanager.ts:359` clamps
-`tenantDue = Math.max(0, grandTotal)`. For a month where overpayment
-carry-forward made `grandTotal` negative, this clamps to 0. But
-`tenantMonthDue = grandTotal - balance` (line 388) is computed AFTER
+**Current behavior.** `dashboardmanager.ts:~425` clamps
+`tenantDue = Math.max(0, rent.total?.grandTotal || 0)`. For a month where
+overpayment carry-forward made `grandTotal` negative, this clamps to 0. But
+`tenantMonthDue = tenantDue - tenantBalance` (~line 448, where
+`tenantBalance` is read from `rent.total?.balance`) is computed AFTER
 clamping in some paths and produces nonsensical values.
 
 **Why deferred.** The audit suggests storing both `clampedDue` (for the
@@ -175,88 +170,48 @@ If a NEW failure appears outside this catalog, treat it as a real
 regression and investigate the deployed bundle revision via Portainer
 before assuming the test is wrong.
 
-## D-8 — Past-month overpayment propagation has two regimes
+## D-8 — Past-month overpayment does NOT propagate forward (term-based freeze)
 
-**Current behavior — two regimes, both verified live (T4 probe, June 2026).**
+**Update (Tier I-1, June 2026, commit `01d48c46`).** The two-regime behavior
+this entry previously documented has COLLAPSED. `_isFrozen` was changed from
+the old `_isPayment`-based check (frozen ⟺ has a payment/discount/debt/
+description) to a purely TERM-based rule:
 
-The propagation outcome depends on whether downstream months have their
-own settlement state (`_isFrozen`). The pipeline runs `5_balance.ts`
-forward-walking each term, but the freeze guard in
-`services/api/src/managers/contract.ts:271-276` short-circuits the
-recompute for any month that has a payment, discount, debt, or non-empty
-description.
+```
+_isFrozen (services/api/src/managers/contract.ts:315):
+  future term  → never frozen
+  PAST term    → ALWAYS frozen (paid OR unpaid, settled or clean)
+  current term → frozen only if fully paid
+```
 
-### Regime A — downstream UNFROZEN: surplus DOES propagate
+So a downstream PAST month is now frozen REGARDLESS of whether it carries
+settlements. The old Regime A ("clean downstream → surplus cascades") no
+longer happens for past terms: recording a 600€ payment on a past April
+when `April.grandTotal=400` leaves the −200 surplus visible on April's
+`newBalance` only — it does NOT flow into May/June even when those months
+are clean. (Forward cascade still works for CURRENT/FUTURE unpaid terms,
+which are not frozen.)
 
-When the months after the touched past month have NO settlements (no
-payment, no discount, no debt, no description), the forward walk
-recomputes them naturally. Recording a 600€ payment on April when
-`April.grandTotal=400` produces:
+**Why the current behavior exists (intentional).** The term-based freeze
+protects ALL historical rents from being silently re-priced when an
+unrelated change cascades through the pipeline. The prior settlement-based
+guard let a clean past month get rewritten; the Tier I-1 fix closed that by
+freezing every past term unconditionally (the past-unpaid-freeze case is
+regression-guarded by `services/api/src/businesslogic/__tests__/contract-freeze-past-unpaid.test.js`).
 
-- `April.payment = 600`, `April.newBalance = −200` (surplus on the
-  touched term)
-- `May.balance = April.grandTotal − April.payment = −200`
-- `May.grandTotal` drops by 200 (the carried surplus)
-- The credit cascades through June, July, etc. until it is absorbed by
-  a non-zero `grandTotal` or hits a frozen month.
+**Landlord-facing consequence (still a deferred UX choice).** A landlord
+who overpays a back month after later months exist sees the surplus
+marooned on the touched term as a negative `newBalance`. Applying that
+credit forward is a manual step today (a `promo`/`discount` line on a
+later term). A "carry the credit forward" affordance remains deferred —
+it needs a UX decision (explicit credit-carry button? automatic with
+confirmation?) and must not reopen the re-pricing hazard the freeze closes.
 
-This is the natural accountant's expectation and works today without
-any code change.
-
-### Regime B — downstream FROZEN: surplus locks into the touched month
-
-When the next month already has its own settlement (a payment was
-recorded against it, or it carries a `description` / `promo` /
-`extracharge`), `_isFrozen` returns true and the forward walk skips
-the recompute for that term and every later frozen term. Result:
-
-- `April.payment = 600`, `April.newBalance = −200` (surplus visible
-  here only)
-- `May.balance` stays at whatever it was before the April probe
-- `May.grandTotal` is unchanged
-- The 200€ surplus does NOT visibly carry forward to May, June, etc.
-
-**T4 probe evidence:** in scenarios where May had a recorded payment
-(even a tiny one), the April overpayment did not flow into May's
-balance. In scenarios where May was clean (no payment yet), the April
-overpayment did flow naturally.
-
-**Why the current behavior exists (intentional).**
-
-The freeze guard protects historical rents from being silently re-priced
-when an unrelated change cascades through the pipeline. Without it,
-editing a one-off expense in April could rewrite the `grandTotal` of
-every paid month after it, mutating the user's historical ledger. That
-is a worse data-integrity hazard than locking a surplus into the month
-it was recorded on.
-
-**Why this might matter for landlords.**
-
-- Regime A users (typical case: paying ahead before next month is
-  recorded) get the natural cascading they expect.
-- Regime B users (paying back-month overage AFTER later months were
-  partially settled) see the surplus marooned on the touched term as a
-  negative `newBalance` and have to manually adjust later months if they
-  want the credit applied there.
-
-**Why deferred.** A "lift the freeze for surplus propagation only"
-behavior is conceptually simple but practically risky: the freeze guard
-is what prevents an arbitrary edit from rewriting paid months. Selectively
-unfreezing for the propagation case requires distinguishing "this month
-has its own real settlement that we must preserve" from "this month was
-frozen because something earlier created a description". A correct fix
-needs a UX choice (rebalance-forward toggle? explicit credit-carry
-button? automatic with confirmation?) plus a migration story for existing
-realm data.
-
-**Hooks if we eventually fix this.**
-- `services/api/src/managers/contract.ts:271-276` — `_isFrozen` guard.
+**Hooks.**
+- `services/api/src/managers/contract.ts:315` — `_isFrozen` function (term-based);
+  the guard CALL inside the pay path is ~line 270.
 - `services/api/src/businesslogic/tasks/5_balance.ts` — already supports
-  negative balance, no change needed there.
-- Workaround for landlords today (Regime B): the overpayment IS visible
-  as the recorded payment on the past term and contributes to that
-  term's `newBalance`. Future months can be adjusted manually via a
-  `promo` / `discount` line keyed to the surplus amount.
+  negative balance; no change needed there.
 
 ---
 

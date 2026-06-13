@@ -39,24 +39,27 @@ e2e-playwright/
 ├── backup/                            # gitignored archives
 └── tests/
     ├── lib/
-    │   └── api.ts                     # idempotent seed helpers
-    ├── 00_nas_smoke.spec.ts
-    ├── 01_expense_edit.spec.ts        # wave-24 bug 1
-    ├── 02_unit_occupancy.spec.ts      # wave-24 bug 9
-    ├── 03_tenant_search.spec.ts
-    ├── 04_property_energy_cert.spec.ts
-    ├── 05_rent_tile_dimming.spec.ts   # wave-24 bug 8
-    ├── 06_dashboard_finance.spec.ts   # wave-24 bug 10
-    ├── 07_repair_past_term_guard.spec.ts  # wave-24 bug 4
-    ├── 09_lease_id_authoritative.spec.ts
-    ├── 10_last_admin_guard.spec.ts
-    ├── 11_tenantapi_me.spec.ts
-    └── 12_validators.spec.ts
+    │   ├── api.ts                     # idempotent seed helpers
+    │   └── mongoExec.ts               # direct NAS-mongo read/seed via Portainer exec
+    ├── 00_nas_smoke … 12_validators   # core regression (wave-24 bugs + auth/validators)
+    ├── 13/15/16/17_payment_*          # payment dialog + matrices + combinatorial
+    ├── 18_stale_row_regression, 19_lifecycle_ui_scenarios
+    ├── 25–29_search_filter_*          # search/filter scenario catalog (tenants/properties/buildings/rents/cross)
+    ├── 30_property_expenses_panel, 31_building_dashboard_owner_totals, 32_expiring_leases_tile, 33_import_extend_lease
+    ├── 40–46_round1_*                 # option catalogs (property expenses / dashboard / repair / expense / tenant tile / pdf import / expiring leases)
+    ├── 47_round2_boundary_concurrency
+    └── 48_building_expense_panel, 49_vacant_owner_money, 50_owner_expenses_paid_tile   # building-domain money (June 2026)
 ```
 
-`08_email_dedup` was attempted and dropped — the email dedup gate requires
-a fully-leased tenant + configured SMTP, which isn't worth the seed
-scaffolding cost yet.
+There are **38 non-scratch numbered specs** (00..50 with gaps) as of June 2026.
+Scratch/work-in-progress specs are named `_*.spec.ts` (gitignored). `08_email_dedup`
+was attempted and dropped — the email dedup gate requires a fully-leased tenant +
+configured SMTP, not worth the seed scaffolding yet.
+
+**⚠️ node@20 required.** Both the Playwright run and the `services/api` jest suite
+require node@20 (the system node drifted to v25 and breaks jest). Prepend
+`export PATH="/usr/local/opt/node@20/bin:$PATH"` before `npx playwright test`
+(matches the repo `engines: node v20` pin).
 
 ### Where tests run
 
@@ -231,10 +234,14 @@ across multiple sessions.
 
 **Real-data scenarios are required for any spec touching:**
 
-- PDF parser flows (Greek leases, E9 imports) — use real fixture PDFs from
-  `e2e-playwright/fixtures/pdfs/` (commit small samples with PII redacted).
-  A spec that "would parse a PDF" without an actual PDF byte payload is
-  not a test.
+- PDF parser flows (Greek leases, E9 imports). The PARSER logic is unit-tested
+  in jest against committed redacted text fixtures (`services/api/src/__tests__/fixtures/e9/`,
+  and `/tmp/e9-reaudit` local dumps which CI-skip). The Playwright specs
+  (`33_import_extend_lease`, `45_round1_pdf_import`) drive the IMPORT UI by
+  MOCKING the `POST /api/v2/tenants/import-pdf` response via `page.route()` and
+  uploading a small payload — they assert the review-dialog behavior, not the
+  parser. (There is no `e2e-playwright/fixtures/pdfs/` directory; do not
+  reference one.)
 - Bad-data shapes the UI must already cope with in production
   (multi-property, co-tenants, partially-corrupt legacy rows). The API
   validator correctly rejects POSTs of bad data — that's the validator
@@ -311,8 +318,8 @@ characters needing escape.
 
 ### API date format is `DD/MM/YYYY`, not ISO
 
-The API's `_stringToDate` parser (`services/api/src/managers/occupantmanager.ts:34`)
-is strict on `moment(input, 'DD/MM/YYYY', true)`. ISO `YYYY-MM-DD` from
+The API's `_stringToDate` parser (`services/api/src/managers/occupantmanager.ts:~30`)
+is strict on `moment.utc(input, 'DD/MM/YYYY', true)`. ISO `YYYY-MM-DD` from
 `Date.toISOString().substring(0,10)` returns 422 with `Invalid date: ...`.
 The `toDDMMYYYY` shim in `lib/api.ts` converts.
 
@@ -360,15 +367,20 @@ When a spec fails this way:
 
 ## Running locally vs CI
 
-Right now the suite runs **only on the developer's Mac** against the
-NAS. There's no CI integration yet. Adding it requires either:
+The **Playwright suite** runs **only on the developer's Mac** against the
+live NAS — there is no CI integration for it. (Note: a GitHub Actions
+workflow `.github/workflows/nas-ci.yml` DOES exist, but it only builds the
+`:nas` Docker images on push to the `nas` branch; it does NOT run Playwright.
+`ci.yml` is master-only and also image-build-only.) Running the E2E suite in
+CI would require either:
 
 - A self-hosted GitHub Actions runner with LAN access to the NAS, or
-- Tailscale-connected runner, or
+- A Tailscale-connected runner, or
 - Exposing the NAS gateway publicly behind auth (not recommended).
 
-This is deferred until the suite has enough specs to make CI valuable
-(currently ~17, target before CI is ~50-100).
+This is deferred. The suite is now at 38 non-scratch specs (past the
+~50-spec threshold once cited as the CI-worthiness bar is in sight), but the
+LAN-access constraint, not spec count, is the blocker.
 
 ## Why Playwright?
 

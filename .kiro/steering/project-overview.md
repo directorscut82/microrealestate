@@ -26,7 +26,7 @@ microrealestate/
 │   └── tenant/           # Tenant web app — Next.js 14 App Router (TypeScript)
 ├── types/                # Shared TypeScript type definitions
 ├── e2e-playwright/       # End-to-end tests (Playwright, NAS-targeted)
-├── docker-compose*.yml   # Docker Compose configs for dev/prod/test/CI
+├── docker-compose*.yml   # 7 compose files: standalone (Caddy), microservices.{base,dev,prod,test}, monitoring, nas
 ├── base.env              # Default environment variables (versioned)
 └── .env                  # Local overrides with secrets (not versioned)
 ```
@@ -56,7 +56,7 @@ All packages are scoped under `@microrealestate/*`:
 ## Branches
 
 - `master` — mirrors upstream in spirit (same source code), used for local dev. Authorship on commits was rewritten for the fork so git sees no common ancestor with `microrealestate/microrealestate` anymore — upstream changes can only be pulled via `git cherry-pick`, not `git merge`.
-- `nas` — self-hosted deployment branch for the directorscut82 fork. Adds 3 source changes for multi-origin support (LAN + Tailscale) and `.github/workflows/nas-ci.yml` which builds `:nas` + `:nas-<sha>` images to GHCR. The `docker-compose.nas.yml` stack file is local-only (gitignored) and never pushed. Deployment is automated via `scripts/deploy-nas.sh` (invoked by `yarn deploy:nas`). See `documentation/DEV_AND_DEPLOY.md` for the full workflow.
+- `nas` — the active self-hosted deployment branch for the directorscut82 fork, and where nearly all current work lands. As of HEAD `4a55ddc4` it is **171 commits ahead of `master`, 0 behind** (common ancestor `231aff39`): it carries the entire building-domain / vacant-owner-billing / owner-expenses work, the api jest-infra `.cjs`-mock migration, the search/filter spec catalog, and multi-origin support (LAN + Tailscale). `.github/workflows/nas-ci.yml` builds `:nas` + `:nas-<sha>` images to GHCR on push. The `docker-compose.nas.yml` stack file is the NAS deploy target. Deployment is automated via `scripts/deploy-nas.sh` (non-interactive: `printf 'n\ny\n' | bash scripts/deploy-nas.sh`; also aliased `yarn deploy:nas`). See `documentation/DEV_AND_DEPLOY.md` for the full workflow.
 
 ## Environment Configuration
 

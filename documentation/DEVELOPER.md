@@ -64,9 +64,14 @@ Next, attach the debugger to the service you wish to debug. This will enable you
 - Docker: Attach to Gateway
 - Docker: Attach to Authenticator
 - Docker: Attach to API
+- Docker: Attach to tenant API
 - Docker: Attach to Emailer
 - Docker: Attach to PdfGenerator
 - Docker: Attach to ResetService
+
+> Note: this fork runs containers under **finch**, not the Docker daemon (see
+> `documentation/FINCH_SETUP.md`). The `yarn dev/build/start/stop` commands and
+> the attach configs work the same; only the runtime engine differs.
 
 [For more information about VS Code debugging](https://code.visualstudio.com/Docs/editor/debugging#_debug-actions)
 </details>
