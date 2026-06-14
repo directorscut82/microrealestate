@@ -323,7 +323,19 @@ export default function BuildingDashboard({ building }) {
       //   fixedOwnerProrated projection below — a complete projection that
       //   does NOT depend on whether the materialiser has run for every month
       //   of the year. Counting both would double-count.
-      .filter((e) => e.source !== 'vacant' && e.source !== 'owner-fixed')
+      //   ALSO exclude source:'owner-resident' — the occupancy-TWIN of
+      //   'vacant': an owner-occupied unit's share of a recurring building
+      //   expense routed to the resident owner. That euro is ALSO already in
+      //   recurringMonthlyEksoda * 12 (the full expense amount, occupancy-
+      //   blind), so counting it here too would double-count the headline,
+      //   exactly like 'vacant' (June 2026 round-4 — owner-resident is now
+      //   materialised flag-independently, so this exclusion is load-bearing).
+      .filter(
+        (e) =>
+          e.source !== 'vacant' &&
+          e.source !== 'owner-resident' &&
+          e.source !== 'owner-fixed'
+      )
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     // F4-buildingdash: prorate by the months the expense is actually
     // active in the current calendar year. A new owner-tracked expense

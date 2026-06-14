@@ -504,6 +504,56 @@ describe('computeOwnerEksodaByMonth (live owner-borne eksoda)', () => {
     expect(repair.owed).toBe(100);
     expect(repair.ownerName).toBeNull(); // building-wide owner-portion
   });
+
+  // FIX #2 (June 2026 round-4 "Attack #3"): an OWNER-OCCUPIED unit's share of
+  // an active expense is the resident owner's OWN cost — billed regardless of
+  // chargeOwnerWhenVacant. The dashboard gap-fill used to gate solely on the
+  // flag, so an owner-occupied unit + flag-OFF read €0 here while the live
+  // breakdown billed it (three surfaces disagreed). Now it is owner-borne.
+  it('owner-occupied unit + chargeOwnerWhenVacant OFF → still owner-borne on the dashboard', async () => {
+    const building = {
+      _id: 'b_ownerocc',
+      realmId: 'r1',
+      units: [
+        mkUnit('p1', {
+          occupancyType: 'owner_occupied',
+          owners: [{ name: 'ΚΑΠΠΑ', taxId: '9', percentage: 100 }]
+        }),
+        mkUnit('p2', { owners: [{ name: 'ΛΑΜΔΑ', taxId: '8', percentage: 100 }] })
+      ],
+      expenses: [
+        {
+          _id: 'e_fixed',
+          name: 'Ρεύμα',
+          type: 'electricity_common',
+          amount: 0,
+          allocationMethod: 'fixed',
+          isRecurring: true,
+          startTerm: 2026010100,
+          chargeOwnerWhenVacant: false, // flag OFF
+          customAllocations: [
+            { propertyId: 'p1', value: 30 },
+            { propertyId: 'p2', value: 20 }
+          ]
+        }
+      ],
+      repairs: [],
+      ownerMonthlyExpenses: []
+    };
+    const { owedByTerm, detailByTerm } = await computeOwnerEksodaByMonth(
+      'r1',
+      building,
+      2026
+    );
+    // p1 (owner-occupied) → €30 owner-borne even with the flag OFF; p2 (empty,
+    // flag OFF) → NOT owner-borne (still uncollected). So owed = €30, not €50.
+    expect(owedByTerm.get(term(6, 2026))).toBe(30);
+    const june = detailByTerm.get(term(6, 2026)) || [];
+    const elec = june.find((d) => d.category === 'electricity_common');
+    expect(elec).toBeTruthy();
+    expect(elec.owed).toBe(30);
+    expect(elec.ownerName).toBe('ΚΑΠΠΑ');
+  });
 });
 
 describe('ownerSlicesOf (per-owner € split by percentage)', () => {
@@ -621,5 +671,50 @@ describe('ownerSlicesOf (per-owner € split by percentage)', () => {
       expect(s.percentage).toBeGreaterThanOrEqual(0);
       expect(s.percentage).toBeLessThanOrEqual(100);
     }
+  });
+
+  // OVER-DECLARED SETS (Σ% > 101) — neither coversWhole (≠100) nor the
+  // rest-slice (residual negative) can reconcile, so the declared branch used
+  // to return raw slices that OVER-SUM the charge (the building-wide
+  // distinct-owner case where each owner is the sole 100% owner of their own
+  // unit). The fix refuses useDeclared for over-covering sets → equal-split,
+  // carrier-remainder, Σ === amount. (Adversarial finding, June 2026 round-4.)
+  it('over-declared two 60% owners → slices reconcile to the charge (not 120% of it)', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1', percentage: 60 },
+        { name: 'B', taxId: '2', percentage: 60 }
+      ],
+      100
+    );
+    expect(slices.reduce((s, x) => s + x.amount, 0)).toBe(100);
+  });
+
+  it('building-wide distinct set: three sole-100% owners of a €240 charge sum to €240 (was €720)', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'Maria', taxId: '1', percentage: 100 },
+        { name: 'Yannis', taxId: '2', percentage: 100 },
+        { name: 'Eleni', taxId: '3', percentage: 100 }
+      ],
+      240
+    );
+    expect(slices).toHaveLength(3);
+    expect(slices.reduce((s, x) => s + x.amount, 0)).toBe(240);
+  });
+
+  it('Σ% === 101 boundary (50.5/50.5) still uses declared shares and reconciles', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1', percentage: 50.5 },
+        { name: 'B', taxId: '2', percentage: 50.5 }
+      ],
+      100
+    );
+    // 101 is within the coversWhole tolerance (≤1), NOT over-declared → declared
+    // shares preserved, force-summed to exactly the charge.
+    expect(slices).toHaveLength(2);
+    expect(slices[0].percentage).toBe(50.5);
+    expect(slices.reduce((s, x) => s + x.amount, 0)).toBe(100);
   });
 });

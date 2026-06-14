@@ -83,8 +83,24 @@ export function ownerSlicesOf(
       const p = _clampPct(o.percentage);
       return p > 0 && p <= 100;
     });
+  // Sum of the IDENTIFIED owners' declared % (clamped). Used both to decide
+  // whether to honour declared shares AND, below, whether they cover the whole
+  // unit. Hoisted above the decision so an OVER-declared set (Σ% > 101) — which
+  // neither the coversWhole nor the rest-slice branch can reconcile — falls to
+  // the equal-split branch instead of returning raw declared slices that
+  // over-sum the charge. Real trigger: a building-wide owner-direct row built
+  // from the DISTINCT owner set of a multi-unit building, where each owner is
+  // the sole 100% owner of their own unit → Σ% = N×100 (adversarial finding,
+  // June 2026 round-4: a €240 charge rendered "(A 100%=€240, B 100%=€240, …)").
+  const identifiedPctSum = owners.reduce(
+    (s, o) => s + _clampPct(o.percentage),
+    0
+  );
+  const overCovers = identifiedPctSum > 101;
   const useDeclared =
-    (fullPctSum > 0.5 && Math.abs(fullPctSum - 100) <= 1) || everyDeclaredInRange;
+    !overCovers &&
+    ((fullPctSum > 0.5 && Math.abs(fullPctSum - 100) <= 1) ||
+      everyDeclaredInRange);
 
   if (useDeclared) {
     const slices: OwnerSlice[] = owners.map((o) => {
@@ -100,10 +116,6 @@ export function ownerSlicesOf(
     // (~100). The array being "complete" (allIdentified) is NOT the signal — a
     // co-owner can be entirely absent from the data, so a sole 50%-owner has a
     // complete array yet only covers 50%.
-    const identifiedPctSum = owners.reduce(
-      (s, o) => s + _clampPct(o.percentage),
-      0
-    );
     const coversWhole = Math.abs(identifiedPctSum - 100) <= 1;
     if (coversWhole && slices.length) {
       // Identified owners cover the whole unit → force-sum to amt.

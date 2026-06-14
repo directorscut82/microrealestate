@@ -619,21 +619,24 @@ export async function getExpenses(req: Req, res: Res) {
           }
         }
       }
-      // DOUBLE-COUNT FIX: when this unit is vacant for the term, the expense's
-      // share is routed to the OWNER and materialised as a source:'vacant'
-      // ownerMonthlyExpense (section 3 emits it with payer:'owner'). Section 1
-      // is occupancy-blind (computeBuildingChargeForProperty returns a vacant
-      // unit's positive share by design), so without this guard the SAME euro
-      // is emitted here as payer:'renter' AND in section 3 as payer:'owner' —
-      // the property tile then showed €60 for a €30 share. Skip any expense
-      // already owned by a source:'vacant' owner row for this propertyId+term;
+      // DOUBLE-COUNT FIX: when this unit is vacant (or owner-occupied) for the
+      // term, the expense's share is routed to the OWNER and materialised as a
+      // source:'vacant'/'owner-resident' ownerMonthlyExpense (section 3 emits
+      // it with payer:'owner'). Section 1 is occupancy-blind
+      // (computeBuildingChargeForProperty returns the unit's positive share by
+      // design), so without this guard the SAME euro is emitted here as
+      // payer:'renter' AND in section 3 as payer:'owner' — the property tile
+      // then showed €60 for a €30 share. Skip any expense already owned by a
+      // source:'vacant' OR 'owner-resident' owner row for this propertyId+term;
       // section 3 is the single home for it (mirrors the breakdown engine's
-      // tenant ? 'renter' : 'owner' single-row decision).
+      // tenant ? 'renter' : 'owner' single-row decision). 'owner-resident' is
+      // the occupancy-twin and is now materialised flag-independently (June
+      // 2026 round-4), so it must be in the skip set too.
       const vacantOwnedExpenseIds = new Set<string>();
       if (Array.isArray(building.ownerMonthlyExpenses)) {
         for (const oe of building.ownerMonthlyExpenses as any[]) {
           if (
-            oe.source === 'vacant' &&
+            (oe.source === 'vacant' || oe.source === 'owner-resident') &&
             Number(oe.term) === term &&
             String(oe.propertyId || '') === String(propertyId) &&
             oe.expenseId

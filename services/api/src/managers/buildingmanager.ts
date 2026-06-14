@@ -1328,8 +1328,23 @@ export async function importFromE9(req: Req, res: Res) {
             // (older imports stored none). Stamp it onto the name-matched
             // owner so ownerKeyOf (n:name|taxId) stays stable and the owner is
             // not split into two (n:name| vs n:name|taxId) on the owners page.
+            // DISAMBIGUATION GUARD: only stamp when the name is UNAMBIGUOUS on
+            // this unit — exactly one owner bears ownerFullName AND no other
+            // owner already carries this ΑΦΜ. Otherwise a second person sharing
+            // a common Greek name re-importing their own E9 would name-match a
+            // taxId-less co-owner and have THEIR ΑΦΜ stamped onto the wrong
+            // person, flipping that owner's ledger identity (money-routing
+            // corruption — adversarial finding, June 2026 round-4).
             if (ownerTaxId && !existingOwner.taxId) {
-              existingOwner.taxId = ownerTaxId;
+              const nameMatches = (existingUnit.owners || []).filter(
+                (o: any) => o.name === ownerFullName
+              );
+              const taxIdElsewhere = (existingUnit.owners || []).some(
+                (o: any) => o.taxId && o.taxId === ownerTaxId
+              );
+              if (nameMatches.length === 1 && !taxIdElsewhere) {
+                existingOwner.taxId = ownerTaxId;
+              }
             }
             // L4: year-on-year re-imports may declare a different
             // ownership percentage (transfers, shifts in joint
@@ -1379,9 +1394,19 @@ export async function importFromE9(req: Req, res: Res) {
               taxId: ownerTaxId || undefined
             });
           } else if (existingOwner) {
-            // BACKFILL ΑΦΜ on the name-matched owner (see ATAK branch above).
+            // BACKFILL ΑΦΜ on the name-matched owner (see ATAK branch above) —
+            // same disambiguation guard: stamp only when the name is unique on
+            // this unit and the ΑΦΜ is not already on another co-owner.
             if (ownerTaxId && !existingOwner.taxId) {
-              existingOwner.taxId = ownerTaxId;
+              const nameMatches = (existingByDeh.owners || []).filter(
+                (o: any) => o.name === ownerFullName
+              );
+              const taxIdElsewhere = (existingByDeh.owners || []).some(
+                (o: any) => o.taxId && o.taxId === ownerTaxId
+              );
+              if (nameMatches.length === 1 && !taxIdElsewhere) {
+                existingOwner.taxId = ownerTaxId;
+              }
             }
             // L4: see ATAK-match branch above for rationale.
             if (
@@ -1639,6 +1664,72 @@ export async function importFromE9(req: Req, res: Res) {
 
       for (const propId of managedPropertyIds) {
         await _recomputeTenantsForProperty(realm!._id, propId);
+      }
+    }
+
+    // REALM-SCOPED ΑΦΜ RECONCILIATION: the per-unit backfill above only
+    // collapses the SAME physical unit's owner row (n:name| → n:name|taxId).
+    // But the same owner can appear ΑΦΜ-less on OTHER units/buildings from a
+    // prior import that dropped the ΑΦΜ — those stay split as a second owner
+    // row on the owners page (adversarial finding, June 2026 round-4). Now that
+    // this E9 carries the filer's ΑΦΜ, backfill it onto every ΑΦΜ-less owner
+    // row of the SAME name across the realm — but ONLY when the name is
+    // realm-wide UNAMBIGUOUS (no existing owner of that name already carries a
+    // DIFFERENT ΑΦΜ). If the name is ambiguous, skip (the operator reconciles
+    // via the manual co-owner editor) rather than stamp a wrong identity.
+    const filerTaxId = (parsed.owner as any).taxId || '';
+    if (filerTaxId && ownerFullName) {
+      const realmBuildings = await Collections.Building.find({
+        realmId: realm!._id
+      });
+      const ambiguous = realmBuildings.some((b: any) =>
+        (b.units || []).some((u: any) =>
+          (u.owners || []).some(
+            (o: any) =>
+              o.name === ownerFullName && o.taxId && o.taxId !== filerTaxId
+          )
+        )
+      );
+      if (!ambiguous) {
+        for (const b of realmBuildings as any[]) {
+          let touched = false;
+          for (const u of b.units || []) {
+            for (const o of u.owners || []) {
+              if (o.name === ownerFullName && !o.taxId) {
+                o.taxId = filerTaxId;
+                touched = true;
+              }
+            }
+          }
+          if (touched) {
+            b.updatedDate = new Date();
+            // BEST-EFFORT: this is a cosmetic owner-row dedup (it only collapses
+            // n:name| into n:name|taxId on the owners page — it writes NO core
+            // import data). It touches potentially every same-named-owner
+            // building in the realm, so a concurrent edit to an UNRELATED
+            // building must NOT throw a 409 that the import try/catch would
+            // turn into a full rollback of the successful import. Swallow the
+            // version conflict and log; the owners page shows the split row
+            // until the next reconcile (June 2026 round-4 review finding).
+            try {
+              await _saveBuildingWithVersionCheck(b);
+            } catch (reconErr: any) {
+              logger.warn(
+                `E9 import: realm-scoped ΑΦΜ backfill skipped building ${String(
+                  b._id
+                )} (${
+                  reconErr?.statusCode === 409
+                    ? 'concurrent modification'
+                    : String(reconErr)
+                })`
+              );
+            }
+          }
+        }
+      } else {
+        logger.info(
+          `E9 import: skipped realm-scoped ΑΦΜ backfill for ambiguous owner name "${ownerFullName}" (another owner of that name already carries a different ΑΦΜ)`
+        );
       }
     }
 
@@ -2448,18 +2539,41 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   const liveExpenseById = new Map<string, any>(
     ((hydrated as any).expenses || []).map((e: any) => [String(e._id), e])
   );
+  // OCCUPANCY GUARD (mirrors computeOwnerEksodaByMonth lines 3965-3975). The
+  // ±12-month vacant recompute leaves source:'vacant'/'owner-resident' rows
+  // for OUT-OF-WINDOW terms unchanged; if a tenant later occupies the unit for
+  // such a term, the same building-expense euro is billed BOTH to the present
+  // tenant's rent (1_base buildingCharges) AND surfaced here as an owner
+  // liability — a double-count (adversarial finding, June 2026 round-4). Drop
+  // the stale owner row when the unit is occupied for the requested term. The
+  // dashboard read-path already does this; the breakdown read-path did not.
+  // Resolved once for the single requested term (the filter below is sync).
+  const occupiedForBreakdown = await _occupiedPropertyIdsForTerm(
+    building as any,
+    realm!._id as string,
+    term
+  );
   const ownerEntries = ((hydrated as any).ownerMonthlyExpenses || []).filter(
     (e: any) => {
       if (Number(e.term) !== term) return false;
       // source:'vacant' AND 'owner-resident' are both re-derived from a
-      // chargeOwnerWhenVacant building expense — validate both against live
-      // state (expense gone / flag off / inactive → stale, drop). They differ
-      // only in WHO consumes the unit (empty vs owner-resident), not in the
-      // opt-in/active gate.
+      // building expense — validate both against live state (expense gone /
+      // inactive → stale, drop). They differ in the OPT-IN gate: a 'vacant'
+      // (truly-empty unit) row requires chargeOwnerWhenVacant; an
+      // 'owner-resident' (the owner lives there) row is the resident owner's
+      // OWN cost and is NOT flag-governed (mirrors 1_base.ts:368 ownerBilled =
+      // isOwnerOccupied || flag). Both drop when a TENANT occupies the unit for
+      // the term (the euro is live-billed to the tenant's rent → double-count).
       if (e.source === 'vacant' || e.source === 'owner-resident') {
         const src = liveExpenseById.get(String(e.expenseId));
-        if (!src || !src.chargeOwnerWhenVacant) return false;
+        if (!src) return false; // expense gone
+        if (e.source === 'vacant' && !src.chargeOwnerWhenVacant) return false;
         if (!isExpenseActiveForTerm(src as any, term)) return false;
+        // A TENANT occupying the unit live-bills this building expense to them
+        // — drop the stale owner row so the euro is not counted twice.
+        if (e.propertyId && occupiedForBreakdown.has(String(e.propertyId))) {
+          return false;
+        }
       }
       return true;
     }
@@ -3676,11 +3790,6 @@ async function _recomputeVacantOwnerCharges(
     applyCarriedSettlement(arr[arr.length - 1], carried);
   }
 
-  if (optInExpenses.length === 0) {
-    return; // no vacant opt-ins; owner-fixed already (re)materialised above
-  }
-
-  const occupied = await _occupiedPropertyIdsForTerm(building, realmId, term);
   // Owner-occupied units (the OWNER lives there). Their building-expense share
   // is genuinely the owner's cost — billed to the owner, but tagged
   // 'owner-resident' (NOT 'vacant') so the UI labels it as an owner-resident
@@ -3691,17 +3800,56 @@ async function _recomputeVacantOwnerCharges(
       .filter((u: any) => u.propertyId && u.occupancyType === 'owner_occupied')
       .map((u: any) => String(u.propertyId))
   );
+  // An owner-resident share is the resident owner's own cost and is NOT
+  // governed by chargeOwnerWhenVacant (that flag only governs truly-EMPTY
+  // units). So the per-unit owner-share pass must run over the SUPERSET of
+  // {flag-on expenses, for empty units} ∪ {any active expense, for owner-
+  // occupied units}. Mirrors the live engine (1_base.ts:368, ownerBilled =
+  // isOwnerOccupied || flag). Without this, an owner-occupied unit with the
+  // flag OFF was billed by the live breakdown but never materialised here nor
+  // counted on the dashboard — three surfaces disagreed (adversarial finding,
+  // June 2026 round-4, "Attack #3").
+  const activeExpenses = expenses.filter((e) =>
+    isExpenseActiveForTerm(e, term)
+  );
+  // Nothing to do if there are neither flag-on expenses NOR owner-occupied
+  // units with active expenses (owner-fixed already (re)materialised above).
+  if (
+    optInExpenses.length === 0 &&
+    (ownerOccupied.size === 0 || activeExpenses.length === 0)
+  ) {
+    return;
+  }
 
-  // For each opt-in expense, write each non-tenant unit's share to the owner.
+  const occupied = await _occupiedPropertyIdsForTerm(building, realmId, term);
+
+  // For each active expense, write each non-tenant unit's share to the owner —
+  // 'owner-resident' for an owner-occupied unit (flag-independent), 'vacant'
+  // for a truly-empty unit (only when the expense opts in via the flag).
   const buildingObj = building.toObject ? building.toObject() : building;
   await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
-  for (const expense of optInExpenses) {
-    // Variable expenses (amount 0) have no live share — their per-unit
-    // amounts live in monthlyCharges and are handled at statement time.
-    if (!(Number(expense.amount) > 0)) continue;
+  // Include FIXED-allocation expenses even when top-level amount===0: their
+  // real per-unit cost lives in customAllocations
+  // (computeBuildingChargeForProperty returns the per-unit value), so a vacant
+  // / owner-occupied unit's €40 IS owner-borne. Mirrors the dashboard gap-fill
+  // predicate (computeOwnerEksodaByMonth) so the ledger, the breakdown panel,
+  // AND the dashboard agree (June 2026 round-4 — the recompute used to skip
+  // amount===0 fixed expenses, leaving them dashboard-only). Truly-VARIABLE
+  // expenses (amount 0, non-fixed — materialised into monthlyCharges at
+  // statement time) are still skipped; the downstream `share <= 0` guard
+  // discards any zero per-unit share.
+  const billableExpenses = activeExpenses.filter(
+    (e) => e.allocationMethod === 'fixed' || Number(e.amount) > 0
+  );
+  for (const expense of billableExpenses) {
+    const flagOn = !!expense.chargeOwnerWhenVacant;
     for (const unit of building.units) {
       if (!unit.propertyId) continue;
       if (occupied.has(String(unit.propertyId))) continue; // billed to renter
+      const isResident = ownerOccupied.has(String(unit.propertyId));
+      // Empty unit → bill the owner only if the expense opts in; owner-occupied
+      // unit → always the resident owner's own cost.
+      if (!isResident && !flagOn) continue;
       const share = computeBuildingChargeForProperty(
         buildingObj,
         String(unit.propertyId),
@@ -3714,7 +3862,6 @@ async function _recomputeVacantOwnerCharges(
           `${String(expense._id)}|${String(unit.propertyId)}|${term}`
         )
       );
-      const isResident = ownerOccupied.has(String(unit.propertyId));
       const arr = building.ownerMonthlyExpenses;
       arr.push({
         expenseId: String(expense._id),
@@ -3964,7 +4111,13 @@ export async function computeOwnerEksodaByMonth(
     // distributed); a tenant who moved in later was not there for the repair.
     if (row.source === 'vacant' || row.source === 'owner-resident') {
       const src = liveExpenseById.get(String(row.expenseId));
-      if (!src || !src.chargeOwnerWhenVacant) continue; // gone / flag off
+      if (!src) continue; // expense gone
+      // 'vacant' (truly-empty unit) requires the opt-in flag; 'owner-resident'
+      // (the owner lives there) is the resident owner's OWN cost, NOT
+      // flag-governed (mirrors 1_base.ts:368 ownerBilled = isOwnerOccupied ||
+      // flag). Dropping owner-resident on flag-off made the dashboard read €0
+      // while the live breakdown billed it (3-surface disagreement, June 2026).
+      if (row.source === 'vacant' && !src.chargeOwnerWhenVacant) continue;
       if (!isExpenseActiveForTerm(src as any, term)) continue; // inactive
       if (row.propertyId) {
         const occ = await occupiedForTerm(term);
@@ -4008,9 +4161,17 @@ export async function computeOwnerEksodaByMonth(
   const buildingObj = building.toObject ? building.toObject() : building;
   await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
 
-  const vacantOptIn = expenses.filter((e) => e.chargeOwnerWhenVacant);
   const ownerFixed = expenses.filter(
     (e) => e.trackOwnerExpense && Number(e.ownerAmount) > 0
+  );
+  // Owner-occupied units (the owner lives there) — their share of ANY active
+  // expense is the resident owner's OWN cost, billed regardless of the
+  // chargeOwnerWhenVacant flag (mirrors 1_base.ts:368 ownerBilled and
+  // _recomputeVacantOwnerCharges). occupancyType is term-independent.
+  const ownerOccupiedSet = new Set<string>(
+    (building.units || [])
+      .filter((u: any) => u.propertyId && u.occupancyType === 'owner_occupied')
+      .map((u: any) => String(u.propertyId))
   );
 
   // Per-month owner liability from building expenses (12 terms of `year`) —
@@ -4027,24 +4188,30 @@ export async function computeOwnerEksodaByMonth(
       addOwed(term, fixedAmt);
       addDetail(term, null, e.type || 'other', e.name || '', fixedAmt, 0);
     }
-    // vacant building-expense shares (chargeOwnerWhenVacant): each vacant
-    // unit's share of an active expense routes to the owner. Include FIXED
-    // expenses even though their `amount` is 0 — a fixed expense's real cost
-    // lives in customAllocations (computeBuildingChargeForProperty returns the
-    // per-unit value), so the €40/€10 on a vacant unit IS owner-borne. Only
-    // truly-variable expenses (amount 0, non-fixed — their per-unit amount is
-    // materialised into monthlyCharges at statement time) are skipped here.
-    const activeVacant = vacantOptIn.filter(
+    // building-expense shares routed to the owner: a truly-EMPTY unit's share
+    // when the expense opts in (chargeOwnerWhenVacant), AND an OWNER-OCCUPIED
+    // unit's share of ANY active expense (flag-independent — the resident
+    // owner's own cost). Include FIXED expenses even though `amount` is 0 — a
+    // fixed expense's real cost lives in customAllocations
+    // (computeBuildingChargeForProperty returns the per-unit value). Only
+    // truly-variable expenses (amount 0, non-fixed — materialised into
+    // monthlyCharges at statement time) are skipped here.
+    const activeForOwner = expenses.filter(
       (e) =>
         isExpenseActiveForTerm(e, term) &&
         (e.allocationMethod === 'fixed' || Number(e.amount) > 0)
     );
-    if (activeVacant.length) {
+    if (activeForOwner.length) {
       const occupied = await occupiedForTerm(term);
-      for (const e of activeVacant) {
+      for (const e of activeForOwner) {
+        const flagOn = !!e.chargeOwnerWhenVacant;
         for (const unit of building.units || []) {
           if (!unit.propertyId) continue;
           if (occupied.has(String(unit.propertyId))) continue;
+          const isResident = ownerOccupiedSet.has(String(unit.propertyId));
+          // empty unit billed only if the expense opts in; owner-occupied unit
+          // always (its share is the resident owner's own cost).
+          if (!isResident && !flagOn) continue;
           if (covered.has(covKey(e._id, unit.propertyId, term))) continue;
           const share = computeBuildingChargeForProperty(
             buildingObj,
@@ -4053,6 +4220,7 @@ export async function computeOwnerEksodaByMonth(
             term
           );
           const shareR = Math.round(share * 100) / 100;
+          if (!(shareR > 0)) continue;
           addOwed(term, shareR);
           addDetail(
             term,
