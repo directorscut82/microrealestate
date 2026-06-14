@@ -968,20 +968,27 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 }
 
 // Append a parsed unit's co-owners (parsedUnit.coOwners) into an EXISTING
-// unit's owners[] on re-import, deduped by taxId then name. The new-unit path
-// does this inline; the ATAK-match and DEH-match merge branches previously did
-// NOT, so a co-owned unit re-imported (it already existed) silently kept only
-// the primary owner — the "50% unit with the other owner missing" bug. Mirrors
-// the new-unit loop: co-owners carry their AFM but no name, so the fallback
-// label is "ΑΦΜ <taxId>" (or 'Co-owner' when even the AFM is absent).
+// unit's owners[] on re-import, deduped by taxId. The new-unit path does this
+// inline; the ATAK-match and DEH-match merge branches previously did NOT, so a
+// co-owned unit re-imported (it already existed) silently kept only the primary
+// owner — the "50% unit with the other owner missing" bug.
+//
+// A parsed co-owner NEVER carries a name (the E9 lists only the filer's name);
+// it is identifiable ONLY by its ΑΦΜ. A co-owner with no ΑΦΜ is therefore
+// UNIDENTIFIABLE and unsettleable — and the parser can spuriously emit one
+// (e.g. a phantom 100% co-owner on a unit the filer already owns 100%, which
+// rendered a bogus 200% unit + a literal "Co-owner" phantom in the owners
+// list, June 2026 round-4). We DROP such co-owners: ownerSlicesOf already
+// synthesises a "λοιποί" rest-slice for any un-named ownership remainder, so
+// the display reconciles WITHOUT storing an unidentifiable owner subdoc.
 function _mergeCoOwners(ownersArr: any[], parsedUnit: any): void {
   if (!Array.isArray(ownersArr)) return;
   for (const co of (parsedUnit as any).coOwners || []) {
     const coTaxId = co.taxId || '';
-    const exists = ownersArr.find((o: any) => {
-      if (coTaxId && o.taxId && o.taxId === coTaxId) return true;
-      return false;
-    });
+    if (!coTaxId) continue; // unidentifiable co-owner → rest-slice handles it
+    const exists = ownersArr.find(
+      (o: any) => o.taxId && o.taxId === coTaxId
+    );
     if (exists) {
       // keep the latest declared percentage
       if (
@@ -994,9 +1001,9 @@ function _mergeCoOwners(ownersArr: any[], parsedUnit: any): void {
     }
     ownersArr.push({
       type: 'external',
-      name: coTaxId ? `ΑΦΜ ${coTaxId}` : 'Co-owner',
+      name: `ΑΦΜ ${coTaxId}`,
       percentage: co.percentage,
-      taxId: coTaxId || undefined
+      taxId: coTaxId
     });
   }
 }
@@ -1613,11 +1620,15 @@ export async function importFromE9(req: Req, res: Res) {
           }
         ];
         for (const co of (parsedUnit as any).coOwners || []) {
+          // A parsed co-owner with no ΑΦΜ is unidentifiable/unsettleable (and
+          // the parser can emit a phantom one — see _mergeCoOwners). Skip it;
+          // ownerSlicesOf renders the un-named remainder as a "λοιποί" slice.
+          if (!co.taxId) continue;
           owners.push({
             type: 'external',
-            name: co.taxId ? `ΑΦΜ ${co.taxId}` : 'Co-owner',
+            name: `ΑΦΜ ${co.taxId}`,
             percentage: co.percentage,
-            taxId: co.taxId || undefined
+            taxId: co.taxId
           });
         }
         (building as any).units.push({
