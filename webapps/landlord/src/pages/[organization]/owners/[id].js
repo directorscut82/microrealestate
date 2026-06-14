@@ -3,12 +3,14 @@ import { useCallback, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
+import { downloadDocument } from '../../../utils/fetch';
 import ErrorPage from 'next/error';
-import { LuArrowLeft, LuHome, LuWallet } from 'react-icons/lu';
+import { LuArrowLeft, LuDownload, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
 import Page from '../../../components/Page';
 import { Progress } from '../../../components/ui/progress';
+import { ownerChargeLabel } from '../../../utils/lineLabels';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -39,6 +41,29 @@ function OwnerDetail() {
     [router]
   );
 
+  // Download the owner expense statement (Εκκαθαριστικό) — the owner twin of
+  // the tenant receipt. Covers the years the owner actually has charges in
+  // (distinct from charges[].term), defaulting to all of them in one PDF.
+  const downloadStatement = useCallback(async () => {
+    if (!owner) return;
+    const years = [
+      ...new Set(
+        (owner.charges || []).map((c) => String(c.term).slice(0, 4))
+      )
+    ].filter(Boolean);
+    const term = years.length ? years.join(',') : String(new Date().getFullYear());
+    try {
+      await downloadDocument({
+        endpoint: `/documents/owner-statement/${encodeURIComponent(
+          owner.ownerKey
+        )}/${term}`,
+        documentName: `${owner.name || 'owner'}-statement.pdf`
+      });
+    } catch (e) {
+      toast.error(e?.response?.status === 404 ? t('No owner expenses') : t('Something went wrong'));
+    }
+  }, [owner, t]);
+
   if (isError) {
     toast.error(t('Error fetching owners'));
     return <ErrorPage statusCode={404} />;
@@ -63,6 +88,12 @@ function OwnerDetail() {
               <div>
                 <div className="text-headline font-medium flex items-center gap-2">
                   {owner.name || t('Owner')}
+                  {Number.isFinite(Number(owner.percentage)) &&
+                    Number(owner.percentage) < 100 && (
+                      <span className="text-base font-normal text-ink-muted">
+                        ({owner.percentage}%)
+                      </span>
+                    )}
                   {owner.alsoRents && (
                     <Badge variant="outline" className="font-normal gap-1">
                       <LuHome className="size-3" aria-hidden="true" />
@@ -77,14 +108,25 @@ function OwnerDetail() {
                 )}
               </div>
             </div>
-            <Button
-              onClick={() => setPayOpen(true)}
-              className="gap-2"
-              disabled={Number(owner.totalOutstanding) <= 0.005}
-            >
-              <LuWallet className="size-4" />
-              {t('Record an owner payment')}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={downloadStatement}
+                className="gap-2"
+                disabled={(owner.charges || []).length === 0}
+              >
+                <LuDownload className="size-4" />
+                {t('Download statement')}
+              </Button>
+              <Button
+                onClick={() => setPayOpen(true)}
+                className="gap-2"
+                disabled={Number(owner.totalOutstanding) <= 0.005}
+              >
+                <LuWallet className="size-4" />
+                {t('Record an owner payment')}
+              </Button>
+            </div>
           </div>
 
           {/* Paid vs total */}
@@ -131,12 +173,32 @@ function OwnerDetail() {
                   >
                     <span className="truncate text-muted-foreground">
                       {_termLabel(c.term)} · {c.buildingName} ·{' '}
-                      {c.description || c.source}
-                      {c.coOwnerCount > 1 && (
+                      {ownerChargeLabel(t, c)}
+                      {Array.isArray(c.coOwners) && c.coOwners.length > 1 ? (
                         <span className="text-muted-foreground/60">
                           {' '}
-                          ({t('co-owned')})
+                          (
+                          {c.coOwners
+                            .map((o) =>
+                              t('{{name}} {{pct}}% = {{amount}}', {
+                                name: o.name,
+                                pct: o.percentage,
+                                amount: new Intl.NumberFormat(undefined, {
+                                  style: 'currency',
+                                  currency: 'EUR'
+                                }).format(o.amount)
+                              })
+                            )
+                            .join(', ')}
+                          )
                         </span>
+                      ) : (
+                        c.coOwnerCount > 1 && (
+                          <span className="text-muted-foreground/60">
+                            {' '}
+                            ({t('co-owned')})
+                          </span>
+                        )
                       )}
                     </span>
                     <span className="flex items-center gap-3 shrink-0 tabular-nums">

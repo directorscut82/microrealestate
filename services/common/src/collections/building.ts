@@ -9,7 +9,11 @@ const UnitOwnerSchema = new mongoose.Schema(
       enum: ['member', 'external'],
       required: true
     },
-    percentage: { type: Number, required: true },
+    // Bounded [0,100] — an ownership share outside that range is
+    // misconfiguration; without the guard a negative/>100 value rendered a
+    // negative € co-owner slice in the breakdown (adversarial finding, June
+    // 2026). Mirrors RepairSchema.tenantSharePercentage's min/max.
+    percentage: { type: Number, required: true, min: 0, max: 100 },
     memberId: String,
     name: String,
     taxId: String,

@@ -6,7 +6,8 @@ import * as Contract from './contract.js';
 import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
   carryOwnerPayments,
-  applyCarriedSettlement
+  applyCarriedSettlement,
+  ownerSlicesOf
 } from './ownermanager.js';
 import {
   validateObjectId,
@@ -965,6 +966,40 @@ async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   return fullText;
 }
 
+// Append a parsed unit's co-owners (parsedUnit.coOwners) into an EXISTING
+// unit's owners[] on re-import, deduped by taxId then name. The new-unit path
+// does this inline; the ATAK-match and DEH-match merge branches previously did
+// NOT, so a co-owned unit re-imported (it already existed) silently kept only
+// the primary owner — the "50% unit with the other owner missing" bug. Mirrors
+// the new-unit loop: co-owners carry their AFM but no name, so the fallback
+// label is "ΑΦΜ <taxId>" (or 'Co-owner' when even the AFM is absent).
+function _mergeCoOwners(ownersArr: any[], parsedUnit: any): void {
+  if (!Array.isArray(ownersArr)) return;
+  for (const co of (parsedUnit as any).coOwners || []) {
+    const coTaxId = co.taxId || '';
+    const exists = ownersArr.find((o: any) => {
+      if (coTaxId && o.taxId && o.taxId === coTaxId) return true;
+      return false;
+    });
+    if (exists) {
+      // keep the latest declared percentage
+      if (
+        typeof co.percentage === 'number' &&
+        co.percentage !== exists.percentage
+      ) {
+        exists.percentage = co.percentage;
+      }
+      continue;
+    }
+    ownersArr.push({
+      type: 'external',
+      name: coTaxId ? `ΑΦΜ ${coTaxId}` : 'Co-owner',
+      percentage: co.percentage,
+      taxId: coTaxId || undefined
+    });
+  }
+}
+
 export async function importFromE9(req: Req, res: Res) {
   const realm = req.realm;
   const file = (req as any).file;
@@ -1303,6 +1338,8 @@ export async function importFromE9(req: Req, res: Res) {
               existingOwner.percentage = parsedUnit.ownershipPercentage;
             }
           }
+          // Append any co-owners the parser detected (was dropped on re-import).
+          _mergeCoOwners(existingUnit.owners, parsedUnit);
           continue;
         }
 
@@ -1346,6 +1383,8 @@ export async function importFromE9(req: Req, res: Res) {
               existingOwner.percentage = parsedUnit.ownershipPercentage;
             }
           }
+          // Append any co-owners the parser detected (was dropped on re-import).
+          _mergeCoOwners(existingByDeh.owners, parsedUnit);
           // Store co-owner's ATAK in altAtakNumbers (on building unit and property)
           if (existingByDeh.atakNumber !== parsedUnit.atakNumber) {
             if (!existingByDeh.altAtakNumbers)
@@ -2379,6 +2418,13 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       ? named[0].name
       : `${named[0].name} +${named.length - 1}`;
   };
+  // Per-owner slices (name + percentage + € split of `amount`) for an owner
+  // row, so the UI can render "ΔΟΚΙΜΗ ΒΗΤΑ 50% = €50" and list every
+  // co-owner. Returns [] for a single-owner unit (UI shows just the name).
+  const _ownerSlicesFor = (unit: any, amount: number) => {
+    const slices = ownerSlicesOf((unit?.owners || []) as any[], amount);
+    return slices.length > 1 ? slices : [];
+  };
   // Index the engine's per-row ShareBasis by expenseId+propertyId so an owner
   // row can show the SAME calculation explanation a renter row shows (e.g.
   // "1,70 € ÷ 11 μονάδες = 0,15 €"). The basis is computed by the live engine
@@ -2406,6 +2452,16 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       ? unitByPropId.get(String(e.propertyId))
       : undefined;
     const ownerName = unit ? _ownerDisplayName(unit) : null;
+    const rowAmount = Math.round((Number(e.amount) || 0) * 100) / 100;
+    // Single owner's declared percentage (when <100), for "Name (50%)".
+    const soleOwner =
+      unit && (unit.owners || []).length === 1 ? unit.owners[0] : null;
+    const ownerPercentage =
+      soleOwner &&
+      Number.isFinite(Number(soleOwner.percentage)) &&
+      Number(soleOwner.percentage) < 100
+        ? Number(soleOwner.percentage)
+        : undefined;
     return {
       // ownerExpenseId is the subdoc _id — the handle the UI PATCHes to
       // toggle paid. expenseId still points at the source expense/repair.
@@ -2423,7 +2479,12 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
         ? unit.property?.name || unit.name || String(e.propertyId)
         : null,
       ownerName: ownerName || null,
-      amount: Math.round((Number(e.amount) || 0) * 100) / 100,
+      // ownership %: the sole owner's share when fractional; co-owner slices
+      // (name + % + € split of this row) so the UI can show the per-owner
+      // breakdown the user asked for ("(ΒΗΤΑ 50% = €50, … 50% = €50)").
+      ownerPercentage,
+      owners: unit ? _ownerSlicesFor(unit, rowAmount) : [],
+      amount: rowAmount,
       // Calc basis (same shape renter rows carry) so the UI can render the
       // "÷ units = share" explanation on owner rows too. Only present for the
       // vacant sources (an allocated share); owner-direct flat entries have
@@ -2465,6 +2526,15 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
     if (persistedVacantKeys.has(key)) continue; // covered by a persisted row
     const unit = unitByPropId.get(String(r.propertyId));
     const ownerName = unit ? _ownerDisplayName(unit) : null;
+    const rowAmount = Math.round((Number(r.amount) || 0) * 100) / 100;
+    const soleOwner =
+      unit && (unit.owners || []).length === 1 ? unit.owners[0] : null;
+    const ownerPercentage =
+      soleOwner &&
+      Number.isFinite(Number(soleOwner.percentage)) &&
+      Number(soleOwner.percentage) < 100
+        ? Number(soleOwner.percentage)
+        : undefined;
     ownerDirect.push({
       ownerExpenseId: null, // not persisted → read-only (no paid toggle)
       expenseId: String(r.expenseId),
@@ -2473,7 +2543,16 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       expenseType: r.expenseType,
       propertyName: r.propertyName || null,
       ownerName: ownerName || null,
-      amount: Math.round((Number(r.amount) || 0) * 100) / 100,
+      ownerPercentage,
+      // live engine row already carries per-owner slices (r.owners); fall back
+      // to recomputing from the unit if absent.
+      owners:
+        r.owners && r.owners.length > 1
+          ? r.owners
+          : unit
+            ? _ownerSlicesFor(unit, rowAmount)
+            : [],
+      amount: rowAmount,
       basis: r.basis || null, // live row carries its own calc basis
       source: 'vacant',
       paid: false
@@ -3621,9 +3700,24 @@ export async function computeOwnerEksodaByMonth(
   realmId: string,
   building: any,
   year: number
-): Promise<{ owedByTerm: Map<number, number>; paidByTerm: Map<number, number> }> {
+): Promise<{
+  owedByTerm: Map<number, number>;
+  paidByTerm: Map<number, number>;
+  // per-term breakdown lines so the dashboard tooltip can list, per month,
+  // each (owner, category) the eksoda is composed of — the expense twin of the
+  // rent tooltip's per-tenant lines. `paid` is filled only for materialised
+  // rows (live gap-fill lines have no recorded paid).
+  detailByTerm: Map<
+    number,
+    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number }>
+  >;
+}> {
   const owedByTerm = new Map<number, number>();
   const paidByTerm = new Map<number, number>();
+  const detailByTerm = new Map<
+    number,
+    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number }>
+  >();
   const addOwed = (term: number, amt: number) => {
     if (!(amt > 0)) return;
     owedByTerm.set(term, (owedByTerm.get(term) || 0) + amt);
@@ -3631,6 +3725,38 @@ export async function computeOwnerEksodaByMonth(
   const addPaid = (term: number, amt: number) => {
     if (!(amt > 0)) return;
     paidByTerm.set(term, (paidByTerm.get(term) || 0) + amt);
+  };
+  // Accumulate a per-(term, owner, category) breakdown line, merging duplicates.
+  const addDetail = (
+    term: number,
+    ownerName: string | null,
+    category: string,
+    label: string,
+    owed: number,
+    paid: number
+  ) => {
+    if (!(owed > 0) && !(paid > 0)) return;
+    const arr = detailByTerm.get(term) || [];
+    const key = `${ownerName || ''}|${category}`;
+    const existing = arr.find((d) => `${d.ownerName || ''}|${d.category}` === key);
+    if (existing) {
+      existing.owed = Math.round((existing.owed + owed) * 100) / 100;
+      existing.paid = Math.round((existing.paid + paid) * 100) / 100;
+      if (!existing.label && label) existing.label = label;
+    } else {
+      arr.push({ ownerName: ownerName || null, category, label, owed, paid });
+    }
+    detailByTerm.set(term, arr);
+  };
+  // First named owner of a unit (for attributing a vacant/repair-vacant line).
+  const unitOwnerName = (propertyId: any): string | null => {
+    if (!propertyId) return null;
+    const unit = (building.units || []).find(
+      (u: any) => String(u.propertyId) === String(propertyId)
+    );
+    const named = ((unit?.owners || []) as any[]).filter((o: any) => o && o.name);
+    if (named.length === 0) return null;
+    return named.length === 1 ? named[0].name : `${named[0].name} +${named.length - 1}`;
   };
 
   const expenses = (building.expenses || []) as any[];
@@ -3651,11 +3777,60 @@ export async function computeOwnerEksodaByMonth(
   const covered = new Set<string>();
   const covKey = (expenseId: any, propertyId: any, term: number) =>
     `${String(expenseId)}|${propertyId ? String(propertyId) : ''}|${term}`;
+
+  // STALE-VACANT GUARD (mirrors getBuildingExpenseBreakdown's read-time guard,
+  // 2335-2361). The vacant/repair-vacant recompute only re-derives the CURRENT
+  // term, so flipping chargeOwnerWhenVacant OFF, an expense going inactive, or
+  // a unit becoming OCCUPIED leaves orphaned source:'vacant'/'repair-vacant'
+  // rows for OTHER terms. Counting them would double-bill: the same euro shows
+  // as owner eksoda here AND is billed to the now-present tenant via rent
+  // buildingCharges (the owner-is-also-renter double-count the audit found).
+  // Drop a vacant row whose expense is gone / no longer opts in / inactive, OR
+  // whose unit is occupied for that term. Occupancy is resolved per-term and
+  // cached (the rows of a year span ≤12 distinct terms).
+  const liveExpenseById = new Map<string, any>(
+    expenses.map((e: any) => [String(e._id), e])
+  );
+  const occupiedCache = new Map<number, Set<string>>();
+  const occupiedForTerm = async (term: number): Promise<Set<string>> => {
+    if (!occupiedCache.has(term)) {
+      occupiedCache.set(
+        term,
+        await _occupiedPropertyIdsForTerm(building, realmId, term)
+      );
+    }
+    return occupiedCache.get(term)!;
+  };
+
   for (const row of (building.ownerMonthlyExpenses || []) as any[]) {
     const term = Number(row.term || 0);
     if (Math.floor(term / 1000000) !== year) continue;
     const amount = Number(row.amount) || 0;
     if (!(amount > 0)) continue;
+    // Validate source:'vacant' (building-expense) rows against current live
+    // state. The occupancy/flag/inactive drop applies ONLY to 'vacant': a
+    // building expense is LIVE-rederived into the now-occupied tenant's rent
+    // (1_base computeBuildingChargeForProperty), so the same euro would
+    // double-count (owner here + tenant rent) — drop the stale owner row.
+    //
+    // 'repair-vacant' is DIFFERENT and must NOT be dropped on occupancy: a
+    // repair's tenant-portion share is materialised ONCE by
+    // _distributeRepairCharge (re-run only on repair add/edit, NEVER on a
+    // tenancy change) and is NOT in building.expenses, so it is never
+    // re-billed to a later tenant. Dropping it on occupancy would make the
+    // repair share vanish from BOTH the owner eksoda AND the tenant rent —
+    // silent money loss (REPAIR-VACANT-VANISHES, adversarial round, June 2026).
+    // The owner genuinely owes it (the unit was vacant when the repair was
+    // distributed); a tenant who moved in later was not there for the repair.
+    if (row.source === 'vacant') {
+      const src = liveExpenseById.get(String(row.expenseId));
+      if (!src || !src.chargeOwnerWhenVacant) continue; // gone / flag off
+      if (!isExpenseActiveForTerm(src as any, term)) continue; // inactive
+      if (row.propertyId) {
+        const occ = await occupiedForTerm(term);
+        if (occ.has(String(row.propertyId))) continue; // now live-billed to tenant
+      }
+    }
     covered.add(covKey(row.expenseId, row.propertyId, term));
     // Materialised row → owed AND paid from the same amount basis.
     addOwed(term, amount);
@@ -3664,7 +3839,24 @@ export async function computeOwnerEksodaByMonth(
       0
     );
     const fromFlag = row.paid ? amount : 0;
-    addPaid(term, Math.min(Math.max(fromPayments, fromFlag), amount));
+    const rowPaid = Math.min(Math.max(fromPayments, fromFlag), amount);
+    addPaid(term, rowPaid);
+    // breakdown line: category from source (repair → 'repair', else the
+    // source expense's schema type), owner from the row's unit (vacant) else
+    // building-level (null).
+    const srcExp = liveExpenseById.get(String(row.expenseId));
+    const category =
+      row.source === 'repair' || row.source === 'repair-vacant'
+        ? 'repair'
+        : srcExp?.type || 'other';
+    addDetail(
+      term,
+      row.propertyId ? unitOwnerName(row.propertyId) : null,
+      category,
+      row.description || srcExp?.name || '',
+      amount,
+      rowPaid
+    );
   }
 
   // Plain snapshot + tenant-group attach so computeBuildingChargeForProperty's
@@ -3688,7 +3880,9 @@ export async function computeOwnerEksodaByMonth(
     for (const e of ownerFixed) {
       if (!isExpenseActiveForTerm(e, term)) continue;
       if (covered.has(covKey(e._id, null, term))) continue; // materialised
-      addOwed(term, Math.round(Number(e.ownerAmount) * 100) / 100);
+      const fixedAmt = Math.round(Number(e.ownerAmount) * 100) / 100;
+      addOwed(term, fixedAmt);
+      addDetail(term, null, e.type || 'other', e.name || '', fixedAmt, 0);
     }
     // vacant building-expense shares (chargeOwnerWhenVacant): each vacant
     // unit's share of an active expense routes to the owner. Include FIXED
@@ -3703,11 +3897,7 @@ export async function computeOwnerEksodaByMonth(
         (e.allocationMethod === 'fixed' || Number(e.amount) > 0)
     );
     if (activeVacant.length) {
-      const occupied = await _occupiedPropertyIdsForTerm(
-        building,
-        realmId,
-        term
-      );
+      const occupied = await occupiedForTerm(term);
       for (const e of activeVacant) {
         for (const unit of building.units || []) {
           if (!unit.propertyId) continue;
@@ -3719,7 +3909,16 @@ export async function computeOwnerEksodaByMonth(
             e,
             term
           );
-          addOwed(term, Math.round(share * 100) / 100);
+          const shareR = Math.round(share * 100) / 100;
+          addOwed(term, shareR);
+          addDetail(
+            term,
+            unitOwnerName(unit.propertyId),
+            e.type || 'other',
+            e.name || '',
+            shareR,
+            0
+          );
         }
       }
     }
@@ -3750,7 +3949,9 @@ export async function computeOwnerEksodaByMonth(
       repair.chargeableTo === 'owners' ? cost : cost * (1 - sharePercentage / 100);
     // owner-portion (source:'repair', no propertyId) — skip if materialised.
     if (!covered.has(covKey(repairIdStr, null, term))) {
-      addOwed(term, Math.round(ownerPortion * 100) / 100);
+      const ownerPortionR = Math.round(ownerPortion * 100) / 100;
+      addOwed(term, ownerPortionR);
+      addDetail(term, null, 'repair', repair.title || '', ownerPortionR, 0);
     }
 
     // repair-vacant: the tenant-billed amount distributed across units; vacant
@@ -3763,11 +3964,7 @@ export async function computeOwnerEksodaByMonth(
         Array.isArray(repair.affectedUnitIds) && repair.affectedUnitIds.length > 0
           ? new Set(repair.affectedUnitIds.map((u: any) => String(u)))
           : null;
-      const occupied = await _occupiedPropertyIdsForTerm(
-        building,
-        realmId,
-        term
-      );
+      const occupied = await occupiedForTerm(term);
       for (const unit of building.units || []) {
         if (!unit.propertyId) continue;
         if (restrictUnits && !restrictUnits.has(String(unit._id))) continue;
@@ -3779,12 +3976,21 @@ export async function computeOwnerEksodaByMonth(
           { amount: effectiveAmount, allocationMethod, name: repair.title } as any,
           term
         );
-        addOwed(term, Math.round(share * 100) / 100);
+        const shareR = Math.round(share * 100) / 100;
+        addOwed(term, shareR);
+        addDetail(
+          term,
+          unitOwnerName(unit.propertyId),
+          'repair',
+          repair.title || '',
+          shareR,
+          0
+        );
       }
     }
   }
 
-  return { owedByTerm, paidByTerm };
+  return { owedByTerm, paidByTerm, detailByTerm };
 }
 
 // Confirm whether ANY tenant LINKED TO THIS BUILDING has a paid rent for

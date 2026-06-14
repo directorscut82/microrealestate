@@ -16,7 +16,8 @@ const VALID_TEMPLATES = new Set([
   'invoice',
   'rentcall',
   'rentcall_reminder',
-  'rentcall_last_reminder'
+  'rentcall_last_reminder',
+  'owner_statement'
 ]);
 
 // Replace the global Mutex with a Semaphore. The Mutex serialized every

@@ -639,18 +639,15 @@ async function _expensesRollup(
   for (let m = 1; m <= 12; m++) {
     const key = moment.utc(`${m}/${year}`, 'MM/YYYY').format('MMYYYY');
     const term = Number(moment.utc(`${m}/${year}`, 'MM/YYYY').format('YYYYMMDDHH'));
-    byMonth[key] = { month: key, paid: 0, notPaid: 0 };
+    byMonth[key] = { month: key, paid: 0, notPaid: 0, breakdown: [] };
     termToKey[term] = key;
   }
 
   let totalYearExpenses = 0;
   let totalYearPaid = 0;
   for (const b of buildings) {
-    const { owedByTerm, paidByTerm } = await computeOwnerEksodaByMonth(
-      realmId,
-      b,
-      year
-    );
+    const { owedByTerm, paidByTerm, detailByTerm } =
+      await computeOwnerEksodaByMonth(realmId, b, year);
     for (const [term, owed] of owedByTerm) {
       const key = termToKey[term];
       const bucket = key ? byMonth[key] : null;
@@ -663,12 +660,35 @@ async function _expensesRollup(
       totalYearExpenses += owed;
       totalYearPaid += paid;
     }
+    // Merge this building's per-(owner, category) detail lines into the month
+    // bucket so the tooltip can list them (the expense twin of revenues'
+    // per-tenant lines). Tagged with the building so the tooltip can show it.
+    for (const [term, lines] of detailByTerm || new Map()) {
+      const key = termToKey[term];
+      const bucket = key ? byMonth[key] : null;
+      if (!bucket) continue;
+      for (const ln of lines as AnyRecord[]) {
+        bucket.breakdown.push({ ...ln, buildingName: b.name || '' });
+      }
+    }
   }
 
   const expenses = Object.values(byMonth).map((v: AnyRecord) => ({
     month: v.month,
     paid: _round(v.paid),
-    notPaid: _round(v.notPaid)
+    notPaid: _round(v.notPaid),
+    breakdown: (v.breakdown as AnyRecord[])
+      .map((d) => ({
+        ownerName: d.ownerName || null,
+        category: d.category,
+        label: d.label || '',
+        buildingName: d.buildingName || '',
+        owed: _round(d.owed),
+        paid: _round(d.paid)
+      }))
+      .filter((d) => d.owed > 0 || d.paid > 0)
+      // largest owed first so the most significant lines lead the tooltip.
+      .sort((a, b2) => b2.owed - a.owed)
   }));
 
   return {

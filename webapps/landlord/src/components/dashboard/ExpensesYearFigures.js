@@ -10,6 +10,7 @@ import {
 import { useMemo } from 'react';
 import { ChartContainer } from '../ui/chart';
 import { DashboardCard } from './DashboardCard';
+import { BUILDING_TYPE_LABEL_KEY } from '../../utils/lineLabels';
 import { LuWallet } from 'react-icons/lu';
 import moment from 'moment';
 import useFormatNumber from '../../hooks/useFormatNumber';
@@ -70,12 +71,23 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
     [data]
   );
 
+  // Localized category label for a breakdown line (Επισκευή for repairs,
+  // Κοιν. Νερό for water, …) — same key map the building expense panel uses.
+  const categoryLabel = (line) => {
+    const key = BUILDING_TYPE_LABEL_KEY[line.category] || 'Other';
+    const typeLabel = t(key);
+    return line.label && line.label !== typeLabel
+      ? `${typeLabel} (${line.label})`
+      : typeLabel;
+  };
+
   const CustomBarTooltip = ({ active, payload }) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
     if (!d) return null;
+    const breakdown = Array.isArray(d.breakdown) ? d.breakdown : [];
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-60">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-72">
         <div className="font-medium text-body text-ink mb-1 leading-tight">
           {moment(d.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
@@ -87,6 +99,27 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
           <div className="flex justify-between gap-3 mb-0.5 font-mono tabular-nums text-label">
             <span className="text-ink-muted">{t('Outstanding')}</span>
             <span className="text-ink">{formatNumber(d.notPaid)}</span>
+          </div>
+        )}
+        {/* Per-owner / per-category breakdown (incl. repairs) — the expense
+            twin of the rent tooltip's per-tenant lines. Each line shows the
+            owner (or building-level), the category, and paid / owed. */}
+        {breakdown.length > 0 && (
+          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-0.5">
+            {breakdown.map((line, i) => (
+              <div
+                key={i}
+                className="flex justify-between gap-2 font-mono tabular-nums text-label"
+              >
+                <span className="text-ink-muted truncate font-sans">
+                  {line.ownerName ? `${line.ownerName} · ` : ''}
+                  {categoryLabel(line)}
+                </span>
+                <span className="whitespace-nowrap text-ink">
+                  {formatNumber(line.paid)} / {formatNumber(line.owed)}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>

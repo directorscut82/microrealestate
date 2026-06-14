@@ -23,6 +23,12 @@ beforeAll(async () => {
       this.status = status;
     }
   }
+  // Use the REAL OwnerStatement util (ownerSlicesOf etc.) — buildingmanager +
+  // ownermanager import it from common; the mock must provide the genuine
+  // implementation so the per-owner split logic under test is exercised.
+  const OwnerStatement = await import(
+    '../../../common/src/utils/ownerstatement.ts'
+  );
   jest.unstable_mockModule('@microrealestate/common', () => ({
     Collections: {
       // _occupiedPropertyIdsForTerm: .find({...}).lean() → tenants
@@ -31,7 +37,8 @@ beforeAll(async () => {
       }
     },
     logger: { warn() {}, info() {}, error() {} },
-    ServiceError
+    ServiceError,
+    OwnerStatement
   }));
   // _attachTenantGroupsToBuildings hits the DB; the cases here use fixed /
   // thousandths allocation (which never read _tenantGroups), so a no-op that
@@ -313,5 +320,290 @@ describe('computeOwnerEksodaByMonth (live owner-borne eksoda)', () => {
     };
     const { owedByTerm } = await computeOwnerEksodaByMonth('r1', building, 2026);
     expect([...owedByTerm.values()].reduce((s, v) => s + v, 0)).toBe(0);
+  });
+
+  it('STALE-VACANT GUARD: a materialised vacant row for a now-OCCUPIED unit is NOT counted (owner-is-also-renter double-count)', async () => {
+    // p1 occupied in June by a tenant; but a stale source:'vacant' row for
+    // p1+June survives (recompute only ran for the current term). It must be
+    // dropped so the €40 is not billed as owner eksoda AND to the tenant.
+    TENANTS = [
+      {
+        _id: 't1',
+        beginDate: '2025-01-01',
+        endDate: '2027-01-01',
+        properties: [{ propertyId: 'p1', entryDate: '2025-01-01' }]
+      }
+    ];
+    const building = {
+      _id: 'b_stale',
+      realmId: 'r1',
+      units: [mkUnit('p1')],
+      expenses: [
+        {
+          _id: 'e_fixed',
+          name: 'Ρεύμα',
+          amount: 0,
+          allocationMethod: 'fixed',
+          isRecurring: true,
+          startTerm: 2026010100,
+          chargeOwnerWhenVacant: true,
+          customAllocations: [{ propertyId: 'p1', value: 40 }]
+        }
+      ],
+      repairs: [],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'stale1',
+          expenseId: 'e_fixed',
+          propertyId: 'p1',
+          term: 2026060100,
+          amount: 40,
+          source: 'vacant',
+          paid: false,
+          payments: []
+        }
+      ]
+    };
+    const { owedByTerm } = await computeOwnerEksodaByMonth('r1', building, 2026);
+    // p1 is occupied in June → the stale vacant row is dropped, owner owes €0.
+    expect(owedByTerm.get(term(6, 2026)) || 0).toBe(0);
+  });
+
+  it('REPAIR-VACANT survives occupancy: a repair-vacant row on a now-OCCUPIED unit is STILL owed by the owner (it is never re-billed to the tenant)', async () => {
+    // Adversarial finding (June 2026): unlike a building-expense 'vacant' row
+    // (live-rederived into the occupied tenant's rent), a 'repair-vacant' row
+    // is materialised once by _distributeRepairCharge and NEVER re-billed to a
+    // later tenant. Dropping it on occupancy would make the repair share vanish
+    // from BOTH owner eksoda AND tenant rent. It must persist.
+    TENANTS = [
+      {
+        _id: 't1',
+        beginDate: '2025-01-01',
+        endDate: '2027-01-01',
+        properties: [{ propertyId: 'p1', entryDate: '2025-01-01' }]
+      }
+    ];
+    const building = {
+      _id: 'b_rv',
+      realmId: 'r1',
+      units: [mkUnit('p1')],
+      expenses: [],
+      repairs: [
+        {
+          _id: 'rep1',
+          title: 'ασανσέρ',
+          chargeableTo: 'split',
+          actualCost: 100,
+          tenantSharePercentage: 50,
+          chargeTerm: 2026060100,
+          status: 'planned'
+        }
+      ],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'rv1',
+          expenseId: 'rep1',
+          propertyId: 'p1',
+          term: 2026060100,
+          amount: 25,
+          source: 'repair-vacant',
+          paid: false,
+          payments: []
+        }
+      ]
+    };
+    const { owedByTerm } = await computeOwnerEksodaByMonth('r1', building, 2026);
+    // The owner owes BOTH: the live repair owner-portion (cost·(1−50%) = €50,
+    // a building-wide source:'repair') AND the materialised repair-vacant €25
+    // (the vacant unit's tenant-share that was never billed to anyone). The
+    // €25 MUST survive p1 being occupied in June — it is not re-billed to the
+    // new tenant. Total €75. (Before the fix the €25 was wrongly dropped → €50.)
+    expect(owedByTerm.get(term(6, 2026))).toBe(75);
+  });
+
+  it('STALE-VACANT GUARD: a vacant row whose expense turned chargeOwnerWhenVacant OFF is dropped', async () => {
+    const building = {
+      _id: 'b_off',
+      realmId: 'r1',
+      units: [mkUnit('p1')],
+      expenses: [
+        {
+          _id: 'e_fixed',
+          name: 'Ρεύμα',
+          amount: 0,
+          allocationMethod: 'fixed',
+          isRecurring: true,
+          startTerm: 2026010100,
+          chargeOwnerWhenVacant: false, // flag turned OFF
+          customAllocations: [{ propertyId: 'p1', value: 40 }]
+        }
+      ],
+      repairs: [],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'stale2',
+          expenseId: 'e_fixed',
+          propertyId: 'p1',
+          term: 2026060100,
+          amount: 40,
+          source: 'vacant',
+          paid: false,
+          payments: []
+        }
+      ]
+    };
+    const { owedByTerm } = await computeOwnerEksodaByMonth('r1', building, 2026);
+    expect(owedByTerm.get(term(6, 2026)) || 0).toBe(0);
+  });
+
+  it('detailByTerm: emits per-(owner,category) breakdown lines incl. repairs', async () => {
+    const building = {
+      _id: 'b_detail',
+      realmId: 'r1',
+      units: [
+        mkUnit('p1', { owners: [{ name: 'ΒΗΤΑ', percentage: 100 }] }),
+        mkUnit('p2', { owners: [{ name: 'ΒΗΤΑ', percentage: 100 }] })
+      ],
+      expenses: [
+        {
+          _id: 'e_fixed',
+          name: 'Ρεύμα',
+          type: 'electricity_common',
+          amount: 0,
+          allocationMethod: 'fixed',
+          isRecurring: true,
+          startTerm: 2026010100,
+          chargeOwnerWhenVacant: true,
+          customAllocations: [
+            { propertyId: 'p1', value: 40 },
+            { propertyId: 'p2', value: 10 }
+          ]
+        }
+      ],
+      repairs: [
+        {
+          _id: 'rep1',
+          title: 'ασανσέρ',
+          chargeableTo: 'owners',
+          actualCost: 100,
+          chargeTerm: 2026060100,
+          status: 'planned'
+        }
+      ],
+      ownerMonthlyExpenses: []
+    };
+    const { detailByTerm } = await computeOwnerEksodaByMonth('r1', building, 2026);
+    const june = detailByTerm.get(term(6, 2026)) || [];
+    // electricity vacant shares (p1+p2, both owned by ΒΗΤΑ → merged) + repair.
+    const elec = june.find((d) => d.category === 'electricity_common');
+    const repair = june.find((d) => d.category === 'repair');
+    expect(elec).toBeTruthy();
+    expect(elec.ownerName).toBe('ΒΗΤΑ');
+    expect(elec.owed).toBe(50); // 40 + 10 merged
+    expect(repair).toBeTruthy();
+    expect(repair.owed).toBe(100);
+    expect(repair.ownerName).toBeNull(); // building-wide owner-portion
+  });
+});
+
+describe('ownerSlicesOf (per-owner € split by percentage)', () => {
+  let ownerSlicesOf;
+  beforeAll(async () => {
+    ({ ownerSlicesOf } = await import('../managers/ownermanager.js'));
+  });
+
+  it('splits by declared percentages with carrier-remainder summing exactly', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1', percentage: 50 },
+        { name: 'B', taxId: '2', percentage: 50 }
+      ],
+      100
+    );
+    expect(slices).toHaveLength(2);
+    expect(slices[0].amount + slices[1].amount).toBe(100);
+    expect(slices[0].percentage).toBe(50);
+  });
+
+  it('equal-splits when percentages are absent', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1' },
+        { name: 'B', taxId: '2' },
+        { name: 'C', taxId: '3' }
+      ],
+      90
+    );
+    expect(slices).toHaveLength(3);
+    expect(slices.reduce((s, x) => s + x.amount, 0)).toBe(90);
+  });
+
+  it('carrier-remainder: 100 split 3 ways sums to exactly 100', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1', percentage: 33.33 },
+        { name: 'B', taxId: '2', percentage: 33.33 },
+        { name: 'C', taxId: '3', percentage: 33.34 }
+      ],
+      100
+    );
+    expect(slices.reduce((s, x) => s + x.amount, 0)).toBe(100);
+  });
+
+  it('skips identity-less owners', () => {
+    const slices = ownerSlicesOf(
+      [{ name: '', taxId: '' }, { name: 'A', taxId: '1', percentage: 100 }],
+      50
+    );
+    expect(slices).toHaveLength(1);
+    expect(slices[0].name).toBe('A');
+    expect(slices[0].amount).toBe(50);
+  });
+
+  it('preserves DECLARED split when a co-owner has a percentage but no identity (40/40 stays 40/40, not 50/50)', () => {
+    // Adversarial finding: pctSum must be over the FULL declared set so a
+    // named 40% + named 40% + nameless 20% shows 40%/40%, not re-normalised.
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1', percentage: 40 },
+        { name: 'B', taxId: '2', percentage: 40 },
+        { name: '', taxId: '', percentage: 20 } // nameless co-owner
+      ],
+      100
+    );
+    expect(slices).toHaveLength(2); // nameless not displayed
+    expect(slices[0].percentage).toBe(40);
+    expect(slices[0].amount).toBe(40);
+    expect(slices[1].percentage).toBe(40);
+    expect(slices[1].amount).toBe(40); // NOT 50 — declared share preserved
+  });
+
+  it('keeps a memberId-only owner (identity via memberId, no name/taxId)', () => {
+    const slices = ownerSlicesOf(
+      [
+        { memberId: 'M1', percentage: 50 },
+        { name: 'B', taxId: '2', percentage: 50 }
+      ],
+      100
+    );
+    expect(slices).toHaveLength(2); // member-only owner kept
+    expect(slices[0].amount + slices[1].amount).toBe(100);
+  });
+
+  it('clamps a negative / >100 percentage so no negative € slice renders', () => {
+    const slices = ownerSlicesOf(
+      [
+        { name: 'A', taxId: '1', percentage: -50 },
+        { name: 'B', taxId: '2', percentage: 150 }
+      ],
+      100
+    );
+    // -50 clamps to 0, 150 clamps to 100 → fullPctSum 100 → declared. No
+    // negative amounts.
+    for (const s of slices) {
+      expect(s.amount).toBeGreaterThanOrEqual(0);
+      expect(s.percentage).toBeGreaterThanOrEqual(0);
+      expect(s.percentage).toBeLessThanOrEqual(100);
+    }
   });
 });

@@ -62,3 +62,35 @@ export function debtLineLabel(t, debt) {
   const d = _trim(debt?.description);
   return d || t('Additional cost');
 }
+
+// Localized label for an OWNER ledger charge (ownerMonthlyExpenses row). Used
+// by the owner detail page + owner payment dialog so neither leaks a raw
+// English source enum ('repair-vacant', 'owner-fixed') or 'Repair:' prefix.
+// Rule: prefer the expense TYPE label (Επισκευή for repairs, Κοιν. Νερό, …);
+// append a real description in parentheses; never show a bare hex id. Falls
+// back to a per-source label so even a typeless row reads in Greek.
+const _SOURCE_LABEL_KEY = {
+  expense: 'Owner expense',
+  'owner-fixed': 'Owner expense',
+  vacant: 'Vacant-unit share',
+  repair: 'Repair',
+  'repair-vacant': 'Repair'
+};
+function _looksLikeId(name) {
+  const s = _trim(name);
+  if (!s) return true;
+  return /^[0-9a-f]{8,}$/i.test(s);
+}
+export function ownerChargeLabel(t, charge) {
+  const typeKey = charge?.expenseType
+    ? BUILDING_TYPE_LABEL_KEY[charge.expenseType]
+    : null;
+  // strip a hardcoded legacy "Repair: <title>" English prefix if present
+  const rawDesc = _trim(charge?.description).replace(/^Repair:\s*/i, '');
+  const desc = _looksLikeId(rawDesc) ? '' : rawDesc;
+  const base = typeKey
+    ? t(typeKey)
+    : t(_SOURCE_LABEL_KEY[charge?.source] || 'Owner expense');
+  if (desc && desc !== base) return `${base}  (${desc})`;
+  return base;
+}

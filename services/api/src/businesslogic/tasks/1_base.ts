@@ -1,5 +1,5 @@
 import type { CollectionTypes } from '@microrealestate/types';
-import { logger } from '@microrealestate/common';
+import { logger, OwnerStatement } from '@microrealestate/common';
 import moment from 'moment';
 
 export interface Contract {
@@ -101,6 +101,11 @@ export type ExpenseBreakdownRow = {
   // chargeOwnerWhenVacant — the share is BILLED to the owner; false when
   // it is simply uncollected. Undefined for renter rows.
   ownerBilled?: boolean;
+  // For OWNER rows: the unit's full owner set with each owner's ownership
+  // percentage and their € slice of this row's amount. Lets the UI render
+  // "ΔΟΚΙΜΗ ΒΗΤΑ 50% = €50" and list every co-owner (not just the first
+  // named one). Empty/absent for renter rows or units with a single owner.
+  owners?: { name: string; percentage: number; amount: number }[];
 };
 
 // Build a STRUCTURED explanation of how a unit's share was derived. The
@@ -254,6 +259,23 @@ function _equalPartyCount(building: any, term?: number): number {
 // Recipient: a unit with a tenant this term → 'renter' (billed); a unit
 // with no tenant → 'owner' (currently uncollected; surfaced explicitly).
 // `building` must carry units[].property + units[].tenant + _tenantGroups.
+// Split a per-unit owner-borne `amount` across the unit's owners by ownership
+// percentage, for DISPLAY ("Name 50% = €50"). Delegates to the SINGLE
+// canonical implementation in common so the building-expense breakdown panel
+// and the owner ledger can never diverge (they did when each had its own copy —
+// adversarial finding, June 2026). Drops the ownerKey field the engine row
+// type doesn't carry.
+function _ownerSlices(
+  unitOwners: any[],
+  amount: number
+): { name: string; percentage: number; amount: number }[] {
+  return OwnerStatement.ownerSlicesOf(unitOwners, amount).map((s) => ({
+    name: s.name,
+    percentage: s.percentage,
+    amount: s.amount
+  }));
+}
+
 export function computeBuildingExpenseBreakdown(
   building: any,
   term: number
@@ -282,6 +304,14 @@ export function computeBuildingExpenseBreakdown(
     const recipientName = tenant ? tenant.name : ownerName;
     const propertyName =
       unit.property?.name || unit.name || String(unit.propertyId);
+    // Per-owner split helper for OWNER rows: when the unit has >1 named owner,
+    // attach each owner's percentage + € slice of the row amount so the UI can
+    // render "Name 50% = €X" per co-owner. Computed per row amount below.
+    const ownerSlicesFor = (amount: number) => {
+      if (tenant) return undefined; // renter row → no owner split
+      const slices = _ownerSlices(unit.owners || [], amount);
+      return slices.length > 1 ? slices : undefined;
+    };
 
     // Which expenseIds are overridden by a persisted monthlyCharge for this
     // term — those are billed from the stored share, not recomputed.
@@ -327,7 +357,10 @@ export function computeBuildingExpenseBreakdown(
             : undefined
         ),
         ...(recipient === 'owner'
-          ? { ownerBilled: !!expense.chargeOwnerWhenVacant }
+          ? {
+              ownerBilled: !!expense.chargeOwnerWhenVacant,
+              owners: ownerSlicesFor(share)
+            }
           : {})
       });
     }
@@ -354,7 +387,10 @@ export function computeBuildingExpenseBreakdown(
         amount: Math.round(amt * 100) / 100,
         // Variable statement amounts + repair distributions are stored
         // directly (no split formula to explain) → no calc basis.
-        basis: { kind: 'none' }
+        basis: { kind: 'none' },
+        ...(recipient === 'owner'
+          ? { owners: ownerSlicesFor(Math.round(amt * 100) / 100) }
+          : {})
       });
     }
   }

@@ -298,6 +298,49 @@ export default function () {
   const { UPLOADS_DIRECTORY } = Service.getInstance().envConfig.getValues();
   const documentsApi = express.Router();
 
+  // Owner expense statement (Εκκαθαριστικό εξόδων ιδιοκτήτη) — the OWNER twin
+  // of the tenant receipt. Distinct literal path because the owner identity is
+  // an `ownerKey` (m:<id> or n:<name>|<taxId>, URL-encoded) NOT an ObjectId,
+  // so it must not hit the tenant route's ObjectId validation. Registered
+  // BEFORE the generic /:document/:id/:term so 'owner-statement' is matched
+  // here. The data picker (data/owner_statement) re-validates the owner +
+  // term and 404s on an empty statement.
+  documentsApi.get(
+    '/owner-statement/:ownerKey/:term',
+    Middlewares.asyncWrapper(async (req, res) => {
+      try {
+        const realm = (req as any).realm;
+        if (!realm?._id) {
+          throw new ServiceError('organization required', 404);
+        }
+        const term = String(req.params.term);
+        // Same term shape as the receipt route: YYYY or YYYYMMDDHH, or a
+        // comma-separated list of up to 12 such terms.
+        const TERM_RE = /^(\d{4}(\d{6})?)(,\d{4}(\d{6})?){0,11}$/;
+        if (!TERM_RE.test(term)) {
+          throw new ServiceError('invalid term format', 422);
+        }
+        const pdfFile = await pdf.generate('owner_statement', {
+          ownerKey: req.params.ownerKey,
+          term,
+          realmId: String(realm._id)
+        });
+        return res.download(pdfFile);
+      } catch (error) {
+        if (error instanceof ServiceError) throw error;
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === 'EACCES' || code === 'ENOENT' || code === 'EROFS') {
+          logger.error(
+            `owner_statement PDF filesystem error (${code}): ${(error as Error).message}`
+          );
+          throw new ServiceError('PDF generation failed', 500);
+        }
+        // owner not found / no charges → 404 with the picker's message.
+        throw new ServiceError(error as Error, 404);
+      }
+    })
+  );
+
   documentsApi.get(
     '/:document/:id/:term',
     Middlewares.asyncWrapper(async (req, res) => {

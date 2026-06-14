@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
+import { ownerChargeLabel } from '../../utils/lineLabels';
 import ResponsiveDialog from '../ResponsiveDialog';
 import {
   Select,
@@ -14,19 +15,24 @@ import {
 } from '../ui/select';
 import { toast } from 'sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import usePaymentTypes from '../../hooks/usePaymentTypes';
 import useTranslation from 'next-translate/useTranslation';
 
 const _round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Owner καταβολή dialog — mirrors the tenant rent payment dialog for owner
-// expenses. Records ONE payment against the owner with an allocation across
-// their outstanding charges:
+// Owner καταβολή dialog — mirrors the tenant rent settlement dialog
+// ("Εισαγωγή διακανονισμού ενοικίου") for owner expenses. Shows the owner's
+// outstanding charges as a per-charge ledger (Οφειλόμενο / Καταβολή / Υπόλοιπο
+// — owed / paid-so-far / balance), exactly like the rent dialog's per-term
+// rows, INCLUDING repairs (επισκευές) labeled as such. Records ONE καταβολή
+// with an allocation across those charges:
 //   - auto    → omit allocation; server spreads oldest-term-first
 //   - specific→ one chosen charge, full amount
 //   - custom  → per-charge amounts (capped at each charge's outstanding)
 export default function OwnerPaymentDialog({ open, setOpen, owner }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
+  const { itemList: paymentTypes } = usePaymentTypes();
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [type, setType] = useState('transfer');
@@ -135,12 +141,75 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
     t
   ]);
 
+  // Per-charge ledger row: label (incl. repairs) + Οφειλόμενο / Καταβολή /
+  // Υπόλοιπο, mirroring the rent dialog. In custom mode an input replaces the
+  // static balance so the landlord allocates per charge.
+  const renderLedgerRow = (c) => {
+    const paidSoFar = _round((Number(c.amount) || 0) - (Number(c.outstanding) || 0));
+    return (
+      <div
+        key={c.ownerExpenseId}
+        className="grid grid-cols-[1fr_auto] gap-2 py-1.5 border-b border-stone-line/40 last:border-b-0"
+      >
+        <div className="min-w-0">
+          <div className="text-sm text-ink truncate">
+            {ownerChargeLabel(t, c)}
+          </div>
+          <div className="text-label text-ink-muted">
+            {_termLabel(c.term)} · {c.buildingName}
+          </div>
+        </div>
+        <div className="flex items-center gap-4 shrink-0 text-label tabular-nums">
+          <span className="text-right">
+            <span className="block text-ink-muted">{t('Owed')}</span>
+            <NumberFormat value={c.amount} />
+          </span>
+          <span className="text-right">
+            <span className="block text-ink-muted">{t('Paid')}</span>
+            <NumberFormat value={paidSoFar} />
+          </span>
+          {mode === 'custom' ? (
+            <span className="text-right">
+              <span className="block text-ink-muted">{t('Settlement')}</span>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                max={c.outstanding}
+                className="w-24 h-8 text-right"
+                value={custom[c.ownerExpenseId] ?? ''}
+                onChange={(e) =>
+                  setCustom((p) => ({
+                    ...p,
+                    [c.ownerExpenseId]: e.target.value
+                  }))
+                }
+                placeholder="0.00"
+              />
+            </span>
+          ) : (
+            <span className="text-right">
+              <span className="block text-ink-muted">{t('Balance')}</span>
+              <span className="text-oxide">
+                <NumberFormat value={c.outstanding} />
+              </span>
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <ResponsiveDialog
       open={open}
       setOpen={setOpen}
       isLoading={mutation.isPending}
-      renderHeader={() => t('Record an owner payment')}
+      renderHeader={() =>
+        owner?.name
+          ? `${t('Enter an owner expense settlement')} — ${owner.name}`
+          : t('Enter an owner expense settlement')
+      }
       renderContent={() => (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -172,9 +241,13 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="transfer">{t('transfer')}</SelectItem>
-                  <SelectItem value="cash">{t('cash')}</SelectItem>
-                  <SelectItem value="cheque">{t('cheque')}</SelectItem>
+                  {paymentTypes
+                    .filter((pt) => !pt.disabled)
+                    .map((pt) => (
+                      <SelectItem key={pt.id} value={pt.value}>
+                        {pt.label}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -197,9 +270,20 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
             />
           </div>
 
+          {/* Per-charge ledger (Οφειλόμενο / Καταβολή / Υπόλοιπο) — the same
+              shape the rent settlement dialog uses, incl. repairs. */}
+          {outstandingCharges.length > 0 && (
+            <div className="rounded-md border border-stone-line/60 bg-muted/20 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                {t('Charges')}
+              </div>
+              {outstandingCharges.map(renderLedgerRow)}
+            </div>
+          )}
+
           {/* Allocation mode */}
           <div className="space-y-2 pt-1">
-            <Label>{t('Allocation')}</Label>
+            <Label>{t('Apply to')}</Label>
             <div className="flex gap-2 text-sm">
               {['auto', 'specific', 'custom'].map((m) => (
                 <button
@@ -238,7 +322,7 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                 <SelectContent>
                   {outstandingCharges.map((c) => (
                     <SelectItem key={c.ownerExpenseId} value={c.ownerExpenseId}>
-                      {_termLabel(c.term)} · {c.description || c.source} ·{' '}
+                      {_termLabel(c.term)} · {ownerChargeLabel(t, c)} ·{' '}
                       {new Intl.NumberFormat(undefined, {
                         style: 'currency',
                         currency: 'EUR'
@@ -250,44 +334,11 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
             )}
 
             {mode === 'custom' && (
-              <div className="space-y-1">
-                {outstandingCharges.map((c) => (
-                  <div
-                    key={c.ownerExpenseId}
-                    className="flex items-center justify-between gap-2 text-sm"
-                  >
-                    <span className="truncate text-muted-foreground">
-                      {_termLabel(c.term)} · {c.description || c.source}{' '}
-                      <span className="text-muted-foreground/60">
-                        ({t('Outstanding')}:{' '}
-                        <NumberFormat value={c.outstanding} />)
-                      </span>
-                    </span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max={c.outstanding}
-                      className="w-24 h-8 text-right"
-                      value={custom[c.ownerExpenseId] ?? ''}
-                      onChange={(e) =>
-                        setCustom((p) => ({
-                          ...p,
-                          [c.ownerExpenseId]: e.target.value
-                        }))
-                      }
-                      placeholder="0.00"
-                    />
-                  </div>
-                ))}
-                <div className="flex justify-between text-xs pt-1 border-t border-stone-line/50">
-                  <span className="text-muted-foreground">
-                    {t('Allocated')}
-                  </span>
-                  <span className="tabular-nums">
-                    <NumberFormat value={customTotal} />
-                  </span>
-                </div>
+              <div className="flex justify-between text-xs pt-1 border-t border-stone-line/50">
+                <span className="text-muted-foreground">{t('Allocated')}</span>
+                <span className="tabular-nums">
+                  <NumberFormat value={customTotal} />
+                </span>
               </div>
             )}
           </div>

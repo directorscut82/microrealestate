@@ -1,6 +1,19 @@
-import { Collections, logger, ServiceError } from '@microrealestate/common';
+import {
+  Collections,
+  logger,
+  ServiceError,
+  OwnerStatement
+} from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import { validateFiniteNumber, validateStringField } from '../validators.js';
+
+// Per-owner € split for DISPLAY — re-exported from the SINGLE canonical
+// implementation in common so the owner ledger, the building-expense
+// breakdown panel, and the owner-statement PDF can never diverge. See
+// common/utils/ownerstatement.ownerSlicesOf for the rules (full-set
+// useDeclared decision, [0,100] clamp, carrier-remainder, member-only owners
+// kept via ownerKeyOf).
+export const ownerSlicesOf = OwnerStatement.ownerSlicesOf;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -38,6 +51,7 @@ export function ownerKeyOf(owner: any): string {
   if (!name && !taxId) return ''; // no identity → not a distinct owner key
   return `n:${name}|${taxId}`;
 }
+
 
 // Derive paid/paidDate for ONE owner ledger row from its payments array.
 // paid when outstanding <= 0.005; paidDate = latest payment date when paid.
@@ -153,12 +167,20 @@ type OwnerCharge = {
   outstanding: number;
   paid: boolean;
   source: string;
+  // schema `type` of the source expense/repair (e.g. 'water_common',
+  // 'repair') so the UI can render a localized category label instead of the
+  // raw English source enum / description. undefined when not resolvable.
+  expenseType?: string;
   description: string;
   propertyId: string | null;
   // present when the charge's unit/building has >1 owner; the charge is
   // attributed once to the canonical owner but flagged co-owned for the UI.
   coOwnerCount?: number;
   coOwnerNames?: string[];
+  // DISPLAY-ONLY per-owner split of `amount` by ownership percentage
+  // (ownerSlicesOf). Lets the UI show "Name (50%) = €50" per co-owner. The
+  // settlement still lands wholly on the canonical owner (one payments[] home).
+  coOwners?: { ownerKey: string; name: string; percentage: number; amount: number }[];
 };
 
 type OwnerAgg = {
@@ -166,6 +188,10 @@ type OwnerAgg = {
   name: string;
   taxId: string;
   memberId: string | null;
+  // the owner's ownership percentage as declared on their unit(s). When an
+  // owner holds units at different percentages this is the LAST seen non-100
+  // value (display hint only); 100/undefined for sole owners.
+  percentage?: number;
   unitCount: number;
   buildingIds: Set<string>;
   charges: OwnerCharge[];
@@ -185,9 +211,16 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
   // First pass: every unit's owners → owner identity + unit count.
   // propertyId → ownerKeys, so we can attribute propertyId-scoped charges.
   const propertyOwners = new Map<string, string[]>();
+  // propertyId → the unit's raw owners[] (name+percentage), so a charge on
+  // that unit can be sliced per co-owner by percentage (ownerSlicesOf).
+  const propertyOwnerArr = new Map<string, any[]>();
+  // buildingId → the building's distinct owners[] (deduped by ownerKey), for
+  // slicing building-wide owner charges (propertyId null) across co-owners.
+  const buildingOwnerArr = new Map<string, any[]>();
 
   for (const b of buildings) {
     const bid = String(b._id);
+    const bOwnersByKey = new Map<string, any>();
     for (const u of b.units || []) {
       const pid = u.propertyId ? String(u.propertyId) : null;
       const keysForUnit: string[] = [];
@@ -195,12 +228,17 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
         const key = ownerKeyOf(o);
         if (!key) continue;
         keysForUnit.push(key);
+        if (!bOwnersByKey.has(key)) bOwnersByKey.set(key, o);
         if (!owners.has(key)) {
           owners.set(key, {
             ownerKey: key,
             name: o.name || '',
             taxId: o.taxId || '',
             memberId: o.memberId ? String(o.memberId) : null,
+            percentage:
+              Number.isFinite(Number(o.percentage)) && Number(o.percentage) < 100
+                ? Number(o.percentage)
+                : undefined,
             unitCount: 0,
             buildingIds: new Set<string>(),
             charges: [],
@@ -216,9 +254,21 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
         // fill in name/taxId if a later unit has richer data
         if (!agg.name && o.name) agg.name = o.name;
         if (!agg.taxId && o.taxId) agg.taxId = o.taxId;
+        // a fractional percentage anywhere is a useful display hint
+        if (
+          agg.percentage === undefined &&
+          Number.isFinite(Number(o.percentage)) &&
+          Number(o.percentage) < 100
+        ) {
+          agg.percentage = Number(o.percentage);
+        }
       }
-      if (pid && keysForUnit.length) propertyOwners.set(pid, keysForUnit);
+      if (pid && keysForUnit.length) {
+        propertyOwners.set(pid, keysForUnit);
+        propertyOwnerArr.set(pid, u.owners || []);
+      }
     }
+    buildingOwnerArr.set(bid, Array.from(bOwnersByKey.values()));
   }
 
   // Second pass: attribute each ownerMonthlyExpenses row to its owner(s).
@@ -250,6 +300,11 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
   for (const b of buildings) {
     const bid = String(b._id);
     const bname = b.name || '';
+    // expenseId → schema `type` (for a localized category label on the charge).
+    const expTypeById = new Map<string, string>();
+    for (const e of b.expenses || []) {
+      if (e && e._id && e.type) expTypeById.set(String(e._id), String(e.type));
+    }
     for (const row of b.ownerMonthlyExpenses || []) {
       const amount = _round(row.amount);
       if (!(amount > 0)) continue;
@@ -257,6 +312,13 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
       const paidAmount = _round(
         payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
       );
+      const src = row.source || 'expense';
+      // A repair row's expenseId is the repair _id (not a building expense), so
+      // type='repair'; otherwise look up the source expense's schema type.
+      const expenseType =
+        src === 'repair' || src === 'repair-vacant'
+          ? 'repair'
+          : expTypeById.get(String(row.expenseId)) || undefined;
       const charge: OwnerCharge = {
         buildingId: bid,
         buildingName: bname,
@@ -267,7 +329,8 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
         paidAmount,
         outstanding: _round(amount - paidAmount),
         paid: paidAmount >= amount - 0.005,
-        source: row.source || 'expense',
+        source: src,
+        expenseType,
         description: row.description || '',
         propertyId: row.propertyId ? String(row.propertyId) : null
       };
@@ -302,10 +365,19 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
       const agg = owners.get(canonicalKey);
       if (!agg) continue;
       if (keys.length > 1) {
-        (charge as any).coOwnerCount = keys.length;
-        (charge as any).coOwnerNames = sortedKeys
+        charge.coOwnerCount = keys.length;
+        charge.coOwnerNames = sortedKeys
           .map((k) => owners.get(k)?.name)
-          .filter(Boolean);
+          .filter(Boolean) as string[];
+        // DISPLAY-only per-owner € split by ownership percentage. Source the
+        // unit's owners[] for a propertyId-scoped charge, else the building's
+        // distinct owners for a building-wide charge.
+        const sliceOwners =
+          charge.propertyId && propertyOwnerArr.has(charge.propertyId)
+            ? propertyOwnerArr.get(charge.propertyId)!
+            : buildingOwnerArr.get(bid) || [];
+        const slices = ownerSlicesOf(sliceOwners, charge.amount);
+        if (slices.length > 1) charge.coOwners = slices;
       }
       agg.charges.push(charge);
       agg.totalAmount = _round(agg.totalAmount + charge.amount);
@@ -349,6 +421,7 @@ function _serializeOwnerSummary(agg: OwnerAgg) {
     name: agg.name,
     taxId: agg.taxId,
     memberId: agg.memberId,
+    percentage: agg.percentage,
     unitCount: agg.unitCount,
     buildingCount: agg.buildingIds.size,
     totalAmount: _round(agg.totalAmount),
@@ -380,7 +453,10 @@ export async function all(req: Req, res: Res) {
 // GET /owners/:ownerKey — one owner: charges grouped + payment history.
 export async function one(req: Req, res: Res) {
   const realm = req.realm;
-  const ownerKey = decodeURIComponent(req.params.ownerKey || '');
+  // Express already decodes the :ownerKey path param once; a second decode
+  // throws URIError on names with a literal '%' (adversarial finding, June
+  // 2026). Use the param verbatim.
+  const ownerKey = req.params.ownerKey || '';
   if (!ownerKey) throw new ServiceError('ownerKey is required', 422);
   const buildings = await Collections.Building.find({
     realmId: realm!._id
@@ -468,7 +544,9 @@ export function autoSpreadOwnerPayment(
 // payments[]; derived paid recomputed per row; the touched buildings saved.
 export async function pay(req: Req, res: Res) {
   const realm = req.realm;
-  const ownerKey = decodeURIComponent(req.params.ownerKey || '');
+  // Express already decodes the path param once — no second decode (URIError
+  // on '%'-names). Verbatim.
+  const ownerKey = req.params.ownerKey || '';
   if (!ownerKey) throw new ServiceError('ownerKey is required', 422);
   const payment = req.body?.payment;
   if (!payment || typeof payment !== 'object') {

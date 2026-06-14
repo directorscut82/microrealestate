@@ -1,0 +1,15 @@
+<div class="customer">
+	<div style="font-size: 9pt; color: #555; letter-spacing: 1pt;"><%= _.t('Owner') %></div>
+	<h3><%= tenant.name %></h3>
+	<% if (tenant.companyInfo && tenant.companyInfo.vatNumber) { %>
+		<%= _.t('Tax id') %>: <%= tenant.companyInfo.vatNumber %><br>
+	<% } %>
+	<% if (tenant.contacts && tenant.contacts[0]) { %>
+		<% if (tenant.contacts[0].phone1) { %>
+			<%= _.t('Phone: {{phone}}', { phone: tenant.contacts[0].phone1 }) %><br>
+		<% } %>
+		<% if (tenant.contacts[0].email) { %>
+			<%= _.t('Email: {{email}}', { email: tenant.contacts[0].email }) %><br>
+		<% } %>
+	<% } %>
+</div>

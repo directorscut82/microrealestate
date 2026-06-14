@@ -38,6 +38,8 @@
   "Credit balance": "Credit balance",
   "VAT {{vatPercent}}": "VAT {{vatPercent}}",
   "Receipt": "Receipt",
+  "Owner expense statement": "OWNER EXPENSE STATEMENT",
+  "Statement number": "Statement no.",
   "Tenant tax id": "Tax ID",
   "Property address": "Property address",
   "Receipt number": "Receipt number",

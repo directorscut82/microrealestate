@@ -22,6 +22,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Separator } from '../ui/separator';
 import NumberFormat from '../NumberFormat';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
@@ -719,18 +720,49 @@ function formatBasis(t, basis) {
   }
 }
 
-function OwnerName({ name, t }) {
-  // Small attribution line: "Ιδιοκτήτης: <name>" or just "Ιδιοκτήτης".
+function OwnerName({ name, percentage, t }) {
+  // Small attribution line: "Ιδιοκτήτης: <name> (50%)" or just "Ιδιοκτήτης".
+  // The percentage is shown only when fractional (<100) — a sole 100% owner
+  // shows just the name (matches the building Επισκόπηση units table rule).
+  const showPct =
+    Number.isFinite(Number(percentage)) && Number(percentage) < 100;
   return (
     <span className="font-normal text-muted-foreground">
       ·{' '}
-      {name ? t('Owner: {{name}}', { name }) : t('Owner')}
+      {name
+        ? showPct
+          ? t('Owner: {{name}} ({{pct}}%)', { name, pct: percentage })
+          : t('Owner: {{name}}', { name })
+        : t('Owner')}
+    </span>
+  );
+}
+
+// Per-owner € split parenthesis for a co-owned amount: "(ΒΗΤΑ 50% = €50,
+// ΓΕΩΡΓΙΟΣ 50% = €50)". `owners` is the server-computed slice array
+// (name + percentage + € amount). Renders nothing for a single owner.
+function CoOwnerSplit({ owners, t, formatNumber }) {
+  if (!Array.isArray(owners) || owners.length < 2) return null;
+  return (
+    <span className="ml-1 text-muted-foreground/60">
+      (
+      {owners
+        .map((o) =>
+          t('{{name}} {{pct}}% = {{amount}}', {
+            name: o.name,
+            pct: o.percentage,
+            amount: formatNumber(o.amount)
+          })
+        )
+        .join(', ')}
+      )
     </span>
   );
 }
 
 function ChargeBreakdown({ breakdown, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
+  const formatNumber = useFormatNumber();
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
   // The ONLY owner rows we take from breakdown.rows are the UNCOLLECTED ones
@@ -843,6 +875,7 @@ function ChargeBreakdown({ breakdown, t }) {
                   map.set(key, {
                     propertyName: e.propertyName || null,
                     ownerName: e.ownerName || null,
+                    ownerPercentage: e.ownerPercentage,
                     items: [],
                     total: 0
                   });
@@ -851,6 +884,8 @@ function ChargeBreakdown({ breakdown, t }) {
                 g.items.push(e);
                 g.total += Number(e.amount) || 0;
                 if (!g.ownerName && e.ownerName) g.ownerName = e.ownerName;
+                if (g.ownerPercentage === undefined && e.ownerPercentage !== undefined)
+                  g.ownerPercentage = e.ownerPercentage;
                 return map;
               }, new Map())
               .values()
@@ -859,7 +894,11 @@ function ChargeBreakdown({ breakdown, t }) {
               <div className="flex items-baseline justify-between text-sm">
                 <span className="font-medium truncate mr-2 text-ink-muted">
                   {g.propertyName || t('Owner expenses')}
-                  <OwnerName name={g.ownerName} t={t} />
+                  <OwnerName
+                    name={g.ownerName}
+                    percentage={g.ownerPercentage}
+                    t={t}
+                  />
                 </span>
                 <span className="tabular-nums font-medium whitespace-nowrap">
                   <NumberFormat value={g.total} />
@@ -877,6 +916,12 @@ function ChargeBreakdown({ breakdown, t }) {
                         ({formatBasis(t, e.basis)})
                       </span>
                     )}
+                    {/* per-owner € split when the unit is co-owned */}
+                    <CoOwnerSplit
+                      owners={e.owners}
+                      t={t}
+                      formatNumber={formatNumber}
+                    />
                   </span>
                   <span className="tabular-nums whitespace-nowrap">
                     <NumberFormat value={e.amount} />
