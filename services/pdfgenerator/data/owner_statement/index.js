@@ -114,7 +114,10 @@ export async function get(params) {
         type: c.expenseType || (c.source === 'expense' ? 'other' : c.source),
         amount: c.amount,
         description: c.description || '',
-        buildingName: c.buildingName || ''
+        buildingName: c.buildingName || '',
+        // per-owner split (name/percentage/amount, isRest for the un-named
+        // remainder) so a co-owned charge prints "(Name 50% = €X, λοιποί 50%)".
+        coOwners: Array.isArray(c.coOwners) ? c.coOwners : []
       }));
       const subTotal = items.reduce((s, c) => s + c.amount, 0);
       const payment = items.reduce((s, c) => s + c.paidAmount, 0);

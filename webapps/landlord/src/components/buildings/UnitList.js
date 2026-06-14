@@ -31,7 +31,7 @@ import {
 } from '../ui/select';
 import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
-import { useForm } from 'react-hook-form';
+import { useFieldArray, useForm } from 'react-hook-form';
 import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -60,7 +60,19 @@ const unitSchema = z.object({
   occupancyType: z
     .enum(['rented', 'owner_occupied', 'vacant', 'parking'])
     .optional(),
-  propertyId: z.string().trim().max(60).optional()
+  propertyId: z.string().trim().max(60).optional(),
+  // Manual co-owner editor — name (required) + optional ΑΦΜ + % (0..100). The
+  // E9 import only carries the filer's own share, so the landlord adds the
+  // co-owner here. Sum is validated server-side (≤ 100); the UI shows a hint.
+  owners: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1, 'Name is required').max(120),
+        taxId: z.string().trim().max(20).optional().or(z.literal('')),
+        percentage: z.coerce.number().min(0).max(100)
+      })
+    )
+    .optional()
 });
 
 const OCCUPANCY_TYPES = [
@@ -123,6 +135,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
     reset,
     watch,
     setValue,
+    control,
     formState: { errors }
   } = useForm({
     resolver: zodResolver(unitSchema),
@@ -136,20 +149,41 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
       elevatorThousandths: '',
       isManaged: true,
       occupancyType: 'vacant',
-      propertyId: ''
+      propertyId: '',
+      owners: []
     },
     values: unit
       ? {
           ...unit,
           isManaged: unit.isManaged ?? true,
-          occupancyType: unit.occupancyType || 'vacant'
+          occupancyType: unit.occupancyType || 'vacant',
+          // normalise existing owners to the form shape (name/taxId/percentage)
+          owners: (unit.owners || []).map((o) => ({
+            name: o.name || '',
+            taxId: o.taxId || '',
+            percentage:
+              o.percentage === undefined || o.percentage === null
+                ? 100
+                : o.percentage
+          }))
         }
       : undefined
   });
 
+  const {
+    fields: ownerFields,
+    append: appendOwner,
+    remove: removeOwner
+  } = useFieldArray({ control, name: 'owners' });
+
   const isManaged = watch('isManaged');
   const occupancyType = watch('occupancyType');
   const propertyIdValue = watch('propertyId');
+  const ownersValue = watch('owners');
+  const ownersPctSum = (ownersValue || []).reduce(
+    (s, o) => s + (Number(o?.percentage) || 0),
+    0
+  );
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -297,6 +331,80 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Owners (co-owner editor). The E9 import carries only the
+                filer's own share; add co-owners here so every owner is
+                recorded. Percentages must sum to ≤ 100 (validated server-side;
+                a hint shows the running total). */}
+            <div className="space-y-2 pt-2 border-t border-stone-line/50">
+              <div className="flex items-center justify-between">
+                <Label>{t('Owners')}</Label>
+                <span
+                  className={
+                    'text-label tabular-nums ' +
+                    (ownersPctSum > 100.5
+                      ? 'text-destructive'
+                      : 'text-ink-muted')
+                  }
+                >
+                  {t('Total')}: {Math.round(ownersPctSum * 10) / 10}%
+                </span>
+              </div>
+              {ownerFields.length === 0 && (
+                <p className="text-label text-ink-muted">
+                  {t('No owners recorded yet.')}
+                </p>
+              )}
+              {ownerFields.map((field, idx) => (
+                <div key={field.id} className="flex items-start gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Input
+                      placeholder={t('Owner name')}
+                      {...register(`owners.${idx}.name`)}
+                    />
+                    {errors.owners?.[idx]?.name && (
+                      <p className="text-sm text-destructive">
+                        {errors.owners[idx].name.message}
+                      </p>
+                    )}
+                  </div>
+                  <Input
+                    className="w-32"
+                    placeholder={t('Tax ID')}
+                    {...register(`owners.${idx}.taxId`)}
+                  />
+                  <div className="w-20">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      placeholder="%"
+                      {...register(`owners.${idx}.percentage`)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeOwner(idx)}
+                    aria-label={t('Remove')}
+                  >
+                    ✕
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  appendOwner({ name: '', taxId: '', percentage: 0 })
+                }
+              >
+                + {t('Add co-owner')}
+              </Button>
             </div>
           </div>
         </form>

@@ -166,6 +166,9 @@ export interface OwnerStatementCharge {
   expenseType?: string;
   description: string;
   propertyId: string | null;
+  // DISPLAY-only per-owner split of `amount` (when co-owned); same slices the
+  // on-screen breakdown shows, so the PDF reconciles per owner.
+  coOwners?: OwnerSlice[];
 }
 
 export interface OwnerStatementData {
@@ -200,9 +203,15 @@ export function buildOwnerStatement(
   // buildingId → distinct ownerKeys (for building-wide rows).
   const propertyOwnerKeys = new Map<string, string[]>();
   const buildingOwnerKeys = new Map<string, Set<string>>();
+  // propertyId → the unit's raw owners[] + buildingId → distinct owners[], so a
+  // charge can be sliced per co-owner for the statement (same as the on-screen
+  // breakdown).
+  const propertyOwnerArr = new Map<string, any[]>();
+  const buildingOwnerArr = new Map<string, any[]>();
   for (const b of buildings) {
     const bid = String(b._id);
     const bset = new Set<string>();
+    const bOwnersByKey = new Map<string, any>();
     for (const u of b.units || []) {
       const pid = u.propertyId ? String(u.propertyId) : null;
       const keys: string[] = [];
@@ -211,6 +220,7 @@ export function buildOwnerStatement(
         if (!k) continue;
         keys.push(k);
         bset.add(k);
+        if (!bOwnersByKey.has(k)) bOwnersByKey.set(k, o);
         if (k === ownerKey && !ownerIdentity) {
           ownerIdentity = {
             ownerKey,
@@ -222,9 +232,13 @@ export function buildOwnerStatement(
           };
         }
       }
-      if (pid && keys.length) propertyOwnerKeys.set(pid, keys);
+      if (pid && keys.length) {
+        propertyOwnerKeys.set(pid, keys);
+        propertyOwnerArr.set(pid, u.owners || []);
+      }
     }
     buildingOwnerKeys.set(bid, bset);
+    buildingOwnerArr.set(bid, Array.from(bOwnersByKey.values()));
   }
 
   const charges: OwnerStatementCharge[] = [];
@@ -262,6 +276,12 @@ export function buildOwnerStatement(
         src === 'repair' || src === 'repair-vacant'
           ? 'repair'
           : expTypeById.get(String(row.expenseId)) || undefined;
+      // Per-owner slices for a co-owned charge (display).
+      const sliceOwners =
+        pid && propertyOwnerArr.has(pid)
+          ? propertyOwnerArr.get(pid)!
+          : buildingOwnerArr.get(bid) || [];
+      const slices = ownerSlicesOf(sliceOwners, amount);
       charges.push({
         buildingId: bid,
         buildingName: bname,
@@ -273,7 +293,8 @@ export function buildOwnerStatement(
         source: src,
         expenseType,
         description: String(row.description || '').replace(/^Repair:\s*/i, ''),
-        propertyId: pid
+        propertyId: pid,
+        ...(slices.length > 1 ? { coOwners: slices } : {})
       });
     }
   }

@@ -1716,6 +1716,51 @@ export async function importFromE9(req: Req, res: Res) {
 // Units
 // ---------------------------------------------------------------------------
 
+// Validate + normalise a unit's owners[] coming from the manual unit editor.
+// Each owner: name (required, non-empty), optional taxId, percentage in
+// [0,100]. The sum of percentages must be ≤ 100 (a unit can be under-declared
+// — a co-owner not yet entered — but never over 100). Returns the normalised
+// owners array (type defaulted to 'external'), or undefined when the body
+// carries no owners key (leave the field untouched on update). Throws 422 on
+// any violation.
+function _validateUnitOwners(rawOwners: any): any[] | undefined {
+  if (rawOwners === undefined) return undefined;
+  if (!Array.isArray(rawOwners)) {
+    throw new ServiceError('owners must be an array', 422);
+  }
+  let sum = 0;
+  const owners = rawOwners.map((o: any, i: number) => {
+    const name = String(o?.name || '').trim();
+    if (!name) {
+      throw new ServiceError(`owner #${i + 1}: name is required`, 422);
+    }
+    const pct = Number(o?.percentage);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      throw new ServiceError(
+        `owner #${i + 1}: percentage must be between 0 and 100`,
+        422
+      );
+    }
+    sum += pct;
+    const taxId = String(o?.taxId || '').trim();
+    return {
+      type: o?.type === 'member' ? 'member' : 'external',
+      name,
+      percentage: pct,
+      ...(taxId ? { taxId } : {}),
+      ...(o?.memberId ? { memberId: String(o.memberId) } : {})
+    };
+  });
+  // Allow a tiny rounding slack over 100.
+  if (sum > 100.5) {
+    throw new ServiceError(
+      `owner percentages sum to ${sum}% (must be ≤ 100%)`,
+      422
+    );
+  }
+  return owners;
+}
+
 export async function addUnit(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
@@ -1740,6 +1785,9 @@ export async function addUnit(req: Req, res: Res) {
   });
   validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
+  // Manual co-owner editor: validate + normalise owners[] (name + % ≤ 100).
+  const validatedOwnersAdd = _validateUnitOwners(req.body.owners);
+  if (validatedOwnersAdd !== undefined) req.body.owners = validatedOwnersAdd;
   if (req.body.propertyId) {
     validateObjectId(req.body.propertyId, 'propertyId');
     // Wave-21 C30-B4: cross-realm guard. Without this, a malicious admin in
@@ -1849,6 +1897,9 @@ export async function updateUnit(req: Req, res: Res) {
   });
   validateFiniteNumber(req.body.surface, 'surface', { min: 0, max: 100000 });
   validateFiniteNumber(req.body.floor, 'floor', { min: -5, max: 200 });
+  // Manual co-owner editor: validate + normalise owners[] (name + % ≤ 100).
+  const validatedOwnersUpd = _validateUnitOwners(req.body.owners);
+  if (validatedOwnersUpd !== undefined) req.body.owners = validatedOwnersUpd;
   if (req.body.propertyId) {
     validateObjectId(req.body.propertyId, 'propertyId');
     // Wave-21 C30-B4: cross-realm guard. Mirror addUnit — block linking a

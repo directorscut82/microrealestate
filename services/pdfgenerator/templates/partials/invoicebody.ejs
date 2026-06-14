@@ -54,8 +54,18 @@ function debtLabel(debt) {
 <% }); %>
 
 <% (rent.buildingCharges || []).forEach(function(charge) { %>
+  <%
+    // Per-owner split suffix for a co-owned charge: "(Name 50% = €50, λοιποί 50% = €50)".
+    var coSuffix = '';
+    if (Array.isArray(charge.coOwners) && charge.coOwners.length > 1) {
+      coSuffix = '  (' + charge.coOwners.map(function(o){
+        var nm = o.isRest ? _.t('others') : o.name;
+        return nm + ' ' + o.percentage + '% = ' + _.formatNumber(o.amount, 'currency');
+      }).join(', ') + ')';
+    }
+  %>
   <tr class="item-row">
-    <td class="description"><%= buildingLabel(charge) %></td>
+    <td class="description"><%= buildingLabel(charge) %><%= coSuffix %></td>
     <td class="txtAlignRight">1</td>
     <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
     <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
