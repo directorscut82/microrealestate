@@ -1,3 +1,10 @@
+import {
+  Drawer,
+  DrawerContent,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle
+} from '../ui/drawer';
 import { payOwner, QueryKeys } from '../../utils/restcalls';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
@@ -5,7 +12,6 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
 import { ownerChargeLabel } from '../../utils/lineLabels';
-import ResponsiveDialog from '../ResponsiveDialog';
 import {
   Select,
   SelectContent,
@@ -201,17 +207,17 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
   };
 
   return (
-    <ResponsiveDialog
-      open={open}
-      setOpen={setOpen}
-      isLoading={mutation.isPending}
-      renderHeader={() =>
-        owner?.name
-          ? `${t('Enter an owner expense settlement')} — ${owner.name}`
-          : t('Enter an owner expense settlement')
-      }
-      renderContent={() => (
-        <div className="space-y-4">
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerContent className="h-full w-full">
+        <DrawerHeader className="mx-auto w-full max-w-screen-lg text-lg md:text-xl font-semibold leading-none tracking-tight px-4">
+          <DrawerTitle>
+            {owner?.name
+              ? `${t('Enter an owner expense settlement')} — ${owner.name}`
+              : t('Enter an owner expense settlement')}
+          </DrawerTitle>
+        </DrawerHeader>
+
+        <div className="p-4 overflow-y-auto scrollbar-branded mx-auto w-full max-w-screen-lg space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="ownerPayAmount">{t('Amount')}</Label>
@@ -343,17 +349,18 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
             )}
           </div>
         </div>
-      )}
-      renderFooter={() => (
-        <>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            {t('Cancel')}
-          </Button>
-          <Button onClick={handleSubmit} disabled={mutation.isPending}>
-            {t('Record')}
-          </Button>
-        </>
-      )}
-    />
+
+        <DrawerFooter className="mx-auto w-full max-w-screen-lg">
+          <div className="flex flex-col md:flex-row md:justify-end sm:gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button onClick={handleSubmit} disabled={mutation.isPending}>
+              {mutation.isPending ? t('Saving') : t('Record')}
+            </Button>
+          </div>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   );
 }

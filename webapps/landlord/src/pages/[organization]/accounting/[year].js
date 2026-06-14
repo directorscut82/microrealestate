@@ -7,10 +7,15 @@ import {
 import { useCallback, useMemo, useState } from 'react';
 import { Card } from '../../../components/ui/card';
 import { downloadDocument } from '../../../utils/fetch';
-import { fetchAccounting, QueryKeys } from '../../../utils/restcalls';
+import {
+  fetchAccounting,
+  fetchOwners,
+  QueryKeys
+} from '../../../utils/restcalls';
 import IncomingTenants from '../../../components/accounting/IncomingTenants';
 import moment from 'moment';
 import OutgoingTenants from '../../../components/accounting/OutgoingTenants';
+import OwnerStatements from '../../../components/accounting/OwnerStatements';
 import Page from '../../../components/Page';
 import PeriodPicker from '../../../components/PeriodPicker';
 import SearchFilterBar from '../../../components/SearchFilterBar';
@@ -60,6 +65,24 @@ function Accounting() {
     queryFn: () => fetchAccounting(year),
     enabled: !!year
   });
+
+  // Owners for the Ιδιοκτήτες sub-tab (statement downloads). Same /owners
+  // aggregate the Owners page uses.
+  const { data: ownersData } = useQuery({
+    queryKey: [QueryKeys.OWNERS],
+    queryFn: fetchOwners
+  });
+
+  const filteredOwners = useMemo(() => {
+    const list = ownersData || [];
+    if (!searchText) return list;
+    const lc = searchText.toLowerCase();
+    return list.filter(
+      (o) =>
+        (o.name || '').toLowerCase().includes(lc) ||
+        String(o.taxId || '').includes(searchText)
+    );
+  }, [ownersData, searchText]);
 
   const filteredData = useMemo(() => {
     if (!accountingData) return {};
@@ -145,6 +168,26 @@ function Accounting() {
     [year, t]
   );
 
+  // Owner statement (εκκαθαριστικό) — the owner counterpart to getYearInvoices.
+  // Returns a (months[]) => void that downloads the owner_statement PDF for the
+  // selected months as a single multi-section document.
+  const getOwnerStatement = useCallback(
+    (owner) => (months) => {
+      const list = Array.isArray(months) ? months : [months];
+      if (!list.length) return;
+      const terms = list
+        .map((m) => `${year}${String(m).padStart(2, '0')}0100`)
+        .join(',');
+      downloadDocument({
+        endpoint: `/documents/owner-statement/${encodeURIComponent(
+          owner.ownerKey
+        )}/${terms}`,
+        documentName: `${owner.name || 'owner'}-${year}-${t('Statement')}.pdf`
+      });
+    },
+    [year, t]
+  );
+
   const handleSearch = useCallback((_, text) => {
     setSearchText(text);
   }, []);
@@ -168,6 +211,9 @@ function Accounting() {
           >{`${t('Payments')} (${
             filteredData.settlements?.length || 0
           })`}</TabsTrigger>
+          <TabsTrigger value="owners" className="min-w-48 sm:w-full">{`${t(
+            'Owners'
+          )} (${filteredOwners?.length || 0})`}</TabsTrigger>
         </TabsList>
         <TabsContent value="incoming">
           <IncomingTenants
@@ -186,6 +232,12 @@ function Accounting() {
             data={filteredData.settlements}
             onCSVClick={getSettlementsAsCsv}
             onDownloadYearInvoices={getYearInvoices}
+          />
+        </TabsContent>
+        <TabsContent value="owners">
+          <OwnerStatements
+            data={filteredOwners}
+            onDownloadStatement={getOwnerStatement}
           />
         </TabsContent>
       </Tabs>

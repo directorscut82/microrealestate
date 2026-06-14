@@ -49,21 +49,45 @@ const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const _clampPct = (v: any): number =>
   Math.max(0, Math.min(100, Number(v) || 0));
 
+// A slice is one owner's € portion of a charge. `isRest:true` marks a SYNTHETIC
+// slice for the un-identified remainder (a declared co-owner with no name/taxId
+// in the data) so the UI can show "(ΒΗΤΑ 50% = €50, λοιποί 50% = €50)" and the
+// "(50%)" beside a name always reconciles with its € — never sits next to a full
+// share with no remainder shown (the misleading case the user flagged).
+export interface OwnerSlice {
+  ownerKey: string;
+  name: string;
+  percentage: number;
+  amount: number;
+  isRest?: boolean;
+}
+
 export function ownerSlicesOf(
   unitOwners: any[],
   amount: number
-): { ownerKey: string; name: string; percentage: number; amount: number }[] {
+): OwnerSlice[] {
   const amt = _round(amount);
   const allOwners = unitOwners || [];
   const owners = allOwners.filter((o) => ownerKeyOf(o));
   if (owners.length === 0) return [];
   // useDeclared over the FULL declared set (clamped), not the survivors.
   const fullPctSum = allOwners.reduce((s, o) => s + _clampPct(o.percentage), 0);
-  const useDeclared = fullPctSum > 0.5 && Math.abs(fullPctSum - 100) <= 1;
-  const allIdentified = owners.length === allOwners.length;
+  // Each identified owner carries a sane declared %? Use declared shares when
+  // the FULL set sums to ~100 (co-owners all present), OR when every owner's
+  // own % is in (0,100] — the latter handles a unit whose co-owner is simply
+  // absent from the data (e.g. a sole 50%-owner): we honour the 50% and show
+  // the missing 50% as a "rest" slice rather than pretending they own 100%.
+  const everyDeclaredInRange =
+    owners.length > 0 &&
+    owners.every((o) => {
+      const p = _clampPct(o.percentage);
+      return p > 0 && p <= 100;
+    });
+  const useDeclared =
+    (fullPctSum > 0.5 && Math.abs(fullPctSum - 100) <= 1) || everyDeclaredInRange;
 
   if (useDeclared) {
-    const slices = owners.map((o) => {
+    const slices: OwnerSlice[] = owners.map((o) => {
       const pct = _clampPct(o.percentage);
       return {
         ownerKey: ownerKeyOf(o),
@@ -72,15 +96,43 @@ export function ownerSlicesOf(
         amount: _round((amt * pct) / 100)
       };
     });
-    // Only force-sum to `amt` when every owner is identified (no nameless
-    // co-owner whose share is legitimately not shown).
-    if (allIdentified && slices.length) {
+    // Decide by whether the IDENTIFIED owners' declared % covers the whole unit
+    // (~100). The array being "complete" (allIdentified) is NOT the signal — a
+    // co-owner can be entirely absent from the data, so a sole 50%-owner has a
+    // complete array yet only covers 50%.
+    const identifiedPctSum = owners.reduce(
+      (s, o) => s + _clampPct(o.percentage),
+      0
+    );
+    const coversWhole = Math.abs(identifiedPctSum - 100) <= 1;
+    if (coversWhole && slices.length) {
+      // Identified owners cover the whole unit → force-sum to amt.
       const sum = _round(slices.reduce((s, x) => s + x.amount, 0));
       const drift = _round(amt - sum);
       if (drift !== 0) {
         slices[slices.length - 1].amount = _round(
           slices[slices.length - 1].amount + drift
         );
+      }
+    } else if (slices.length) {
+      // A declared co-owner is NOT identified (no name/taxId in the data).
+      // Append a synthetic "rest" slice for the residual % + € so the split
+      // still reconciles to the full share and "(50%)" never looks like the
+      // owner owes 100%. Only when the residual is material (> ~0.5%).
+      const identifiedPct = _round(
+        slices.reduce((s, x) => s + x.percentage, 0)
+      );
+      const restPct = Math.round((100 - identifiedPct) * 10) / 10;
+      const identifiedAmt = _round(slices.reduce((s, x) => s + x.amount, 0));
+      const restAmt = _round(amt - identifiedAmt);
+      if (restPct > 0.5 && restAmt > 0.005) {
+        slices.push({
+          ownerKey: '',
+          name: '',
+          percentage: restPct,
+          amount: restAmt,
+          isRest: true
+        });
       }
     }
     return slices;

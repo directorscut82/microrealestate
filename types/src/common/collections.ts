@@ -535,7 +535,16 @@ export namespace CollectionTypes {
     //                   expense recompute does not strip it.
     // 'owner-fixed'   = materialised fixed owner-only monthly amount
     //                   (BuildingExpense.ownerAmount), payable like any other.
-    source?: 'expense' | 'repair' | 'vacant' | 'repair-vacant' | 'owner-fixed';
+    // 'owner-resident'= building-EXPENSE share of an OWNER-OCCUPIED unit
+    //                   (occupancyType='owner_occupied'), billed to the resident
+    //                   owner — NOT a vacant unit, never shown as uncollected.
+    source?:
+      | 'expense'
+      | 'repair'
+      | 'vacant'
+      | 'repair-vacant'
+      | 'owner-fixed'
+      | 'owner-resident';
     // Owner payments (καταβολές) recorded against this charge. Settlement is
     // DERIVED from this array; `paid`/`paidDate` are a cached convenience.
     payments?: OwnerExpensePayment[];

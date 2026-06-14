@@ -3,9 +3,8 @@ import { useCallback, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
-import { downloadDocument } from '../../../utils/fetch';
 import ErrorPage from 'next/error';
-import { LuArrowLeft, LuDownload, LuHome, LuWallet } from 'react-icons/lu';
+import { LuArrowLeft, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
 import Page from '../../../components/Page';
@@ -41,28 +40,9 @@ function OwnerDetail() {
     [router]
   );
 
-  // Download the owner expense statement (Εκκαθαριστικό) — the owner twin of
-  // the tenant receipt. Covers the years the owner actually has charges in
-  // (distinct from charges[].term), defaulting to all of them in one PDF.
-  const downloadStatement = useCallback(async () => {
-    if (!owner) return;
-    const years = [
-      ...new Set(
-        (owner.charges || []).map((c) => String(c.term).slice(0, 4))
-      )
-    ].filter(Boolean);
-    const term = years.length ? years.join(',') : String(new Date().getFullYear());
-    try {
-      await downloadDocument({
-        endpoint: `/documents/owner-statement/${encodeURIComponent(
-          owner.ownerKey
-        )}/${term}`,
-        documentName: `${owner.name || 'owner'}-statement.pdf`
-      });
-    } catch (e) {
-      toast.error(e?.response?.status === 404 ? t('No owner expenses') : t('Something went wrong'));
-    }
-  }, [owner, t]);
+  // (The owner statement/εκκαθαριστικό download lives in the Τιμολόγια →
+  // Ιδιοκτήτες sub-tab, mirroring where tenant receipts are downloaded — not on
+  // this detail page.)
 
   if (isError) {
     toast.error(t('Error fetching owners'));
@@ -109,15 +89,6 @@ function OwnerDetail() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={downloadStatement}
-                className="gap-2"
-                disabled={(owner.charges || []).length === 0}
-              >
-                <LuDownload className="size-4" />
-                {t('Download statement')}
-              </Button>
               <Button
                 onClick={() => setPayOpen(true)}
                 className="gap-2"
@@ -181,7 +152,7 @@ function OwnerDetail() {
                           {c.coOwners
                             .map((o) =>
                               t('{{name}} {{pct}}% = {{amount}}', {
-                                name: o.name,
+                                name: o.isRest ? t('others') : o.name,
                                 pct: o.percentage,
                                 amount: new Intl.NumberFormat(undefined, {
                                   style: 'currency',

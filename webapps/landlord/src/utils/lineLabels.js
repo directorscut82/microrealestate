@@ -73,6 +73,7 @@ const _SOURCE_LABEL_KEY = {
   expense: 'Owner expense',
   'owner-fixed': 'Owner expense',
   vacant: 'Vacant-unit share',
+  'owner-resident': 'Owner-resident share',
   repair: 'Repair',
   'repair-vacant': 'Repair'
 };

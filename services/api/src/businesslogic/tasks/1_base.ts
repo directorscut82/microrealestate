@@ -296,6 +296,13 @@ export function computeBuildingExpenseBreakdown(
     if (!unit.propertyId) continue;
     const tenant = unit.tenant || null;
     const recipient: 'renter' | 'owner' = tenant ? 'renter' : 'owner';
+    // An owner-occupied unit (the OWNER lives there) genuinely owes its share —
+    // it is the owner's own cost, NOT uncollected/evaporating money. So an
+    // owner row on such a unit is always "owner-billed", regardless of the
+    // expense's chargeOwnerWhenVacant flag (which only governs truly-empty
+    // units). Without this an owner-occupied unit's share fell into the
+    // "Αχρέωτα (κενές μονάδες)" warning, wrong for a unit whose owner resides.
+    const isOwnerOccupied = unit.occupancyType === 'owner_occupied';
     // recipientName: the tenant's name when occupied; otherwise the unit's
     // OWNER name (first owner with a name) so an owner row is attributed to a
     // human, not left blank. Falls back to null when no owner name exists.
@@ -358,7 +365,7 @@ export function computeBuildingExpenseBreakdown(
         ),
         ...(recipient === 'owner'
           ? {
-              ownerBilled: !!expense.chargeOwnerWhenVacant,
+              ownerBilled: isOwnerOccupied || !!expense.chargeOwnerWhenVacant,
               owners: ownerSlicesFor(share)
             }
           : {})

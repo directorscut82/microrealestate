@@ -301,7 +301,19 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   //                     expenseId holds the building expense _id.
   source: {
     type: String,
-    enum: ['expense', 'repair', 'vacant', 'repair-vacant', 'owner-fixed'],
+    // 'owner-resident': the share of a unit whose OWNER lives in it
+    // (occupancyType='owner_occupied'). The owner genuinely consumes the
+    // expense, so the share is billed to the owner — but it is NOT a 'vacant'
+    // unit and must never be shown as uncollected/evaporating. Distinct source
+    // so the UI labels it as an owner-resident cost.
+    enum: [
+      'expense',
+      'repair',
+      'vacant',
+      'repair-vacant',
+      'owner-fixed',
+      'owner-resident'
+    ],
     default: 'expense'
   },
   // Owner payments (καταβολές) recorded against THIS charge. The owner-scoped

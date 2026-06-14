@@ -740,7 +740,10 @@ function OwnerName({ name, percentage, t }) {
 
 // Per-owner € split parenthesis for a co-owned amount: "(ΒΗΤΑ 50% = €50,
 // ΓΕΩΡΓΙΟΣ 50% = €50)". `owners` is the server-computed slice array
-// (name + percentage + € amount). Renders nothing for a single owner.
+// (name + percentage + € amount). Renders nothing for a single owner. A slice
+// with isRest:true is the un-identified remainder co-owner — labeled "λοιποί"
+// (others) so the parenthesis still reconciles to the full share when the E9
+// only carried one of the co-owners.
 function CoOwnerSplit({ owners, t, formatNumber }) {
   if (!Array.isArray(owners) || owners.length < 2) return null;
   return (
@@ -749,7 +752,7 @@ function CoOwnerSplit({ owners, t, formatNumber }) {
       {owners
         .map((o) =>
           t('{{name}} {{pct}}% = {{amount}}', {
-            name: o.name,
+            name: o.isRest ? t('others') : o.name,
             pct: o.percentage,
             amount: formatNumber(o.amount)
           })

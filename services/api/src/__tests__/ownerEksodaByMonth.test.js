@@ -560,9 +560,10 @@ describe('ownerSlicesOf (per-owner € split by percentage)', () => {
     expect(slices[0].amount).toBe(50);
   });
 
-  it('preserves DECLARED split when a co-owner has a percentage but no identity (40/40 stays 40/40, not 50/50)', () => {
-    // Adversarial finding: pctSum must be over the FULL declared set so a
-    // named 40% + named 40% + nameless 20% shows 40%/40%, not re-normalised.
+  it('preserves DECLARED split + appends a "rest" slice for the un-identified remainder (40/40 named + 20 nameless → 40/40/rest-20)', () => {
+    // pctSum over the FULL declared set so named 40%/40% are NOT re-normalised
+    // to 50/50; the nameless 20% becomes a synthetic isRest slice so the split
+    // reconciles to the full €100 and "(40%)" never sits next to a full share.
     const slices = ownerSlicesOf(
       [
         { name: 'A', taxId: '1', percentage: 40 },
@@ -571,11 +572,26 @@ describe('ownerSlicesOf (per-owner € split by percentage)', () => {
       ],
       100
     );
-    expect(slices).toHaveLength(2); // nameless not displayed
+    expect(slices).toHaveLength(3); // A, B, + rest
     expect(slices[0].percentage).toBe(40);
     expect(slices[0].amount).toBe(40);
     expect(slices[1].percentage).toBe(40);
     expect(slices[1].amount).toBe(40); // NOT 50 — declared share preserved
+    const rest = slices[2];
+    expect(rest.isRest).toBe(true);
+    expect(rest.percentage).toBe(20);
+    expect(rest.amount).toBe(20);
+    // slices reconcile to the full amount
+    expect(slices.reduce((s, x) => s + x.amount, 0)).toBe(100);
+  });
+
+  it('sole 50% owner (co-owner absent) → owner slice + rest slice, reconciling to full', () => {
+    const slices = ownerSlicesOf([{ name: 'A', taxId: '1', percentage: 50 }], 80);
+    expect(slices).toHaveLength(2);
+    expect(slices[0].name).toBe('A');
+    expect(slices[0].amount).toBe(40);
+    expect(slices[1].isRest).toBe(true);
+    expect(slices[1].amount).toBe(40);
   });
 
   it('keeps a memberId-only owner (identity via memberId, no name/taxId)', () => {

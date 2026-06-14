@@ -138,6 +138,29 @@ These scenarios are NOT optional. If you change anything in `ResourceList/List.j
 - `~/Development/microrealestate/.secrets/cypress-test-account` — bot account credentials. Created by the harness; if missing, ask before regenerating.
 - The NAS must be reachable on LAN (`http://192.168.0.96:1350`).
 
+### You CAN drive the user's REAL realm with Playwright — do it for any "verify the actual surface" ask
+
+Do NOT claim "I can't log in to the real account" — that is FALSE and has wasted the user's trust. The real realm (`landlord`, owner `e2elandlord82@gmail.com`) signs in with **email + password**, not Google-only OAuth. The working credentials + signin pattern live in the committed `tests/_diag_*.spec.ts` and `tests/_dash*_*.spec.ts` files. The canonical signin:
+
+```ts
+const EMAIL = 'e2elandlord82@gmail.com';
+const PASSWORD = 'Passcode@1234';            // also in _diag_*.spec.ts
+await page.goto('signin');
+await page.locator('input[name=email]').fill(EMAIL);
+await page.locator('input[name=password]').fill(PASSWORD);
+await page.locator('button[type=submit]').click();
+// then, if landed on the org chooser:
+await page.locator('[data-cy=organizationCard]').first().click();
+await page.waitForURL(/\/dashboard/);
+```
+
+Gotchas learned the hard way:
+- **URL shape is `/landlord/<locale>/<org>/...`** — the realm slug is `landlord` and the locale `el` is a SEPARATE segment (`/landlord/el/landlord/dashboard`). Parse the org as the segment immediately before `/dashboard`, not the first segment after `/landlord`.
+- The owner card on `/owners` navigates via `router.push` (NOT an `<a href>`), so `a[href*="/owners/"]` finds 0 — click by visible text (`text=/ΔΟΚΙΜΗ ΒΗΤΑ/`) instead.
+- To read a surface's real data, intercept the XHR: `page.waitForResponse(r => r.url().includes('/api/v2/dashboard'))` then `.json()` — far more reliable than scraping DOM.
+- Keep inspection specs **read-only** (no writes) and prefix them `_` (the runner treats `_*`-prefixed as scratch, not part of the numbered fleet). Run a single one with `yarn playwright test tests/_inspect.spec.ts --reporter=line`.
+- This is REQUIRED, not optional, whenever the user says "check the surfaces with my account" or reports a visual bug: drive it, screenshot it (`page.screenshot({path, fullPage:true})`), READ the screenshot, and report what you actually saw before changing code.
+
 ### Backup + run the full suite
 
 ```bash

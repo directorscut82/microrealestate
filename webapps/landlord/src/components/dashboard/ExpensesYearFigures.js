@@ -73,11 +73,17 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
 
   // Localized category label for a breakdown line (Επισκευή for repairs,
   // Κοιν. Νερό for water, …) — same key map the building expense panel uses.
+  // Append the row's own label ONLY when it is a real name, never a bare id
+  // (e.g. 'd6aa8660a511') — mirrors expenseDisplayLabel's _looksLikeId rule so
+  // the tooltip shows "Κοιν. Νερό", not the raw expense id.
+  const looksLikeId = (s) =>
+    !s || typeof s !== 'string' || /^[0-9a-f]{8,}$/i.test(s.trim());
   const categoryLabel = (line) => {
     const key = BUILDING_TYPE_LABEL_KEY[line.category] || 'Other';
     const typeLabel = t(key);
-    return line.label && line.label !== typeLabel
-      ? `${typeLabel} (${line.label})`
+    const realName = !looksLikeId(line.label) ? String(line.label).trim() : '';
+    return realName && realName !== typeLabel
+      ? `${typeLabel} (${realName})`
       : typeLabel;
   };
 
