@@ -1324,11 +1324,17 @@ export async function importFromE9(req: Req, res: Res) {
               taxId: ownerTaxId || undefined
             });
           } else if (existingOwner) {
+            // BACKFILL ΑΦΜ: a re-import of the SAME owner now carries their ΑΦΜ
+            // (older imports stored none). Stamp it onto the name-matched
+            // owner so ownerKeyOf (n:name|taxId) stays stable and the owner is
+            // not split into two (n:name| vs n:name|taxId) on the owners page.
+            if (ownerTaxId && !existingOwner.taxId) {
+              existingOwner.taxId = ownerTaxId;
+            }
             // L4: year-on-year re-imports may declare a different
             // ownership percentage (transfers, shifts in joint
             // ownership). Keep the latest E9 declaration as the source
             // of truth instead of silently preserving the prior value.
-            // Audit log so the change is visible in operator review.
             if (
               typeof parsedUnit.ownershipPercentage === 'number' &&
               parsedUnit.ownershipPercentage !== existingOwner.percentage
@@ -1373,6 +1379,10 @@ export async function importFromE9(req: Req, res: Res) {
               taxId: ownerTaxId || undefined
             });
           } else if (existingOwner) {
+            // BACKFILL ΑΦΜ on the name-matched owner (see ATAK branch above).
+            if (ownerTaxId && !existingOwner.taxId) {
+              existingOwner.taxId = ownerTaxId;
+            }
             // L4: see ATAK-match branch above for rationale.
             if (
               typeof parsedUnit.ownershipPercentage === 'number' &&
