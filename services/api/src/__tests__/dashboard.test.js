@@ -638,11 +638,15 @@ describe('Dashboard computation logic', () => {
     });
   });
 
-  // Mirror of dashboardmanager._ownerExpensesRollup per-row derivation: a
-  // row's paid = min(max(Σ payments, paid?amount:0), amount), summed over the
-  // current-year owner ledger across buildings. Bridges old checkbox-paid
-  // rows + new καταβολές without double-counting or exceeding the amount.
-  describe('owner-expenses rollup math', () => {
+  // Mirror of the `paid` derivation used by buildingmanager.computeOwnerEksoda-
+  // ByMonth (the ΕΞΟΔΑ twin of revenues). OWED is now computed LIVE from
+  // building expenses + repairs (see the buildingmanager eksoda tests), but a
+  // term's PAID is recorded state read from the materialised owner rows:
+  //   paid = min(max(Σ payments, paid?amount:0), amount)  per row, summed per
+  // term. Bridges old checkbox-paid rows + new καταβολές without double-
+  // counting or exceeding the amount. The dashboard then caps a term's paid at
+  // that term's live owed (paid can never exceed what is owed for the month).
+  describe('eksoda paid derivation (recorded state per term)', () => {
     const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
     const rowPaid = (e) => {
       const amount = Number(e.amount) || 0;
@@ -653,62 +657,75 @@ describe('Dashboard computation logic', () => {
       const fromFlag = e.paid ? amount : 0;
       return Math.min(Math.max(fromPayments, fromFlag), amount);
     };
-    const rollup = (rows, year) => {
-      let total = 0;
-      let paid = 0;
+    // Aggregate recorded paid per term, then cap each term's paid at owed.
+    const paidByTermCapped = (rows, owedByTerm, year) => {
+      const paid = {};
       for (const e of rows) {
-        if (Math.floor(Number(e.term || 0) / 1000000) !== year) continue;
-        const amount = Number(e.amount) || 0;
-        if (!(amount > 0)) continue;
-        total += amount;
-        paid += rowPaid(e);
+        const term = Number(e.term || 0);
+        if (Math.floor(term / 1000000) !== year) continue;
+        if (!(Number(e.amount) > 0)) continue;
+        paid[term] = round((paid[term] || 0) + rowPaid(e));
       }
-      total = round(total);
-      paid = round(paid);
-      return { total, paid, outstanding: round(Math.max(0, total - paid)) };
+      for (const term of Object.keys(paid)) {
+        paid[term] = round(Math.min(paid[term], owedByTerm[term] || 0));
+      }
+      return paid;
     };
 
-    it('sums current-year rows; payment-derived paid', () => {
-      const r = rollup(
+    it('payment-derived paid, bucketed per term', () => {
+      const paid = paidByTermCapped(
         [
           { term: 2026010100, amount: 100, payments: [{ amount: 100 }] },
           { term: 2026020100, amount: 50, payments: [{ amount: 20 }] }
         ],
+        { 2026010100: 100, 2026020100: 50 },
         2026
       );
-      expect(r).toEqual({ total: 150, paid: 120, outstanding: 30 });
+      expect(paid).toEqual({ 2026010100: 100, 2026020100: 20 });
     });
     it('bridges a manual paid flag with empty payments', () => {
-      const r = rollup(
+      const paid = paidByTermCapped(
         [{ term: 2026010100, amount: 80, paid: true, payments: [] }],
+        { 2026010100: 80 },
         2026
       );
-      expect(r).toEqual({ total: 80, paid: 80, outstanding: 0 });
+      expect(paid).toEqual({ 2026010100: 80 });
     });
-    it('caps paid at the amount (overpayment cannot inflate paid)', () => {
-      const r = rollup(
+    it('caps paid at the row amount (overpayment cannot inflate paid)', () => {
+      const paid = paidByTermCapped(
         [{ term: 2026010100, amount: 60, payments: [{ amount: 90 }] }],
+        { 2026010100: 60 },
         2026
       );
-      expect(r).toEqual({ total: 60, paid: 60, outstanding: 0 });
+      expect(paid).toEqual({ 2026010100: 60 });
+    });
+    it('caps a term paid at that term LIVE owed (paid ≤ owed)', () => {
+      // recorded paid 100 but the live owed for the month is only 50 → 50.
+      const paid = paidByTermCapped(
+        [{ term: 2026010100, amount: 100, payments: [{ amount: 100 }] }],
+        { 2026010100: 50 },
+        2026
+      );
+      expect(paid).toEqual({ 2026010100: 50 });
     });
     it('excludes other-year rows', () => {
-      const r = rollup(
+      const paid = paidByTermCapped(
         [
           { term: 2025010100, amount: 100, payments: [{ amount: 100 }] },
-          { term: 2026010100, amount: 40, payments: [] }
+          { term: 2026010100, amount: 40, payments: [{ amount: 40 }] }
         ],
+        { 2026010100: 40 },
         2026
       );
-      expect(r).toEqual({ total: 40, paid: 0, outstanding: 40 });
+      expect(paid).toEqual({ 2026010100: 40 });
     });
     it('payment flag OR payments, whichever is higher (no double count)', () => {
-      // paid:true AND a partial payment → counts amount once, not amount+payment
-      const r = rollup(
+      const paid = paidByTermCapped(
         [{ term: 2026010100, amount: 100, paid: true, payments: [{ amount: 30 }] }],
+        { 2026010100: 100 },
         2026
       );
-      expect(r).toEqual({ total: 100, paid: 100, outstanding: 0 });
+      expect(paid).toEqual({ 2026010100: 100 });
     });
   });
 });

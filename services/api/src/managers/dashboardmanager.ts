@@ -2,6 +2,7 @@ import { Collections, logger } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import moment from 'moment';
 import { _isSettledByCarryForward } from './frontdata.js';
+import { computeOwnerEksodaByMonth } from './buildingmanager.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -566,62 +567,115 @@ export async function all(req: Req, res: Res) {
     logger.error(`Failed to fetch pending bills: ${String(error)}`);
   }
 
-  // Owner-expenses rollup (current year, across ALL buildings). Drives the
-  // dashboard "owner expenses paid vs unpaid" bar — the owner counterpart to
-  // the rent-collected-vs-owed figures. paid is derived from Σ καταβολές OR
-  // the manual paid flag (same bridge as BuildingDashboard so old
-  // checkbox-marked rows count), capped at the charge amount.
-  let ownerExpenses = { total: 0, paid: 0, outstanding: 0 };
+  // EKSODA rollup (current year, all buildings, incl. repairs). Produces the
+  // per-month `expenses[]` series (twin of `revenues`) + the year totals for
+  // the Overview "Συνολικά έξοδα για το έτος" row.
+  let expensesRollup = {
+    totalYearExpenses: 0,
+    totalYearPaid: 0,
+    expenses: [] as AnyRecord[]
+  };
   try {
-    ownerExpenses = await _ownerExpensesRollup(String(realmId), now.year());
+    expensesRollup = await _expensesRollup(String(realmId), now.year());
   } catch (error) {
-    logger.error(`Failed to compute owner-expenses rollup: ${String(error)}`);
+    logger.error(`Failed to compute expenses rollup: ${String(error)}`);
   }
 
+  // Fold the year eksoda totals onto the overview so the Overview card can
+  // show Έξοδα right under Έσοδα (mirroring totalYearRevenues).
+  const overviewWithExpenses = overview
+    ? {
+        ...overview,
+        totalYearExpenses: expensesRollup.totalYearExpenses,
+        totalYearExpensesPaid: expensesRollup.totalYearPaid
+      }
+    : overview;
+
   res.json({
-    overview,
+    overview: overviewWithExpenses,
     topUnpaid,
     revenues,
-    pendingBills,
-    ownerExpenses
+    expenses: expensesRollup.expenses,
+    pendingBills
   });
 }
 
-// Sum the current-year owner ledger across every building in the realm.
-// total = Σ row.amount; paid = Σ min(max(Σ payments, paid?amount:0), amount);
-// outstanding = total − paid. Mirrors BuildingDashboard's per-row derivation
-// so the dashboard bar and the building tiles agree.
-async function _ownerExpensesRollup(
+// The landlord's EKSODA across every building in the realm — the owner-borne
+// expense the landlord must pay, WHATEVER the origin. This explicitly INCLUDES
+// ΕΠΙΣΚΕΥΕΣ (repairs): a repair's owner-borne portion lands in
+// ownerMonthlyExpenses as source:'repair', and a vacant unit's repair share as
+// source:'repair-vacant' — this rollup reads ALL sources, so repairs are
+// counted alongside building-expense shares ('expense'/'vacant') and the fixed
+// owner amount ('owner-fixed'). (The tenant-billed repair share lives in
+// unit.monthlyCharges and is the TENANT's, not the landlord's eksoda, so it is
+// correctly excluded.) This is the expense twin of `revenues` (rent income):
+// same per-month shape so the dashboard renders Έξοδα with the SAME visuals as
+// Έσοδα.
+//
+// Per row: owed = amount; paid = min(max(Σ payments, paid?amount:0), amount)
+// (bridges old checkbox-paid rows + new καταβολές, capped). Bucketed by month
+// into the MMYYYY shape `revenues` uses ({month, paid, notPaid}). Returns the
+// year total for the Overview "Συνολικά έξοδα για το έτος" row + the per-month
+// `expenses[]` series for the Έξοδα charts.
+async function _expensesRollup(
   realmId: string,
   year: number
-): Promise<{ total: number; paid: number; outstanding: number; year: number }> {
-  const buildings: AnyRecord[] = await Collections.Building.find(
-    { realmId },
-    { ownerMonthlyExpenses: 1 }
-  ).lean();
-  let total = 0;
-  let paid = 0;
+): Promise<{
+  totalYearExpenses: number;
+  totalYearPaid: number;
+  expenses: AnyRecord[];
+}> {
+  // Full building docs — computeOwnerEksodaByMonth needs expenses + repairs +
+  // units + ownerMonthlyExpenses to compute the owner-borne eksoda LIVE
+  // (the ledger alone is near-empty when materialisers never ran — old data).
+  const buildings: AnyRecord[] = await Collections.Building.find({
+    realmId
+  }).lean();
+
+  // Seed all 12 months so the chart shows a full year like the rent chart.
+  // term (YYYYMMDDHH) → MMYYYY bucket key (the shape `revenues` uses).
+  const byMonth: AnyRecord = {};
+  const termToKey: Record<number, string> = {};
+  for (let m = 1; m <= 12; m++) {
+    const key = moment.utc(`${m}/${year}`, 'MM/YYYY').format('MMYYYY');
+    const term = Number(moment.utc(`${m}/${year}`, 'MM/YYYY').format('YYYYMMDDHH'));
+    byMonth[key] = { month: key, paid: 0, notPaid: 0 };
+    termToKey[term] = key;
+  }
+
+  let totalYearExpenses = 0;
+  let totalYearPaid = 0;
   for (const b of buildings) {
-    for (const e of (b.ownerMonthlyExpenses || []) as AnyRecord[]) {
-      if (Math.floor(Number(e.term || 0) / 1000000) !== year) continue;
-      const amount = Number(e.amount) || 0;
-      if (!(amount > 0)) continue;
-      const fromPayments = ((e.payments || []) as AnyRecord[]).reduce(
-        (s, p) => s + (Number(p.amount) || 0),
-        0
-      );
-      const fromFlag = e.paid ? amount : 0;
-      const rowPaid = Math.min(Math.max(fromPayments, fromFlag), amount);
-      total += amount;
-      paid += rowPaid;
+    const { owedByTerm, paidByTerm } = await computeOwnerEksodaByMonth(
+      realmId,
+      b,
+      year
+    );
+    for (const [term, owed] of owedByTerm) {
+      const key = termToKey[term];
+      const bucket = key ? byMonth[key] : null;
+      if (!bucket) continue;
+      const paid = Math.min(paidByTerm.get(term) || 0, owed);
+      bucket.paid += paid;
+      // notPaid = the unpaid remainder of THIS month's owner bill (mirrors the
+      // rent chart's per-month `notPaid` = unsigned shortfall on this month).
+      bucket.notPaid += Math.max(0, owed - paid);
+      totalYearExpenses += owed;
+      totalYearPaid += paid;
     }
   }
-  total = _round(total);
-  paid = _round(paid);
-  // Return the year the rollup actually filtered by (UTC), so the UI labels
-  // the figure with the SAME clock the data was selected on — avoids the
-  // UTC-vs-local year mismatch at the Jan-1 boundary (CLAUDE.md #1 gotcha).
-  return { total, paid, outstanding: _round(Math.max(0, total - paid)), year };
+
+  const expenses = Object.values(byMonth).map((v: AnyRecord) => ({
+    month: v.month,
+    paid: _round(v.paid),
+    notPaid: _round(v.notPaid)
+  }));
+
+  return {
+    totalYearExpenses: _round(totalYearExpenses),
+    totalYearPaid: _round(totalYearPaid),
+    expenses
+  };
 }
 
 function _tenantName(tenant: AnyRecord): string {

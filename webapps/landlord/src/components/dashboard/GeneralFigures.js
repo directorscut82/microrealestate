@@ -84,6 +84,18 @@ export default function GeneralFigures({ className, dashboardData }) {
           emphasis
         />
         <Row
+          label={t('Expenses')}
+          description={t('Total expenses for the year')}
+          value={
+            <NumberFormat
+              value={overview.totalYearExpenses}
+              showZero={true}
+              debitColor
+            />
+          }
+          emphasis
+        />
+        <Row
           label={t('Occupancy rate')}
           description={t('Percentage of occupied properties')}
           value={
