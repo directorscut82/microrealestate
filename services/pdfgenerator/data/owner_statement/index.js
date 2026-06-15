@@ -51,7 +51,41 @@ export async function get(params) {
     );
   }
 
-  const statement = OwnerStatement.buildOwnerStatement(buildings, ownerKey, terms);
+  // Resolve tenant occupancy for the requested terms so the statement drops a
+  // stale 'vacant'/'owner-resident' owner row whose unit is actually
+  // tenant-occupied — same guard the on-screen breakdown + dashboard apply, so
+  // the settlement document never bills the owner for a euro that is also the
+  // tenant's rent (round-4 review). One occupancy algorithm (common).
+  const unitPropIds = [];
+  for (const b of buildings) {
+    for (const u of b.units || []) {
+      if (u.propertyId) unitPropIds.push(String(u.propertyId));
+    }
+  }
+  const occTenants = unitPropIds.length
+    ? await Collections.Tenant.find(
+        { realmId, 'properties.propertyId': { $in: unitPropIds } },
+        {
+          beginDate: 1,
+          endDate: 1,
+          terminationDate: 1,
+          'properties.propertyId': 1,
+          'properties.entryDate': 1,
+          'properties.exitDate': 1
+        }
+      ).lean()
+    : [];
+  const occupiedKeys = OwnerStatement.occupiedPropertyTermKeys(
+    occTenants,
+    terms
+  );
+
+  const statement = OwnerStatement.buildOwnerStatement(
+    buildings,
+    ownerKey,
+    terms,
+    occupiedKeys
+  );
   if (!statement.owner) {
     throw new Error(`owner ${ownerKey} not found in realm ${realmId}`);
   }

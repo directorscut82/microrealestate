@@ -49,10 +49,24 @@ beforeAll(async () => {
     }
   }));
 
-  ({ computeOwnerEksodaByMonth } = await import(
+  ({ computeOwnerEksodaByMonth, _recomputeVacantOwnerCharges } = await import(
     '../managers/buildingmanager.js'
   ));
 });
+
+let _recomputeVacantOwnerCharges;
+
+// A Mongoose-DocumentArray-like shim: _recomputeVacantOwnerCharges mutates
+// building.ownerMonthlyExpenses via .pull(_id) and .push(row). A plain array
+// plus those two methods is enough for the in-memory test.
+function omeArray(initial = []) {
+  const arr = [...initial];
+  arr.pull = function (id) {
+    const i = this.findIndex((e) => String(e._id) === String(id));
+    if (i >= 0) this.splice(i, 1);
+  };
+  return arr;
+}
 
 beforeEach(() => {
   TENANTS = [];
@@ -553,6 +567,56 @@ describe('computeOwnerEksodaByMonth (live owner-borne eksoda)', () => {
     expect(elec).toBeTruthy();
     expect(elec.owed).toBe(30);
     expect(elec.ownerName).toBe('ΚΑΠΠΑ');
+  });
+});
+
+// R2 round-4-review #2b: the WRITE twin of the dashboard read-path. The
+// materialiser must persist a source:'owner-resident' row for an owner-occupied
+// unit even from a FIXED expense whose top-level amount is 0 (cost in
+// customAllocations) and chargeOwnerWhenVacant OFF — the part the dashboard test
+// only covered on the read side. A regression (e.g. re-adding the amount>0 skip)
+// would silently drop the materialised row and no test caught it before.
+describe('_recomputeVacantOwnerCharges (owner-row materialiser)', () => {
+  it('materialises owner-resident for an owner-occupied unit + fixed amount-0 expense (flag OFF); leaves an empty flag-off unit unbilled', async () => {
+    const building = {
+      _id: 'b_mat',
+      realmId: 'r1',
+      units: [
+        mkUnit('p1', { occupancyType: 'owner_occupied' }),
+        mkUnit('p2') // empty, not owner-occupied
+      ],
+      expenses: [
+        {
+          _id: 'e_fixed',
+          name: 'Ρεύμα',
+          type: 'electricity_common',
+          amount: 0,
+          allocationMethod: 'fixed',
+          isRecurring: true,
+          startTerm: 2026010100,
+          chargeOwnerWhenVacant: false, // flag OFF
+          customAllocations: [
+            { propertyId: 'p1', value: 30 },
+            { propertyId: 'p2', value: 20 }
+          ]
+        }
+      ],
+      repairs: [],
+      ownerMonthlyExpenses: omeArray([])
+    };
+    // signature: (building, realmId, term)
+    await _recomputeVacantOwnerCharges(building, 'r1', term(6, 2026));
+    const rows = building.ownerMonthlyExpenses.filter(
+      (r) => Number(r.term) === term(6, 2026)
+    );
+    const p1 = rows.find((r) => String(r.propertyId) === 'p1');
+    const p2 = rows.find((r) => String(r.propertyId) === 'p2');
+    // p1 (owner-occupied) → owner-resident €30 even with the flag OFF.
+    expect(p1).toBeTruthy();
+    expect(p1.source).toBe('owner-resident');
+    expect(p1.amount).toBe(30);
+    // p2 (empty, flag OFF) → NOT billed (uncollected).
+    expect(p2).toBeFalsy();
   });
 });
 

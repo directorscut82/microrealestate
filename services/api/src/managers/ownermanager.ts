@@ -205,8 +205,19 @@ type OwnerAgg = {
 // Map a propertyId → the ownerKey(s) of its unit's owners, across all
 // buildings, plus accumulate each owner's charges. Returns a Map keyed by
 // ownerKey. `buildings` are lean docs.
-function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
+//
+// `occupiedKeys` (optional): `${propertyId}|${term}` keys of tenant-occupied
+// units, used by the shared staleness guard so the ledger (the settlement
+// surface) drops a 'vacant'/'owner-resident' row whose unit is actually
+// tenant-occupied / no longer owner-occupied / whose expense went inactive —
+// never billing the owner for a euro that is also the tenant's rent (round-4
+// review). Omitted → no unit treated as occupied (legacy callers / tests).
+function _aggregateOwners(
+  buildings: any[],
+  occupiedKeys?: Set<string>
+): Map<string, OwnerAgg> {
   const owners = new Map<string, OwnerAgg>();
+  const occSet = occupiedKeys || new Set<string>();
 
   // First pass: every unit's owners → owner identity + unit count.
   // propertyId → ownerKeys, so we can attribute propertyId-scoped charges.
@@ -302,12 +313,36 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
     const bname = b.name || '';
     // expenseId → schema `type` (for a localized category label on the charge).
     const expTypeById = new Map<string, string>();
+    const expById = new Map<string, any>();
     for (const e of b.expenses || []) {
-      if (e && e._id && e.type) expTypeById.set(String(e._id), String(e.type));
+      if (e && e._id) {
+        expById.set(String(e._id), e);
+        if (e.type) expTypeById.set(String(e._id), String(e.type));
+      }
     }
     for (const row of b.ownerMonthlyExpenses || []) {
       const amount = _round(row.amount);
       if (!(amount > 0)) continue;
+      // SHARED staleness guard: drop a 'vacant'/'owner-resident' row whose
+      // source expense is gone / flag-off / inactive / the unit is
+      // tenant-occupied FOR THIS TERM. The ledger is the settlement surface, so
+      // counting a stale row would bill the owner for a euro that is also the
+      // present tenant's rent (round-4 review). A row with recorded payments is
+      // NEVER dropped (isOwnerExpenseRowStale) — recorded money must survive.
+      {
+        const rpid = row.propertyId ? String(row.propertyId) : null;
+        const rterm = Number(row.term);
+        const isOccupied = rpid ? occSet.has(`${rpid}|${rterm}`) : false;
+        if (
+          OwnerStatement.isOwnerExpenseRowStale(
+            row,
+            expById.get(String(row.expenseId)),
+            isOccupied
+          )
+        ) {
+          continue;
+        }
+      }
       const payments = Array.isArray(row.payments) ? row.payments : [];
       const paidAmount = _round(
         payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
@@ -389,6 +424,48 @@ function _aggregateOwners(buildings: any[]): Map<string, OwnerAgg> {
   return owners;
 }
 
+// Resolve the `${propertyId}|${term}` tenant-occupancy key-set for the staleness
+// guard in _aggregateOwners — over every term present in the buildings' owner
+// rows. One Tenant query (projected to date fields), one shared occupancy
+// algorithm (common.occupiedPropertyTermKeys). Returns an empty set when there
+// are no propertyId-scoped vacant/owner-resident rows to validate (no query).
+async function _occupiedKeysForBuildings(
+  realmId: string,
+  buildings: any[]
+): Promise<Set<string>> {
+  const propIds = new Set<string>();
+  const terms = new Set<number>();
+  for (const b of buildings as any[]) {
+    for (const u of b.units || []) {
+      if (u.propertyId) propIds.add(String(u.propertyId));
+    }
+    for (const row of b.ownerMonthlyExpenses || []) {
+      if (
+        (row.source === 'vacant' || row.source === 'owner-resident') &&
+        row.propertyId
+      ) {
+        terms.add(Number(row.term));
+      }
+    }
+  }
+  if (terms.size === 0 || propIds.size === 0) return new Set<string>();
+  const tenants = await Collections.Tenant.find(
+    { realmId, 'properties.propertyId': { $in: Array.from(propIds) } },
+    {
+      beginDate: 1,
+      endDate: 1,
+      terminationDate: 1,
+      'properties.propertyId': 1,
+      'properties.entryDate': 1,
+      'properties.exitDate': 1
+    }
+  ).lean();
+  return OwnerStatement.occupiedPropertyTermKeys(
+    tenants as any[],
+    Array.from(terms)
+  );
+}
+
 // Mark owners who ALSO rent a unit (occupancy pill). A tenant whose taxId or
 // name matches an owner identity is "alsoRents".
 async function _markAlsoRents(
@@ -437,7 +514,11 @@ export async function all(req: Req, res: Res) {
   const buildings = await Collections.Building.find({
     realmId: realm!._id
   }).lean();
-  const owners = _aggregateOwners(buildings as any[]);
+  const occupiedKeys = await _occupiedKeysForBuildings(
+    String(realm!._id),
+    buildings as any[]
+  );
+  const owners = _aggregateOwners(buildings as any[], occupiedKeys);
   await _markAlsoRents(String(realm!._id), owners);
   const list = Array.from(owners.values())
     .map(_serializeOwnerSummary)
@@ -461,7 +542,11 @@ export async function one(req: Req, res: Res) {
   const buildings = await Collections.Building.find({
     realmId: realm!._id
   }).lean();
-  const owners = _aggregateOwners(buildings as any[]);
+  const occupiedKeys = await _occupiedKeysForBuildings(
+    String(realm!._id),
+    buildings as any[]
+  );
+  const owners = _aggregateOwners(buildings as any[], occupiedKeys);
   await _markAlsoRents(String(realm!._id), owners);
   const agg = owners.get(ownerKey);
   if (!agg) throw new ServiceError('Owner not found', 404);
@@ -566,7 +651,11 @@ export async function pay(req: Req, res: Res) {
   // Load this realm's buildings (mutable docs — we save the touched ones).
   const buildings = await Collections.Building.find({ realmId: realm!._id });
   const lean = buildings.map((b: any) => b.toObject());
-  const owners = _aggregateOwners(lean as any[]);
+  const occupiedKeys = await _occupiedKeysForBuildings(
+    String(realm!._id),
+    lean as any[]
+  );
+  const owners = _aggregateOwners(lean as any[], occupiedKeys);
   const agg = owners.get(ownerKey);
   if (!agg) throw new ServiceError('Owner not found', 404);
 
@@ -713,7 +802,11 @@ export async function pay(req: Req, res: Res) {
 
   // Re-aggregate for the response so the client sees fresh totals.
   const fresh = await Collections.Building.find({ realmId: realm!._id }).lean();
-  const freshOwners = _aggregateOwners(fresh as any[]);
+  const freshOccupied = await _occupiedKeysForBuildings(
+    String(realm!._id),
+    fresh as any[]
+  );
+  const freshOwners = _aggregateOwners(fresh as any[], freshOccupied);
   await _markAlsoRents(String(realm!._id), freshOwners);
   const updated = freshOwners.get(ownerKey);
   return res.json(updated ? _serializeOwnerSummary(updated) : { ownerKey });

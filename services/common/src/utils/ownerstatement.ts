@@ -22,6 +22,134 @@ export function ownerKeyOf(owner: any): string {
 
 const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
+// Is an expense ACTIVE for a term, compared at YYYYMM granularity? Mirrors
+// api/businesslogic/tasks/1_base.isExpenseActiveForTerm — duplicated here (not
+// imported) because `common` must not depend on `api`. Both must agree.
+export function isExpenseActiveForTermMonth(expense: any, term: number): boolean {
+  if (!expense) return false;
+  const ymTerm = Math.floor(Number(term) / 10000);
+  const startYM = expense.startTerm
+    ? Math.floor(Number(expense.startTerm) / 10000)
+    : null;
+  if (!expense.isRecurring) {
+    if (!expense.startTerm) return false;
+    return startYM === ymTerm;
+  }
+  if (!expense.startTerm) return false;
+  if (ymTerm < (startYM as number)) return false;
+  if (expense.endTerm && ymTerm > Math.floor(Number(expense.endTerm) / 10000)) {
+    return false;
+  }
+  return true;
+}
+
+// Build the `${propertyId}|${term}` occupancy key-set the staleness guard /
+// buildOwnerStatement consume, from raw tenant rows. ONE algorithm shared by
+// the owner-statement PDF picker (and any other common-side caller) so it
+// matches the api occupancy check. A unit is occupied for a term when the
+// tenant's lease window (beginDate..terminationDate|endDate) AND the per-
+// property entry/exit window both cover the term's YYYYMM. Date math is
+// moment-free (common has no moment dep): parse to UTC year*100+month.
+export function occupiedPropertyTermKeys(
+  tenants: any[],
+  terms: number[]
+): Set<string> {
+  const toYM = (d: any): number | null => {
+    if (!d) return null;
+    const dt = d instanceof Date ? d : new Date(d);
+    return isNaN(dt.getTime())
+      ? null
+      : dt.getUTCFullYear() * 100 + (dt.getUTCMonth() + 1);
+  };
+  const keys = new Set<string>();
+  const termYMs = (terms || []).map((t) => ({
+    term: Number(t),
+    ym: Math.floor(Number(t) / 10000)
+  }));
+  for (const tn of tenants || []) {
+    const begin = toYM(tn.beginDate);
+    const end = toYM(tn.terminationDate || tn.endDate);
+    for (const tp of tn.properties || []) {
+      if (!tp.propertyId) continue;
+      const pEntry = toYM(tp.entryDate);
+      const pExit = toYM(tp.exitDate);
+      for (const { term, ym } of termYMs) {
+        if (begin !== null && ym < begin) continue;
+        if (end !== null && ym > end) continue;
+        if (pEntry !== null && ym < pEntry) continue;
+        if (pExit !== null && ym > pExit) continue;
+        keys.add(`${String(tp.propertyId)}|${term}`);
+      }
+    }
+  }
+  return keys;
+}
+
+// SHARED read-time staleness predicate for a persisted ownerMonthlyExpenses
+// row of source 'vacant' / 'owner-resident'. These two sources are RE-DERIVED
+// from a building expense by the ±12-month recompute, so a row can outlive the
+// state that justified it FOR ITS TERM (expense deleted / went inactive for
+// that term / flag flipped off / a tenant occupies the unit that term). Every
+// READ surface that sums these rows as owner liability — the building-expense
+// breakdown panel, the dashboard eksoda series, the owner καταβολές ledger, and
+// the owner-statement PDF — MUST drop such a stale row, or the same euro is
+// counted as BOTH the owner's liability AND the present tenant's rent (the
+// owner-is-also-renter double-count). This is the ONE definition so the four
+// surfaces cannot drift (adversarial finding, June 2026 round-4 review).
+//
+// 'repair' / 'repair-vacant' / 'expense' / 'owner-fixed' rows are NOT covered
+// here — they are not re-derived from a building expense (a repair share is
+// materialised once and never re-billed; owner-direct/fixed are landlord-
+// entered), so they are always kept by their respective surfaces.
+//
+// Inputs are pre-resolved by the caller (so `common` needs no DB / no api dep):
+//   expense        the live building expense for row.expenseId, or null/undefined if gone
+//   isOccupied     true if a TENANT occupies row.propertyId for row.term
+// Every drop condition here is TERM-ANCHORED (it is true/false for the row's
+// own term), so a row is only ever dropped when the SAME-term live state
+// contradicts it — never because of unrelated current-day state. Two
+// conditions that look tempting are deliberately NOT here:
+//   • "unit is no longer owner-occupied" — occupancy is TERM-specific (the
+//     owner genuinely lived there in a historical term); a current move-out
+//     must not retroactively erase past owner-resident liabilities. The
+//     in-window correction is the WRITER's job (updateUnit →
+//     recomputeVacantOwnerForProperties restrips/rebuilds the ±12-month
+//     window); out-of-window historical rows stay as genuinely owed.
+//   • dropping a row that carries recorded payments — see the hasPayments
+//     guard below: a recorded καταβολή is USER STATE and must survive any
+//     read-time drop (mirrors carryOwnerPayments), or real money vanishes from
+//     the ledger/statement with no audit trail (round-4-review-2 finding).
+export function isOwnerExpenseRowStale(
+  row: {
+    source?: string;
+    expenseId?: any;
+    term?: any;
+    propertyId?: any;
+    payments?: any[];
+  },
+  expense: any,
+  isOccupied: boolean
+): boolean {
+  const src = row.source || 'expense';
+  if (src !== 'vacant' && src !== 'owner-resident') return false;
+  // NEVER drop a row with a recorded payment — the money is real and must stay
+  // reconcilable on every settlement surface.
+  const hasPayments =
+    Array.isArray(row.payments) &&
+    row.payments.some((p: any) => Number(p && p.amount) > 0);
+  if (hasPayments) return false;
+  if (!expense) return true; // source expense gone
+  // 'vacant' (truly-empty unit) requires the opt-in flag; 'owner-resident'
+  // (resident owner's own cost) is NOT flag-governed.
+  if (src === 'vacant' && !expense.chargeOwnerWhenVacant) return true;
+  if (!isExpenseActiveForTermMonth(expense, Number(row.term))) return true;
+  // A tenant occupying the unit FOR THIS TERM live-bills the expense to them →
+  // the owner row would double-count that euro. Term-anchored via the caller's
+  // per-(propertyId,term) occupancy resolution.
+  if (row.propertyId && isOccupied) return true;
+  return false;
+}
+
 // Split a charge `amount` across a unit's owners by ownership percentage, for
 // DISPLAY ("ΔΟΚΙΜΗ ΒΗΤΑ 50% = €50"). The SINGLE canonical implementation
 // — both api/managers/ownermanager.ts and api/businesslogic/tasks/1_base.ts
@@ -199,13 +327,23 @@ export interface OwnerStatementData {
 // Build the statement for one ownerKey across all the realm's buildings,
 // filtered to the requested terms (array of YYYYMMDDHH numbers; empty = all).
 // `buildings` are lean docs (units[].owners[], ownerMonthlyExpenses[]).
+//
+// `occupiedKeys` (optional): a Set of `${propertyId}|${term}` keys for units a
+// TENANT occupies that term. The caller resolves it (this module is DB-free).
+// It drives the shared staleness guard (isOwnerExpenseRowStale) so the
+// statement — the settlement document of record — never bills the owner for a
+// 'vacant'/'owner-resident' euro that is also billed to the present tenant's
+// rent (round-4 review). Omitted → no unit is treated as tenant-occupied
+// (matches the pre-guard behaviour for callers that don't supply it).
 export function buildOwnerStatement(
   buildings: any[],
   ownerKey: string,
-  terms: number[]
+  terms: number[],
+  occupiedKeys?: Set<string>
 ): OwnerStatementData {
   const termSet = new Set((terms || []).map((t) => Number(t)));
   const wantTerm = (t: number) => termSet.size === 0 || termSet.has(Number(t));
+  const occSet = occupiedKeys || new Set<string>();
 
   // Resolve the owner's identity + contact from the matching unit owner
   // subdoc (first one whose ownerKey matches). The ledger drops iban/phone/
@@ -258,14 +396,37 @@ export function buildOwnerStatement(
     const bid = String(b._id);
     const bname = b.name || '';
     const expTypeById = new Map<string, string>();
+    const expById = new Map<string, any>();
     for (const e of b.expenses || []) {
-      if (e && e._id && e.type) expTypeById.set(String(e._id), String(e.type));
+      if (e && e._id) {
+        expById.set(String(e._id), e);
+        if (e.type) expTypeById.set(String(e._id), String(e.type));
+      }
     }
     for (const row of b.ownerMonthlyExpenses || []) {
       const term = Number(row.term || 0);
       if (!wantTerm(term)) continue;
       const amount = _round(row.amount);
       if (!(amount > 0)) continue;
+      // SHARED staleness guard: drop a 'vacant'/'owner-resident' row whose
+      // source expense is gone / flag-off / inactive / the unit is
+      // tenant-occupied FOR THIS TERM — the same term-anchored drop the
+      // breakdown + dashboard read-paths apply, so the settlement document
+      // never double-counts the owner against the tenant's rent. (Never drops
+      // a row with recorded payments; see isOwnerExpenseRowStale.)
+      {
+        const rpid = row.propertyId ? String(row.propertyId) : null;
+        const isOccupied = rpid ? occSet.has(`${rpid}|${term}`) : false;
+        if (
+          isOwnerExpenseRowStale(
+            row,
+            expById.get(String(row.expenseId)),
+            isOccupied
+          )
+        ) {
+          continue;
+        }
+      }
       // Attribute to the SAME canonical owner the ledger does (lex-first
       // ownerKey of the row's owner set), counted once.
       let keys: string[] = [];

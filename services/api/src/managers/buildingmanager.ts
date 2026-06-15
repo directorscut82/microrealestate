@@ -1705,11 +1705,27 @@ export async function importFromE9(req: Req, res: Res) {
         for (const b of realmBuildings as any[]) {
           let touched = false;
           for (const u of b.units || []) {
-            for (const o of u.owners || []) {
-              if (o.name === ownerFullName && !o.taxId) {
-                o.taxId = filerTaxId;
-                touched = true;
-              }
+            const unitOwners = (u.owners || []) as any[];
+            // PER-UNIT DISAMBIGUATION (mirrors the ATAK/DEH backfill guards):
+            // only stamp filerTaxId onto a taxId-less owner when the name is
+            // UNIQUE on this unit AND no owner on this unit already carries
+            // filerTaxId. Otherwise two same-named co-owners on one unit (a
+            // common Greek name) would both get the filer's ΑΦΜ — flipping the
+            // second person's ledger identity to the filer. The realm-wide
+            // `ambiguous` check above only catches a DIFFERENT existing taxId;
+            // two taxId-less same-name owners on one unit slip past it, so this
+            // per-unit guard is required (round-4 review).
+            const nameMatchesOnUnit = unitOwners.filter(
+              (o: any) => o.name === ownerFullName
+            );
+            const filerTaxIdOnUnit = unitOwners.some(
+              (o: any) => o.taxId && o.taxId === filerTaxId
+            );
+            if (nameMatchesOnUnit.length !== 1 || filerTaxIdOnUnit) continue;
+            const target = nameMatchesOnUnit[0];
+            if (!target.taxId) {
+              target.taxId = filerTaxId;
+              touched = true;
             }
           }
           if (touched) {
@@ -1717,11 +1733,16 @@ export async function importFromE9(req: Req, res: Res) {
             // BEST-EFFORT: this is a cosmetic owner-row dedup (it only collapses
             // n:name| into n:name|taxId on the owners page — it writes NO core
             // import data). It touches potentially every same-named-owner
-            // building in the realm, so a concurrent edit to an UNRELATED
-            // building must NOT throw a 409 that the import try/catch would
-            // turn into a full rollback of the successful import. Swallow the
-            // version conflict and log; the owners page shows the split row
-            // until the next reconcile (June 2026 round-4 review finding).
+            // building in the realm, INCLUDING pre-existing legacy buildings
+            // whose full-document validation may fail on save (CLAUDE.md notes
+            // partially-corrupt legacy rows exist). This step MUST NEVER fail
+            // the import: it runs INSIDE the import try, whose catch rolls back
+            // (deletes) every building/property the import just created. So
+            // swallow ALL save errors here (a 409 concurrency conflict OR a
+            // legacy-row ValidationError) — log and move on; the owners page
+            // shows the un-collapsed split row until the next reconcile. Do NOT
+            // re-throw (round-4-review-2: re-throwing a non-409 ValidationError
+            // nuked a fully-successful import).
             try {
               await _saveBuildingWithVersionCheck(b);
             } catch (reconErr: any) {
@@ -2052,7 +2073,12 @@ export async function updateUnit(req: Req, res: Res) {
   }
 
   const oldPropertyId = unit.propertyId;
+  const oldOccupancyType = unit.occupancyType;
   unit.set(req.body);
+  const occupancyChanged =
+    unit.occupancyType !== oldOccupancyType &&
+    (oldOccupancyType === 'owner_occupied' ||
+      unit.occupancyType === 'owner_occupied');
 
   // Validate building-wide thousandths totals after the update — if the
   // edit pushes any of the three schemes above 1000, refuse the change.
@@ -2098,6 +2124,21 @@ export async function updateUnit(req: Req, res: Res) {
   }
   if (oldPropertyId && String(oldPropertyId) !== String(req.body.propertyId)) {
     await _recomputeTenantsForProperty(realm!._id, String(oldPropertyId));
+  }
+
+  // OWNER-RESIDENT MATERIALISATION: a unit flipping into/out of owner_occupied
+  // changes whether its building-expense share is an owner-resident charge
+  // (the resident owner's own cost, flag-independent) vs a vacant/uncollected
+  // share. The owner-row materialiser is otherwise only triggered by expense
+  // edits + tenancy lifecycle — NOT a bare occupancyType edit — so without this
+  // the ledger/dashboard/breakdown kept a stale owner-resident row (or missed a
+  // new one) until some unrelated recompute ran (round-4 review). Refresh the
+  // ±12-month owner rows for the affected property now.
+  if (occupancyChanged) {
+    const pid = String(req.body.propertyId || oldPropertyId || '');
+    if (pid) {
+      await recomputeVacantOwnerForProperties(realm!._id as string, [pid]);
+    }
   }
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
@@ -2515,6 +2556,26 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   ]);
   await _attachTenantGroupsToBuildings(realm!._id as string, [hydrated]);
 
+  // ONE term-aware occupancy source for this whole handler, derived in-memory
+  // from the _tenantGroups just attached (no extra Tenant query). _toBuildingData
+  // attaches unit.tenant DATE-BLIND (any tenant ever linked to the property,
+  // incl. terminated / future-lease), but the live engine reads unit.tenant to
+  // decide recipient renter-vs-owner. So BEFORE computing the breakdown, null
+  // unit.tenant for any unit NOT actually occupied for `term` — otherwise a
+  // terminated/future-lease unit gets a recipient:'renter' row in the engine
+  // AND a surviving owner row here = the same euro double-counted (round-4
+  // review). This makes the engine's recipient and the owner-row occupancy
+  // guard below share the identical predicate.
+  const occupiedForBreakdown = _occupiedFromOccupancyRows(
+    ((hydrated as any)._tenantGroups || []) as any[],
+    term
+  );
+  for (const u of (hydrated as any).units || []) {
+    if (u.propertyId && !occupiedForBreakdown.has(String(u.propertyId))) {
+      u.tenant = null;
+    }
+  }
+
   const breakdown = computeBuildingExpenseBreakdown(hydrated as any, term);
 
   // Owner monthly expenses (separate stream) for this term — surfaced so
@@ -2550,32 +2611,38 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   const liveExpenseById = new Map<string, any>(
     ((hydrated as any).expenses || []).map((e: any) => [String(e._id), e])
   );
-  // OCCUPANCY GUARD (mirrors computeOwnerEksodaByMonth lines 3965-3975). The
-  // ±12-month vacant recompute leaves source:'vacant'/'owner-resident' rows
-  // for OUT-OF-WINDOW terms unchanged; if a tenant later occupies the unit for
-  // such a term, the same building-expense euro is billed BOTH to the present
-  // tenant's rent (1_base buildingCharges) AND surfaced here as an owner
-  // liability — a double-count (adversarial finding, June 2026 round-4). Drop
-  // the stale owner row when the unit is occupied for the requested term. The
-  // dashboard read-path already does this; the breakdown read-path did not.
-  // Resolved once for the single requested term (the filter below is sync).
-  const occupiedForBreakdown = await _occupiedPropertyIdsForTerm(
-    building as any,
-    realm!._id as string,
-    term
-  );
+  // OCCUPANCY GUARD (mirrors the source:'vacant'/'owner-resident' occupancy-drop
+  // in computeOwnerEksodaByMonth's materialised-row loop). The ±12-month vacant
+  // recompute leaves source:'vacant'/'owner-resident' rows for OUT-OF-WINDOW
+  // terms unchanged; if a tenant later occupies the unit for such a term, the
+  // same building-expense euro is billed BOTH to the present tenant's rent
+  // (1_base buildingCharges) AND surfaced here as an owner liability — a
+  // double-count (adversarial finding, June 2026 round-4). Drop the stale owner
+  // row when the unit is occupied for the requested term. Reuses the single
+  // occupiedForBreakdown set computed above from _tenantGroups (same predicate
+  // the engine recipient now uses), so the filter below is sync.
   const ownerEntries = ((hydrated as any).ownerMonthlyExpenses || []).filter(
     (e: any) => {
       if (Number(e.term) !== term) return false;
       // source:'vacant' AND 'owner-resident' are both re-derived from a
-      // building expense — validate both against live state (expense gone /
-      // inactive → stale, drop). They differ in the OPT-IN gate: a 'vacant'
-      // (truly-empty unit) row requires chargeOwnerWhenVacant; an
-      // 'owner-resident' (the owner lives there) row is the resident owner's
-      // OWN cost and is NOT flag-governed (mirrors 1_base.ts:368 ownerBilled =
-      // isOwnerOccupied || flag). Both drop when a TENANT occupies the unit for
-      // the term (the euro is live-billed to the tenant's rent → double-count).
+      // building expense — validate both against live state FOR THIS TERM
+      // (expense gone / inactive-for-term → stale, drop). They differ in the
+      // OPT-IN gate: a 'vacant' (truly-empty unit) row requires
+      // chargeOwnerWhenVacant; an 'owner-resident' (the owner lives there) row
+      // is the resident owner's OWN cost and is NOT flag-governed (mirrors
+      // 1_base ownerBilled = isOwnerOccupied || flag). Both drop when a TENANT
+      // occupies the unit FOR THE TERM (the euro is live-billed to the tenant's
+      // rent → double-count). Every condition is TERM-anchored — a current-day
+      // occupancy flip is the WRITER's job (updateUnit recompute), and a
+      // historical owner-resident liability for a term the owner DID reside in
+      // must NOT be dropped by today's occupancy (round-4-review-2 money-wrong
+      // finding). A row carrying recorded payments is never dropped — recorded
+      // money must survive on every settlement surface.
       if (e.source === 'vacant' || e.source === 'owner-resident') {
+        const hasPayments =
+          Array.isArray(e.payments) &&
+          e.payments.some((p: any) => Number(p && p.amount) > 0);
+        if (hasPayments) return true;
         const src = liveExpenseById.get(String(e.expenseId));
         if (!src) return false; // expense gone
         if (e.source === 'vacant' && !src.chargeOwnerWhenVacant) return false;
@@ -3693,31 +3760,44 @@ async function _distributeRepairCharge(
 // term (compared at YYYYMM granularity). Shared by vacant-owner billing
 // and repair distribution so "is this unit vacant this month" is computed
 // one way everywhere.
-async function _occupiedPropertyIdsForTerm(
-  building: any,
-  realmId: string,
-  term: number
-): Promise<Set<string>> {
+// PURE: given tenant "occupancy rows" (each carrying a lease window
+// beginDate/endDate/terminationDate + a properties[] list with per-property
+// entry/exit windows) decide which propertyIds are occupied for `term`. This is
+// the ONE occupancy algorithm — both the DB-fetching wrapper below AND the
+// breakdown read-path (which already has _tenantGroups in memory) call it, so
+// "is this unit occupied this month" can never be computed two different ways
+// (the divergence that let a terminated/future-lease unit be billed to BOTH the
+// tenant rent and the owner — adversarial finding, June 2026 round-4-review).
+// A row shape: { beginDate, endDate, terminationDate, properties: [{propertyId,
+// entryDate, exitDate}] }. _tenantGroups already matches this shape exactly.
+// The propertyIds of units whose OWNER lives in them (occupancyType
+// 'owner_occupied'). An owner-occupied unit's building-expense share is the
+// resident owner's own cost, billed to the owner regardless of the expense's
+// chargeOwnerWhenVacant flag (mirrors 1_base ownerBilled = isOwnerOccupied ||
+// flag). ONE definition shared by the materialiser (_recomputeVacantOwnerCharges)
+// and the dashboard/breakdown read-paths so they cannot drift.
+function _ownerOccupiedPropertyIds(building: any): Set<string> {
+  return new Set<string>(
+    (building?.units || [])
+      .filter((u: any) => u.propertyId && u.occupancyType === 'owner_occupied')
+      .map((u: any) => String(u.propertyId))
+  );
+}
+
+function _occupiedFromOccupancyRows(rows: any[], term: number): Set<string> {
   const ymTerm = Math.floor(term / 10000);
   const toYM = (d: any): number | null => {
     if (!d) return null;
     const m = moment.utc(d);
     return m.isValid() ? m.year() * 100 + (m.month() + 1) : null;
   };
-  const buildingUnitPropIds = (building.units || [])
-    .filter((u: any) => u.propertyId)
-    .map((u: any) => String(u.propertyId));
-  const tenants = await Collections.Tenant.find({
-    realmId,
-    'properties.propertyId': { $in: buildingUnitPropIds }
-  }).lean();
   const occupied = new Set<string>();
-  for (const tn of tenants as any[]) {
-    const begin = toYM(tn.beginDate);
-    const end = toYM(tn.terminationDate || tn.endDate);
+  for (const r of rows || []) {
+    const begin = toYM(r.beginDate);
+    const end = toYM(r.terminationDate || r.endDate);
     if (begin !== null && ymTerm < begin) continue;
     if (end !== null && ymTerm > end) continue;
-    for (const tp of tn.properties || []) {
+    for (const tp of r.properties || []) {
       if (!tp.propertyId) continue;
       const pEntry = toYM(tp.entryDate);
       const pExit = toYM(tp.exitDate);
@@ -3729,7 +3809,38 @@ async function _occupiedPropertyIdsForTerm(
   return occupied;
 }
 
-async function _recomputeVacantOwnerCharges(
+async function _occupiedPropertyIdsForTerm(
+  building: any,
+  realmId: string,
+  term: number
+): Promise<Set<string>> {
+  const buildingUnitPropIds = (building.units || [])
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  // Covering projection: this function reads only the lease/entry-exit date
+  // fields below — never tenant.rents[] (the largest embedded field). Without
+  // the projection every callsite (incl. recompute fan-out) pulled full tenant
+  // docs (perf finding, round-4-review).
+  const tenants = await Collections.Tenant.find(
+    {
+      realmId,
+      'properties.propertyId': { $in: buildingUnitPropIds }
+    },
+    {
+      beginDate: 1,
+      endDate: 1,
+      terminationDate: 1,
+      'properties.propertyId': 1,
+      'properties.entryDate': 1,
+      'properties.exitDate': 1
+    }
+  ).lean();
+  return _occupiedFromOccupancyRows(tenants as any[], term);
+}
+
+// Exported for direct unit testing of the owner-row materialiser (the write
+// twin of computeOwnerEksodaByMonth's read path). Not a public route handler.
+export async function _recomputeVacantOwnerCharges(
   building: any,
   realmId: string,
   term: number
@@ -3804,13 +3915,9 @@ async function _recomputeVacantOwnerCharges(
   // Owner-occupied units (the OWNER lives there). Their building-expense share
   // is genuinely the owner's cost — billed to the owner, but tagged
   // 'owner-resident' (NOT 'vacant') so the UI labels it as an owner-resident
-  // charge and never as a vacant/uncollected unit. occupancyType lives on the
-  // unit subdoc; resolve from the in-memory building.units.
-  const ownerOccupied = new Set<string>(
-    (building.units || [])
-      .filter((u: any) => u.propertyId && u.occupancyType === 'owner_occupied')
-      .map((u: any) => String(u.propertyId))
-  );
+  // charge and never as a vacant/uncollected unit. Shared definition with the
+  // dashboard/breakdown read-paths (see _ownerOccupiedPropertyIds).
+  const ownerOccupied = _ownerOccupiedPropertyIds(building);
   // An owner-resident share is the resident owner's own cost and is NOT
   // governed by chargeOwnerWhenVacant (that flag only governs truly-EMPTY
   // units). So the per-unit owner-share pass must run over the SUPERSET of
@@ -4099,6 +4206,10 @@ export async function computeOwnerEksodaByMonth(
     }
     return occupiedCache.get(term)!;
   };
+  // CURRENT owner-occupied set — an 'owner-resident' row is only valid while
+  // the unit is still owner-occupied (updateUnit can flip occupancyType
+  // without a window-bounded owner recompute, leaving a stale row).
+  const ownerOccupiedNow = _ownerOccupiedPropertyIds(building);
 
   for (const row of (building.ownerMonthlyExpenses || []) as any[]) {
     const term = Number(row.term || 0);
@@ -4121,21 +4232,33 @@ export async function computeOwnerEksodaByMonth(
     // The owner genuinely owes it (the unit was vacant when the repair was
     // distributed); a tenant who moved in later was not there for the repair.
     if (row.source === 'vacant' || row.source === 'owner-resident') {
-      const src = liveExpenseById.get(String(row.expenseId));
-      if (!src) continue; // expense gone
-      // 'vacant' (truly-empty unit) requires the opt-in flag; 'owner-resident'
-      // (the owner lives there) is the resident owner's OWN cost, NOT
-      // flag-governed (mirrors 1_base.ts:368 ownerBilled = isOwnerOccupied ||
-      // flag). Dropping owner-resident on flag-off made the dashboard read €0
-      // while the live breakdown billed it (3-surface disagreement, June 2026).
-      if (row.source === 'vacant' && !src.chargeOwnerWhenVacant) continue;
-      if (!isExpenseActiveForTerm(src as any, term)) continue; // inactive
-      if (row.propertyId) {
-        const occ = await occupiedForTerm(term);
-        // A TENANT moving in live-bills the building expense to them, so a
-        // stale 'vacant' OR 'owner-resident' owner row for that unit/term must
-        // drop (else the same euro double-counts: owner here + tenant rent).
-        if (occ.has(String(row.propertyId))) continue;
+      // NEVER drop a row carrying recorded payments — recorded money must
+      // survive on every settlement surface (round-4-review-2 finding).
+      const hasPayments = ((row.payments || []) as any[]).some(
+        (p) => Number(p && p.amount) > 0
+      );
+      if (!hasPayments) {
+        const src = liveExpenseById.get(String(row.expenseId));
+        if (!src) continue; // expense gone
+        // 'vacant' (truly-empty unit) requires the opt-in flag; 'owner-resident'
+        // (the owner lives there) is the resident owner's OWN cost, NOT
+        // flag-governed (mirrors 1_base ownerBilled = isOwnerOccupied || flag).
+        // Dropping owner-resident on flag-off made the dashboard read €0 while
+        // the live breakdown billed it (3-surface disagreement, June 2026).
+        if (row.source === 'vacant' && !src.chargeOwnerWhenVacant) continue;
+        if (!isExpenseActiveForTerm(src as any, term)) continue; // inactive
+        if (row.propertyId) {
+          const occ = await occupiedForTerm(term);
+          // A TENANT occupying the unit FOR THE TERM live-bills the building
+          // expense to them, so a stale 'vacant' OR 'owner-resident' owner row
+          // for that unit/term must drop (else the same euro double-counts:
+          // owner here + tenant rent). This is the ONLY occupancy drop — a
+          // current-day owner-occupancy flip is the writer's job (updateUnit
+          // recompute); a historical owner-resident liability for a term the
+          // owner DID reside in must NOT be erased by today's state
+          // (round-4-review-2 money-wrong finding).
+          if (occ.has(String(row.propertyId))) continue;
+        }
       }
     }
     covered.add(covKey(row.expenseId, row.propertyId, term));
@@ -4177,13 +4300,9 @@ export async function computeOwnerEksodaByMonth(
   );
   // Owner-occupied units (the owner lives there) — their share of ANY active
   // expense is the resident owner's OWN cost, billed regardless of the
-  // chargeOwnerWhenVacant flag (mirrors 1_base.ts:368 ownerBilled and
-  // _recomputeVacantOwnerCharges). occupancyType is term-independent.
-  const ownerOccupiedSet = new Set<string>(
-    (building.units || [])
-      .filter((u: any) => u.propertyId && u.occupancyType === 'owner_occupied')
-      .map((u: any) => String(u.propertyId))
-  );
+  // chargeOwnerWhenVacant flag (mirrors _recomputeVacantOwnerCharges).
+  // Same shared definition; reuse the set computed above.
+  const ownerOccupiedSet = ownerOccupiedNow;
 
   // Per-month owner liability from building expenses (12 terms of `year`) —
   // ONLY for liabilities not already covered by a materialised row above.

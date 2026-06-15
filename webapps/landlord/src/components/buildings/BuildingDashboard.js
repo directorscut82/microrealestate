@@ -304,11 +304,13 @@ export default function BuildingDashboard({ building }) {
     //     undercounts by the entire fixed owner share.
     const recordedOwnerEksoda = (building?.ownerMonthlyExpenses || [])
       .filter((e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
-      // EXCLUDE source:'vacant' rows ONLY: a vacant unit's share of a
-      // recurring building EXPENSE is routed to the owner, but that euro is
-      // ALREADY counted once in recurringMonthlyEksoda * 12 (the full expense
-      // amount). Routing changes WHO pays, not the building total — counting
-      // it here too would double-count the headline.
+      // EXCLUDE the recurring-building-expense owner rows (vacant +
+      // owner-resident + owner-fixed; see the three exclusions below): a vacant
+      // or owner-occupied unit's share of a recurring building EXPENSE is routed
+      // to the owner, but that euro is ALREADY counted once in
+      // recurringMonthlyEksoda * 12 (the full expense amount). Routing changes
+      // WHO pays, not the building total — counting it here too would
+      // double-count the headline.
       //   We deliberately do NOT exclude source:'repair-vacant' (a vacant
       //   unit's tenant-portion share of a REPAIR routed to the owner):
       //   repairEksoda above sums only unit.monthlyCharges with a repairId,
