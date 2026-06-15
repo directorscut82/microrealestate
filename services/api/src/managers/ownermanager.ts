@@ -800,6 +800,15 @@ export async function pay(req: Req, res: Res) {
     }
   }
 
+  // The amount ACTUALLY allocated to charges (≤ payment.amount). For an
+  // auto-spread overpayment the surplus is dropped (owner has no carry-forward
+  // ledger), so this can be < payment.amount — the client must report THIS,
+  // not the typed amount, or it would tell the landlord more money was
+  // recorded than actually landed on the ledger (adversarial finding).
+  const allocatedTotal = _round(
+    targets.reduce((s, tgt) => s + (Number(tgt.amount) || 0), 0)
+  );
+
   // Re-aggregate for the response so the client sees fresh totals.
   const fresh = await Collections.Building.find({ realmId: realm!._id }).lean();
   const freshOccupied = await _occupiedKeysForBuildings(
@@ -809,5 +818,9 @@ export async function pay(req: Req, res: Res) {
   const freshOwners = _aggregateOwners(fresh as any[], freshOccupied);
   await _markAlsoRents(String(realm!._id), freshOwners);
   const updated = freshOwners.get(ownerKey);
-  return res.json(updated ? _serializeOwnerSummary(updated) : { ownerKey });
+  return res.json(
+    updated
+      ? { ..._serializeOwnerSummary(updated), allocatedTotal }
+      : { ownerKey, allocatedTotal }
+  );
 }

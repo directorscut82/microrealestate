@@ -150,27 +150,32 @@ skipIfNoFixtures('parseE9 — fixture suite', () => {
 // future refactor surfaces a single failing test instead of a bag of
 // "well it's different now" snapshot diffs.
 skipIfNoFixtures('parseE9 — T2 regressions', () => {
-  // T2.P1.3: the ΠΕΡΙΟΧΗ ΘΗΤΑ row in 2027-1 has a non-numeric block-plot id
-  // ("831Α") and previously fell through the urban/rural patterns,
-  // ending up dropped as a land plot. The 4th-pattern fallback should
-  // surface it as a real building unit with a positive surface.
-  test('T2.P1.3: settlement block-plot row surfaces as a building', () => {
+  // T2.P1.3 (REVISED): the ΠΕΡΙΟΧΗ ΘΗΤΑ row in 2027-1 (ATAK 00112233393,
+  // 410.18 m²) is a bare PLOT, not a building — AADE stamps it
+  // ΚΑΤΗΓΟΡΙΑ ΑΚΙΝΗΤΟΥ 0 with NO electricity meter, whereas the genuine
+  // apartments on the same filing carry category 1 + a DEH number. The
+  // settlement-block-plot address pattern still PARSES the row (so a real
+  // block-plot BUILDING with a κτίσμα would be importable), but
+  // isRealBuildingUnit now rejects a category-0/no-DEH row as land. So the
+  // row must NOT surface as a building and must be counted in
+  // skippedLandPlots. (Earlier this test asserted the opposite — that
+  // mistaken expectation is what let a 410 m² οικόπεδο import as a building;
+  // the owner flagged it. Real AADE type code, not a surface heuristic.)
+  test('T2.P1.3: settlement block-plot PLOT (category 0, no DEH) is skipped as land, not a building', () => {
     const text = readFixture('PeriousiakiKatastasi2027-1.txt');
     if (!text) return; // fixture missing — handled at suite level
     const parsed = parseE9(text);
-    // The row carries surface 410.18 m² with ATAK 00112233393. Find
-    // either by ATAK or by the recognizable surface.
     const allUnits = parsed.buildings.flatMap((b) => b.units);
-    const row = allUnits.find(
-      (u) => u.atakNumber === '00112233393' || Math.abs(u.surface - 410.18) < 0.01
+    const plot = allUnits.find(
+      (u) =>
+        u.atakNumber === '00112233393' || Math.abs(u.surface - 410.18) < 0.01
     );
-    expect(row).toBeTruthy();
-    if (row) {
-      expect(row.surface).toBeGreaterThan(0);
-      // The block-plot identifier should round-trip as the streetNumber
-      // so downstream importer can group/preview the building.
-      expect(row.streetNumber).toMatch(/^\d+[Α-Ω]?$/);
-    }
+    expect(plot).toBeFalsy(); // not imported as a building unit
+    expect(parsed.skippedLandPlots).toBeGreaterThan(0);
+    // The genuine apartments on the same filing (ΟΔΟΣ ΖΗΤΑ 9, category 1
+    // + DEH) MUST still import — the guard rejects ONLY category-0/no-DEH.
+    const realUnits = allUnits.filter((u) => u.electricitySupplyNumber);
+    expect(realUnits.length).toBeGreaterThan(0);
   });
 
   // T2.P1.4 spot-check: a row with a 50,0 ownership fraction (ΟΔΟΣ ΗΤΑ
@@ -297,5 +302,34 @@ describe('parseE9 — AADE category → type', () => {
     expect(inferPropertyType({ category: null, floor: -1, name: null })).toBe(
       'storage'
     );
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// BARE-PLOT GUARD (isRealBuildingUnit ↔ AADE ΚΑΤΗΓΟΡΙΑ ΑΚΙΝΗΤΟΥ). Runs in
+// CI off the committed redacted ΟΔΟΣ ΕΨΙΛΟΝ fixture (no /tmp dependency).
+// A 410 m² ΠΕΡΙΟΧΗ ΘΗΤΑ parcel (category 0, no DEH meter) was wrongly imported
+// as a building; the guard must reject category-0/no-DEH rows as land WHILE
+// keeping every genuine unit (category ≥ 1 OR a DEH meter). These assertions
+// pin the invariant on real data so the guard can't silently regress.
+// ───────────────────────────────────────────────────────────────────────
+describe('parseE9 — bare-plot guard (AADE category 0 + no DEH = land)', () => {
+  test('every imported ΟΔΟΣ ΕΨΙΛΟΝ unit is a genuine building unit (category≥1 OR has a DEH meter)', () => {
+    const text = readOdos Epsilon();
+    if (!text) return;
+    const parsed = parseE9(text);
+    const units = parsed.buildings.flatMap((b) => b.units);
+    expect(units.length).toBeGreaterThan(0);
+    for (const u of units) {
+      const kept =
+        (typeof u.category === 'number' && u.category >= 1) ||
+        !!u.electricitySupplyNumber ||
+        u.isElectrified;
+      if (!kept) {
+        throw new Error(
+          `unit ${u.atakNumber} survived the guard but is category=${u.category} with no DEH — would be a bare plot`
+        );
+      }
+    }
   });
 });

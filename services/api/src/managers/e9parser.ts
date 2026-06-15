@@ -127,6 +127,22 @@ function isRealBuildingUnit(unit: {
   category: number | null;
 }): boolean {
   if (unit.surface <= 0) return false;
+  // AADE TYPE GUARD (ΚΑΤΗΓΟΡΙΑ ΑΚΙΝΗΤΟΥ). The E9 stamps a category code on
+  // every ΠΙΝΑΚΑΣ-1 row: a built property (κατοικία/διαμέρισμα/κατάστημα/…)
+  // carries category ≥ 1, while a bare plot/parcel that slipped into ΠΙΝΑΚΑΣ 1
+  // via the settlement-block-plot address pattern carries category 0 (no
+  // κτίσμα). Such a row also has NO electricity meter. Use the PDF's own type
+  // code — NOT a surface heuristic — to reject it: category 0 AND no DEH meter
+  // is land, not an ακίνητο. (Verified on real E9s: a 410 m² ΠΕΡΙΟΧΗ ΘΗΤΑ parcel
+  // parsed as category 0 / no DEH and was wrongly imported as a building;
+  // genuine apartments on the same filing carry category 1 + a DEH number.)
+  if (
+    unit.category === 0 &&
+    !unit.isElectrified &&
+    !unit.electricitySupplyNumber
+  ) {
+    return false;
+  }
   // Primary: has a floor number (apartments always have one)
   if (unit.floor !== null) return true;
   // Secondary: has electricity (building unit where floor parsing failed)

@@ -4142,8 +4142,18 @@ export async function computeOwnerEksodaByMonth(
   ) => {
     if (!(owed > 0) && !(paid > 0)) return;
     const arr = detailByTerm.get(term) || [];
-    const key = `${ownerName || ''}|${category}`;
-    const existing = arr.find((d) => `${d.ownerName || ''}|${d.category}` === key);
+    // Merge key includes the LABEL, not just owner+category. Two distinct
+    // charges of the same category for the same owner (e.g. a building-wide
+    // repair owner-portion AND a per-unit repair-vacant share of a DIFFERENT
+    // repair, or two 'other' expenses) must stay as separate tooltip lines —
+    // merging on owner|category alone collapsed them into one and dropped the
+    // second label once building-wide lines gained a non-null owner name
+    // (round-6 review). Same-charge fragments still merge because they share
+    // the same label.
+    const key = `${ownerName || ''}|${category}|${label || ''}`;
+    const existing = arr.find(
+      (d) => `${d.ownerName || ''}|${d.category}|${d.label || ''}` === key
+    );
     if (existing) {
       existing.owed = Math.round((existing.owed + owed) * 100) / 100;
       existing.paid = Math.round((existing.paid + paid) * 100) / 100;
@@ -4163,6 +4173,27 @@ export async function computeOwnerEksodaByMonth(
     if (named.length === 0) return null;
     return named.length === 1 ? named[0].name : `${named[0].name} +${named.length - 1}`;
   };
+
+  // Building-level owner name for a building-WIDE liability (a repair
+  // owner-portion or owner-fixed amount carries no propertyId). The payer is
+  // the building's owner(s): the sole distinct named owner, or "<first> +N"
+  // when several. So a building-wide repair line shows WHO pays in the tooltip
+  // instead of a blank owner (the "Επισκευή ασανσέρ with no payer" bug). Same
+  // distinct-owner resolution the building Έξοδα breakdown uses.
+  const buildingOwnerName = (() => {
+    const byKey = new Map<string, any>();
+    for (const u of (building.units || []) as any[]) {
+      for (const o of (u.owners || []) as any[]) {
+        const k = ownerKeyOf(o);
+        if (k && o && o.name && !byKey.has(k)) byKey.set(k, o);
+      }
+    }
+    const named = Array.from(byKey.values());
+    if (named.length === 0) return null;
+    return named.length === 1
+      ? named[0].name
+      : `${named[0].name} +${named.length - 1}`;
+  })();
 
   const expenses = (building.expenses || []) as any[];
   const repairs = (building.repairs || []) as any[];
@@ -4272,8 +4303,10 @@ export async function computeOwnerEksodaByMonth(
     const rowPaid = Math.min(Math.max(fromPayments, fromFlag), amount);
     addPaid(term, rowPaid);
     // breakdown line: category from source (repair → 'repair', else the
-    // source expense's schema type), owner from the row's unit (vacant) else
-    // building-level (null).
+    // source expense's schema type), owner from the row's unit (vacant /
+    // owner-resident / repair-vacant) else the building's owner(s) for a
+    // building-wide row (owner-direct / owner-fixed / building-wide repair) —
+    // so the tooltip always shows WHO pays, never a blank payer.
     const srcExp = liveExpenseById.get(String(row.expenseId));
     const category =
       row.source === 'repair' || row.source === 'repair-vacant'
@@ -4281,7 +4314,7 @@ export async function computeOwnerEksodaByMonth(
         : srcExp?.type || 'other';
     addDetail(
       term,
-      row.propertyId ? unitOwnerName(row.propertyId) : null,
+      row.propertyId ? unitOwnerName(row.propertyId) : buildingOwnerName,
       category,
       row.description || srcExp?.name || '',
       amount,
@@ -4316,7 +4349,7 @@ export async function computeOwnerEksodaByMonth(
       if (covered.has(covKey(e._id, null, term))) continue; // materialised
       const fixedAmt = Math.round(Number(e.ownerAmount) * 100) / 100;
       addOwed(term, fixedAmt);
-      addDetail(term, null, e.type || 'other', e.name || '', fixedAmt, 0);
+      addDetail(term, buildingOwnerName, e.type || 'other', e.name || '', fixedAmt, 0);
     }
     // building-expense shares routed to the owner: a truly-EMPTY unit's share
     // when the expense opts in (chargeOwnerWhenVacant), AND an OWNER-OCCUPIED
@@ -4392,7 +4425,14 @@ export async function computeOwnerEksodaByMonth(
     if (!covered.has(covKey(repairIdStr, null, term))) {
       const ownerPortionR = Math.round(ownerPortion * 100) / 100;
       addOwed(term, ownerPortionR);
-      addDetail(term, null, 'repair', repair.title || '', ownerPortionR, 0);
+      addDetail(
+        term,
+        buildingOwnerName,
+        'repair',
+        repair.title || '',
+        ownerPortionR,
+        0
+      );
     }
 
     // repair-vacant: the tenant-billed amount distributed across units; vacant

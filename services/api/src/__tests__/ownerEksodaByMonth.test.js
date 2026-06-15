@@ -516,7 +516,10 @@ describe('computeOwnerEksodaByMonth (live owner-borne eksoda)', () => {
     expect(elec.owed).toBe(50); // 40 + 10 merged
     expect(repair).toBeTruthy();
     expect(repair.owed).toBe(100);
-    expect(repair.ownerName).toBeNull(); // building-wide owner-portion
+    // A building-wide repair owner-portion now carries the building's owner as
+    // the payer (was null → the tooltip showed no payer). Both units here are
+    // ΒΗΤΑ-owned, so the building's sole distinct owner is ΒΗΤΑ.
+    expect(repair.ownerName).toBe('ΒΗΤΑ');
   });
 
   // FIX #2 (June 2026 round-4 "Attack #3"): an OWNER-OCCUPIED unit's share of
