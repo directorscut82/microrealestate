@@ -13,6 +13,20 @@
 <% (rent.buildingCharges || []).forEach(function(item) { %>
 - <%- item.buildingName ? item.buildingName + ' - ' : '' %><%- item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
 <% }); %>
+<%# Round-2 audit M3: reconcile listed lines to the Total (see body_html). %>
+<% if (rent.total.discount) { %>
+- <%- _.t('Discount') %>: - <%- _.formatNumber(rent.total.discount, 'currency') %>
+<% } %>
+<% if (rent.total.debts) { %>
+- <%- _.t('Additional costs') %>: <%- _.formatNumber(rent.total.debts, 'currency') %>
+<% } %>
+<% if (rent.total.vat) { %>
+- <%- _.t('VAT') %>: <%- _.formatNumber(rent.total.vat, 'currency') %>
+<% } %>
+<% if (rent.total.balance) { %>
+- <%- _.t('Previous balance') %>: <%- _.formatNumber(rent.total.balance, 'currency') %>
+<% } %>
+<%- _.t('Total') %>: <%- _.formatNumber(rent.total.grandTotal, 'currency') %>
 <% } %>
 <%- _.t('Please send us your payment before {{date}}.', { date: _.formatDate(dueDate, 'LL') }) %>
 <%- include('../__content_parts/text/paymentmethods.ejs') %>

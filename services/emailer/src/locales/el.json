@@ -69,5 +69,10 @@
   "short_rentcall": "Ε",
   "short_rentcall_last_reminder": "Ε",
   "short_rentcall_reminder": "Ε",
-  "{{appName}} Sign in to the tenant portal": "{{appName}} Σύνδεση στην πύλη ενοικιαστή"
+  "{{appName}} Sign in to the tenant portal": "{{appName}} Σύνδεση στην πύλη ενοικιαστή",
+  "Total": "Σύνολο",
+  "Discount": "Έκπτωση",
+  "VAT": "ΦΠΑ",
+  "Previous balance": "Προηγούμενο υπόλοιπο",
+  "Additional costs": "Πρόσθετες χρεώσεις"
 }

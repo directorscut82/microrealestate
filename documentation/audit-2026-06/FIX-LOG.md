@@ -154,3 +154,28 @@
 - `yarn workspace @microrealestate/{common,api} build` OK; `landlord lint` OK.
 - **Known sibling (logged, not in this batch):** `BuildingExpensePanel.js:91` has the same full-granularity `isExpenseActiveForTerm` as the old tile helper — a display-only breakdown divergence for recurring mid-month-startTerm expenses. Queued.
 - Deploy + live-verify: PENDING user authorization.
+
+## MEDIUM BATCH (base c0a1772d) — round-1 + round-2 MEDIUM findings
+
+> Re-verified every open MEDIUM against current code first (workflow): all 14
+> STILL-BROKEN. Fixed the tractable ones; deferred 2 infra/concurrency-bound.
+
+### Fixed + proven (jest, where a harness exists):
+- **R2-M1** property expense-sum now WINDOWS each expense by [beginDate,endDate] at MONTH granularity matching the engine (frontdata.ts) — a one-time / sub-period / past expense no longer inflates the recurring monthly Total. `occupantExpenseSum.test.js` (+6 cases incl. mid-current-month begin/end via fake timers).
+- **R1-M2** thousandths basis `whole` now reduces over ALL building.units (engine denominator) so the printed part÷whole×total reconciles to the billed share. `expenseBreakdown.test.js` (+1, basis.whole == full-building).
+- **R1-M5** dashboard notPaid: a NEGATIVE carry-in balance (overpayment credit) no longer inflates this month's due — `tenantMonthDue = tenantDue − Math.max(0, balance)`. (Step-7 caught my first attempt using `_isSettledByCarryForward`, which also hid an arrears-paid-later month; reverted to the surgical clamp.) Dashboard handler — deploy-verify + logic re-read.
+- **R1-M6** `totalYearRevenues` now counts `amount − Σ non-revenue allocation` (excludes vat/deposit/previousBalance/extracharge) — and PRESERVES an overpayment's unallocated surplus (Step-7 caught my first income-line-sum attempt dropping it). Dashboard handler — deploy-verify.
+- **R1-M9** bulkExpressPayment rejects a duplicate tenantId in the batch (fail-fast 422). `mediumBatch.test.js`.
+- **R1-M11** emailmanager send + sendSmsOnly pair tenant→term by id-map, not by ($in-unordered) result position. `mediumBatch.test.js`.
+- **R2-M3 + R2-L14** rentcall email itemized table now renders discount/debts/VAT/previous-balance rows so it reconciles to the bold Total; added Σύνολο/Έκπτωση/ΦΠΑ/Προηγούμενο υπόλοιπο/Πρόσθετες χρεώσεις to all 6 emailer locales (fixes the English "Total" leak too). Emailer — deploy-verify.
+- **R2-M6** payment/owner toasts + allocation warnings format via `useFormatNumber` (org locale/currency), €-free keys added to all 6 landlord locales (PaymentTabs + OwnerPaymentDialog). Frontend — deploy-verify.
+- **R2-M7** RentTable surplus badge + RentSelector "Remaining"/surplus render via NumberFormat/useFormatNumber, €-free key. Frontend — deploy-verify.
+
+### Step-7 (TIER-MONEY): round 1 = 3 HOLDS (R1-M2,M9,M11) + 3 BROKEN (R2-M1 day-vs-month granularity [same class as H3], R1-M5 broad-gate hid arrears-paid-later, R1-M6 dropped overpayment surplus). All 3 re-fixed; round 2 = 3 HOLDS. The granularity bug (R2-M1) and the surplus bug (R1-M6) were both real money-drops in my own fixes that jest-green missed — Step-7 earned its keep a 9th and 10th time this campaign.
+
+### Deferred (documented, NOT shipped):
+- **R1-M1** owner-payment cross-building partial-commit — the verdict's fix is a mongo `withTransaction`, but the deployed mongo is SINGLE-NODE (roadmap-hardening §4.10: transactions require a replica set — an infra change, not a code fix). The "v1 partial-commit edge" is an already-documented limitation. Alternative (server returns a partial-commit signal the client surfaces) is an owner-flow change deferred.
+- **R1-M8** payment-write vs recompute `__v` race (one-shot 409, no retry) — concurrency hardening, user-recoverable by manual retry (low severity); the retry loop interacts with a per-attempt `_getEmailStatus` network call. Deferred to a focused concurrency PR.
+- **R1-M3** (allocation VAT preview), **R1-M4** (pie Receipts-vs-Owed basis), **R2-M2** (express drawer page-bound ≤21 rows), **R1-M10** (bulk-selection refetch-prune) — frontend display findings, queued for the frontend follow-up.
+
+### Verification: api jest **610 passed / 0 failed** (+11 over the HIGH-batch 599). common+api+emailer build OK; landlord lint OK.

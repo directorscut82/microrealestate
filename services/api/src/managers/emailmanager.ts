@@ -127,9 +127,18 @@ export async function sendSmsOnly(req: Req, res: Res) {
     realmId: realm!._id
   }).lean();
 
+  // Round-1 audit M11: pair each tenant with its OWN term by id, not by the
+  // (unordered) $in result position.
+  const _termById = new Map(
+    (tenantIds || []).map((id: any, i: number) => [
+      String(id),
+      terms && terms[i]
+    ])
+  );
+
   const statusList: AnyRecord[] = await Promise.all(
-    tenants.map(async (tenant: AnyRecord, index: number) => {
-      const term = Number((terms && terms[index]) || defaultTerm);
+    tenants.map(async (tenant: AnyRecord) => {
+      const term = Number(_termById.get(String(tenant._id)) ?? defaultTerm);
       const result = await _sendSms(req, tenant, document || 'rentcall', term);
       return {
         name: tenant.name,
@@ -159,6 +168,17 @@ export async function send(req: Req, res: Res) {
     realmId: realm!._id
   }).lean();
 
+  // Round-1 audit M11: a `$in` query does NOT preserve the request's tenantId
+  // order, so reading terms[index] by RESULT position pairs a tenant with
+  // ANOTHER tenant's term in a heterogeneous bulk send. Map each request
+  // tenantId → its own term once, then look up by the tenant's _id.
+  const _termById = new Map(
+    (tenantIds || []).map((id: any, i: number) => [
+      String(id),
+      terms && terms[i]
+    ])
+  );
+
   // Wave-24 A10: prevent accidental double-send. The Email collection tracks
   // every successfully-sent message; a 60-minute lookback for the same
   // (tenantId, templateName, term) is sufficient to catch double-clicks
@@ -184,9 +204,9 @@ export async function send(req: Req, res: Res) {
   }
 
   const statusList = await Promise.all(
-    tenants.map(async (tenant: AnyRecord, index: number) => {
+    tenants.map(async (tenant: AnyRecord) => {
       const tenantId = String(tenant._id);
-      const term = Number((terms && terms[index]) || defaultTerm);
+      const term = Number(_termById.get(tenantId) ?? defaultTerm);
 
       // Wave-24 A10: skip + warn if the same (tenant, document, term) was
       // emailed within the last 60 minutes. Force=true bypasses.

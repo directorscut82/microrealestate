@@ -15,6 +15,7 @@ import { DatePickerInput } from '../ui/date-picker-input';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import { Textarea } from '../ui/textarea';
 import { ownerChargeLabel } from '../../utils/lineLabels';
 import {
@@ -60,6 +61,7 @@ const emptyDraft = () => ({
 // deliberately identical to the tenant dialog (the user's explicit ask).
 export default function OwnerPaymentDialog({ open, setOpen, owner }) {
   const { t } = useTranslation('common');
+  const formatNumber = useFormatNumber();
   const queryClient = useQueryClient();
   const { itemList: paymentTypes } = usePaymentTypes();
   const [drafts, setDrafts] = useState([]);
@@ -135,8 +137,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
       // amount IS the allocation sum in custom mode, so the toast + the
       // recorded figure can never disagree.
       if (allocSum > amt + 0.005) {
-        return { error: t('Over-allocated by {{amount}}€', {
-          amount: (allocSum - amt).toFixed(2)
+        // R2-M6: org locale/currency, €-free key.
+        return { error: t('Over-allocated by {{amount}}', {
+          amount: formatNumber(allocSum - amt)
         }) };
       }
     }
@@ -212,8 +215,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
       }
       await refreshOwners();
       toast.success(
-        t('Payment of {{amount}}€ recorded', {
-          amount: allocatedTotal.toFixed(2)
+        // R2-M6: org locale/currency, €-free key.
+        t('Payment of {{amount}} recorded', {
+          amount: formatNumber(allocatedTotal)
         })
       );
       setOpen(false);
@@ -471,12 +475,13 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                       (customDelta < 0 ? 'text-oxide' : 'text-amber-600')
                     }
                   >
+                    {/* R2-M6: org locale/currency, €-free keys. */}
                     {customDelta < 0
-                      ? t('Over-allocated by {{amount}}€', {
-                          amount: Math.abs(customDelta).toFixed(2)
+                      ? t('Over-allocated by {{amount}}', {
+                          amount: formatNumber(Math.abs(customDelta))
                         })
-                      : t('{{amount}}€ of this payment is unallocated and will not be recorded.', {
-                          amount: customDelta.toFixed(2)
+                      : t('{{amount}} of this payment is unallocated and will not be recorded.', {
+                          amount: formatNumber(customDelta)
                         })}
                   </div>
                 )}

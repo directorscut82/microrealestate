@@ -511,8 +511,22 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
 
   // Validate every item up-front so a bad row aborts the batch before
   // any write happens.
+  // Round-1 audit M9: two items for the SAME tenant fan out as concurrent
+  // __v-guarded writes against one stale baseline — one wins, the other 409s
+  // and its valid payment is dropped. The shipped dialog emits one item per
+  // tenant, so a duplicate is always a client/caller bug; reject it fail-fast
+  // (same style as the surrounding validations) instead of silently losing money.
+  const _seenTenants = new Set<string>();
   items.forEach((it: AnyRecord, idx: number) => {
     validateObjectId(it?.tenantId, `items[${idx}].tenantId`);
+    const _tid = String(it?.tenantId);
+    if (_seenTenants.has(_tid)) {
+      throw new ServiceError(
+        `items[${idx}] duplicate tenant in batch (a tenant may appear at most once)`,
+        422
+      );
+    }
+    _seenTenants.add(_tid);
     validateTerm(String(it?.term || ''), `items[${idx}].term`);
     if (
       typeof it?.monthly !== 'boolean' &&

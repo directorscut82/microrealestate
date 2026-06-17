@@ -69,5 +69,10 @@
   "short_rentcall": "R",
   "short_rentcall_last_reminder": "R",
   "short_rentcall_reminder": "R",
-  "{{appName}} Sign in to the tenant portal": "{{appName}} Melden Sie sich beim Mietportal an"
+  "{{appName}} Sign in to the tenant portal": "{{appName}} Melden Sie sich beim Mietportal an",
+  "Total": "Gesamt",
+  "Discount": "Rabatt",
+  "VAT": "MwSt.",
+  "Previous balance": "Vorheriger Saldo",
+  "Additional costs": "Zusätzliche Kosten"
 }

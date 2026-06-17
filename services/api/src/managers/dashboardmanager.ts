@@ -294,7 +294,43 @@ export async function all(req: Req, res: Res) {
                 '[]'
               )
             ) {
-              sumPayments = sumPayments + payment.amount;
+              // Round-1 audit M6: the headline revenue KPI must count only the
+              // RENT/CHARGE income portion of a payment, not VAT / deposit /
+              // previous-balance / extra-charge cash (those are pass-through or
+              // carry-in, not revenue). Mirror the category exclusion
+              // _computePaidByBucket uses. When a payment carries an explicit
+              // allocation, sum only the income categories; an un-allocated
+              // (legacy) payment counts in full as before (it is rent cash).
+              const allocation = Array.isArray(payment.allocation)
+                ? payment.allocation
+                : null;
+              if (allocation && allocation.length) {
+                // Revenue = the payment MINUS its explicitly NON-revenue
+                // allocation (VAT / deposit / previous-balance / extra-charge).
+                // Computing it as (amount − non-revenue) rather than summing the
+                // income lines is critical for an OVERPAYMENT: the surplus has
+                // no owed-line to allocate to, so Σ(allocation) < amount; the
+                // unallocated surplus is rent PREPAYMENT (real collected cash,
+                // becomes a carry-forward credit) and must still count as
+                // revenue (Step-7 R1-M6 — summing income lines dropped it).
+                const NON_REVENUE = new Set([
+                  'vat',
+                  'previousBalance',
+                  'extracharge',
+                  'deposit'
+                ]);
+                const nonRevenue = allocation.reduce(
+                  (s: number, a: AnyRecord) =>
+                    NON_REVENUE.has(String(a?.category || ''))
+                      ? s + (Number(a?.amount) || 0)
+                      : s,
+                  0
+                );
+                const income = Math.max(0, (Number(payment.amount) || 0) - nonRevenue);
+                sumPayments = sumPayments + income;
+              } else {
+                sumPayments = sumPayments + payment.amount;
+              }
             }
           });
         });
@@ -445,8 +481,18 @@ export async function all(req: Req, res: Res) {
         // double-count prior months. The internal cumulative ledger
         // (rent.total.balance) is unchanged; only this aggregator output
         // is per-month.
+        // Round-1 audit M5: a NEGATIVE balance is a carry-in CREDIT from a
+        // prior overpayment, not additional due-this-month. The old
+        // `tenantDue - tenantBalance` ADDED the credit's magnitude to this
+        // month's due (a 1000 bill with a -200 credit became monthDue 1200),
+        // surfacing phantom notPaid for a month the credit already settled.
+        // Clamp the carry-in at 0 so a credit can't inflate this month's
+        // shortfall. (Step-7: do NOT use _isSettledByCarryForward here — it
+        // also returns true for a PAST month settled by a LATER catch-up
+        // payment, which would wrongly hide a month whose own rent was never
+        // collected that month and break billed = paid + notPaid.)
         const tenantBalance = rent.total?.balance || 0;
-        const tenantMonthDue = tenantDue - tenantBalance;
+        const tenantMonthDue = tenantDue - Math.max(0, tenantBalance);
         acc[key].notPaid +=
           tenantPaid < tenantMonthDue ? tenantMonthDue - tenantPaid : 0;
         acc[key].baseRent += tenantBaseRent;

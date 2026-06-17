@@ -14,6 +14,7 @@ import { downloadDocument } from '../../utils/fetch';
 import { EmptyIllustration } from '../Illustrations';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import ExpressPaymentDialog from './ExpressPaymentDialog';
 import NewPaymentDialog from '../payment/NewPaymentDialog';
 import RentHistoryDialog from './RentHistoryDialog';
@@ -363,6 +364,7 @@ function StatusLegend({ actionsRight }) {
 
 function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
   const { t } = useTranslation('common');
+  const formatNumber = useFormatNumber();
   const store = useContext(StoreContext);
   const rentAmounts = getRentAmounts(rent);
   const hasBreakdown =
@@ -520,7 +522,8 @@ function RentRow({ rent, isSelected, onSelect, onEdit, onHistory }) {
                 />
                 {_surplus > 0 ? (
                   <div className="text-[10px] text-olive whitespace-nowrap">
-                    {t('+{{surplus}}€ credit', { surplus: _surplus.toFixed(2) })}
+                    {/* R2-M7: format via org locale/currency, €-free key. */}
+                    {t('+{{surplus}} credit', { surplus: formatNumber(_surplus) })}
                   </div>
                 ) : null}
               </div>

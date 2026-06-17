@@ -202,4 +202,34 @@ describe('computeBuildingExpenseBreakdown', () => {
     expect(byProp.p2.amount).toBe(20);
     expect(r.tenantTotal).toBe(50); // both billed to renters, matching the engine
   });
+
+  // Round-1 audit M2: the thousandths basis `whole` (the printed denominator)
+  // must reduce over ALL building.units — the SAME denominator the engine bills
+  // with — so the equation part ÷ whole × total reconciles to the billed share
+  // when an UNMANAGED unit (no propertyId) carries thousandths.
+  it('M2: thousandths basis `whole` uses the full-building denominator', () => {
+    const b = {
+      _id: 'bm2', name: 'BM2', atakPrefix: '005578',
+      units: [
+        // managed unit (500‰), tenant-occupied
+        { ...makeUnit('p1', { generalThousandths: 500 }), property: { name: 'Apt 1' }, tenant: { _id: 't1', name: 'Alice' } },
+        // UNMANAGED unit (no propertyId) carrying the other 500‰
+        { _id: 'u_unmanaged', atakNumber: 'ATAK_u', isManaged: false, surface: 50, generalThousandths: 500, heatingThousandths: 0, elevatorThousandths: 0, floor: 1, owners: [], monthlyCharges: [] }
+      ],
+      expenses: [{ _id: 'e1', name: 'Cleaning', type: 'common', amount: 100, allocationMethod: 'general_thousandths', isRecurring: true, startTerm: 2024010100, customAllocations: [] }],
+      address: {}, blockStreets: [], contractors: [], repairs: [], ownerMonthlyExpenses: []
+    };
+    const r = computeBuildingExpenseBreakdown(b, 2024060100);
+    const row = r.rows.find((x) => x.propertyId === 'p1');
+    expect(row).toBeDefined();
+    // Engine bills 100 × 500/1000 = 50 for the managed unit.
+    expect(row.amount).toBe(50);
+    // FAILING-FIRST: basis.whole was 500 (managed-only) → 100×500/500=100 ≠ 50.
+    // After the fix whole=1000 (full building) → 100×500/1000=50 = billed share.
+    expect(row.basis.kind).toBe('thousandths');
+    expect(row.basis.whole).toBe(1000);
+    expect(row.basis.part).toBe(500);
+    // The equation now reconciles: part/whole*total === amount.
+    expect((row.basis.part / row.basis.whole) * row.basis.total).toBeCloseTo(row.amount, 2);
+  });
 });

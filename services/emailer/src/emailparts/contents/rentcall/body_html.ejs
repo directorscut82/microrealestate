@@ -29,6 +29,23 @@
             <% (rent.buildingCharges || []).forEach(function(item) { %>
             <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%= item.buildingName ? item.buildingName + ' - ' : '' %><%= item.description %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(item.amount, 'currency') %></td></tr>
             <% }); %>
+            <%# Round-2 audit M3: reconcile the table to the bold Total. The
+                listed lines above are PRE-TAX; without these rows the visible
+                items don't sum to grandTotal (= preTax + charges + building
+                + debts - discount + VAT + previous balance). Mirror the PDF's
+                rentcalltotal.ejs. Only emit a row when its amount is non-zero. %>
+            <% if (rent.total.discount) { %>
+            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%- _.t('Discount') %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">- <%- _.formatNumber(rent.total.discount, 'currency') %></td></tr>
+            <% } %>
+            <% if (rent.total.debts) { %>
+            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%- _.t('Additional costs') %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(rent.total.debts, 'currency') %></td></tr>
+            <% } %>
+            <% if (rent.total.vat) { %>
+            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%- _.t('VAT') %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(rent.total.vat, 'currency') %></td></tr>
+            <% } %>
+            <% if (rent.total.balance) { %>
+            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%- _.t('Previous balance') %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(rent.total.balance, 'currency') %></td></tr>
+            <% } %>
             <tr><td style="padding:4px 8px;font-weight:bold;"><strong><%- _.t('Total') %></strong></td><td style="padding:4px 8px;text-align:right;font-weight:bold;"><strong><%- _.formatNumber(rent.total.grandTotal, 'currency') %></strong></td></tr>
           </table>
           <% } %>

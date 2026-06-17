@@ -1,6 +1,7 @@
 {
   "(unlinked)": "(unlinked)",
   "+{{surplus}}€ credit": "+{{surplus}}€ credit",
+  "+{{surplus}} credit": "+{{surplus}} credit",
   "1st notice sent on {{date}}": "1st notice sent on {{date}}",
   "2nd notice sent on {{date}}": "2nd notice sent on {{date}}",
   "= unpaid": "= unpaid",
@@ -1125,7 +1126,6 @@
   "{{count}} bill(s) imported successfully": "{{count}} bill(s) imported successfully",
   "{{count}} bill(s) marked as paid": "{{count}} bill(s) marked as paid",
   "{{count}} buildings": "{{count}} buildings",
-  "{{count}} buildings": "{{count}} buildings",
   "{{count}} buildings_one": "1 building",
   "{{name}} {{pct}}% = {{amount}}": "{{name}} {{pct}}% = {{amount}}",
   "{{count}} duplicate files skipped": "{{count}} duplicate files skipped",
@@ -1153,5 +1153,8 @@
   "{{part}}‰ of {{whole}}‰": "{{part}}‰ of {{whole}}‰",
   "{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €": "{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €",
   "{{total}} ÷ {{count}}": "{{total}} ÷ {{count}}",
-  "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} units = {{share}} €"
+  "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} units = {{share}} €",
+  "Payment of {{amount}} recorded": "Payment of {{amount}} recorded",
+  "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
 }

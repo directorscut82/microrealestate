@@ -503,10 +503,39 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
       // reduce produce NaN, and `(length && NaN) || 0` collapsed the WHOLE
       // property's expense sum to €0 (Overview under-stated vs the ledger —
       // round-2 audit H1). Matches the engine guard at 1_base.ts.
-      occupant.expenses += (item.expenses || []).reduce(
-        (acc: number, e: { amount: number }) => acc + (Number(e?.amount) || 0),
-        0
-      );
+      // Round-2 audit M1: window each expense by its [beginDate,endDate] like
+      // the rent engine does (1_base.ts ~896-916). The Overview labels this
+      // figure as the RECURRING monthly Total, so a one-time / sub-period
+      // expense whose window excludes the current period must NOT inflate it
+      // every month. beginDate/endDate were just normalized to DD/MM/YYYY above
+      // (and defaulted to the property entry/exit when absent).
+      occupant.expenses += (item.expenses || [])
+        .filter((e: AnyRecord) => {
+          if (!e?.beginDate && !e?.endDate) return true; // no window → always
+          const begin = e.beginDate
+            ? moment.utc(e.beginDate, 'DD/MM/YYYY')
+            : null;
+          const end = e.endDate ? moment.utc(e.endDate, 'DD/MM/YYYY') : null;
+          if (begin && !begin.isValid()) return true; // unparseable → keep
+          if (end && !end.isValid()) return true;
+          // MONTH-granularity, matching the rent engine
+          // (1_base.ts ~896-916: isBetween(begin, end, 'months', '[]') against
+          // currentMoment = startOf the term's month). Comparing at day
+          // granularity would wrongly drop an expense that starts/ends
+          // mid-current-month (e.g. begin=20th when today is the 18th, or
+          // end=10th when today is the 18th) even though the engine bills it
+          // for the whole current month (Step-7 R2-M1, same class as H3).
+          const nowMonth = currentDate.clone().startOf('month');
+          if (begin && nowMonth.isBefore(begin.clone().startOf('month')))
+            return false;
+          if (end && nowMonth.isAfter(end.clone().startOf('month')))
+            return false;
+          return true;
+        })
+        .reduce(
+          (acc: number, e: { amount: number }) => acc + (Number(e?.amount) || 0),
+          0
+        );
     });
     occupant.preTaxTotal =
       occupant.rental + occupant.expenses - occupant.discount;

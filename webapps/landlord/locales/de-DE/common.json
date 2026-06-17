@@ -1,6 +1,7 @@
 {
   "(unlinked)": "(nicht verknüpft)",
   "+{{surplus}}€ credit": "+{{surplus}}€ Guthaben",
+  "+{{surplus}} credit": "+{{surplus}} Guthaben",
   "1st notice sent on {{date}}": "Den ersten Zahlungshinweis am {{date}} verschickt",
   "2nd notice sent on {{date}}": "Den zweiten Zahlungshinweis am {{date}} verschickt",
   "= unpaid": "= unbezahlt",
@@ -1062,5 +1063,8 @@
   "Replace in place": "An Ort und Stelle ersetzen",
   "Create new tenant": "Neuen Mieter erstellen",
   "Lease extension detected": "Mietvertragsverlängerung erkannt",
-  "Tenant already exists": "Mieter existiert bereits"
+  "Tenant already exists": "Mieter existiert bereits",
+  "Payment of {{amount}} recorded": "Zahlung von {{amount}} erfasst",
+  "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
 }

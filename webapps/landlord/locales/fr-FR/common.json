@@ -1,6 +1,7 @@
 {
   "(unlinked)": "(non lié)",
   "+{{surplus}}€ credit": "+{{surplus}}€ de crédit",
+  "+{{surplus}} credit": "+{{surplus}} de crédit",
   "1st notice sent on {{date}}": "1er avis envoyé le {{date}}",
   "2nd notice sent on {{date}}": "2ème avis envoyé le {{date}}",
   "= unpaid": "= impayé",
@@ -1062,5 +1063,8 @@
   "Replace in place": "Remplacer sur place",
   "Create new tenant": "Créer un nouveau locataire",
   "Lease extension detected": "Prolongation de bail détectée",
-  "Tenant already exists": "Le locataire existe déjà"
+  "Tenant already exists": "Le locataire existe déjà",
+  "Payment of {{amount}} recorded": "Paiement de {{amount}} enregistré",
+  "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
 }

@@ -1,6 +1,7 @@
 {
   "(unlinked)": "(μη συνδεδεμένο)",
   "+{{surplus}}€ credit": "+{{surplus}}€ πίστωση",
+  "+{{surplus}} credit": "+{{surplus}} πίστωση",
   "1st notice sent on {{date}}": "1η ειδοποίηση στάλθηκε στις {{date}}",
   "2nd notice sent on {{date}}": "2η ειδοποίηση στάλθηκε στις {{date}}",
   "= unpaid": "= απλήρωτο",
@@ -1151,5 +1152,8 @@
   "{{part}}‰ of {{whole}}‰": "{{part}}‰ από {{whole}}‰",
   "{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €": "{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €",
   "{{total}} ÷ {{count}}": "{{total}} ÷ {{count}}",
-  "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} μονάδες = {{share}} €"
+  "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} μονάδες = {{share}} €",
+  "Payment of {{amount}} recorded": "Καταγράφηκε καταβολή {{amount}}",
+  "Over-allocated by {{amount}}": "Υπερκατανομή κατά {{amount}}",
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν."
 }

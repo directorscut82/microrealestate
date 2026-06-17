@@ -3,12 +3,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import { LuChevronDown } from 'react-icons/lu';
+import NumberFormat from '../NumberFormat';
 import { Separator } from '../ui/separator';
 import { useState } from 'react';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import useTranslation from 'next-translate/useTranslation';
 
 function SelectRentItem({ rent, onClick }) {
   const { t } = useTranslation('common');
+  const formatNumber = useFormatNumber();
   const rentAmounts = rent ? getRentAmounts(rent) : null;
 
   // Remaining = max(0, totalAmount - payment). Surplus (overpaid) is
@@ -43,14 +46,20 @@ function SelectRentItem({ rent, onClick }) {
                 {t('Remaining')}
               </div>
               <div className="text-label text-ink">
-                {/* Inline number to keep the surplus badge aligned. */}
-                <span className={_remaining > 0 ? 'font-bold text-oxide' : ''}>
-                  {_remaining.toFixed(2)}
-                </span>
+                {/* R2-M7: render via NumberFormat (org locale + currency)
+                    instead of a bare .toFixed(2) with no symbol. */}
+                <NumberFormat
+                  value={_remaining}
+                  showZero
+                  debitColor={_remaining > 0}
+                  className={_remaining > 0 ? 'font-bold' : ''}
+                />
               </div>
               {_surplus > 0 ? (
                 <div className="text-[10px] text-olive whitespace-nowrap">
-                  {t('+{{surplus}}€ credit', { surplus: _surplus.toFixed(2) })}
+                  {/* R2-M7: format the surplus through the org formatter and
+                      use the €-free key (the amount carries the currency). */}
+                  {t('+{{surplus}} credit', { surplus: formatNumber(_surplus) })}
                 </div>
               ) : null}
             </div>

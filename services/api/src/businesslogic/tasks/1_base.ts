@@ -168,7 +168,12 @@ function _shareBasis(
           : method === 'heating_thousandths'
             ? 'heatingThousandths'
             : 'elevatorThousandths';
-      const sumT = managed.reduce(
+      // Round-1 audit M2: the engine (_computeBuildingChargeRaw) divides
+      // thousandths over ALL building.units, not just managed units. Sum the
+      // displayed `whole` over the SAME full set so the printed equation
+      // (part ÷ whole × total) reconciles to the billed share when an unmanaged
+      // unit carries thousandths. (`part`/`share`/`amount` are unchanged.)
+      const sumT = (building.units || []).reduce(
         (s: number, u: any) => s + (Number(u[key]) || 0),
         0
       );

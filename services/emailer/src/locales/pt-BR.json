@@ -69,5 +69,10 @@
   "short_rentcall": "R",
   "short_rentcall_last_reminder": "R",
   "short_rentcall_reminder": "R",
-  "{{appName}} Sign in to the tenant portal": "{{appName}} Entre no portal do inquilino"
+  "{{appName}} Sign in to the tenant portal": "{{appName}} Entre no portal do inquilino",
+  "Total": "Total",
+  "Discount": "Desconto",
+  "VAT": "IVA",
+  "Previous balance": "Saldo anterior",
+  "Additional costs": "Custos adicionais"
 }

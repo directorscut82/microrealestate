@@ -27,6 +27,7 @@ import {
 } from '../ui/select';
 import { LuPencil, LuPlus, LuTrash2 } from 'react-icons/lu';
 import NumberFormat from '../NumberFormat';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import ConfirmDialog from '../ConfirmDialog';
 import { cn } from '../../utils';
 import moment from 'moment';
@@ -330,6 +331,7 @@ function _formatDate(d) {
 function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) {
   const queryClient = useQueryClient();
   const { t } = useTranslation('common');
+  const formatNumber = useFormatNumber();
   const paymentTypes = usePaymentTypes();
   const initVals = initialFormValues();
   const formRef = useRef();
@@ -647,8 +649,9 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
         if (_sum > 0) {
           toast.success(
-            t('Payment of {{amount}}€ recorded', {
-              amount: _sum.toFixed(2)
+            // R2-M6: format via org locale/currency, €-free key.
+            t('Payment of {{amount}} recorded', {
+              amount: formatNumber(_sum)
             })
           );
         } else if (_savedTilesChanged) {

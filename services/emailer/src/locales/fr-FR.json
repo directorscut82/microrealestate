@@ -69,5 +69,10 @@
   "short_rentcall": "A",
   "short_rentcall_last_reminder": "A",
   "short_rentcall_reminder": "A",
-  "{{appName}} Sign in to the tenant portal": "{{appName}} Connectez-vous au portail locataire"
+  "{{appName}} Sign in to the tenant portal": "{{appName}} Connectez-vous au portail locataire",
+  "Total": "Total",
+  "Discount": "Remise",
+  "VAT": "TVA",
+  "Previous balance": "Solde précédent",
+  "Additional costs": "Frais supplémentaires"
 }

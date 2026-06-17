@@ -1,6 +1,7 @@
 {
   "(unlinked)": "(não vinculado)",
   "+{{surplus}}€ credit": "+{{surplus}}€ de crédito",
+  "+{{surplus}} credit": "+{{surplus}} de crédito",
   "1st notice sent on {{date}}": "1º aviso enviado em {{date}}",
   "2nd notice sent on {{date}}": "2º aviso enviado em {{date}}",
   "= unpaid": "= não pago",
@@ -1062,5 +1063,8 @@
   "Replace in place": "Substituir no local",
   "Create new tenant": "Criar novo inquilino",
   "Lease extension detected": "Prorrogação de contrato detectada",
-  "Tenant already exists": "O inquilino já existe"
+  "Tenant already exists": "O inquilino já existe",
+  "Payment of {{amount}} recorded": "Pagamento de {{amount}} registrado",
+  "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
 }
