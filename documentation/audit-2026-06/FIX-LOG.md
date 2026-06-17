@@ -179,3 +179,28 @@
 - **R1-M3** (allocation VAT preview), **R1-M4** (pie Receipts-vs-Owed basis), **R2-M2** (express drawer page-bound ≤21 rows), **R1-M10** (bulk-selection refetch-prune) — frontend display findings, queued for the frontend follow-up.
 
 ### Verification: api jest **610 passed / 0 failed** (+11 over the HIGH-batch 599). common+api+emailer build OK; landlord lint OK.
+
+## LOW BATCH (base 51eda92a) — selected round-1 + round-2 LOW findings
+
+> Fixed the LOWs that are real crash-guards / money-correctness / cross-surface
+> consistency; the rest (pure cosmetic / UI-binding / legal-question) are noted
+> as queued. Several LOWs were already closed by the HIGH/MED batches.
+
+### Already fixed by earlier batches (no action):
+- **R2-L1** (add() currency validation) — fixed with R2-H6.
+- **R2-L5** (toOccupantData no-expenses crash) — fixed in 3bd3ee52.
+- **R2-L14** (English "Total"/"Building charges" in Greek email) — fixed with R2-M3 (added Σύνολο/Έκπτωση/ΦΠΑ/… to all 6 emailer locales).
+- **R1-L4** (auto-spread phantom discount owed-line) — display-only, same root as the shipped express/H1 discount fix.
+- **R1-L9 ≡ R2-M2** (express drawer page-bound) — deferred frontend (queued).
+
+### Fixed this batch:
+- **R2-L9** receipt/invoice PDF body crashed (500/blank) on a legacy rent missing `preTaxAmounts`/`discounts`/`debts` arrays — added `|| []` guards on the 3 forEach + the empty-row length math (mirrors the existing buildingCharges/charges guards). `invoicebody.ejs`. pdfgenerator build OK; render-proof at deploy.
+- **R1-L7** accounting Owners-tab taxId search now normalized (lowercase + strip space/dot/dash) like the Owners page, so the same query yields the same owner set on both surfaces. `accounting/[year].js`.
+- **R1-L8** accounting tenant search coerces name/tenant via `String(x ?? '')` — a null name no longer throws → ErrorBoundary-blanks the whole Accounting page. `accounting/[year].js`.
+- **R1-L2** repair `chargeTerm` normalized to YYYYMM0100 (day=01) in add/updateRepair so a day≠01 term doesn't vanish from the dashboard rollup (mirrors the one-time expense startTerm normalization). `buildingmanager.ts`. (API/script-only; UI emits day-01.)
+- **R1-L6** owner "Outstanding" badge (OwnerListItem) + co-owner split (owners/[id].js) now format via `useFormatNumber` (org locale + currency) instead of `Intl.NumberFormat(undefined,{currency:'EUR'})` — correct grouping/symbol on non-el / non-EUR realms.
+
+### Verification: api jest 609/0; api + pdfgenerator build OK; landlord lint OK.
+
+### Queued LOWs (documented, lower-value — cosmetic / UI-binding / legal):
+- R2-L2 (JPY zero-decimal forced 2dp), R2-L3 (multi-property PDF names first address), R2-L4/L12 (expense date inputs bound to lease vs property entry/exit), R2-L6 (IRIS QR write-only), R2-L7 (express UTC vs local date off-by-one), R2-L8 (DEH bare-thousands-dot parse), R2-L10 (DEH €0 em-dash + OS-locale dates), R2-L11 (tenant-app USD default), R2-L13 (`{{count}} tenants` plural for count=1), R2-L15 (settlement month labels frozen at module-load locale), R2-L16 (empty-IBAN dangling line + no IBAN validation), R1-L1 (E9 bare-ownership/usufruct billed as full owner — needs legal confirmation), R1-L3 (E9 mid-batch rents not rolled back), R1-L5 (owner persisted-amount vs grafted-basis display disagree).

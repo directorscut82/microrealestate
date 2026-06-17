@@ -78,11 +78,17 @@ function Accounting() {
   const filteredOwners = useMemo(() => {
     const list = ownersData || [];
     if (!searchText) return list;
+    // Round-1 audit L7: normalize taxId the SAME way the Owners page does
+    // (lowercase + strip space/dot/dash) so the same query yields the same
+    // owner set on both surfaces and a separator-containing taxId still matches.
+    const norm = (s) =>
+      String(s || '')
+        .toLowerCase()
+        .replace(/\s|\.|-/gi, '');
+    const q = norm(searchText);
     const lc = searchText.toLowerCase();
     return list.filter(
-      (o) =>
-        (o.name || '').toLowerCase().includes(lc) ||
-        String(o.taxId || '').includes(searchText)
+      (o) => (o.name || '').toLowerCase().includes(lc) || norm(o.taxId).includes(q)
     );
   }, [ownersData, searchText]);
 
@@ -90,19 +96,22 @@ function Accounting() {
     if (!accountingData) return {};
     if (!searchText) return accountingData;
     const lc = searchText.toLowerCase();
+    // Round-1 audit L8: coerce name/tenant with String(x ?? '') — a row with a
+    // null name otherwise throws at .toLowerCase() and the ErrorBoundary blanks
+    // the whole Accounting page (matches owners/index.js norm()).
     return {
       ...accountingData,
       incomingTenants:
         accountingData.incomingTenants?.filter((t) =>
-          t.name.toLowerCase().includes(lc)
+          String(t.name ?? '').toLowerCase().includes(lc)
         ) || [],
       outgoingTenants:
         accountingData.outgoingTenants?.filter((t) =>
-          t.name.toLowerCase().includes(lc)
+          String(t.name ?? '').toLowerCase().includes(lc)
         ) || [],
       settlements:
         accountingData.settlements?.filter((s) =>
-          s.tenant.toLowerCase().includes(lc)
+          String(s.tenant ?? '').toLowerCase().includes(lc)
         ) || []
     };
   }, [accountingData, searchText]);

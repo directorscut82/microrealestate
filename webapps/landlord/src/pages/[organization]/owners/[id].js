@@ -13,6 +13,7 @@ import { ownerChargeLabel } from '../../../utils/lineLabels';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
+import useFormatNumber from '../../../hooks/useFormatNumber';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
@@ -23,6 +24,7 @@ const _termLabel = (term) => {
 
 function OwnerDetail() {
   const { t } = useTranslation('common');
+  const formatNumber = useFormatNumber();
   const router = useRouter();
   const ownerKey = decodeURIComponent(
     Array.isArray(router.query.id) ? router.query.id[0] : router.query.id || ''
@@ -154,10 +156,8 @@ function OwnerDetail() {
                               t('{{name}} {{pct}}% = {{amount}}', {
                                 name: o.isRest ? t('others') : o.name,
                                 pct: o.percentage,
-                                amount: new Intl.NumberFormat(undefined, {
-                                  style: 'currency',
-                                  currency: 'EUR'
-                                }).format(o.amount)
+                                // R1-L6: org locale + currency, not hardcoded EUR
+                                amount: formatNumber(o.amount)
                               })
                             )
                             .join(', ')}

@@ -12,6 +12,7 @@ import NumberFormat from '../NumberFormat';
 import { Progress } from '../ui/progress';
 import { useCallback } from 'react';
 import { useRouter } from 'next/router';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import useTranslation from 'next-translate/useTranslation';
 
 // One owner card in the Owners list. Mirrors TenantListItem: header (name +
@@ -20,6 +21,7 @@ import useTranslation from 'next-translate/useTranslation';
 export default function OwnerListItem({ owner }) {
   const router = useRouter();
   const { t } = useTranslation('common');
+  const formatNumber = useFormatNumber();
 
   const handleClick = useCallback(async () => {
     await router.push(
@@ -127,10 +129,8 @@ export default function OwnerListItem({ owner }) {
             />
             {settled
               ? t('Settled')
-              : `${t('Outstanding')}: ${new Intl.NumberFormat(undefined, {
-                  style: 'currency',
-                  currency: 'EUR'
-                }).format(outstanding)}`}
+              : /* R1-L6: org locale + currency, not browser-locale hardcoded EUR */
+                `${t('Outstanding')}: ${formatNumber(outstanding)}`}
           </Badge>
         )}
       </CardFooter>

@@ -4945,6 +4945,15 @@ export async function addRepair(req: Req, res: Res) {
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
+    // Round-1 audit L2: normalize chargeTerm to YYYYMM0100 (day=01) so a
+    // day≠01 term doesn't vanish from the dashboard rollup (which seeds
+    // termToKey only at YYYYMM0100 and drops anything else). Mirrors the
+    // one-time expense startTerm normalization (~line 3040). UI emits day-01;
+    // this guards API/script callers.
+    const _ct = Number(req.body.chargeTerm);
+    if (Number.isFinite(_ct)) {
+      req.body.chargeTerm = Math.floor(_ct / 10000) * 10000 + 100;
+    }
   }
 
   const building = await Collections.Building.findOne({
@@ -5037,6 +5046,15 @@ export async function updateRepair(req: Req, res: Res) {
   }
   if (req.body.chargeTerm) {
     validateTerm(req.body.chargeTerm, 'chargeTerm');
+    // Round-1 audit L2: normalize chargeTerm to YYYYMM0100 (day=01) so a
+    // day≠01 term doesn't vanish from the dashboard rollup (which seeds
+    // termToKey only at YYYYMM0100 and drops anything else). Mirrors the
+    // one-time expense startTerm normalization (~line 3040). UI emits day-01;
+    // this guards API/script callers.
+    const _ct = Number(req.body.chargeTerm);
+    if (Number.isFinite(_ct)) {
+      req.body.chargeTerm = Math.floor(_ct / 10000) * 10000 + 100;
+    }
   }
 
   // Optimistic lock — same pattern as updateExpense. When client passes
