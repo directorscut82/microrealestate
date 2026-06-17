@@ -362,7 +362,11 @@ function _aggregateOwners(
         term: Number(row.term),
         amount,
         paidAmount,
-        outstanding: _round(amount - paidAmount),
+        // CLAMP outstanding to ≥0: an over-paid row (owner overpaid a repair,
+        // then a transition reduced its owner-portion) must never render a
+        // NEGATIVE outstanding on the ledger/statement (Step-7 r2/r5). The
+        // surplus stays visible as paidAmount; outstanding floors at 0.
+        outstanding: Math.max(0, _round(amount - paidAmount)),
         paid: paidAmount >= amount - 0.005,
         source: src,
         expenseType,

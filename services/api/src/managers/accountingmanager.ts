@@ -160,19 +160,45 @@ function _properties(tenant: AnyRecord, rawData = true): AnyRecord[] | string {
   return tenant.properties.map(({ name }: AnyRecord) => name).join('\n');
 }
 
+// Build a currency formatter for the CSV path (rawData=false) that NEVER
+// throws: the JSON path (rawData=true, consumed by React) uses a passthrough,
+// and an empty/invalid `currency` falls back to a passthrough instead of
+// throwing a RangeError that would take down the whole Accounting page + CSV
+// exports (round-2 audit H5). A realm with currency:'' (legacy/mongo-seed;
+// realm schema has no default/required) is the trigger.
+function _safeCurrencyFormatter(
+  locale: string | undefined,
+  currency: string | undefined,
+  rawData: boolean
+): { format: (value: number) => number } {
+  // rawData (JSON for React) → identity passthrough returning the raw number,
+  // exactly as the prior `{ format: (value) => value }` did. The CSV path gets
+  // a real Intl formatter; a bad/empty currency falls back to the SAME identity
+  // passthrough rather than throwing (round-2 audit H5). NOTE: the passthrough
+  // returns the number unchanged (matching prior behavior); call sites that
+  // need a string already coerce via template/translate.
+  const passthrough = { format: (value: number) => value };
+  if (rawData) return passthrough;
+  try {
+    // Intl.NumberFormat.format returns string; cast to the shared shape — CSV
+    // cells accept both, and the prior code assigned the same union.
+    return Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: currency || 'EUR',
+      minimumFractionDigits: 2
+    }) as unknown as { format: (value: number) => number };
+  } catch {
+    return passthrough;
+  }
+}
+
 function _incomingTenants(
   tenants: AnyRecord[],
   locale?: string,
   currency?: string,
   rawData = true
 ): AnyRecord[] {
-  const NumberFormat = !rawData
-    ? Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency,
-        minimumFractionDigits: 2
-      })
-    : { format: (value: number) => value };
+  const NumberFormat = _safeCurrencyFormatter(locale, currency, rawData);
 
   return tenants
     .filter(({ incoming }: AnyRecord) => incoming)
@@ -214,13 +240,7 @@ function _outgoingTenants(
   currency?: string,
   rawData = true
 ): AnyRecord[] {
-  const NumberFormat = !rawData
-    ? Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency,
-        minimumFractionDigits: 2
-      })
-    : { format: (value: number) => value };
+  const NumberFormat = _safeCurrencyFormatter(locale, currency, rawData);
 
   return tenants
     .filter(({ outgoing }: AnyRecord) => outgoing)
@@ -279,24 +299,32 @@ function _settlements(
   currency: string,
   rawData = true
 ): AnyRecord[] {
-  const NumberFormat = Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2
-  });
+  // Gate construction on !rawData like the _incomingTenants/_outgoingTenants
+  // siblings (the JSON path consumed by React never needs a formatter), AND
+  // fall back to a passthrough if `currency` is empty/invalid — an unconditional
+  // Intl.NumberFormat with currency:'' threw a RangeError that took down the
+  // ENTIRE Accounting page + all 3 CSV exports (round-2 audit H5).
+  const NumberFormat = _safeCurrencyFormatter(locale, currency, rawData);
 
   const months = moment.localeData(locale).months();
 
   return tenants.map((tenant: AnyRecord) => {
     // Pin CSV dates to ISO (YYYY-MM-DD); see _incomingTenants for rationale.
+    // Guard the moment.utc against a missing date — moment.utc(undefined) is
+    // TODAY (drifting daily), which fabricated a begin/end period for any
+    // legacy/mongo-seed tenant lacking begin/termination/end (round-2 audit M5).
+    // Mirrors the _incomingTenants/_outgoingTenants `value ? ... : ''` guard.
+    const _endRaw = tenant.terminationDate || tenant.endDate;
     const beginDate = rawData
       ? tenant.beginDate
-      : moment.utc(tenant.beginDate).format('YYYY-MM-DD');
+      : tenant.beginDate
+        ? moment.utc(tenant.beginDate).format('YYYY-MM-DD')
+        : '';
     const endDate = rawData
-      ? tenant.terminationDate || tenant.endDate
-      : moment.utc(tenant.terminationDate || tenant.endDate).format(
-          'YYYY-MM-DD'
-        );
+      ? _endRaw
+      : _endRaw
+        ? moment.utc(_endRaw).format('YYYY-MM-DD')
+        : '';
     const settlements: AnyRecord = rawData
       ? (months as unknown as string[]).map(() => null)
       : (months as unknown as string[]).reduce((acc: AnyRecord, m: string) => {
@@ -388,7 +416,7 @@ function _settlements(
             : `${tenant.name}\n${
                 tenant.reference
               }\n${beginDate} - ${endDate}\n${i18n.__('Deposit: {{deposit}}', {
-                deposit: NumberFormat.format(_round(tenant.guaranty || 0))
+                deposit: String(NumberFormat.format(_round(tenant.guaranty || 0)))
               })}\n${tenant.properties.map(({ name }: AnyRecord) => name).join('\n')}`,
           ...settlements
         };

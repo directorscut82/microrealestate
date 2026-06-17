@@ -164,7 +164,11 @@ function SettlementList({ month, tenantId, settlements, notes }) {
                     {moment(date).format('L')}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {t(type[0].toUpperCase() + type.slice(1))}
+                    {/* Guard against a legacy/typeless payment (type==='' or
+                        undefined): type[0] threw and the ErrorBoundary blanked
+                        the WHOLE Accounting page for every tenant (round-2 audit
+                        H7). Render nothing for a missing type instead. */}
+                    {type ? t(type[0].toUpperCase() + type.slice(1)) : ''}
                   </div>
                   <NumberFormat value={amount} withColor className="text-lg" />
                 </div>

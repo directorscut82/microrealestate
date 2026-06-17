@@ -27,7 +27,7 @@
                     </p>
 
                     <p>
-                        <%- _.t('So far, one or more rents have not been paid. The current amount of unpaid rents is <strong>{{amount}}</strong>.', { amount: _.formatNumber(tenant.rents[0].total.grandTotal, 'currency') }) %>
+                        <%- _.t('So far, one or more rents have not been paid. The current amount of unpaid rents is <strong>{{amount}}</strong>.', { amount: _.formatNumber(Math.max(0, (Number(tenant.rents[0].total.grandTotal) || 0) - (Number(tenant.rents[0].total.payment) || 0)), 'currency') }) %>
                     </p>
 
                     <p>

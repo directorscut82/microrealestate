@@ -19,7 +19,7 @@
           </p>
 
           <p>
-            <%- _.t('We would be grateful if you could proceed to the payment of <strong>{{amount}}</strong> very shortly.', { amount: _.formatNumber(tenant.rents[0].total.grandTotal, 'currency') }) %>
+            <%- _.t('We would be grateful if you could proceed to the payment of <strong>{{amount}}</strong> very shortly.', { amount: _.formatNumber(Math.max(0, (Number(tenant.rents[0].total.grandTotal) || 0) - (Number(tenant.rents[0].total.payment) || 0)), 'currency') }) %>
           </p>
 
           <p>

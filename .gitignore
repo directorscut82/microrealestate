@@ -63,3 +63,10 @@ e2e-playwright/tests/_*.spec.ts
 # Local agent tooling / session artifacts
 .claude/
 .impeccable/
+
+# Adversarial Step-7 workflow scratch test files (subagents leave these in __tests__)
+**/__tests__/*probe*.test.js
+**/__tests__/*skeptic*.test.js
+**/__tests__/_diag*.test.js
+**/__tests__/ZZ_*.test.js
+**/__tests__/zz_*.test.js

@@ -125,12 +125,21 @@ export async function getRentsData(params, documentId) {
             (omitCharges ? 0 : propertyChargesSum) -
             (rent.total.discount || 0) +
             (rent.total.debts || 0);
-          // Receipt headline = subTotal + previous balance (the landlord
-          // perspective). Rent-call headline = the rent's own grandTotal
-          // already computed by the businesslogic pipeline so the PDF
-          // matches the rest of the app exactly.
+          // Receipt headline = subTotal (pre-VAT) + VAT + previous balance.
+          // The template prints "Total before VAT" (subTotal), then a "VAT"
+          // line, then "Previous balance", then "Total with VAT"
+          // (invoiceGrandTotal) — so the headline MUST include the VAT or the
+          // legal Greek receipt does not foot (its printed line-items sum to
+          // more than the headline) and a fully-paid VAT tenant shows phantom
+          // remaining debt (round-2 audit H2). subTotal stays pre-VAT (it is
+          // labeled "Total before VAT"); VAT is added into the headline only.
+          // Rent-call headline = the pipeline grandTotal (already VAT-inclusive)
+          // so the PDF matches the rest of the app exactly.
           const invoiceGrandTotal = omitCharges
-            ? Math.round((subTotal + (rent.total.balance || 0)) * 100) / 100
+            ? Math.round(
+                (subTotal + (rent.total.vat || 0) + (rent.total.balance || 0)) *
+                  100
+              ) / 100
             : Math.round((rent.total.grandTotal || 0) * 100) / 100;
           return {
             ...rent.total,

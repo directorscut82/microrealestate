@@ -461,7 +461,9 @@ export function buildOwnerStatement(
         term,
         amount,
         paidAmount,
-        outstanding: _round(amount - paidAmount),
+        // CLAMP outstanding to ≥0 so an over-paid repair row never prints a
+        // negative outstanding on the legal owner statement (Step-7 r2/r5).
+        outstanding: Math.max(0, _round(amount - paidAmount)),
         paid: paidAmount >= amount - 0.005,
         source: src,
         expenseType,

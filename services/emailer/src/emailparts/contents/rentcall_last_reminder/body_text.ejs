@@ -12,7 +12,7 @@
 
 <%- _.t('In this contract, it is explicitly indicated that {{tenant}} is obliged to pay in advance and monthly its rents to {{landlord}}.', { tenant: tenant.name, landlord: (landlord.hasCompanyInfo ? landlord.companyInfo.legalStructure + ' ' : '') + landlord.name }) %>
 
-<%- _.t('So far, one or more rents have not been paid. The current amount of unpaid rents is {{amount}}.', { amount: _.formatNumber(tenant.rents[0].total.grandTotal, 'currency') }) %>
+<%- _.t('So far, one or more rents have not been paid. The current amount of unpaid rents is {{amount}}.', { amount: _.formatNumber(Math.max(0, (Number(tenant.rents[0].total.grandTotal) || 0) - (Number(tenant.rents[0].total.payment) || 0)), 'currency') }) %>
 
 <%- _.t('We would be grateful if you could proceed to the payment of your rent debts in the following {{days}} days, otherwise we will engage an eviction procedure.', { days: (config && config.EVICTION_NOTICE_DAYS) || 10 }) %>
 

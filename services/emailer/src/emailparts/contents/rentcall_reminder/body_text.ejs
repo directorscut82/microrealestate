@@ -6,7 +6,7 @@
 
 <%- _.t('On examining your account, we note that, failing mistake or omission on our part, you have not settled your rent of {{term}}.', { term: _.formatTerm(period, tenant.contract.lease.timeRange)}) %>
 
-<%- _.t('We would be grateful if you could proceed to the payment of {{amount}} very shortly.', { amount: _.formatNumber(tenant.rents[0].total.grandTotal, 'currency') }) %>
+<%- _.t('We would be grateful if you could proceed to the payment of {{amount}} very shortly.', { amount: _.formatNumber(Math.max(0, (Number(tenant.rents[0].total.grandTotal) || 0) - (Number(tenant.rents[0].total.payment) || 0)), 'currency') }) %>
 
 <%- include('../__content_parts/text/paymentmethods.ejs') %>
 

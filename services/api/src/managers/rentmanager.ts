@@ -189,6 +189,36 @@ function _computeOwedLines(rent: AnyRecord): OwedLine[] {
 }
 
 /**
+ * Express-settle NET owed for a rent, mirroring ExpressPaymentDialog exactly:
+ *   monthly  = (grandTotal − balance)  [discount already netted into grandTotal]
+ *   previous = balance (carry-in arrears)
+ * then subtract what is ALREADY PAID (rent.total.payment), carry-in first then
+ * monthly — so the express amount equals what the user saw in the dialog, NOT
+ * the gross owed-line sum (which over-charged every discounted / partially-paid
+ * tenant — round-1 H1/H6 + round-2 C1/C2). Pure + exported for unit tests.
+ */
+export function _expressNetOwed(targetRent: AnyRecord): {
+  monthlyOwed: number;
+  previousOwed: number;
+} {
+  const grandTotal = Number(targetRent?.total?.grandTotal) || 0;
+  const balance = Number(targetRent?.total?.balance) || 0;
+  let monthlyOwed = Math.max(0, _round(grandTotal - balance));
+  let previousOwed = Math.max(0, _round(balance));
+  let paidSoFar = Math.max(0, Number(targetRent?.total?.payment) || 0);
+  if (paidSoFar > 0 && previousOwed > 0) {
+    const used = Math.min(paidSoFar, previousOwed);
+    previousOwed = _round(previousOwed - used);
+    paidSoFar = _round(paidSoFar - used);
+  }
+  if (paidSoFar > 0 && monthlyOwed > 0) {
+    const used = Math.min(paidSoFar, monthlyOwed);
+    monthlyOwed = _round(monthlyOwed - used);
+  }
+  return { monthlyOwed: _round(monthlyOwed), previousOwed: _round(previousOwed) };
+}
+
+/**
  * B1: auto-spread that emits per-LINE allocations.
  * Walks the OwedLine list (which is already in AUTO_SPREAD_ORDER:
  * previousBalance → rent → propertyCharge → buildingCharge → repair →
@@ -552,10 +582,12 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
     const previousLine = allLines.find(
       (l) => l.category === 'previousBalance'
     );
-    const monthlyOwed = _round(
-      monthLines.reduce((s, l) => s + l.amount, 0)
-    );
-    const previousOwed = _round(previousLine?.amount || 0);
+    // monthLines / previousLine (gross) are used ONLY to build the per-line
+    // allocation SHAPE. The RECORDED amount is the NET remaining from
+    // _expressNetOwed (discount-netted, minus already-paid) so it equals what
+    // the dialog showed — recording the gross sum over-charged every discounted
+    // / partially-paid tenant (round-1 H1/H6 + round-2 C1/C2).
+    const { monthlyOwed, previousOwed } = _expressNetOwed(targetRent);
     let amount = 0;
     const allocation: {
       category: string;
@@ -565,16 +597,14 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
 
     if (it.monthly === true && monthlyOwed > 0) {
       amount = _round(amount + monthlyOwed);
-      // Walk each month-line in spread order, attributing the full
-      // owed amount to its matching lineKey.
+      // Spread the NET monthly amount across the gross month-lines in order,
+      // capped per line, so the allocation never exceeds the recorded amount.
+      let toSpread = monthlyOwed;
       monthLines.forEach((l) => {
-        if (l.amount > 0.005) {
-          allocation.push({
-            category: l.category,
-            lineKey: l.lineKey,
-            amount: l.amount
-          });
-        }
+        if (toSpread <= 0.005 || l.amount <= 0.005) return;
+        const a = _round(Math.min(toSpread, l.amount));
+        allocation.push({ category: l.category, lineKey: l.lineKey, amount: a });
+        toSpread = _round(toSpread - a);
       });
     }
     if (it.previousBalance === true && previousOwed > 0 && previousLine) {
@@ -593,11 +623,31 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
       return null;
     }
 
+    // PRESERVE existing payments. _updateByTerm REPLACES settlements.payments
+    // with paymentData.payments, so the express payload MUST carry the prior
+    // payments (mapped to persisted shape) or it destroys a recorded payment
+    // (round-2 C1). Mirror the normal dialog's `[...savedPayments, ...drafts]`.
+    const existingPayments = (
+      Array.isArray(targetRent?.payments) ? targetRent.payments : []
+    ).map((p: AnyRecord) => ({
+      amount: Number(p?.amount) || 0,
+      date: p?.date || '',
+      type: p?.type || 'transfer',
+      reference: p?.reference || '',
+      description: p?.description || '',
+      allocation: Array.isArray(p?.allocation) ? p.allocation : [],
+      promo: Number(p?.promo) || 0,
+      notepromo: p?.notepromo || '',
+      extracharge: Number(p?.extracharge) || 0,
+      noteextracharge: p?.noteextracharge || ''
+    }));
+
     const paymentData: AnyRecord = {
       _id: tenantId,
       month: Number(term.slice(4, 6)),
       year: Number(term.slice(0, 4)),
       payments: [
+        ...existingPayments,
         {
           amount,
           date: todayDDMMYYYY,

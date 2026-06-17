@@ -34,8 +34,14 @@ export default function IncomingTenants({ data, onCSVClick }) {
             <div>
               <div className="text-xl">{tenant.name}</div>
               <div className="text-muted-foreground">
-                {moment(tenant.beginDate).format('L')} -{' '}
-                {moment(tenant.endDate).format('L')}
+                {moment(tenant.beginDate).format('L')}
+                {/* _incomingTenants intentionally omits endDate; moment(undefined)
+                    rendered TODAY (advancing daily) as a fabricated contract-end
+                    (round-2 audit M4). Only render the end side when present —
+                    matching the CSV which omits the column. */}
+                {tenant.endDate
+                  ? ` - ${moment(tenant.endDate).format('L')}`
+                  : ''}
               </div>
               <div className="flex items-center flex-wrap gap-2 md:text-xl mt-2 mb-4">
                 {tenant.properties.map((property) => (

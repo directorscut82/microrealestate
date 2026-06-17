@@ -36,10 +36,13 @@ export function _isSettledByCarryForward(
       (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
       0
     );
-    const settlementDiscounts = (r.discounts || [])
-      .filter((d: AnyRecord) => d.origin === 'settlement')
-      .reduce((s: number, d: AnyRecord) => s + (Number(d.amount) || 0), 0);
-    const cashIn = paymentsSum + settlementDiscounts;
+    // cashIn is RECEIVED money only. A settlement discount is a BILL REDUCTION
+    // already netted into grandTotal (7_total subtracts ALL rent.discounts), so
+    // it is already reflected in monthlyBill (= grandTotal − balance). Adding it
+    // to cashIn too subtracted the discount from the running deficit TWICE → an
+    // underpaid month wrongly flipped to "paid" (round-1 audit H5). Payments
+    // only.
+    const cashIn = paymentsSum;
     running += monthlyBill - cashIn;
     totalCashIn += cashIn;
     if (Number(r.term) === Number(targetTerm)) {
@@ -476,7 +479,10 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
         if (item.exitDate) {
           item.exitDate = moment.utc(item.exitDate).format('DD/MM/YYYY');
         }
-        item.expenses.forEach((expense: AnyRecord) => {
+        // `|| []` — a property entry lacking the expenses key (legacy /
+        // mongo-seed) otherwise threw here → 500 + blank tenant page (round-2
+        // audit L5). Engine + sum-loop already guard; this display path did not.
+        (item.expenses || []).forEach((expense: AnyRecord) => {
           expense.beginDate = expense.beginDate
             ? moment.utc(expense.beginDate).format('DD/MM/YYYY')
             : item.entryDate;
@@ -492,13 +498,15 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
         }
       }
       occupant.rental += item.rent || 0;
-      occupant.expenses +=
-        (item.expenses?.length &&
-          item.expenses.reduce(
-            (acc: number, { amount }: { amount: number }) => acc + amount,
-            0
-          )) ||
-        0;
+      // Coerce each amount with Number()||0 — a single expense missing/undefined
+      // amount (legacy row; validator only checks amount when present) made the
+      // reduce produce NaN, and `(length && NaN) || 0` collapsed the WHOLE
+      // property's expense sum to €0 (Overview under-stated vs the ledger —
+      // round-2 audit H1). Matches the engine guard at 1_base.ts.
+      occupant.expenses += (item.expenses || []).reduce(
+        (acc: number, e: { amount: number }) => acc + (Number(e?.amount) || 0),
+        0
+      );
     });
     occupant.preTaxTotal =
       occupant.rental + occupant.expenses - occupant.discount;

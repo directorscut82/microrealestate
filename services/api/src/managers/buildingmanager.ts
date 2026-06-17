@@ -7,6 +7,7 @@ import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
   carryOwnerPayments,
   applyCarriedSettlement,
+  recomputeOwnerExpensePaid,
   ownerSlicesOf,
   ownerKeyOf
 } from './ownermanager.js';
@@ -3486,7 +3487,214 @@ async function _removeRepairCharges(building: any, repair: any): Promise<void> {
   }
 }
 
-async function _distributeRepairCharge(
+// Locale-neutral "today" for a synthetic repair-payment provenance date when
+// no prior payment template exists (DD/MM/YYYY, the persisted date format).
+function todayDDMMYYYYForRepair(): string {
+  return moment.utc().format('DD/MM/YYYY');
+}
+
+// Distribute the single recorded-payment pool for a repair across its freshly-
+// rebuilt owner rows (source 'repair' owner-portion + per-vacant-unit
+// 'repair-vacant'), capped at each row's amount so paid never exceeds amount
+// (owed===paid per row — no negative outstanding on the ledger/statement, no
+// silent truncation on the eksoda dashboard). Any pool euro the live liability
+// rows cannot absorb (the repair is now mostly the tenant's) becomes ONE
+// standalone settled-remnant 'repair' row whose amount === that remainder
+// (owed===paid). This is the SINGLE place repair payments are re-attached, so
+// the result is identical no matter how many reclassify / occupancy / term
+// transitions preceded it (round-1 C2 + Step-7 r1/r2/r3 hardening).
+function _applyRepairPaymentPool(
+  building: any,
+  repairIdStr: string,
+  term: number,
+  paidByProp: Map<string, number>,
+  flagByProp: Map<string, { amount: number; date: any }>,
+  mkPoolPayment: (amount: number) => any
+): void {
+  const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  const OWNER_KEY = '__owner__';
+  const omeArr = (building as any).ownerMonthlyExpenses;
+  const liveRows = omeArr.filter(
+    (e: any) =>
+      (e.source === 'repair' || e.source === 'repair-vacant') &&
+      String(e.expenseId) === repairIdStr
+  );
+  const keyOf = (row: any) =>
+    row.propertyId ? String(row.propertyId) : OWNER_KEY;
+
+  // Re-apply recorded καταβολές PER PROPERTY: each rebuilt row draws from its
+  // OWN unit's captured pool first (exact owner attribution — a flat pool
+  // attributed one owner's payment to another's row in a multi-vacant building,
+  // Step-7-r7). Cap each row's fill at its amount. A bare manual paid flag
+  // (setOwnerExpensePaid: paid:true, empty payments) for that same property is
+  // applied to ONE matching unpaid row when no cash covers it.
+  const remainingByProp = new Map<string, number>();
+  for (const [k, v] of paidByProp) remainingByProp.set(k, _round(v));
+
+  // Pass 1: fill each row from its OWN property bucket, capped at amount.
+  for (const row of liveRows) {
+    const k = keyOf(row);
+    const rem = remainingByProp.get(k) || 0;
+    if (rem <= 0.005) continue;
+    const rowAmount = Number(row.amount) || 0;
+    if (rowAmount <= 0.005) continue;
+    const apply = Math.min(rowAmount, rem);
+    row.payments = [
+      ...(Array.isArray(row.payments) ? row.payments : []),
+      mkPoolPayment(apply)
+    ];
+    recomputeOwnerExpensePaid(row);
+    remainingByProp.set(k, _round(rem - apply));
+  }
+
+  // Pass 2: cross-source migration, gated by the SAME owner-identity the READ
+  // SIDE uses, so a migrated payment is never attributed to an owner who did not
+  // pay it. The realistic carry this preserves: an owner-portion 'repair' row
+  // [key '__owner__'] collapses to a per-unit 'repair-vacant' row on a
+  // reclassify (single-unit owners→tenants — the C2-a case), or vice-versa.
+  //
+  // The read side (ownermanager._aggregateOwners, ownerstatement) attributes:
+  //   - a per-unit (propertyId) row → that unit's owner(s);
+  //   - a building-wide '__owner__' row → the LEX-FIRST canonical owner of the
+  //     building's distinct owners (ownermanager.ts canonicalKey).
+  // So migration is money-correct only between rows that resolve to the SAME
+  // attributed owner. r12 broke because '__owner__' was allowed to reach ANY
+  // unit unconditionally; in a mixed building that credited a different owner.
+  //
+  // Owner identity is reconciled drift-tolerantly (sameOwner): same human across
+  // memberId-vs-name and taxId-present-vs-absent key drift (r10), without merging
+  // two different same-surname owners who carry conflicting taxIds (r11 B3).
+  const sameOwner = (a: any, b: any) => {
+    if (!a || !b) return false;
+    if (a.memberId && b.memberId)
+      return String(a.memberId) === String(b.memberId);
+    const an = String(a.name || '').trim().toLowerCase();
+    const bn = String(b.name || '').trim().toLowerCase();
+    if (!an || !bn || an !== bn) return false; // names must match
+    const at = String(a.taxId || '').trim();
+    const bt = String(b.taxId || '').trim();
+    if (at && bt) return at === bt; // both present → must be equal
+    return true; // same name + non-conflicting (≥1 absent) taxId → same human
+  };
+  const dedupOwners = (owners: any[]): any[] => {
+    const out: any[] = [];
+    for (const o of owners) if (!out.some((x) => sameOwner(x, o))) out.push(o);
+    return out;
+  };
+  const buildingOwners = dedupOwners(
+    (building.units || []).flatMap((u: any) => (u.owners || []) as any[])
+  );
+  // canonical owner the read side credits a building-wide '__owner__' row to:
+  // lex-first by ownerKeyOf (matches ownermanager.canonicalKey).
+  const canonicalBuildingOwner =
+    buildingOwners.length > 0
+      ? [...buildingOwners].sort((x: any, y: any) =>
+          ownerKeyOf(x) < ownerKeyOf(y) ? -1 : 1
+        )[0]
+      : null;
+  const ownersOf = (k: string): any[] => {
+    if (k === OWNER_KEY)
+      return canonicalBuildingOwner ? [canonicalBuildingOwner] : [];
+    const unit = (building.units || []).find(
+      (u: any) => String(u.propertyId) === String(k)
+    );
+    return dedupOwners(((unit && unit.owners) || []) as any[]);
+  };
+  const rowOwners = (row: any): any[] =>
+    row.propertyId
+      ? ownersOf(String(row.propertyId))
+      : canonicalBuildingOwner
+        ? [canonicalBuildingOwner]
+        : [];
+  // Same attributed owner-set (drift-tolerant, order-independent). An empty
+  // destination (unowned legacy unit) is reachable from anyone; an empty source
+  // reaches only empty destinations.
+  const sameAttributedOwner = (src: any[], dst: any[]) => {
+    if (dst.length === 0) return true;
+    if (src.length !== dst.length) return false;
+    const used = new Array(src.length).fill(false);
+    for (const d of dst) {
+      const i = src.findIndex((s, idx) => !used[idx] && sameOwner(s, d));
+      if (i < 0) return false;
+      used[i] = true;
+    }
+    return true;
+  };
+
+  // Track each property bucket's UNPLACED remainder after migration, so we can
+  // distinguish a genuine overpayment (drop) from a payment whose liability row
+  // simply moved to a now-occupied term (re-materialise at the original term).
+  const leftoverByProp = new Map<string, number>();
+  for (const [k, rem] of remainingByProp) {
+    if (rem <= 0.005) continue;
+    const srcOwners = ownersOf(k);
+    let left = _round(rem);
+    for (const row of liveRows) {
+      if (left <= 0.005) break;
+      if (!sameAttributedOwner(srcOwners, rowOwners(row))) continue;
+      const rowAmount = Number(row.amount) || 0;
+      const already = (
+        Array.isArray(row.payments) ? row.payments : []
+      ).reduce((s: number, p: any) => s + (Number(p && p.amount) || 0), 0);
+      const room = _round(rowAmount - already);
+      if (room <= 0.005) continue;
+      const apply = Math.min(room, left);
+      row.payments = [
+        ...(Array.isArray(row.payments) ? row.payments : []),
+        mkPoolPayment(apply)
+      ];
+      recomputeOwnerExpensePaid(row);
+      left = _round(left - apply);
+    }
+    if (left > 0.005) leftoverByProp.set(k, _round(left));
+  }
+
+  // Bare manual paid flags: per property, consume onto ONE matching unpaid row.
+  for (const [k, flag] of flagByProp) {
+    if (!flag || flag.amount <= 0.005) continue;
+    for (const row of liveRows) {
+      if (keyOf(row) !== k) continue;
+      const hasCash =
+        Array.isArray(row.payments) &&
+        row.payments.some((p: any) => Number(p && p.amount) > 0);
+      if (hasCash) continue;
+      if (Math.abs((Number(row.amount) || 0) - flag.amount) <= 0.005) {
+        row.paid = true;
+        row.paidDate = flag.date || new Date();
+        break; // one flag → one row
+      }
+    }
+  }
+
+  // Each property bucket's UNPLACED remainder is DROPPED + logged. A leftover
+  // means the payment's liability row was not rebuilt this run AND no
+  // same-attributed-owner live row could absorb it — i.e. the owner overpaid
+  // relative to what this repair now owes (the owner-portion shrank, the unit
+  // became occupied, or the charge moved months). MRE has NO owner carry-forward
+  // ledger: payOwner auto-mode drops owner surplus the same way, so we follow
+  // that single contract uniformly. (We previously tried re-materialising such a
+  // remnant as a synthetic row at its original term to preserve the rare
+  // chargeTerm-move-with-move-in case — Step-7-r13 — but a synthetic
+  // repair-vacant row is never stale-dropped by the read side, so every
+  // adjacent edit shape resurrected it as phantom owed/over-paid money: unit
+  // dropped via affectedUnitIds, overpay carrying the full leftover, etc.
+  // Step-7-r14. Dropping uniformly is the only leak-free rule — no synthetic row
+  // exists for any surface to miscount. The realistic C2 bug — a payment ≤ the
+  // liability that STILL has its row — is fully preserved by Pass-1/Pass-2 above;
+  // only a genuine post-transition overpayment is dropped.)
+  let migrating = 0;
+  for (const left of leftoverByProp.values()) migrating = _round(migrating + left);
+  if (migrating > 0.005) {
+    logger.warn(
+      `repair ${repairIdStr} term ${term}: owner overpayment of ${migrating} exceeds the current owner liability after a charge transition; surplus dropped (no owner carry-forward ledger — matches payOwner auto-mode surplus handling).`
+    );
+  }
+}
+
+// Exported (underscore prefix = internal, exposed for unit tests like
+// _recomputeVacantOwnerCharges) so the owner-side repair money carry can be
+// asserted directly. See repairCharges.test.js "C2-*".
+export async function _distributeRepairCharge(
   building: any,
   repair: any,
   realmId: string
@@ -3541,22 +3749,82 @@ async function _distributeRepairCharge(
   const term = Number(repair.chargeTerm);
   const repairIdStr = String(repair._id);
 
-  // Always re-derive owner-side state from scratch — strip prior entries
-  // (also covered by _removeRepairCharges on cancelled, but here we cover
-  // the edit path that lands a new amount/term). Scope by expenseId+source.
-  // Snapshot the landlord-recorded settlement (payments + derived paid) first
-  // so editing a repair doesn't wipe recorded καταβολές on the owner-portion
-  // (mirrors the repair-vacant carry forward below). Keyed by term (one
-  // source:'repair' row per repair+term).
-  const priorRepairSettle = new Map<number, any>();
+  // ── UNIFIED OWNER-SIDE PAYMENT POOL (round-1 C2; hardened across 3 Step-7
+  //    rounds) ────────────────────────────────────────────────────────────
+  // A repair's owner-borne cost can be carried by TWO sources — 'repair' (the
+  // owner-portion of a split/owners repair) and 'repair-vacant' (a tenant share
+  // that fell to the owner because the unit was vacant). A recorded owner
+  // καταβολή can sit on EITHER, and reclassify/occupancy/term edits migrate the
+  // liability between them. Snapshotting/reattaching per-source-per-transition
+  // double-counted or dropped money on every multi-step round-trip (Step-7 r1
+  // double-count, r2 overpay, r3 owners→tenants→owners). The robust model:
+  //   1. POOL = the single total of all recorded payments for this repair
+  //      across BOTH sources (the owner has paid €X toward this repair, full
+  //      stop), captured BEFORE any strip, with one payment template for
+  //      date/type/reference provenance.
+  //   2. STRIP every owner-side row (both sources, all terms) up front.
+  //   3. REBUILD the fresh liability rows with ZERO payments.
+  //   4. APPLY the pool across the rebuilt rows capped per-row (paid never
+  //      exceeds amount → owed===paid per row, no negative outstanding, no
+  //      vanish); any remainder → ONE settled-remnant 'repair' row (amount ===
+  //      remainder). Invariant to the number of transitions.
+  let paymentTemplate: any = null;
+  // A bare manual paid flag (set via setOwnerExpensePaid: paid:true with EMPTY
+  // payments[]) is ALSO recorded settlement state that must survive a rebuild —
+  // every other owner-side source preserves it via applyCarriedSettlement, so
+  // the repair path must too (Step-7-r4 B1/B2: a manually-checked-paid repair
+  // row reverted to outstanding on any innocuous repair edit). Capture the
+  // flagged amount + paidDate so a rebuilt row of the SAME amount re-derives
+  // paid. (If real payments exist we use those; the flag is the no-payment case.)
+  // PER-PROPERTY pools (NOT a flat sum) so a recorded καταβολή is re-applied to
+  // the SAME unit's rebuilt row — a flat pool filled rows in array order and, in
+  // a multi-vacant building where different units have different owners,
+  // attributed one owner's payment to another owner's row (Step-7-r7). Key by
+  // propertyId; the building-wide owner-portion ('repair', propertyId null) uses
+  // the sentinel '__owner__'. Bare paid flags are tracked the same way.
+  const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  const OWNER_KEY = '__owner__';
+  const propKeyOf = (e: any) =>
+    e.propertyId ? String(e.propertyId) : OWNER_KEY;
+  const paidByProp = new Map<string, number>();
+  const flagByProp = new Map<string, { amount: number; date: any }>();
   for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
-    if (e.source === 'repair' && String(e.expenseId) === repairIdStr) {
-      priorRepairSettle.set(Number(e.term), e);
+    if (
+      (e.source === 'repair' || e.source === 'repair-vacant') &&
+      String(e.expenseId) === repairIdStr
+    ) {
+      const k = propKeyOf(e);
+      let rowPaidSum = 0;
+      for (const p of Array.isArray(e.payments) ? e.payments : []) {
+        const amt = Number(p && p.amount) || 0;
+        if (amt > 0) {
+          rowPaidSum += amt;
+          paidByProp.set(k, _round((paidByProp.get(k) || 0) + amt));
+          if (!paymentTemplate) paymentTemplate = p;
+        }
+      }
+      if (rowPaidSum <= 0.005 && e.paid === true) {
+        const prev = flagByProp.get(k);
+        flagByProp.set(k, {
+          amount: _round((prev?.amount || 0) + (Number(e.amount) || 0)),
+          date: prev?.date || e.paidDate || null
+        });
+      }
     }
   }
+  const mkPoolPayment = (amount: number) => ({
+    date: paymentTemplate?.date || todayDDMMYYYYForRepair(),
+    amount: Math.round(amount * 100) / 100,
+    type: paymentTemplate?.type || 'transfer',
+    reference: paymentTemplate?.reference || '',
+    description: paymentTemplate?.description || ''
+  });
+
+  // Strip ALL prior owner-side rows for this repair (both sources, all terms)
+  // up front. Payments are preserved in paidPool and re-applied after rebuild.
   const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
     (e: any) =>
-      e.source === 'repair' &&
+      (e.source === 'repair' || e.source === 'repair-vacant') &&
       e.expenseId &&
       String(e.expenseId) === repairIdStr
   );
@@ -3564,8 +3832,8 @@ async function _distributeRepairCharge(
     (building as any).ownerMonthlyExpenses.pull(e._id);
   }
 
+  // Rebuild the owner-portion liability row (zero payments; pool applied below).
   if (ownerPortion > 0) {
-    const carriedRepair = carryOwnerPayments(priorRepairSettle.get(term));
     const arr = (building as any).ownerMonthlyExpenses;
     arr.push({
       expenseId: repairIdStr,
@@ -3574,13 +3842,21 @@ async function _distributeRepairCharge(
       source: 'repair',
       description:
         'Repair: ' + (repair.title || repair.description || 'untitled'),
-      payments: carriedRepair.payments
+      payments: []
     });
-    applyCarriedSettlement(arr[arr.length - 1], carriedRepair);
   }
 
-  // If 100% owner-funded, skip the tenant-side distribution entirely.
+  // If 100% owner-funded, there is no tenant-side / vacant distribution; apply
+  // the pool to the owner-portion row (capped) + remnant, then return.
   if (sharePercentage <= 0) {
+    _applyRepairPaymentPool(
+      building,
+      repairIdStr,
+      term,
+      paidByProp,
+      flagByProp,
+      mkPoolPayment
+    );
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
     const propertyIds = building.units
@@ -3614,35 +3890,10 @@ async function _distributeRepairCharge(
     realmId,
     term
   );
-  // Snapshot landlord-recorded settlement (payments + derived paid) on
-  // repair-vacant rows before the strip below regenerates them (same
-  // carry-forward rationale as _recomputeVacantOwnerCharges: recorded
-  // καταβολές are user state the rebuild must not wipe). Keyed by
-  // propertyId+term within this repair.
-  const repairVacantPaidKey = (e: any) =>
-    `${String(e.propertyId)}|${Number(e.term)}`;
-  const priorRepairVacantSettle = new Map<string, any>();
-  for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
-    if (
-      e.source === 'repair-vacant' &&
-      String(e.expenseId) === repairIdStr
-    ) {
-      priorRepairVacantSettle.set(repairVacantPaidKey(e), e);
-    }
-  }
-
-  // Strip prior owner-side repair-vacant entries for this repair across ALL
-  // terms (not just the current chargeTerm) so editing chargeTerm A→B does
-  // not orphan the term-A row. Mirrors the source:'repair' strip above which
-  // also matches by repairId across all terms. Scoped by the distinct
-  // source:'repair-vacant' so building-EXPENSE vacant shares are untouched.
-  const staleRepairVacant = ((building as any).ownerMonthlyExpenses || []).filter(
-    (e: any) =>
-      e.source === 'repair-vacant' && String(e.expenseId) === repairIdStr
-  );
-  for (const e of staleRepairVacant) {
-    (building as any).ownerMonthlyExpenses.pull(e._id);
-  }
+  // (Owner-side rows for this repair — both 'repair' and 'repair-vacant' — were
+  // already stripped up front; their payments live in paidPool and are
+  // re-applied after the rebuild. The unit loop below pushes ZERO-payment
+  // repair-vacant rows; the pool reconciliation at the end distributes paidPool.)
 
   // Tier I-3.c: when affectedUnitIds is set, restrict the distribution to
   // only those unit ids. Otherwise spread across all units (legacy).
@@ -3709,10 +3960,8 @@ async function _distributeRepairCharge(
         // (NOT 'vacant') so the building-expense vacant recompute, which
         // strips+rebuilds source:'vacant' rows from building.expenses only,
         // never touches it — otherwise this euro would silently disappear on
-        // the next unrelated tenancy change (REPAIR-VACANT-VANISHES).
-        const carriedRV = carryOwnerPayments(
-          priorRepairVacantSettle.get(`${String(unit.propertyId)}|${term}`)
-        );
+        // the next unrelated tenancy change (REPAIR-VACANT-VANISHES). ZERO
+        // payments — paidPool is applied once after the loop.
         const rvArr = (building as any).ownerMonthlyExpenses;
         rvArr.push({
           expenseId: repairIdStr,
@@ -3721,13 +3970,24 @@ async function _distributeRepairCharge(
           propertyId: String(unit.propertyId),
           source: 'repair-vacant',
           description: 'Repair: ' + (repair.title || repair.description || 'untitled'),
-          // Carry recorded καταβολές across the rebuild; paid re-derived below.
-          payments: carriedRV.payments
+          payments: []
         });
-        applyCarriedSettlement(rvArr[rvArr.length - 1], carriedRV);
       }
     }
   }
+
+  // Apply the single recorded-payment pool across ALL freshly-rebuilt owner
+  // rows for this repair (owner-portion + per-vacant-unit), capped per row,
+  // remainder → one settled remnant. One pool, one distribution — invariant to
+  // however many reclassify/occupancy/term transitions preceded this run.
+  _applyRepairPaymentPool(
+    building,
+    repairIdStr,
+    term,
+    paidByProp,
+    flagByProp,
+    mkPoolPayment
+  );
 
   building.updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building);
@@ -3882,9 +4142,58 @@ export async function _recomputeVacantOwnerCharges(
       priorSettle.set(settleKey(e), e);
     }
   }
+  // `consume(key)` reads a prior settlement AND marks it consumed (deletes it
+  // from priorSettle) so the post-rebuild re-attach below can tell which prior
+  // rows the rebuild did NOT recreate.
+  const consume = (key: string) => {
+    const v = priorSettle.get(key);
+    if (v !== undefined) priorSettle.delete(key);
+    return v;
+  };
+  // Re-attach any payment-carrying prior row the rebuild did NOT recreate (flag
+  // flipped OFF, unit now occupied, expense went variable/inactive, early
+  // return). The row is no longer ACTIVELY billed, but the recorded καταβολή is
+  // USER STATE that must never be silently deleted — the read surfaces keep it
+  // (isOwnerExpenseRowStale's hasPayments guard). Without this, a recorded owner
+  // payment vanished on the next recompute (adversarial round-1 finding C1:
+  // proven by ownerEksodaByMonth.test.js "C1-a/C1-b"). A prior row with ZERO
+  // recorded payments is safe to drop (no money lost). MUST run before EVERY
+  // exit from this function.
+  const reattachPaidOrphans = () => {
+    for (const prior of priorSettle.values()) {
+      const carried = carryOwnerPayments(prior);
+      const paidSum = carried.payments.reduce(
+        (s, p) => s + (Number(p.amount) || 0),
+        0
+      );
+      if (paidSum <= 0) continue; // nothing recorded → safe to drop
+      const arr = building.ownerMonthlyExpenses;
+      arr.push({
+        expenseId: prior.expenseId,
+        term,
+        // SETTLED REMNANT: the row is no longer actively billed (flag off /
+        // unit occupied / inactive), so it must NOT assert the old liability —
+        // its amount collapses to what was actually paid so owed === paid and
+        // outstanding === 0 on EVERY surface (eksoda caps paid to amount; the
+        // ledger + statement compute amount−paid). Carrying the full prior
+        // amount created a phantom residual / negative-outstanding split across
+        // surfaces (Step-7-r2 B2/B5). The recorded καταβολή is preserved; only
+        // the dead owed-basis is dropped.
+        amount: Math.round(paidSum * 100) / 100,
+        propertyId: prior.propertyId || null,
+        source: prior.source,
+        description: prior.description || '',
+        payments: carried.payments
+      });
+      applyCarriedSettlement(arr[arr.length - 1], carried);
+      // mark consumed so a second exit-call cannot double-attach.
+      priorSettle.delete(settleKey(prior));
+    }
+  };
 
   // Strip prior vacant + owner-fixed + owner-resident entries for this term —
-  // full re-derive (this function owns all three sources).
+  // full re-derive (this function owns all three sources). Recorded καταβολές
+  // are carried via priorSettle/consume and re-attached by reattachPaidOrphans.
   const stale = (building.ownerMonthlyExpenses || []).filter(
     (e: any) =>
       (e.source === 'vacant' ||
@@ -3897,7 +4206,7 @@ export async function _recomputeVacantOwnerCharges(
   // Materialise the fixed owner-only amount rows (independent of vacancy).
   for (const expense of ownerFixedExpenses) {
     const carried = carryOwnerPayments(
-      priorSettle.get(`${String(expense._id)}||${term}`)
+      consume(`${String(expense._id)}||${term}`)
     );
     const arr = building.ownerMonthlyExpenses;
     arr.push({
@@ -3936,6 +4245,10 @@ export async function _recomputeVacantOwnerCharges(
     optInExpenses.length === 0 &&
     (ownerOccupied.size === 0 || activeExpenses.length === 0)
   ) {
+    // owner-fixed rows above already consumed their priorSettle; any remaining
+    // payment-carrying prior row (e.g. a now-inactive vacant expense) must not
+    // be silently dropped.
+    reattachPaidOrphans();
     return;
   }
 
@@ -3976,9 +4289,7 @@ export async function _recomputeVacantOwnerCharges(
       );
       if (share <= 0) continue;
       const carried = carryOwnerPayments(
-        priorSettle.get(
-          `${String(expense._id)}|${String(unit.propertyId)}|${term}`
-        )
+        consume(`${String(expense._id)}|${String(unit.propertyId)}|${term}`)
       );
       const arr = building.ownerMonthlyExpenses;
       arr.push({
@@ -3995,6 +4306,10 @@ export async function _recomputeVacantOwnerCharges(
       applyCarriedSettlement(arr[arr.length - 1], carried);
     }
   }
+
+  // Any prior row the rebuild did NOT recreate (occupied unit, flag-off, share
+  // <= 0, variable expense) keeps its recorded καταβολή instead of dropping it.
+  reattachPaidOrphans();
 }
 
 // Exported lifecycle hook: recompute vacant-owner charges for every
@@ -4293,7 +4608,11 @@ export async function computeOwnerEksodaByMonth(
       }
     }
     covered.add(covKey(row.expenseId, row.propertyId, term));
-    // Materialised row → owed AND paid from the same amount basis.
+    // Materialised row → owed AND paid from the same amount basis. paid is
+    // CLAMPED to the row amount (an over-paid row — owner overpaid a repair then
+    // a transition reduced its owner-portion — contributes owed===paid===amount,
+    // outstanding 0; the surplus stays in payments[] without inflating owed or
+    // going negative).
     addOwed(term, amount);
     const fromPayments = ((row.payments || []) as any[]).reduce(
       (s, p) => s + (Number(p.amount) || 0),
