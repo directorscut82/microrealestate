@@ -111,3 +111,8 @@
 - Express-settle found independently by BOTH audit rounds.
 - C1/C2 match the user's prior-session lesson (memory `project_owner_row_staleness_invariants`:
   "never drop recorded payments") — same bug class, new triggers.
+
+## DEPLOYED + LIVE-VERIFIED (2026-06-17)
+- Commit `3bd3ee52` deployed to NAS; all 9 app containers verified on revision 3bd3ee52 (independent Portainer poll); landlord HTTP 200.
+- Live Playwright `_verify_money_batch.spec.ts` on the REAL `landlord` account PASSED: Accounting page renders (no ErrorBoundary blank — H7/H5-acc crash class confirmed fixed); 4 owners checked, every owner totalPaid ≤ totalAmount (C2 no-over-pay invariant holds on real data); dashboard/owners/accounting XHR all 200; no NaN/undefined/{{}} leak in rendered text; M4 incoming-tenants show no fabricated today-end-date. Screenshots read + confirmed.
+- mongodump backup taken pre-verify: e2e-playwright/backup/mredb_pre_test_20260617_214627.archive.
