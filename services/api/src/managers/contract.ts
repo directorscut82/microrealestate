@@ -280,18 +280,142 @@ export function payTerm(
           payments
         };
       }
+      // Round-1 audit H4: the TARGET term is exempt from the freeze guard above
+      // (so its new payment can be recorded), but if the target is itself a
+      // FROZEN (past, or fully-paid current) term, BL.computeRent would re-price
+      // its base charges against the LIVE contract.buildings / property rent —
+      // e.g. paying a late arrears in a closed month after a building expense
+      // was raised would silently inflate that month's bill. Snapshot the
+      // billed charge line-items first, then (below) restore them so only the
+      // new SETTLEMENT items apply, never the re-priced base charges. This
+      // mirrors Contract.update's freeze (it clones past rents) but still
+      // records the payment, matching the "closed months are immutable; arrears
+      // adjust via settlements, not re-pricing" contract.
+      const _targetIsFrozen =
+        rent.term === targetTerm && _isFrozen(rent, currentTerm);
+      const _billedSnapshot = _targetIsFrozen ? _.cloneDeep(rent) : null;
       contract.rents[index] = BL.computeRent(
         contract,
         current.format('DD/MM/YYYY HH:mm'),
         previousRent,
         settlements
       );
+      if (_billedSnapshot) {
+        contract.rents[index] = _freezeBilledCharges(
+          _billedSnapshot,
+          contract.rents[index]
+        );
+      }
       previousRent = contract.rents[index];
       current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
     }
   });
 
   return contract;
+}
+
+// Round-1 audit H4 helper. `billed` = the rent as it was originally billed
+// (snapshot taken before the re-price). `recomputed` = BL.computeRent output
+// for the target term, which now carries the NEW payments + any new
+// settlement-origin debts/discounts/vats but RE-PRICED base charges. Produce a
+// rent that keeps the billed BASE charges (preTaxAmounts / charges /
+// buildingCharges / carry-in balance / contract-origin VAT) frozen while
+// retaining the freshly-applied settlement items + payments, then re-derive the
+// totals so the document stays internally consistent. This is the same
+// "closed-month base is immutable; settlements still apply" rule
+// Contract.update enforces — just on the term actually being paid.
+function _freezeBilledCharges(billed: Rent, recomputed: Rent): Rent {
+  const out: Rent = recomputed;
+  // Restore billed base line-items (the things a re-price would have changed).
+  out.preTaxAmounts = _.cloneDeep(billed.preTaxAmounts) || [];
+  out.charges = _.cloneDeep(billed.charges) || [];
+  out.buildingCharges = _.cloneDeep(billed.buildingCharges) || [];
+  // Discounts: ONLY the standing CONTRACT discount (origin:'contract') is
+  // re-priced (taskDiscounts reads contract.discount live). Step-7 H4: a later
+  // edit that shrank the discount left total.discount at the new (smaller)
+  // value while the billed discount-VAT stayed, inflating the closed month.
+  // Fix: restore the BILLED contract-origin discount, keep every NON-contract
+  // (settlement) discount the recompute produced — those come from settlement
+  // INPUT (a promo on this payment), are not re-priced, and may legitimately
+  // lack an explicit origin tag.
+  const billedContractDiscounts = (billed.discounts || []).filter(
+    (d) => d.origin === 'contract'
+  );
+  const recomputeNonContractDiscounts = (recomputed.discounts || []).filter(
+    (d) => d.origin !== 'contract'
+  );
+  out.discounts = [
+    ..._.cloneDeep(billedContractDiscounts),
+    ...recomputeNonContractDiscounts
+  ];
+  // Debts come ONLY from settlements input (taskDebts: no contract-origin
+  // debts) — they are NOT re-priced by live building/property state, so keep
+  // the recompute's debts verbatim (they carry both carried-forward and the
+  // new settlement debt, the latter possibly without an origin tag).
+  out.debts = recomputed.debts || [];
+  // VAT: contract-origin VAT lines are derived from the billed base charges AND
+  // the (now-restored) contract discount, so restore them from billed. Keep
+  // settlement-origin VAT the recompute produced (extracharge / settlement-
+  // discount compensating VAT on this payment).
+  const billedContractVats = (billed.vats || []).filter(
+    (v) => v.origin !== 'settlement'
+  );
+  const newSettlementVats = (recomputed.vats || []).filter(
+    (v) => v.origin === 'settlement'
+  );
+  out.vats = [..._.cloneDeep(billedContractVats), ...newSettlementVats];
+  // Carry-in balance is part of the billed bill — pin it to what was billed so
+  // a later upstream re-price can't retroactively change this closed month.
+  if (out.total && billed.total) {
+    out.total.balance = Number(billed.total.balance) || 0;
+  }
+  // Re-derive every total from the now-frozen line-items + the new payments.
+  out.total.preTaxAmount =
+    Math.round(
+      (out.preTaxAmounts || []).reduce((s, p) => s + (Number(p.amount) || 0), 0) *
+        100
+    ) / 100;
+  out.total.charges =
+    Math.round(
+      (out.charges || []).reduce((s, c) => s + (Number(c.amount) || 0), 0) * 100
+    ) / 100;
+  const buildingChargesTotal =
+    Math.round(
+      (out.buildingCharges || []).reduce(
+        (s, c) => s + (Number(c.amount) || 0),
+        0
+      ) * 100
+    ) / 100;
+  out.total.debts =
+    Math.round(
+      (out.debts || []).reduce((s, d) => s + (Number(d.amount) || 0), 0) * 100
+    ) / 100;
+  out.total.discount =
+    Math.round(
+      (out.discounts || []).reduce((s, d) => s + (Number(d.amount) || 0), 0) *
+        100
+    ) / 100;
+  out.total.vat =
+    Math.round(
+      (out.vats || []).reduce((s, v) => s + (Number(v.amount) || 0), 0) * 100
+    ) / 100;
+  out.total.payment =
+    Math.round(
+      (out.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100
+    ) / 100;
+  const grand =
+    Math.round(
+      (out.total.preTaxAmount +
+        out.total.charges +
+        buildingChargesTotal +
+        out.total.debts -
+        out.total.discount +
+        out.total.vat +
+        (out.total.balance || 0)) *
+        100
+    ) / 100;
+  out.total.grandTotal = Number.isFinite(grand) ? grand : 0;
+  return out;
 }
 
 // "Frozen" = a rent that must NOT be re-priced when expenses, properties,

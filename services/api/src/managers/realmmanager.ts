@@ -10,8 +10,8 @@ import {
   validateArrayMaxLength,
   validateStringField,
   validateFiniteNumber,
-  LOCALES,
-  CURRENCIES
+  validateCurrency,
+  LOCALES
 } from '../validators.js';
 
 // Wave-24 B8: a permissive RFC-5322-ish email regex. We don't need full
@@ -171,6 +171,14 @@ export async function add(req: Req, res: Res) {
     req.body.locale = _normalizeLocale(req.body.locale);
   }
 
+  // Round-2 audit L1/H6: add() must validate currency too (update() does at
+  // line ~228). Without it a realm could be created with a non-ISO code that
+  // later crashed the accounting Intl.NumberFormat (H5) and 422-locked every
+  // subsequent settings PATCH (H6). Same enum, same surface as update().
+  if (req.body.currency !== undefined) {
+    validateCurrency(req.body.currency, 'currency');
+  }
+
   const newRealm: any = new Collections.Realm(req.body);
 
   _hasRequiredFields(newRealm);
@@ -225,7 +233,7 @@ export async function update(req: Req, res: Res) {
   // RangeError when the accounting CSV tries to format amounts with it,
   // surfacing as a generic 500 to the user.
   if (req.body.currency !== undefined) {
-    validateEnum(req.body.currency, CURRENCIES, 'currency');
+    validateCurrency(req.body.currency, 'currency');
   }
   validateArrayMaxLength(req.body.members, 50, 'members');
 

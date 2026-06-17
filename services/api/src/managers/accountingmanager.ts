@@ -157,7 +157,11 @@ function _properties(tenant: AnyRecord, rawData = true): AnyRecord[] | string {
     }));
   }
 
-  return tenant.properties.map(({ name }: AnyRecord) => name).join('\n');
+  // Round-2 audit H8: property names are tenant/landlord-controlled; sanitize
+  // each before joining for the CSV path (formula-prefix neutralization).
+  return tenant.properties
+    .map(({ name }: AnyRecord) => _sanitizeCsvText(name))
+    .join('\n');
 }
 
 // Build a currency formatter for the CSV path (rawData=false) that NEVER
@@ -224,8 +228,11 @@ function _incomingTenants(
 
       return {
         _id: tenant._id,
-        name: tenant.name,
-        reference: tenant.reference,
+        // Round-2 audit H8: sanitize tenant-controlled strings on the CSV
+        // (rawData=false) path — json2csv escapes quotes/newlines but NOT a
+        // leading formula prefix (=,+,-,@). The JSON path (React) is untouched.
+        name: rawData ? tenant.name : _sanitizeCsvText(tenant.name),
+        reference: rawData ? tenant.reference : _sanitizeCsvText(tenant.reference),
         properties: _properties(tenant, rawData),
         beginDate,
         terminationDate,
@@ -279,8 +286,9 @@ function _outgoingTenants(
 
       return {
         _id: tenant._id,
-        name: tenant.name,
-        reference: tenant.reference,
+        // Round-2 audit H8: sanitize on the CSV path (see _incomingTenants).
+        name: rawData ? tenant.name : _sanitizeCsvText(tenant.name),
+        reference: rawData ? tenant.reference : _sanitizeCsvText(tenant.reference),
         properties: _properties(tenant, rawData),
         beginDate,
         endDate,
@@ -392,9 +400,11 @@ function _settlements(
             const isoDate = moment
               .utc(date, 'DD/MM/YYYY', true)
               .format('YYYY-MM-DD');
+            // Round-2 audit H8: payment reference is tenant-controlled and
+            // lands in a CSV cell — neutralize a leading formula prefix.
             return `${isoDate} ${i18n.__(
               type
-            )} ${reference}\n${NumberFormat.format(amount)}`;
+            )} ${_sanitizeCsvText(reference)}\n${NumberFormat.format(amount)}`;
           })
           .join('\n\n');
       }
@@ -411,13 +421,17 @@ function _settlements(
         }
       : {
           tenantId: tenant._id,
-          tenant: rawData
-            ? tenant.name
-            : `${tenant.name}\n${
-                tenant.reference
-              }\n${beginDate} - ${endDate}\n${i18n.__('Deposit: {{deposit}}', {
-                deposit: String(NumberFormat.format(_round(tenant.guaranty || 0)))
-              })}\n${tenant.properties.map(({ name }: AnyRecord) => name).join('\n')}`,
+          // Round-2 audit H8: the composite tenant cell interpolates
+          // tenant-controlled name / reference / property names into a single
+          // CSV cell. Sanitize each so a leading formula prefix (=,+,-,@) on the
+          // cell — or on any embedded line — is neutralized.
+          tenant: `${_sanitizeCsvText(tenant.name)}\n${_sanitizeCsvText(
+            tenant.reference
+          )}\n${beginDate} - ${endDate}\n${i18n.__('Deposit: {{deposit}}', {
+            deposit: String(NumberFormat.format(_round(tenant.guaranty || 0)))
+          })}\n${tenant.properties
+            .map(({ name }: AnyRecord) => _sanitizeCsvText(name))
+            .join('\n')}`,
           ...settlements
         };
   });

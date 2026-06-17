@@ -5,7 +5,7 @@ import {
   PopoverContent,
   PopoverTrigger
 } from '../../../../components/ui/popover';
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../../../components/ui/button';
 import ChannelStatusBanners from '../../../../components/rents/ChannelStatusBanners';
@@ -280,6 +280,15 @@ function Rents() {
     enabled: isYearMonthValid
   });
   const [rentSelected, setRentSelected] = useState([]);
+
+  // Round-1 audit H12: the rents page is NOT remounted on month navigation
+  // (router.push to the same [yearMonth] route, no key prop), so a bulk
+  // selection made on April survived a nav to May and the Send handler shipped
+  // April's captured terms while May's grid was displayed. Reset the selection
+  // whenever the period changes so a send can never carry a prior month's rows.
+  useEffect(() => {
+    setRentSelected([]);
+  }, [yearMonth]);
 
   const handleActionDone = useCallback(() => {
     setRentSelected([]);

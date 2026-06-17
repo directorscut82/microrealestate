@@ -1527,13 +1527,27 @@ export async function update(req: Req, res: Res) {
   // back on edit, including these fields.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { _id, __v, realmId: _realmId, ...occupantPatch } = newOccupant;
+  // Wave-21 H7 (round-1 audit): un-terminate. When the edit clears
+  // terminationDate, _stringToDate('') → undefined and Mongo `$set` SILENTLY
+  // DROPS undefined keys, so the stale terminationDate would survive and the
+  // tenant reads terminated-but-active (double-billing vacant-owner shares).
+  // Mirror extendLease's explicit `$unset` (line ~2161) so the field is
+  // actually removed.
+  const _clearTermination = occupantPatch.terminationDate === undefined;
+  let _unsetOps = {};
+  if (_clearTermination) {
+    // Drop the undefined key from $set so $set and $unset never target the
+    // same path (Mongo rejects "conflict at terminationDate" when both do).
+    delete occupantPatch.terminationDate;
+    _unsetOps = { $unset: { terminationDate: '' } };
+  }
   const updated = await Collections.Tenant.findOneAndUpdate(
     {
       realmId: realm!._id,
       _id: occupantId,
       __v: documentVersion
     },
-    { $set: occupantPatch, $inc: { __v: 1 } }
+    { $set: occupantPatch, $inc: { __v: 1 }, ..._unsetOps }
   );
   if (!updated) {
     throw new ServiceError(
@@ -1911,6 +1925,16 @@ export async function archive(req: Req, res: Res) {
 export async function unarchive(req: Req, res: Res) {
   const tenantId = req.params.id;
   validateObjectId(tenantId, 'tenant id');
+  // Round-1 audit H8 was withdrawn after Step-7: unconditionally $unset-ing
+  // terminationDate here DESTROYS a genuine move-out date for the common case
+  // (a tenant legitimately terminated, then archived via the plain Archive
+  // button — which preserves the real terminationDate — then unarchived). That
+  // wrongly re-opens occupancy and silently drops the owner's vacant-unit
+  // charges across every money surface. The tenant model has NO marker to tell
+  // a force-archive-invented date from a real one, so unarchive cannot safely
+  // clear it. The original edge (a ?force=true-deleted tenant left stuck
+  // terminated) is reachable only via the raw API, not the UI, and is the
+  // lesser evil — so unarchive only flips `archived`, preserving any real date.
   const tenant = await Collections.Tenant.findOneAndUpdate(
     { _id: tenantId, realmId: req.realm!._id },
     { $set: { archived: false } },
@@ -2151,6 +2175,23 @@ export async function extendLease(req: Req, res: Res) {
       throw new ServiceError(String(e), 422);
     }
   }
+
+  // Wave-21 H9 (round-1 audit): the extend path must run the SAME
+  // double-occupancy guard that add() and update() use, otherwise extending a
+  // lease past a successor tenant's entry creates overlapping occupancy on a
+  // shared property (corrupting equal-allocation party counts). The extend
+  // clears any termination (it is a renewal), so the effective upper bound is
+  // newEndDate; exclude self so the tenant's own prior window never collides.
+  await _assertNoDoubleOccupancy(
+    realm!._id,
+    {
+      properties: existingDoc.properties,
+      beginDate: newBeginDate,
+      endDate: newEndDate,
+      terminationDate: undefined
+    },
+    tenantId
+  );
 
   // Atomic single write: __v guard + history push + new dates +
   // termination unset + (when applicable) regenerated rents. The follow-up

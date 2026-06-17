@@ -18,8 +18,13 @@ export const QueryKeys = {
 
 // Owner-debt ledger (καταβολές ιδιοκτητών). Owners are aggregated server-side
 // across buildings; their liabilities are the buildings' ownerMonthlyExpenses.
-export async function fetchOwners() {
-  const response = await apiFetcher().get('/owners');
+// `year` (optional): scope owner totals to that calendar year so the
+// year-scoped Accounting page reconciles with its sibling tabs + statement PDF
+// (round-2 audit H9). Omit on the standalone Owners page for all-time totals.
+export async function fetchOwners(year) {
+  const response = await apiFetcher().get(
+    year ? `/owners?year=${encodeURIComponent(year)}` : '/owners'
+  );
   return response.data;
 }
 

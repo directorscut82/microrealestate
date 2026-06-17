@@ -212,9 +212,15 @@ type OwnerAgg = {
 // tenant-occupied / no longer owner-occupied / whose expense went inactive —
 // never billing the owner for a euro that is also the tenant's rent (round-4
 // review). Omitted → no unit treated as occupied (legacy callers / tests).
-function _aggregateOwners(
+// `year` (optional): when supplied, only owner charges whose term falls in that
+// calendar year are aggregated. Round-2 audit H9 — the year-scoped Accounting
+// page was summing all-time totals (no year filter), contradicting the
+// year-scoped statement PDF beside it. Absent year → all-time (the standalone
+// Owners page). Exported for the H9 jest proof.
+export function _aggregateOwners(
   buildings: any[],
-  occupiedKeys?: Set<string>
+  occupiedKeys?: Set<string>,
+  year?: number
 ): Map<string, OwnerAgg> {
   const owners = new Map<string, OwnerAgg>();
   const occSet = occupiedKeys || new Set<string>();
@@ -323,6 +329,9 @@ function _aggregateOwners(
     for (const row of b.ownerMonthlyExpenses || []) {
       const amount = _round(row.amount);
       if (!(amount > 0)) continue;
+      // Round-2 audit H9: year-scope when requested. term is YYYYMMDDHH →
+      // Math.floor(term / 1e6) = YYYY. Absent year → no filter (all-time).
+      if (year && Math.floor(Number(row.term) / 1000000) !== year) continue;
       // SHARED staleness guard: drop a 'vacant'/'owner-resident' row whose
       // source expense is gone / flag-off / inactive / the unit is
       // tenant-occupied FOR THIS TERM. The ledger is the settlement surface, so
@@ -515,6 +524,11 @@ function _serializeOwnerSummary(agg: OwnerAgg) {
 // GET /owners — aggregated owner list.
 export async function all(req: Req, res: Res) {
   const realm = req.realm;
+  // Round-2 audit H9: optional ?year= scopes the owner totals to that calendar
+  // year so the Accounting page's Owners tab reconciles with its sibling
+  // year-scoped tabs + statement PDF. Absent → all-time (standalone Owners page).
+  const yearRaw = (req.query as Record<string, unknown> | undefined)?.year;
+  const year = yearRaw != null && yearRaw !== '' ? Number(yearRaw) : undefined;
   const buildings = await Collections.Building.find({
     realmId: realm!._id
   }).lean();
@@ -522,7 +536,11 @@ export async function all(req: Req, res: Res) {
     String(realm!._id),
     buildings as any[]
   );
-  const owners = _aggregateOwners(buildings as any[], occupiedKeys);
+  const owners = _aggregateOwners(
+    buildings as any[],
+    occupiedKeys,
+    Number.isFinite(year) ? year : undefined
+  );
   await _markAlsoRents(String(realm!._id), owners);
   const list = Array.from(owners.values())
     .map(_serializeOwnerSummary)

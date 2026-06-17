@@ -1544,6 +1544,26 @@ export async function importFromE9(req: Req, res: Res) {
                 // outer rollback path can clean up.
                 throw createErr;
               }
+              // Round-1 audit H10 (Step-7): this E11000 catch is the OTHER
+              // buildingId-reassign path (a concurrent import for the same ATAK
+              // won the create race and may have linked the property to a
+              // DIFFERENT building). Apply the SAME cross-building steal guard
+              // as the else-branch so the race loser can't double-link it.
+              {
+                const otherBuilding = await Collections.Building.findOne({
+                  realmId: realm!._id,
+                  'units.propertyId': String(property._id)
+                }).lean();
+                if (
+                  otherBuilding &&
+                  String((otherBuilding as any)._id) !== String(building!._id)
+                ) {
+                  throw new ServiceError(
+                    `Property ${parsedUnit.atakNumber} is already linked to a unit in another building (${(otherBuilding as any).name || 'unknown'}). Remove that unit first, or re-import into that building.`,
+                    422
+                  );
+                }
+              }
               // Fall into the existing-property branch below — apply
               // the empty-only fills via a synthetic re-entry.
               property.buildingId = String(building!._id) as any;
@@ -1569,6 +1589,26 @@ export async function importFromE9(req: Req, res: Res) {
             }
           }
         } else {
+          // Round-1 audit H10: refuse to STEAL a property already linked to a
+          // unit in a DIFFERENT building. The by-ATAK find above is
+          // realm-scoped (not building-scoped); without this guard the import
+          // reassigns property.buildingId + pushes a fresh unit onto this
+          // building while the OTHER building keeps its orphan unit for the
+          // same propertyId — rent computation then walks both buildings and
+          // double-bills the koinochrista. Mirror the addUnit guard exactly.
+          const otherBuilding = await Collections.Building.findOne({
+            realmId: realm!._id,
+            'units.propertyId': String(property._id)
+          }).lean();
+          if (
+            otherBuilding &&
+            String((otherBuilding as any)._id) !== String(building!._id)
+          ) {
+            throw new ServiceError(
+              `Property ${parsedUnit.atakNumber} is already linked to a unit in another building (${(otherBuilding as any).name || 'unknown'}). Remove that unit first, or re-import into that building.`,
+              422
+            );
+          }
           // T2.P1.20: gate destructive writes. Without forceOverwrite we
           // only fill empty fields on an existing Property — preserving
           // user edits (e.g. a hand-corrected DEH supply number) that

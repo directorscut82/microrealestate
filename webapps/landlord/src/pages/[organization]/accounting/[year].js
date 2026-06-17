@@ -66,11 +66,13 @@ function Accounting() {
     enabled: !!year
   });
 
-  // Owners for the Ιδιοκτήτες sub-tab (statement downloads). Same /owners
-  // aggregate the Owners page uses.
+  // Owners for the Ιδιοκτήτες sub-tab (statement downloads). Round-2 audit H9:
+  // scope to the page's year so Paid/Outstanding reconcile with the sibling
+  // year-scoped tabs + statement PDF (the standalone Owners page omits year).
   const { data: ownersData } = useQuery({
-    queryKey: [QueryKeys.OWNERS],
-    queryFn: fetchOwners
+    queryKey: [QueryKeys.OWNERS, year],
+    queryFn: () => fetchOwners(year),
+    enabled: !!year
   });
 
   const filteredOwners = useMemo(() => {

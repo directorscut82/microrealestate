@@ -167,4 +167,39 @@ describe('computeBuildingExpenseBreakdown', () => {
     expect(off.ownerBilledTotal).toBe(0);
     expect(off.ownerUnbilledTotal).toBe(50); // vacant r2 share uncollected
   });
+
+  // H11 (round-1 audit): a FIXED-allocation expense whose top-level amount is 0
+  // (the per-unit shares live in customAllocations, a canonical config the
+  // validators accept) is BILLED by the rent engine and COUNTED by the
+  // dashboard, but was DROPPED from this breakdown by the `total <= 0 continue`
+  // guard — which has no fixed-allocation exemption (unlike the engine at
+  // 1_base _computeBuildingChargeRaw, which special-cases `fixed`). The three
+  // surfaces must agree. After the fix the fixed/amount-0 row appears here too.
+  it('H11: fixed-allocation expense with amount=0 still appears in the breakdown', () => {
+    const b = {
+      _id: 'bh11', name: 'BH11', atakPrefix: '005578',
+      units: [
+        { ...makeUnit('p1'), property: { name: 'Apt 1' }, tenant: { _id: 't1', name: 'Alice' } },
+        { ...makeUnit('p2'), property: { name: 'Apt 2' }, tenant: { _id: 't2', name: 'Bob' } }
+      ],
+      // amount:0, fixed, with per-unit customAllocations (Alice €30, Bob €20).
+      expenses: [{
+        _id: 'fx1', name: 'Doorman', type: 'common', amount: 0,
+        allocationMethod: 'fixed', isRecurring: true, startTerm: 2024010100,
+        customAllocations: [
+          { propertyId: 'p1', value: 30 },
+          { propertyId: 'p2', value: 20 }
+        ]
+      }],
+      address: {}, blockStreets: [], contractors: [], repairs: [], ownerMonthlyExpenses: []
+    };
+    const r = computeBuildingExpenseBreakdown(b, 2024060100);
+    const byProp = Object.fromEntries(r.rows.map((x) => [x.propertyId, x]));
+    // FAILING-FIRST: today the fixed/amount-0 rows are dropped → byProp.p1 is
+    // undefined and tenantTotal is 0.
+    expect(byProp.p1).toBeDefined();
+    expect(byProp.p1.amount).toBe(30);
+    expect(byProp.p2.amount).toBe(20);
+    expect(r.tenantTotal).toBe(50); // both billed to renters, matching the engine
+  });
 });

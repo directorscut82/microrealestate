@@ -335,7 +335,13 @@ export function computeBuildingExpenseBreakdown(
       if (!isExpenseActiveForTerm(expense, term)) continue;
       if (overridden.has(String(expense._id))) continue;
       const total = Number(expense.amount) || 0;
-      if (total <= 0) continue; // variable expenses (amount 0) come from #2
+      // variable expenses (amount 0, equal/thousandths) come from #2; but a
+      // FIXED-allocation expense legitimately has amount 0 with its per-unit
+      // shares in customAllocations — the engine (_computeBuildingChargeRaw)
+      // bills it and the dashboard counts it, so the breakdown must keep it too
+      // (round-1 audit H11). The `share <= 0` guard below still drops genuinely
+      // zero shares.
+      if (total <= 0 && (expense.allocationMethod || 'equal') !== 'fixed') continue;
       const share = computeBuildingChargeForProperty(
         building,
         String(unit.propertyId),

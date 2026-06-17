@@ -185,3 +185,70 @@ describe('realmmanager.remove', () => {
     expect(m.realmDelete).not.toHaveBeenCalled();
   });
 });
+
+// ── Round-2 audit H6: currency whitelist must accept every ISO code the
+//    org-settings dropdown offers, else editing any setting 422-locks the
+//    realm forever. The whitelist is now Intl.supportedValuesOf('currency').
+describe('realmmanager currency whitelist (round-2 H6)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  // The currency check at update() line ~228 fires BEFORE any DB read, so a
+  // rejected currency throws synchronously regardless of realm state.
+  function updateReq(currency) {
+    return {
+      realm: { _id: 'realm123', name: 'Test Org' },
+      realms: [{ _id: { toString: () => 'realm123' }, name: 'Test Org' }],
+      user: { email: 'admin@test.com', role: 'administrator' },
+      body: {
+        _id: 'realm123',
+        name: 'Test Org',
+        locale: 'en-US',
+        currency
+      }
+    };
+  }
+
+  it('ACCEPTS a dropdown-offered ISO currency (AED) that the old 14-entry list rejected', async () => {
+    // FAILING-FIRST against the old narrow list: AED → "Invalid currency" 422.
+    // The NumberFormat-probe validator passes the currency gate and proceeds
+    // (then fails later on the mocked DB — NOT on currency).
+    let err = null;
+    try {
+      await realmManager.update(updateReq('AED'), makeRes());
+    } catch (e) {
+      err = e;
+    }
+    if (err) expect(err.message).not.toMatch(/Invalid currency/);
+  });
+
+  it('ACCEPTS a fund/unit code (CHE) the dropdown offers but Intl.supportedValuesOf omits (Step-7 H6 sibling)', async () => {
+    // CHE/CHW/CLF/COU/MXV/BOV/UYI/UYW/XUA are offered by the currency-codes
+    // dropdown and accepted by Intl.NumberFormat, but absent from
+    // supportedValuesOf — a static list would 422-lock them. The NumberFormat
+    // probe accepts them (they never crash the accounting pipeline).
+    let err = null;
+    try {
+      await realmManager.update(updateReq('CHE'), makeRes());
+    } catch (e) {
+      err = e;
+    }
+    if (err) expect(err.message).not.toMatch(/Invalid currency/);
+  });
+
+  it('still REJECTS a non-ISO garbage code', async () => {
+    await expect(
+      realmManager.update(updateReq('NOTACURRENCY'), makeRes())
+    ).rejects.toThrow(/Invalid currency/);
+  });
+
+  it('add() now validates currency too (was unguarded — L1)', async () => {
+    const addReq = {
+      user: { email: 'admin@test.com', role: 'administrator' },
+      realms: [],
+      body: { name: 'New Org', locale: 'en-US', currency: 'NOTACURRENCY' }
+    };
+    await expect(realmManager.add(addReq, makeRes())).rejects.toThrow(
+      /Invalid currency/
+    );
+  });
+});

@@ -117,3 +117,40 @@
 - Commit `3bd3ee52` deployed to NAS; all 9 app containers verified on revision 3bd3ee52 (independent Portainer poll); landlord HTTP 200.
 - Live Playwright `_verify_money_batch.spec.ts` on the REAL `landlord` account PASSED: Accounting page renders (no ErrorBoundary blank — H7/H5-acc crash class confirmed fixed); 4 owners checked, every owner totalPaid ≤ totalAmount (C2 no-over-pay invariant holds on real data); dashboard/owners/accounting XHR all 200; no NaN/undefined/{{}} leak in rendered text; M4 incoming-tenants show no fabricated today-end-date. Screenshots read + confirmed.
 - mongodump backup taken pre-verify: e2e-playwright/backup/mredb_pre_test_20260617_214627.archive.
+
+## HIGH BATCH (post-3bd3ee52, base 87399bce) — round-1 + round-2 HIGH findings
+
+> Re-verified every open HIGH against current code first (workflow): R2-H1
+> FIXED-ALREADY by 3bd3ee52; R1-H2 NOT-A-BUG (ledger/statement/PDF already
+> agree on payments[]-only — the finding misread which surface was the
+> outlier; only the dashboard tile bridges the legacy flag by design); R1-H13
+> mostly fixed by 3bd3ee52's M5/H5 (residual demoted to LOW). The rest were
+> STILL-BROKEN and are fixed below, each jest red→green, then Step-7'd.
+
+### Fixed + proven (jest):
+- **R1-H7** un-terminate `$unset` — occupantmanager.update() now `$unset:{terminationDate:''}` (and deletes the undefined key from $set so no path-conflict) when clearing termination. `lifecycleUnsetGuards.test.js`.
+- **R1-H9** extendLease double-occupancy — now calls `_assertNoDoubleOccupancy(...,tenantId)` before the write. `lifecycleUnsetGuards.test.js`.
+- **R1-H11** fixed-allocation amount-0 dropped from breakdown — `1_base.ts` guard now `total<=0 && method!=='fixed'`. `expenseBreakdown.test.js`.
+- **R2-H6 + R2-L1** currency lockout — replaced static `CURRENCIES` enum with `validateCurrency` that PROBES `Intl.NumberFormat` (the real downstream consumer); add() now validates currency too. Accepts the 9 fund codes (CHE/CHW/…) the dropdown offers, rejects garbage. `realmmanager.test.js`.
+- **R2-H8** CSV formula-injection — `_sanitizeCsvText` now applied on the rawData=false (CSV) branches of all 3 builders (name/reference/property/composite/payment-ref). `accountingCsvInjection.test.js`.
+- **R2-H9** Owners tab all-time totals — `_aggregateOwners(…, year)` filters charges by `floor(term/1e6)===year`; `all()` reads `?year=`; `fetchOwners(year)`+queryKey on `[year].js` (standalone Owners page unchanged, absent year = all-time). `ownerYearScope.test.js`.
+- **R1-H4** payTerm re-prices closed past term — payTerm now snapshots a frozen TARGET term's billed line-items before BL.computeRent and restores them via `_freezeBilledCharges` (base charges + contract discount + contract VAT + carry-in balance frozen; NEW settlement items still apply; grandTotal re-derived). 78 freeze/pipeline tests green. `payterm-past-freeze.test.js`.
+- **R1-H10** E9 cross-building property steal — addUnit's guard mirrored into importFromE9 on BOTH the else-branch and the E11000 concurrent-race catch-branch. `e9CrossBuildingSteal.test.js`.
+- **R1-H3** owner-tile staleness (frontend) — BuildingDashboard owner paid/unpaid tile now drops stale vacant/owner-resident rows (expense-gone / flag-off / inactive-for-month), NEVER payment-carrying rows, and does NOT use current-occupancy (server is term-anchored authority). Month-granularity active check matches server `isExpenseActiveForTermMonth`. Frontend (no jest harness) — verified by direct predicate-equality + deploy-verify.
+- **R1-H12** bulk rent-notice month-stale (frontend) — `useEffect(()=>setRentSelected([]),[yearMonth])` resets selection on month nav. Frontend — deploy-verify.
+
+### Step-7 (TIER-MONEY adversarial refutation):
+- **Round 1** (11 fixes): 6 HOLDS (H7,H9,H11,H12,R2-H8,R2-H9), 5 BROKEN — each a real bug in my OWN fix:
+  - H8 — unconditional unarchive $unset DESTROYS a real move-out date (normally-terminated→archived→unarchived) → owner vacant charges vanish. **WITHDREW H8** (the original edge is raw-API-only; the revert's lesser evil preserves real dates).
+  - H4 — `_freezeBilledCharges` restored base charges but not the contract discount → a shrunk discount inflated the closed month's grandTotal. **Fixed**: restore billed `origin:'contract'` discount, keep recompute's settlement discounts + debts verbatim.
+  - R2-H6 — `Intl.supportedValuesOf` omits 9 fund codes the dropdown offers → still 422-locks them. **Fixed**: probe `Intl.NumberFormat` directly instead.
+  - H10 — the guard covered only the else-branch; the E11000 catch-branch still stole. **Fixed**: guard added to both.
+  - H3 — client current-occupancy drop wrongly erased a genuinely-owed past-term owner-resident row on a move-IN. **Fixed**: removed the occupancy clause (server is the term-anchored authority).
+- **Round 2** (5 re-fixes): 4 HOLDS (H4-v2,R2-H6-v2,H10-v2,H8-v2), 1 BROKEN — H3-v2: the tile's full-YYYYMMDDHH active check dropped a recurring/mid-month-startTerm row the server keeps at YYYYMM. **Fixed**: month-granularity check; verified predicate-equality with server.
+- **THE LESSON (again):** Step-7 caught 6 money bugs in my own "done" fixes that jest-green + self-review missed. Never claim a money fix done without an adversarial round coming back clean.
+
+### Verification:
+- Full api jest: **599 passed, 0 failed** (+21 over the 578 baseline). New: lifecycleUnsetGuards, accountingCsvInjection, ownerYearScope, e9CrossBuildingSteal, payterm-past-freeze; extended expenseBreakdown + realmmanager.
+- `yarn workspace @microrealestate/{common,api} build` OK; `landlord lint` OK.
+- **Known sibling (logged, not in this batch):** `BuildingExpensePanel.js:91` has the same full-granularity `isExpenseActiveForTerm` as the old tile helper — a display-only breakdown divergence for recurring mid-month-startTerm expenses. Queued.
+- Deploy + live-verify: PENDING user authorization.

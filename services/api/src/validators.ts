@@ -43,27 +43,47 @@ const LOCALES = [
   'pt-BR'
 ] as const;
 
-// Wave-21 C29-B1: ISO-4217 subset accepted on realm.currency. Without this
-// guard, a malformed currency code (e.g. "NOTACURRENCY") was accepted at
-// PATCH time and later crashed Intl.NumberFormat in the accounting CSV
-// pipeline with a 500. Add new codes here as needed; the list intentionally
-// stays narrow to keep the surface area small.
-const CURRENCIES = [
-  'EUR',
-  'USD',
-  'GBP',
-  'BRL',
-  'COP',
-  'AUD',
-  'CAD',
-  'CHF',
-  'JPY',
-  'CNY',
-  'INR',
-  'NOK',
-  'SEK',
-  'DKK'
-] as const;
+// Wave-21 C29-B1: validate realm.currency. The guard exists to keep a
+// malformed code (e.g. "NOTACURRENCY") from reaching Intl.NumberFormat in the
+// accounting CSV pipeline (RangeError → 500).
+//
+// Round-2 audit H6 + Step-7: a STATIC list (whether the old 14 codes or
+// Intl.supportedValuesOf — 162 codes) is NARROWER than what the org-settings
+// dropdown offers (167 codes from `currency-codes`) AND narrower than what
+// Intl.NumberFormat actually accepts — 9 fund/unit-of-account codes
+// (BOV/CHE/CHW/CLF/COU/MXV/UYI/UYW/XUA) are offered by the dropdown and accepted
+// by NumberFormat but absent from supportedValuesOf, so a static list 422-locks
+// those realms on every settings save. The ONLY non-drifting source of truth is
+// the downstream consumer itself: validate by PROBING `Intl.NumberFormat`. It
+// accepts exactly the set that will never crash the accounting pipeline and
+// rejects genuine garbage — by construction it can never diverge from the
+// consumer again. `validateCurrency` below replaces the static-enum check.
+function _isFormattableCurrency(code: string): boolean {
+  try {
+    // Intl normalizes case; require a 3-letter ISO-shaped code first so junk
+    // like "1" or "$" is rejected before the (lenient) Intl probe.
+    if (!/^[A-Za-z]{3}$/.test(code)) return false;
+    // Throws RangeError on an invalid currency — exactly the crash we prevent.
+    new Intl.NumberFormat('en', { style: 'currency', currency: code });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function validateCurrency(
+  value: unknown,
+  fieldName = 'currency'
+): string | undefined {
+  if (value == null || value === '') return undefined;
+  if (typeof value !== 'string' || !_isFormattableCurrency(value)) {
+    throw new ServiceError(
+      `Invalid ${fieldName}: '${String(value)}'. Must be a valid ISO-4217 currency code.`,
+      422
+    );
+  }
+  return value;
+}
 
 const PROPERTY_TYPES = [
   'store',
@@ -625,6 +645,5 @@ export {
   CHARGEABLE_TO,
   TIME_RANGES,
   LOCALES,
-  PROPERTY_TYPES,
-  CURRENCIES
+  PROPERTY_TYPES
 };

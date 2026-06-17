@@ -380,8 +380,55 @@ export default function BuildingDashboard({ building }) {
     // materialised owner-fixed) — they all appear in the ledger and the owner
     // pays them via owner καταβολές. ownerLedgerTotal is the sum of the rows'
     // amounts; ownerPaid the sum of payments; ownerUnpaid the remainder.
+    // Round-1 audit H3 (+ Step-7): drop STALE vacant/owner-resident rows before
+    // summing, mirroring the read-side predicate
+    // (OwnerStatement.isOwnerExpenseRowStale) so this tile can't inflate the
+    // owner liability past every other surface. We drop ONLY the deterministic,
+    // TERM-INDEPENDENT stale conditions: source expense gone /
+    // chargeOwnerWhenVacant off (vacant) / expense inactive for the row's term.
+    // We deliberately DO NOT apply an occupancy-based drop here: the client has
+    // only CURRENT occupancy (tenantByPropertyId), not the per-(propertyId,term)
+    // occupancy the server uses — a current move-IN would otherwise wrongly
+    // erase a genuinely-owed PAST-term owner-resident row (Step-7 H3). The
+    // server's _aggregateOwners already drops occupancy-stale rows term-anchored;
+    // this tile only needs the expense-existence/flag/active checks. NEVER drop
+    // a row carrying recorded καταβολές — that money is real.
+    const _expByIdH3 = new Map(
+      (building?.expenses || []).map((x) => [String(x._id), x])
+    );
+    // Match the SERVER's owner-side activeness predicate
+    // (OwnerStatement.isExpenseActiveForTermMonth) at YYYYMM granularity. The
+    // shared isExpenseActiveForTerm above compares recurring startTerm at full
+    // YYYYMMDDHH granularity — but an owner row's term is always start-of-month
+    // (YYYYMM0100), so a recurring expense with a mid-month startTerm (day != 01,
+    // e.g. 2026011500) would make `rowTerm(2026010100) < startTerm` TRUE and
+    // wrongly drop a row the server KEEPS (Step-7 H3-v2 undercount). Compare at
+    // month granularity here so the tile agrees with the ledger/statement.
+    const _activeForTermMonthH3 = (exp, term) => {
+      const ymTerm = Math.floor(Number(term) / 10000); // YYYYMMDDHH → YYYYMM
+      if (exp.startTerm && ymTerm < Math.floor(Number(exp.startTerm) / 10000))
+        return false;
+      if (exp.endTerm && ymTerm > Math.floor(Number(exp.endTerm) / 10000))
+        return false;
+      return true;
+    };
+    const _isOwnerRowStaleH3 = (e) => {
+      const src = e.source || 'expense';
+      if (src !== 'vacant' && src !== 'owner-resident') return false;
+      const hasPayments = (e.payments || []).some(
+        (p) => Number(p && p.amount) > 0
+      );
+      if (hasPayments) return false;
+      const exp = _expByIdH3.get(String(e.expenseId));
+      if (!exp) return true; // source expense gone
+      if (src === 'vacant' && !exp.chargeOwnerWhenVacant) return true;
+      if (!_activeForTermMonthH3(exp, Number(e.term))) return true;
+      return false;
+    };
     const ownerLedgerThisYear = (building?.ownerMonthlyExpenses || []).filter(
-      (e) => Math.floor(Number(e.term || 0) / 1000000) === currentYear
+      (e) =>
+        Math.floor(Number(e.term || 0) / 1000000) === currentYear &&
+        !_isOwnerRowStaleH3(e)
     );
     // Per-row paid amount = Σ recorded καταβολές, OR the full amount when the
     // row carries the manual paid flag (paid:true) with no payment record.
