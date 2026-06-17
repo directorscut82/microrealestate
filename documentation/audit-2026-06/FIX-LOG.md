@@ -1,6 +1,7 @@
 # Audit 2026-06 — Fix Log (branch nas, base HEAD f6f75966)
 
-> Status of each confirmed finding. NOT deployed. Staged locally, awaiting user authorization.
+> Status: DEPLOYED to NAS as commit 3bd3ee52 (2026-06-17) + live-verified on the real
+> account — see "DEPLOYED + LIVE-VERIFIED" at the end of this file.
 > Discipline: every fix has a failing-test proof BEFORE the fix, re-verified green AFTER,
 > then adversarially re-challenged (Step 7) until the round comes back clean.
 
