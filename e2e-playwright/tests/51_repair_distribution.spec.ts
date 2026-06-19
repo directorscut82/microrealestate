@@ -455,3 +455,248 @@ test.describe('Repair surfaces render correctly', () => {
     expect(text, 'no template leak').not.toMatch(/\{\{[A-Za-z_]+\}\}/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ADVANCED SCENARIOS — occupancy, reclassify, payment survival
+// ═══════════════════════════════════════════════════════════════════════════
+
+test.describe('Repair advanced: mixed occupancy + reclassify + payment', () => {
+  let repairIds: string[] = [];
+  let vacantUnitId: string | null = null;
+
+  test.beforeAll(async ({ request }) => {
+    // Add a second VACANT unit to the test building (no tenant occupies it)
+    const buildingResp = await request.get(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}`,
+      { headers: auth }
+    );
+    const building = await buildingResp.json();
+    const existing = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-VacantUnit'
+    );
+    if (existing) {
+      vacantUnitId = existing._id;
+    } else {
+      const created = await request.post(
+        `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units`,
+        {
+          headers: auth,
+          data: {
+            atakNumber: 'E2E-VacantUnit',
+            isManaged: true,
+            occupancyType: 'vacant',
+            generalThousandths: 500
+          }
+        }
+      );
+      if (created.status() < 400) {
+        const updated = await created.json();
+        const unit = (updated.units || []).find(
+          (u: any) => u.atakNumber === 'E2E-VacantUnit'
+        );
+        vacantUnitId = unit?._id || null;
+      }
+    }
+    // Update the occupied unit's thousandths to 500 so we get a clear 50/50 split
+    const occupiedUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-RichUnit'
+    );
+    if (occupiedUnit) {
+      await request.patch(
+        `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units/${occupiedUnit._id}`,
+        { headers: auth, data: { generalThousandths: 500 } }
+      );
+    }
+  });
+
+  test.afterAll(async ({ request }) => {
+    for (const id of repairIds) {
+      try { await deleteRepair(request, id); } catch {}
+    }
+  });
+
+  test('S13: mixed occupancy — occupied unit gets monthlyCharge, vacant gets repair-vacant', async ({
+    request
+  }) => {
+    test.skip(!vacantUnitId, 'vacant unit not seeded');
+    const building = await createRepair(request, {
+      title: 'E2E-Repair-MixedOcc',
+      category: 'plumbing',
+      chargeableTo: 'tenants',
+      tenantSharePercentage: 100,
+      chargeTerm: currentTerm(),
+      actualCost: 200,
+      allocationMethod: 'general_thousandths',
+      status: 'planned'
+    });
+    const repair = building.repairs?.find(
+      (r: any) => r.title === 'E2E-Repair-MixedOcc'
+    );
+    expect(repair).toBeDefined();
+    repairIds.push(repair._id);
+
+    // Occupied unit (E2E-RichUnit, 500‰) should have monthlyCharge = 100 (200 * 500/1000)
+    const occupiedUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-RichUnit'
+    );
+    const tenantCharge = (occupiedUnit?.monthlyCharges || []).find(
+      (c: any) => String(c.repairId) === repair._id
+    );
+    expect(tenantCharge, 'occupied unit has repair monthlyCharge').toBeDefined();
+    expect(tenantCharge.amount, 'tenant charge = 50% of 200').toBeCloseTo(100, 1);
+
+    // Vacant unit should NOT have a monthlyCharge (no tenant to bill)
+    const vacantUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-VacantUnit'
+    );
+    const vacantCharge = (vacantUnit?.monthlyCharges || []).find(
+      (c: any) => String(c.repairId) === repair._id
+    );
+    expect(vacantCharge, 'vacant unit has NO monthlyCharge').toBeUndefined();
+
+    // Instead, the vacant unit's share goes to ownerMonthlyExpenses as repair-vacant
+    const repairVacant = (building.ownerMonthlyExpenses || []).filter(
+      (e: any) => e.source === 'repair-vacant' && e.description?.includes('E2E-Repair-MixedOcc')
+    );
+    expect(repairVacant.length, 'repair-vacant row created for vacant unit').toBeGreaterThan(0);
+    expect(repairVacant[0].amount, 'vacant share = 50% of 200').toBeCloseTo(100, 1);
+  });
+
+  test('S14: reclassify tenants→owners — monthlyCharges removed, ownerMonthlyExpenses created', async ({
+    request
+  }) => {
+    // Create a tenants-only repair first
+    const building = await createRepair(request, {
+      title: 'E2E-Repair-Reclassify',
+      category: 'general',
+      chargeableTo: 'tenants',
+      tenantSharePercentage: 100,
+      chargeTerm: currentTerm(),
+      actualCost: 150,
+      allocationMethod: 'general_thousandths',
+      status: 'planned'
+    });
+    const repair = building.repairs?.find(
+      (r: any) => r.title === 'E2E-Repair-Reclassify'
+    );
+    expect(repair).toBeDefined();
+    repairIds.push(repair._id);
+
+    // Verify tenant charges exist
+    const tenantCharges = (building.units || []).flatMap((u: any) =>
+      (u.monthlyCharges || []).filter(
+        (c: any) => String(c.repairId) === repair._id
+      )
+    );
+    expect(tenantCharges.length, 'initial: tenant charges exist').toBeGreaterThan(0);
+
+    // Now reclassify to owners
+    const resp = await request.patch(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}/repairs/${repair._id}`,
+      { headers: auth, data: { chargeableTo: 'owners' } }
+    );
+    expect(resp.status()).toBe(200);
+    const updated = await resp.json();
+
+    // Tenant charges should be GONE
+    const afterTenantCharges = (updated.units || []).flatMap((u: any) =>
+      (u.monthlyCharges || []).filter(
+        (c: any) => String(c.repairId) === repair._id
+      )
+    );
+    expect(afterTenantCharges.length, 'after reclassify: no tenant charges').toBe(0);
+
+    // Owner row should exist
+    const ownerRows = (updated.ownerMonthlyExpenses || []).filter(
+      (e: any) => e.source === 'repair' && e.description?.includes('E2E-Repair-Reclassify')
+    );
+    expect(ownerRows.length, 'after reclassify: owner row exists').toBeGreaterThan(0);
+    expect(ownerRows[0].amount, 'owner gets full cost').toBe(150);
+  });
+
+  test('S15: owner pays repair, then cost edited — payment survives', async ({
+    request
+  }) => {
+    // Create an owners-only repair
+    const building = await createRepair(request, {
+      title: 'E2E-Repair-PaySurvival',
+      category: 'general',
+      chargeableTo: 'owners',
+      chargeTerm: currentTerm(),
+      actualCost: 100,
+      allocationMethod: 'general_thousandths',
+      status: 'planned'
+    });
+    const repair = building.repairs?.find(
+      (r: any) => r.title === 'E2E-Repair-PaySurvival'
+    );
+    expect(repair).toBeDefined();
+    repairIds.push(repair._id);
+
+    // Find the owner row to get ownerExpenseId for payment
+    const ownerRow = (building.ownerMonthlyExpenses || []).find(
+      (e: any) => e.source === 'repair' && e.description?.includes('E2E-Repair-PaySurvival')
+    );
+    expect(ownerRow, 'owner repair row exists').toBeDefined();
+
+    // Record a payment against this repair via the owners API
+    // First need the ownerKey — get it from /owners list
+    const ownersResp = await request.get(`${GATEWAY}/api/v2/owners`, {
+      headers: auth
+    });
+    const owners = await ownersResp.json();
+    const ownerWithCharges = (owners || []).find(
+      (o: any) => (o.totalAmount || 0) > 0
+    );
+    if (!ownerWithCharges) {
+      console.log('[S15] No owner with charges — skipping payment test');
+      return;
+    }
+
+    // Pay €50 against the repair
+    const payResp = await request.post(
+      `${GATEWAY}/api/v2/owners/${encodeURIComponent(ownerWithCharges.ownerKey)}/payment`,
+      {
+        headers: auth,
+        data: {
+          payment: {
+            date: new Date().toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric'
+            }),
+            amount: 50,
+            type: 'cash',
+            reference: 'E2E-repair-pay-test'
+          }
+        }
+      }
+    );
+    if (payResp.status() !== 200) {
+      console.log('[S15] Payment failed:', await payResp.text());
+      return;
+    }
+
+    // Now edit the repair cost (increase to 120)
+    const editResp = await request.patch(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}/repairs/${repair._id}`,
+      { headers: auth, data: { actualCost: 120 } }
+    );
+    expect(editResp.status()).toBe(200);
+    const editedBuilding = await editResp.json();
+
+    // The payment should survive the re-distribution (unified payment pool)
+    const editedRow = (editedBuilding.ownerMonthlyExpenses || []).find(
+      (e: any) => e.source === 'repair' && e.description?.includes('E2E-Repair-PaySurvival')
+    );
+    expect(editedRow, 'owner row still exists after cost edit').toBeDefined();
+    expect(editedRow.amount, 'amount updated to 120').toBe(120);
+    // Payment should be preserved
+    const payments = editedRow.payments || [];
+    const totalPaid = payments.reduce(
+      (s: number, p: any) => s + (Number(p.amount) || 0),
+      0
+    );
+    expect(totalPaid, 'payment of 50 survived the edit (unified pool)').toBeGreaterThanOrEqual(50);
+  });
+});

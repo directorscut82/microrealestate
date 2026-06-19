@@ -3884,22 +3884,6 @@ export async function _distributeRepairCharge(
     (building as any).ownerMonthlyExpenses.pull(e._id);
   }
 
-  // Strip ALL prior tenant-side monthlyCharges for this repair UNCONDITIONALLY
-  // (same scope as the owner strip above). Without this, a reclassify from
-  // 'tenants' to 'owners' (sharePercentage→0, early return) left stale
-  // monthlyCharges on occupied units (E2E S14 found this).
-  for (const unit of building.units) {
-    const repairCharges = (unit.monthlyCharges || []).filter(
-      (c: any) =>
-        (c.repairId && String(c.repairId) === repairIdStr) ||
-        (!c.repairId &&
-          c.description === `Repair: ${repair.title}`)
-    );
-    for (const charge of repairCharges) {
-      unit.monthlyCharges.pull(charge._id);
-    }
-  }
-
   // Rebuild the owner-portion liability row (zero payments; pool applied below).
   if (ownerPortion > 0) {
     const arr = (building as any).ownerMonthlyExpenses;
@@ -3916,7 +3900,21 @@ export async function _distributeRepairCharge(
 
   // If 100% owner-funded, there is no tenant-side / vacant distribution; apply
   // the pool to the owner-portion row (capped) + remnant, then return.
+  // Strip any stale tenant monthlyCharges (from a prior 'tenants'/'split'
+  // distribution) so a reclassify to 'owners' doesn't leave charges on both
+  // sides (E2E S14). Only runs on this early-return path where no unit-loop
+  // will re-create them.
   if (sharePercentage <= 0) {
+    for (const unit of building.units) {
+      const stale = (unit.monthlyCharges || []).filter(
+        (c: any) =>
+          (c.repairId && String(c.repairId) === repairIdStr) ||
+          (!c.repairId && c.description === `Repair: ${repair.title}`)
+      );
+      for (const charge of stale) {
+        unit.monthlyCharges.pull(charge._id);
+      }
+    }
     _applyRepairPaymentPool(
       building,
       repairIdStr,
