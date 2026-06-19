@@ -599,6 +599,62 @@ export default function BuildingDashboard({ building }) {
             </div>
           </div>
         )}
+        {/* Per-repair financial line items — each repair with title, term,
+            charge attribution, and total cost so repairs are visible as named
+            entities in the overview, not just aggregated into a single number.
+            All 22 downstream read-surfaces (expense panel, owner ledger, rent
+            detail, invoices, PDFs, charts) render repair-BILLING data
+            (monthlyCharges/ownerMonthlyExpenses) which requires the distribution
+            to have run; this section shows the REPAIR ITSELF regardless. */}
+        {(building?.repairs || []).filter(
+          (r) => (r.actualCost || r.estimatedCost) && r.status !== 'cancelled'
+        ).length > 0 && (
+          <div className="mt-3 pt-3 border-t border-stone-line/60">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+              {t('Repairs')}
+            </div>
+            <div className="space-y-1">
+              {(building.repairs || [])
+                .filter(
+                  (r) =>
+                    (r.actualCost || r.estimatedCost) &&
+                    r.status !== 'cancelled'
+                )
+                .map((r, i) => {
+                  const cost = Number(r.actualCost || r.estimatedCost || 0);
+                  const chargeLabel =
+                    r.chargeableTo === 'tenants'
+                      ? t('Tenants')
+                      : r.chargeableTo === 'owners'
+                        ? t('Owners')
+                        : r.chargeableTo === 'split'
+                          ? `${t('Split')} ${r.tenantSharePercentage || 0}/${100 - (r.tenantSharePercentage || 0)}`
+                          : t('Unassigned');
+                  const termLabel = r.chargeTerm
+                    ? `${String(r.chargeTerm).slice(4, 6)}/${String(r.chargeTerm).slice(0, 4)}`
+                    : '';
+                  return (
+                    <div
+                      key={r._id || i}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="text-ink truncate">
+                        {r.title || r.description || t('Repair')}
+                      </span>
+                      <span className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
+                        {termLabel && <span>{termLabel}</span>}
+                        <span>→ {chargeLabel}</span>
+                        <NumberFormat
+                          value={cost}
+                          className="text-ink font-medium"
+                        />
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* Owner expenses paid vs unpaid — directly under the income card, the

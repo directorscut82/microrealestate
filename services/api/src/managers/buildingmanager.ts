@@ -3759,11 +3759,23 @@ export async function _distributeRepairCharge(
   // owner ledger empty. We now keep going so an entry lands in
   // ownerMonthlyExpenses[]. The chargeTerm guard still applies — without a
   // term we don't know which month the entry belongs to.
-  if (!repair.chargeableTo) return;
-  if (!repair.chargeTerm) return;
-
+  // A repair without billing info (no chargeableTo, no chargeTerm, or zero
+  // cost) is a draft — no distribution needed, but the building still must be
+  // SAVED so the repair subdoc (pushed by addRepair / mutated by updateRepair)
+  // persists. Without this save the early-return leaves the repair in-memory
+  // only — the client sees it in the response but it vanishes on next GET
+  // (Step-7 WRITE-PATH finding).
+  if (!repair.chargeableTo || !repair.chargeTerm) {
+    building.updatedDate = new Date();
+    await _saveBuildingWithVersionCheck(building);
+    return;
+  }
   const cost = repair.actualCost || repair.estimatedCost || 0;
-  if (cost <= 0) return;
+  if (cost <= 0) {
+    building.updatedDate = new Date();
+    await _saveBuildingWithVersionCheck(building);
+    return;
+  }
 
   // Respect explicit tenantSharePercentage when provided. Default depends on
   // chargeableTo: 'tenants' implies 100% to tenants, 'split' implies 0%
@@ -4974,9 +4986,13 @@ export async function addRepair(req: Req, res: Res) {
 
   (building as any).repairs.push(req.body);
   (building as any).updatedDate = new Date();
-  await _saveBuildingWithVersionCheck(building!);
-
-  // Distribute repair cost to tenants if chargeable
+  // DO NOT save here — _distributeRepairCharge saves the building itself (it
+  // mutates unit.monthlyCharges + ownerMonthlyExpenses then calls
+  // _saveBuildingWithVersionCheck). Saving twice caused a race: save #1 bumps
+  // __v, then _distributeRepairCharge's save #2 conflicts if anything else
+  // touched the building between the two (e.g. a concurrent sibling-recompute),
+  // causing the distribution to 409 while the repair subdoc persisted — a
+  // stranded repair with zero billing data. Single-save eliminates the race.
   const newRepair = (building as any).repairs[
     (building as any).repairs.length - 1
   ];
@@ -5120,9 +5136,9 @@ export async function updateRepair(req: Req, res: Res) {
   void _ignoredRepairV;
   repair.set(repairPatchBody);
   (building as any).updatedDate = new Date();
-  await _saveBuildingWithVersionCheck(building!);
-
-  // Re-distribute repair cost
+  // Single-save: _distributeRepairCharge mutates + saves the building itself.
+  // Removing the prior separate save eliminates the same race as addRepair
+  // (stranded repair with zero billing on 409 between two saves).
   await _distributeRepairCharge(building as any, repair, realm!._id);
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
