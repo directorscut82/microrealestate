@@ -94,15 +94,15 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Run that to confirm NAS is on the commit you pushed BEFORE running tests.
 
-### Current state (June 13, 2026)
+### Current state (June 19, 2026)
 
-- **Production NAS revision**: `4a55ddc4` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200. (`58f94315` is still an ancestor but is ~24 commits behind.)
+- **Production NAS revision**: `ae31de3b` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/` → 200. Full audit-2026-06 campaign deployed: 33 findings fixed across 4 batches (3bd3ee52 → c0a1772d → 51eda92a → ae31de3b), 15 Step-7 self-bugs caught. jest: 609 passed / 0 failed.
 - **Jest now requires node@20.** `services/api` is `type: module`; the system node drifted to v25 which breaks the suite (`ERR_REQUIRE_ESM` on the winston mock). node@20 lives at `/usr/local/opt/node@20/bin/node`. Run the suite as:
   ```bash
   export PATH="/usr/local/opt/node@20/bin:$PATH"
   cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage
   ```
-  The winston / express-winston / jsonwebtoken mocks are now `.cjs` (`src/__mocks__/*.cjs`) mapped via `moduleNameMapper`; `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Full suite: **431 passed, 15 skipped, 1 skipped suite** (e9parser /tmp fixtures), 0 failed. Repaired in `6cf15c26`. See [`project_jest_node20_cjs_mocks` in memory] and `documentation/E2E_TESTING.md`.
+  The winston / express-winston / jsonwebtoken mocks are now `.cjs` (`src/__mocks__/*.cjs`) mapped via `moduleNameMapper`; `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Full suite: **609 passed, 10 skipped, 1 skipped suite** (e9parser /tmp fixtures), 0 failed. Grown from 431 (May 2026) to 609 (June 2026) by the audit campaign's proof tests. Repaired in `6cf15c26`. See [`project_jest_node20_cjs_mocks` in memory] and `documentation/E2E_TESTING.md`.
 - **Recent shipped work (June 9-13 2026) — building-domain / money-correctness / vacant-owner billing (all on `nas`, deployed at `4a55ddc4`):**
   - **Owner-billing for vacant units** (`978bf92b` → `4a55ddc4`) — an empty managed unit's building-expense share now routes to the OWNER when the expense has `chargeOwnerWhenVacant=true` (was a "coming soon" stub for months). `equal` allocation now counts vacant units as parties (`1_base.ts`); `OwnerMonthlyExpenseSchema` gained `source: 'repair-vacant'` (distinct from `'vacant'`) + `paid`/`paidDate`. Five workflow-confirmed money bugs fixed across the batch + three adversarial-round follow-ups: fixed-zero server guard (`5a14bee6`), method-flip bypass (`42b7860e`), single_unit/sub-cent (`182c3d4d`), duplicate-propertyId (`4a55ddc4`). New `validateSingleUnitAllocations` + duplicate-propertyId rejection in `validators.ts`.
   - **Owner-expenses paid/unpaid tile** (`6cf15c26`) — building Overview shows a paid-vs-outstanding progress tile under the income tile; each owner-side charge has a paid checkbox in the Expenses breakdown. New route `PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid` → `setOwnerExpensePaid`.
