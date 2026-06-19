@@ -4552,7 +4552,7 @@ export async function computeOwnerEksodaByMonth(
     );
     const named = ((unit?.owners || []) as any[]).filter((o: any) => o && o.name);
     if (named.length === 0) return null;
-    return named.length === 1 ? named[0].name : `${named[0].name} +${named.length - 1}`;
+    return named.map((o: any) => o.name).join(', ');
   };
 
   // Building-level owner name for a building-WIDE liability (a repair
@@ -4561,6 +4561,9 @@ export async function computeOwnerEksodaByMonth(
   // when several. So a building-wide repair line shows WHO pays in the tooltip
   // instead of a blank owner (the "Επισκευή ασανσέρ with no payer" bug). Same
   // distinct-owner resolution the building Έξοδα breakdown uses.
+  // List ALL building owners by name (not "+N" truncation) so the tooltip
+  // shows every co-owner. A building with 2 owners shows "ΛΑΜΔΑ, ΚΑΠΠΑ"
+  // not "ΛΑΜΔΑ +1" (the user explicitly flagged the +1 as wrong).
   const buildingOwnerName = (() => {
     const byKey = new Map<string, any>();
     for (const u of (building.units || []) as any[]) {
@@ -4571,9 +4574,7 @@ export async function computeOwnerEksodaByMonth(
     }
     const named = Array.from(byKey.values());
     if (named.length === 0) return null;
-    return named.length === 1
-      ? named[0].name
-      : `${named[0].name} +${named.length - 1}`;
+    return named.map((o) => o.name).join(', ');
   })();
 
   const expenses = (building.expenses || []) as any[];

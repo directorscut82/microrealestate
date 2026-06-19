@@ -396,41 +396,67 @@ export function _aggregateOwners(
       }
       keys = Array.from(new Set(keys)).filter((k) => owners.has(k));
       if (keys.length === 0) continue;
-      // Attribute the charge to a SINGLE canonical owner (lex-first ownerKey),
-      // counted ONCE — never split across co-owners, and never N-counted.
-      // Rationale: a charge has ONE ownerMonthlyExpenses row with ONE payments
-      // array; attributing the same row to N owners and summing the full
-      // amount to each inflated liability (the N-count bug: €1000 → €2000 in a
-      // 2-owner building). Splitting the amount across owners would instead
-      // make a single payments[] array ambiguous (which co-owner paid which
-      // slice). v1 therefore lands the whole charge on one canonical owner so
-      // it is counted once and payments have an unambiguous home. Per-owner
-      // percentage split is deferred (design spec "Follow-ons"). When there
-      // ARE multiple owners we record the count + the co-owners' names so the
-      // UI can show "co-owned by A, B" against the canonical owner's charge.
+      // Split the charge PROPORTIONALLY across co-owners so each owner's
+      // ledger shows their OWN share (not the full amount on one canonical
+      // owner). A €50 charge on a building with 2 co-owners at 50% each
+      // becomes €25 per owner. Payments are split the same way so
+      // outstanding = slice(amount) − slice(paid) per owner.
+      // When there's a single owner, the full amount lands on them (no split).
       const sortedKeys = [...keys].sort();
-      const canonicalKey = sortedKeys[0];
-      const agg = owners.get(canonicalKey);
-      if (!agg) continue;
-      if (keys.length > 1) {
-        charge.coOwnerCount = keys.length;
-        charge.coOwnerNames = sortedKeys
-          .map((k) => owners.get(k)?.name)
-          .filter(Boolean) as string[];
-        // DISPLAY-only per-owner € split by ownership percentage. Source the
-        // unit's owners[] for a propertyId-scoped charge, else the building's
-        // distinct owners for a building-wide charge.
-        const sliceOwners =
-          charge.propertyId && propertyOwnerArr.has(charge.propertyId)
-            ? propertyOwnerArr.get(charge.propertyId)!
-            : buildingOwnerArr.get(bid) || [];
-        const slices = ownerSlicesOf(sliceOwners, charge.amount);
-        if (slices.length > 1) charge.coOwners = slices;
+      const sliceOwners =
+        charge.propertyId && propertyOwnerArr.has(charge.propertyId)
+          ? propertyOwnerArr.get(charge.propertyId)!
+          : buildingOwnerArr.get(bid) || [];
+      const slices = ownerSlicesOf(sliceOwners, charge.amount);
+      // Map each slice to the ownerKey it belongs to (by name match or by
+      // position-aligned fallback). When only one owner, full charge on them.
+      if (keys.length === 1 || slices.length <= 1) {
+        // Single-owner fast path — full amount, no split needed.
+        const agg = owners.get(sortedKeys[0]);
+        if (!agg) continue;
+        if (keys.length > 1) {
+          charge.coOwnerCount = keys.length;
+          charge.coOwnerNames = sortedKeys
+            .map((k) => owners.get(k)?.name)
+            .filter(Boolean) as string[];
+          charge.coOwners = slices.length > 1 ? slices : undefined;
+        }
+        agg.charges.push(charge);
+        agg.totalAmount = _round(agg.totalAmount + charge.amount);
+        agg.totalPaid = _round(agg.totalPaid + charge.paidAmount);
+        agg.totalOutstanding = _round(agg.totalOutstanding + charge.outstanding);
+      } else {
+        // Multi-owner proportional split: each owner gets their percentage
+        // of amount AND paidAmount so the ledger reflects their own liability.
+        for (const slice of slices) {
+          // Resolve which ownerKey this slice belongs to by name match.
+          const sliceKey = sortedKeys.find(
+            (k) => owners.get(k)?.name === slice.name
+          );
+          const agg = sliceKey ? owners.get(sliceKey) : null;
+          if (!agg) continue;
+          const ratio = (slice.percentage || 0) / 100;
+          const sliceAmount = _round(charge.amount * ratio);
+          const slicePaid = _round(paidAmount * ratio);
+          const sliceOutstanding = Math.max(0, _round(sliceAmount - slicePaid));
+          const sliceCharge: OwnerCharge = {
+            ...charge,
+            amount: sliceAmount,
+            paidAmount: slicePaid,
+            outstanding: sliceOutstanding,
+            paid: slicePaid >= sliceAmount - 0.005,
+            coOwnerCount: keys.length,
+            coOwnerNames: sortedKeys
+              .map((k) => owners.get(k)?.name)
+              .filter(Boolean) as string[],
+            coOwners: slices
+          };
+          agg.charges.push(sliceCharge);
+          agg.totalAmount = _round(agg.totalAmount + sliceAmount);
+          agg.totalPaid = _round(agg.totalPaid + slicePaid);
+          agg.totalOutstanding = _round(agg.totalOutstanding + sliceOutstanding);
+        }
       }
-      agg.charges.push(charge);
-      agg.totalAmount = _round(agg.totalAmount + charge.amount);
-      agg.totalPaid = _round(agg.totalPaid + charge.paidAmount);
-      agg.totalOutstanding = _round(agg.totalOutstanding + charge.outstanding);
     }
   }
 

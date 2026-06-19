@@ -1066,5 +1066,7 @@
   "Tenant already exists": "El arrendatario ya existe",
   "Payment of {{amount}} recorded": "Pago de {{amount}} registrado",
   "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
-  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded.",
+  "Split": "Dividido",
+  "Unassigned": "Sin asignar"
 }

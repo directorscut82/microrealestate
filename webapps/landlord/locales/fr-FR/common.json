@@ -1066,5 +1066,7 @@
   "Tenant already exists": "Le locataire existe déjà",
   "Payment of {{amount}} recorded": "Paiement de {{amount}} enregistré",
   "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
-  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded.",
+  "Split": "Réparti",
+  "Unassigned": "Non attribué"
 }

@@ -1155,5 +1155,7 @@
   "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} μονάδες = {{share}} €",
   "Payment of {{amount}} recorded": "Καταγράφηκε καταβολή {{amount}}",
   "Over-allocated by {{amount}}": "Υπερκατανομή κατά {{amount}}",
-  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν."
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν.",
+  "Split": "Μερισμένο",
+  "Unassigned": "Μη ανατεθειμένο"
 }

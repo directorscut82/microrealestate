@@ -622,13 +622,14 @@ export default function BuildingDashboard({ building }) {
                 )
                 .map((r, i) => {
                   const cost = Number(r.actualCost || r.estimatedCost || 0);
+                  const tp = r.tenantSharePercentage || 0;
                   const chargeLabel =
                     r.chargeableTo === 'tenants'
                       ? t('Tenants')
                       : r.chargeableTo === 'owners'
                         ? t('Owners')
                         : r.chargeableTo === 'split'
-                          ? `${t('Split')} ${r.tenantSharePercentage || 0}/${100 - (r.tenantSharePercentage || 0)}`
+                          ? `${t('Tenants')} ${tp}% · ${t('Owners')} ${100 - tp}%`
                           : t('Unassigned');
                   const termLabel = r.chargeTerm
                     ? `${String(r.chargeTerm).slice(4, 6)}/${String(r.chargeTerm).slice(0, 4)}`

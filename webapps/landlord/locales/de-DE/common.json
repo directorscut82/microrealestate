@@ -1066,5 +1066,7 @@
   "Tenant already exists": "Mieter existiert bereits",
   "Payment of {{amount}} recorded": "Zahlung von {{amount}} erfasst",
   "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
-  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded."
+  "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded.",
+  "Split": "Aufgeteilt",
+  "Unassigned": "Nicht zugewiesen"
 }
