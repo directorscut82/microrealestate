@@ -3884,6 +3884,22 @@ export async function _distributeRepairCharge(
     (building as any).ownerMonthlyExpenses.pull(e._id);
   }
 
+  // Strip ALL prior tenant-side monthlyCharges for this repair UNCONDITIONALLY
+  // (same scope as the owner strip above). Without this, a reclassify from
+  // 'tenants' to 'owners' (sharePercentage→0, early return) left stale
+  // monthlyCharges on occupied units (E2E S14 found this).
+  for (const unit of building.units) {
+    const repairCharges = (unit.monthlyCharges || []).filter(
+      (c: any) =>
+        (c.repairId && String(c.repairId) === repairIdStr) ||
+        (!c.repairId &&
+          c.description === `Repair: ${repair.title}`)
+    );
+    for (const charge of repairCharges) {
+      unit.monthlyCharges.pull(charge._id);
+    }
+  }
+
   // Rebuild the owner-portion liability row (zero payments; pool applied below).
   if (ownerPortion > 0) {
     const arr = (building as any).ownerMonthlyExpenses;
