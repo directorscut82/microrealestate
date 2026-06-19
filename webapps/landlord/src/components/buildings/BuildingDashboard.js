@@ -599,48 +599,6 @@ export default function BuildingDashboard({ building }) {
             </div>
           </div>
         )}
-        {/* Per-repair financial summary — each repair with its title, total cost,
-            charge split, and term. Surfaces the individual repair data that was
-            previously visible only on the Repairs tab; answers "who is charged
-            for each repair, how much, and when" at a glance. */}
-        {(building?.repairs || []).filter((r) => r.actualCost || r.estimatedCost).length > 0 && (
-          <div className="mt-3 pt-3 border-t border-stone-line/60">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-              {t('Repairs')}
-            </div>
-            <div className="space-y-1">
-              {(building.repairs || [])
-                .filter((r) => r.actualCost || r.estimatedCost)
-                .map((r, i) => {
-                  const cost = Number(r.actualCost || r.estimatedCost || 0);
-                  const chargeLabel =
-                    r.chargeableTo === 'tenants'
-                      ? t('Tenants')
-                      : r.chargeableTo === 'owners'
-                        ? t('Owners')
-                        : t('Mixed');
-                  const termLabel = r.chargeTerm
-                    ? `${String(r.chargeTerm).slice(4, 6)}/${String(r.chargeTerm).slice(0, 4)}`
-                    : '';
-                  return (
-                    <div
-                      key={r._id || i}
-                      className="flex items-center justify-between gap-2 text-xs"
-                    >
-                      <span className="text-ink truncate">
-                        {r.title || r.description || t('Repair')}
-                      </span>
-                      <span className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
-                        {termLabel && <span>{termLabel}</span>}
-                        <span>→ {chargeLabel}</span>
-                        <NumberFormat value={cost} className="text-ink font-medium" />
-                      </span>
-                    </div>
-                  );
-                })}
-            </div>
-          </div>
-        )}
       </Card>
 
       {/* Owner expenses paid vs unpaid — directly under the income card, the
