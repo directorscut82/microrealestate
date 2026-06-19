@@ -110,20 +110,37 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
         {/* Per-owner / per-category breakdown (incl. repairs) — the expense
             twin of the rent tooltip's per-tenant lines. Each line shows the
             owner (or building-level), the category, and paid / owed. */}
+        {/* Per-owner / per-category breakdown — owner name as a header line,
+            categories + amounts indented below (not jammed on one truncated
+            line). Mirrors the multi-line pattern in the rent tooltip. */}
         {breakdown.length > 0 && (
-          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-0.5">
-            {breakdown.map((line, i) => (
-              <div
-                key={i}
-                className="flex justify-between gap-2 font-mono tabular-nums text-label"
-              >
-                <span className="text-ink-muted truncate font-sans">
-                  {line.ownerName ? `${line.ownerName} · ` : ''}
-                  {categoryLabel(line)}
-                </span>
-                <span className="whitespace-nowrap text-ink">
-                  {formatNumber(line.paid)} / {formatNumber(line.owed)}
-                </span>
+          <div className="mt-1.5 border-t border-stone-line pt-1.5 max-h-[260px] overflow-y-auto space-y-1.5">
+            {/* Group lines by ownerName so each owner is a visual section. */}
+            {Object.entries(
+              breakdown.reduce((groups, line) => {
+                const key = line.ownerName || t('Building');
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(line);
+                return groups;
+              }, {})
+            ).map(([owner, lines]) => (
+              <div key={owner}>
+                <div className="text-ink font-sans font-medium text-label leading-tight mb-0.5">
+                  {owner}
+                </div>
+                {lines.map((line, i) => (
+                  <div
+                    key={i}
+                    className="flex justify-between gap-2 pl-2 font-mono tabular-nums text-label"
+                  >
+                    <span className="text-ink-muted truncate font-sans">
+                      {categoryLabel(line)}
+                    </span>
+                    <span className="whitespace-nowrap text-ink">
+                      {formatNumber(line.paid)} / {formatNumber(line.owed)}
+                    </span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -206,6 +223,8 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
+              allowEscapeViewBox={{ x: true, y: true }}
+              wrapperStyle={{ pointerEvents: 'auto' }}
             />
             <Bar
               dataKey="paid"
