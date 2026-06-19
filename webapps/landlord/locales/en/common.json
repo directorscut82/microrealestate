@@ -1158,5 +1158,7 @@
   "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
   "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded.",
   "Split": "Split",
-  "Unassigned": "Unassigned"
+  "Unassigned": "Unassigned",
+  "Tenant settlements": "Tenant settlements",
+  "Owner settlements": "Owner settlements"
 }

@@ -1157,5 +1157,7 @@
   "Over-allocated by {{amount}}": "Υπερκατανομή κατά {{amount}}",
   "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν.",
   "Split": "Μερισμένο",
-  "Unassigned": "Μη ανατεθειμένο"
+  "Unassigned": "Μη ανατεθειμένο",
+  "Tenant settlements": "Εκκαθαριστικά ενοικιαστών",
+  "Owner settlements": "Εκκαθαριστικά ιδιοκτητών"
 }

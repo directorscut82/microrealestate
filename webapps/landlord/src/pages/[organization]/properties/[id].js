@@ -56,7 +56,7 @@ function PropertyOverviewCard({ property }) {
             >
               <LuBuilding2 className="size-3.5 shrink-0" />
               <span className="truncate underline underline-offset-2 decoration-dotted">
-                {t('Building')}
+                {property.buildingName || t('Building')}
               </span>
             </div>
           )}

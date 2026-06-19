@@ -225,13 +225,13 @@ function OwnerDetail() {
             <Card className="p-4">
               <div className="text-sm font-medium mb-2 flex items-center gap-2">
                 <LuBuilding2 className="size-4 text-muted-foreground" />
-                {t('Owned properties')}
+                {t('Properties')}
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {(owner.ownedProperties || []).map((prop, i) => (
                   <div
                     key={prop.propertyId || i}
-                    className="flex items-center justify-between gap-2 text-xs py-1 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded"
+                    className="text-xs py-1.5 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded border-b border-stone-line/40 last:border-0"
                     onClick={() =>
                       prop.propertyId &&
                       router.push(
@@ -239,25 +239,27 @@ function OwnerDetail() {
                       )
                     }
                   >
-                    <div className="truncate">
-                      <span className="font-mono text-ink-muted">
-                        {prop.atakNumber}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-ink font-medium truncate">
+                        {prop.propertyName || prop.address?.street1 || t('Property')}
                       </span>
-                      <span className="ml-2 text-ink">
-                        {prop.propertyName || prop.address?.street1 || ''}
-                      </span>
-                      {prop.surface && (
-                        <span className="ml-1 text-ink-muted">
-                          ({prop.surface} m²)
+                      {prop.percentage != null && prop.percentage < 100 && (
+                        <span className="text-ink-muted whitespace-nowrap">
+                          {prop.percentage}%
                         </span>
                       )}
                     </div>
-                    <span className="text-muted-foreground whitespace-nowrap">
-                      {prop.buildingName}
-                      {prop.percentage != null && prop.percentage < 100 && (
-                        <span className="ml-1">· {prop.percentage}%</span>
-                      )}
-                    </span>
+                    <div className="text-ink-muted mt-0.5">
+                      {prop.address
+                        ? [prop.address.street1, prop.address.city, prop.address.zipCode]
+                            .filter(Boolean)
+                            .join(', ')
+                        : ''}
+                      {prop.surface ? ` · ${prop.surface} m²` : ''}
+                    </div>
+                    <div className="text-ink-muted mt-0.5 font-mono text-[10px]">
+                      ΑΤΑΚ {prop.atakNumber} · {prop.buildingName}
+                    </div>
                   </div>
                 ))}
               </div>
