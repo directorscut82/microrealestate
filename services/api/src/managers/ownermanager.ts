@@ -625,10 +625,38 @@ export async function one(req: Req, res: Res) {
   paymentHistory.sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
+  // Owned properties: every unit across all buildings where the owner's key
+  // appears in unit.owners[]. Provides the data for the owner detail page's
+  // apartment list (ATAK + address + link to property page).
+  const ownedProperties: any[] = [];
+  for (const b of buildings as any[]) {
+    for (const u of b.units || []) {
+      const isOwner = (u.owners || []).some(
+        (o: any) => ownerKeyOf(o) === ownerKey
+      );
+      if (!isOwner) continue;
+      const ownerEntry = (u.owners || []).find(
+        (o: any) => ownerKeyOf(o) === ownerKey
+      );
+      ownedProperties.push({
+        propertyId: u.propertyId ? String(u.propertyId) : null,
+        buildingId: String(b._id),
+        buildingName: b.name || '',
+        atakNumber: u.atakNumber || '',
+        surface: u.surface || null,
+        floor: u.floor ?? null,
+        percentage: ownerEntry?.percentage ?? null,
+        propertyName: u.property?.name || '',
+        address: u.property?.address || null
+      });
+    }
+  }
+
   return res.json({
     ...(_serializeOwnerSummary(agg) as any),
     charges: agg.charges.sort((a, b) => a.term - b.term),
-    paymentHistory
+    paymentHistory,
+    ownedProperties
   });
 }
 

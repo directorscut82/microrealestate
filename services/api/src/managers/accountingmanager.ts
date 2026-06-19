@@ -518,17 +518,67 @@ async function settlementsAsCsv(req: Req, res: Res) {
   i18n.setLocale(realm.locale);
 
   const tenants = await _fetchData(realmId, year);
-  const data = _settlements(tenants, realm.locale, realm.currency, false);
+  const NumberFormat = _safeCurrencyFormatter(realm.locale, realm.currency, false);
   const months = moment.localeData(realm.locale).months();
+
+  // Redesigned format: one row per tenant, separate columns for identification,
+  // month columns contain ONLY the payment total (a single number — sortable,
+  // summable, human-readable). No multi-line composite cells.
+  const rows = tenants.map((tenant: AnyRecord) => {
+    const _endRaw = tenant.terminationDate || tenant.endDate;
+    const beginDate = tenant.beginDate
+      ? moment.utc(tenant.beginDate).format('YYYY-MM-DD')
+      : '';
+    const endDate = _endRaw
+      ? moment.utc(_endRaw).format('YYYY-MM-DD')
+      : '';
+    const properties = _sanitizeCsvText(
+      (tenant.properties || []).map(({ name }: AnyRecord) => name).join(', ')
+    );
+
+    // Month totals: for each month, sum ALL payment amounts
+    const monthTotals: AnyRecord = {};
+    (months as unknown as string[]).forEach((m: string) => {
+      monthTotals[m] = '';
+    });
+    (tenant.rents || []).forEach(({ month, payments }: AnyRecord) => {
+      const total = (payments || []).reduce(
+        (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
+        0
+      );
+      if (total > 0) {
+        const monthName = (months as unknown as string[])[month - 1];
+        if (monthName) {
+          monthTotals[monthName] = NumberFormat.format(_round(total));
+        }
+      }
+    });
+
+    return {
+      name: _sanitizeCsvText(tenant.name),
+      reference: _sanitizeCsvText(tenant.reference),
+      properties,
+      beginDate,
+      endDate,
+      deposit: NumberFormat.format(_round(tenant.guaranty || 0)),
+      ...monthTotals
+    };
+  });
+
   const fields = [
-    { label: i18n.__('Tenant'), value: 'tenant' },
+    { label: i18n.__('Name'), value: 'name' },
+    { label: i18n.__('Reference'), value: 'reference' },
+    { label: i18n.__('Properties'), value: 'properties' },
+    { label: i18n.__('Contract begin date'), value: 'beginDate' },
+    { label: i18n.__('Contract end date'), value: 'endDate' },
+    { label: i18n.__('Deposit'), value: 'deposit' },
     ...(months as unknown as string[])
   ];
 
   const json2csv = new Parser({ fields, delimiter: ';', withBOM: true });
-  const csv = json2csv.parse(data);
+  const csvStr = json2csv.parse(rows);
   res.header('Content-Type', 'text/csv');
-  return res.send(csv);
+  return res.send(csvStr);
 }
 
 export const csv = {

@@ -219,7 +219,7 @@ function Accounting() {
           <TabsTrigger
             value="settlements"
             className="min-w-48 sm:w-full"
-          >{`${t('Payments')} (${
+          >{`${t('Settlements')} (${
             filteredData.settlements?.length || 0
           })`}</TabsTrigger>
           <TabsTrigger value="owners" className="min-w-48 sm:w-full">{`${t(

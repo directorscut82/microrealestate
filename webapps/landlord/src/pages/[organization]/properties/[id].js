@@ -1,4 +1,4 @@
-import { LuArrowLeft, LuHistory, LuKeyRound, LuTrash } from 'react-icons/lu';
+import { LuArrowLeft, LuBuilding2, LuHistory, LuKeyRound, LuTrash } from 'react-icons/lu';
 import {
   Tabs,
   TabsContent,
@@ -34,6 +34,7 @@ import { withAuthentication } from '../../../components/Authentication';
 
 function PropertyOverviewCard({ property }) {
   const { t } = useTranslation('common');
+  const router = useRouter();
   return (
     <DashboardCard
       Icon={LuKeyRound}
@@ -44,6 +45,21 @@ function PropertyOverviewCard({ property }) {
             <span className="text-muted-foreground">{property?.name}</span>
             <NumberFormat value={property?.price} />
           </div>
+          {property?.buildingId && (
+            <div
+              className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer hover:text-ink transition-colors"
+              onClick={() =>
+                router.push(
+                  `/${router.query.organization}/buildings/${property.buildingId}`
+                )
+              }
+            >
+              <LuBuilding2 className="size-3.5 shrink-0" />
+              <span className="truncate underline underline-offset-2 decoration-dotted">
+                {t('Building')}
+              </span>
+            </div>
+          )}
           <Map address={property?.address} />
         </div>
       )}

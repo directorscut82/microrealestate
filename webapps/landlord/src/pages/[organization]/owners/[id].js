@@ -4,7 +4,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import ErrorPage from 'next/error';
-import { LuArrowLeft, LuHome, LuWallet } from 'react-icons/lu';
+import { LuArrowLeft, LuBuilding2, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
 import Page from '../../../components/Page';
@@ -213,6 +213,50 @@ function OwnerDetail() {
                     </span>
                     <span className="tabular-nums text-olive">
                       <NumberFormat value={p.amount} />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Owned apartments — ATAK, address, surface, link to property page */}
+          {(owner.ownedProperties || []).length > 0 && (
+            <Card className="p-4">
+              <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                <LuBuilding2 className="size-4 text-muted-foreground" />
+                {t('Owned properties')}
+              </div>
+              <div className="space-y-1">
+                {(owner.ownedProperties || []).map((prop, i) => (
+                  <div
+                    key={prop.propertyId || i}
+                    className="flex items-center justify-between gap-2 text-xs py-1 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded"
+                    onClick={() =>
+                      prop.propertyId &&
+                      router.push(
+                        `/${router.query.organization}/properties/${prop.propertyId}`
+                      )
+                    }
+                  >
+                    <div className="truncate">
+                      <span className="font-mono text-ink-muted">
+                        {prop.atakNumber}
+                      </span>
+                      <span className="ml-2 text-ink">
+                        {prop.propertyName || prop.address?.street1 || ''}
+                      </span>
+                      {prop.surface && (
+                        <span className="ml-1 text-ink-muted">
+                          ({prop.surface} m²)
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-muted-foreground whitespace-nowrap">
+                      {prop.buildingName}
+                      {prop.percentage != null && prop.percentage < 100 && (
+                        <span className="ml-1">· {prop.percentage}%</span>
+                      )}
                     </span>
                   </div>
                 ))}

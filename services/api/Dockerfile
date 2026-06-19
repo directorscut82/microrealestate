@@ -17,7 +17,8 @@ RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/roo
     yarn workspaces focus @microrealestate/api && \
     yarn workspace @microrealestate/types run build && \
     yarn workspace @microrealestate/common run build && \
-    yarn workspace @microrealestate/api run transpile:service
+    yarn workspace @microrealestate/api run transpile:service && \
+    cp -r services/api/src/locales services/api/dist/locales
 
 FROM base AS deps
 WORKDIR /usr/app
