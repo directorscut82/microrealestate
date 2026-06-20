@@ -17,20 +17,28 @@ export default function RentOverviewCard({ tenant }) {
             <span className="text-muted-foreground">{t('Rent')}</span>
             <NumberFormat value={tenant.rental} />
           </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">
-              {/* Wave-26 round-3m: 'Expenses' read as 'Έξοδα' (the
-                  landlord's own building expenses) which is the wrong
-                  word for the tenant view. These are RECURRING extra
-                  costs the tenant pays alongside rent (utilities,
-                  common-area fees, etc.) — distinct from the
-                  per-payment 'Additional cost' (Έκτακτη χρέωση =
-                  extraordinary one-off charges). The two keys are
-                  intentionally separate. */}
-              {t('Additional charges')}
-            </span>
-            <NumberFormat value={tenant.expenses} />
-          </div>
+          {/* Property-level recurring expenses (tenant's own surcharges) */}
+          {tenant.expenses > 0 && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">
+                {t('Additional charges')}
+              </span>
+              <NumberFormat value={tenant.expenses} />
+            </div>
+          )}
+          {/* Building charges (per-unit allocated from building expenses) */}
+          {(tenant.buildingCharges || []).length > 0 && (
+            <div className="space-y-0.5">
+              {tenant.buildingCharges.map((c, i) => (
+                <div key={i} className="flex justify-between text-sm">
+                  <span className="text-muted-foreground truncate mr-2">
+                    {c.description || t('Building charge')}
+                  </span>
+                  <NumberFormat value={c.amount} />
+                </div>
+              ))}
+            </div>
+          )}
           {tenant.discount > 0 ? (
             <div className="flex justify-between">
               <span className="text-muted-foreground">{t('Discount')}</span>

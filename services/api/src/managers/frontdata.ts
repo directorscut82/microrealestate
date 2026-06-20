@@ -539,6 +539,27 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
     });
     occupant.preTaxTotal =
       occupant.rental + occupant.expenses - occupant.discount;
+    // Include building charges in the total so Σύνολο on the rent overview card
+    // matches the rent's grandTotal (which includes them). Without this the card
+    // showed rental+expenses while grandTotal was higher by the building charges.
+    // Also expose buildingChargesTotal so the card can list individual charges.
+    const _currentRent = Array.isArray(occupant.rents) && occupant.rents.length
+      ? occupant.rents[occupant.rents.length - 1]
+      : null;
+    const _bcTotal = (_currentRent?.buildingCharges || []).reduce(
+      (s: number, c: AnyRecord) => s + (Number(c.amount) || 0),
+      0
+    );
+    occupant.buildingChargesTotal = Math.round(_bcTotal * 100) / 100;
+    occupant.buildingCharges = (_currentRent?.buildingCharges || []).map(
+      (c: AnyRecord) => ({
+        description: c.description || '',
+        amount: Number(c.amount) || 0,
+        type: c.type || ''
+      })
+    );
+    occupant.preTaxTotal =
+      occupant.rental + occupant.expenses + occupant.buildingChargesTotal - occupant.discount;
     occupant.total = occupant.preTaxTotal;
     if (occupant.vatRatio) {
       occupant.vat = occupant.preTaxTotal * occupant.vatRatio;
