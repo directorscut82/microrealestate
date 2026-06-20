@@ -130,6 +130,50 @@ function OwnerDetail() {
             </Card>
           )}
 
+          {/* Ακίνητα — one line per property, before Χρεώσεις */}
+          {(owner.ownedProperties || []).length > 0 && (
+            <Card className="p-4">
+              <div className="text-sm font-medium mb-2 flex items-center gap-2">
+                <LuBuilding2 className="size-4 text-muted-foreground" />
+                {t('Properties')}
+              </div>
+              <div className="divide-y divide-stone-line/40">
+                {(owner.ownedProperties || []).map((prop, i) => (
+                  <div
+                    key={prop.propertyId || i}
+                    className="flex items-center gap-3 py-1 text-xs cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded"
+                    onClick={() =>
+                      prop.propertyId &&
+                      router.push(
+                        `/${router.query.organization}/properties/${prop.propertyId}`
+                      )
+                    }
+                  >
+                    <span className="text-ink-muted w-5 shrink-0">#{i + 1}</span>
+                    <span className="font-mono text-ink-muted w-28 shrink-0 truncate">
+                      {prop.atakNumber}
+                    </span>
+                    <span className="text-ink-muted w-16 shrink-0 text-right">
+                      {prop.surface ? `${prop.surface} m²` : ''}
+                    </span>
+                    <span className="text-ink truncate flex-1 min-w-0">
+                      {prop.address
+                        ? [prop.address.street1, prop.address.city, prop.address.zipCode]
+                            .filter(Boolean)
+                            .join(', ')
+                        : prop.propertyName || ''}
+                    </span>
+                    <span className="text-ink-muted whitespace-nowrap shrink-0">
+                      {prop.percentage != null && prop.percentage < 100
+                        ? `${prop.percentage}%`
+                        : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           {/* Charges ledger */}
           <Card className="p-4">
             <div className="text-sm font-medium mb-2">{t('Charges')}</div>
@@ -220,51 +264,7 @@ function OwnerDetail() {
             </Card>
           )}
 
-          {/* Owned apartments — ATAK, address, surface, link to property page */}
-          {(owner.ownedProperties || []).length > 0 && (
-            <Card className="p-4">
-              <div className="text-sm font-medium mb-2 flex items-center gap-2">
-                <LuBuilding2 className="size-4 text-muted-foreground" />
-                {t('Properties')}
-              </div>
-              <div className="space-y-1.5">
-                {(owner.ownedProperties || []).map((prop, i) => (
-                  <div
-                    key={prop.propertyId || i}
-                    className="text-xs py-1.5 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded border-b border-stone-line/40 last:border-0"
-                    onClick={() =>
-                      prop.propertyId &&
-                      router.push(
-                        `/${router.query.organization}/properties/${prop.propertyId}`
-                      )
-                    }
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-ink font-medium truncate">
-                        {prop.propertyName || prop.address?.street1 || t('Property')}
-                      </span>
-                      {prop.percentage != null && prop.percentage < 100 && (
-                        <span className="text-ink-muted whitespace-nowrap">
-                          {prop.percentage}%
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-ink-muted mt-0.5">
-                      {prop.address
-                        ? [prop.address.street1, prop.address.city, prop.address.zipCode]
-                            .filter(Boolean)
-                            .join(', ')
-                        : ''}
-                      {prop.surface ? ` · ${prop.surface} m²` : ''}
-                    </div>
-                    <div className="text-ink-muted mt-0.5 font-mono text-[10px]">
-                      ΑΤΑΚ {prop.atakNumber} · {prop.buildingName}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          {/* Ακίνητα — MOVED BEFORE Χρεώσεις, now renders BEFORE payments */}
 
           <OwnerPaymentDialog open={payOpen} setOpen={setPayOpen} owner={owner} />
         </div>
