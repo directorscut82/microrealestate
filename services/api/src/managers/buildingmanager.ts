@@ -4508,14 +4508,14 @@ export async function computeOwnerEksodaByMonth(
   // rows (live gap-fill lines have no recorded paid).
   detailByTerm: Map<
     number,
-    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number }>
+    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean }>
   >;
 }> {
   const owedByTerm = new Map<number, number>();
   const paidByTerm = new Map<number, number>();
   const detailByTerm = new Map<
     number,
-    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number }>
+    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean }>
   >();
   const addOwed = (term: number, amt: number) => {
     if (!(amt > 0)) return;
@@ -4532,7 +4532,11 @@ export async function computeOwnerEksodaByMonth(
     category: string,
     label: string,
     owed: number,
-    paid: number
+    paid: number,
+    // D5: display-only — true when this line is a vacant unit's share routed to
+    // the owner (source 'vacant'/'repair-vacant'), so the tooltip can mark it
+    // ΚΕΝΟ. Does NOT affect any money computation.
+    vacant = false
   ) => {
     if (!(owed > 0) && !(paid > 0)) return;
     const arr = detailByTerm.get(term) || [];
@@ -4552,8 +4556,9 @@ export async function computeOwnerEksodaByMonth(
       existing.owed = Math.round((existing.owed + owed) * 100) / 100;
       existing.paid = Math.round((existing.paid + paid) * 100) / 100;
       if (!existing.label && label) existing.label = label;
+      if (vacant) existing.vacant = true;
     } else {
-      arr.push({ ownerName: ownerName || null, category, label, owed, paid });
+      arr.push({ ownerName: ownerName || null, category, label, owed, paid, vacant });
     }
     detailByTerm.set(term, arr);
   };
@@ -4717,7 +4722,8 @@ export async function computeOwnerEksodaByMonth(
       category,
       row.description || srcExp?.name || '',
       amount,
-      rowPaid
+      rowPaid,
+      row.source === 'vacant' || row.source === 'repair-vacant'
     );
   }
 
@@ -4790,7 +4796,8 @@ export async function computeOwnerEksodaByMonth(
             e.type || 'other',
             e.name || '',
             shareR,
-            0
+            0,
+            true // vacant-unit share routed to owner → ΚΕΝΟ
           );
         }
       }
@@ -4864,7 +4871,8 @@ export async function computeOwnerEksodaByMonth(
           'repair',
           repair.title || '',
           shareR,
-          0
+          0,
+          true // vacant-unit repair share routed to owner → ΚΕΝΟ
         );
       }
     }

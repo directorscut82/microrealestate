@@ -82,9 +82,13 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
     const key = BUILDING_TYPE_LABEL_KEY[line.category] || 'Other';
     const typeLabel = t(key);
     const realName = !looksLikeId(line.label) ? String(line.label).trim() : '';
-    return realName && realName !== typeLabel
-      ? `${typeLabel} (${realName})`
-      : typeLabel;
+    const base =
+      realName && realName !== typeLabel
+        ? `${typeLabel} (${realName})`
+        : typeLabel;
+    // D5: a vacant-unit share routed to the owner is marked ΚΕΝΟ so the
+    // landlord sees WHY the owner is charged it.
+    return line.vacant ? `${base} — ${t('Vacant unit')}` : base;
   };
 
   const CustomBarTooltip = ({ active, payload }) => {

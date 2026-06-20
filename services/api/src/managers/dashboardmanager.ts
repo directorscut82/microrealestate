@@ -730,7 +730,9 @@ async function _expensesRollup(
         label: d.label || '',
         buildingName: d.buildingName || '',
         owed: _round(d.owed),
-        paid: _round(d.paid)
+        paid: _round(d.paid),
+        // D5: vacant-unit share routed to owner → frontend marks it ΚΕΝΟ.
+        vacant: !!d.vacant
       }))
       .filter((d) => d.owed > 0 || d.paid > 0)
       // largest owed first so the most significant lines lead the tooltip.
