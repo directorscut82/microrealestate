@@ -481,16 +481,7 @@ function _computeBuildingChargeRaw(
   );
   if (!unit) return 0;
 
-  const { amount, customAllocations } = expense;
-  // κυμαινόμενο correction: a variable expense (amount=0 on the expense
-  // record) combined with allocationMethod='fixed' is an invalid state
-  // the old UI allowed. 'fixed' reads customAllocations which may be
-  // empty/stale. Treat fixed+amount=0 as 'equal' so the typed monthly
-  // statement total splits correctly. Matches saveMonthlyStatement.
-  const allocationMethod =
-    expense.allocationMethod === 'fixed' && (Number(amount) || 0) === 0
-      ? 'equal'
-      : expense.allocationMethod;
+  const { allocationMethod, amount, customAllocations } = expense;
   // For non-fixed methods, amount must be a valid positive number
   if (allocationMethod !== 'fixed' && (!Number.isFinite(amount) || amount <= 0)) return 0;
 
