@@ -40,7 +40,9 @@ function StatementMonthPicker({ onPick, t }) {
     <Popover open={open} onOpenChange={handleOpenChange} modal>
       <PopoverTrigger asChild>
         <Button variant="secondary" className="flex items-center gap-1">
-          <LuPaperclip /> {t('Receipt')}
+          {/* OS7: this downloads a STATEMENT (εκκαθαριστικό), not a receipt.
+              The tenant tab correctly uses 'Receipt'/Απόδειξη for receipts. */}
+          <LuPaperclip /> {t('Statement')}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-2" align="end">
@@ -103,6 +105,9 @@ function SettlementRow({ month, ownerKey, settlements }) {
       </div>
       <div
         className={cn(
+          // MIDDLE = the money column (mirrors TenantSettlements): each
+          // καταβολή's date + payment type + amount. OS1/OS2: was empty / showed
+          // charge metadata; now shows recorded payments.
           'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2 border-r',
           !hasSettlements ? 'bg-muted' : ''
         )}
@@ -120,7 +125,9 @@ function SettlementRow({ month, ownerKey, settlements }) {
                     </div>
                   )}
                   <div className="text-xs text-muted-foreground">
-                    {s.description || t(s.type || 'expense')}
+                    {/* payment TYPE (Μεταφορά/Μετρητά/Επιταγή), like the tenant
+                        grid — guard a legacy/empty type (H7 class). */}
+                    {s.type ? t(s.type[0].toUpperCase() + s.type.slice(1)) : ''}
                   </div>
                   <NumberFormat value={s.amount} withColor className="text-lg" />
                 </div>
@@ -128,18 +135,19 @@ function SettlementRow({ month, ownerKey, settlements }) {
             })
           : null}
       </div>
-      <div className="col-span-2 px-4 py-2 border-r text-xs text-muted-foreground">
-        {hasSettlements && settlements.some((s) => s.owed > 0) && (
-          <div className="leading-snug">
-            <span className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground/80 mr-1">
-              {t('Owed')}
-            </span>
-            <NumberFormat
-              value={settlements.reduce((sum, s) => sum + (s.owed || 0), 0)}
-              className="text-xs"
-            />
-          </div>
-        )}
+      <div className="col-span-2 px-4 py-2 border-r text-xs text-muted-foreground space-y-1">
+        {/* RIGHT = notes recorded during the καταβολή (mirrors the tenant grid's
+            notes column). OS1: owed was wrongly rendered here; owed now lives in
+            the header total only. */}
+        {hasSettlements
+          ? settlements
+              .filter((s) => s.amount > 0 && s.description)
+              .map((s, index) => (
+                <div key={`${ownerKey}_${month}_note_${index}`} className="leading-snug">
+                  {s.description}
+                </div>
+              ))
+          : null}
       </div>
     </div>
   );
@@ -172,6 +180,23 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
                 onPick={onDownloadStatement(owner)}
                 t={t}
               />
+            </div>
+            {/* OS5/OS6: a second header line so the owner block matches the
+                tenant block's height (tenant shows the lease date range). Owners
+                have no lease range → show units/buildings + ΑΦΜ instead, so the
+                two tabs line up row-for-row. */}
+            <div className="text-muted-foreground mb-2 px-2 text-sm">
+              {[
+                owner.unitCount != null
+                  ? t('{{count}} units', { count: owner.unitCount })
+                  : null,
+                owner.buildingCount != null
+                  ? t('{{count}} buildings', { count: owner.buildingCount })
+                  : null,
+                owner.taxId ? `${t('Tax ID')}: ${owner.taxId}` : null
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </div>
             <div>
               {months.map((_m, index) => (

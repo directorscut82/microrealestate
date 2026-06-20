@@ -174,6 +174,15 @@ type OwnerCharge = {
   expenseType?: string;
   description: string;
   propertyId: string | null;
+  // Per-unit scope discriminator so the owner-detail Χρεώσεις can label each
+  // line by which unit it bills (the user reported 3 visually-identical repair
+  // lines). 'building' = a building-wide owner-portion (propertyId null) →
+  // "Ολόκληρο κτίριο"; 'unit' = a propertyId-scoped vacant/repair-vacant share
+  // → the unit's floor, marked ΚΕΝΟ when the unit is vacant. The frontend maps
+  // unitFloor/unitVacant to a localized label (Ισόγειο / Όροφος N / ΚΕΝΟ).
+  scope?: 'building' | 'unit';
+  unitFloor?: number | null;
+  unitVacant?: boolean;
   // present when the charge's unit/building has >1 owner; the charge is
   // attributed once to the canonical owner but flagged co-owned for the UI.
   coOwnerCount?: number;
@@ -182,6 +191,17 @@ type OwnerCharge = {
   // (ownerSlicesOf). Lets the UI show "Name (50%) = €50" per co-owner. The
   // settlement still lands wholly on the canonical owner (one payments[] home).
   coOwners?: { ownerKey: string; name: string; percentage: number; amount: number }[];
+  // The recorded καταβολές on this charge (sliced by the same co-owner ratio as
+  // `amount`/`paidAmount`). Drives the Τιμολόγια settlements GRID, which mirrors
+  // the tenant grid (built from payments, not from owed). Owed stays in the
+  // header total, never in the grid (OS1/OS2/OS3, 2026-06-20).
+  payments?: {
+    date: any;
+    amount: number;
+    type: string;
+    reference: string;
+    description: string;
+  }[];
 };
 
 type OwnerAgg = {
@@ -327,6 +347,12 @@ export function _aggregateOwners(
         if (e.type) expTypeById.set(String(e._id), String(e.type));
       }
     }
+    // propertyId → unit, so a propertyId-scoped charge can label its line by
+    // the unit's floor + occupancy (ΚΕΝΟ when vacant).
+    const unitByPropId = new Map<string, any>();
+    for (const u of b.units || []) {
+      if (u.propertyId) unitByPropId.set(String(u.propertyId), u);
+    }
     for (const row of b.ownerMonthlyExpenses || []) {
       const amount = _round(row.amount);
       if (!(amount > 0)) continue;
@@ -381,7 +407,31 @@ export function _aggregateOwners(
         source: src,
         expenseType,
         description: row.description || '',
-        propertyId: row.propertyId ? String(row.propertyId) : null
+        propertyId: row.propertyId ? String(row.propertyId) : null,
+        // Per-unit scope label (see OwnerCharge.scope). A building-wide
+        // owner-portion has no propertyId → 'building'; a propertyId-scoped
+        // share is a 'unit' line, labeled by the unit's floor and marked vacant
+        // (ΚΕΝΟ) when occupancyType==='vacant'.
+        ...(row.propertyId
+          ? (() => {
+              const u = unitByPropId.get(String(row.propertyId));
+              return {
+                scope: 'unit' as const,
+                unitFloor: u && u.floor != null ? Number(u.floor) : null,
+                unitVacant: !!u && (u.occupancyType || 'vacant') === 'vacant'
+              };
+            })()
+          : { scope: 'building' as const }),
+        // raw recorded payments on this owner row (full, unsliced). For the
+        // single-owner path these go verbatim onto the charge; the multi-owner
+        // path re-slices amounts by ratio below.
+        payments: payments.map((p: any) => ({
+          date: p.date,
+          amount: Number(p.amount) || 0,
+          type: p.type || 'transfer',
+          reference: p.reference || '',
+          description: p.description || ''
+        }))
       };
       // Resolve the owner(s) this charge belongs to.
       //   - propertyId-scoped (vacant / repair-vacant): the owners of THAT
@@ -450,7 +500,13 @@ export function _aggregateOwners(
             coOwnerNames: sortedKeys
               .map((k) => owners.get(k)?.name)
               .filter(Boolean) as string[],
-            coOwners: slices
+            coOwners: slices,
+            // re-slice each payment by this owner's ratio so the settlements
+            // grid shows their OWN share of each καταβολή (mirrors amount slice)
+            payments: (charge.payments || []).map((p) => ({
+              ...p,
+              amount: _round((Number(p.amount) || 0) * ratio)
+            }))
           };
           agg.charges.push(sliceCharge);
           agg.totalAmount = _round(agg.totalAmount + sliceAmount);
@@ -533,22 +589,33 @@ async function _markAlsoRents(
 }
 
 function _serializeOwnerSummary(agg: OwnerAgg) {
-  // Build per-month settlements (12 slots) mirroring TenantSettlements shape
-  // so the Τιμολόγια Ιδιοκτήτες tab renders an identical 12-month grid.
+  // Build per-month settlements (12 slots) from the owner's recorded καταβολές
+  // — mirroring TenantSettlements, which is built from rent.payments[] (a
+  // PAYMENT each: date + type + amount + note). OS1/OS2/OS3 (2026-06-20): the
+  // owner grid was wrongly built from CHARGES (owed/source), which put owed in
+  // the notes column and left the money column empty. Owed is NOT in the grid;
+  // it lives in the header total (totalAmount/totalOutstanding below).
   const settlements: (any[] | undefined)[] = Array.from({ length: 12 }, () => undefined);
   for (const charge of agg.charges) {
     const term = Number(charge.term);
     if (!term) continue;
     const month = Math.floor((term % 1000000) / 10000) - 1; // 0-based
     if (month < 0 || month > 11) continue;
-    if (!settlements[month]) settlements[month] = [];
-    settlements[month]!.push({
-      date: charge.paid ? (charge as any).paidDate || null : null,
-      amount: charge.paidAmount || 0,
-      owed: charge.amount || 0,
-      type: charge.source || 'expense',
-      description: charge.description || ''
-    });
+    for (const p of charge.payments || []) {
+      const amt = Number(p.amount) || 0;
+      if (!(amt > 0)) continue;
+      if (!settlements[month]) settlements[month] = [];
+      settlements[month]!.push({
+        date: p.date || null,
+        amount: _round(amt),
+        // payment TYPE (cash/transfer/cheque) — what the tenant grid shows in
+        // its money column — NOT the charge source.
+        type: p.type || 'transfer',
+        reference: p.reference || '',
+        // the καταβολή note → the right (notes) column, like the tenant grid.
+        description: p.description || ''
+      });
+    }
   }
   return {
     ownerKey: agg.ownerKey,

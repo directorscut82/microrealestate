@@ -13,7 +13,6 @@ import { ownerChargeLabel } from '../../../utils/lineLabels';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
-import useFormatNumber from '../../../hooks/useFormatNumber';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
@@ -22,9 +21,59 @@ const _termLabel = (term) => {
   return s.length >= 6 ? `${s.slice(4, 6)}/${s.slice(0, 4)}` : s;
 };
 
+// Per-unit scope label for an owner charge line. Server sends scope
+// ('building'|'unit') + unitFloor + unitVacant (ownermanager.ts). A building-
+// wide owner-portion reads "Ολόκληρο κτίριο"; a unit line reads the floor
+// (Ισόγειο / Όροφος N), suffixed ΚΕΝΟ when the unit is vacant (the case where a
+// vacant unit's tenant-share routes to the owner). Returns '' when not a unit
+// scope with known floor, so the caller can omit the suffix entirely.
+const _unitScopeLabel = (t, c) => {
+  if (c.scope === 'building') return t('Whole building');
+  if (c.scope !== 'unit') return '';
+  let floorLabel = '';
+  if (c.unitFloor === 0) floorLabel = t('Ground floor');
+  else if (typeof c.unitFloor === 'number')
+    floorLabel = `${t('Floor')} ${c.unitFloor}`;
+  if (c.unitVacant) {
+    // ΚΕΝΟ (neuter) per user. With a known floor: "Ισόγειο — ΚΕΝΟ".
+    return floorLabel ? `${floorLabel} — ${t('Vacant unit')}` : t('Vacant unit');
+  }
+  return floorLabel;
+};
+
+// Group charges by month+building so the owner sees one block per
+// (term, building) with the co-owner split shown ONCE in the header (not
+// repeated per line — user decision 2026-06-20). Returns an array of
+// { key, term, buildingName, coOwners, coOwnerCount, lines[], total }.
+const _groupCharges = (charges) => {
+  const groups = new Map();
+  for (const c of charges) {
+    const key = `${c.term}|${c.buildingId || c.buildingName}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        term: c.term,
+        buildingName: c.buildingName,
+        coOwners: Array.isArray(c.coOwners) ? c.coOwners : null,
+        coOwnerCount: c.coOwnerCount || 0,
+        lines: [],
+        total: 0
+      });
+    }
+    const g = groups.get(key);
+    g.lines.push(c);
+    g.total += Number(c.amount) || 0;
+    // carry the richest co-owner split seen in the group for the header
+    if (!g.coOwners && Array.isArray(c.coOwners) && c.coOwners.length > 1) {
+      g.coOwners = c.coOwners;
+      g.coOwnerCount = c.coOwnerCount || c.coOwners.length;
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => a.term - b.term);
+};
+
 function OwnerDetail() {
   const { t } = useTranslation('common');
-  const formatNumber = useFormatNumber();
   const router = useRouter();
   const ownerKey = decodeURIComponent(
     Array.isArray(router.query.id) ? router.query.id[0] : router.query.id || ''
@@ -110,17 +159,20 @@ function OwnerDetail() {
                   {t('Owner expenses paid')}
                 </span>
                 <span className="tabular-nums text-sm">
-                  <NumberFormat value={paid} />
+                  {/* OD4: showZero so paid=0 renders "0,00 € / 70,00 €", not the
+                      malformed "−/ 70,00 €" (NumberFormat returns "—" for 0
+                      without showZero). */}
+                  <NumberFormat value={paid} showZero />
                   <span className="text-ink-muted">
                     {' / '}
-                    <NumberFormat value={total} />
+                    <NumberFormat value={total} showZero />
                   </span>
                 </span>
               </div>
               <Progress value={pct} />
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span className="text-olive">
-                  {t('Paid')}: <NumberFormat value={paid} />
+                  {t('Paid')}: <NumberFormat value={paid} showZero />
                 </span>
                 <span className="text-oxide">
                   {t('Outstanding')}:{' '}
@@ -174,7 +226,9 @@ function OwnerDetail() {
             </Card>
           )}
 
-          {/* Charges ledger */}
+          {/* Charges ledger — grouped by month+building. Co-owner split shown
+              ONCE in the group header (user decision 2026-06-20); each line is
+              labeled by its unit scope (Ολόκληρο κτίριο / floor / ΚΕΝΟ). */}
           <Card className="p-4">
             <div className="text-sm font-medium mb-2">{t('Charges')}</div>
             {charges.length === 0 ? (
@@ -182,56 +236,62 @@ function OwnerDetail() {
                 {t('No expenses for this period')}
               </p>
             ) : (
-              <div className="space-y-1">
-                {charges.map((c) => (
-                  <div
-                    key={c.ownerExpenseId}
-                    className="flex items-baseline justify-between gap-2 text-sm py-0.5"
-                  >
-                    <span className="truncate text-muted-foreground">
-                      {_termLabel(c.term)} · {c.buildingName} ·{' '}
-                      {ownerChargeLabel(t, c)}
-                      {Array.isArray(c.coOwners) && c.coOwners.length > 1 ? (
-                        <span className="text-muted-foreground/60">
-                          {' '}
-                          (
-                          {c.coOwners
-                            .map((o) =>
-                              t('{{name}} {{pct}}% = {{amount}}', {
-                                name: o.isRest ? t('others') : o.name,
-                                pct: o.percentage,
-                                // R1-L6: org locale + currency, not hardcoded EUR
-                                amount: formatNumber(o.amount)
-                              })
-                            )
-                            .join(', ')}
-                          )
-                        </span>
-                      ) : (
-                        c.coOwnerCount > 1 && (
-                          <span className="text-muted-foreground/60">
-                            {' '}
-                            ({t('co-owned')})
-                          </span>
-                        )
-                      )}
-                    </span>
-                    <span className="flex items-center gap-3 shrink-0 tabular-nums">
-                      <span className={c.paid ? 'text-olive' : 'text-oxide'}>
-                        <NumberFormat value={c.amount} />
+              <div className="space-y-4">
+                {_groupCharges(charges).map((g) => (
+                  <div key={g.key}>
+                    {/* group header: month · building, then the co-owner split
+                        ONCE underneath (not per line) */}
+                    <div className="flex items-baseline justify-between gap-2 text-sm font-medium">
+                      <span>
+                        {_termLabel(g.term)} · {g.buildingName}
                       </span>
-                      <Badge
-                        variant={c.paid ? 'success' : 'outline'}
-                        className={
-                          'font-normal ' + (!c.paid ? 'border-oxide/40 text-oxide' : '')
-                        }
-                      >
-                        {c.paid
-                          ? t('Paid')
-                          : `${t('Outstanding')} `}
-                        {!c.paid && <NumberFormat value={c.outstanding} />}
-                      </Badge>
-                    </span>
+                      <span className="tabular-nums text-ink-muted">
+                        <NumberFormat value={g.total} showZero />
+                      </span>
+                    </div>
+                    {Array.isArray(g.coOwners) && g.coOwners.length > 1 && (
+                      <div className="text-xs text-muted-foreground/70 mb-1">
+                        {t('Co-ownership')}:{' '}
+                        {g.coOwners
+                          .map((o) =>
+                            `${o.isRest ? t('others') : o.name} ${o.percentage}%`
+                          )
+                          .join(' · ')}
+                      </div>
+                    )}
+                    <div className="space-y-0.5 pl-3">
+                      {g.lines.map((c) => {
+                        const scopeLabel = _unitScopeLabel(t, c);
+                        return (
+                          <div
+                            key={c.ownerExpenseId}
+                            className="flex items-baseline justify-between gap-2 text-sm py-0.5"
+                          >
+                            <span className="truncate text-muted-foreground">
+                              {ownerChargeLabel(t, c)}
+                              {scopeLabel ? ` — ${scopeLabel}` : ''}
+                            </span>
+                            <span className="flex items-center gap-3 shrink-0 tabular-nums">
+                              <span
+                                className={c.paid ? 'text-olive' : 'text-oxide'}
+                              >
+                                <NumberFormat value={c.amount} />
+                              </span>
+                              <Badge
+                                variant={c.paid ? 'success' : 'outline'}
+                                className={
+                                  'font-normal ' +
+                                  (!c.paid ? 'border-oxide/40 text-oxide' : '')
+                                }
+                              >
+                                {c.paid ? t('Paid') : `${t('Outstanding')} `}
+                                {!c.paid && <NumberFormat value={c.outstanding} />}
+                              </Badge>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ))}
               </div>
