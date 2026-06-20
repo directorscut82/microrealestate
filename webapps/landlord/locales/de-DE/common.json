@@ -1,4 +1,12 @@
 {
+  "Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.": "Jahresprognose auf Basis des aktuellen Standes. Neue oder geänderte Ausgaben, Reparaturen oder Mieten in einzelnen Monaten ändern diese Prognose.",
+  "of": "von",
+  "Occupancy": "Belegung",
+  "OWNERS": "EIGENTÜMER",
+  "TENANTS": "MIETER",
+  "subtracted from Net": "vom Netto abgezogen",
+  "not subtracted from Net": "nicht vom Netto abgezogen",
+  "Annual projection": "Jahresprognose",
   "VAT and previous balances not included": "(MwSt. und frühere Salden nicht enthalten)",
   "Detailed statement for {{monthYear}}": "Detaillierte Aufstellung für {{monthYear}}",
   "Co-ownership": "Miteigentum",

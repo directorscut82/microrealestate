@@ -11,11 +11,6 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger
-} from '../ui/popover';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { Progress } from '../ui/progress';
@@ -23,9 +18,10 @@ import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
+import { StoreContext } from '../../store';
 
 // Mirror services/api/src/businesslogic/tasks/1_base.ts :: isExpenseActiveForTerm —
 // must agree with the rent-pipeline check so the dashboard headline matches what
@@ -106,6 +102,14 @@ function FloorLabel({ floor }) {
 
 export default function BuildingDashboard({ building }) {
   const { t } = useTranslation('common');
+  const store = useContext(StoreContext);
+  // B1/B2: locale-aware plain-decimal formatter (NOT currency, NOT the ×100
+  // percent path). Used for τ.μ. surfaces (70,05) and owner % (33,33%) so the
+  // whole screen follows the org locale's decimal separator instead of a raw
+  // JS dot. Up to 2 decimals, trailing zeros trimmed.
+  const _locale = store?.organization?.selected?.locale || undefined;
+  const fmtNum = (v) =>
+    Number(v).toLocaleString(_locale, { maximumFractionDigits: 2 });
 
   const { data: properties } = useQuery({
     queryKey: [QueryKeys.PROPERTIES],
@@ -142,7 +146,11 @@ export default function BuildingDashboard({ building }) {
             map.set(tp.propertyId, {
               name: tenant.name,
               rent: tp.rent,
-              tenantId: tenant._id
+              tenantId: tenant._id,
+              // E1: the tenant's δαπάνες επί ενοικίου for this property — these
+              // are charged to the tenant ON TOP of base rent, so the building
+              // income projection must include them, not rent alone.
+              expenses: Array.isArray(tp.expenses) ? tp.expenses : []
             });
           });
         }
@@ -208,6 +216,26 @@ export default function BuildingDashboard({ building }) {
   // Owner-occupied + parking units contribute zero esoda but still incur
   // their share of any owner-tracked expenses.
   const finance = useMemo(() => {
+    const _now = moment();
+    // E1: a tenant's δαπάνες-επί-ενοικίου for the CURRENT month — windowed by
+    // each expense's [beginDate,endDate] at month granularity, mirroring the
+    // rent engine (frontdata.ts toOccupantData / 1_base.ts) so a one-time /
+    // sub-period expense doesn't inflate the monthly figure outside its window.
+    const _monthlyPropExpenses = (expenses) =>
+      (Array.isArray(expenses) ? expenses : [])
+        .filter((e) => {
+          if (!e?.beginDate && !e?.endDate) return true;
+          const begin = e.beginDate ? moment(e.beginDate) : null;
+          const end = e.endDate ? moment(e.endDate) : null;
+          if (begin && !begin.isValid()) return true;
+          if (end && !end.isValid()) return true;
+          if (begin && _now.isBefore(begin, 'month')) return false;
+          if (end && _now.isAfter(end, 'month')) return false;
+          return true;
+        })
+        .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+    // Income = base rent + δαπάνες επί ενοικίου (both charged to the tenant).
     const monthlyEsoda = sortedUnits.reduce((sum, unit) => {
       if (!unit.propertyId) return sum;
       const property = propertyMap.get(
@@ -215,7 +243,11 @@ export default function BuildingDashboard({ building }) {
       );
       const tenantInfo = property ? tenantByPropertyId.get(property._id) : null;
       if (!tenantInfo) return sum;
-      return sum + (Number(tenantInfo.rent) || 0);
+      return (
+        sum +
+        (Number(tenantInfo.rent) || 0) +
+        _monthlyPropExpenses(tenantInfo.expenses)
+      );
     }, 0);
 
     // Current term in YYYYMMDDHH so we can ask isExpenseActiveForTerm whether
@@ -456,12 +488,18 @@ export default function BuildingDashboard({ building }) {
     const ownerUnpaid = Math.max(0, ownerLedgerTotal - ownerPaid);
 
     const annualEsoda = monthlyEsoda * 12;
-    const annualEksoda =
-      recurringMonthlyEksoda * 12 +
-      oneTimeEksoda +
-      repairEksoda +
-      ownerEksoda;
-    const net = annualEsoda - annualEksoda;
+    // Pass-through (paid by tenants, remitted to providers — κοινόχρηστα,
+    // tenant repairs): recurring×12 + one-time + tenant-repair share. These are
+    // NOT the owner's money.
+    const passThroughEksoda =
+      recurringMonthlyEksoda * 12 + oneTimeEksoda + repairEksoda;
+    // Total building cash flow (kept for the breakdown tiles).
+    const annualEksoda = passThroughEksoda + ownerEksoda;
+    // A5 (user decision 2026-06-20): NET subtracts ONLY owner-borne expenses
+    // (έξοδα ιδιοκτήτη) — pass-through κοινόχρηστα/tenant-repairs are the
+    // tenants' money flowing to providers, never the owner's, so subtracting
+    // them understated net. (Future: a φόρος line subtracted too.)
+    const net = annualEsoda - ownerEksoda;
     // Repairs OPERATIONAL state (not just billed euros) — the overview
     // never surfaced building.repairs, so planned/in-progress/emergency
     // work was invisible until you opened the Repairs tab.
@@ -483,6 +521,7 @@ export default function BuildingDashboard({ building }) {
       oneTimeEksoda,
       repairEksoda,
       ownerEksoda,
+      passThroughEksoda,
       annualEksoda,
       net,
       repairStats,
@@ -510,11 +549,14 @@ export default function BuildingDashboard({ building }) {
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <div className="text-label text-muted-foreground uppercase tracking-wide">
-              {t('Income vs expenses')}
+              {t('Annual projection')}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
+              {/* A1/A5: pure annual projection; only OWNER expenses are
+                  subtracted from Net (pass-through κοινόχρηστα/tenant repairs
+                  are the tenants' money). */}
               {t(
-                'Annual projection — current monthly rent × 12, recurring expenses × 12, plus all one-time expenses, repairs, and owner-tracked expenses.'
+                'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
               )}
             </div>
           </div>
@@ -529,10 +571,11 @@ export default function BuildingDashboard({ building }) {
             </div>
             <div>
               <div className="text-label text-muted-foreground uppercase">
-                {t('Expenses')}
+                {t('Owner expenses')}
               </div>
               <div className="text-xl font-medium text-oxide">
-                <NumberFormat value={finance.annualEksoda} showZero />
+                {/* A5: the subtracted figure is owner-borne only. */}
+                <NumberFormat value={finance.ownerEksoda} showZero />
               </div>
             </div>
             <div>
@@ -556,46 +599,47 @@ export default function BuildingDashboard({ building }) {
           </div>
         </div>
         {finance.annualEksoda > 0 && (
-          <div className="mt-3 pt-3 border-t border-stone-line/60 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
+          /* A5/A6 — "who pays" breakdown, two plain groups. ΕΝΟΙΚΙΑΣΤΕΣ pay the
+             pass-through (κοινόχρηστα + one-time + tenant repairs) — NOT
+             subtracted from Net; ΙΔΙΟΚΤΗΤΕΣ pay έξοδα ιδιοκτήτη — the only part
+             subtracted from Net. */
+          <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-2 text-xs text-muted-foreground">
             <div>
-              {t('Recurring')} ×12:{' '}
-              <NumberFormat value={finance.recurringMonthlyEksoda * 12} showZero />
+              <div className="font-medium text-olive mb-1">
+                {t('TENANTS')}{' '}
+                <span className="text-muted-foreground/70 font-normal">
+                  — {t('not subtracted from Net')}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pl-2">
+                <div>
+                  {t('Recurring')} ×12:{' '}
+                  <NumberFormat
+                    value={finance.recurringMonthlyEksoda * 12}
+                    showZero
+                  />
+                </div>
+                <div>
+                  {t('One-time')}:{' '}
+                  <NumberFormat value={finance.oneTimeEksoda} showZero />
+                </div>
+                <div>
+                  {t('Tenant repairs')}:{' '}
+                  <NumberFormat value={finance.repairEksoda} showZero />
+                </div>
+              </div>
             </div>
             <div>
-              {t('One-time')}: <NumberFormat value={finance.oneTimeEksoda} showZero />
-            </div>
-            <div>
-              {/* This sums the TENANT-billed repair share (unit.monthlyCharges
-                  with a repairId). The owner-borne repair portion is counted
-                  separately under "Owner expenses". Labeling it explicitly so
-                  the two repair streams aren't conflated. */}
-              {t('Tenant repairs')}:{' '}
-              <NumberFormat value={finance.repairEksoda} showZero />
-            </div>
-            <div>
-              {/* Popover (tap-to-open) instead of Tooltip (hover-only)
-                  so the breakdown is reachable on touch devices.
-                  asChild lets the trigger inherit normal text styling. */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="border-b border-dotted border-muted-foreground/50 cursor-help text-left"
-                  >
-                    {t('Owner expenses')}
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent
-                  side="bottom"
-                  className="max-w-[260px] text-xs"
-                >
-                  {t(
-                    'Includes fixed owner-only expenses, owner-portion of repairs, and direct owner monthly entries.'
-                  )}
-                </PopoverContent>
-              </Popover>
-              :{' '}
-              <NumberFormat value={finance.ownerEksoda} showZero />
+              <div className="font-medium text-oxide mb-1">
+                {t('OWNERS')}{' '}
+                <span className="text-muted-foreground/70 font-normal">
+                  — {t('subtracted from Net')}
+                </span>
+              </div>
+              <div className="pl-2">
+                {t('Owner expenses')}:{' '}
+                <NumberFormat value={finance.ownerEksoda} showZero />
+              </div>
             </div>
           </div>
         )}
@@ -708,8 +752,10 @@ export default function BuildingDashboard({ building }) {
         </Card>
       )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Summary cards — B3: Κενά and Στάθμευση are DISTINCT categories, shown
+          as separate cards (was one merged "Vacant / Parking"). A4: occupancy %
+          below. */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <Card className="p-4 text-center">
           <div className="text-2xl font-bold">{stats.total}</div>
           <div className="text-sm text-muted-foreground">{t('Total units')}</div>
@@ -730,13 +776,27 @@ export default function BuildingDashboard({ building }) {
         </Card>
         <Card className="p-4 text-center">
           <div className="text-2xl font-bold text-muted-foreground">
-            {stats.vacant + stats.parking}
+            {stats.vacant}
           </div>
-          <div className="text-sm text-muted-foreground">
-            {t('Vacant / Parking')}
+          <div className="text-sm text-muted-foreground">{t('Vacant')}</div>
+        </Card>
+        <Card className="p-4 text-center">
+          <div className="text-2xl font-bold text-muted-foreground">
+            {stats.parking}
           </div>
+          <div className="text-sm text-muted-foreground">{t('Parking')}</div>
         </Card>
       </div>
+      {/* A4: occupancy rate (rented of total). */}
+      {stats.total > 0 && (
+        <div className="text-xs text-muted-foreground text-right -mt-3">
+          {t('Occupancy')}:{' '}
+          <span className="font-semibold text-ink">
+            {Math.round((stats.rented / stats.total) * 100)}%
+          </span>{' '}
+          ({stats.rented} {t('of')} {stats.total})
+        </div>
+      )}
 
       {/* Repairs operational summary — open (planned + in-progress) repairs
           and any emergencies, so scheduled work is visible on the overview
@@ -813,7 +873,7 @@ export default function BuildingDashboard({ building }) {
                     ? unit.owners
                         .map(
                           (o) =>
-                            `${o.name || ''} ${o.percentage < 100 ? `(${o.percentage}%)` : ''}`.trim()
+                            `${o.name || ''} ${o.percentage < 100 ? `(${fmtNum(o.percentage)}%)` : ''}`.trim()
                         )
                         .join(', ')
                     : '—';
@@ -853,7 +913,9 @@ export default function BuildingDashboard({ building }) {
                     <TableCell className="font-medium">
                       {idx === 0 ? <FloorLabel floor={floor} /> : ''}
                     </TableCell>
-                    <TableCell>{unit.surface || '—'}</TableCell>
+                    <TableCell>
+                      {unit.surface ? fmtNum(unit.surface) : '—'}
+                    </TableCell>
                     <TableCell>
                       <OccupancyBadge type={effectiveOccupancy} />
                     </TableCell>

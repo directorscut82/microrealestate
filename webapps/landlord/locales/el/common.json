@@ -1,4 +1,12 @@
 {
+  "Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.": "Ετήσια προβολή με βάση τη σημερινή κατάσταση. Νέα ή τροποποιημένα έξοδα, επισκευές ή ενοίκια σε επιμέρους μήνες μεταβάλλουν αυτή την προβολή.",
+  "of": "από",
+  "Occupancy": "Πληρότητα",
+  "OWNERS": "ΙΔΙΟΚΤΗΤΕΣ",
+  "TENANTS": "ΕΝΟΙΚΙΑΣΤΕΣ",
+  "subtracted from Net": "αφαιρούνται από το Καθαρό",
+  "not subtracted from Net": "δεν αφαιρούνται από το Καθαρό",
+  "Annual projection": "Ετήσια προβολή",
   "VAT and previous balances not included": "(Δεν περιλαμβάνονται ΦΠΑ και προηγούμενα υπόλοιπα)",
   "Detailed statement for {{monthYear}}": "Αναλυτική Κατάσταση μήνα {{monthYear}}",
   "(unlinked)": "(μη συνδεδεμένο)",
