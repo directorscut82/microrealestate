@@ -214,6 +214,7 @@ export default function YearFigures({ className, dashboardData }) {
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
+              trigger="click"
               wrapperStyle={{ pointerEvents: 'auto' }}
             />
             {/* Wave-26 round-3t: paid (dark) renders first so it sits
