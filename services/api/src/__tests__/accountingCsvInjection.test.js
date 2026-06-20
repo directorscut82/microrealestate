@@ -130,11 +130,29 @@ describe('H8 — accounting CSV exports sanitize formula-injection', () => {
     expect(hasUnescapedFormula(csv)).toBe(false);
   });
 
-  it('settlements CSV neutralizes a formula-prefixed composite tenant cell + payment reference', async () => {
+  it('settlements XLSX neutralizes a formula-prefixed composite tenant cell + payment reference', async () => {
+    // CS1/CS2: settlements now exports a real .xlsx (buffer), not a CSV string.
+    // The H8 formula-injection guard must still hold: no string cell may start
+    // with =,+,-,@ (Excel would evaluate it). _sanitizeCsvText is still applied
+    // to name/reference/properties on the xlsx rows; assert by reading the
+    // workbook back and inspecting every string cell value.
     const res = makeRes();
     await accountingManager.csv.settlements(REQ, res);
-    const csv = res.send.mock.calls[0][0];
-    expect(hasUnescapedFormula(csv)).toBe(false);
+    const buf = res.send.mock.calls[0][0];
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    const offending = [];
+    ws.eachRow((row) => {
+      row.eachCell((cell) => {
+        if (typeof cell.value === 'string' && /^[=+\-@]/.test(cell.value)) {
+          offending.push(cell.value);
+        }
+      });
+    });
+    expect(offending).toEqual([]);
   });
 
   it('benign data is byte-unchanged (no spurious quoting)', async () => {
