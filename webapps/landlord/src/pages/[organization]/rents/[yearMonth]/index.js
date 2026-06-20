@@ -38,26 +38,21 @@ function _filterData(data, filters) {
 
   if (filters.searchText) {
     const regExp = /\s|\.|-/gi;
-    const cleanedSearchText = filters.searchText
-      .toLowerCase()
-      .replace(regExp, '');
+    // Greek final-sigma normalization: ς (U+03C2, word-final) must match
+    // σ (U+03C3, medial). Without this, "ΔΟΚΙΜΙΩΡΟΣ" lowercased with spaces
+    // stripped produces "επωνυμοσ" (medial σ) in the stored name but
+    // "δοκιμιωρος" (final ς) in the typed search — no match.
+    const norm = (s) => s.replace(regExp, '').toLowerCase().replace(/ς/g, 'σ');
+    const cleanedSearchText = norm(filters.searchText);
 
     filteredItems = filteredItems.filter(
       ({ occupant: { isCompany, name, manager, contacts }, payments }) => {
         // Search match name
-        let found =
-          String(name ?? '')
-            .replace(regExp, '')
-            .toLowerCase()
-            .indexOf(cleanedSearchText) != -1;
+        let found = norm(String(name ?? '')).indexOf(cleanedSearchText) != -1;
 
         // Search match manager
         if (!found && isCompany) {
-          found =
-            String(manager ?? '')
-              .replace(regExp, '')
-              .toLowerCase()
-              .indexOf(cleanedSearchText) != -1;
+          found = norm(String(manager ?? '')).indexOf(cleanedSearchText) != -1;
         }
 
         // Search match contact — schema stores phone1 and phone2 (the
