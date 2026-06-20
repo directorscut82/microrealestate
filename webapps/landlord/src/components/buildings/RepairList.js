@@ -32,7 +32,6 @@ import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Separator } from '../ui/separator';
-import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import { apiFetcher, uploadDocument } from '../../utils/fetch';
@@ -309,7 +308,6 @@ export default function RepairList({ building }) {
   const allocationMethod = watch('allocationMethod');
   const chargeTerm = watch('chargeTerm');
   const contractorId = watch('contractorId');
-  const isPaidFromRepairsFund = watch('isPaidFromRepairsFund');
   const affectedUnitIds = watch('affectedUnitIds') || [];
   const invoiceDocumentId = watch('invoiceDocumentId');
 
@@ -952,22 +950,8 @@ export default function RepairList({ building }) {
                 </div>
               )}
 
-              <div className="space-y-1">
-                <div className="flex items-center gap-3">
-                  <Switch
-                    checked={isPaidFromRepairsFund}
-                    onCheckedChange={(val) =>
-                      setValue('isPaidFromRepairsFund', val)
-                    }
-                  />
-                  <Label>{t('Paid from repairs fund')}</Label>
-                </div>
-                <p className="text-label text-ink-muted">
-                  {t(
-                    'Informational only — marks the repair as covered by an accumulated reserve outside this app. Does not affect tenant bills or building totals.'
-                  )}
-                </p>
-              </div>
+              {/* §3: removed the 'Paid from repairs fund' Switch — AI-slop
+                  informational toggle that affected no computation. */}
 
               <div className="space-y-2">
                 <Label htmlFor="invoiceReference">
