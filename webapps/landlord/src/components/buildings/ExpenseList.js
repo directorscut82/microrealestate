@@ -228,13 +228,25 @@ const ALLOCATION_METHODS_BY_TYPE = {
 // total DOES change monthly. All other methods (equal, thousandths, surface,
 // custom_percentage, custom_ratio, single_unit) work fine: they distribute
 // whatever total the landlord types proportionally.
-function getAllocationMethodsForType(expenseType, isVariable) {
+function getAllocationMethodsForType(expenseType, isVariable, building) {
   const allowed = ALLOCATION_METHODS_BY_TYPE[expenseType];
   let methods = allowed
     ? allocationMethods.filter((m) => allowed.includes(m.id))
     : allocationMethods;
   if (isVariable) {
     methods = methods.filter((m) => m.id !== 'fixed');
+  }
+  // Building-flag gating: an allocation by elevator/heating thousandths makes no
+  // sense on a building without an elevator / central heating. Hide those
+  // methods unless the building has the corresponding feature. (No flag info →
+  // don't gate, to avoid hiding a valid method when building is absent.)
+  if (building) {
+    if (!building.hasElevator) {
+      methods = methods.filter((m) => m.id !== 'elevator_thousandths');
+    }
+    if (!building.hasCentralHeating) {
+      methods = methods.filter((m) => m.id !== 'heating_thousandths');
+    }
   }
   return methods;
 }
@@ -418,18 +430,22 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
 
   const isVariable = isRecurring && (Number(amount) || 0) === 0;
   const filteredMethods = useMemo(
-    () => getAllocationMethodsForType(expenseType, isVariable),
-    [expenseType, isVariable]
+    () => getAllocationMethodsForType(expenseType, isVariable, building),
+    [expenseType, isVariable, building]
   );
 
   useEffect(() => {
     if (expenseType && allocationMethod) {
-      const valid = getAllocationMethodsForType(expenseType, isVariable);
+      const valid = getAllocationMethodsForType(
+        expenseType,
+        isVariable,
+        building
+      );
       if (!valid.find((m) => m.id === allocationMethod)) {
         setValue('allocationMethod', valid[0]?.id || '');
       }
     }
-  }, [expenseType, allocationMethod, setValue]);
+  }, [expenseType, allocationMethod, isVariable, building, setValue]);
 
   // F5-expense: switching allocation methods leaves customAllocations in
   // a corrupted partial state (a custom_percentage with values 30/40/30

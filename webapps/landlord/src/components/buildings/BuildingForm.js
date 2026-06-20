@@ -204,11 +204,20 @@ export default function BuildingForm({ building, onSubmit }) {
                 <SelectValue placeholder={t('Select heating type')} />
               </SelectTrigger>
               <SelectContent>
-                {heatingTypes.map((ht) => (
-                  <SelectItem key={ht.id} value={ht.id}>
-                    {t(ht.labelId)}
-                  </SelectItem>
-                ))}
+                {/* §5: this dropdown only renders when Central Heating is ON,
+                    so only the CENTRAL types are valid choices — 'Autonomous'
+                    and 'None' contradict central heating. The enum keeps all
+                    values for data compatibility; only the offered options are
+                    gated. */}
+                {heatingTypes
+                  .filter(
+                    (ht) => ht.id === 'central_oil' || ht.id === 'central_gas'
+                  )
+                  .map((ht) => (
+                    <SelectItem key={ht.id} value={ht.id}>
+                      {t(ht.labelId)}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
