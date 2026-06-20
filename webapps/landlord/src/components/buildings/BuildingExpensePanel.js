@@ -6,6 +6,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../../utils';
+import { BUILDING_TYPE_LABEL_KEY } from '../../utils/lineLabels';
 import {
   LuChevronLeft,
   LuChevronRight,
@@ -164,6 +165,7 @@ function buildRowsForTerm(building, term, isOwnerSide) {
       rows.push({
         expenseId: String(expense._id),
         name: expense.name,
+        type: expense.type,
         kind: 'variable',
         amount: hasPersisted ? persisted : '',
         allocationMethod: expense.allocationMethod,
@@ -174,6 +176,7 @@ function buildRowsForTerm(building, term, isOwnerSide) {
       rows.push({
         expenseId: String(expense._id),
         name: expense.name,
+        type: expense.type,
         kind: 'fixed',
         amount: Number(fixedAmount) || 0,
         allocationMethod: expense.allocationMethod,
@@ -241,7 +244,9 @@ function ExpenseRow({ row, value, onChange, onSave, saving, t }) {
   return (
     <div className="flex items-center justify-between gap-2 text-sm py-0.5">
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
-        {row.name}
+        {/^[0-9a-f]{8,}$/i.test((row.name || '').trim())
+          ? t(BUILDING_TYPE_LABEL_KEY[row.type] || 'Other')
+          : row.name}
         {row.allocationMethod && (
           <TooltipProvider delayDuration={200}>
             <Tooltip>
@@ -720,20 +725,15 @@ function formatBasis(t, basis) {
   }
 }
 
-function OwnerName({ name, percentage, t }) {
-  // Small attribution line: "Ιδιοκτήτης: <name> (50%)" or just "Ιδιοκτήτης".
-  // The percentage is shown only when fractional (<100) — a sole 100% owner
-  // shows just the name (matches the building Επισκόπηση units table rule).
+function OwnerName({ name, percentage }) {
+  // Show just the owner name (with percentage if co-owned). No "Ιδιοκτήτης:"
+  // prefix — the section heading already makes the owner context obvious.
   const showPct =
     Number.isFinite(Number(percentage)) && Number(percentage) < 100;
+  if (!name) return null;
   return (
     <span className="font-normal text-muted-foreground">
-      ·{' '}
-      {name
-        ? showPct
-          ? t('Owner: {{name}} ({{pct}}%)', { name, pct: percentage })
-          : t('Owner: {{name}}', { name })
-        : t('Owner')}
+      · {showPct ? `${name} (${percentage}%)` : name}
     </span>
   );
 }
@@ -900,7 +900,6 @@ function ChargeBreakdown({ breakdown, t }) {
                   <OwnerName
                     name={g.ownerName}
                     percentage={g.ownerPercentage}
-                    t={t}
                   />
                 </span>
                 <span className="tabular-nums font-medium whitespace-nowrap">
@@ -914,18 +913,6 @@ function ChargeBreakdown({ breakdown, t }) {
                 >
                   <span className="truncate mr-2">
                     {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
-                    {/* Source indicator so the landlord knows WHY this charge
-                        exists: owner-portion vs vacant-unit tenant share */}
-                    {e.source === 'repair-vacant' && (
-                      <span className="ml-1 text-[10px] text-muted-foreground/50 italic">
-                        ({t('vacant unit')})
-                      </span>
-                    )}
-                    {e.source === 'repair' && !e.propertyId && (
-                      <span className="ml-1 text-[10px] text-muted-foreground/50 italic">
-                        ({t('owner share')})
-                      </span>
-                    )}
                     {formatBasis(t, e.basis) && (
                       <span className="ml-1 text-muted-foreground/60">
                         ({formatBasis(t, e.basis)})

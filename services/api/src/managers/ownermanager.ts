@@ -647,29 +647,42 @@ export async function one(req: Req, res: Res) {
   // Owned properties: every unit across all buildings where the owner's key
   // appears in unit.owners[]. Provides the data for the owner detail page's
   // apartment list (ATAK + address + link to property page).
-  const ownedProperties: any[] = [];
+  const ownerPropIds: string[] = [];
+  const ownerUnits: any[] = [];
   for (const b of buildings as any[]) {
     for (const u of b.units || []) {
       const isOwner = (u.owners || []).some(
         (o: any) => ownerKeyOf(o) === ownerKey
       );
       if (!isOwner) continue;
-      const ownerEntry = (u.owners || []).find(
-        (o: any) => ownerKeyOf(o) === ownerKey
-      );
-      ownedProperties.push({
-        propertyId: u.propertyId ? String(u.propertyId) : null,
-        buildingId: String(b._id),
-        buildingName: b.name || '',
-        atakNumber: u.atakNumber || '',
-        surface: u.surface || null,
-        floor: u.floor ?? null,
-        percentage: ownerEntry?.percentage ?? null,
-        propertyName: u.property?.name || '',
-        address: u.property?.address || null
-      });
+      ownerUnits.push({ unit: u, building: b });
+      if (u.propertyId) ownerPropIds.push(String(u.propertyId));
     }
   }
+  const props = ownerPropIds.length
+    ? await Collections.Property.find(
+        { _id: { $in: ownerPropIds } },
+        { name: 1, 'address.street1': 1, 'address.city': 1, 'address.zipCode': 1 }
+      ).lean()
+    : [];
+  const propById = new Map((props as any[]).map((p) => [String(p._id), p]));
+  const ownedProperties = ownerUnits.map(({ unit: u, building: b }) => {
+    const ownerEntry = (u.owners || []).find(
+      (o: any) => ownerKeyOf(o) === ownerKey
+    );
+    const prop = u.propertyId ? propById.get(String(u.propertyId)) : null;
+    return {
+      propertyId: u.propertyId ? String(u.propertyId) : null,
+      buildingId: String(b._id),
+      buildingName: b.name || '',
+      atakNumber: u.atakNumber || '',
+      surface: u.surface || null,
+      floor: u.floor ?? null,
+      percentage: ownerEntry?.percentage ?? null,
+      propertyName: prop?.name || '',
+      address: prop?.address || null
+    };
+  });
 
   return res.json({
     ...(_serializeOwnerSummary(agg) as any),
