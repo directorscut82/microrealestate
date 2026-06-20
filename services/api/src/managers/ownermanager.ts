@@ -6,6 +6,7 @@ import {
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import { validateFiniteNumber, validateStringField } from '../validators.js';
+import moment from 'moment';
 
 // Per-owner € split for DISPLAY — re-exported from the SINGLE canonical
 // implementation in common so the owner ledger, the building-expense
@@ -845,7 +846,13 @@ export async function pay(req: Req, res: Res) {
   // partial commit is possible only across DISTINCT buildings under concurrent
   // edits, an accepted edge for v1 (documented; mongo-transaction wrapping is a
   // follow-on if it ever bites).
-  const pDate = payment.date ? new Date(payment.date) : new Date();
+  // Parse DD/MM/YYYY (the format the client sends, matching the rent payment
+  // handler) via moment.utc strict mode. Raw `new Date("20/06/2026")` returns
+  // Invalid Date because JS Date doesn't parse DD/MM/YYYY — bug found by the
+  // comprehensive test account seed.
+  const pDate = payment.date
+    ? moment.utc(payment.date, 'DD/MM/YYYY', true).toDate()
+    : new Date();
   const touchedBuildings = new Set<string>();
   for (const t of targets) {
     if (!Array.isArray(t.row.payments)) t.row.payments = [];
