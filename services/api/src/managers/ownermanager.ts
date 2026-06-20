@@ -533,6 +533,23 @@ async function _markAlsoRents(
 }
 
 function _serializeOwnerSummary(agg: OwnerAgg) {
+  // Build per-month settlements (12 slots) mirroring TenantSettlements shape
+  // so the Τιμολόγια Ιδιοκτήτες tab renders an identical 12-month grid.
+  const settlements: (any[] | undefined)[] = Array.from({ length: 12 }, () => undefined);
+  for (const charge of agg.charges) {
+    const term = Number(charge.term);
+    if (!term) continue;
+    const month = Math.floor((term % 1000000) / 10000) - 1; // 0-based
+    if (month < 0 || month > 11) continue;
+    if (!settlements[month]) settlements[month] = [];
+    settlements[month]!.push({
+      date: charge.paid ? (charge as any).paidDate || null : null,
+      amount: charge.paidAmount || 0,
+      owed: charge.amount || 0,
+      type: charge.source || 'expense',
+      description: charge.description || ''
+    });
+  }
   return {
     ownerKey: agg.ownerKey,
     name: agg.name,
@@ -544,7 +561,8 @@ function _serializeOwnerSummary(agg: OwnerAgg) {
     totalAmount: _round(agg.totalAmount),
     totalPaid: _round(agg.totalPaid),
     totalOutstanding: _round(agg.totalOutstanding),
-    alsoRents: agg.alsoRents
+    alsoRents: agg.alsoRents,
+    settlements
   };
 }
 

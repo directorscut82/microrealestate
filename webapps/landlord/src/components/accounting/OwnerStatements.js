@@ -3,16 +3,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { Button } from '../ui/button';
 import { cn } from '../../utils';
 import { EmptyIllustration } from '../Illustrations';
+import { GrDocumentCsv } from 'react-icons/gr';
 import { LuPaperclip } from 'react-icons/lu';
 import moment from 'moment';
+import NumberFormat from '../NumberFormat';
 import { useState } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
-// Per-month statement picker for an owner — mirrors the tenant
-// ReceiptMonthPicker. The selected months become a comma-separated
-// YYYYMMDDHH term string passed to onPick, which downloads a single
-// multi-section owner statement PDF (owner_statement.ejs iterates the
-// sections exactly like the tenant receipt iterates rents).
+const months = moment.localeData().months();
+
 function StatementMonthPicker({ onPick, t }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState([]);
@@ -92,10 +91,60 @@ function StatementMonthPicker({ onPick, t }) {
   );
 }
 
-// Τιμολόγια → Ιδιοκτήτες sub-tab. Lists every owner with name + ΑΦΜ + paid/
-// outstanding and a per-owner statement (εκκαθαριστικό) download — the owner
-// counterpart to the tenant receipts tab. `onDownloadStatement(owner)` returns
-// a (months[]) => void that downloads the owner_statement PDF for those terms.
+function SettlementRow({ month, ownerKey, settlements }) {
+  const { t } = useTranslation('common');
+  const hasSettlements = !!settlements?.length;
+  const monthName = months[month][0].toUpperCase() + months[month].slice(1);
+
+  return (
+    <div className={cn('grid grid-cols-6 border-b first:border-t')}>
+      <div className="text-muted-foreground md:text-lg border-l border-r col-span-2 md:col-span-1 px-4 py-2">
+        {monthName}
+      </div>
+      <div
+        className={cn(
+          'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2 border-r',
+          !hasSettlements ? 'bg-muted' : ''
+        )}
+      >
+        {hasSettlements
+          ? settlements.map((s, index) => {
+              return s.amount > 0 ? (
+                <div
+                  key={`${ownerKey}_${month}_${index}`}
+                  className="text-right min-w-[8rem] flex-shrink-0"
+                >
+                  {s.date && (
+                    <div className="text-xs text-muted-foreground">
+                      {moment(s.date).format('L')}
+                    </div>
+                  )}
+                  <div className="text-xs text-muted-foreground">
+                    {s.description || t(s.type || 'expense')}
+                  </div>
+                  <NumberFormat value={s.amount} withColor className="text-lg" />
+                </div>
+              ) : null;
+            })
+          : null}
+      </div>
+      <div className="col-span-2 px-4 py-2 border-r text-xs text-muted-foreground">
+        {hasSettlements && settlements.some((s) => s.owed > 0) && (
+          <div className="leading-snug">
+            <span className="font-medium uppercase tracking-wide text-[10px] text-muted-foreground/80 mr-1">
+              {t('Owed')}
+            </span>
+            <NumberFormat
+              value={settlements.reduce((sum, s) => sum + (s.owed || 0), 0)}
+              className="text-xs"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function OwnerStatements({ data, onDownloadStatement, onCSVClick }) {
   const { t } = useTranslation('common');
   const hasData = !!data?.length;
@@ -103,10 +152,10 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
     <Card>
       <CardHeader>
         <CardTitle className="flex justify-between items-center text-lg md:text-xl">
-          {t('Owner settlements')}
+          {t('Payments')}
           {onCSVClick && (
             <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
-              <LuPaperclip className="size-6" />
+              <GrDocumentCsv className="size-6" />
             </Button>
           )}
         </CardTitle>
@@ -123,6 +172,16 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
                 onPick={onDownloadStatement(owner)}
                 t={t}
               />
+            </div>
+            <div>
+              {months.map((_m, index) => (
+                <SettlementRow
+                  key={`${owner.ownerKey}_${index}`}
+                  ownerKey={owner.ownerKey}
+                  month={index}
+                  settlements={owner.settlements?.[index]}
+                />
+              ))}
             </div>
           </div>
         ))}

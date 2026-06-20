@@ -1004,7 +1004,11 @@ export default function ExpenseList({ building }) {
           <TableBody>
             {expenses.map((expense) => (
               <TableRow key={expense._id}>
-                <TableCell>{expense.name}</TableCell>
+                <TableCell>
+                  {/^[0-9a-f]{8,}$/i.test((expense.name || '').trim())
+                    ? t(expenseTypes.find((et) => et.id === expense.type)?.labelId || expense.type)
+                    : expense.name}
+                </TableCell>
                 <TableCell>
                   {t(
                     expenseTypes.find((et) => et.id === expense.type)
