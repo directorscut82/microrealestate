@@ -74,19 +74,25 @@ const _groupCharges = (charges) => {
     g.total += Number(c.amount) || 0;
     const sig = _splitSig(c.coOwners);
     if (sig) g._sigs.add(sig);
+    else g._hasSoleOwned = true; // a line with no co-owner split
   }
-  // Decide header vs per-line split: header ONLY when every co-owned line in the
-  // group shares exactly one split signature; otherwise each line shows its own.
+  // Decide header vs per-line split. The header split is shown ONLY when the
+  // group is UNIFORMLY co-owned: every line shares exactly one split signature
+  // AND no sole-owned line is present (Step-7 r2 OWN-1: a header split must not
+  // imply a split for sole-owned lines in a mixed group). Otherwise each
+  // co-owned line shows its own split inline.
   return Array.from(groups.values())
     .map((g) => {
-      const uniform = g._sigs.size === 1;
+      const uniform = g._sigs.size === 1 && !g._hasSoleOwned;
       const headerCoOwners = uniform
         ? g.lines.find((l) => _splitSig(l.coOwners))?.coOwners || null
         : null;
       return {
         ...g,
         coOwners: headerCoOwners,
-        showSplitPerLine: !uniform && g._sigs.size > 1
+        // per-line split whenever we can't show a single header split but
+        // co-owned lines exist (mixed signatures, or co-owned mixed with sole).
+        showSplitPerLine: !headerCoOwners && g._sigs.size >= 1
       };
     })
     .sort((a, b) => a.term - b.term);

@@ -656,7 +656,12 @@ export function _serializeOwnerSummary(agg: OwnerAgg) {
     if (month < 0 || month > 11) continue;
     for (const p of charge.payments || []) {
       const amt = Number(p.amount) || 0;
-      if (!(amt > 0)) continue;
+      // Step-7 r2 OWN-2: skip ONLY exact-zero (adds nothing). A negative
+      // correction/refund row IS counted in the header totalPaid, so it must
+      // also appear in the grid or the two diverge (grid > header). Reachable
+      // only via direct DB seed today (pay() enforces min 0.01), but aligning
+      // the filters keeps grid≡header for any future correction feature.
+      if (amt === 0) continue;
       if (!settlements[month]) settlements[month] = [];
       settlements[month]!.push({
         date: p.date || null,
