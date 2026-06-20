@@ -91,7 +91,6 @@ const schema = z.object({
   reportedDate: z.string().optional(),
   startDate: z.string().optional(),
   completionDate: z.string().optional(),
-  isPaidFromRepairsFund: z.boolean().optional(),
   invoiceReference: z.string().optional(),
   // Tier I-3.d: storage key returned by /documents/upload after the
   // landlord attaches an invoice scan.
@@ -105,8 +104,9 @@ const schema = z.object({
   // in-progress repairs may legitimately lack a final cost/term, and a
   // reserve-funded repair intentionally doesn't bill, so scope the guard
   // to completed + not-reserve-funded.
-  const isChargeable =
-    data.status === 'completed' && !data.isPaidFromRepairsFund;
+  // §3: removed the isPaidFromRepairsFund bypass (AI-slop toggle that gated
+  // billing on a dead flag). A completed repair with a cost is chargeable.
+  const isChargeable = data.status === 'completed';
   if (!isChargeable) return;
   const cost =
     (Number(data.actualCost) || 0) || (Number(data.estimatedCost) || 0);
@@ -279,7 +279,6 @@ export default function RepairList({ building }) {
       completionDate: selectedRepair?.completionDate
         ? selectedRepair.completionDate.substring(0, 10)
         : '',
-      isPaidFromRepairsFund: selectedRepair?.isPaidFromRepairsFund ?? false,
       invoiceReference: selectedRepair?.invoiceReference ?? '',
       invoiceDocumentId: selectedRepair?.invoiceDocumentId ?? null,
       affectedUnitIds: Array.isArray(selectedRepair?.affectedUnitIds)

@@ -281,8 +281,15 @@ export default function BuildingDashboard({ building }) {
       (Array.isArray(expenses) ? expenses : [])
         .filter((e) => {
           if (!e?.beginDate && !e?.endDate) return true;
-          const begin = e.beginDate ? moment(e.beginDate) : null;
-          const end = e.endDate ? moment(e.endDate) : null;
+          // Step-7 E1-DATE-MISPARSE: the API serves these as DD/MM/YYYY STRINGS
+          // (frontdata.toOccupantData formats them), so a bare moment(str)
+          // misparses (US MM/DD fallback; day>12 → Invalid → wrongly kept).
+          // Parse with the explicit format + strict, exactly like the server
+          // (frontdata.ts uses moment.utc(e.beginDate,'DD/MM/YYYY')).
+          const begin = e.beginDate
+            ? moment(e.beginDate, 'DD/MM/YYYY', true)
+            : null;
+          const end = e.endDate ? moment(e.endDate, 'DD/MM/YYYY', true) : null;
           if (begin && !begin.isValid()) return true;
           if (end && !end.isValid()) return true;
           if (begin && _now.isBefore(begin, 'month')) return false;
@@ -551,11 +558,23 @@ export default function BuildingDashboard({ building }) {
       recurringMonthlyEksoda * 12 + oneTimeEksoda + repairEksoda;
     // Total building cash flow (kept for the breakdown tiles).
     const annualEksoda = passThroughEksoda + ownerEksoda;
+    // Step-7 A5 fix (DASH-A5-VACANT-OWNER-SHARE): a vacant/owner-occupied unit's
+    // share of a recurring/one-time building expense is genuine owner cost
+    // (materialised source:'vacant'/'owner-resident'), but it is EXCLUDED from
+    // ownerEksoda (correct — the FULL expense is in passThroughEksoda). Since A5
+    // no longer subtracts passThrough from Net, that owner share would vanish
+    // from Net. Derive it from the already-year-scoped, stale-dropped owner
+    // ledger and subtract it in Net ONLY (the headline ownerEksoda column still
+    // pairs with the ΕΝΟΙΚΙΑΣΤΕΣ pass-through breakdown).
+    const vacantOwnerResidentEksoda = ownerLedgerThisYear
+      .filter((e) => e.source === 'vacant' || e.source === 'owner-resident')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     // A5 (user decision 2026-06-20): NET subtracts ONLY owner-borne expenses
     // (έξοδα ιδιοκτήτη) — pass-through κοινόχρηστα/tenant-repairs are the
-    // tenants' money flowing to providers, never the owner's, so subtracting
-    // them understated net. (Future: a φόρος line subtracted too.)
-    const net = annualEsoda - ownerEksoda;
+    // tenants' money flowing to providers, never the owner's. Owner-borne =
+    // ownerEksoda (direct + repairs + fixed) + the vacant/owner-resident
+    // expense shares. (Future: a φόρος line subtracted too.)
+    const net = annualEsoda - ownerEksoda - vacantOwnerResidentEksoda;
     // Repairs OPERATIONAL state (not just billed euros) — the overview
     // never surfaced building.repairs, so planned/in-progress/emergency
     // work was invisible until you opened the Repairs tab.
@@ -577,6 +596,10 @@ export default function BuildingDashboard({ building }) {
       oneTimeEksoda,
       repairEksoda,
       ownerEksoda,
+      // owner-borne total used by the headline + Net so Income − this === Net
+      // exactly (includes the vacant/owner-resident expense shares).
+      ownerBorneTotal: ownerEksoda + vacantOwnerResidentEksoda,
+      vacantOwnerResidentEksoda,
       passThroughEksoda,
       annualEksoda,
       net,
@@ -630,8 +653,9 @@ export default function BuildingDashboard({ building }) {
                 {t('Owner expenses')}
               </div>
               <div className="text-xl font-medium text-oxide">
-                {/* A5: the subtracted figure is owner-borne only. */}
-                <NumberFormat value={finance.ownerEksoda} showZero />
+                {/* A5: the subtracted figure is owner-borne only — includes the
+                    vacant/owner-resident expense shares so Income − this === Net. */}
+                <NumberFormat value={finance.ownerBorneTotal} showZero />
               </div>
             </div>
             <div>
@@ -692,9 +716,20 @@ export default function BuildingDashboard({ building }) {
                   — {t('subtracted from Net')}
                 </span>
               </div>
-              <div className="pl-2">
-                {t('Owner expenses')}:{' '}
-                <NumberFormat value={finance.ownerEksoda} showZero />
+              <div className="pl-2 space-y-0.5">
+                <div>
+                  {t('Owner expenses')}:{' '}
+                  <NumberFormat value={finance.ownerEksoda} showZero />
+                </div>
+                {finance.vacantOwnerResidentEksoda > 0 && (
+                  <div>
+                    {t('Vacant / owner-occupied unit shares')}:{' '}
+                    <NumberFormat
+                      value={finance.vacantOwnerResidentEksoda}
+                      showZero
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
