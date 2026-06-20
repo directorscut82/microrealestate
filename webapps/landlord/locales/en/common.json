@@ -1,4 +1,6 @@
 {
+  "VAT and previous balances not included": "(VAT and previous balances not included)",
+  "Detailed statement for {{monthYear}}": "Detailed statement for {{monthYear}}",
   "(unlinked)": "(unlinked)",
   "+{{surplus}}€ credit": "+{{surplus}}€ credit",
   "+{{surplus}} credit": "+{{surplus}} credit",

@@ -45,6 +45,16 @@ const _unitScopeLabel = (t, c) => {
 // (term, building) with the co-owner split shown ONCE in the header (not
 // repeated per line — user decision 2026-06-20). Returns an array of
 // { key, term, buildingName, coOwners, coOwnerCount, lines[], total }.
+// Signature of a co-owner split so we can tell whether all co-owned lines in a
+// group share the SAME split (then show it once in the header) or differ (then
+// the header split would mislabel some lines — show per line instead). Step-7
+// BROKEN 6: a (term,building) group can mix a building-wide co-owned charge with
+// per-unit charges that have a different/no split.
+const _splitSig = (coOwners) =>
+  Array.isArray(coOwners) && coOwners.length > 1
+    ? coOwners.map((o) => `${o.ownerKey || o.name}:${o.percentage}`).join('|')
+    : '';
+
 const _groupCharges = (charges) => {
   const groups = new Map();
   for (const c of charges) {
@@ -54,22 +64,32 @@ const _groupCharges = (charges) => {
         key,
         term: c.term,
         buildingName: c.buildingName,
-        coOwners: Array.isArray(c.coOwners) ? c.coOwners : null,
-        coOwnerCount: c.coOwnerCount || 0,
         lines: [],
-        total: 0
+        total: 0,
+        _sigs: new Set()
       });
     }
     const g = groups.get(key);
     g.lines.push(c);
     g.total += Number(c.amount) || 0;
-    // carry the richest co-owner split seen in the group for the header
-    if (!g.coOwners && Array.isArray(c.coOwners) && c.coOwners.length > 1) {
-      g.coOwners = c.coOwners;
-      g.coOwnerCount = c.coOwnerCount || c.coOwners.length;
-    }
+    const sig = _splitSig(c.coOwners);
+    if (sig) g._sigs.add(sig);
   }
-  return Array.from(groups.values()).sort((a, b) => a.term - b.term);
+  // Decide header vs per-line split: header ONLY when every co-owned line in the
+  // group shares exactly one split signature; otherwise each line shows its own.
+  return Array.from(groups.values())
+    .map((g) => {
+      const uniform = g._sigs.size === 1;
+      const headerCoOwners = uniform
+        ? g.lines.find((l) => _splitSig(l.coOwners))?.coOwners || null
+        : null;
+      return {
+        ...g,
+        coOwners: headerCoOwners,
+        showSplitPerLine: !uniform && g._sigs.size > 1
+      };
+    })
+    .sort((a, b) => a.term - b.term);
 };
 
 function OwnerDetail() {
@@ -262,6 +282,20 @@ function OwnerDetail() {
                     <div className="space-y-0.5 pl-3">
                       {g.lines.map((c) => {
                         const scopeLabel = _unitScopeLabel(t, c);
+                        // Step-7 BROKEN 6: when the group's co-owned lines have
+                        // DIFFERENT splits, the header split is suppressed and
+                        // each co-owned line shows its OWN split inline instead.
+                        const perLineSplit =
+                          g.showSplitPerLine &&
+                          Array.isArray(c.coOwners) &&
+                          c.coOwners.length > 1
+                            ? c.coOwners
+                                .map(
+                                  (o) =>
+                                    `${o.isRest ? t('others') : o.name} ${o.percentage}%`
+                                )
+                                .join(' · ')
+                            : '';
                         return (
                           <div
                             key={c.ownerExpenseId}
@@ -270,6 +304,12 @@ function OwnerDetail() {
                             <span className="truncate text-muted-foreground">
                               {ownerChargeLabel(t, c)}
                               {scopeLabel ? ` — ${scopeLabel}` : ''}
+                              {perLineSplit ? (
+                                <span className="text-muted-foreground/60">
+                                  {' '}
+                                  ({perLineSplit})
+                                </span>
+                              ) : null}
                             </span>
                             <span className="flex items-center gap-3 shrink-0 tabular-nums">
                               <span

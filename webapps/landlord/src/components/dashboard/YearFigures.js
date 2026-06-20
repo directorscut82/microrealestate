@@ -92,8 +92,12 @@ export default function YearFigures({ className, dashboardData }) {
     const data = payload[0]?.payload;
     if (!data) return null;
     const tenants = data.tenants || [];
+    // D4: the OUTER wrapper caps height + owns the scroll, and pointer-events
+    // are enabled (also on the recharts <Tooltip wrapperStyle>) so the mouse can
+    // rest on it and the wheel scrolls THIS, not the page. The tooltip is pinned
+    // (non-cursor-following) via <Tooltip position> so it doesn't flee the cursor.
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-60">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-60 max-h-[400px] overflow-y-auto scrollbar-branded">
         <div className="font-medium text-body text-ink mb-1 leading-tight">
           {moment(data.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
@@ -108,7 +112,7 @@ export default function YearFigures({ className, dashboardData }) {
           </div>
         )}
         {tenants.length > 0 && (
-          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-0.5 max-h-[280px] overflow-y-auto scrollbar-branded">
+          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-0.5">
             {tenants.map((tenant, i) => {
               const balance = tenant.paid - tenant.due;
               return (
@@ -211,11 +215,15 @@ export default function YearFigures({ className, dashboardData }) {
                 </div>
               )}
             />
+            {/* D3+D4: HOVER (no trigger='click' — that broke hover) + pinned,
+                pointer-interactive tooltip so it can be scrolled. The wrapper's
+                pointerEvents:auto lets the mouse enter; the content div owns the
+                overflow/scroll. */}
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
-              trigger="click"
               wrapperStyle={{ pointerEvents: 'auto' }}
+              isAnimationActive={false}
             />
             {/* Wave-26 round-3t: paid (dark) renders first so it sits
                 on the LEFT of the stacked bar, owed (light) on the

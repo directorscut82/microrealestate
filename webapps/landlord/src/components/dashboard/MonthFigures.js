@@ -87,6 +87,15 @@ function isDark() {
   return document.documentElement.classList.contains('dark');
 }
 
+// Greek genitive month names for the "Αναλυτική Κατάσταση μήνα <Ιουνίου>"
+// header (D1). moment('el').format('MMMM') yields the NOMINATIVE ("Ιούνιος"),
+// which is wrong after "μήνα". This maps month index (0-11) → genitive. For
+// non-Greek locales the caller falls back to moment's own month name.
+const EL_GENITIVE_MONTHS = [
+  'Ιανουαρίου', 'Φεβρουαρίου', 'Μαρτίου', 'Απριλίου', 'Μαΐου', 'Ιουνίου',
+  'Ιουλίου', 'Αυγούστου', 'Σεπτεμβρίου', 'Οκτωβρίου', 'Νοεμβρίου', 'Δεκεμβρίου'
+];
+
 function categoryFor(type) {
   return CATEGORY_COLORS[type] ? type : 'other';
 }
@@ -106,10 +115,17 @@ export function unpaidColor(type) {
    directly, legend uses literal oklch swatches. */
 
 export default function MonthFigures({ className, dashboardData }) {
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
   const router = useRouter();
   const formatNumber = useFormatNumber();
   const yearMonth = moment().format('YYYY.MM');
+  // D1: header "Αναλυτική Κατάσταση μήνα <genitive month> <year>". Greek needs
+  // the genitive ("Ιουνίου"); other locales use moment's own month name.
+  const _now = moment();
+  const monthYearGenitive =
+    lang === 'el'
+      ? `${EL_GENITIVE_MONTHS[_now.month()]} ${_now.format('YYYY')}`
+      : _now.format('MMMM YYYY');
 
   const currentRevenues = useMemo(() => {
     const currentMonth = moment().format('MMYYYY');
@@ -366,8 +382,14 @@ export default function MonthFigures({ className, dashboardData }) {
               </thead>
               <tbody>
                 {visibleRows.map((r, i) => {
+                  // D2 — 3-state payment signal on the collected amount:
+                  //   nothing paid     → plain/muted
+                  //   partially paid   → BOLD (same color)
+                  //   fully paid       → the category's blue paid color
                   const fullyPaid =
                     r.owed > 0 && r.collected + 0.005 >= r.owed;
+                  const partiallyPaid =
+                    !fullyPaid && r.collected > 0.005;
                   // Tenant column shows: <tenant> (<subcategory or description>)
                   // when the row has a sub-label; falls back to plain
                   // tenant name for the rent case.
@@ -392,12 +414,14 @@ export default function MonthFigures({ className, dashboardData }) {
                       <td
                         className={cn(
                           'py-0.5 pl-3 text-right',
-                          fullyPaid ? '' : 'text-ink-muted'
+                          // partial → bold (same color); nothing-paid → muted
+                          partiallyPaid && 'font-semibold',
+                          !fullyPaid && !partiallyPaid && 'text-ink-muted'
                         )}
                         style={{
-                          color: fullyPaid
-                            ? paidColor(entry.type)
-                            : undefined
+                          // fully paid → blue paid color; partial → keep ink
+                          // (bold conveys it); nothing → default muted
+                          color: fullyPaid ? paidColor(entry.type) : undefined
                         }}
                       >
                         {formatNumber(r.collected)}
@@ -473,10 +497,10 @@ export default function MonthFigures({ className, dashboardData }) {
       />
       <DashboardCard
         Icon={LuBanknote}
-        title={t('Rents of {{monthYear}}', {
-          monthYear: moment().format('MMMM YYYY')
+        title={t('Detailed statement for {{monthYear}}', {
+          monthYear: monthYearGenitive
         })}
-        description={t('Pie chart subheader')}
+        description={t('VAT and previous balances not included')}
         renderContent={() => (
           <div>
             {pieData.length > 0 ? (

@@ -38,6 +38,38 @@ type Res = ServiceResponse;
 
 const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
+// Apportion a TARGET total across `parts` (each part's nominal share) so the
+// rounded shares sum EXACTLY to the rounded target — largest-remainder method.
+// Used to slice a co-owner's payments so Σ(per-payment share) === slicePaid
+// (the header figure), eliminating the round-of-sum vs sum-of-rounds drift
+// Step-7 found (BROKEN 1/3/4/7). `parts` are the raw (unrounded) nominal
+// amounts; returns rounded shares aligned to `parts`, summing to _round(target).
+function _apportion(target: number, parts: number[]): number[] {
+  const tgt = _round(target);
+  const partsSum = parts.reduce((s, p) => s + (Number(p) || 0), 0);
+  if (parts.length === 0) return [];
+  if (!(partsSum > 0)) {
+    // nothing to weight by — put the whole target on the first part.
+    return parts.map((_p, i) => (i === 0 ? tgt : 0));
+  }
+  // floor each share to the cent, track remainders, then hand out the leftover
+  // cents to the largest remainders so the total reconciles exactly.
+  const cents = Math.round(tgt * 100);
+  const exact = parts.map((p) => ((Number(p) || 0) / partsSum) * cents);
+  const floors = exact.map((x) => Math.floor(x));
+  const used = floors.reduce((s, x) => s + x, 0);
+  let leftover = cents - used;
+  const order = exact
+    .map((x, i) => ({ i, rem: x - Math.floor(x) }))
+    .sort((a, b) => b.rem - a.rem);
+  const out = floors.slice();
+  for (let k = 0; k < order.length && leftover > 0; k++) {
+    out[order[k].i] += 1;
+    leftover--;
+  }
+  return out.map((c) => c / 100);
+}
+
 // Stable identity for an owner across units/buildings: memberId when present,
 // else a normalized name|taxId key. Returns '' (NO identity) when the owner
 // has neither memberId nor name nor taxId — such owners MUST NOT be merged
@@ -412,16 +444,23 @@ export function _aggregateOwners(
         // owner-portion has no propertyId → 'building'; a propertyId-scoped
         // share is a 'unit' line, labeled by the unit's floor and marked vacant
         // (ΚΕΝΟ) when occupancyType==='vacant'.
-        ...(row.propertyId
-          ? (() => {
-              const u = unitByPropId.get(String(row.propertyId));
-              return {
-                scope: 'unit' as const,
-                unitFloor: u && u.floor != null ? Number(u.floor) : null,
-                unitVacant: !!u && (u.occupancyType || 'vacant') === 'vacant'
-              };
-            })()
-          : { scope: 'building' as const }),
+        ...(() => {
+          const u = row.propertyId
+            ? unitByPropId.get(String(row.propertyId))
+            : null;
+          // Step-7 BROKEN 5: a propertyId-scoped row whose unit no longer
+          // exists (orphaned vacant/repair-vacant row surviving the staleness
+          // guard because it carries payments) must NOT be forced to scope
+          // 'unit' with a fake non-vacant label. With no resolvable unit, treat
+          // it as building-wide so the line reads "Ολόκληρο κτίριο", not a
+          // mislabeled occupied unit.
+          if (!u) return { scope: 'building' as const };
+          return {
+            scope: 'unit' as const,
+            unitFloor: u.floor != null ? Number(u.floor) : null,
+            unitVacant: (u.occupancyType || 'vacant') === 'vacant'
+          };
+        })(),
         // raw recorded payments on this owner row (full, unsliced). For the
         // single-owner path these go verbatim onto the charge; the multi-owner
         // path re-slices amounts by ratio below.
@@ -480,16 +519,32 @@ export function _aggregateOwners(
         // Multi-owner proportional split: each owner gets their percentage
         // of amount AND paidAmount so the ledger reflects their own liability.
         for (const slice of slices) {
-          // Resolve which ownerKey this slice belongs to by name match.
-          const sliceKey = sortedKeys.find(
-            (k) => owners.get(k)?.name === slice.name
-          );
+          // Resolve which ownerKey this slice belongs to by the slice's OWN
+          // ownerKey (ownerSlicesOf populates it distinctly per owner). Step-7
+          // BROKEN 2: name-match dropped/double-attributed a payment for two
+          // same-name co-owners with distinct taxIds. The 'rest' carrier slice
+          // (ownerKey '') has no aggregate of its own — skip it; its amount is
+          // already absorbed into the named slices by ownerSlicesOf.
+          const sliceKey = slice.ownerKey || null;
           const agg = sliceKey ? owners.get(sliceKey) : null;
           if (!agg) continue;
-          const ratio = (slice.percentage || 0) / 100;
-          const sliceAmount = _round(charge.amount * ratio);
+          // Use the slice's EXACT carrier-corrected euro (ownerSlicesOf already
+          // makes Σ slice.amount === charge.amount), NOT percentage*amount —
+          // Step-7 BROKEN 3 (rounded display % drifts).
+          const sliceAmount = _round(slice.amount);
+          // slicePaid is the round-ONCE header figure; the per-payment shares
+          // below are apportioned to sum to EXACTLY this (Step-7 BROKEN 1/4/7:
+          // round-of-sum header vs sum-of-rounds grid disagreed). Ratio uses the
+          // slice's exact share of the charge.
+          const ratio = charge.amount > 0 ? sliceAmount / charge.amount : 0;
           const slicePaid = _round(paidAmount * ratio);
           const sliceOutstanding = Math.max(0, _round(sliceAmount - slicePaid));
+          // Apportion slicePaid across this owner's payment shares so the grid
+          // (Σ payment shares) reconciles EXACTLY with slicePaid / the header.
+          const payShares = _apportion(
+            slicePaid,
+            (charge.payments || []).map((p) => Number(p.amount) || 0)
+          );
           const sliceCharge: OwnerCharge = {
             ...charge,
             amount: sliceAmount,
@@ -501,11 +556,9 @@ export function _aggregateOwners(
               .map((k) => owners.get(k)?.name)
               .filter(Boolean) as string[],
             coOwners: slices,
-            // re-slice each payment by this owner's ratio so the settlements
-            // grid shows their OWN share of each καταβολή (mirrors amount slice)
-            payments: (charge.payments || []).map((p) => ({
+            payments: (charge.payments || []).map((p, pi) => ({
               ...p,
-              amount: _round((Number(p.amount) || 0) * ratio)
+              amount: payShares[pi] || 0
             }))
           };
           agg.charges.push(sliceCharge);
@@ -588,7 +641,7 @@ async function _markAlsoRents(
   }
 }
 
-function _serializeOwnerSummary(agg: OwnerAgg) {
+export function _serializeOwnerSummary(agg: OwnerAgg) {
   // Build per-month settlements (12 slots) from the owner's recorded καταβολές
   // — mirroring TenantSettlements, which is built from rent.payments[] (a
   // PAYMENT each: date + type + amount + note). OS1/OS2/OS3 (2026-06-20): the

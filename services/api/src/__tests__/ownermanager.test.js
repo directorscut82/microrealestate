@@ -3,7 +3,9 @@ import {
   recomputeOwnerExpensePaid,
   carryOwnerPayments,
   applyCarriedSettlement,
-  autoSpreadOwnerPayment
+  autoSpreadOwnerPayment,
+  _aggregateOwners,
+  _serializeOwnerSummary
 } from '../managers/ownermanager.ts';
 
 // Owner-debt ledger settlement engine — the pure money logic behind owner
@@ -206,5 +208,85 @@ describe('D5 allocation fold — duplicate ownerExpenseId entries sum before cap
       { ownerExpenseId: 'Y', amount: 20 }
     ]);
     expect(out).toHaveLength(2);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Step-7 (Batch 1) regression: the payments-driven settlements GRID must
+// reconcile EXACTLY with the header totalPaid, and same-name co-owners must
+// each get their own charge/payments. These guard the 7 money bugs the
+// adversarial review found in the multi-owner slice path.
+// ───────────────────────────────────────────────────────────────────────────
+describe('owner settlements grid reconciles with header (Step-7 batch1)', () => {
+  // minimal building: one repair-owner-portion row (propertyId null →
+  // building-wide), co-owned, paid in 3 awkward installments.
+  const mkBuilding = (owners, payments) => ({
+    _id: 'b1',
+    name: 'B1',
+    units: [{ propertyId: 'p1', atakNumber: 'AK1', floor: 1, owners }],
+    expenses: [],
+    repairs: [{ _id: 'r1' }],
+    ownerMonthlyExpenses: [
+      {
+        _id: 'ome1',
+        expenseId: 'r1',
+        term: 2026060100,
+        amount: 100,
+        source: 'repair',
+        propertyId: null,
+        payments
+      }
+    ]
+  });
+
+  const gridSum = (summary) =>
+    Math.round(
+      (summary.settlements || [])
+        .filter(Boolean)
+        .flat()
+        .reduce((s, e) => s + (Number(e.amount) || 0), 0) * 100
+    ) / 100;
+
+  it('50/50 co-owners, installments 33.33/33.33/33.34: each grid Σ == header totalPaid, no cent drift', () => {
+    const owners = [
+      { name: 'ALPHA', taxId: '111', percentage: 50 },
+      { name: 'BETA', taxId: '222', percentage: 50 }
+    ];
+    const pays = [
+      { amount: 33.33, date: '2026-06-02', type: 'cash' },
+      { amount: 33.33, date: '2026-06-03', type: 'cash' },
+      { amount: 33.34, date: '2026-06-04', type: 'cash' }
+    ];
+    const map = _aggregateOwners([mkBuilding(owners, pays)], new Set());
+    for (const key of map.keys()) {
+      const summary = _serializeOwnerSummary(map.get(key));
+      // the grid (Σ per-payment sliced amounts) equals the header totalPaid
+      expect(gridSum(summary)).toBeCloseTo(summary.totalPaid, 2);
+      // and never exceeds this owner's sliced charge amount
+      expect(summary.totalPaid).toBeLessThanOrEqual(summary.totalAmount + 0.005);
+    }
+  });
+
+  it('same-name co-owners (distinct taxId): each owner gets their OWN charge + payments (no drop/double)', () => {
+    const owners = [
+      { name: 'ΠΑΠΑΔΟΠΟΥΛΟΣ', taxId: '111', percentage: 50 },
+      { name: 'ΠΑΠΑΔΟΠΟΥΛΟΣ', taxId: '222', percentage: 50 }
+    ];
+    const pays = [{ amount: 100, date: '2026-06-02', type: 'transfer' }];
+    const map = _aggregateOwners([mkBuilding(owners, pays)], new Set());
+    const k1 = ownerKeyOf(owners[0]);
+    const k2 = ownerKeyOf(owners[1]);
+    expect(k1).not.toBe(k2);
+    // both owners exist, each with a €50 charge and €50 paid — not one with 100
+    expect(map.get(k1)).toBeTruthy();
+    expect(map.get(k2)).toBeTruthy();
+    const s1 = _serializeOwnerSummary(map.get(k1));
+    const s2 = _serializeOwnerSummary(map.get(k2));
+    expect(s1.totalAmount).toBeCloseTo(50, 2);
+    expect(s2.totalAmount).toBeCloseTo(50, 2);
+    expect(s1.totalPaid).toBeCloseTo(50, 2);
+    expect(s2.totalPaid).toBeCloseTo(50, 2);
+    expect(gridSum(s1)).toBeCloseTo(50, 2);
+    expect(gridSum(s2)).toBeCloseTo(50, 2);
   });
 });

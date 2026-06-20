@@ -92,8 +92,11 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
     const d = payload[0]?.payload;
     if (!d) return null;
     const breakdown = Array.isArray(d.breakdown) ? d.breakdown : [];
+    // D4: outer wrapper caps height + owns the scroll (pointer-events enabled on
+    // the recharts <Tooltip wrapperStyle> so the mouse can rest here and the
+    // wheel scrolls THIS, not the page).
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-72">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-72 max-h-[400px] overflow-y-auto scrollbar-branded">
         <div className="font-medium text-body text-ink mb-1 leading-tight">
           {moment(d.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
@@ -112,7 +115,7 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
             buildings don't jam everything on one truncated line. Scrollable
             with max-h + overflow-y-auto (MonthFigures pattern). */}
         {breakdown.length > 0 && (
-          <div className="mt-1.5 border-t border-stone-line pt-1.5 max-h-[280px] overflow-y-auto scrollbar-branded space-y-1.5">
+          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-1.5">
             {Object.entries(
               breakdown.reduce((groups, line) => {
                 const key = line.ownerName || t('Building');
@@ -217,11 +220,13 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
                 </div>
               )}
             />
+            {/* D3+D4: HOVER (no trigger='click') + pointer-interactive so it
+                can be scrolled; the content div owns the overflow. */}
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
-              trigger="click"
               wrapperStyle={{ pointerEvents: 'auto' }}
+              isAnimationActive={false}
             />
             <Bar
               dataKey="paid"

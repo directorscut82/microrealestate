@@ -1,4 +1,6 @@
 {
+  "VAT and previous balances not included": "(Δεν περιλαμβάνονται ΦΠΑ και προηγούμενα υπόλοιπα)",
+  "Detailed statement for {{monthYear}}": "Αναλυτική Κατάσταση μήνα {{monthYear}}",
   "(unlinked)": "(μη συνδεδεμένο)",
   "+{{surplus}}€ credit": "+{{surplus}}€ πίστωση",
   "+{{surplus}} credit": "+{{surplus}} πίστωση",
