@@ -33,24 +33,20 @@ function _filterData(data = [], filters) {
 
   if (filters.searchText) {
     const regExp = /\s|\.|-/gi;
-    const cleanedSearchText = filters.searchText
-      .toLowerCase()
-      .replace(regExp, '');
+    // Greek ς (final sigma) / σ (medial sigma) normalization — same fix as
+    // the rents page filter. Without this, searching for a name with uppercase
+    // Σ at word-end fails after toLowerCase + space-strip changes positions.
+    const norm = (s) => s.replace(regExp, '').toLowerCase().replace(/ς/g, 'σ');
+    const cleanedSearchText = norm(filters.searchText);
 
     filteredItems = filteredItems.filter(
       ({ isCompany, name, manager, contacts, properties }) => {
         // Search match name
-        let found =
-          name.replace(regExp, '').toLowerCase().indexOf(cleanedSearchText) !=
-          -1;
+        let found = norm(String(name ?? '')).indexOf(cleanedSearchText) != -1;
 
         // Search match manager
         if (!found && isCompany) {
-          found =
-            manager
-              ?.replace(regExp, '')
-              .toLowerCase()
-              .indexOf(cleanedSearchText) != -1;
+          found = norm(String(manager ?? '')).indexOf(cleanedSearchText) != -1;
         }
 
         // Search match contact — schema stores phone1 and phone2 (the

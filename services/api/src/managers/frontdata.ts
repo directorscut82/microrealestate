@@ -558,13 +558,19 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
         type: c.type || ''
       })
     );
+    // preTaxTotal = the VAT base (rent + property-level expenses - discount).
+    // Building charges are NOT in the VAT base (taskVATs doesn't tax them —
+    // see 4_vats.ts:49-55). They're added to the total AFTER VAT.
     occupant.preTaxTotal =
-      occupant.rental + occupant.expenses + occupant.buildingChargesTotal - occupant.discount;
+      occupant.rental + occupant.expenses - occupant.discount;
     occupant.total = occupant.preTaxTotal;
     if (occupant.vatRatio) {
       occupant.vat = occupant.preTaxTotal * occupant.vatRatio;
       occupant.total = occupant.preTaxTotal + occupant.vat;
     }
+    // Building charges added AFTER VAT (they're already at their final amount
+    // from the rent pipeline, no additional tax applied).
+    occupant.total += occupant.buildingChargesTotal;
   }
 
   occupant.hasPayments = occupant.rents
