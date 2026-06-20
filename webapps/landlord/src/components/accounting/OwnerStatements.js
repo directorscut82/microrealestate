@@ -5,7 +5,6 @@ import { cn } from '../../utils';
 import { EmptyIllustration } from '../Illustrations';
 import { LuPaperclip } from 'react-icons/lu';
 import moment from 'moment';
-import NumberFormat from '../NumberFormat';
 import { useState } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -42,7 +41,7 @@ function StatementMonthPicker({ onPick, t }) {
     <Popover open={open} onOpenChange={handleOpenChange} modal>
       <PopoverTrigger asChild>
         <Button variant="secondary" className="flex items-center gap-1">
-          <LuPaperclip /> {t('Statement')}
+          <LuPaperclip /> {t('Receipt')}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-2" align="end">
@@ -97,68 +96,36 @@ function StatementMonthPicker({ onPick, t }) {
 // outstanding and a per-owner statement (εκκαθαριστικό) download — the owner
 // counterpart to the tenant receipts tab. `onDownloadStatement(owner)` returns
 // a (months[]) => void that downloads the owner_statement PDF for those terms.
-export default function OwnerStatements({ data, onDownloadStatement }) {
+export default function OwnerStatements({ data, onDownloadStatement, onCSVClick }) {
   const { t } = useTranslation('common');
   const hasData = !!data?.length;
   return hasData ? (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg md:text-xl">{t('Owners')}</CardTitle>
+        <CardTitle className="flex justify-between items-center text-lg md:text-xl">
+          {t('Owner settlements')}
+          {onCSVClick && (
+            <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
+              <LuPaperclip className="size-6" />
+            </Button>
+          )}
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        {data.map((owner) => {
-          const total = Number(owner.totalAmount) || 0;
-          const paid = Number(owner.totalPaid) || 0;
-          const outstanding = Number(owner.totalOutstanding) || 0;
-          return (
-            <div
-              key={owner.ownerKey}
-              className="border-b first:border-t last:border-none py-4"
-            >
-              <div className="flex justify-between items-start gap-3 px-2">
-                <div className="min-w-0">
-                  <div className="text-xl truncate">
-                    {owner.name || t('Owner')}
-                    {Number.isFinite(Number(owner.percentage)) &&
-                      Number(owner.percentage) < 100 && (
-                        <span className="ml-1 text-base text-muted-foreground">
-                          ({owner.percentage}%)
-                        </span>
-                      )}
-                  </div>
-                  {owner.taxId ? (
-                    <div className="text-sm text-muted-foreground">
-                      {t('Tax ID')}: {owner.taxId}
-                    </div>
-                  ) : null}
-                  <div className="text-sm text-muted-foreground mt-1">
-                    {t('{{count}} units', { count: owner.unitCount || 0 })} ·{' '}
-                    {total > 0.005 ? (
-                      <>
-                        <span className="text-olive">
-                          {t('Paid')}: <NumberFormat value={paid} />
-                        </span>
-                        {' · '}
-                        <span className={outstanding > 0.005 ? 'text-oxide' : ''}>
-                          {t('Outstanding')}:{' '}
-                          <NumberFormat value={outstanding} />
-                        </span>
-                      </>
-                    ) : (
-                      <span>{t('No owner expenses')}</span>
-                    )}
-                  </div>
-                </div>
-                {total > 0.005 ? (
-                  <StatementMonthPicker
-                    onPick={onDownloadStatement(owner)}
-                    t={t}
-                  />
-                ) : null}
-              </div>
+        {data.map((owner) => (
+          <div
+            key={owner.ownerKey}
+            className="border-b first:border-t last:border-none py-4"
+          >
+            <div className="flex justify-between text-xl px-2">
+              <div>{owner.name || t('Owner')}</div>
+              <StatementMonthPicker
+                onPick={onDownloadStatement(owner)}
+                t={t}
+              />
             </div>
-          );
-        })}
+          </div>
+        ))}
       </CardContent>
     </Card>
   ) : (
