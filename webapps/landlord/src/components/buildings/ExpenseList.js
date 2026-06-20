@@ -222,10 +222,21 @@ const ALLOCATION_METHODS_BY_TYPE = {
   pest_control: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit']
 };
 
-function getAllocationMethodsForType(expenseType) {
+// κυμαινόμενο (variable monthly) expenses have amount=0 — the landlord types
+// the total each month in the monthly statement. 'fixed' makes no sense here
+// because fixed means absolute per-unit amounts that don't change — but the
+// total DOES change monthly. All other methods (equal, thousandths, surface,
+// custom_percentage, custom_ratio, single_unit) work fine: they distribute
+// whatever total the landlord types proportionally.
+function getAllocationMethodsForType(expenseType, isVariable) {
   const allowed = ALLOCATION_METHODS_BY_TYPE[expenseType];
-  if (!allowed) return allocationMethods;
-  return allocationMethods.filter((m) => allowed.includes(m.id));
+  let methods = allowed
+    ? allocationMethods.filter((m) => allowed.includes(m.id))
+    : allocationMethods;
+  if (isVariable) {
+    methods = methods.filter((m) => m.id !== 'fixed');
+  }
+  return methods;
 }
 
 const METHODS_NEEDING_ALLOCATIONS = [
@@ -405,14 +416,15 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const trackOwnerExpense = watch('trackOwnerExpense');
   const ownerAmount = watch('ownerAmount');
 
+  const isVariable = isRecurring && (Number(amount) || 0) === 0;
   const filteredMethods = useMemo(
-    () => getAllocationMethodsForType(expenseType),
-    [expenseType]
+    () => getAllocationMethodsForType(expenseType, isVariable),
+    [expenseType, isVariable]
   );
 
   useEffect(() => {
     if (expenseType && allocationMethod) {
-      const valid = getAllocationMethodsForType(expenseType);
+      const valid = getAllocationMethodsForType(expenseType, isVariable);
       if (!valid.find((m) => m.id === allocationMethod)) {
         setValue('allocationMethod', valid[0]?.id || '');
       }

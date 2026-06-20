@@ -2473,13 +2473,30 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
         // Compute share for this unit. Pass the buildingPlain snapshot
         // (with _tenantGroups attached above) so equal-allocation
         // groups by unique tenant instead of by managed unit.
+        //
+        // κυμαινόμενο correction: a variable monthly expense (amount=0 on
+        // the expense record, landlord types the total each month) combined
+        // with allocationMethod='fixed' is an invalid state the old UI
+        // allowed. 'fixed' reads customAllocations which may point to wrong
+        // units. For the monthly-statement save (which IS the variable-amount
+        // path), treat fixed+amount-0 as 'equal' so the typed total splits
+        // correctly across managed occupied units.
+        const effectiveMethod = (() => {
+          if (
+            allocationMethod === 'fixed' &&
+            (Number(buildingExpense?.amount) || 0) === 0
+          ) {
+            return 'equal';
+          }
+          return allocationMethod;
+        })();
         const share = computeBuildingChargeForProperty(
           buildingPlain,
           String(unit.propertyId),
           {
             ...(buildingExpense?.toObject?.() || {}),
             amount: entry.amount,
-            allocationMethod
+            allocationMethod: effectiveMethod
           },
           Number(term)
         );
