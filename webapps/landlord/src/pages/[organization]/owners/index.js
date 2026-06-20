@@ -18,8 +18,9 @@ function _filterData(data = [], filters) {
   if (filters.searchText) {
     const norm = (s) =>
       String(s || '')
+        .replace(/\s|\.|-/gi, '')
         .toLowerCase()
-        .replace(/\s|\.|-/gi, '');
+        .replace(/ς/g, 'σ');
     const q = norm(filters.searchText);
     items = items.filter(
       (o) => norm(o.name).indexOf(q) !== -1 || norm(o.taxId).indexOf(q) !== -1

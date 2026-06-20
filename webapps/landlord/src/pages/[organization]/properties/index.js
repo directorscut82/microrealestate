@@ -41,16 +41,15 @@ function _filterData(data = [], filters) {
   if (filters.searchText) {
     const regExp = /\s|\.|-/gi;
     const cleanedSearchText = filters.searchText
+      .replace(regExp, '')
       .toLowerCase()
-      .replace(regExp, '');
+      .replace(/ς/g, 'σ');
 
-    // Wave-24 B2: extend the search beyond `name` to atakNumber, address
-    // street/city, and surface — these are the fields landlords actually
-    // type when looking for a property.
     const matchField = (val) =>
       String(val ?? '')
         .replace(regExp, '')
         .toLowerCase()
+        .replace(/ς/g, 'σ')
         .indexOf(cleanedSearchText) != -1;
     filteredItems = filteredItems.filter(
       ({ name, atakNumber, address, surface }) =>

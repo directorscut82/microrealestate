@@ -83,35 +83,37 @@ function Accounting() {
     // owner set on both surfaces and a separator-containing taxId still matches.
     const norm = (s) =>
       String(s || '')
+        .replace(/\s|\.|-/gi, '')
         .toLowerCase()
-        .replace(/\s|\.|-/gi, '');
+        .replace(/ς/g, 'σ');
     const q = norm(searchText);
-    const lc = searchText.toLowerCase();
     return list.filter(
-      (o) => (o.name || '').toLowerCase().includes(lc) || norm(o.taxId).includes(q)
+      (o) => norm(o.name).includes(q) || norm(o.taxId).includes(q)
     );
   }, [ownersData, searchText]);
 
   const filteredData = useMemo(() => {
     if (!accountingData) return {};
     if (!searchText) return accountingData;
-    const lc = searchText.toLowerCase();
-    // Round-1 audit L8: coerce name/tenant with String(x ?? '') — a row with a
-    // null name otherwise throws at .toLowerCase() and the ErrorBoundary blanks
-    // the whole Accounting page (matches owners/index.js norm()).
+    const norm = (s) =>
+      String(s ?? '')
+        .replace(/\s|\.|-/gi, '')
+        .toLowerCase()
+        .replace(/ς/g, 'σ');
+    const q = norm(searchText);
     return {
       ...accountingData,
       incomingTenants:
         accountingData.incomingTenants?.filter((t) =>
-          String(t.name ?? '').toLowerCase().includes(lc)
+          norm(t.name).includes(q)
         ) || [],
       outgoingTenants:
         accountingData.outgoingTenants?.filter((t) =>
-          String(t.name ?? '').toLowerCase().includes(lc)
+          norm(t.name).includes(q)
         ) || [],
       settlements:
         accountingData.settlements?.filter((s) =>
-          String(s.tenant ?? '').toLowerCase().includes(lc)
+          norm(s.tenant).includes(q)
         ) || []
     };
   }, [accountingData, searchText]);

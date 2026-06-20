@@ -35,11 +35,12 @@ function _filterData(data = [], filters) {
     // description/street1/city matched every query. Coerce to '' first so
     // the chain resolves to a real number.
     const regExp = /\s|\.|-/gi;
-    const cleaned = filters.searchText.toLowerCase().replace(regExp, '');
+    const cleaned = filters.searchText.replace(regExp, '').toLowerCase().replace(/ς/g, 'σ');
     const matchField = (val) =>
       String(val ?? '')
         .replace(regExp, '')
         .toLowerCase()
+        .replace(/ς/g, 'σ')
         .indexOf(cleaned) !== -1;
     filteredItems = filteredItems.filter(
       (b) =>
