@@ -14,5 +14,10 @@
   "Reference": "Referência",
   "Refunded deposit": "Devolução de caução",
   "Tenant": "Inquilino",
-  "transfer": "Transferência"
+  "transfer": "Transferência",
+  "Payment": "Pagamento",
+  "Owed": "Devido",
+  "Total payments": "Total de pagamentos",
+  "Total owed": "Total devido",
+  "Payments": "Pagamentos"
 }

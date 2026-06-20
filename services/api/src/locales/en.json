@@ -14,5 +14,10 @@
   "Reference": "Reference",
   "Refunded deposit": "Refunded deposit",
   "Tenant": "Tenant",
-  "transfer": "Transfer"
+  "transfer": "Transfer",
+  "Payment": "Payment",
+  "Owed": "Owed",
+  "Total payments": "Total payments",
+  "Total owed": "Total owed",
+  "Payments": "Payments"
 }

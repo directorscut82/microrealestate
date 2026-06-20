@@ -14,5 +14,10 @@
   "Reference": "Référence",
   "Refunded deposit": "Remboursement du dépôt de garantie",
   "Tenant": "Locataire",
-  "transfer": "Virement"
+  "transfer": "Virement",
+  "Payment": "Paiement",
+  "Owed": "Dû",
+  "Total payments": "Total des paiements",
+  "Total owed": "Total dû",
+  "Payments": "Paiements"
 }

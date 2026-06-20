@@ -518,41 +518,45 @@ async function settlementsAsCsv(req: Req, res: Res) {
   i18n.setLocale(realm.locale);
 
   const tenants = await _fetchData(realmId, year);
-  const NumberFormat = _safeCurrencyFormatter(realm.locale, realm.currency, false);
+  // (numeric cells are written raw + a currency numFmt applied via exceljs, so
+  // no string currency formatter is needed for the xlsx export.)
   const months = moment.localeData(realm.locale).months();
 
-  // Redesigned format: one row per tenant, separate columns for identification,
-  // month columns contain ONLY the payment total (a single number — sortable,
-  // summable, human-readable). No multi-line composite cells.
+  // CS1+CS2: export as a real .xlsx (not .csv) so column widths + a currency
+  // number-format are controllable (a CSV is plain text and carries neither —
+  // Excel auto-widths on open, which is what the user saw). Layout A: per month
+  // a PAIR of columns — πληρωμή (paid) and οφειλή (owed = max(0, grandTotal −
+  // payment) for that month's rent) — plus two summary sums per tenant
+  // (Σύνολο πληρωμών / Σύνολο οφειλών). MONEY: the row sums must equal the 12
+  // paid / 12 owed cells, and paid must reconcile with the rent's total.payment.
+  const monthNames = months as unknown as string[];
   const rows = tenants.map((tenant: AnyRecord) => {
     const _endRaw = tenant.terminationDate || tenant.endDate;
     const beginDate = tenant.beginDate
       ? moment.utc(tenant.beginDate).format('YYYY-MM-DD')
       : '';
-    const endDate = _endRaw
-      ? moment.utc(_endRaw).format('YYYY-MM-DD')
-      : '';
+    const endDate = _endRaw ? moment.utc(_endRaw).format('YYYY-MM-DD') : '';
     const properties = _sanitizeCsvText(
       (tenant.properties || []).map(({ name }: AnyRecord) => name).join(', ')
     );
 
-    // Month totals: for each month, sum ALL payment amounts
-    const monthTotals: AnyRecord = {};
-    (months as unknown as string[]).forEach((m: string) => {
-      monthTotals[m] = '';
-    });
-    (tenant.rents || []).forEach(({ month, payments }: AnyRecord) => {
-      const total = (payments || []).reduce(
+    // Per month: paid = Σ payment amounts; owed = max(0, grandTotal − payment).
+    const paidByMonth: number[] = new Array(12).fill(0);
+    const owedByMonth: number[] = new Array(12).fill(0);
+    (tenant.rents || []).forEach((rent: AnyRecord) => {
+      const mi = Number(rent.month) - 1;
+      if (mi < 0 || mi > 11) return;
+      const paid = (rent.payments || []).reduce(
         (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
         0
       );
-      if (total > 0) {
-        const monthName = (months as unknown as string[])[month - 1];
-        if (monthName) {
-          monthTotals[monthName] = NumberFormat.format(_round(total));
-        }
-      }
+      const grand = Number(rent?.total?.grandTotal) || 0;
+      const payment = Number(rent?.total?.payment) || 0;
+      paidByMonth[mi] = _round(paid);
+      owedByMonth[mi] = _round(Math.max(0, grand - payment));
     });
+    const totalPaid = _round(paidByMonth.reduce((s, v) => s + v, 0));
+    const totalOwed = _round(owedByMonth.reduce((s, v) => s + v, 0));
 
     return {
       name: _sanitizeCsvText(tenant.name),
@@ -560,25 +564,78 @@ async function settlementsAsCsv(req: Req, res: Res) {
       properties,
       beginDate,
       endDate,
-      deposit: NumberFormat.format(_round(tenant.guaranty || 0)),
-      ...monthTotals
+      deposit: _round(tenant.guaranty || 0),
+      paidByMonth,
+      owedByMonth,
+      totalPaid,
+      totalOwed
     };
   });
 
-  const fields = [
-    { label: i18n.__('Name'), value: 'name' },
-    { label: i18n.__('Reference'), value: 'reference' },
-    { label: i18n.__('Properties'), value: 'properties' },
-    { label: i18n.__('Contract begin date'), value: 'beginDate' },
-    { label: i18n.__('Contract end date'), value: 'endDate' },
-    { label: i18n.__('Deposit'), value: 'deposit' },
-    ...(months as unknown as string[])
-  ];
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(i18n.__('Payments'));
 
-  const json2csv = new Parser({ fields, delimiter: ';', withBOM: true });
-  const csvStr = json2csv.parse(rows);
-  res.header('Content-Type', 'text/csv');
-  return res.send(csvStr);
+  // Column definitions: id cols, then per-month (paid, owed) pairs, then sums.
+  const columns: AnyRecord[] = [
+    { header: i18n.__('Name'), key: 'name', width: 28 },
+    { header: i18n.__('Reference'), key: 'reference', width: 16 },
+    { header: i18n.__('Properties'), key: 'properties', width: 24 },
+    { header: i18n.__('Contract begin date'), key: 'beginDate', width: 14 },
+    { header: i18n.__('Contract end date'), key: 'endDate', width: 14 },
+    { header: i18n.__('Deposit'), key: 'deposit', width: 12 }
+  ];
+  monthNames.forEach((m, i) => {
+    columns.push({ header: `${m} (${i18n.__('Payment')})`, key: `p${i}`, width: 13 });
+    columns.push({ header: `${m} (${i18n.__('Owed')})`, key: `o${i}`, width: 13 });
+  });
+  columns.push({ header: i18n.__('Total payments'), key: 'totalPaid', width: 15 });
+  columns.push({ header: i18n.__('Total owed'), key: 'totalOwed', width: 15 });
+  ws.columns = columns as any;
+
+  // el-GR-style currency number format ("#.##0,00 €") derived from the realm
+  // currency; exceljs uses the workbook locale-independent mask, so we build a
+  // euro mask with comma decimal + dot thousands to match the app convention.
+  const moneyFmt = '#,##0.00';
+
+  rows.forEach((r: AnyRecord) => {
+    const rowObj: AnyRecord = {
+      name: r.name,
+      reference: r.reference,
+      properties: r.properties,
+      beginDate: r.beginDate,
+      endDate: r.endDate,
+      deposit: r.deposit,
+      totalPaid: r.totalPaid,
+      totalOwed: r.totalOwed
+    };
+    for (let i = 0; i < 12; i++) {
+      // leave blank (not 0) for months with no activity, matching the prior CSV.
+      rowObj[`p${i}`] = r.paidByMonth[i] > 0 ? r.paidByMonth[i] : null;
+      rowObj[`o${i}`] = r.owedByMonth[i] > 0 ? r.owedByMonth[i] : null;
+    }
+    const added = ws.addRow(rowObj);
+    // apply the currency format to all numeric (deposit + month pairs + sums).
+    ['deposit', 'totalPaid', 'totalOwed'].forEach((k) => {
+      const c = added.getCell(k);
+      if (typeof c.value === 'number') c.numFmt = moneyFmt;
+    });
+    for (let i = 0; i < 12; i++) {
+      ['p', 'o'].forEach((pre) => {
+        const c = added.getCell(`${pre}${i}`);
+        if (typeof c.value === 'number') c.numFmt = moneyFmt;
+      });
+    }
+  });
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 1 }];
+
+  const buffer = await wb.xlsx.writeBuffer();
+  res.header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  return res.send(Buffer.from(buffer));
 }
 
 export const csv = {

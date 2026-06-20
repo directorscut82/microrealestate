@@ -14,5 +14,10 @@
   "Reference": "Αναφορά",
   "Refunded deposit": "Επιστροφή εγγύησης",
   "Tenant": "Ενοικιαστής",
-  "transfer": "Μεταφορά"
+  "transfer": "Μεταφορά",
+  "Payment": "Πληρωμή",
+  "Owed": "Οφειλή",
+  "Total payments": "Σύνολο πληρωμών",
+  "Total owed": "Σύνολο οφειλών",
+  "Payments": "Καταβολές"
 }

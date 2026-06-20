@@ -123,7 +123,9 @@ function Accounting() {
       e.stopPropagation();
       downloadDocument({
         endpoint: `/csv/settlements/${year}`,
-        documentName: t('Payments - {{year}}.csv', { year })
+        // CS1: settlements now export as a real .xlsx (column widths + currency
+        // format + paid/owed pairs + sums).
+        documentName: t('Payments - {{year}}.xlsx', { year })
       });
     },
     [t, year]

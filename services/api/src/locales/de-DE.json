@@ -14,5 +14,10 @@
   "Reference": "Referenz",
   "Refunded deposit": "Zurückerstattete Kaution",
   "Tenant": "Mieter",
-  "transfer": "Transfer"
+  "transfer": "Transfer",
+  "Payment": "Zahlung",
+  "Owed": "Geschuldet",
+  "Total payments": "Summe Zahlungen",
+  "Total owed": "Summe geschuldet",
+  "Payments": "Zahlungen"
 }

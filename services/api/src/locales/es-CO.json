@@ -14,5 +14,10 @@
   "Reference": "Referencia",
   "Refunded deposit": "Depósito reembolsado",
   "Tenant": "Inquilino",
-  "transfer": "Transferencia"
+  "transfer": "Transferencia",
+  "Payment": "Pago",
+  "Owed": "Adeudado",
+  "Total payments": "Total de pagos",
+  "Total owed": "Total adeudado",
+  "Payments": "Pagos"
 }
