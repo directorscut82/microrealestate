@@ -35,8 +35,18 @@ function isExpenseActiveForTerm(expense, term) {
     }
     return true;
   }
-  if (expense.startTerm && term < expense.startTerm) return false;
-  if (expense.endTerm && term > expense.endTerm) return false;
+  // Step-7 DASH-ACTIVEFORTERM-GRANULARITY: compare the recurring window at
+  // MONTH (YYYYMM) granularity, matching the server's authoritative check
+  // (1_base.ts isExpenseActiveForTerm). currentTerm is YYYYMM0100, so a
+  // recurring expense persisted with a mid-month startTerm (day != 01, possible
+  // via seed/legacy/import) was wrongly excluded at full YYYYMMDDHH granularity
+  // → under-reported recurring eksoda + over-reported Net. (Same fix the
+  // owner-tile path already uses via _activeForTermMonthH3.)
+  const ymTerm = Math.floor(Number(term) / 10000);
+  if (expense.startTerm && ymTerm < Math.floor(Number(expense.startTerm) / 10000))
+    return false;
+  if (expense.endTerm && ymTerm > Math.floor(Number(expense.endTerm) / 10000))
+    return false;
   return true;
 }
 

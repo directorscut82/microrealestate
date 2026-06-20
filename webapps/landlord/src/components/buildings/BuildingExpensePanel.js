@@ -89,8 +89,14 @@ function isExpenseActiveForTerm(expense, term) {
     const tMonth = Math.floor(Number(term) / 10000);
     return expMonth === tMonth;
   }
-  if (Number(term) < Number(expense.startTerm)) return false;
-  if (expense.endTerm && Number(term) > Number(expense.endTerm)) return false;
+  // Step-7 DASH-ACTIVEFORTERM-GRANULARITY (sibling fix): compare the recurring
+  // window at MONTH granularity, matching the server (1_base.ts) so a recurring
+  // expense with a mid-month startTerm (day != 01 via seed/legacy/import) isn't
+  // wrongly excluded from the breakdown.
+  const tMonth2 = Math.floor(Number(term) / 10000);
+  if (tMonth2 < Math.floor(Number(expense.startTerm) / 10000)) return false;
+  if (expense.endTerm && tMonth2 > Math.floor(Number(expense.endTerm) / 10000))
+    return false;
   return true;
 }
 
