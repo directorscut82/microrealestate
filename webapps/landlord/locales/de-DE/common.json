@@ -1070,5 +1070,7 @@
   "Split": "Aufgeteilt",
   "Unassigned": "Nicht zugewiesen",
   "Tenant settlements": "Mieterabrechnungen",
-  "Owner settlements": "Eigentümerabrechnungen"
+  "Owner settlements": "Eigentümerabrechnungen",
+  "vacant unit": "leere Einheit",
+  "owner share": "Eigentümeranteil"
 }

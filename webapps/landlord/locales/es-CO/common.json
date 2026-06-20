@@ -1070,5 +1070,7 @@
   "Split": "Dividido",
   "Unassigned": "Sin asignar",
   "Tenant settlements": "Liquidaciones de inquilinos",
-  "Owner settlements": "Liquidaciones de propietarios"
+  "Owner settlements": "Liquidaciones de propietarios",
+  "vacant unit": "unidad vacía",
+  "owner share": "parte propietario"
 }

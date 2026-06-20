@@ -1159,5 +1159,7 @@
   "Split": "Μερισμένο",
   "Unassigned": "Μη ανατεθειμένο",
   "Tenant settlements": "Εκκαθαριστικά ενοικιαστών",
-  "Owner settlements": "Εκκαθαριστικά ιδιοκτητών"
+  "Owner settlements": "Εκκαθαριστικά ιδιοκτητών",
+  "vacant unit": "κενή μονάδα",
+  "owner share": "μερίδιο ιδιοκτήτη"
 }

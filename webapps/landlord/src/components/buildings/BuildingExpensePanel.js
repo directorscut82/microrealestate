@@ -914,6 +914,18 @@ function ChargeBreakdown({ breakdown, t }) {
                 >
                   <span className="truncate mr-2">
                     {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
+                    {/* Source indicator so the landlord knows WHY this charge
+                        exists: owner-portion vs vacant-unit tenant share */}
+                    {e.source === 'repair-vacant' && (
+                      <span className="ml-1 text-[10px] text-muted-foreground/50 italic">
+                        ({t('vacant unit')})
+                      </span>
+                    )}
+                    {e.source === 'repair' && !e.propertyId && (
+                      <span className="ml-1 text-[10px] text-muted-foreground/50 italic">
+                        ({t('owner share')})
+                      </span>
+                    )}
                     {formatBasis(t, e.basis) && (
                       <span className="ml-1 text-muted-foreground/60">
                         ({formatBasis(t, e.basis)})

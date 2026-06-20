@@ -2713,9 +2713,7 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       (o: any) => o && o.name
     );
     if (named.length === 0) return null;
-    return named.length === 1
-      ? named[0].name
-      : `${named[0].name} +${named.length - 1}`;
+    return named.map((o: any) => o.name).join(', ');
   };
   // Per-owner slices (name + percentage + € split of `amount`) for an owner
   // row, so the UI can render "ΔΟΚΙΜΗ ΒΗΤΑ 50% = €50" and list every
@@ -2752,9 +2750,7 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   const buildingWideOwnerName = (): string | null => {
     const named = distinctBuildingOwners.filter((o: any) => o && o.name);
     if (named.length === 0) return null;
-    return named.length === 1
-      ? named[0].name
-      : `${named[0].name} +${named.length - 1}`;
+    return named.map((o: any) => o.name).join(', ');
   };
   const buildingWideOwnerPct = (): number | undefined => {
     const named = distinctBuildingOwners.filter((o: any) => o && o.name);

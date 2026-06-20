@@ -1070,5 +1070,7 @@
   "Split": "Réparti",
   "Unassigned": "Non attribué",
   "Tenant settlements": "Règlements locataires",
-  "Owner settlements": "Règlements propriétaires"
+  "Owner settlements": "Règlements propriétaires",
+  "vacant unit": "unité vacante",
+  "owner share": "part propriétaire"
 }
