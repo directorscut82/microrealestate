@@ -108,7 +108,7 @@ export default function YearFigures({ className, dashboardData }) {
           </div>
         )}
         {tenants.length > 0 && (
-          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-0.5">
+          <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-0.5 max-h-[280px] overflow-y-auto scrollbar-branded">
             {tenants.map((tenant, i) => {
               const balance = tenant.paid - tenant.due;
               return (
@@ -214,6 +214,7 @@ export default function YearFigures({ className, dashboardData }) {
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
+              wrapperStyle={{ pointerEvents: 'auto' }}
             />
             {/* Wave-26 round-3t: paid (dark) renders first so it sits
                 on the LEFT of the stacked bar, owed (light) on the

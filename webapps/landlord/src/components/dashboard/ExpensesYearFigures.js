@@ -220,6 +220,7 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
+              wrapperStyle={{ pointerEvents: 'auto' }}
             />
             <Bar
               dataKey="paid"
