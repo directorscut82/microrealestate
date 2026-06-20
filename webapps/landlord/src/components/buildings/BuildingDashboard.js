@@ -111,6 +111,62 @@ export default function BuildingDashboard({ building }) {
   const fmtNum = (v) =>
     Number(v).toLocaleString(_locale, { maximumFractionDigits: 2 });
 
+  // A7: dual repair status.
+  //  (1) WORK badge — the manual status enum (planned/in_progress/completed/
+  //      cancelled).
+  //  (2) MONEY badge — DERIVED: Πληρωμένη (fully collected) / Εκκρεμεί
+  //      (uncollected, term not yet passed) / Εκπρόθεσμη (uncollected AND the
+  //      chargeTerm/completionDate has passed). Owner-side paid is read from the
+  //      building's ownerMonthlyExpenses repair rows (source repair/repair-vacant
+  //      with this repairId). The TENANT repair-share has NO per-charge paid
+  //      field (monthlyCharges; deferred-decisions D-9), so the money badge
+  //      reflects the OWNER side only — it does not claim anything about
+  //      tenant-side collection it cannot see.
+  const _workStatusLabel = (status) => {
+    switch (status) {
+      case 'in_progress':
+        return t('In progress');
+      case 'completed':
+        return t('Completed');
+      case 'cancelled':
+        return t('Cancelled');
+      default:
+        return t('Planned');
+    }
+  };
+  const _repairMoneyBadge = (repair) => {
+    const repairId = String(repair._id || '');
+    const rows = (building?.ownerMonthlyExpenses || []).filter(
+      (e) =>
+        String(e.expenseId) === repairId &&
+        (e.source === 'repair' || e.source === 'repair-vacant')
+    );
+    // No materialised owner rows → nothing owner-side to settle; no money badge.
+    if (rows.length === 0) return null;
+    const owed = rows.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const paid = rows.reduce(
+      (s, e) =>
+        s +
+        Math.min(
+          (e.payments || []).reduce((a, p) => a + (Number(p.amount) || 0), 0),
+          Number(e.amount) || 0
+        ),
+      0
+    );
+    if (paid >= owed - 0.005 && owed > 0) {
+      return { key: 'paid', label: t('Paid'), cls: 'bg-olive/15 text-olive' };
+    }
+    // time check: has the charge term / completion date passed?
+    const term = Number(repair.completionDate
+      ? moment(repair.completionDate).format('YYYYMM')
+      : String(repair.chargeTerm || '').slice(0, 6));
+    const nowYM = Number(moment().format('YYYYMM'));
+    const overdue = term > 0 && term < nowYM;
+    return overdue
+      ? { key: 'overdue', label: t('Overdue'), cls: 'bg-oxide/15 text-oxide' }
+      : { key: 'pending', label: t('Pending'), cls: 'bg-stone text-ink-muted' };
+  };
+
   const { data: properties } = useQuery({
     queryKey: [QueryKeys.PROPERTIES],
     queryFn: fetchProperties
@@ -675,16 +731,39 @@ export default function BuildingDashboard({ building }) {
                         : r.chargeableTo === 'split'
                           ? `${t('Tenants')} ${tp}% · ${t('Owners')} ${100 - tp}%`
                           : t('Unassigned');
-                  const termLabel = r.chargeTerm
+                  // A7: term or MM/YYYY–MM/YYYY span (when completionDate set).
+                  const startYM = r.chargeTerm
                     ? `${String(r.chargeTerm).slice(4, 6)}/${String(r.chargeTerm).slice(0, 4)}`
                     : '';
+                  const endYM = r.completionDate
+                    ? moment(r.completionDate).format('MM/YYYY')
+                    : '';
+                  const termLabel =
+                    endYM && endYM !== startYM
+                      ? `${startYM} – ${endYM}`
+                      : startYM;
+                  const work = _workStatusLabel(r.status);
+                  const money = _repairMoneyBadge(r);
                   return (
                     <div
                       key={r._id || i}
                       className="flex items-center justify-between gap-2 text-xs"
                     >
-                      <span className="text-ink truncate">
-                        {r.title || r.description || t('Repair')}
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="text-ink truncate">
+                          {r.title || r.description || t('Repair')}
+                        </span>
+                        {/* A7 dual status: work badge + (owner-side) money badge */}
+                        <span className="inline-block px-1.5 rounded-pill bg-sea-tint text-sea-deep">
+                          {work}
+                        </span>
+                        {money && (
+                          <span
+                            className={cn('inline-block px-1.5 rounded-pill', money.cls)}
+                          >
+                            {money.label}
+                          </span>
+                        )}
                       </span>
                       <span className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
                         {termLabel && <span>{termLabel}</span>}

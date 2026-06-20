@@ -1,4 +1,9 @@
 {
+  "Pending": "Εκκρεμεί",
+  "Overdue": "Εκπρόθεσμη",
+  "Planned": "Προγραμματισμένη",
+  "Cancelled": "Ακυρωμένη",
+  "Completed": "Ολοκληρωμένη",
   "Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.": "Ετήσια προβολή με βάση τη σημερινή κατάσταση. Νέα ή τροποποιημένα έξοδα, επισκευές ή ενοίκια σε επιμέρους μήνες μεταβάλλουν αυτή την προβολή.",
   "of": "από",
   "Occupancy": "Πληρότητα",

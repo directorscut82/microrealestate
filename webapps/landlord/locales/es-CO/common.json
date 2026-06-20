@@ -1,4 +1,9 @@
 {
+  "Pending": "Pendiente",
+  "Overdue": "Vencida",
+  "Planned": "Planificada",
+  "Cancelled": "Cancelada",
+  "Completed": "Completada",
   "Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.": "Proyección anual según el estado actual. Gastos, reparaciones o rentas nuevos o modificados en meses concretos cambiarán esta proyección.",
   "of": "de",
   "Occupancy": "Ocupación",

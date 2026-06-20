@@ -1,4 +1,9 @@
 {
+  "Pending": "Pending",
+  "Overdue": "Overdue",
+  "Planned": "Planned",
+  "Cancelled": "Cancelled",
+  "Completed": "Completed",
   "Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.": "Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.",
   "of": "of",
   "Occupancy": "Occupancy",
