@@ -366,7 +366,7 @@ export default function BuildingExpensePanel({ building }) {
   // server-side with the real billing engine so it matches what is actually
   // charged. Refetched whenever the month or the building data changes.
   const { data: breakdown } = useQuery({
-    queryKey: ['expense-breakdown', building?._id, selectedTerm, building?.__v],
+    queryKey: ['expense-breakdown', building?._id, selectedTerm],
     queryFn: () => fetchExpenseBreakdown(building._id, selectedTerm),
     enabled: !!building?._id && !!selectedTerm && hasAnyConfiguredExpense
   });
@@ -567,7 +567,7 @@ export default function BuildingExpensePanel({ building }) {
           </span>
           {ownerTotal !== 0 && (
             <span className="block text-xs text-muted-foreground">
-              {t('Tenant share')}
+              {t('Tenants')}
             </span>
           )}
         </span>
@@ -596,7 +596,7 @@ export default function BuildingExpensePanel({ building }) {
               <Separator className="my-2" />
               <div className="flex items-baseline justify-between mb-1">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {t('Owner expenses')}
+                  {t('Owners')}
                 </span>
                 {ownerTotal !== 0 && (
                   <span className="text-xs italic text-muted-foreground tabular-nums">
@@ -863,7 +863,7 @@ function ChargeBreakdown({ breakdown, t }) {
       {ownerLiabilities.length > 0 && (
         <div className="mt-3 pt-2 border-t border-stone-line/50">
           <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
-            {t('Owner expenses')}
+            {t('Owners')}
           </div>
           {Array.from(
             // Group by propertyId (NOT the non-unique propertyName) so two
@@ -896,7 +896,7 @@ function ChargeBreakdown({ breakdown, t }) {
             <div key={`og-${gi}`} className="mb-2 last:mb-0">
               <div className="flex items-baseline justify-between text-sm">
                 <span className="font-medium truncate mr-2 text-ink-muted">
-                  {g.propertyName || t('Owner expenses')}
+                  {g.propertyName || t('Owners')}
                   <OwnerName
                     name={g.ownerName}
                     percentage={g.ownerPercentage}
