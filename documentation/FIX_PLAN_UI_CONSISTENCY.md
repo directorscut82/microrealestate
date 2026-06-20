@@ -66,7 +66,7 @@ Group by month, then by building:
   Επισκευή (ασανσέρ) — Ισόγειο             5,00 €    Οφειλές 5,00 €
 ```
 
-No co-owner split repeated per line — it's the owner's OWN page, they know their percentage.
+Co-owner split shown ONCE at the group header (not per line). RESOLVED 2026-06-20: the split IS shown, once per month+building group header (e.g. `Συνιδιοκτησία: ΛΑΜΔΑ 50% · ΚΑΠΠΑ 50%`), NOT repeated on each charge line. (Earlier this line said "show none"; that was the outlier — OD3 + the user-approved render both show it once at group level. Implemented in `owners/[id].js` `_groupCharges`.)
 
 ### Dashboard tooltip
 
@@ -503,10 +503,10 @@ Issues:
 | 2 | `PropertyExpensesCard.js` | Remove inline "(ενοικιαστής)" / "(ιδιοκτήτης)" per-line payer labels. Instead: owner lines get "— ιδιοκτήτης" suffix, tenant lines unmarked |
 | 3 | `PropertyExpensesCard.js` | Consistent format: Type label (expense name) + amount. No separate-line wrapping |
 
-## Open questions for the user
+## Open questions for the user — RESOLVED 2026-06-20
 
-- For the owner detail Χρεώσεις: is grouping by month+building correct, or should it be a flat list?
-- Should the co-owner split show at all on the owner's own page?
+- ~~For the owner detail Χρεώσεις: is grouping by month+building correct, or should it be a flat list?~~ → **RESOLVED: group by month + building** (user-approved render + implemented in `owners/[id].js` `_groupCharges`).
+- ~~Should the co-owner split show at all on the owner's own page?~~ → **RESOLVED: show it ONCE at the group header**, not per line (and only when the group is uniformly co-owned; mixed groups show per-line — Step-7 batch1 OWN-1). Fixed the contradicting line 69 above.
 
 ---
 
