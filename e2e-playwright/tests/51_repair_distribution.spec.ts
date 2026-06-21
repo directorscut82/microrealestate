@@ -89,23 +89,45 @@ test.describe('Repair creation + distribution', () => {
     expect(repair, 'repair persisted').toBeDefined();
     repairIds.push(repair._id);
 
-    // Tenant charges created (occupied unit has the seed tenant)
+    // Tenant charges created (occupied unit has the seed tenant). NOTE: the
+    // building may also hold a VACANT unit (added by the S13 block); a
+    // 100%-tenant repair bills ONLY the occupied unit its thousandths share —
+    // the vacant unit's share is Αχρέωτα (flag off, the default here), NOT a
+    // tenant charge. So assert the OCCUPIED unit's share, not total===cost
+    // (which only held on a single-occupied-unit building — fragile to the
+    // shared vacant unit, §2).
     const repairCharges = (building.units || []).flatMap((u: any) =>
       (u.monthlyCharges || []).filter(
         (c: any) => String(c.repairId) === repair._id
       )
     );
     expect(repairCharges.length, 'monthlyCharge created for occupied unit').toBeGreaterThan(0);
-    // The charge amount depends on the unit's thousandths share; at minimum
-    // it's > 0 and the total of all charges equals the actualCost.
-    const totalCharged = repairCharges.reduce((s: number, c: any) => s + c.amount, 0);
-    expect(totalCharged, 'total tenant charges = actualCost').toBeCloseTo(200, 1);
-
-    // No owner rows for a 100%-tenant repair
-    const ownerRepairRows = (building.ownerMonthlyExpenses || []).filter(
-      (e: any) => e.source === 'repair' && String(e.expenseId || e.repairId || '') === repair._id
+    // Occupied unit's share = cost × its thousandths / Σ thousandths of ALL units.
+    const totalTh = (building.units || []).reduce(
+      (s: number, u: any) => s + (Number(u.generalThousandths) || 0),
+      0
     );
-    expect(ownerRepairRows.length, 'no owner-portion for tenants-only repair').toBe(0);
+    const occUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-RichUnit'
+    );
+    const expectedOccShare =
+      totalTh > 0 ? (200 * (Number(occUnit?.generalThousandths) || 0)) / totalTh : 200;
+    const occCharge = (occUnit?.monthlyCharges || [])
+      .filter((c: any) => String(c.repairId) === repair._id)
+      .reduce((s: number, c: any) => s + c.amount, 0);
+    expect(occCharge, 'occupied unit billed its thousandths share').toBeCloseTo(
+      expectedOccShare,
+      1
+    );
+
+    // No owner rows for a 100%-tenant repair with the flag OFF (vacant share →
+    // Αχρέωτα, not the owner ledger).
+    const ownerRepairRows = (building.ownerMonthlyExpenses || []).filter(
+      (e: any) =>
+        (e.source === 'repair' || e.source === 'repair-vacant') &&
+        String(e.expenseId || e.repairId || '') === repair._id
+    );
+    expect(ownerRepairRows.length, 'no owner rows for tenants-only flag-off repair').toBe(0);
   });
 
   test('S2: chargeableTo=owners (100%) → ownerMonthlyExpenses source:repair, no monthlyCharges', async ({
@@ -161,17 +183,34 @@ test.describe('Repair creation + distribution', () => {
     expect(repair).toBeDefined();
     repairIds.push(repair._id);
 
-    // Tenant gets 60% = €60
+    // Tenant 60% = €60 across ALL units by thousandths; the OCCUPIED unit gets
+    // its thousandths share of that €60 (the vacant unit's portion is Αχρέωτα,
+    // flag off). So assert the occupied unit's share, not the €60 total — which
+    // only held with no vacant unit (fragile to the shared vacant unit, §2).
     const tenantCharges = (building.units || []).flatMap((u: any) =>
       (u.monthlyCharges || []).filter(
         (c: any) => String(c.repairId) === repair._id
       )
     );
     expect(tenantCharges.length, 'tenant charge created').toBeGreaterThan(0);
-    const tenantTotal = tenantCharges.reduce((s: number, c: any) => s + c.amount, 0);
-    expect(tenantTotal, 'tenant share = 60% of 100').toBeCloseTo(60, 1);
+    const totalTh = (building.units || []).reduce(
+      (s: number, u: any) => s + (Number(u.generalThousandths) || 0),
+      0
+    );
+    const occUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-RichUnit'
+    );
+    const expectedOcc =
+      totalTh > 0 ? (60 * (Number(occUnit?.generalThousandths) || 0)) / totalTh : 60;
+    const occCharge = (occUnit?.monthlyCharges || [])
+      .filter((c: any) => String(c.repairId) === repair._id)
+      .reduce((s: number, c: any) => s + c.amount, 0);
+    expect(occCharge, 'occupied unit billed its share of the 60% tenant split').toBeCloseTo(
+      expectedOcc,
+      1
+    );
 
-    // Owner gets 40% = €40
+    // Owner gets 40% = €40 (building-wide source:repair — unit-independent).
     const ownerRows = (building.ownerMonthlyExpenses || []).filter(
       (e: any) => e.source === 'repair' && e.description?.includes('E2E-Repair-Split-60-40')
     );
@@ -266,16 +305,27 @@ test.describe('Repair edit + cancel + delete lifecycle', () => {
     expect(resp.status()).toBe(200);
     const building = await resp.json();
 
-    // Tenant share = 50% of 200 = 100
-    const tenantCharges = (building.units || []).flatMap((u: any) =>
-      (u.monthlyCharges || []).filter(
-        (c: any) => String(c.repairId) === repairId
-      )
+    // Tenant share = 50% of 200 = €100 across ALL units by thousandths; the
+    // OCCUPIED unit gets its thousandths slice (vacant portion → Αχρέωτα, flag
+    // off). Assert the occupied unit's slice, robust to the shared vacant unit.
+    const totalTh = (building.units || []).reduce(
+      (s: number, u: any) => s + (Number(u.generalThousandths) || 0),
+      0
     );
-    const tenantTotal = tenantCharges.reduce((s: number, c: any) => s + c.amount, 0);
-    expect(tenantTotal, 'tenant share updated to 50% of 200').toBeCloseTo(100, 1);
+    const occUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-RichUnit'
+    );
+    const expectedOcc =
+      totalTh > 0 ? (100 * (Number(occUnit?.generalThousandths) || 0)) / totalTh : 100;
+    const occCharge = (occUnit?.monthlyCharges || [])
+      .filter((c: any) => String(c.repairId) === repairId)
+      .reduce((s: number, c: any) => s + c.amount, 0);
+    expect(occCharge, 'occupied unit slice of the 50% tenant share at new cost').toBeCloseTo(
+      expectedOcc,
+      1
+    );
 
-    // Owner portion = 50% of 200 = 100
+    // Owner portion = 50% of 200 = €100 (building-wide source:repair).
     const ownerRows = (building.ownerMonthlyExpenses || []).filter(
       (e: any) => e.source === 'repair' && e.description?.includes('E2E-Repair-Lifecycle')
     );
@@ -467,8 +517,40 @@ test.describe('Repair advanced: mixed occupancy + reclassify + payment', () => {
   let repairIds: string[] = [];
   let vacantUnitId: string | null = null;
 
+  let vacantPropertyId: string | null = null;
+
   test.beforeAll(async ({ request }) => {
-    // Add a second VACANT unit to the test building (no tenant occupies it)
+    // A managed unit only receives an owner-side repair-vacant share when it is
+    // LINKED to a property (the distribution loop is keyed by unit.propertyId).
+    // Create/find a dedicated property for the vacant unit and link it — without
+    // this the unit had propertyId=none and _distributeRepairCharge skipped it,
+    // so no repair-vacant row was ever created (the S13 flake, exposed by §2).
+    const propsResp = await request.get(`${GATEWAY}/api/v2/properties`, {
+      headers: auth
+    });
+    const props = (await propsResp.json()) as Array<{
+      _id: string;
+      name: string;
+    }>;
+    let vacantProp = props.find((p) => p.name === 'E2E-VacantProperty');
+    if (!vacantProp) {
+      const createdProp = await request.post(`${GATEWAY}/api/v2/properties`, {
+        headers: auth,
+        data: {
+          name: 'E2E-VacantProperty',
+          type: 'apartment',
+          rent: 0,
+          surface: 50,
+          address: { street1: 'Test', city: 'Test', zipCode: '00000' }
+        }
+      });
+      if (createdProp.status() < 400) {
+        vacantProp = (await createdProp.json()) as { _id: string; name: string };
+      }
+    }
+    vacantPropertyId = vacantProp?._id || null;
+
+    // Add a second VACANT unit to the test building, LINKED to the property.
     const buildingResp = await request.get(
       `${GATEWAY}/api/v2/buildings/${seed.buildingId}`,
       { headers: auth }
@@ -479,6 +561,23 @@ test.describe('Repair advanced: mixed occupancy + reclassify + payment', () => {
     );
     if (existing) {
       vacantUnitId = existing._id;
+      // Backfill the propertyId link on a unit seeded by an older run without it.
+      if (!existing.propertyId && vacantPropertyId) {
+        await request.post(
+          `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units`,
+          {
+            headers: auth,
+            data: {
+              _id: existing._id,
+              atakNumber: 'E2E-VacantUnit',
+              isManaged: true,
+              occupancyType: 'vacant',
+              propertyId: vacantPropertyId,
+              generalThousandths: 500
+            }
+          }
+        );
+      }
     } else {
       const created = await request.post(
         `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units`,
@@ -488,6 +587,7 @@ test.describe('Repair advanced: mixed occupancy + reclassify + payment', () => {
             atakNumber: 'E2E-VacantUnit',
             isManaged: true,
             occupancyType: 'vacant',
+            propertyId: vacantPropertyId,
             generalThousandths: 500
           }
         }
@@ -524,7 +624,10 @@ test.describe('Repair advanced: mixed occupancy + reclassify + payment', () => {
       chargeTerm: currentTerm(),
       actualCost: 200,
       allocationMethod: 'general_thousandths',
-      status: 'planned'
+      status: 'planned',
+      // §2: a vacant unit's repair share routes to the owner ONLY when this is
+      // on (else Αχρέωτα). This test verifies that routing mechanic, so opt in.
+      chargeOwnerWhenVacant: true
     });
     const repair = building.repairs?.find(
       (r: any) => r.title === 'E2E-Repair-MixedOcc'
@@ -558,6 +661,47 @@ test.describe('Repair advanced: mixed occupancy + reclassify + payment', () => {
     );
     expect(repairVacant.length, 'repair-vacant row created for vacant unit').toBeGreaterThan(0);
     expect(repairVacant[0].amount, 'vacant share > 0').toBeGreaterThan(0);
+  });
+
+  test('S13b: §2 flag OFF (default) — vacant unit share becomes Αχρέωτα, NO repair-vacant owner row', async ({
+    request
+  }) => {
+    test.skip(!vacantUnitId, 'vacant unit not seeded');
+    const building = await createRepair(request, {
+      title: 'E2E-Repair-MixedOcc-FlagOff',
+      category: 'plumbing',
+      chargeableTo: 'tenants',
+      tenantSharePercentage: 100,
+      chargeTerm: currentTerm(),
+      actualCost: 200,
+      allocationMethod: 'general_thousandths',
+      status: 'planned'
+      // chargeOwnerWhenVacant intentionally OMITTED → default false
+    });
+    const repair = building.repairs?.find(
+      (r: any) => r.title === 'E2E-Repair-MixedOcc-FlagOff'
+    );
+    expect(repair).toBeDefined();
+    repairIds.push(repair._id);
+
+    // Occupied unit STILL gets its tenant monthlyCharge (flag only governs vacant).
+    const occupiedUnit = (building.units || []).find(
+      (u: any) => u.atakNumber === 'E2E-RichUnit'
+    );
+    const tenantCharge = (occupiedUnit?.monthlyCharges || []).find(
+      (c: any) => String(c.repairId) === repair._id
+    );
+    expect(tenantCharge, 'occupied unit still billed').toBeDefined();
+    expect(tenantCharge.amount).toBeGreaterThan(0);
+
+    // Vacant unit's share is NOT routed to the owner (flag off) → NO repair-vacant
+    // row. The share is Αχρέωτα (uncollected, computed live, never persisted).
+    const repairVacant = (building.ownerMonthlyExpenses || []).filter(
+      (e: any) =>
+        e.source === 'repair-vacant' &&
+        e.description?.includes('E2E-Repair-MixedOcc-FlagOff')
+    );
+    expect(repairVacant.length, 'NO repair-vacant row when flag off').toBe(0);
   });
 
   test('S14: reclassify tenants→owners — monthlyCharges removed, ownerMonthlyExpenses created', async ({
