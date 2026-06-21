@@ -3335,12 +3335,27 @@ export async function removeExpense(req: Req, res: Res) {
         unit.monthlyCharges.pull(chargeId);
       }
     }
-    // Remove orphaned owner monthly expenses
-    const ownerOrphaned = ((building as any).ownerMonthlyExpenses || [])
-      .filter((e: any) => String(e.expenseId) === expId)
-      .map((e: any) => e._id);
-    for (const eid of ownerOrphaned) {
-      (building as any).ownerMonthlyExpenses.pull(eid);
+    // Remove orphaned owner monthly expenses — but NEVER drop a row that
+    // carries recorded καταβολές: pulling it deletes the payments[] with it and
+    // the owner's money vanishes with no trail. A row with payments is instead
+    // preserved as a zero-amount CREDIT (owed=0, payments kept) so the owner
+    // ledger shows the recorded money as an overpayment/credit. Zero-payment
+    // rows are pulled as before.
+    const ownerRows = ((building as any).ownerMonthlyExpenses || []).filter(
+      (e: any) => String(e.expenseId) === expId
+    );
+    for (const e of ownerRows) {
+      const hasPayments =
+        Array.isArray(e.payments) &&
+        e.payments.some((p: any) => Number(p && p.amount) > 0);
+      if (hasPayments) {
+        e.amount = 0;
+        e.source = 'credit';
+        e.paid = true;
+        e.paidDate = e.paidDate || new Date();
+      } else {
+        (building as any).ownerMonthlyExpenses.pull(e._id);
+      }
     }
     (building as any).expenses.pull(expense._id);
 
@@ -3536,7 +3551,22 @@ async function _removeRepairCharges(building: any, repair: any): Promise<void> {
       String(e.expenseId) === repairIdStr
   );
   for (const e of ownerToRemove) {
-    (building as any).ownerMonthlyExpenses.pull(e._id);
+    // Same owner-payment-preservation invariant as removeExpense: never pull a
+    // row carrying recorded καταβολές — keep it as a zero-amount credit so the
+    // owner's money survives the repair delete/cancel as a credit. (NOTE: this
+    // is the wholesale strip used on cancel/delete; the per-edit redistribution
+    // path _distributeRepairCharge carries payments forward separately.)
+    const hasPayments =
+      Array.isArray(e.payments) &&
+      e.payments.some((p: any) => Number(p && p.amount) > 0);
+    if (hasPayments) {
+      e.amount = 0;
+      e.source = 'credit';
+      e.paid = true;
+      e.paidDate = e.paidDate || new Date();
+    } else {
+      (building as any).ownerMonthlyExpenses.pull(e._id);
+    }
   }
 }
 

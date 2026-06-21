@@ -290,3 +290,42 @@ describe('owner settlements grid reconciles with header (Step-7 batch1)', () => 
     expect(gridSum(s2)).toBeCloseTo(50, 2);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// Delete-time owner-payment preservation: when an expense/repair is hard-
+// deleted, an owner row that carried recorded καταβολές must NOT vanish — it
+// becomes a zero-amount 'credit' row (payments kept) and MUST still surface on
+// the owner ledger as preserved money (outstanding clamped to 0).
+// ───────────────────────────────────────────────────────────────────────────
+describe('deleted-expense owner payment survives as a credit row', () => {
+  it('a source:credit row (amount 0, payments>0) is aggregated, not skipped, and shows as credit', () => {
+    const building = {
+      _id: 'b1',
+      name: 'B1',
+      units: [
+        { propertyId: 'p1', atakNumber: 'AK1', floor: 1,
+          owners: [{ name: 'ALPHA', taxId: '1', percentage: 100 }] }
+      ],
+      expenses: [],
+      repairs: [],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'c1', expenseId: 'gone-expense', term: 2026060100,
+          amount: 0, source: 'credit', paid: true,
+          payments: [{ amount: 40, date: '2026-06-01', type: 'cash' }]
+        }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    const agg = map.get(ownerKeyOf(building.units[0].owners[0]));
+    expect(agg).toBeTruthy();
+    // the €40 preserved payment surfaces as paid; owed/outstanding are 0.
+    expect(agg.totalPaid).toBeCloseTo(40, 2);
+    expect(agg.totalAmount).toBeCloseTo(0, 2);
+    expect(agg.totalOutstanding).toBeCloseTo(0, 2); // clamped, never negative
+    const credit = agg.charges.find((c) => c.source === 'credit');
+    expect(credit).toBeTruthy();
+    expect(credit.paidAmount).toBeCloseTo(40, 2);
+    expect(credit.outstanding).toBe(0);
+  });
+});

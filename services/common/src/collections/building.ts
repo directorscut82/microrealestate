@@ -306,13 +306,18 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
     // expense, so the share is billed to the owner — but it is NOT a 'vacant'
     // unit and must never be shown as uncollected/evaporating. Distinct source
     // so the UI labels it as an owner-resident cost.
+    // 'credit': a settled row whose source expense/repair was hard-deleted but
+    // which carried recorded καταβολές — kept (amount=0, payments preserved) so
+    // the owner's money survives the delete as an overpayment/credit instead of
+    // vanishing with the pulled row.
     enum: [
       'expense',
       'repair',
       'vacant',
       'repair-vacant',
       'owner-fixed',
-      'owner-resident'
+      'owner-resident',
+      'credit'
     ],
     default: 'expense'
   },

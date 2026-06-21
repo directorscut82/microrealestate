@@ -387,7 +387,14 @@ export function _aggregateOwners(
     }
     for (const row of b.ownerMonthlyExpenses || []) {
       const amount = _round(row.amount);
-      if (!(amount > 0)) continue;
+      // Skip empty rows — EXCEPT a 'credit' row (amount=0) that carries recorded
+      // καταβολές: that is preserved owner money from a deleted expense/repair
+      // and MUST surface as an overpayment/credit, not be dropped (the whole
+      // point of the delete-time payment-preservation fix).
+      const rowHasPayments =
+        Array.isArray(row.payments) &&
+        row.payments.some((p: any) => Number(p && p.amount) > 0);
+      if (!(amount > 0) && !rowHasPayments) continue;
       // Round-2 audit H9: year-scope when requested. term is YYYYMMDDHH →
       // Math.floor(term / 1e6) = YYYY. Absent year → no filter (all-time).
       if (year && Math.floor(Number(row.term) / 1000000) !== year) continue;
