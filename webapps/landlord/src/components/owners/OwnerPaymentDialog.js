@@ -1,4 +1,3 @@
-import { Card, CardContent, CardHeader } from '../ui/card';
 import {
   Drawer,
   DrawerContent,
@@ -553,24 +552,24 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
             </div>
           )}
 
-          {/* Καταβολή card — the draft entries, identical to the rent dialog. */}
-          <Card>
-            <CardHeader className="text-lg px-6 pt-3 pb-0">
+          {/* Καταβολή — the draft entries. A plain labelled section, NOT a
+              Card, so the bordered draft blocks below are not cards-inside-a-card
+              (DESIGN.md: nested cards are banned). */}
+          <div>
+            <div className="text-label uppercase tracking-wide text-ink-muted mb-2">
               {t('Payment')}
-            </CardHeader>
-            <CardContent>
-              {drafts.map(renderDraft)}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setDrafts((prev) => [...prev, emptyDraft()])}
-                disabled={outstandingCharges.length === 0}
-              >
-                <LuPlus className="size-4 mr-1" />
-                {drafts.length > 0 ? t('Add another payment') : t('Add a payment')}
-              </Button>
-            </CardContent>
-          </Card>
+            </div>
+            {drafts.map(renderDraft)}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDrafts((prev) => [...prev, emptyDraft()])}
+              disabled={outstandingCharges.length === 0}
+            >
+              <LuPlus className="size-4 mr-1" />
+              {drafts.length > 0 ? t('Add another payment') : t('Add a payment')}
+            </Button>
+          </div>
         </div>
 
         <DrawerFooter className="mx-auto w-full max-w-screen-lg">
