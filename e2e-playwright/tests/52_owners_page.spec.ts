@@ -126,9 +126,12 @@ test('52.2 — record a payment via the dialog drops outstanding + readback conf
   // Open the payment dialog.
   await page.getByRole('button', { name: /Record an owner payment|Καταχώρηση πληρωμής/ }).click();
   // Pre-existing drift (NOT this branch): OwnerPaymentDialog was rebuilt to
-  // mirror the tenant payment UI (commits a8e1516f→51eda92a) and the amount
-  // input id became the RHF field-array path 'ownerPay.0.amount'; the spec kept
-  // the old flat '#ownerPayAmount'. Use an attribute selector (id has dots).
+  // mirror the tenant payment UI (commits a8e1516f→51eda92a). The dialog opens
+  // with NO draft rows — the landlord clicks "Add a payment" to add one, which
+  // reveals the amount input (id = RHF field-array path 'ownerPay.0.amount';
+  // attribute selector because the id has dots). The old spec used a flat
+  // '#ownerPayAmount' that no longer exists and skipped the add-row step.
+  await page.getByRole('button', { name: /Add a payment|Προσθήκη πληρωμής/ }).click();
   const ownerPayAmount = page.locator('[id="ownerPay.0.amount"]');
   await expect(ownerPayAmount).toBeVisible({ timeout: 10_000 });
   // €120 in auto mode (default) → settles the €120 charge.
