@@ -143,7 +143,7 @@ test('51.2 — POST payment (auto-spread) settles oldest charge first; readback 
     {
       headers: headers(),
       data: {
-        payment: { date: `${YEAR}-06-15`, amount: 100, type: 'transfer', reference: 'E2E51-RF' }
+        payment: { date: `15/06/${YEAR}`, amount: 100, type: 'transfer', reference: 'E2E51-RF' }
       }
     }
   );
@@ -214,7 +214,7 @@ test('51.4 — custom allocation over a charge outstanding is rejected 422', asy
       headers: headers(),
       data: {
         payment: {
-          date: `${YEAR}-06-16`, amount: 80, type: 'cash',
+          date: `16/06/${YEAR}`, amount: 80, type: 'cash',
           allocation: [{ ownerExpenseId: newCharge!.ownerExpenseId, amount: 80 }]
         }
       }
@@ -232,7 +232,7 @@ test('51.4 — custom allocation over a charge outstanding is rejected 422', asy
       headers: headers(),
       data: {
         payment: {
-          date: `${YEAR}-06-16`, amount: 80, type: 'cash',
+          date: `16/06/${YEAR}`, amount: 80, type: 'cash',
           allocation: [
             { ownerExpenseId: newCharge!.ownerExpenseId, amount: 40 },
             { ownerExpenseId: newCharge!.ownerExpenseId, amount: 40 }

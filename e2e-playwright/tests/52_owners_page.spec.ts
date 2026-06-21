@@ -125,9 +125,14 @@ test('52.2 — record a payment via the dialog drops outstanding + readback conf
 
   // Open the payment dialog.
   await page.getByRole('button', { name: /Record an owner payment|Καταχώρηση πληρωμής/ }).click();
-  await expect(page.locator('#ownerPayAmount')).toBeVisible({ timeout: 10_000 });
+  // Pre-existing drift (NOT this branch): OwnerPaymentDialog was rebuilt to
+  // mirror the tenant payment UI (commits a8e1516f→51eda92a) and the amount
+  // input id became the RHF field-array path 'ownerPay.0.amount'; the spec kept
+  // the old flat '#ownerPayAmount'. Use an attribute selector (id has dots).
+  const ownerPayAmount = page.locator('[id="ownerPay.0.amount"]');
+  await expect(ownerPayAmount).toBeVisible({ timeout: 10_000 });
   // €120 in auto mode (default) → settles the €120 charge.
-  await page.locator('#ownerPayAmount').fill('120');
+  await ownerPayAmount.fill('120');
   await page.getByRole('button', { name: /^Record$|^Καταχώρηση$/ }).click();
 
   // Mongo readback: the καταβολή landed (€120 on the charge).

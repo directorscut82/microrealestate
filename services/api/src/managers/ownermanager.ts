@@ -1002,13 +1002,26 @@ export async function pay(req: Req, res: Res) {
   // partial commit is possible only across DISTINCT buildings under concurrent
   // edits, an accepted edge for v1 (documented; mongo-transaction wrapping is a
   // follow-on if it ever bites).
-  // Parse DD/MM/YYYY (the format the client sends, matching the rent payment
-  // handler) via moment.utc strict mode. Raw `new Date("20/06/2026")` returns
-  // Invalid Date because JS Date doesn't parse DD/MM/YYYY — bug found by the
-  // comprehensive test account seed.
-  const pDate = payment.date
-    ? moment.utc(payment.date, 'DD/MM/YYYY', true).toDate()
-    : new Date();
+  // Parse the payment date. The landlord UI sends DD/MM/YYYY (matching the rent
+  // payment handler); accept ISO YYYY-MM-DD too (API callers / imports). Raw
+  // `new Date("20/06/2026")` returns Invalid Date because JS Date doesn't parse
+  // DD/MM/YYYY. A truly-unparseable date must 422 (not persist an Invalid Date
+  // that fails the Mongoose cast with a 500 — hardening found via E2E spec 51).
+  let pDate = new Date();
+  if (payment.date) {
+    const m = moment.utc(
+      payment.date,
+      ['DD/MM/YYYY', 'YYYY-MM-DD', moment.ISO_8601],
+      true
+    );
+    if (!m.isValid()) {
+      throw new ServiceError(
+        `payment.date is not a valid date: ${String(payment.date)}`,
+        422
+      );
+    }
+    pDate = m.toDate();
+  }
   const touchedBuildings = new Set<string>();
   for (const t of targets) {
     if (!Array.isArray(t.row.payments)) t.row.payments = [];
