@@ -67,3 +67,64 @@ fixes through **`edfe02ac`**.
 Everything above is deployed and verified to the extent automatable. The deferred items
 (A2/A6, Batch-4 pipeline, Αχρέωτα) are the multi-hour money/feature builds — tell me which
 to take next and I'll do them one batch at a time with the same Step-7 discipline.
+
+---
+
+# Continuation session — 2026-06-21 (later) — §2 + inert-credit + §1 + §4
+
+Production NAS revision advanced to **`a9aff646`** (app images). All money work
+went through build → jest → **Step-7 (5 rounds for the credit model)** → deploy →
+live Playwright.
+
+## TL;DR
+- **§2 chargeOwnerWhenVacant on repairs + the inert-credit money model** shipped and
+  NAS-verified. The credit model took **5 adversarial Step-7 rounds** to converge —
+  each round's confirmed findings fixed, severity dropping HIGH→HIGH→MED→LOW→clean.
+- **Step-7 caught a whole class of self-introduced money bugs** I would otherwise have
+  shipped: re-absorbing credits into the repair pool caused (R2) per-bucket
+  double-count and (R3) occupy→vacate→occupy money-LOSS; (R4) cancel→un-cancel left a
+  phantom owner debt on the ledger/statement; (R5) a sub-cent co-owner residual. The
+  final design — **credits are INERT + same-obligation read-time netting** — is leak-free.
+- **§4** repairs moved under the Έξοδα tab; **§1** repair calc-basis returned from server.
+- Full api jest **594 passed / 0 failed**. Live NAS: specs 49+50+51+52+53+54 green.
+
+## What shipped (per item)
+
+| Item | What | Jest | Step-7 | Live on NAS |
+|---|---|---|---|---|
+| **§2** | `chargeOwnerWhenVacant` on RepairSchema + Switch; writer (`_distributeRepairCharge`) and live reader (`computeOwnerEksodaByMonth`) both gate on it; flag off → Αχρέωτα | ✓ | ✓ 5 rounds | ✓ 51 S13/S13b, 54.1/54.2 |
+| **credit (inert)** | deleted/cancelled PAID expense/repair → `source:'credit'` survives; credits never re-pooled; leftover drop-vs-preserve by transition DESTINATION (occupied re-bill = drop, Αχρέωτα = preserve) | ✓ | ✓ | ✓ 54.3 |
+| **netting** | same-`(expenseId,term,propertyId)` netting on ledger `_aggregateOwners` + statement `buildOwnerStatement` + `_ownerOwedLines` + dashboard tile, so cancel→un-cancel = €0 outstanding (no phantom debt / double-charge); co-owner credit split uses carrier-corrected `ownerSlicesOf` | ✓ | ✓ | ✓ 54.3 |
+| **dashboard** | `_expensesRollup` walks union(owed,paid) so a credit's paid surfaces; tile credit-aware + obligation-netted denominator | ✓ | ✓ | ✓ 50 |
+| **§4** | RepairList under Έξοδα tab; old tab → "Εργολάβοι" (Contractors only) | — | — | ✓ |
+| **§1** | server returns repair calc-basis (`repair_split` reconciles; `repair_vacant` = pool→unit-slice allocation, zero-cost guard) + formatBasis + el strings | ✓ | adversarial 1-pass | ✓ live breakdown API check |
+
+## The 5 Step-7 rounds on the credit model (why it took 5)
+1. **R1** — delete dropped recorded owner καταβολές → preserve as credit.
+2. **R2** — per-bucket preserve FLAG double-counted a credit co-located with a genuine overpay → switch to per-amount.
+3. **R3** — occupy→vacate→occupy oscillation re-absorbed+re-dropped the credit (money LOSS) → make credits INERT (never re-pooled).
+4. **R4** — inert credit + re-opened liability showed a phantom debt on the row-summing readers (only the dashboard netted per-term) → add same-obligation `netOwnerChargeOutstanding` to ledger/statement/tile.
+5. **R5** — co-owner credit split by 1-decimal % vs carrier-corrected euro left a ~€0.03 residual → split the credit payment with `ownerSlicesOf` too. **Clean.**
+
+Two reviewer agents fabricated "I ran test X" narration (files that don't exist);
+the **second-opinion reviewers independently reproduced the real mechanism each time**,
+so every confirmed finding was verified against the actual code before fixing.
+
+## Test-harness + realm hygiene done this session
+- New spec **54** (mongo-seeded clean building) — deterministic §2 + credit coverage,
+  avoiding the polluted shared rich building.
+- Spec **51**: S13 opts into the flag (the routing it asserts) + links the vacant unit
+  to a property (the prior flake); new S13b covers flag-off Αχρέωτα; S1/S3/S6 made
+  unit-aware (occupied unit's thousandths share, not total===cost).
+- Purged the rich building's accumulated debris on NAS (36 leaked repairs, 24 owner
+  rows, RichUnit thousandths restored to 1000, orphan unit dropped) so spec 51 runs
+  deterministically. (test-isolation debt, per CLAUDE.md's "seed leakage cascade".)
+
+## Commits
+`5273d4e2`+`fb330cbf` credit preservation+surfacing · `59b36000` §2+inert-credit+netting (5 Step-7 rounds) ·
+`2689e6e5` specs (51 unit-aware + new 54) · `a9aff646` §4 tab move + §1 repair basis.
+
+## Deferred (NOT faked — need a user decision / new server payload / larger engine change)
+- **§5 Αχρέωτα tracking + voluntary payment** — new subdocument + route + payment-dialog bucket + receipt label.
+- **§1.8 repair-vacant Αχρέωτα visibility** — needs the engine to compute a flag-off repair's vacant share live (money-surface change). The money is correctly NOT billed; only its uncollected *visibility* is missing.
+- **A2 / A6 / left-panel allocation-method inline label** — need a new payload field or a UI judgment call to confirm.

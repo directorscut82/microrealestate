@@ -1,5 +1,49 @@
 # Fix Plan — UI Consistency Across Expense/Charge Panels
 
+## STATUS (2026-06-21) — shipped to NAS + Playwright-verified
+
+Deployed on `nas` and verified green on the live NAS (rev `a9aff646`):
+
+- **§2 chargeOwnerWhenVacant on repairs** — schema flag + RepairList Switch +
+  writer gate (`_distributeRepairCharge`) + live-reader gate
+  (`computeOwnerEksodaByMonth`). Vacant repair share → owner only when on, else
+  Αχρέωτα. (commit `59b36000`)
+- **Inert-credit money model** (hardened across 5 Step-7 rounds) — a deleted/
+  cancelled PAID expense/repair's owner καταβολή survives as a `source:'credit'`
+  row; credits are INERT (never re-pooled); same-obligation read-time netting on
+  ledger/statement/dashboard so cancel→un-cancel shows €0 outstanding, no phantom
+  debt, no double-charge. (`59b36000`)
+- **§3** remove `isPaidFromRepairsFund` toggle. (earlier)
+- **§4** repairs moved under the Έξοδα tab; the old tab is now "Εργολάβοι"
+  (Contractors only). (`a9aff646`)
+- **§1.2/§1.3** server returns a calculation basis for repair owner rows
+  (`repair_split` reconciles; `repair_vacant` shows pool→unit-slice allocation,
+  not a false `× %` equation; zero-cost guard). (`a9aff646`)
+- **§1.4–§1.6** owner-name prefix removed, co-owner split shown once per group
+  (OwnerName / CoOwnerSplit). (earlier)
+- **§6** tooltip scroll fix (YearFigures / ExpensesYearFigures). (earlier)
+- Dashboard credit surfacing (union-walk), BuildingDashboard owner-paid tile
+  credit-aware + obligation-netted denominator. (`59b36000`/`a9aff646`)
+
+E2E: specs 49(7) + 50(6) + 51(16, incl. new S13/S13b §2) + 52 + 53 + new
+54(3 §2+credit) all green on NAS. api jest 594 pass / 0 fail.
+
+### DEFERRED (need a user decision, a new server payload, or a larger engine change — NOT to be faked)
+
+- **§5 Αχρέωτα tracking + voluntary payment** — needs a new `uncollectedPayments[]`
+  subdocument + a POST route + a payment-dialog bucket + receipt label. A real
+  feature, not a display tweak.
+- **§1.8 repair-vacant Αχρέωτα visibility** — the Αχρέωτα section reads the engine's
+  `recipient:'owner' && !ownerBilled` rows, which cover building EXPENSES only;
+  the engine does not compute a flag-off repair's vacant share live. Surfacing it
+  needs `computeBuildingExpenseBreakdown` (or `getExpenseBreakdown`) to emit a
+  repair Αχρέωτα row — a money-surface computation change, not a render tweak. The
+  money is correctly NOT billed today; only its *uncollected* visibility is missing.
+- **A2 / A6 / left-panel monthly-statement allocation-method inline label** — need a
+  new server payload field (tenant rent collected/owed bar; κυμαινόμενα YTD cell)
+  or a UI judgment call the user should confirm.
+- **OS4/OS6 owner-tab CSV** — owner-side export.
+
 ## Problem
 
 Every panel that shows building charges renders them in a different format. The landlord sees the same data presented inconsistently depending on which page they're on.
