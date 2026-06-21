@@ -54,11 +54,23 @@ beforeEach(() => {
   TENANTS = [];
 });
 
+// Mirror Mongoose's DocumentArray: .pull(_id) removes by id, and .push() ASSIGNS
+// an _id when the row lacks one (real subdocs always get an _id). Without the
+// auto-id, a row pushed by the manager (e.g. a preserved 'credit') had _id
+// undefined, and a later .pull(undefined) matched the FIRST id-less row by
+// accident — silently removing the wrong row (a test-harness artifact, not a
+// production bug; the real DocumentArray never yields an id-less subdoc).
+let _omeSeq = 0;
 function omeArray(initial = []) {
-  const arr = [...initial];
+  const arr = initial.map((x) => ({ _id: x._id || `ome_${++_omeSeq}`, ...x }));
   arr.pull = function (id) {
     const i = this.findIndex((e) => String(e._id) === String(id));
     if (i >= 0) this.splice(i, 1);
+  };
+  arr.push = function (row) {
+    const withId = { _id: row._id || `ome_${++_omeSeq}`, ...row };
+    Array.prototype.push.call(this, withId);
+    return withId;
   };
   return arr;
 }
@@ -223,6 +235,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: 2026060100,
       status: 'completed'
@@ -247,6 +268,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 150,
       chargeTerm: 2026060100,
       status: 'completed'
@@ -286,6 +316,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -332,6 +371,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -376,6 +424,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -417,6 +474,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -455,6 +521,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'split',
       tenantSharePercentage: 50,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -510,6 +585,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -587,6 +671,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'owners',
       tenantSharePercentage: 0,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -644,6 +737,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'tenants',
       tenantSharePercentage: 100,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -696,6 +798,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'split',
       tenantSharePercentage: 50, // ownerPortion = 50% > 0 → owner-portion row
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 1000,
       chargeTerm: T,
       status: 'completed'
@@ -746,6 +857,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'tenants',
       tenantSharePercentage: 100,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 200,
       chargeTerm: T,
       status: 'completed'
@@ -811,6 +931,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'split',
       tenantSharePercentage: 40, // ownerPortion 60% > 0 → building-wide row
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 1000,
       chargeTerm: T,
       status: 'completed'
@@ -856,6 +985,15 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       chargeableTo: 'tenants',
       tenantSharePercentage: 100,
       allocationMethod: 'general_thousandths',
+      // §2: these C2 payment-MIGRATION tests assume a vacant unit's repair
+      // tenant-share routes to the OWNER (a source:'repair-vacant' row) — the
+      // precondition every assertion below depends on. Post-§2 that routing is
+      // opt-in via chargeOwnerWhenVacant (default false → Αχρέωτα), so the flag
+      // must be ON to reproduce the world these tests verify. The migration
+      // engine under test (pool re-apply, owner-identity reconciliation,
+      // cross-owner safety) is unchanged by §2. Flag-OFF behavior (share →
+      // Αχρέωτα, no owner row) is covered separately in the §2 describe below.
+      chargeOwnerWhenVacant: true,
       actualCost: 100,
       chargeTerm: A,
       status: 'completed'
@@ -897,5 +1035,227 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       );
       expect(paid).toBeLessThanOrEqual(Number(r.amount) + 0.005);
     }
+  });
+
+  // ── §2: chargeOwnerWhenVacant gates whether a vacant unit's repair share
+  // routes to the owner. Default FALSE → the share is NOT billed to the owner
+  // (it becomes Αχρέωτα, computed live, not persisted) — no repair-vacant row.
+  // (The mkRepairBuilding fixtures above set the flag TRUE; these build repairs
+  // WITHOUT going through that line so the flag defaults to undefined/false.)
+  describe('§2 chargeOwnerWhenVacant gating (flag OFF → Αχρέωτα, not owner-billed)', () => {
+    const mkBareBuilding = () => ({
+      _id: 'b_s2',
+      realmId: 'r1',
+      name: 'S2',
+      atakPrefix: '011172',
+      units: [mkUnit('p1', { generalThousandths: 1000 })],
+      expenses: [],
+      repairs: [],
+      contractors: [],
+      ownerMonthlyExpenses: omeArray([]),
+      save: async function () {
+        return this;
+      },
+      toObject: function () {
+        return this;
+      }
+    });
+
+    it('flag OFF: a vacant unit tenants-repair creates NO repair-vacant owner row', async () => {
+      TENANTS = []; // p1 vacant
+      const building = mkBareBuilding();
+      const repair = {
+        _id: 'repS2off',
+        title: 'Roof',
+        chargeableTo: 'tenants',
+        tenantSharePercentage: 100,
+        allocationMethod: 'general_thousandths',
+        actualCost: 100,
+        chargeTerm: 2026060100,
+        status: 'completed'
+        // chargeOwnerWhenVacant intentionally absent → default false
+      };
+      building.repairs = [repair];
+      await _distributeRepairCharge(building, repair, 'r1');
+      const rv = building.ownerMonthlyExpenses.find(
+        (r) => r.source === 'repair-vacant' && String(r.expenseId) === 'repS2off'
+      );
+      expect(rv).toBeFalsy(); // share went to Αχρέωτα, not the owner ledger
+      // and the eksoda owed for that term is €0 (uncollected, not owner-borne).
+      const { owedByTerm } = await computeOwnerEksodaByMonth(
+        'r1',
+        building,
+        2026
+      );
+      expect(owedByTerm.get(2026060100) || 0).toBe(0);
+    });
+
+    it('flag ON: the SAME vacant unit tenants-repair DOES create a repair-vacant owner row', async () => {
+      TENANTS = [];
+      const building = mkBareBuilding();
+      const repair = {
+        _id: 'repS2on',
+        title: 'Roof',
+        chargeableTo: 'tenants',
+        tenantSharePercentage: 100,
+        allocationMethod: 'general_thousandths',
+        actualCost: 100,
+        chargeTerm: 2026060100,
+        status: 'completed',
+        chargeOwnerWhenVacant: true
+      };
+      building.repairs = [repair];
+      await _distributeRepairCharge(building, repair, 'r1');
+      const rv = building.ownerMonthlyExpenses.find(
+        (r) => r.source === 'repair-vacant' && String(r.expenseId) === 'repS2on'
+      );
+      expect(rv).toBeTruthy();
+      expect(Number(rv.amount)).toBe(100); // full tenant share routed to owner
+    });
+
+    const cashFor2 = (building, expenseId) =>
+      building.ownerMonthlyExpenses
+        .filter((r) => String(r.expenseId) === String(expenseId))
+        .reduce((s, r) => s + paymentsTotal(r), 0);
+
+    // Step-7 re-review (inert-credit model): a credit remnant + a later liability
+    // share that ends up re-billed to an occupied tenant. Credits are INERT
+    // (never re-captured/re-dropped), so the owner's full recorded €100 survives
+    // as a credit, the tenant is billed the corrected €70 SEPARATELY, and there
+    // is NO double-count (the €70 tenant charge is the tenant's own obligation,
+    // not netted against the owner credit) and NO loss (the owner's €100 stays).
+    // The owner genuinely paid €100 toward a repair later corrected to €70 and
+    // re-billed to the tenant → they hold a €100 credit, owe €0. Natural 4-step
+    // sequence, all via the real writer.
+    it('contamination: credit survives in full + tenant billed separately (no double-count, no loss)', async () => {
+      const T = 2026060100;
+      const mkB = () => ({
+        _id: 'b_contam',
+        realmId: 'r1',
+        name: 'C',
+        atakPrefix: '011172',
+        units: [mkUnit('p1', { generalThousandths: 1000 })],
+        expenses: [],
+        repairs: [],
+        contractors: [],
+        ownerMonthlyExpenses: omeArray([]),
+        save: async function () {
+          return this;
+        },
+        toObject: function () {
+          return this;
+        }
+      });
+      TENANTS = []; // p1 vacant
+      const building = mkB();
+      const repair = {
+        _id: 'repContam',
+        title: 'Lift',
+        chargeableTo: 'tenants',
+        tenantSharePercentage: 100,
+        allocationMethod: 'general_thousandths',
+        actualCost: 100,
+        chargeTerm: T,
+        status: 'completed',
+        chargeOwnerWhenVacant: true
+      };
+      building.repairs = [repair];
+      // Step 1: vacant + flag ON → €100 repair-vacant; owner pays €100.
+      await _distributeRepairCharge(building, repair, 'r1');
+      building.ownerMonthlyExpenses.find(
+        (r) => r.source === 'repair-vacant'
+      ).payments = [recordedPayment(100)];
+      // Step 2: flag OFF → €100 preserved as a credit (Αχρέωτα, no tenant twin).
+      repair.chargeOwnerWhenVacant = false;
+      await _distributeRepairCharge(building, repair, 'r1');
+      expect(
+        building.ownerMonthlyExpenses.filter((r) => r.source === 'credit')
+      ).toHaveLength(1);
+      // Step 3: cost corrected to €70 + flag back ON → €70 repair-vacant absorbs
+      // €70, €30 residual credit, both at bucket p1.
+      repair.actualCost = 70;
+      repair.chargeOwnerWhenVacant = true;
+      await _distributeRepairCharge(building, repair, 'r1');
+      // Step 4: tenant occupies p1 → €70 re-bills to rent; repair re-distributed.
+      TENANTS = [
+        {
+          _id: 't1',
+          beginDate: '2026-01-01',
+          endDate: '2027-01-01',
+          properties: [{ propertyId: 'p1', entryDate: '2026-01-01' }]
+        }
+      ];
+      repair.title = 'Lift (edited)';
+      await _distributeRepairCharge(building, repair, 'r1');
+      // The €70 corrected share is now the tenant's (a monthlyCharge on p1). The
+      // owner's recorded €100 survives IN FULL as an inert credit (they overpaid a
+      // repair later corrected + moved to the tenant → they hold a €100 credit).
+      // No double-count: the €70 tenant charge is the tenant's own obligation, not
+      // summed against the owner credit. No loss: the full €100 stays on the owner.
+      const tenantCharge = building.units[0].monthlyCharges
+        .filter((c) => String(c.repairId) === 'repContam')
+        .reduce((s, c) => s + Number(c.amount), 0);
+      expect(tenantCharge).toBe(70);
+      expect(cashFor2(building, 'repContam')).toBe(100); // owner's full recorded €
+      // owner owes nothing now (liability moved to tenant): no live repair/repair-
+      // vacant liability row remains, only the inert credit.
+      const liveLiab = building.ownerMonthlyExpenses.filter(
+        (r) =>
+          String(r.expenseId) === 'repContam' &&
+          (r.source === 'repair' || r.source === 'repair-vacant')
+      );
+      expect(liveLiab).toHaveLength(0);
+    });
+
+    // Step-7 finding 4: owners→split-on-vacant-flag-off reclassify of a PAID
+    // owner-portion. The owner paid the full owners repair; reclassify so a share
+    // routes to a flag-off vacant unit (Αχρέωτα). That share has NO tenant twin →
+    // the already-paid money must be PRESERVED as a credit, not dropped.
+    it('owners→split-on-vacant (flag off) reclassify preserves the paid owner καταβολή (no money loss)', async () => {
+      const T = 2026060100;
+      const building = {
+        _id: 'b_f4',
+        realmId: 'r1',
+        name: 'F4',
+        atakPrefix: '011172',
+        units: [mkUnit('p1', { generalThousandths: 1000 })],
+        expenses: [],
+        repairs: [],
+        contractors: [],
+        ownerMonthlyExpenses: omeArray([]),
+        save: async function () {
+          return this;
+        },
+        toObject: function () {
+          return this;
+        }
+      };
+      TENANTS = []; // p1 vacant
+      const repair = {
+        _id: 'repF4',
+        title: 'Facade',
+        chargeableTo: 'owners',
+        tenantSharePercentage: 0,
+        allocationMethod: 'general_thousandths',
+        actualCost: 100,
+        chargeTerm: T,
+        status: 'completed'
+        // chargeOwnerWhenVacant absent → false
+      };
+      building.repairs = [repair];
+      await _distributeRepairCharge(building, repair, 'r1');
+      // owner pays the full €100 owner-portion.
+      building.ownerMonthlyExpenses.find(
+        (r) => r.source === 'repair' && String(r.expenseId) === 'repF4'
+      ).payments = [recordedPayment(100)];
+      // reclassify to 60% tenant → owner-portion shrinks to €40; the €60 tenant
+      // share falls on the VACANT p1 with flag OFF → Αχρέωτα (no tenant twin).
+      repair.chargeableTo = 'split';
+      repair.tenantSharePercentage = 60;
+      await _distributeRepairCharge(building, repair, 'r1');
+      // The €100 the owner paid must survive in full: €40 on the rebuilt owner-
+      // portion + €60 preserved as a credit (the Αχρέωτα-bound share). NOT dropped.
+      expect(cashFor2(building, 'repF4')).toBe(100);
+    });
   });
 });

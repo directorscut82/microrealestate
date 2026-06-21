@@ -525,6 +525,30 @@ export function _aggregateOwners(
       } else {
         // Multi-owner proportional split: each owner gets their percentage
         // of amount AND paidAmount so the ledger reflects their own liability.
+        // For a 'credit' row (charge.amount=0) the preserved payment is split by
+        // the SAME carrier-corrected ownerSlicesOf algorithm used for a sibling
+        // liability's amount — NOT by the 1-decimal display percentage. With
+        // non-terminating shares (33.33% etc.) the rounded percentage (33.3)
+        // diverged from the exact euro slice (33.33), leaving a few-cent phantom
+        // outstanding that the same-obligation netting could not cancel (a credit
+        // €33.3 vs a liability €33.33 per owner → €0.03 residual; Step-7 round-5).
+        // Splitting both by ownerSlicesOf makes credit-paid === liability-amount
+        // per owner → nets to exactly €0.
+        const creditPaidSlices =
+          charge.source === 'credit' && paidAmount > 0
+            ? ownerSlicesOf(sliceOwners, paidAmount)
+            : null;
+        const creditPaidByKey = new Map<string, number>();
+        if (creditPaidSlices) {
+          for (const s of creditPaidSlices) {
+            if (s.ownerKey) {
+              creditPaidByKey.set(
+                s.ownerKey,
+                _round((creditPaidByKey.get(s.ownerKey) || 0) + s.amount)
+              );
+            }
+          }
+        }
         for (const slice of slices) {
           // Resolve which ownerKey this slice belongs to by the slice's OWN
           // ownerKey (ownerSlicesOf populates it distinctly per owner). Step-7
@@ -546,13 +570,16 @@ export function _aggregateOwners(
           // row has charge.amount=0 (so amount-ratio would be 0 and DROP the
           // preserved payment across co-owners, F1/F3). For a credit, split the
           // preserved payment by the owner's PERCENTAGE instead.
-          const ratio =
+          // slicePaid: for a normal charge, paidAmount × (this owner's exact euro
+          // share of amount). For a credit (amount 0), use the carrier-corrected
+          // ownerSlicesOf split of the preserved payment so it matches a sibling
+          // liability's euro slice exactly (Step-7 round-5 — was rounded %).
+          const slicePaid =
             charge.amount > 0
-              ? sliceAmount / charge.amount
+              ? _round(paidAmount * (sliceAmount / charge.amount))
               : charge.source === 'credit'
-                ? (Number(slice.percentage) || 0) / 100
+                ? creditPaidByKey.get(sliceKey || '') || 0
                 : 0;
-          const slicePaid = _round(paidAmount * ratio);
           const sliceOutstanding = Math.max(0, _round(sliceAmount - slicePaid));
           // Apportion slicePaid across this owner's payment shares so the grid
           // (Σ payment shares) reconciles EXACTLY with slicePaid / the header.
@@ -583,6 +610,29 @@ export function _aggregateOwners(
         }
       }
     }
+  }
+
+  // Finalization: NET a credit's surplus against its same-obligation
+  // (expenseId|term|propertyId) sibling on each owner's ledger, so a
+  // cancel→un-cancel / chargeOwnerWhenVacant OFF→ON pair (an inert credit beside
+  // a re-opened liability) shows €0 outstanding — settled — instead of a phantom
+  // debt that also leaked into the collectible owed-lines (double-charge path).
+  // Scoped to the same obligation so a credit can never mask an unrelated debt.
+  // Matches the dashboard's term-level netting + buildOwnerStatement (Step-7
+  // round-4 reader-disagreement finding). Recompute totalOutstanding from the
+  // netted per-charge values.
+  for (const agg of owners.values()) {
+    const netted = OwnerStatement.netOwnerChargeOutstanding(agg.charges);
+    let total = 0;
+    agg.charges.forEach((c, i) => {
+      const o = netted.get(i);
+      if (o != null) {
+        c.outstanding = o;
+        c.paid = o <= 0.005;
+      }
+      total = _round(total + c.outstanding);
+    });
+    agg.totalOutstanding = total;
   }
 
   return owners;

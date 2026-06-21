@@ -694,14 +694,23 @@ async function _expensesRollup(
   for (const b of buildings) {
     const { owedByTerm, paidByTerm, detailByTerm } =
       await computeOwnerEksodaByMonth(realmId, b, year);
-    for (const [term, owed] of owedByTerm) {
+    // Walk the UNION of owed+paid terms. A delete-time 'credit' row contributes
+    // PAID with owed=0, so its term may be absent from owedByTerm entirely —
+    // iterating owedByTerm alone (and clamping paid≤owed) dropped the preserved
+    // καταβολή from the dashboard (Step-7 F1/CREDIT-DASH-1). Paid is NOT clamped
+    // to owed here: a credit legitimately has paid>owed(=0). notPaid still uses
+    // only the owed-vs-its-own-paid shortfall so a credit's surplus can't make
+    // notPaid negative.
+    const allTerms = new Set([...owedByTerm.keys(), ...paidByTerm.keys()]);
+    for (const term of allTerms) {
       const key = termToKey[term];
       const bucket = key ? byMonth[key] : null;
       if (!bucket) continue;
-      const paid = Math.min(paidByTerm.get(term) || 0, owed);
+      const owed = owedByTerm.get(term) || 0;
+      const paid = paidByTerm.get(term) || 0;
       bucket.paid += paid;
-      // notPaid = the unpaid remainder of THIS month's owner bill (mirrors the
-      // rent chart's per-month `notPaid` = unsigned shortfall on this month).
+      // notPaid = unpaid remainder of THIS month's owner bill (clamped ≥0 so a
+      // credit/overpayment never produces negative notPaid).
       bucket.notPaid += Math.max(0, owed - paid);
       totalYearExpenses += owed;
       totalYearPaid += paid;

@@ -150,6 +150,76 @@ export function isOwnerExpenseRowStale(
   return false;
 }
 
+// Net a 'credit' row's overpayment against its SIBLING liability — same
+// obligation only: identical (expenseId, term, propertyId). Returns a Map from a
+// charge's array index to its NETTED outstanding.
+//
+// WHY: a cancel→un-cancel (or chargeOwnerWhenVacant OFF→ON on a paid vacant
+// repair) leaves two rows for ONE obligation — an inert source:'credit'
+// {amount:0, paid:X} beside a re-opened liability {amount:X, paid:0}. Summing
+// each row's own max(0, amount−paid) shows a PHANTOM X outstanding (the credit's
+// −X surplus is clamped away) on a debt the owner already settled — and offers
+// it as a collectible owed-line (double-charge). The dashboard eksoda already
+// nets owed/paid per TERM; this brings the per-row settlement readers (ledger
+// _aggregateOwners + statement buildOwnerStatement + _ownerOwedLines) into
+// agreement (Step-7 round-4 reader-disagreement finding).
+//
+// SCOPE GUARD: nets ONLY within the same (expenseId|term|propertyId) key, so a
+// credit can NEVER mask a DIFFERENT obligation's debt (e.g. a co-owner's unpaid
+// share on another unit — Step-7 round-3 cross-owner masking finding). Group
+// outstanding = max(0, Σamount − Σpaid); distributed across the group's rows
+// largest-amount-first (a credit's amount 0 → it never carries outstanding).
+export function netOwnerChargeOutstanding(
+  charges: {
+    expenseId?: any;
+    term?: any;
+    propertyId?: any;
+    amount?: number;
+    paidAmount?: number;
+  }[]
+): Map<number, number> {
+  const _r = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  const groups = new Map<string, number[]>();
+  charges.forEach((c, i) => {
+    const key = `${String(c.expenseId)}|${String(c.term)}|${
+      c.propertyId == null ? '' : String(c.propertyId)
+    }`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(i);
+  });
+  const out = new Map<number, number>();
+  for (const idxs of groups.values()) {
+    // Fast path: a lone row keeps its own clamped outstanding (no sibling to net).
+    if (idxs.length === 1) {
+      const c = charges[idxs[0]];
+      out.set(
+        idxs[0],
+        Math.max(0, _r((Number(c.amount) || 0) - (Number(c.paidAmount) || 0)))
+      );
+      continue;
+    }
+    const sumAmount = _r(
+      idxs.reduce((s, i) => s + (Number(charges[i].amount) || 0), 0)
+    );
+    const sumPaid = _r(
+      idxs.reduce((s, i) => s + (Number(charges[i].paidAmount) || 0), 0)
+    );
+    let groupOutstanding = Math.max(0, _r(sumAmount - sumPaid));
+    // Distribute the netted group outstanding across the rows, largest amount
+    // first, capped at each row's own amount (a credit's amount 0 gets nothing).
+    const ordered = [...idxs].sort(
+      (a, b) => (Number(charges[b].amount) || 0) - (Number(charges[a].amount) || 0)
+    );
+    for (const i of ordered) {
+      const cap = Number(charges[i].amount) || 0;
+      const give = Math.min(cap, groupOutstanding);
+      out.set(i, _r(give));
+      groupOutstanding = _r(groupOutstanding - give);
+    }
+  }
+  return out;
+}
+
 // Split a charge `amount` across a unit's owners by ownership percentage, for
 // DISPLAY ("ΔΟΚΙΜΗ ΒΗΤΑ 50% = €50"). The SINGLE canonical implementation
 // — both api/managers/ownermanager.ts and api/businesslogic/tasks/1_base.ts
@@ -297,6 +367,11 @@ export function ownerSlicesOf(
 export interface OwnerStatementCharge {
   buildingId: string;
   buildingName: string;
+  // The source expense/repair _id. Needed to group same-obligation rows for
+  // credit netting (a credit + its re-opened liability share expenseId+term+
+  // propertyId). Was previously omitted, which made every charge net into one
+  // group (undefined key) and a credit masked unrelated debts.
+  expenseId?: string;
   term: number;
   amount: number;
   paidAmount: number;
@@ -465,6 +540,7 @@ export function buildOwnerStatement(
       charges.push({
         buildingId: bid,
         buildingName: bname,
+        expenseId: String(row.expenseId),
         term,
         amount,
         paidAmount,
@@ -482,6 +558,16 @@ export function buildOwnerStatement(
   }
 
   charges.sort((a, b) => a.term - b.term);
+  // Net a credit's surplus against its same-obligation (expenseId|term|
+  // propertyId) sibling so a cancel→un-cancel / flag OFF→ON pair shows €0
+  // outstanding (settled), not a phantom debt — matching the dashboard's
+  // term-level netting. Scoped to the same obligation so it never masks an
+  // unrelated debt. (Step-7 round-4.)
+  const nettedOutstanding = netOwnerChargeOutstanding(charges);
+  charges.forEach((c, i) => {
+    c.outstanding = nettedOutstanding.get(i) ?? c.outstanding;
+    c.paid = c.outstanding <= 0.005;
+  });
   const totals = charges.reduce(
     (acc, c) => {
       acc.amount = _round(acc.amount + c.amount);

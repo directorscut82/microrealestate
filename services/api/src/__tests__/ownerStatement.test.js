@@ -206,6 +206,89 @@ describe('buildOwnerStatement', () => {
     expect(buildOwnerStatement(flipped, ownerKeyOf(owner), []).charges).toHaveLength(1);
   });
 
+  // Step-7 round-4: cancel→un-cancel (or chargeOwnerWhenVacant OFF→ON on a paid
+  // vacant repair) leaves an inert source:'credit' {amount 0, paid X} beside a
+  // re-opened liability {amount X, paid 0} for the SAME obligation. The statement
+  // must NET them (€0 outstanding, settled) — not sum each row's own clamped
+  // outstanding into a phantom X debt.
+  it('nets a same-obligation credit + re-opened liability to €0 outstanding (no phantom debt)', () => {
+    const owner = { name: 'A', taxId: '1' };
+    const buildings = [
+      {
+        _id: 'b1',
+        name: 'B',
+        expenses: [],
+        repairs: [{ _id: 'rep1', title: 'roof', chargeableTo: 'owners' }],
+        units: [mkUnit('p1', [owner])],
+        ownerMonthlyExpenses: [
+          {
+            _id: 'credit1',
+            expenseId: 'rep1',
+            term: 2026060100,
+            amount: 0,
+            source: 'credit',
+            paid: true,
+            payments: [{ amount: 100, date: '2026-06-01', type: 'cash' }]
+          },
+          {
+            _id: 'liab1',
+            expenseId: 'rep1',
+            term: 2026060100,
+            amount: 100,
+            source: 'repair',
+            paid: false,
+            payments: []
+          }
+        ]
+      }
+    ];
+    const st = buildOwnerStatement(buildings, ownerKeyOf(owner), []);
+    expect(st.totals.paid).toBeCloseTo(100, 2);
+    expect(st.totals.outstanding).toBeCloseTo(0, 2); // netted, NOT 100
+  });
+
+  // SCOPE GUARD: a credit must NOT mask a DIFFERENT obligation's debt. Same owner,
+  // a paid credit on repair A and a genuinely-unpaid liability on repair B → B's
+  // €50 must STILL show outstanding (the credit only offsets its own obligation).
+  it('does NOT net a credit against a DIFFERENT obligation (cross-obligation debt survives)', () => {
+    const owner = { name: 'A', taxId: '1' };
+    const buildings = [
+      {
+        _id: 'b1',
+        name: 'B',
+        expenses: [],
+        repairs: [
+          { _id: 'repA', title: 'a', chargeableTo: 'owners' },
+          { _id: 'repB', title: 'b', chargeableTo: 'owners' }
+        ],
+        units: [mkUnit('p1', [owner])],
+        ownerMonthlyExpenses: [
+          {
+            _id: 'creditA',
+            expenseId: 'repA',
+            term: 2026060100,
+            amount: 0,
+            source: 'credit',
+            paid: true,
+            payments: [{ amount: 100, date: '2026-06-01', type: 'cash' }]
+          },
+          {
+            _id: 'liabB',
+            expenseId: 'repB',
+            term: 2026060100,
+            amount: 50,
+            source: 'repair',
+            paid: false,
+            payments: []
+          }
+        ]
+      }
+    ];
+    const st = buildOwnerStatement(buildings, ownerKeyOf(owner), []);
+    expect(st.totals.paid).toBeCloseTo(100, 2);
+    expect(st.totals.outstanding).toBeCloseTo(50, 2); // repB still owed, NOT masked
+  });
+
   it('NEVER drops an owner row that carries a recorded payment, even when its expense is gone', () => {
     const owner = { name: 'A', taxId: '1' };
     // expense deleted (not in expenses[]), but the owner already PAID this row.

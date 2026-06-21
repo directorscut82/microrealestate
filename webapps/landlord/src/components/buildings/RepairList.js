@@ -32,6 +32,7 @@ import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Separator } from '../ui/separator';
+import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import { apiFetcher, uploadDocument } from '../../utils/fetch';
@@ -83,6 +84,9 @@ const schema = z.object({
   tenantSharePercentage: z.coerce.number().min(0).max(100).optional(),
   allocationMethod: z.string().optional(),
   chargeTerm: z.string().optional(),
+  // §2: charge a vacant unit's tenant-share to the owner (real functionality,
+  // mirrors building expenses). Default false → vacant share becomes Αχρέωτα.
+  chargeOwnerWhenVacant: z.boolean().optional(),
   contractorId: z.string().optional(),
   // Tier I-3.c: subdocument _ids of building.units that this repair is
   // scoped to. Empty = applies to all units (legacy default).
@@ -263,6 +267,7 @@ export default function RepairList({ building }) {
       actualCost: selectedRepair?.actualCost ?? '',
       chargeableTo: selectedRepair?.chargeableTo ?? 'owners',
       tenantSharePercentage: selectedRepair?.tenantSharePercentage ?? 50,
+      chargeOwnerWhenVacant: selectedRepair?.chargeOwnerWhenVacant ?? false,
       allocationMethod:
         selectedRepair?.allocationMethod ?? 'general_thousandths',
       chargeTerm: selectedRepair?.chargeTerm
@@ -815,6 +820,28 @@ export default function RepairList({ building }) {
                       )}
                     </div>
                   </div>
+
+                  {/* §2: only meaningful when tenants bear a share (tenants /
+                      split). For an 'owners' repair there is no vacant-tenant
+                      share to route. */}
+                  {chargeableTo !== 'owners' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-3">
+                        <Switch
+                          checked={watch('chargeOwnerWhenVacant')}
+                          onCheckedChange={(val) =>
+                            setValue('chargeOwnerWhenVacant', val)
+                          }
+                        />
+                        <Label>{t('Charge owner for vacant units')}</Label>
+                      </div>
+                      <p className="text-label text-ink-muted">
+                        {t(
+                          "When a unit is vacant, charge its tenant-share of this repair to the owner. Off: it stays uncollected (Αχρέωτα)."
+                        )}
+                      </p>
+                    </div>
+                  )}
 
                   {/* Tier I-3.c: per-unit scoping. Empty = all units, which
                       preserves the legacy default. We list each unit by its

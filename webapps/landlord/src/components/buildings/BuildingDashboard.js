@@ -547,17 +547,47 @@ export default function BuildingDashboard({ building }) {
         (s, p) => s + (Number(p.amount) || 0),
         0
       );
+      // A 'credit' row (amount 0, καταβολές preserved when its source expense/
+      // repair was deleted/shrunk) is paid VERBATIM — clamping to amount(=0)
+      // hid the owner's recorded money on this tile while all four server
+      // readers (eksoda, ledger, statement, dashboard rollup) counted it
+      // (Step-7 round-3 reader-consistency finding). Match them here.
+      if (e.source === 'credit') return fromPayments;
       const fromFlag = e.paid ? _rowAmount(e) : 0;
       return Math.min(Math.max(fromPayments, fromFlag), _rowAmount(e));
     };
-    const ownerLedgerTotal = ownerLedgerThisYear.reduce(
-      (sum, e) => sum + _rowAmount(e),
-      0
-    );
-    const ownerPaid = ownerLedgerThisYear.reduce(
-      (sum, e) => sum + _rowPaidAmount(e),
-      0
-    );
+    // NET same-obligation rows before totalling, mirroring the server ledger
+    // (ownermanager._aggregateOwners) + statement netting. A cancel→un-cancel /
+    // chargeOwnerWhenVacant OFF→ON pair leaves an inert credit {amount 0, paid X}
+    // beside a re-opened liability {amount X, paid 0} for the SAME obligation
+    // (expenseId|term|propertyId). Summing each row's own amount/paid would
+    // DOUBLE-COUNT the denominator (X credit + X liability = 2X owed) and show a
+    // phantom half-paid bar. Collapse each obligation group to one effective
+    // {amount = Σamount, paid = min(Σpaid, Σamount)} so the tile agrees with the
+    // server (Step-7 round-4 reader-disagreement / round-4 denominator finding).
+    const _obKey = (e) =>
+      `${String(e.expenseId)}|${String(e.term)}|${
+        e.propertyId == null ? '' : String(e.propertyId)
+      }`;
+    const _obGroups = new Map();
+    for (const e of ownerLedgerThisYear) {
+      const k = _obKey(e);
+      const g = _obGroups.get(k) || { amount: 0, paid: 0 };
+      g.amount += _rowAmount(e);
+      g.paid += _rowPaidAmount(e);
+      _obGroups.set(k, g);
+    }
+    let ownerLedgerTotal = 0;
+    let ownerPaid = 0;
+    for (const g of _obGroups.values()) {
+      // Denominator = the obligation's owed (Σamount), but never less than its
+      // paid so a credit-only obligation (amount 0, paid X) still surfaces the
+      // tile and counts its X. Paid is capped at that denominator so an
+      // overpayment can't push the bar past 100%.
+      const denom = Math.max(g.amount, g.paid);
+      ownerLedgerTotal += denom;
+      ownerPaid += Math.min(g.paid, denom);
+    }
     const ownerUnpaid = Math.max(0, ownerLedgerTotal - ownerPaid);
 
     const annualEsoda = monthlyEsoda * 12;

@@ -328,4 +328,107 @@ describe('deleted-expense owner payment survives as a credit row', () => {
     expect(credit.paidAmount).toBeCloseTo(40, 2);
     expect(credit.outstanding).toBe(0);
   });
+
+  // Step-7 round-4: cancel→un-cancel (or chargeOwnerWhenVacant OFF→ON on a paid
+  // vacant repair) leaves an inert credit {amount 0, paid X} beside a re-opened
+  // liability {amount X, paid 0} for the SAME obligation. The ledger must NET them
+  // to €0 totalOutstanding — else the owner shows a phantom debt AND it leaks into
+  // the collectible owed-lines (double-charge path).
+  it('nets a same-obligation credit + re-opened liability to €0 totalOutstanding (no phantom debt)', () => {
+    const building = {
+      _id: 'b1',
+      name: 'B1',
+      units: [
+        { propertyId: 'p1', atakNumber: 'AK1', floor: 1,
+          owners: [{ name: 'ALPHA', taxId: '1', percentage: 100 }] }
+      ],
+      expenses: [],
+      repairs: [{ _id: 'rep1', title: 'roof', chargeableTo: 'owners' }],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'c1', expenseId: 'rep1', term: 2026060100,
+          amount: 0, source: 'credit', paid: true,
+          payments: [{ amount: 100, date: '2026-06-01', type: 'cash' }]
+        },
+        {
+          _id: 'l1', expenseId: 'rep1', term: 2026060100,
+          amount: 100, source: 'repair', paid: false, payments: []
+        }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    const agg = map.get(ownerKeyOf(building.units[0].owners[0]));
+    expect(agg).toBeTruthy();
+    expect(agg.totalPaid).toBeCloseTo(100, 2);
+    expect(agg.totalOutstanding).toBeCloseTo(0, 2); // netted, NOT 100 phantom
+  });
+
+  // Step-7 round-5: a CO-OWNED obligation with non-terminating shares (33.33%/
+  // 66.67%) — credit + re-opened liability — must net to EXACTLY €0 per owner.
+  // The credit's preserved payment is split by the same carrier-corrected
+  // ownerSlicesOf euros as the liability (was 1-decimal % → a €0.03 phantom that
+  // _ownerOwedLines surfaced as a collectible debt on a settled obligation).
+  it('co-owned credit + liability (33.33/66.67) nets to €0 — no sub-cent phantom', () => {
+    const owners = [
+      { name: 'ALFA', taxId: '1', percentage: 33.33 },
+      { name: 'BETA', taxId: '2', percentage: 66.67 }
+    ];
+    const building = {
+      _id: 'b1',
+      name: 'B1',
+      units: [{ propertyId: 'p1', atakNumber: 'AK1', floor: 1, owners }],
+      expenses: [],
+      repairs: [{ _id: 'rep1', title: 'roof', chargeableTo: 'owners' }],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'c1', expenseId: 'rep1', term: 2026060100, propertyId: 'p1',
+          amount: 0, source: 'credit', paid: true,
+          payments: [{ amount: 100, date: '2026-06-01', type: 'cash' }]
+        },
+        {
+          _id: 'l1', expenseId: 'rep1', term: 2026060100, propertyId: 'p1',
+          amount: 100, source: 'repair-vacant', paid: false, payments: []
+        }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    for (const o of owners) {
+      const agg = map.get(ownerKeyOf(o));
+      expect(agg).toBeTruthy();
+      // each co-owner's obligation is fully settled — no sub-cent phantom owed.
+      expect(agg.totalOutstanding).toBeCloseTo(0, 2);
+    }
+  });
+
+  // SCOPE GUARD: a credit must NOT mask a DIFFERENT obligation's debt.
+  it('does NOT net a credit against a DIFFERENT obligation (cross-obligation debt survives)', () => {
+    const building = {
+      _id: 'b1',
+      name: 'B1',
+      units: [
+        { propertyId: 'p1', atakNumber: 'AK1', floor: 1,
+          owners: [{ name: 'ALPHA', taxId: '1', percentage: 100 }] }
+      ],
+      expenses: [],
+      repairs: [
+        { _id: 'repA', title: 'a', chargeableTo: 'owners' },
+        { _id: 'repB', title: 'b', chargeableTo: 'owners' }
+      ],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'cA', expenseId: 'repA', term: 2026060100,
+          amount: 0, source: 'credit', paid: true,
+          payments: [{ amount: 100, date: '2026-06-01', type: 'cash' }]
+        },
+        {
+          _id: 'lB', expenseId: 'repB', term: 2026060100,
+          amount: 50, source: 'repair', paid: false, payments: []
+        }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    const agg = map.get(ownerKeyOf(building.units[0].owners[0]));
+    expect(agg.totalPaid).toBeCloseTo(100, 2);
+    expect(agg.totalOutstanding).toBeCloseTo(50, 2); // repB still owed, NOT masked
+  });
 });

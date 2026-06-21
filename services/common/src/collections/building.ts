@@ -237,7 +237,12 @@ const RepairSchema = new mongoose.Schema({
     enum: ['general_thousandths', 'heating_thousandths', 'elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
     default: 'general_thousandths'
   },
-  chargeTerm: Number
+  chargeTerm: Number,
+  // §2: when a unit is vacant for the charge term, its tenant-share of the
+  // repair is routed to the OWNER (source:'repair-vacant') only if this is true
+  // — mirroring BuildingExpenseSchema.chargeOwnerWhenVacant. Default false: a
+  // vacant unit's share becomes Αχρέωτα (uncollected) instead.
+  chargeOwnerWhenVacant: { type: Boolean, default: false }
 });
 
 // A single owner payment (καταβολή) slice allocated to one owner charge.

@@ -728,4 +728,81 @@ describe('Dashboard computation logic', () => {
       expect(paid).toEqual({ 2026010100: 100 });
     });
   });
+
+  // Mirror of dashboardmanager._expensesRollup's per-building merge loop. The
+  // producer (computeOwnerEksodaByMonth) emits a delete-time 'credit' row's
+  // PAID into paidByTerm with NO owedByTerm entry. The consumer MUST walk the
+  // UNION of owed+paid terms (not owedByTerm alone) and must NOT clamp paid to
+  // owed — else a credit's preserved καταβολή is silently dropped from the
+  // dashboard eksoda total (Step-7 CREDIT-DASH-1). This mirror guards that the
+  // union-walk shape stays in sync with the production emit.
+  describe('expensesRollup union-walk (credit-row paid surfaces)', () => {
+    const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // The OLD (broken) consumer: iterate owedByTerm only, clamp paid≤owed.
+    const rollupOwedOnly = (owedByTerm, paidByTerm) => {
+      let paid = 0;
+      let expenses = 0;
+      for (const [term, owed] of owedByTerm) {
+        const p = Math.min(paidByTerm.get(term) || 0, owed);
+        paid = round(paid + p);
+        expenses = round(expenses + owed);
+      }
+      return { paid, expenses };
+    };
+    // The NEW consumer: walk the union, paid NOT clamped to owed, notPaid ≥0.
+    const rollupUnion = (owedByTerm, paidByTerm) => {
+      let paid = 0;
+      let expenses = 0;
+      let notPaid = 0;
+      const allTerms = new Set([...owedByTerm.keys(), ...paidByTerm.keys()]);
+      for (const term of allTerms) {
+        const owed = owedByTerm.get(term) || 0;
+        const p = paidByTerm.get(term) || 0;
+        paid = round(paid + p);
+        notPaid = round(notPaid + Math.max(0, owed - p));
+        expenses = round(expenses + owed);
+      }
+      return { paid, expenses, notPaid };
+    };
+
+    it('OLD owed-only loop DROPS a credit-only term (regression witness)', () => {
+      // June: owed 0 (credit), paid 40. The owed-only loop never visits June.
+      const owed = new Map();
+      const paid = new Map([[2026060100, 40]]);
+      expect(rollupOwedOnly(owed, paid)).toEqual({ paid: 0, expenses: 0 });
+    });
+
+    it('union loop SURFACES the credit-only term paid (paid 40, owed 0)', () => {
+      const owed = new Map();
+      const paid = new Map([[2026060100, 40]]);
+      expect(rollupUnion(owed, paid)).toEqual({
+        paid: 40,
+        expenses: 0,
+        notPaid: 0 // credit surplus never produces negative notPaid
+      });
+    });
+
+    it('union loop keeps normal owed+paid terms intact alongside a credit term', () => {
+      // May: normal €100 owed, €60 paid. June: credit €40 paid, €0 owed.
+      const owed = new Map([[2026050100, 100]]);
+      const paid = new Map([
+        [2026050100, 60],
+        [2026060100, 40]
+      ]);
+      expect(rollupUnion(owed, paid)).toEqual({
+        paid: 100, // 60 + 40
+        expenses: 100, // only May owes
+        notPaid: 40 // May shortfall 40; June credit contributes 0
+      });
+    });
+
+    it('union loop does NOT clamp a credit overpayment down to owed', () => {
+      // A credit can legitimately have paid>owed(=0). The OLD min(...,owed)
+      // clamp zeroed it; the union loop counts it verbatim.
+      const owed = new Map();
+      const paid = new Map([[2026060100, 40]]);
+      expect(rollupOwedOnly(owed, paid).paid).toBe(0); // clamped away
+      expect(rollupUnion(owed, paid).paid).toBe(40); // preserved
+    });
+  });
 });

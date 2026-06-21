@@ -3592,7 +3592,18 @@ function _applyRepairPaymentPool(
   term: number,
   paidByProp: Map<string, number>,
   flagByProp: Map<string, { amount: number; date: any }>,
-  mkPoolPayment: (amount: number) => any
+  mkPoolPayment: (amount: number) => any,
+  // Per-bucket DROPPABLE € budget: the portion of each bucket's unabsorbable
+  // leftover that is a GENUINE overpay — owner cash whose repair share this run
+  // was re-billed to an OCCUPIED tenant's rent. We DROP min(leftover, droppable)
+  // and PRESERVE the rest as a source:'credit' row. Preserving a droppable euro
+  // would double-count it (owner credit + tenant rent); dropping a
+  // non-droppable euro (share went to flag-off Αχρέωτα / owner-portion shrank /
+  // cancel credit) would silently destroy recorded owner money. Per-AMOUNT (not
+  // a per-bucket flag) so a credit and a genuine overpay sharing one property
+  // bucket are split correctly (Step-7 re-review: a flag rescued/dropped the
+  // whole contaminated bucket).
+  droppableByProp: Map<string, number> = new Map()
 ): void {
   const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
   const OWNER_KEY = '__owner__';
@@ -3749,27 +3760,65 @@ function _applyRepairPaymentPool(
     }
   }
 
-  // Each property bucket's UNPLACED remainder is DROPPED + logged. A leftover
-  // means the payment's liability row was not rebuilt this run AND no
-  // same-attributed-owner live row could absorb it — i.e. the owner overpaid
-  // relative to what this repair now owes (the owner-portion shrank, the unit
-  // became occupied, or the charge moved months). MRE has NO owner carry-forward
-  // ledger: payOwner auto-mode drops owner surplus the same way, so we follow
-  // that single contract uniformly. (We previously tried re-materialising such a
-  // remnant as a synthetic row at its original term to preserve the rare
-  // chargeTerm-move-with-move-in case — Step-7-r13 — but a synthetic
-  // repair-vacant row is never stale-dropped by the read side, so every
-  // adjacent edit shape resurrected it as phantom owed/over-paid money: unit
-  // dropped via affectedUnitIds, overpay carrying the full leftover, etc.
-  // Step-7-r14. Dropping uniformly is the only leak-free rule — no synthetic row
-  // exists for any surface to miscount. The realistic C2 bug — a payment ≤ the
-  // liability that STILL has its row — is fully preserved by Pass-1/Pass-2 above;
-  // only a genuine post-transition overpayment is dropped.)
-  let migrating = 0;
-  for (const left of leftoverByProp.values()) migrating = _round(migrating + left);
-  if (migrating > 0.005) {
+  // Each property bucket's UNPLACED remainder is resolved one of two ways:
+  //
+  //  A) PRESERVE up to the bucket's PRESERVABLE budget — money the owner ALREADY
+  //     paid that this run stranded into Αχρέωτα/credit (not a tenant re-bill):
+  //     a cancel-time 'credit' re-absorbed on un-cancel whose owner-portion
+  //     shrank, a 'repair-vacant' row whose flag flipped OFF, or an owner-portion
+  //     share that now lands on a flag-off vacant unit. Mirroring
+  //     _removeRepairCharges / removeExpense, we keep it as ONE zero-amount
+  //     source:'credit' row (payments preserved) so the owner's recorded money
+  //     survives on EVERY surface (ledger/statement/dashboard all count a
+  //     credit's payments). amount=0 makes it leak-free: it adds PAID, never
+  //     owed, and the read-side credit branch is never stale-dropped.
+  //
+  //  B) DROP + log the REST — a genuine post-transition OVERPAY: the leftover
+  //     beyond the preservable budget is a euro whose unit became OCCUPIED (share
+  //     re-billed to the tenant's rent) or the charge relocated months.
+  //     Preserving it would DOUBLE-COUNT against the tenant rent (Step-7
+  //     re-review). MRE has NO owner carry-forward ledger; payOwner auto-mode
+  //     drops owner surplus the same way. We tried re-materialising a synthetic
+  //     row (r13) but it resurrected as phantom owed/over-paid on adjacent edits
+  //     (r14) — dropping a TRUE overpay is the only leak-free rule.
+  //
+  // min(leftover, budget) splits a bucket that holds BOTH a credit remnant AND a
+  // genuine occupied-overpay: only the credit-origin € is preserved, the overpay
+  // € drops. Without the per-amount cap a single credit rescued the whole
+  // contaminated bucket → the occupied-overpay euro showed on owner credit AND
+  // tenant rent.
+  let dropped = 0;
+  let preserved = 0;
+  for (const [k, left] of leftoverByProp) {
+    if (left <= 0.005) continue;
+    const dropBudget = droppableByProp.get(k) || 0;
+    const toDrop = Math.min(_round(left), _round(dropBudget));
+    const toPreserve = _round(left - toDrop);
+    if (toPreserve > 0.005) {
+      omeArr.push({
+        expenseId: repairIdStr,
+        term,
+        amount: 0,
+        propertyId: k === OWNER_KEY ? null : k,
+        source: 'credit',
+        description:
+          'Repair credit (κατάλοιπο καταβολής): ' + repairIdStr,
+        payments: [mkPoolPayment(toPreserve)],
+        paid: true,
+        paidDate: new Date()
+      });
+      preserved = _round(preserved + toPreserve);
+    }
+    if (toDrop > 0.005) dropped = _round(dropped + toDrop);
+  }
+  if (preserved > 0.005) {
+    logger.info(
+      `repair ${repairIdStr} term ${term}: preserved ${preserved} of recorded owner καταβολή as a source:'credit' remnant (liability removed/shrunk by un-cancel or chargeOwnerWhenVacant flip — recorded money must survive).`
+    );
+  }
+  if (dropped > 0.005) {
     logger.warn(
-      `repair ${repairIdStr} term ${term}: owner overpayment of ${migrating} exceeds the current owner liability after a charge transition; surplus dropped (no owner carry-forward ledger — matches payOwner auto-mode surplus handling).`
+      `repair ${repairIdStr} term ${term}: owner overpayment of ${dropped} exceeds the current owner liability after a charge transition; surplus dropped (no owner carry-forward ledger — matches payOwner auto-mode surplus handling).`
     );
   }
 }
@@ -3883,11 +3932,50 @@ export async function _distributeRepairCharge(
     e.propertyId ? String(e.propertyId) : OWNER_KEY;
   const paidByProp = new Map<string, number>();
   const flagByProp = new Map<string, { amount: number; date: any }>();
+  // Per-bucket DROPPABLE €: the part of a bucket's unabsorbable leftover that is
+  // a GENUINE overpay — owner cash whose repair share this run was re-billed to
+  // an OCCUPIED tenant's rent. Preserving it would DOUBLE-COUNT the same euro on
+  // owner credit AND tenant rent (Step-7 re-review confirmed via the real
+  // writer), so it is dropped. Everything ELSE in a leftover (share went to
+  // flag-off-vacant Αχρέωτα → billed to nobody, or the owner-portion simply
+  // shrank / a cancel-time credit) is recorded owner money with no tenant twin →
+  // PRESERVED as a source:'credit' row. So: preserve = leftover − min(leftover,
+  // droppable). Populated in the unit loop (each occupied unit's re-billed share
+  // is attributed to the bucket that actually holds that owner's cash — its own
+  // property bucket if it has captured cash, else the building-wide owner-portion
+  // bucket — so one rebill is never charged to two buckets, and no cross-owner
+  // bucket is touched). The owner-only early-return path bills no tenant, so it
+  // passes an EMPTY map (nothing droppable → owner-portion shrink fully
+  // preserved). This is the inverse of, and supersedes, the earlier origin-based
+  // preserve flag: keying on the transition DESTINATION (occupied-tenant vs
+  // Αχρέωτα) is what distinguishes a double-count overpay from preserved money,
+  // and it also covers the owners→split-on-vacant-flag-off case (Step-7 finding
+  // 4) that an origin flag missed.
+  const droppableByProp = new Map<string, number>();
+  // 'credit' rows are SACRED and INERT: a credit (created by _removeRepairCharges
+  // on cancel, removeExpense on delete, or this function's own leftover-preserve
+  // stage) carries recorded owner money that has NO live liability. It is
+  // deliberately EXCLUDED here so it is never captured into the payment pool nor
+  // stripped — it simply survives, read by every surface (owed 0, paid verbatim).
+  //
+  // We tried re-absorbing credits into the pool on un-cancel (to merge the
+  // floating credit back onto the re-opened liability — purely cosmetic, one row
+  // vs two). It created a whole class of money bugs: a credit's cash merged into
+  // a liability row (Pass 1) lost its "surplus, no-tenant-twin" provenance, so a
+  // later occupy→vacate→occupy oscillation re-classified it as a tenant-rebilled
+  // overpay and DROPPED it (Step-7 round-3 money loss), and a credit co-located
+  // with a genuine occupied-overpay contaminated the per-bucket drop/preserve
+  // split (round-2 double-count). Keeping credits OUT of the pool is the only
+  // leak-free rule: the term-level dashboard union-walk already reconciles a
+  // floating credit against a re-opened liability (owed===paid → settled), so the
+  // money is correct without re-absorption — it just shows as two rows. An
+  // expense-derived credit also has a different expenseId, doubly out of scope.
+  const isRepairOwnerRow = (e: any) =>
+    (e.source === 'repair' || e.source === 'repair-vacant') &&
+    e.expenseId &&
+    String(e.expenseId) === repairIdStr;
   for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
-    if (
-      (e.source === 'repair' || e.source === 'repair-vacant') &&
-      String(e.expenseId) === repairIdStr
-    ) {
+    if (isRepairOwnerRow(e)) {
       const k = propKeyOf(e);
       let rowPaidSum = 0;
       for (const p of Array.isArray(e.payments) ? e.payments : []) {
@@ -3898,6 +3986,12 @@ export async function _distributeRepairCharge(
           if (!paymentTemplate) paymentTemplate = p;
         }
       }
+      // (droppableByProp — the genuine-overpay portion of each bucket's leftover
+      // — is computed in the unit loop below from the transition DESTINATION, not
+      // here from the row's origin: a leftover euro is a double-count overpay only
+      // if its share was re-billed to an OCCUPIED tenant this run. That is the
+      // exact discriminator; an origin flag could not distinguish a flag-off
+      // Αχρέωτα drop, billed to nobody, which must be PRESERVED.)
       if (rowPaidSum <= 0.005 && e.paid === true) {
         const prev = flagByProp.get(k);
         flagByProp.set(k, {
@@ -3915,13 +4009,12 @@ export async function _distributeRepairCharge(
     description: paymentTemplate?.description || ''
   });
 
-  // Strip ALL prior owner-side rows for this repair (both sources, all terms)
-  // up front. Payments are preserved in paidPool and re-applied after rebuild.
+  // Strip ALL prior owner-side rows for this repair (all sources incl. a
+  // cancel-time 'credit' remnant, all terms) up front. Payments are preserved
+  // in paidByProp/flagByProp above and re-applied after rebuild — so an
+  // un-cancel re-absorbs the credit's καταβολές instead of orphaning them.
   const ownerToRemove = ((building as any).ownerMonthlyExpenses || []).filter(
-    (e: any) =>
-      (e.source === 'repair' || e.source === 'repair-vacant') &&
-      e.expenseId &&
-      String(e.expenseId) === repairIdStr
+    (e: any) => isRepairOwnerRow(e)
   );
   for (const e of ownerToRemove) {
     (building as any).ownerMonthlyExpenses.pull(e._id);
@@ -3964,7 +4057,8 @@ export async function _distributeRepairCharge(
       term,
       paidByProp,
       flagByProp,
-      mkPoolPayment
+      mkPoolPayment,
+      droppableByProp
     );
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
@@ -4062,15 +4156,29 @@ export async function _distributeRepairCharge(
           description: `Repair: ${repair.title}`,
           repairId: repairIdStr
         });
-      } else {
-        // VACANT this term → the tenant share would be stranded (no rent
-        // term to attach to). Route it to the owner ledger so the repair
-        // cost lands somewhere instead of vanishing. Tagged 'repair-vacant'
-        // (NOT 'vacant') so the building-expense vacant recompute, which
-        // strips+rebuilds source:'vacant' rows from building.expenses only,
-        // never touches it — otherwise this euro would silently disappear on
-        // the next unrelated tenancy change (REPAIR-VACANT-VANISHES). ZERO
-        // payments — paidPool is applied once after the loop.
+        // This unit's share is now the TENANT's (rent monthlyCharge). Any owner
+        // καταβολή captured for it is a genuine overpay → its leftover must DROP,
+        // not preserve (else the same euro lands on owner credit AND tenant rent
+        // — Step-7 re-review double-count). Attribute the re-billed € to the
+        // bucket that holds that owner's cash: the unit's OWN bucket if it had a
+        // captured repair-vacant payment, else the building-wide owner-portion
+        // bucket (__owner__) which a reclassified owners→tenants repair paid into.
+        const dk = paidByProp.has(String(unit.propertyId))
+          ? String(unit.propertyId)
+          : OWNER_KEY;
+        droppableByProp.set(
+          dk,
+          _round((droppableByProp.get(dk) || 0) + share)
+        );
+      } else if (repair.chargeOwnerWhenVacant) {
+        // VACANT this term AND the repair opts vacant units into owner-billing
+        // (§2 chargeOwnerWhenVacant, mirroring building expenses): the tenant
+        // share would be stranded (no rent term), so route it to the owner
+        // ledger. Tagged 'repair-vacant' (NOT 'vacant') so the building-expense
+        // vacant recompute, which strips+rebuilds source:'vacant' rows from
+        // building.expenses only, never touches it — otherwise this euro would
+        // silently disappear on the next unrelated tenancy change
+        // (REPAIR-VACANT-VANISHES). ZERO payments — paidPool applied after loop.
         const rvArr = (building as any).ownerMonthlyExpenses;
         rvArr.push({
           expenseId: repairIdStr,
@@ -4082,6 +4190,10 @@ export async function _distributeRepairCharge(
           payments: []
         });
       }
+      // else: VACANT and chargeOwnerWhenVacant OFF → the share is NOT billed to
+      // the owner; it becomes Αχρέωτα (uncollected), surfaced live by the
+      // breakdown panel (computed, not persisted) — same as a vacant building
+      // expense with the flag off. No owner row created.
     }
   }
 
@@ -4095,7 +4207,8 @@ export async function _distributeRepairCharge(
     term,
     paidByProp,
     flagByProp,
-    mkPoolPayment
+    mkPoolPayment,
+    droppableByProp
   );
 
   building.updatedDate = new Date();
@@ -4885,11 +4998,15 @@ export async function computeOwnerEksodaByMonth(
       );
     }
 
-    // repair-vacant: the tenant-billed amount distributed across units; vacant
-    // units' shares are the owner's. Same engine call _distributeRepairCharge
-    // makes for the tenant portion.
+    // repair-vacant: the tenant-billed amount distributed across units; a
+    // VACANT unit's share is the owner's ONLY when the repair opts in via
+    // chargeOwnerWhenVacant (§2 — mirrors building expenses). With the flag OFF
+    // the vacant share is Αχρέωτα (uncollected), NOT owner-borne — so this live
+    // reader MUST gate on the same flag the writer (_distributeRepairCharge)
+    // does, else the dashboard eksoda bills the owner for a share the writer
+    // never materialised (writer/reader disagreement, Step-7 §2-read finding).
     const effectiveAmount = cost * (sharePercentage / 100);
-    if (effectiveAmount > 0) {
+    if (effectiveAmount > 0 && repair.chargeOwnerWhenVacant) {
       const allocationMethod = repair.allocationMethod || 'general_thousandths';
       const restrictUnits =
         Array.isArray(repair.affectedUnitIds) && repair.affectedUnitIds.length > 0

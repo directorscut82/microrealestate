@@ -285,6 +285,43 @@ describe('computeOwnerEksodaByMonth (live owner-borne eksoda)', () => {
     expect(paidByTerm.get(term(6, 2026))).toBe(40); // the recorded payment
   });
 
+  // Step-7 (CREDIT-DASH-1): a delete-time 'credit' row (amount 0, καταβολές
+  // preserved) must emit its PAID into paidByTerm WITHOUT an owedByTerm entry
+  // for that term. This is the producer contract the dashboard consumer
+  // (_expensesRollup) relies on — it now walks the UNION of owed+paid terms so
+  // a credit-only term still surfaces (iterating owedByTerm alone dropped it).
+  it("a 'credit' row (amount 0, payments>0) emits paid with NO owed for that term", async () => {
+    const building = {
+      _id: 'b_credit',
+      realmId: 'r1',
+      units: [mkUnit('p1')],
+      expenses: [],
+      repairs: [],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'credit1',
+          expenseId: 'gone',
+          propertyId: 'p1',
+          term: 2026060100,
+          amount: 0,
+          source: 'credit',
+          paid: true,
+          payments: [{ amount: 40, date: '2026-06-01' }]
+        }
+      ]
+    };
+    const { owedByTerm, paidByTerm } = await computeOwnerEksodaByMonth(
+      'r1',
+      building,
+      2026
+    );
+    // owed has NO June entry (credit owes nothing) — the exact shape that made
+    // the owedByTerm-only consumer loop skip the term entirely.
+    expect(owedByTerm.get(term(6, 2026)) || 0).toBe(0);
+    // paid surfaces the preserved €40 (verbatim, not min-clamped to amount 0).
+    expect(paidByTerm.get(term(6, 2026))).toBe(40);
+  });
+
   it('manual source:expense row (variable owner amount) → owed + paid from the row', async () => {
     const building = {
       _id: 'b_man',
