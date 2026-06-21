@@ -518,6 +518,19 @@ export namespace CollectionTypes {
     description?: string;
   };
 
+  // §5: a VOLUNTARY contribution toward a building's Αχρέωτα (uncollected
+  // vacant-unit expense money). NOT a liability — nobody owes it; it never
+  // appears in Οφειλές. Recorded ONLY here (not on the payer's rent/owner
+  // ledger as a settling payment) so the same euro is never counted twice.
+  export type UncollectedPayment = {
+    term: number;
+    amount: number;
+    paidByType: 'renter' | 'owner';
+    payerId: string;
+    date: Date;
+    reference?: string;
+  };
+
   export type OwnerMonthlyExpense = {
     _id: string;
     expenseId: string;
@@ -618,6 +631,7 @@ export namespace CollectionTypes {
     contractors: Contractor[] | [];
     repairs: Repair[] | [];
     ownerMonthlyExpenses: OwnerMonthlyExpense[] | [];
+    uncollectedPayments?: UncollectedPayment[] | [];
     notes?: string;
     createdDate?: Date;
     updatedDate?: Date;

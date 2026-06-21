@@ -865,4 +865,71 @@ describe('Dashboard computation logic', () => {
       expect(owedFixed(partial, 2026)).toBe(1200); // 3 × €400 monthly shortfall
     });
   });
+
+  // Mirror of §5 addUncollectedPayment's oldest-first allocation. A voluntary
+  // coverage payment is distributed across the year's OUTSTANDING uncollected
+  // terms (gross − already-covered) oldest-first, so it lands on the months that
+  // carry the gross — making the per-term ΧΡΕΩΣΕΙΣ panel and the year tile
+  // reconcile (a client-fixed current-month term made them disagree, Step-7 §5).
+  describe('A§5 uncollected coverage allocation (oldest-first)', () => {
+    const _r = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // grossByTerm: Map-like array [[term, gross], ...]; paidByTerm: {term: paid}.
+    const allocate = (amount, grossByTerm, paidByTerm = {}, fallbackTerm) => {
+      const outstanding = grossByTerm
+        .map(([tm, g]) => [tm, _r(g - (paidByTerm[tm] || 0))])
+        .filter(([, rem]) => rem > 0.005)
+        .sort((a, b) => a[0] - b[0]);
+      let remaining = _r(amount);
+      const pushed = [];
+      for (const [tm, rem] of outstanding) {
+        if (remaining <= 0.005) break;
+        const apply = Math.min(rem, remaining);
+        pushed.push({ term: tm, amount: _r(apply) });
+        remaining = _r(remaining - apply);
+      }
+      if (remaining > 0.005) pushed.push({ term: fallbackTerm, amount: _r(remaining) });
+      return pushed;
+    };
+
+    it('covers a single past-month gross on THAT term (not the current month)', () => {
+      // Jan gross €500, current month June (gross 0). Pay €500 → lands on Jan.
+      const pushed = allocate(500, [[2026010100, 500]], {}, 2026060100);
+      expect(pushed).toEqual([{ term: 2026010100, amount: 500 }]);
+    });
+
+    it('spreads oldest-first across multiple outstanding months', () => {
+      // Jan €300, Mar €200. Pay €400 → €300 Jan + €100 Mar.
+      const pushed = allocate(400, [[2026010100, 300], [2026030100, 200]], {}, 2026060100);
+      expect(pushed).toEqual([
+        { term: 2026010100, amount: 300 },
+        { term: 2026030100, amount: 100 }
+      ]);
+    });
+
+    it('skips already-covered terms (gross − paid)', () => {
+      // Jan €300 but €300 already covered; Mar €200 open. Pay €200 → Mar only.
+      const pushed = allocate(200, [[2026010100, 300], [2026030100, 200]], { 2026010100: 300 }, 2026060100);
+      expect(pushed).toEqual([{ term: 2026030100, amount: 200 }]);
+    });
+
+    it('surplus beyond the year gross falls to the requested term (clamped ≥0 by the tile)', () => {
+      const pushed = allocate(500, [[2026010100, 300]], {}, 2026060100);
+      expect(pushed).toEqual([
+        { term: 2026010100, amount: 300 },
+        { term: 2026060100, amount: 200 }
+      ]);
+    });
+
+    it('per-term panel + year tile now reconcile (Σ per-term covered === total covered)', () => {
+      // gross Jan 300 + Mar 200 = 500; pay 500 → fully allocated to Jan+Mar.
+      const pushed = allocate(500, [[2026010100, 300], [2026030100, 200]], {}, 2026060100);
+      const perTermCovered = {};
+      for (const p of pushed) perTermCovered[p.term] = (perTermCovered[p.term] || 0) + p.amount;
+      // Panel for Jan: gross 300 − covered 300 = 0; Mar: 200 − 200 = 0. Tile: 0.
+      expect(_r(300 - (perTermCovered[2026010100] || 0))).toBe(0);
+      expect(_r(200 - (perTermCovered[2026030100] || 0))).toBe(0);
+      // No coverage stranded on a zero-gross current month.
+      expect(perTermCovered[2026060100] || 0).toBe(0);
+    });
+  });
 });

@@ -266,6 +266,27 @@ const OwnerExpensePaymentSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// §5: a VOLUNTARY contribution toward this building's Αχρέωτα (uncollected
+// vacant-unit expense money). It is NOT a liability — nobody owes Αχρέωτα — so
+// it is recorded ONLY here, never as a settling payment on the payer's rent or
+// owner ledger (that would reduce a real debt the payer doesn't have AND
+// double-count the euro on the Αχρέωτα tile). The Overview tile + ΧΡΕΩΣΕΙΣ panel
+// subtract Σ uncollectedPayments[term] from the gross Αχρέωτα. Append-only,
+// no per-row PATCH → _id:false (mirrors OwnerExpensePaymentSchema).
+const UncollectedPaymentSchema = new mongoose.Schema(
+  {
+    term: { type: Number, required: true },
+    amount: { type: Number, required: true },
+    paidByType: { type: String, enum: ['renter', 'owner'], required: true },
+    // The renter's tenant _id or the owner's ownerKey (owners are NOT
+    // ObjectIds — they live in units[].owners[]). A free string for both.
+    payerId: { type: String, required: true },
+    date: { type: Date, required: true },
+    reference: { type: String, default: '' }
+  },
+  { _id: false }
+);
+
 const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   expenseId: { type: String, required: true },
   term: { type: Number, required: true },
@@ -386,6 +407,7 @@ const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
   contractors: [ContractorSchema],
   repairs: [RepairSchema],
   ownerMonthlyExpenses: [OwnerMonthlyExpenseSchema],
+  uncollectedPayments: [UncollectedPaymentSchema],
 
   notes: String,
   createdDate: Date,

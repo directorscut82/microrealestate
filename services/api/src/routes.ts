@@ -372,6 +372,11 @@ export default function routes(): express.Router {
     '/:id/owner-expense/:ownerExpenseId/paid',
     Middlewares.asyncWrapper(buildingManager.setOwnerExpensePaid as any)
   );
+  // §5: record a voluntary contribution toward the building's Αχρέωτα.
+  buildingsRouter.post(
+    '/:id/uncollected-payment',
+    Middlewares.asyncWrapper(buildingManager.addUncollectedPayment as any)
+  );
   buildingsRouter.patch(
     '/:id/contractors/:contractorId',
     Middlewares.asyncWrapper(buildingManager.updateContractor as any)

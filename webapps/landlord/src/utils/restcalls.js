@@ -477,6 +477,18 @@ export async function setOwnerExpensePaid(buildingId, ownerExpenseId, paid) {
   return response.data;
 }
 
+// §5: record a VOLUNTARY contribution toward a building's Αχρέωτα. Returns the
+// updated building so React Query can refresh the Overview Αχρέωτα tile + the
+// ΧΡΕΩΣΕΙΣ panel. payload = { term, amount, paidByType:'renter'|'owner',
+// payerId, date?, reference? }.
+export async function addUncollectedPayment(buildingId, payload) {
+  const response = await apiFetcher().post(
+    `/buildings/${buildingId}/uncollected-payment`,
+    payload
+  );
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // Bills
 // ---------------------------------------------------------------------------

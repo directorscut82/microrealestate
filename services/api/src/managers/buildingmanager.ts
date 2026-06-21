@@ -154,6 +154,26 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
     rentYTDByBuilding.set(bid, slot);
   }
 
+  // §5: cumulative Αχρέωτα (uncollected, netted by voluntary payments) for the
+  // current year — ONLY for the single-building detail/dashboard read. It runs
+  // the breakdown engine 12× per building, far too heavy for the building LIST
+  // (the Overview tile that consumes it only renders on the detail page). One
+  // building in the array ⇒ detail route (one()/update()); many ⇒ list (skip).
+  const uncollectedByBuilding = new Map<
+    string,
+    { total: number; paidTotal: number; outstanding: number }
+  >();
+  if (buildings.length === 1) {
+    try {
+      uncollectedByBuilding.set(
+        String(buildings[0]._id),
+        await computeUncollectedByYear(realmId, buildings[0], currentYear)
+      );
+    } catch {
+      // Defensive: a breakdown failure must not break the whole building read.
+    }
+  }
+
   return buildings.map((building: any) => {
     const units = (building.units || []).map((unit: any) => ({
       ...unit,
@@ -171,7 +191,9 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
       managedCount,
       unitCount: units.length,
       tenantRentYTD:
-        rentYTDByBuilding.get(String(building._id)) || { collected: 0, owed: 0 }
+        rentYTDByBuilding.get(String(building._id)) || { collected: 0, owed: 0 },
+      uncollected:
+        uncollectedByBuilding.get(String(building._id)) || null
     };
   });
 }
@@ -3092,6 +3114,107 @@ export async function setOwnerExpensePaid(req: Req, res: Res) {
   return res.json(result[0]);
 }
 
+// POST /buildings/:id/uncollected-payment  { term, amount, paidByType, payerId, date?, reference? }
+// §5: record a VOLUNTARY contribution toward this building's Αχρέωτα (uncollected
+// vacant-unit expense money). Αχρέωτα is NOT a liability — this is the ONLY place
+// the euro is recorded (never as a settling payment on the payer's rent/owner
+// ledger), so it can't double-count. SUBDOC-ONLY: it must NOT push to
+// ownerMonthlyExpenses and must NOT trigger _recomputeTenantsForProperty (a
+// recompute would regenerate source:'vacant' rows and re-bill the very amount
+// just covered). Append-only.
+export async function addUncollectedPayment(req: Req, res: Res) {
+  const realm = req.realm;
+  const { id } = req.params;
+  // `term` from the client selects the YEAR; the server ALLOCATES the amount
+  // across that year's outstanding terms oldest-first (below) so the payment
+  // lands on the months that actually carry the gross — making the per-term
+  // ΧΡΕΩΣΕΙΣ panel and the year tile reconcile. (A client-fixed current-month
+  // term made them disagree — Step-7 §5 reconciliation finding.)
+  const term = validateTerm(req.body?.term, 'term');
+  const amount = validateFiniteNumber(req.body?.amount, 'amount', {
+    min: 0,
+    max: 10000000,
+    required: true
+  });
+  validateEnum(req.body?.paidByType, ['renter', 'owner'], 'paidByType', {
+    required: true
+  });
+  // payerId: a tenant _id (renter) OR an ownerKey (owners are NOT ObjectIds —
+  // they live in units[].owners[]), so a plain non-empty string, NOT ObjectId.
+  const payerId = String(req.body?.payerId || '').trim();
+  if (!payerId) throw new ServiceError('payerId is required', 422);
+
+  const building = await Collections.Building.findOne({
+    _id: id,
+    realmId: realm!._id
+  });
+  _findBuilding(building, id);
+
+  const _r = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  const year = Math.floor(Number(term) / 1000000);
+  (building as any).uncollectedPayments =
+    (building as any).uncollectedPayments || [];
+
+  // Per-term OUTSTANDING gross = gross − already-recorded coverage for that term.
+  const grossByTerm = await _uncollectedGrossByTerm(
+    realm!._id as string,
+    building,
+    year
+  );
+  const paidByTerm = new Map<number, number>();
+  for (const p of (building as any).uncollectedPayments) {
+    if (Math.floor(Number(p.term || 0) / 1000000) !== year) continue;
+    paidByTerm.set(
+      Number(p.term),
+      _r((paidByTerm.get(Number(p.term)) || 0) + (Number(p.amount) || 0))
+    );
+  }
+  const outstandingTerms = Array.from(grossByTerm.entries())
+    .map(([tm, gross]) => [tm, _r(gross - (paidByTerm.get(tm) || 0))] as [
+      number,
+      number
+    ])
+    .filter(([, rem]) => rem > 0.005)
+    .sort((a, b) => a[0] - b[0]); // oldest term first
+
+  const date = req.body?.date ? new Date(req.body.date) : new Date();
+  const reference = String(req.body?.reference || '');
+  let remaining = _r(Number(amount));
+  const pushed: any[] = [];
+  for (const [tm, rem] of outstandingTerms) {
+    if (remaining <= 0.005) break;
+    const apply = Math.min(rem, remaining);
+    pushed.push({
+      term: tm,
+      amount: _r(apply),
+      paidByType: req.body.paidByType,
+      payerId,
+      date,
+      reference
+    });
+    remaining = _r(remaining - apply);
+  }
+  // Any surplus beyond the year's outstanding gross is recorded against the
+  // requested term (so nothing is silently dropped); the tile clamps it ≥0.
+  if (remaining > 0.005) {
+    pushed.push({
+      term: Number(term),
+      amount: _r(remaining),
+      paidByType: req.body.paidByType,
+      payerId,
+      date,
+      reference
+    });
+  }
+  for (const p of pushed) (building as any).uncollectedPayments.push(p);
+
+  (building as any).updatedDate = new Date();
+  await _saveBuildingWithVersionCheck(building!);
+
+  const result = await _toBuildingData(realm!._id, [building!.toObject()]);
+  return res.json(result[0]);
+}
+
 // ---------------------------------------------------------------------------
 // Expenses
 // ---------------------------------------------------------------------------
@@ -5134,6 +5257,97 @@ export async function computeOwnerEksodaByMonth(
   }
 
   return { owedByTerm, paidByTerm, detailByTerm };
+}
+
+// §5: the per-term GROSS Αχρέωτα (uncollected vacant-unit expense money) for
+// every month of `year`. Runs the SAME breakdown engine getExpenseBreakdown
+// uses, per month, taking ONLY ownerUnbilledTotal (recipient:'owner',
+// !ownerBilled rows — flag-off vacant expense shares + §1.8 flag-off repair
+// shares). Returns Map<term, grossEuro>. Expensive (12 engine runs); callers
+// gate it to a single building. Has ZERO side effects (works on a deep clone).
+async function _uncollectedGrossByTerm(
+  realmId: string,
+  building: any,
+  year: number
+): Promise<Map<number, number>> {
+  const _r = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  // DEEP-CLONE: the caller may pass a lean()/toObject() POJO whose reference IS
+  // the object _toBuildingData later spreads into the response. Mutating it here
+  // (attaching _tenantGroups, per-term unit.tenant scratch) would LEAK internal
+  // lease-window data into every single-building API response (Step-7 §5).
+  const hydratedBase: any = JSON.parse(
+    JSON.stringify(building.toObject ? building.toObject() : building)
+  );
+  const propIds = (hydratedBase.units || [])
+    .filter((u: any) => u.propertyId)
+    .map((u: any) => String(u.propertyId));
+  const props = propIds.length
+    ? await Collections.Property.find({
+        realmId,
+        _id: { $in: propIds }
+      }).lean()
+    : [];
+  const propMap = new Map((props as any[]).map((p: any) => [String(p._id), p]));
+  const tenants = propIds.length
+    ? await Collections.Tenant.find(
+        { realmId, 'properties.propertyId': { $in: propIds } },
+        { name: 1, properties: 1 }
+      ).lean()
+    : [];
+  const tenantByProp = new Map<string, any>();
+  for (const tt of tenants as any[]) {
+    for (const tp of tt.properties || []) {
+      if (tp.propertyId)
+        tenantByProp.set(String(tp.propertyId), {
+          _id: String(tt._id),
+          name: tt.name
+        });
+    }
+  }
+  for (const u of hydratedBase.units || []) {
+    u.property = u.propertyId ? propMap.get(String(u.propertyId)) : null;
+    u.tenant = u.propertyId ? tenantByProp.get(String(u.propertyId)) || null : null;
+  }
+  await _attachTenantGroupsToBuildings(realmId, [hydratedBase]);
+  const groups = (hydratedBase._tenantGroups || []) as any[];
+  const baseTenantByUnit = new Map<string, any>();
+  for (const u of hydratedBase.units || []) {
+    baseTenantByUnit.set(String(u._id), u.tenant || null);
+  }
+  const byTerm = new Map<number, number>();
+  for (let mm = 1; mm <= 12; mm++) {
+    const term = Number(`${year}${String(mm).padStart(2, '0')}0100`);
+    const occupied = _occupiedFromOccupancyRows(groups, term);
+    for (const u of (hydratedBase as any).units || []) {
+      if (!u.propertyId) continue;
+      u.tenant = occupied.has(String(u.propertyId))
+        ? baseTenantByUnit.get(String(u._id)) || null
+        : null;
+    }
+    const bd = computeBuildingExpenseBreakdown(hydratedBase as any, term);
+    const g = _r(Number(bd.ownerUnbilledTotal) || 0);
+    if (g > 0) byTerm.set(term, g);
+  }
+  return byTerm;
+}
+
+// §5: cumulative Αχρέωτα for `year`, netted against recorded voluntary
+// uncollectedPayments. {total, paidTotal, outstanding}.
+async function computeUncollectedByYear(
+  realmId: string,
+  building: any,
+  year: number
+): Promise<{ total: number; paidTotal: number; outstanding: number }> {
+  const _r = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  const byTerm = await _uncollectedGrossByTerm(realmId, building, year);
+  let total = 0;
+  for (const g of byTerm.values()) total = _r(total + g);
+  const paidTotal = _r(
+    ((building as any).uncollectedPayments || [])
+      .filter((p: any) => Math.floor(Number(p.term || 0) / 1000000) === year)
+      .reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
+  );
+  return { total, paidTotal, outstanding: Math.max(0, _r(total - paidTotal)) };
 }
 
 // Confirm whether ANY tenant LINKED TO THIS BUILDING has a paid rent for

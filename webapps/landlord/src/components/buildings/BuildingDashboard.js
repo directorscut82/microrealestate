@@ -18,7 +18,9 @@ import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
-import { useContext, useMemo } from 'react';
+import { Button } from '../ui/button';
+import UncollectedPaymentDialog from './UncollectedPaymentDialog';
+import { useContext, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 import { StoreContext } from '../../store';
@@ -113,6 +115,8 @@ function FloorLabel({ floor }) {
 export default function BuildingDashboard({ building }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
+  // §5: dialog for recording a voluntary contribution toward the Αχρέωτα.
+  const [uncollectedDialogOpen, setUncollectedDialogOpen] = useState(false);
   // B1/B2: locale-aware plain-decimal formatter (NOT currency, NOT the ×100
   // percent path). Used for τ.μ. surfaces (70,05) and owner % (33,33%) so the
   // whole screen follows the org locale's decimal separator instead of a raw
@@ -989,6 +993,78 @@ export default function BuildingDashboard({ building }) {
               <NumberFormat value={finance.ownerUnpaid} showZero />
             </span>
           </div>
+        </Card>
+      )}
+
+      {/* §5: Αχρέωτα (uncollected) — vacant-unit expense money billed to NOBODY
+          (the share of an expense/repair on a vacant unit with the
+          chargeOwnerWhenVacant flag off). NOT a debt — it's money the building
+          simply doesn't collect. The tile shows the cumulative year total and
+          how much has been VOLUNTARILY covered (building.uncollected, computed
+          server-side, netted by uncollectedPayments). Server returns it only on
+          the building detail read. */}
+      {building?.uncollected && building.uncollected.total > 0 && (
+        <Card className="p-4">
+          <div className="flex items-end justify-between gap-4 mb-2">
+            <div>
+              <div className="text-label text-muted-foreground uppercase tracking-wide">
+                {t('Uncollected')}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {t(
+                  'Vacant-unit expense shares billed to nobody for {{year}}. Not a debt — coverage payments reduce it.',
+                  { year: new Date().getFullYear() }
+                )}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xl font-medium">
+                <NumberFormat value={building.uncollected.outstanding} showZero />
+                <span className="text-sm text-muted-foreground">
+                  {' / '}
+                  <NumberFormat value={building.uncollected.total} showZero />
+                </span>
+              </div>
+            </div>
+          </div>
+          <Progress
+            value={
+              building.uncollected.total > 0
+                ? Math.round(
+                    (building.uncollected.paidTotal /
+                      building.uncollected.total) *
+                      100
+                  )
+                : 0
+            }
+          />
+          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+            <span className="text-olive">
+              {t('Covered')}:{' '}
+              <NumberFormat value={building.uncollected.paidTotal} showZero />
+            </span>
+            <span className="text-oxide">
+              {t('Still uncollected')}:{' '}
+              <NumberFormat value={building.uncollected.outstanding} showZero />
+            </span>
+          </div>
+          {building.uncollected.outstanding > 0 && (
+            <div className="mt-3 flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setUncollectedDialogOpen(true)}
+              >
+                {t('Coverage payment')}
+              </Button>
+            </div>
+          )}
+          <UncollectedPaymentDialog
+            open={uncollectedDialogOpen}
+            setOpen={setUncollectedDialogOpen}
+            building={building}
+            outstanding={building.uncollected.outstanding}
+          />
         </Card>
       )}
 

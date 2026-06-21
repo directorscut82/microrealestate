@@ -585,7 +585,12 @@ export default function BuildingExpensePanel({ building }) {
 
       {/* RIGHT column — who is charged (the breakdown), beside the calendar */}
       <div className="min-w-0">
-        <ChargeBreakdown breakdown={breakdown} t={t} />
+        <ChargeBreakdown
+          breakdown={breakdown}
+          building={building}
+          term={selectedTerm}
+          t={t}
+        />
       </div>
     </div>
   );
@@ -741,7 +746,7 @@ function CoOwnerSplit({ owners, t, formatNumber }) {
   );
 }
 
-function ChargeBreakdown({ breakdown, t }) {
+function ChargeBreakdown({ breakdown, building, term, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
   const formatNumber = useFormatNumber();
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
@@ -756,9 +761,22 @@ function ChargeBreakdown({ breakdown, t }) {
     (r) => r.recipient === 'owner' && !r.ownerBilled
   );
   const ownerLiabilities = breakdown.ownerDirect || [];
-  const uncollectedTotal = ownerVacantRows.reduce(
+  const uncollectedGross = ownerVacantRows.reduce(
     (s, r) => s + (Number(r.amount) || 0),
     0
+  );
+  // §5: subtract this term's VOLUNTARY contributions (building.uncollectedPayments)
+  // from the gross Αχρέωτα. Note: term is a STRING ('YYYYMMDDHH'), the persisted
+  // term is a Number — compare with Number(term) or the === silently never
+  // matches. Clamp ≥0 (an over-contribution must not render a phantom credit).
+  // Subtract ONLY the building subdoc (the single source); never also the
+  // payer's rent/owner ledger — Option A keeps the euro off those entirely.
+  const uncollectedPaidForTerm = (building?.uncollectedPayments || [])
+    .filter((up) => Number(up.term) === Number(term))
+    .reduce((s, up) => s + (Number(up.amount) || 0), 0);
+  const uncollectedTotal = Math.max(
+    0,
+    Math.round((uncollectedGross - uncollectedPaidForTerm) * 100) / 100
   );
 
   if (renterRows.length === 0 && ownerLiabilities.length === 0 && ownerVacantRows.length === 0) {
