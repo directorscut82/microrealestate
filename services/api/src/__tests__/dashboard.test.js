@@ -805,4 +805,64 @@ describe('Dashboard computation logic', () => {
       expect(rollupUnion(owed, paid).paid).toBe(40); // preserved
     });
   });
+
+  // Mirror of A2 _toBuildingData tenantRentYTD per-tenant loop. rent.total
+  // .grandTotal is CUMULATIVE (carries prior unpaid months), so owed must strip
+  // the carry-in (monthDue = max(0, grandTotal − max(0, balance))) before
+  // subtracting payment — else a tenant N months behind shows a quadratic owed
+  // (Step-7 A2 carry-forward double-count). Guards the carry-strip stays.
+  describe('A2 tenantRentYTD carry-forward (owed strips the carried balance)', () => {
+    const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    // The BROKEN formula: owed += max(0, grandTotal − payment).
+    const owedNaive = (rents, year) =>
+      round(
+        rents
+          .filter((r) => Math.floor(r.term / 1000000) === year)
+          .reduce((s, r) => s + Math.max(0, r.grandTotal - r.payment), 0)
+      );
+    // The FIXED formula: strip the carried balance first.
+    const owedFixed = (rents, year) =>
+      round(
+        rents
+          .filter((r) => Math.floor(r.term / 1000000) === year)
+          .reduce((s, r) => {
+            const monthDue = Math.max(0, r.grandTotal - Math.max(0, r.balance));
+            return s + Math.max(0, monthDue - r.payment);
+          }, 0)
+      );
+    // €1000/mo, nothing paid for 6 months → grandTotal carries: 1000,2000,...,6000.
+    const rents = [1000, 2000, 3000, 4000, 5000, 6000].map((g, i) => ({
+      term: Number(`2026${String(i + 1).padStart(2, '0')}0100`),
+      grandTotal: g,
+      payment: 0,
+      balance: g - 1000 // prior cumulative deficit carried into this month
+    }));
+
+    it('naive sum blows up quadratically (regression witness)', () => {
+      expect(owedNaive(rents, 2026)).toBe(21000); // 1000+2000+...+6000
+    });
+    it('carry-stripped sum equals the true arrears (€6,000)', () => {
+      expect(owedFixed(rents, 2026)).toBe(6000); // 6 × €1000 monthly bill
+    });
+    it('a fully-paid tenant owes €0 either way', () => {
+      const paid = [1, 2, 3].map((m) => ({
+        term: Number(`20260${m}0100`),
+        grandTotal: 1000,
+        payment: 1000,
+        balance: 0
+      }));
+      expect(owedFixed(paid, 2026)).toBe(0);
+      expect(owedNaive(paid, 2026)).toBe(0);
+    });
+    it('partial monthly payment: owed is the per-month shortfall, not the carry', () => {
+      // €1000/mo, pays €600 each month → carries €400/mo. True YTD shortfall over
+      // 3 months = €1200, NOT the cumulative-sum blow-up.
+      const partial = [
+        { term: 2026010100, grandTotal: 1000, payment: 600, balance: 0 },
+        { term: 2026020100, grandTotal: 1400, payment: 600, balance: 400 },
+        { term: 2026030100, grandTotal: 1800, payment: 600, balance: 800 }
+      ];
+      expect(owedFixed(partial, 2026)).toBe(1200); // 3 × €400 monthly shortfall
+    });
+  });
 });

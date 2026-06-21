@@ -89,11 +89,18 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
 
   // A2: per-building tenant rent collected-vs-owed for the CURRENT YEAR, the
   // tenant twin of the owner paid/unpaid tile. The building payload deliberately
-  // strips tenant.rents[] (above), so compute the YTD sums server-side from a
-  // focused projection (term + total.{grandTotal,payment,balance}) and attach
-  // {collected, owed} per building. Same formula the dashboard income chart uses
-  // (dashboardmanager: collected = Σ total.payment; owed = Σ max(0, grandTotal −
-  // payment) over the year's rents) so the building tile reconciles with it.
+  // strips tenant.rents[] (above), so compute the YTD sums server-side and attach
+  // {collected, owed} per building.
+  //
+  // CARRY-FORWARD: rent.total.grandTotal is a CUMULATIVE running ledger — each
+  // month's grandTotal already INCLUDES every prior unpaid month (5_balance:
+  // balance = prevGrandTotal − prevPayment; 7_total: grandTotal = thisMonthBill +
+  // balance). So Σ max(0, grandTotal − payment) re-adds the arrears every month
+  // (quadratic blow-up: 6 months at €1000 unpaid → €21,000 not €6,000). The
+  // dashboard income chart (dashboardmanager) strips the carry-in: monthDue =
+  // max(0, grandTotal − max(0, balance)); notPaid += max(0, monthDue − payment).
+  // We MUST do the same (project total.balance) so this tile reconciles with it
+  // (Step-7 caught the missing strip).
   const currentYear = new Date().getFullYear();
   const rentTenants = propertyIds.length
     ? await Collections.Tenant.find(
@@ -102,15 +109,11 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
           'properties.propertyId': 1,
           'rents.term': 1,
           'rents.total.grandTotal': 1,
-          'rents.total.payment': 1
+          'rents.total.payment': 1,
+          'rents.total.balance': 1
         }
       ).lean()
     : [];
-  // Map each tenant's propertyIds → which building they belong to, so a tenant's
-  // rent YTD lands on the right building. A tenant rent is building-wide (not
-  // per-property), so attribute the tenant's whole YTD to every building that
-  // holds any of its properties (in practice a tenant's properties are in one
-  // building). Build propertyId → buildingId first.
   const propIdToBuildingId = new Map<string, string>();
   for (const b of buildings as any[]) {
     for (const u of b.units || []) {
@@ -120,7 +123,10 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
   const rentYTDByBuilding = new Map<string, { collected: number; owed: number }>();
   const _r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
   for (const t of rentTenants as any[]) {
-    // Which building this tenant is in (first matching property).
+    // ATTRIBUTION: a tenant rent is building-wide. Attribute it to the building
+    // holding the tenant's FIRST property that resolves to a building IN THIS
+    // payload. (A multi-building tenant is vanishingly rare — one lease, one
+    // building in practice; this keeps the figure stable for the common case.)
     let bid: string | null = null;
     for (const tp of t.properties || []) {
       const candidate = propIdToBuildingId.get(String(tp.propertyId));
@@ -136,8 +142,11 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
       if (Math.floor(Number(rent.term || 0) / 1000000) !== currentYear) continue;
       const grand = Number(rent?.total?.grandTotal) || 0;
       const payment = Number(rent?.total?.payment) || 0;
+      const balance = Number(rent?.total?.balance) || 0;
+      // THIS month's bill only (strip the carried-in prior-months deficit).
+      const monthDue = Math.max(0, grand - Math.max(0, balance));
       collected += payment;
-      owed += Math.max(0, grand - payment);
+      owed += Math.max(0, monthDue - payment);
     }
     const slot = rentYTDByBuilding.get(bid) || { collected: 0, owed: 0 };
     slot.collected = _r2(slot.collected + collected);
