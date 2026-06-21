@@ -542,8 +542,16 @@ export function _aggregateOwners(
           // slicePaid is the round-ONCE header figure; the per-payment shares
           // below are apportioned to sum to EXACTLY this (Step-7 BROKEN 1/4/7:
           // round-of-sum header vs sum-of-rounds grid disagreed). Ratio uses the
-          // slice's exact share of the charge.
-          const ratio = charge.amount > 0 ? sliceAmount / charge.amount : 0;
+          // slice's exact share of the charge — EXCEPT a delete-time 'credit'
+          // row has charge.amount=0 (so amount-ratio would be 0 and DROP the
+          // preserved payment across co-owners, F1/F3). For a credit, split the
+          // preserved payment by the owner's PERCENTAGE instead.
+          const ratio =
+            charge.amount > 0
+              ? sliceAmount / charge.amount
+              : charge.source === 'credit'
+                ? (Number(slice.percentage) || 0) / 100
+                : 0;
           const slicePaid = _round(paidAmount * ratio);
           const sliceOutstanding = Math.max(0, _round(sliceAmount - slicePaid));
           // Apportion slicePaid across this owner's payment shares so the grid

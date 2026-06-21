@@ -407,7 +407,14 @@ export function buildOwnerStatement(
       const term = Number(row.term || 0);
       if (!wantTerm(term)) continue;
       const amount = _round(row.amount);
-      if (!(amount > 0)) continue;
+      // Keep amount=0 rows that carry recorded καταβολές (a delete-time 'credit'
+      // row preserving owner money) so the preserved payment surfaces on the
+      // STATEMENT PDF as a credit — mirroring the ledger (_aggregateOwners). The
+      // two settlement surfaces MUST agree on owner paid amount (file header).
+      const rowHasPayments =
+        Array.isArray(row.payments) &&
+        row.payments.some((p: any) => Number(p && p.amount) > 0);
+      if (!(amount > 0) && !rowHasPayments) continue;
       // SHARED staleness guard: drop a 'vacant'/'owner-resident' row whose
       // source expense is gone / flag-off / inactive / the unit is
       // tenant-occupied FOR THIS TERM — the same term-anchored drop the

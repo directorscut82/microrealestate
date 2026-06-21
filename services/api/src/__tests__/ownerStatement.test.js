@@ -284,4 +284,37 @@ describe('occupiedPropertyTermKeys — shared occupancy key-set', () => {
     expect(keys.has('p1|2026060100')).toBe(true); // within lease
     expect(keys.has('p1|2026080100')).toBe(false); // after terminationDate
   });
+
+  // Step-7 (delete-payment preservation): a 'credit' row (amount=0 with
+  // preserved καταβολές from a deleted expense) MUST surface on the statement
+  // PDF as paid — the statement and the ledger must agree on owner paid amount.
+  it("surfaces a delete-time 'credit' row (amount 0, payments>0) as preserved paid", () => {
+    const alpha = { name: 'ALPHA', taxId: '1' };
+    const buildings = [
+      {
+        _id: 'b1',
+        name: 'B1',
+        expenses: [],
+        repairs: [],
+        units: [mkUnit('p1', [alpha])],
+        ownerMonthlyExpenses: [
+          {
+            _id: 'credit1',
+            expenseId: 'gone',
+            term: 2026060100,
+            amount: 0,
+            source: 'credit',
+            paid: true,
+            payments: [{ amount: 40, date: '2026-06-01', type: 'cash' }]
+          }
+        ]
+      }
+    ];
+    const st = buildOwnerStatement(buildings, ownerKeyOf(alpha), []);
+    const credit = st.charges.find((c) => c.source === 'credit');
+    expect(credit).toBeTruthy(); // not dropped by the amount>0 skip
+    expect(credit.paidAmount).toBeCloseTo(40, 2);
+    expect(st.totals.paid).toBeCloseTo(40, 2); // statement agrees with ledger
+    expect(st.totals.outstanding).toBeCloseTo(0, 2); // clamped, not negative
+  });
 });

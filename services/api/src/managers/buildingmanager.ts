@@ -4676,7 +4676,14 @@ export async function computeOwnerEksodaByMonth(
     const term = Number(row.term || 0);
     if (Math.floor(term / 1000000) !== year) continue;
     const amount = Number(row.amount) || 0;
-    if (!(amount > 0)) continue;
+    // Keep amount=0 rows carrying recorded καταβολές (delete-time 'credit'
+    // rows) so the preserved owner payment is counted in the dashboard eksoda
+    // PAID total — mirroring the ledger + statement. (addOwed only fires for
+    // amount>0, so a credit adds paid without inflating owed.)
+    const rowHasPaymentsK = ((row.payments || []) as any[]).some(
+      (p) => Number(p && p.amount) > 0
+    );
+    if (!(amount > 0) && !rowHasPaymentsK) continue;
     // Validate source:'vacant' (building-expense) rows against current live
     // state. The occupancy/flag/inactive drop applies ONLY to 'vacant': a
     // building expense is LIVE-rederived into the now-occupied tenant's rent
@@ -4734,7 +4741,14 @@ export async function computeOwnerEksodaByMonth(
       0
     );
     const fromFlag = row.paid ? amount : 0;
-    const rowPaid = Math.min(Math.max(fromPayments, fromFlag), amount);
+    // A delete-time 'credit' row has amount=0 but carries preserved payments;
+    // the normal min(...,amount) clamp would zero them. For 'credit', count the
+    // recorded payments verbatim (it adds PAID without owed — addOwed(0) above
+    // is a no-op — so it can't inflate owed or go negative).
+    const rowPaid =
+      row.source === 'credit'
+        ? fromPayments
+        : Math.min(Math.max(fromPayments, fromFlag), amount);
     addPaid(term, rowPaid);
     // breakdown line: category from source (repair → 'repair', else the
     // source expense's schema type), owner from the row's unit (vacant /
