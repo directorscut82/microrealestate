@@ -8,7 +8,6 @@ import { LuArrowLeft, LuBuilding2, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
 import Page from '../../../components/Page';
-import { Progress } from '../../../components/ui/progress';
 import { ownerChargeLabel } from '../../../utils/lineLabels';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
@@ -177,17 +176,15 @@ function OwnerDetail() {
             </div>
           </div>
 
-          {/* Paid vs total */}
+          {/* Paid vs total — thin two-tone bar (not the fat near-black blob). */}
           {total > 0 && (
-            <Card className="p-4 space-y-2">
-              <div className="flex items-baseline justify-between">
+            <Card className="p-5 space-y-2">
+              <div className="flex items-baseline justify-between gap-3">
                 <span className="text-label text-ink-muted uppercase tracking-wide">
                   {t('Owner expenses paid')}
                 </span>
-                <span className="tabular-nums text-sm">
-                  {/* OD4: showZero so paid=0 renders "0,00 € / 70,00 €", not the
-                      malformed "−/ 70,00 €" (NumberFormat returns "—" for 0
-                      without showZero). */}
+                <span className="font-mono tabular-nums text-body text-ink">
+                  {/* OD4: showZero so paid=0 renders "0,00 € / 70,00 €". */}
                   <NumberFormat value={paid} showZero />
                   <span className="text-ink-muted">
                     {' / '}
@@ -195,8 +192,13 @@ function OwnerDetail() {
                   </span>
                 </span>
               </div>
-              <Progress value={pct} />
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="h-2 rounded-pill bg-stone overflow-hidden">
+                <div
+                  className="h-full rounded-pill bg-olive"
+                  style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-label">
                 <span className="text-olive">
                   {t('Paid')}: <NumberFormat value={paid} showZero />
                 </span>
@@ -210,9 +212,9 @@ function OwnerDetail() {
 
           {/* Ακίνητα — one line per property, before Χρεώσεις */}
           {(owner.ownedProperties || []).length > 0 && (
-            <Card className="p-4">
-              <div className="text-sm font-medium mb-2 flex items-center gap-2">
-                <LuBuilding2 className="size-4 text-muted-foreground" />
+            <Card className="p-5">
+              <div className="text-label text-ink-muted uppercase tracking-wide mb-3 flex items-center gap-2">
+                <LuBuilding2 className="size-4" />
                 {t('Properties')}
               </div>
               <div className="divide-y divide-stone-line/40">
@@ -255,8 +257,10 @@ function OwnerDetail() {
           {/* Charges ledger — grouped by month+building. Co-owner split shown
               ONCE in the group header (user decision 2026-06-20); each line is
               labeled by its unit scope (Ολόκληρο κτίριο / floor / ΚΕΝΟ). */}
-          <Card className="p-4">
-            <div className="text-sm font-medium mb-2">{t('Charges')}</div>
+          <Card className="p-5">
+            <div className="text-label text-ink-muted uppercase tracking-wide mb-3">
+              {t('Charges')}
+            </div>
             {charges.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 {t('No expenses for this period')}

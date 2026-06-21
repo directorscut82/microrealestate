@@ -790,58 +790,55 @@ export default function BuildingDashboard({ building }) {
 
   return (
     <div className="space-y-4">
-      {/* CARD 1 — Ετήσια προβολή (annual projection). Header: label + note on
-          the left, the three figures (Έσοδα / Έξοδα ιδιοκτήτη / Καθαρό) aligned
-          right. Then "Ανάλυση εξόδων κτιρίου": who pays — ΕΝΟΙΚΙΑΣΤΕΣ cells (not
-          subtracted from Net) + ΙΔΙΟΚΤΗΤΕΣ cell (the only part subtracted).
-          Matches documentation/mockups/building-overview-redesign.html. */}
+      {/* CARD 1 — Ετήσια προβολή (annual projection). Mockup `.proj-grid`: a
+          vertical key→value list (label left, value right) so the three figures
+          share ONE aligned value column at ONE size — they cannot misalign or
+          differ in size the way a 3-column side-by-side header did. Καθαρό sits
+          below a divider. Matches documentation/mockups/building-overview-redesign.html. */}
       <Card className="p-5">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-          <div className="min-w-0 md:max-w-[58%]">
-            <SectionLabel>
-              {t('Annual projection')} {new Date().getFullYear()}
-            </SectionLabel>
-            <p className="text-body text-ink-muted mt-1.5">
-              {/* A1/A5: pure annual projection; only OWNER expenses are
-                  subtracted from Net (pass-through κοινόχρηστα/tenant repairs
-                  are the tenants' money). */}
-              {t(
-                'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
-              )}
-            </p>
+        <SectionLabel>
+          {t('Annual projection')} {new Date().getFullYear()}
+        </SectionLabel>
+        <div className="mt-3 max-w-xl space-y-1.5">
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-body text-ink-soft">{t('Income')}</span>
+            <span className="font-mono tabular-nums text-headline text-olive">
+              <NumberFormat value={finance.annualEsoda} showZero />
+            </span>
           </div>
-          {/* Three figures, right-aligned, each label over a mono value. The
-              labels wrap above their own value so the figures never collide. */}
-          <div className="flex items-start justify-end gap-6 shrink-0">
-            <div className="text-right">
-              <SectionLabel>{t('Income')}</SectionLabel>
-              <div className="font-mono tabular-nums text-headline text-olive mt-1">
-                <NumberFormat value={finance.annualEsoda} showZero />
-              </div>
-            </div>
-            <div className="text-right">
-              <SectionLabel>{t('Owner expenses')}</SectionLabel>
-              <div className="font-mono tabular-nums text-headline text-oxide mt-1">
-                {/* A5: owner-borne only — includes vacant/owner-resident shares
-                    so Income − this === Net. */}
-                <NumberFormat value={finance.ownerBorneTotal} showZero />
-              </div>
-            </div>
-            <div className="text-right">
-              <SectionLabel>{t('Net')}</SectionLabel>
-              <div
-                className={cn(
-                  'font-mono tabular-nums text-headline mt-1',
-                  finance.net > 0 && 'text-olive',
-                  finance.net < 0 && 'text-oxide',
-                  finance.net === 0 && 'text-ink-muted'
-                )}
-              >
-                <NumberFormat value={finance.net} showZero />
-              </div>
-            </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-body text-ink-soft">
+              {t('Owner expenses')}
+            </span>
+            {/* A5: owner-borne only — includes vacant/owner-resident shares so
+                Income − this === Net. Shown as a subtraction (− …). */}
+            <span className="font-mono tabular-nums text-headline text-oxide">
+              − <NumberFormat value={finance.ownerBorneTotal} showZero />
+            </span>
+          </div>
+          <div className="border-t border-stone-line my-1" />
+          <div className="flex items-baseline justify-between gap-4">
+            <span className="text-title text-ink">{t('Net')}</span>
+            <span
+              className={cn(
+                'font-mono tabular-nums text-headline',
+                finance.net > 0 && 'text-olive',
+                finance.net < 0 && 'text-oxide',
+                finance.net === 0 && 'text-ink-muted'
+              )}
+            >
+              <NumberFormat value={finance.net} showZero />
+            </span>
           </div>
         </div>
+        <p className="text-body text-ink-muted mt-3 max-w-prose">
+          {/* A1/A5: pure annual projection; only OWNER expenses are subtracted
+              from Net (pass-through κοινόχρηστα/tenant repairs are the tenants'
+              money). */}
+          {t(
+            'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
+          )}
+        </p>
 
         {(finance.annualEksoda > 0 || finance.variableYtdEksoda > 0) && (
           /* H3: surface the who-pays breakdown when EITHER annualEksoda or the
