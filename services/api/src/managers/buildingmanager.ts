@@ -87,6 +87,64 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
     }
   }
 
+  // A2: per-building tenant rent collected-vs-owed for the CURRENT YEAR, the
+  // tenant twin of the owner paid/unpaid tile. The building payload deliberately
+  // strips tenant.rents[] (above), so compute the YTD sums server-side from a
+  // focused projection (term + total.{grandTotal,payment,balance}) and attach
+  // {collected, owed} per building. Same formula the dashboard income chart uses
+  // (dashboardmanager: collected = Σ total.payment; owed = Σ max(0, grandTotal −
+  // payment) over the year's rents) so the building tile reconciles with it.
+  const currentYear = new Date().getFullYear();
+  const rentTenants = propertyIds.length
+    ? await Collections.Tenant.find(
+        { realmId, 'properties.propertyId': { $in: propertyIds } },
+        {
+          'properties.propertyId': 1,
+          'rents.term': 1,
+          'rents.total.grandTotal': 1,
+          'rents.total.payment': 1
+        }
+      ).lean()
+    : [];
+  // Map each tenant's propertyIds → which building they belong to, so a tenant's
+  // rent YTD lands on the right building. A tenant rent is building-wide (not
+  // per-property), so attribute the tenant's whole YTD to every building that
+  // holds any of its properties (in practice a tenant's properties are in one
+  // building). Build propertyId → buildingId first.
+  const propIdToBuildingId = new Map<string, string>();
+  for (const b of buildings as any[]) {
+    for (const u of b.units || []) {
+      if (u.propertyId) propIdToBuildingId.set(String(u.propertyId), String(b._id));
+    }
+  }
+  const rentYTDByBuilding = new Map<string, { collected: number; owed: number }>();
+  const _r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  for (const t of rentTenants as any[]) {
+    // Which building this tenant is in (first matching property).
+    let bid: string | null = null;
+    for (const tp of t.properties || []) {
+      const candidate = propIdToBuildingId.get(String(tp.propertyId));
+      if (candidate) {
+        bid = candidate;
+        break;
+      }
+    }
+    if (!bid) continue;
+    let collected = 0;
+    let owed = 0;
+    for (const rent of t.rents || []) {
+      if (Math.floor(Number(rent.term || 0) / 1000000) !== currentYear) continue;
+      const grand = Number(rent?.total?.grandTotal) || 0;
+      const payment = Number(rent?.total?.payment) || 0;
+      collected += payment;
+      owed += Math.max(0, grand - payment);
+    }
+    const slot = rentYTDByBuilding.get(bid) || { collected: 0, owed: 0 };
+    slot.collected = _r2(slot.collected + collected);
+    slot.owed = _r2(slot.owed + owed);
+    rentYTDByBuilding.set(bid, slot);
+  }
+
   return buildings.map((building: any) => {
     const units = (building.units || []).map((unit: any) => ({
       ...unit,
@@ -102,7 +160,9 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
       ...building,
       units,
       managedCount,
-      unitCount: units.length
+      unitCount: units.length,
+      tenantRentYTD:
+        rentYTDByBuilding.get(String(building._id)) || { collected: 0, owed: 0 }
     };
   });
 }

@@ -372,6 +372,40 @@ export default function BuildingDashboard({ building }) {
           isExpenseActiveForTerm(e, currentTerm)
       )
       .reduce((sum, e) => sum + _expenseMonthlyCost(e), 0);
+    // A6: κυμαινόμενα (variable) recurring expenses have amount 0 — their real
+    // monthly figure is the landlord-typed `inputAmount` saved per term on the
+    // unit monthlyCharges. They are NOT a ×12 projection (each month differs), so
+    // we sum the ACTUAL typed totals for the CURRENT YEAR ("φέτος μέχρι σήμερα").
+    // Per (expenseId, term) take inputAmount ONCE — every per-unit share carries
+    // the same inputAmount (buildingmanager.saveMonthlyStatement) — with a legacy
+    // fallback of summing the per-unit shares when inputAmount is absent. Mirrors
+    // BuildingExpensePanel's per-term variable read so the two never disagree.
+    const _isVariableExpense = (e) =>
+      (e.isRecurring ?? e.recurring) && _expenseMonthlyCost(e) === 0;
+    const variableYtdEksoda = (building?.expenses || [])
+      .filter(_isVariableExpense)
+      .reduce((sum, e) => {
+        const perTerm = new Map(); // term -> { input: number|null, shareSum }
+        for (const unit of building?.units || []) {
+          for (const c of unit.monthlyCharges || []) {
+            const inYear =
+              Math.floor(Number(c.term || 0) / 1000000) === currentYear;
+            const matches =
+              String(c.expenseId) === String(e._id) ||
+              c.description === e.name;
+            if (!inYear || !matches) continue;
+            const slot = perTerm.get(c.term) || { input: null, shareSum: 0 };
+            if (c.inputAmount != null) slot.input = Number(c.inputAmount) || 0;
+            else slot.shareSum += Number(c.amount) || 0;
+            perTerm.set(c.term, slot);
+          }
+        }
+        let exTotal = 0;
+        for (const slot of perTerm.values()) {
+          exTotal += slot.input != null ? slot.input : slot.shareSum;
+        }
+        return sum + exTotal;
+      }, 0);
     // F3-buildingdash: gate one-time expenses on currentYear — a one-time
     // expense saved in 2018 must not appear in the 2026 headline.
     const oneTimeEksoda = (building?.expenses || [])
@@ -633,6 +667,7 @@ export default function BuildingDashboard({ building }) {
       monthlyEsoda,
       annualEsoda,
       recurringMonthlyEksoda,
+      variableYtdEksoda,
       oneTimeEksoda,
       repairEksoda,
       ownerEksoda,
@@ -731,13 +766,18 @@ export default function BuildingDashboard({ building }) {
                   — {t('not subtracted from Net')}
                 </span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pl-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pl-2">
                 <div>
-                  {t('Recurring')} ×12:{' '}
+                  {t('Fixed recurring')} ×12:{' '}
                   <NumberFormat
                     value={finance.recurringMonthlyEksoda * 12}
                     showZero
                   />
+                </div>
+                {/* A6: κυμαινόμενα are NOT ×12 — the actual typed totals YTD. */}
+                <div>
+                  {t('Variable (year to date)')}:{' '}
+                  <NumberFormat value={finance.variableYtdEksoda} showZero />
                 </div>
                 <div>
                   {t('One-time')}:{' '}
@@ -855,6 +895,52 @@ export default function BuildingDashboard({ building }) {
           </div>
         )}
       </Card>
+
+      {/* A2: tenant rent collected vs owed (φέτος μέχρι σήμερα) — the tenant
+          twin of the owner paid/unpaid tile below. collected = Σ rent payments
+          this year, owed = Σ unpaid rent this year (server-computed in
+          _toBuildingData from the tenants' rents). Shown when there is any rent
+          activity this year. */}
+      {(() => {
+        const ytd = building?.tenantRentYTD || { collected: 0, owed: 0 };
+        const total = (Number(ytd.collected) || 0) + (Number(ytd.owed) || 0);
+        if (!(total > 0)) return null;
+        return (
+          <Card className="p-4">
+            <div className="flex items-end justify-between gap-4 mb-2">
+              <div>
+                <div className="text-label text-muted-foreground uppercase tracking-wide">
+                  {t('Rent collected')}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {t('Tenant rent for {{year}}: collected vs owed.', {
+                    year: new Date().getFullYear()
+                  })}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xl font-medium">
+                  <NumberFormat value={ytd.collected} showZero />
+                  <span className="text-sm text-muted-foreground">
+                    {' / '}
+                    <NumberFormat value={total} showZero />
+                  </span>
+                </div>
+              </div>
+            </div>
+            <Progress value={Math.round((ytd.collected / total) * 100)} />
+            <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+              <span className="text-olive">
+                {t('Collected')}:{' '}
+                <NumberFormat value={ytd.collected} showZero />
+              </span>
+              <span className="text-oxide">
+                {t('Owed')}: <NumberFormat value={ytd.owed} showZero />
+              </span>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Owner expenses paid vs unpaid — directly under the income card, the
           eksoda counterpart to the esoda headline. Only shown when the owner

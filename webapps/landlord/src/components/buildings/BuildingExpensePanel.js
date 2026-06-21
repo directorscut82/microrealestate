@@ -6,19 +6,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../../utils';
-import { BUILDING_TYPE_LABEL_KEY } from '../../utils/lineLabels';
 import {
   LuChevronLeft,
   LuChevronRight,
   LuInfo,
   LuSave
 } from 'react-icons/lu';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger
-} from '../ui/tooltip';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Separator } from '../ui/separator';
@@ -50,35 +43,9 @@ import moment from 'moment';
  * charges (via saveMonthlyStatement) that flow into rent computation.
  */
 
-const ALLOCATION_LABELS = {
-  equal: 'Equal',
-  by_surface: 'By Surface',
-  general_thousandths: 'General ‰',
-  heating_thousandths: 'Heating ‰',
-  elevator_thousandths: 'Elevator ‰',
-  fixed: 'Fixed',
-  // single_unit is a real, selectable method (ExpenseList offers it for
-  // most expense types). Reuse the SAME label/description strings
-  // ExpenseList uses so the two surfaces stay consistent — both keys
-  // already exist in every locale, so no locale-file edit is needed.
-  // Omitting it made BuildingExpensePanel render the raw '(single_unit)'
-  // token with a blank tooltip.
-  single_unit: 'Single Unit',
-  custom_ratio: 'Custom Ratio',
-  custom_percentage: 'Custom Percentage'
-};
-
-const ALLOCATION_DESCRIPTIONS = {
-  equal: 'Split equally among all units',
-  by_surface: 'Split proportionally by unit surface area (m²)',
-  general_thousandths: 'Split by general thousandths (‰) from E9',
-  heating_thousandths: 'Split by heating thousandths (‰) from E9',
-  elevator_thousandths: 'Split by elevator thousandths (‰) — ground floor excluded',
-  fixed: 'Each unit pays a fixed predefined amount',
-  single_unit: 'Bill the whole expense to one specific unit',
-  custom_ratio: 'Split by custom ratio shares you defined per unit',
-  custom_percentage: 'Each unit pays a custom percentage of the total'
-};
+// (ALLOCATION_LABELS / ALLOCATION_DESCRIPTIONS removed with the left-panel
+// "(Ισομερής)" allocation-method tooltip — FIX_PLAN §500-501: the allocation
+// method is noise on the monthly-statement line.)
 
 // Mirrors services/api/src/businesslogic/tasks/1_base.ts isExpenseActiveForTerm
 function isExpenseActiveForTerm(expense, term) {
@@ -250,28 +217,12 @@ function ExpenseRow({ row, value, onChange, onSave, saving, t }) {
   return (
     <div className="flex items-center justify-between gap-2 text-sm py-0.5">
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
-        {/^[0-9a-f]{8,}$/i.test((row.name || '').trim())
-          ? t(BUILDING_TYPE_LABEL_KEY[row.type] || 'Other')
-          : row.name}
-        {row.allocationMethod && (
-          <TooltipProvider delayDuration={200}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="ml-1 text-xs text-muted-foreground/70 border-b border-dotted border-muted-foreground/40 cursor-help">
-                  (
-                  {t(
-                    ALLOCATION_LABELS[row.allocationMethod] ||
-                      row.allocationMethod
-                  )}
-                  )
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[240px] text-xs">
-                {t(ALLOCATION_DESCRIPTIONS[row.allocationMethod] || '')}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
+        {/* Left-panel monthly statement (FIX_PLAN §470-503): show the TYPE label
+            with the name in parens — "Τύπος (όνομα)" — the SAME convention the
+            right-panel breakdown uses (expenseDisplayLabel). The allocation
+            method "(Ισομερής)" was removed: per §500-501 it's noise here (the
+            landlord doesn't need to see HOW it's split on the statement line). */}
+        {expenseDisplayLabel(t, row.name, row.type)}
       </span>
       {row.kind === 'variable' ? (
         <div className="flex items-center gap-1.5 shrink-0">
