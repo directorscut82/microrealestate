@@ -757,7 +757,12 @@ export default function BuildingDashboard({ building }) {
             </div>
           </div>
         </div>
-        {finance.annualEksoda > 0 && (
+        {(finance.annualEksoda > 0 || finance.variableYtdEksoda > 0) && (
+          /* H3: variableYtdEksoda is NOT part of annualEksoda (which only sums
+             fixed×12 + one-time + repairs + ownerEksoda). A building whose only
+             expenses are κυμαινόμενα (variable monthly — electricity/water) thus
+             had annualEksoda 0 and the whole "who pays" breakdown, including its
+             real Variable YTD figure, was hidden. Surface it when either is > 0. */
           /* A5/A6 — "who pays" breakdown, two plain groups. ΕΝΟΙΚΙΑΣΤΕΣ pay the
              pass-through (κοινόχρηστα + one-time + tenant repairs) — NOT
              subtracted from Net; ΙΔΙΟΚΤΗΤΕΣ pay έξοδα ιδιοκτήτη — the only part
@@ -1030,10 +1035,13 @@ export default function BuildingDashboard({ building }) {
           <Progress
             value={
               building.uncollected.total > 0
-                ? Math.round(
-                    (building.uncollected.paidTotal /
-                      building.uncollected.total) *
-                      100
+                ? Math.min(
+                    100,
+                    Math.round(
+                      (building.uncollected.paidTotal /
+                        building.uncollected.total) *
+                        100
+                    )
                   )
                 : 0
             }

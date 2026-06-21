@@ -261,7 +261,14 @@ const OwnerExpensePaymentSchema = new mongoose.Schema(
       default: 'transfer'
     },
     reference: { type: String, default: '' },
-    description: { type: String, default: '' }
+    description: { type: String, default: '' },
+    // WHICH co-owner paid this slice. A building-wide charge (propertyId null)
+    // is split across all co-owners on read; without per-payment attribution a
+    // single shared payments[] is ambiguous and the read-time re-split credited
+    // one owner's καταβολή to a co-owner (audit C2). Set by pay() to the paying
+    // owner's ownerKey. Optional: legacy rows (and single-owner charges) have
+    // none → the reader falls back to the proportional split for those.
+    ownerKey: { type: String, default: null }
   },
   { _id: false }
 );
@@ -277,10 +284,14 @@ const UncollectedPaymentSchema = new mongoose.Schema(
   {
     term: { type: Number, required: true },
     amount: { type: Number, required: true },
-    paidByType: { type: String, enum: ['renter', 'owner'], required: true },
-    // The renter's tenant _id or the owner's ownerKey (owners are NOT
-    // ObjectIds — they live in units[].owners[]). A free string for both.
-    payerId: { type: String, required: true },
+    // OPTIONAL attribution. A building-level voluntary coverage is attributed to
+    // no specific payer, so these are absent for that case. If a future flow
+    // records a contribution from a specific renter/owner, paidByType is
+    // 'renter'|'owner' and payerId is the tenant _id or ownerKey (owners are NOT
+    // ObjectIds — they live in units[].owners[]). No read path consumes them
+    // today; they exist only as an optional audit trail.
+    paidByType: { type: String, enum: ['renter', 'owner'] },
+    payerId: { type: String },
     date: { type: Date, required: true },
     reference: { type: String, default: '' }
   },

@@ -46,7 +46,19 @@ type Res = ServiceResponse;
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function _toBuildingData(realmId: string, buildings: any[]) {
+// `withUncollected` (L4): explicitly opt into the heavy §5 Αχρέωτα breakdown
+// (12 engine runs/building). Default true so the detail-page GET + every
+// detail-mutation caller (which pass a single building and render the Overview
+// tile) keep computing it. The LIST route (`all()`) and the E9-import route
+// (`importFromE9()`) pass false — a realm with exactly one building must NOT
+// pay the 12× cost on those just because `buildings.length === 1` happened to
+// hold (the old proxy for "detail route"). The length===1 guard below still
+// applies as a perf floor — the tile only renders for a single building anyway.
+async function _toBuildingData(
+  realmId: string,
+  buildings: any[],
+  withUncollected = true
+) {
   const propertyIds = buildings.flatMap((b: any) =>
     (b.units || [])
       .filter((u: any) => u.propertyId)
@@ -64,14 +76,25 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
     (properties as any[]).map((p: any) => [String(p._id), p])
   );
 
-  // Fetch tenants linked to these properties for occupant info
+  // Fetch tenants linked to these properties ONCE. Both the occupant map
+  // (name + properties) and the A2 rent-YTD rollup (rents.total.*) need the
+  // SAME tenant set with the SAME filter — L3 merged the two back-to-back
+  // identical-filter Tenant.find calls into one with a combined projection
+  // (rents fields are needed only for the YTD loop below).
   const tenants = propertyIds.length
     ? await Collections.Tenant.find(
         {
           realmId,
           'properties.propertyId': { $in: propertyIds }
         },
-        { name: 1, properties: 1 }
+        {
+          name: 1,
+          properties: 1,
+          'rents.term': 1,
+          'rents.total.grandTotal': 1,
+          'rents.total.payment': 1,
+          'rents.total.balance': 1
+        }
       ).lean()
     : [];
 
@@ -102,18 +125,6 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
   // We MUST do the same (project total.balance) so this tile reconciles with it
   // (Step-7 caught the missing strip).
   const currentYear = new Date().getFullYear();
-  const rentTenants = propertyIds.length
-    ? await Collections.Tenant.find(
-        { realmId, 'properties.propertyId': { $in: propertyIds } },
-        {
-          'properties.propertyId': 1,
-          'rents.term': 1,
-          'rents.total.grandTotal': 1,
-          'rents.total.payment': 1,
-          'rents.total.balance': 1
-        }
-      ).lean()
-    : [];
   const propIdToBuildingId = new Map<string, string>();
   for (const b of buildings as any[]) {
     for (const u of b.units || []) {
@@ -122,7 +133,9 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
   }
   const rentYTDByBuilding = new Map<string, { collected: number; owed: number }>();
   const _r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
-  for (const t of rentTenants as any[]) {
+  // Reuse the single tenant fetch above (L3) — it now carries the rents.total
+  // projection this YTD rollup needs.
+  for (const t of tenants as any[]) {
     // ATTRIBUTION: a tenant rent is building-wide. Attribute it to the building
     // holding the tenant's FIRST property that resolves to a building IN THIS
     // payload. (A multi-building tenant is vanishingly rare — one lease, one
@@ -163,7 +176,7 @@ async function _toBuildingData(realmId: string, buildings: any[]) {
     string,
     { total: number; paidTotal: number; outstanding: number }
   >();
-  if (buildings.length === 1) {
+  if (withUncollected && buildings.length === 1) {
     try {
       uncollectedByBuilding.set(
         String(buildings[0]._id),
@@ -669,7 +682,14 @@ export async function all(req: Req, res: Res) {
     .sort({ name: 1 })
     .lean();
 
-  const buildings = await _toBuildingData(realm!._id, dbBuildings as any[]);
+  // List route: skip the heavy §5 Αχρέωτα breakdown (the tile only renders on
+  // the detail page) — L4: don't pay the 12× cost just because the realm has a
+  // single building.
+  const buildings = await _toBuildingData(
+    realm!._id,
+    dbBuildings as any[],
+    false
+  );
   return res.json(buildings);
 }
 
@@ -1898,7 +1918,9 @@ export async function importFromE9(req: Req, res: Res) {
       }
     }
 
-    const result = await _toBuildingData(realm!._id, createdBuildings);
+    // Import route: skip the §5 breakdown (no Overview tile rendered from the
+    // import dialog response) — L4.
+    const result = await _toBuildingData(realm!._id, createdBuildings, false);
     // T1.P1.19: emit per-building outcomes plus aggregate counts so the
     // dialog can surface accurate "X created, Y updated, Z units added"
     // text instead of a blanket "created:true" lie. Keep the legacy
@@ -3136,13 +3158,15 @@ export async function addUncollectedPayment(req: Req, res: Res) {
     max: 10000000,
     required: true
   });
-  validateEnum(req.body?.paidByType, ['renter', 'owner'], 'paidByType', {
-    required: true
-  });
-  // payerId: a tenant _id (renter) OR an ownerKey (owners are NOT ObjectIds —
-  // they live in units[].owners[]), so a plain non-empty string, NOT ObjectId.
+  // OPTIONAL attribution: a building-level voluntary coverage has no payer. Only
+  // validate/persist paidByType + payerId when the caller actually supplies a
+  // specific payer (a future attributed-contribution flow).
+  if (req.body?.paidByType != null) {
+    validateEnum(req.body.paidByType, ['renter', 'owner'], 'paidByType', {
+      required: true
+    });
+  }
   const payerId = String(req.body?.payerId || '').trim();
-  if (!payerId) throw new ServiceError('payerId is required', 422);
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -3177,21 +3201,36 @@ export async function addUncollectedPayment(req: Req, res: Res) {
     .filter(([, rem]) => rem > 0.005)
     .sort((a, b) => a[0] - b[0]); // oldest term first
 
-  const date = req.body?.date ? new Date(req.body.date) : new Date();
+  // M2: `new Date("20/06/2026")` returns Invalid Date (JS Date can't parse
+  // DD/MM/YYYY). An Invalid Date pushed onto a Date-required schema field fails
+  // the Mongoose cast as an opaque 500. Validate explicitly → 422, mirroring
+  // ownermanager.pay()'s guard.
+  let date = new Date();
+  if (req.body?.date) {
+    const m = moment.utc(
+      req.body.date,
+      ['DD/MM/YYYY', 'YYYY-MM-DD', moment.ISO_8601],
+      true
+    );
+    if (!m.isValid()) {
+      throw new ServiceError(
+        `date is not a valid date: ${String(req.body.date)}`,
+        422
+      );
+    }
+    date = m.toDate();
+  }
   const reference = String(req.body?.reference || '');
+  // Optional attribution — only carried when a specific payer was supplied.
+  const attribution: Record<string, any> = {};
+  if (req.body?.paidByType != null) attribution.paidByType = req.body.paidByType;
+  if (payerId) attribution.payerId = payerId;
   let remaining = _r(Number(amount));
   const pushed: any[] = [];
   for (const [tm, rem] of outstandingTerms) {
     if (remaining <= 0.005) break;
     const apply = Math.min(rem, remaining);
-    pushed.push({
-      term: tm,
-      amount: _r(apply),
-      paidByType: req.body.paidByType,
-      payerId,
-      date,
-      reference
-    });
+    pushed.push({ term: tm, amount: _r(apply), date, reference, ...attribution });
     remaining = _r(remaining - apply);
   }
   // Any surplus beyond the year's outstanding gross is recorded against the
@@ -3200,10 +3239,9 @@ export async function addUncollectedPayment(req: Req, res: Res) {
     pushed.push({
       term: Number(term),
       amount: _r(remaining),
-      paidByType: req.body.paidByType,
-      payerId,
       date,
-      reference
+      reference,
+      ...attribution
     });
   }
   for (const p of pushed) (building as any).uncollectedPayments.push(p);
@@ -5340,14 +5378,35 @@ async function computeUncollectedByYear(
 ): Promise<{ total: number; paidTotal: number; outstanding: number }> {
   const _r = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
   const byTerm = await _uncollectedGrossByTerm(realmId, building, year);
+  // M1: net PER-TERM, then sum — the ΧΡΕΩΣΕΙΣ panel clamps each month's
+  // outstanding to max(0, gross[term] − paid[term]), so an over-contribution in
+  // one month stays confined to that month. Summing gross and paid separately
+  // and clamping once at year level let an over-payment in month A bleed into
+  // and reduce month B's outstanding — the tile then under-reported vs the
+  // panel for the same building (reader disagreement). Sum the per-term gross
+  // for the headline `total`, and the per-term clamped residual for
+  // `outstanding`, so the tile and panel reconcile term-by-term.
+  const paidByTerm = new Map<number, number>();
+  for (const p of (building as any).uncollectedPayments || []) {
+    const tm = Number(p.term || 0);
+    if (Math.floor(tm / 1000000) !== year) continue;
+    paidByTerm.set(tm, _r((paidByTerm.get(tm) || 0) + (Number(p.amount) || 0)));
+  }
   let total = 0;
-  for (const g of byTerm.values()) total = _r(total + g);
-  const paidTotal = _r(
-    ((building as any).uncollectedPayments || [])
-      .filter((p: any) => Math.floor(Number(p.term || 0) / 1000000) === year)
-      .reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
-  );
-  return { total, paidTotal, outstanding: Math.max(0, _r(total - paidTotal)) };
+  let paidTotal = 0;
+  let outstanding = 0;
+  // Union of terms that carry gross OR a payment, so a contribution recorded
+  // against a term with zero gross is still counted in paidTotal (the headline)
+  // but contributes 0 to outstanding (clamped) — never a negative.
+  const terms = new Set<number>([...byTerm.keys(), ...paidByTerm.keys()]);
+  for (const tm of terms) {
+    const gross = _r(byTerm.get(tm) || 0);
+    const paid = _r(paidByTerm.get(tm) || 0);
+    total = _r(total + gross);
+    paidTotal = _r(paidTotal + paid);
+    outstanding = _r(outstanding + Math.max(0, _r(gross - paid)));
+  }
+  return { total, paidTotal, outstanding };
 }
 
 // Confirm whether ANY tenant LINKED TO THIS BUILDING has a paid rent for

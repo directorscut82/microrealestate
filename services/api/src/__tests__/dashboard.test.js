@@ -1,237 +1,26 @@
 /* eslint-env node */
 import moment from 'moment';
-
-// Test the dashboard computation logic by importing the compiled manager
-// and verifying behavior through the response contract
-
-// Since the dashboard manager requires DB mocking via unstable_mockModule
-// and this Jest config uses @swc/jest which doesn't support top-level await,
-// we test the computation logic directly by extracting and testing the
-// pure functions that drive the dashboard response.
-
-// --- Pure computation functions extracted from dashboardmanager logic ---
+// M3 (test integrity): import the REAL dashboard computations the `all()`
+// handler runs — not hand-copied mirrors. The previous version re-implemented
+// each function in this file; those copies silently drifted from production
+// (the revenue mirror lacked the M6 VAT/allocation exclusion, the notPaid
+// mirror kept the pre-Wave-26 signed value, the top-unpaid mirror omitted the
+// carry-forward settle check) so the suite was green while asserting a contract
+// the API no longer ships (the GEN-001 incident). These are pure functions —
+// no DB mock needed — so a plain import under @swc/jest is fine.
+import {
+  _computeActiveTenants as computeActiveTenants,
+  _computeTopUnpaid as computeTopUnpaid,
+  _computeTotalYearRevenues as computeTotalYearRevenues,
+  _computeRevenues as computeRevenues,
+  _computeOccupancyRate as computeOccupancyRate
+} from '../managers/dashboardmanager.js';
 
 function _tenantName(tenant) {
   return (
     tenant.name ||
     `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim()
   );
-}
-
-// Mirrors dashboardmanager.ts active-tenant predicate:
-//   1) tenant has at least one property assigned (T1.7 surfaced
-//      property-less tenants as setup-incomplete, they don't generate
-//      rent records and shouldn't inflate the dashboard)
-//   2) (terminationDate || endDate) is a valid date that is not in
-//      the past, with both sides in UTC
-function computeActiveTenants(allTenants, now) {
-  return allTenants.filter((tenant) => {
-    if (!tenant.properties?.length) return false;
-    const endValue = tenant.terminationDate || tenant.endDate;
-    if (!endValue) return false;
-    const endMoment = moment.utc(endValue);
-    if (!endMoment.isValid()) return false;
-    return endMoment.isSameOrAfter(now, 'day');
-  });
-}
-
-// GEN-001 fix: this mirror drifted out of sync with the production
-// emit in dashboardmanager.ts. The "Top 5 unpaid" tile emits the
-// remaining-owed as a POSITIVE amount (`Math.max(0, grandTotal -
-// payment)`), keeps only rows where remaining > 0.005, and sorts
-// DESCENDING (biggest debtor first). The previous version of this
-// helper computed a SIGNED balance (`payment - grandTotal`) and
-// filtered `< 0` — pre-Wave-26 semantics that no longer match what
-// the API ships, so the suite was green while validating the wrong
-// contract. Realigned below. (The production path also drops tenants
-// settled by a future-month overpayment via _isSettledByCarryForward;
-// that needs the full ledger helper and is exercised by the E2E
-// suite, not this pure-function mirror.)
-function computeTopUnpaid(activeTenants, beginOfTheMonth, endOfTheMonth) {
-  return activeTenants
-    .reduce((acc, tenant) => {
-      const currentRent = (tenant.rents || []).find((rent) => {
-        const termMoment = rent.term && moment.utc(rent.term, 'YYYYMMDDHH');
-        return (
-          termMoment &&
-          termMoment.isBetween(beginOfTheMonth, endOfTheMonth, 'day', '[]')
-        );
-      });
-      if (currentRent) {
-        const remaining = Math.max(
-          0,
-          (currentRent.total?.grandTotal || 0) -
-            (currentRent.total?.payment || 0)
-        );
-        if (remaining > 0.005) {
-          acc.push({
-            tenant: { _id: tenant._id, name: _tenantName(tenant) },
-            balance: remaining
-          });
-        }
-      }
-      return acc;
-    }, [])
-    .sort((t1, t2) => t2.balance - t1.balance)
-    .slice(0, 5);
-}
-
-function computeTotalYearRevenues(
-  allTenants,
-  beginOfTheYear,
-  endOfTheYear
-) {
-  return allTenants.reduce((total, { rents = [] }) => {
-    let sumPayments = 0;
-    rents.forEach((rent) => {
-      (rent.payments || []).forEach((payment) => {
-        if (!payment.date || Number(payment.amount) === 0) return;
-        const paymentMoment = moment.utc(payment.date, 'DD/MM/YYYY');
-        if (
-          paymentMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')
-        ) {
-          sumPayments += payment.amount;
-        }
-      });
-    });
-    return total + sumPayments;
-  }, 0);
-}
-
-function computeRevenues(allTenants, beginOfTheYear, endOfTheYear, now) {
-  const emptyRevenues = moment
-    .months()
-    .reduce((acc, _month, index) => {
-      const key = moment
-        .utc(`${index + 1}/${now.year()}`, 'MM/YYYY')
-        .format('MMYYYY');
-      acc[key] = {
-        month: key,
-        paid: 0,
-        notPaid: 0,
-        baseRent: 0,
-        charges: 0,
-        buildingCharges: 0,
-        buildingChargesByType: {},
-        tenants: []
-      };
-      return acc;
-    }, {});
-
-  return Object.entries(
-    allTenants.reduce((acc, tenant) => {
-      const tenantName = _tenantName(tenant);
-      (tenant.rents || []).forEach((rent) => {
-        const termMoment = moment.utc(rent.term, 'YYYYMMDDHH');
-        if (
-          !termMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')
-        ) {
-          return;
-        }
-        const key = termMoment.format('MMYYYY');
-
-        const tenantBaseRent = rent.total?.preTaxAmount || 0;
-        const tenantCharges = (rent.charges || []).reduce(
-          (sum, c) => sum + (c.amount || 0),
-          0
-        );
-        const tenantBuildingCharges = (rent.buildingCharges || []).reduce(
-          (sum, c) => sum + (c.amount || 0),
-          0
-        );
-        const tenantBuildingByType = {};
-        (rent.buildingCharges || []).forEach((c) => {
-          const t = c.type || 'other';
-          tenantBuildingByType[t] =
-            (tenantBuildingByType[t] || 0) + (c.amount || 0);
-        });
-        const tenantDue = rent.total?.grandTotal || 0;
-        const tenantPaid = rent.total?.payment || 0;
-
-        if (!acc[key]) {
-          acc[key] = {
-            month: key,
-            paid: 0,
-            notPaid: 0,
-            baseRent: 0,
-            charges: 0,
-            buildingCharges: 0,
-            buildingChargesByType: {},
-            tenants: []
-          };
-        }
-
-        acc[key].paid += tenantPaid;
-        acc[key].notPaid +=
-          tenantPaid - tenantDue < 0 ? tenantPaid - tenantDue : 0;
-        acc[key].baseRent += tenantBaseRent;
-        acc[key].charges += tenantCharges;
-        acc[key].buildingCharges += tenantBuildingCharges;
-        Object.entries(tenantBuildingByType).forEach(([type, amount]) => {
-          acc[key].buildingChargesByType[type] =
-            (acc[key].buildingChargesByType[type] || 0) + amount;
-        });
-        acc[key].tenants.push({
-          name: tenantName,
-          paid: tenantPaid,
-          due: tenantDue,
-          baseRent: tenantBaseRent,
-          charges: tenantCharges,
-          buildingCharges: tenantBuildingCharges,
-          buildingChargesByType: tenantBuildingByType
-        });
-      });
-      return acc;
-    }, emptyRevenues)
-  )
-    .map(([, value]) => ({
-      ...value,
-      paid: value.paid > 0 ? Math.round(value.paid * 100) / 100 : value.paid,
-      notPaid:
-        value.notPaid < 0
-          ? Math.round(value.notPaid * 100) / 100
-          : value.notPaid
-    }))
-    .sort((r1, r2) =>
-      moment.utc(r1.month, 'MMYYYY').isBefore(moment.utc(r2.month, 'MMYYYY'))
-        ? -1
-        : 1
-    );
-}
-
-function computeOccupancyRate(
-  activeTenants,
-  propertyCount,
-  buildings
-) {
-  const nonRentablePropertyIds = new Set();
-  for (const building of buildings) {
-    for (const unit of building.units || []) {
-      if (
-        unit.propertyId &&
-        (unit.occupancyType === 'owner_occupied' ||
-          unit.occupancyType === 'parking')
-      ) {
-        nonRentablePropertyIds.add(String(unit.propertyId));
-      }
-    }
-  }
-
-  const rentablePropertyCount = propertyCount - nonRentablePropertyIds.size;
-  if (rentablePropertyCount <= 0) return 0;
-
-  const countPropertyRented = activeTenants.reduce(
-    (acc, { properties = [] }) => {
-      properties.forEach(({ propertyId }) => {
-        if (!nonRentablePropertyIds.has(String(propertyId))) {
-          acc.add(propertyId);
-        }
-      });
-      return acc;
-    },
-    new Set()
-  ).size;
-  return countPropertyRented / rentablePropertyCount;
 }
 
 // --- Test Data Factories ---
@@ -526,7 +315,9 @@ describe('Dashboard computation logic', () => {
       const result = computeRevenues([tenant], beginOfYear, endOfYear, now);
       const march = result.find((r) => r.month === `03${year}`);
       expect(march.paid).toBe(600);
-      expect(march.notPaid).toBe(-400);
+      // notPaid is the UNSIGNED this-month shortfall (production emits
+      // Math.abs(_round(...))). A €1000 bill with €600 paid → €400 owed.
+      expect(march.notPaid).toBe(400);
       expect(march.tenants).toHaveLength(1);
       expect(march.tenants[0].name).toBe('John Doe');
       expect(march.tenants[0].due).toBe(1000);
@@ -576,7 +367,8 @@ describe('Dashboard computation logic', () => {
       const result = computeRevenues([tenant], beginOfYear, endOfYear, now);
       const jan = result.find((r) => r.month === `01${year}`);
       expect(jan.paid).toBe(100.11);
-      expect(jan.notPaid).toBe(-233.22);
+      // Unsigned shortfall, rounded: €333.33 − €100.11 = €233.22.
+      expect(jan.notPaid).toBe(233.22);
     });
   });
 

@@ -162,6 +162,48 @@ describe('H8 — accounting CSV exports sanitize formula-injection', () => {
     expect(offending).toEqual([]);
   });
 
+  // C1 (audit 2026-06-21): the settlements xlsx 'Owed' must strip the carried-in
+  // balance. rent.total.grandTotal is CUMULATIVE (carries every prior unpaid
+  // month via total.balance); summing it per-month double-counts the arrears.
+  // A €500/mo tenant unpaid 3 months owes €1,500 — NOT €3,000.
+  it('settlements XLSX: Total owed strips the carried-forward balance (no arrears double-count)', async () => {
+    m.aggregate.mockResolvedValue([
+      {
+        _id: 't1',
+        name: 'Arrears Tenant',
+        reference: 'A1',
+        beginDate: new Date('2026-01-01T00:00:00Z'),
+        endDate: new Date('2026-12-31T00:00:00Z'),
+        guaranty: 0,
+        properties: [{ _id: 'p1', name: 'Apt 1', type: 'apartment' }],
+        // €500/mo bill, nothing paid → grandTotal carries: 500, 1000, 1500;
+        // balance is the prior cumulative deficit: 0, 500, 1000.
+        rents: [
+          { year: 2026, month: 1, total: { grandTotal: 500, payment: 0, balance: 0 }, payments: [] },
+          { year: 2026, month: 2, total: { grandTotal: 1000, payment: 0, balance: 500 }, payments: [] },
+          { year: 2026, month: 3, total: { grandTotal: 1500, payment: 0, balance: 1000 }, payments: [] }
+        ]
+      }
+    ]);
+    const res = makeRes();
+    await accountingManager.csv.settlements(REQ, res);
+    const buf = res.send.mock.calls[0][0];
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const ws = wb.worksheets[0];
+    // Find the 'Total owed' column by its header, read the single data row.
+    const header = ws.getRow(1);
+    let totalOwedCol = null;
+    header.eachCell((cell, col) => {
+      if (String(cell.value).toLowerCase().includes('total owed')) totalOwedCol = col;
+    });
+    expect(totalOwedCol).not.toBeNull();
+    const totalOwed = Number(ws.getRow(2).getCell(totalOwedCol).value);
+    // 3 × €500 monthly bill = €1,500 — NOT the cumulative 500+1000+1500 = €3,000.
+    expect(totalOwed).toBeCloseTo(1500, 2);
+  });
+
   it('benign data is byte-unchanged (no spurious quoting)', async () => {
     m.aggregate.mockResolvedValue([
       {

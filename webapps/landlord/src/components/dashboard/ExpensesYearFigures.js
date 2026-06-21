@@ -96,11 +96,11 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
     const d = payload[0]?.payload;
     if (!d) return null;
     const breakdown = Array.isArray(d.breakdown) ? d.breakdown : [];
-    // D4: outer wrapper caps height + owns the scroll (pointer-events enabled on
-    // the recharts <Tooltip wrapperStyle> so the mouse can rest here and the
-    // wheel scrolls THIS, not the page).
+    // H4: hover tooltip — recharts positions it at the cursor (no `position`
+    // prop), so it follows the mouse and a max-h+overflow scroll region is
+    // unreachable. Mirrors the YearFigures fix: size to content, no dead scroll.
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-72 max-h-[400px] overflow-y-auto scrollbar-branded">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-72">
         <div className="font-medium text-body text-ink mb-1 leading-tight">
           {moment(d.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
@@ -116,8 +116,7 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
         )}
         {/* Per-owner / per-category breakdown (incl. repairs). Grouped by
             owner (name as a header, categories indented below) so multi-owner
-            buildings don't jam everything on one truncated line. Scrollable
-            with max-h + overflow-y-auto (MonthFigures pattern). */}
+            buildings don't jam everything on one truncated line. */}
         {breakdown.length > 0 && (
           <div className="mt-1.5 border-t border-stone-line pt-1.5 space-y-1.5">
             {Object.entries(
@@ -224,12 +223,10 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
                 </div>
               )}
             />
-            {/* D3+D4: HOVER (no trigger='click') + pointer-interactive so it
-                can be scrolled; the content div owns the overflow. */}
+            {/* HOVER tooltip (no trigger='click' — that broke hover). */}
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
-              wrapperStyle={{ pointerEvents: 'auto' }}
               isAnimationActive={false}
             />
             <Bar

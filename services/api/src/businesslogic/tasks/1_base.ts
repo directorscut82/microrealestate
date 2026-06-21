@@ -306,6 +306,12 @@ export function computeBuildingExpenseBreakdown(
   const expenseById = new Map(
     expenses.map((e: any) => [String(e._id), e])
   );
+  // Repairs keyed by _id so a persisted repair monthlyCharge (section 2) can
+  // resolve its chargeOwnerWhenVacant flag — needed to decide owner-billed vs
+  // Αχρέωτα for a repair charge left stale on a now-vacant unit (H1).
+  const repairById = new Map(
+    ((building?.repairs || []) as any[]).map((r: any) => [String(r._id), r])
+  );
 
   for (const unit of units) {
     if (!unit.propertyId) continue;
@@ -402,6 +408,18 @@ export function computeBuildingExpenseBreakdown(
       const srcExpense = c.expenseId
         ? expenseById.get(String(c.expenseId))
         : null;
+      const srcRepair = c.repairId ? repairById.get(String(c.repairId)) : null;
+      // H1: an owner-recipient persisted charge must set ownerBilled — same rule
+      // as section 1. Without it `!undefined === true` dumped EVERY persisted
+      // owner charge (owner-occupied variable statements, vacant units whose
+      // expense has chargeOwnerWhenVacant) into ownerUnbilledTotal (Αχρέωτα),
+      // even though the owner genuinely owes them. A stale flag-OFF repair charge
+      // left on a now-vacant unit correctly stays ownerBilled:false → Αχρέωτα,
+      // which section 3's §1.8 dedup relies on.
+      const ownerBilledForCharge =
+        isOwnerOccupied ||
+        !!srcExpense?.chargeOwnerWhenVacant ||
+        !!srcRepair?.chargeOwnerWhenVacant;
       rows.push({
         expenseId: String(c.expenseId || c.repairId || ''),
         expenseName:
@@ -417,7 +435,10 @@ export function computeBuildingExpenseBreakdown(
         // directly (no split formula to explain) → no calc basis.
         basis: { kind: 'none' },
         ...(recipient === 'owner'
-          ? { owners: ownerSlicesFor(Math.round(amt * 100) / 100) }
+          ? {
+              ownerBilled: ownerBilledForCharge,
+              owners: ownerSlicesFor(Math.round(amt * 100) / 100)
+            }
           : {})
       });
     }
@@ -450,9 +471,26 @@ export function computeBuildingExpenseBreakdown(
     // unit's monthlyCharges for the term. (No tenancy hook re-runs
     // _distributeRepairCharge, so these stale charges genuinely occur.)
     const chargedRepairIdsThisTerm = new Set<string>();
+    // H2: LEGACY repair charges (written before the repairId field existed) carry
+    // NO repairId — only `description: 'Repair: <title>'` (see buildingmanager
+    // _distributeRepairCharge legacyDescription). The repairId-only dedup above
+    // misses them, so §1.8 re-emitted the same repair's share alongside the
+    // stale section-2 row → Αχρέωτα doubled. Also key the dedup on that legacy
+    // description so a title match suppresses re-emission.
+    const chargedRepairDescThisTerm = new Set<string>();
     for (const c of unit.monthlyCharges || []) {
-      if (Number(c.term) === term && c.repairId) {
+      if (Number(c.term) !== term) continue;
+      if (c.repairId) {
         chargedRepairIdsThisTerm.add(String(c.repairId));
+      } else if (c.description && !c.expenseId) {
+        // Only a charge with NO expenseId is a genuine (legacy, pre-repairId)
+        // repair charge. Guarding on !c.expenseId prevents a variable
+        // building-EXPENSE charge (whose description is the expense name) from
+        // poisoning the repair-dedup set and wrongly suppressing a same-named
+        // repair (Step-7 H2-1 cross-type collision). The same-title legacy
+        // repair-vs-repair collision is unfixable without an id — a known,
+        // informational-only (Αχρέωτα under-count) limitation.
+        chargedRepairDescThisTerm.add(String(c.description));
       }
     }
     for (const repair of repairs) {
@@ -461,6 +499,7 @@ export function computeBuildingExpenseBreakdown(
       if (Number(repair.chargeTerm) !== term) continue;
       if (repair.chargeOwnerWhenVacant === true) continue; // flag ON → owner-billed elsewhere
       if (chargedRepairIdsThisTerm.has(String(repair._id))) continue; // already surfaced by §2
+      if (chargedRepairDescThisTerm.has(`Repair: ${repair.title}`)) continue; // legacy no-repairId row already surfaced by §2
       const cost = Number(repair.actualCost) || Number(repair.estimatedCost) || 0;
       if (!(cost > 0)) continue;
       const tenantPct = repairTenantSharePercentage(repair);

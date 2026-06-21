@@ -541,7 +541,13 @@ async function settlementsAsCsv(req: Req, res: Res) {
       (tenant.properties || []).map(({ name }: AnyRecord) => name).join(', ')
     );
 
-    // Per month: paid = Σ payment amounts; owed = max(0, grandTotal − payment).
+    // Per month: paid = Σ payment amounts; owed = THIS month's shortfall.
+    // rent.total.grandTotal is CUMULATIVE — it carries every prior unpaid month
+    // via rent.total.balance (5_balance/7_total). Summing max(0, grandTotal −
+    // payment) across months re-adds the arrears every month (a €1,500 debt
+    // would print as €3,000; 6 months blows up quadratically). Strip the
+    // carried-in balance first so each cell is THIS month's bill, matching the
+    // canonical formula in frontdata.ts + the A2 dashboard tile (_toBuildingData).
     const paidByMonth: number[] = new Array(12).fill(0);
     const owedByMonth: number[] = new Array(12).fill(0);
     (tenant.rents || []).forEach((rent: AnyRecord) => {
@@ -553,8 +559,10 @@ async function settlementsAsCsv(req: Req, res: Res) {
       );
       const grand = Number(rent?.total?.grandTotal) || 0;
       const payment = Number(rent?.total?.payment) || 0;
+      const balance = Number(rent?.total?.balance) || 0;
+      const monthDue = Math.max(0, grand - Math.max(0, balance));
       paidByMonth[mi] = _round(paid);
-      owedByMonth[mi] = _round(Math.max(0, grand - payment));
+      owedByMonth[mi] = _round(Math.max(0, monthDue - payment));
     });
     const totalPaid = _round(paidByMonth.reduce((s, v) => s + v, 0));
     const totalOwed = _round(owedByMonth.reduce((s, v) => s + v, 0));

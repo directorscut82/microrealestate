@@ -525,8 +525,8 @@ export namespace CollectionTypes {
   export type UncollectedPayment = {
     term: number;
     amount: number;
-    paidByType: 'renter' | 'owner';
-    payerId: string;
+    paidByType?: 'renter' | 'owner';
+    payerId?: string;
     date: Date;
     reference?: string;
   };

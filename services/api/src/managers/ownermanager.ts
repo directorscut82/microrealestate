@@ -142,7 +142,15 @@ export function carryOwnerPayments(prior: any): {
       amount: Number(p.amount) || 0,
       type: p.type || 'transfer',
       reference: p.reference || '',
-      description: p.description || ''
+      description: p.description || '',
+      // C2-1 (Step-7): MUST carry ownerKey through every strip+rebuild. Every
+      // recompute path (saveMonthlyStatement, _recomputeVacantOwnerCharges)
+      // funnels carried payments through here; dropping ownerKey made
+      // _aggregateOwners lose the per-co-owner attribution on the first
+      // recompute → useTaggedPaid went false → the payment got re-split
+      // proportionally across co-owners (one owner's debt re-opened, a co-owner
+      // credited money they never paid). Mirror the other carried fields.
+      ownerKey: p.ownerKey || null
     })
   );
   return {
@@ -422,6 +430,24 @@ export function _aggregateOwners(
       const paidAmount = _round(
         payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
       );
+      // C2: per-owner paid attribution. A building-wide co-owned charge's
+      // payments[] is shared; without this, the multi-owner re-split below
+      // credited one owner's καταβολή to a co-owner. Sum each payment under its
+      // recorded ownerKey. `taggedPaid` is the total of ATTRIBUTED payments;
+      // when it covers the whole paidAmount we attribute per owner exactly,
+      // otherwise (legacy untagged rows) we fall back to the proportional split.
+      const taggedPaidByKey = new Map<string, number>();
+      let taggedPaid = 0;
+      for (const p of payments) {
+        const k = p && p.ownerKey ? String(p.ownerKey) : '';
+        if (!k) continue;
+        const amt = Number(p.amount) || 0;
+        taggedPaidByKey.set(k, _round((taggedPaidByKey.get(k) || 0) + amt));
+        taggedPaid = _round(taggedPaid + amt);
+      }
+      // Use attribution only when the tagged payments account for (essentially)
+      // all recorded money — a partially-tagged row would otherwise under-credit.
+      const useTaggedPaid = taggedPaid >= paidAmount - 0.005 && taggedPaid > 0;
       const src = row.source || 'expense';
       // A repair row's expenseId is the repair _id (not a building expense), so
       // type='repair'; otherwise look up the source expense's schema type.
@@ -505,6 +531,25 @@ export function _aggregateOwners(
           ? propertyOwnerArr.get(charge.propertyId)!
           : buildingOwnerArr.get(bid) || [];
       const slices = ownerSlicesOf(sliceOwners, charge.amount);
+      // C2-1 round-2 (Step-7): useTaggedPaid alone is NOT safe for the
+      // multi-owner split. It only checks that the tagged payments cover
+      // paidAmount — NOT that every tagged ownerKey maps to a CURRENT owner
+      // slice. If a payer's identity changed after paying (ΑΦΜ/memberId
+      // correction, rename) or the payer LEFT the building (unit sold /
+      // reassigned / E9 re-import), the tagged key resolves to no surviving
+      // slice; slicePaid then reads taggedPaidByKey.get(missingKey)=0 for EVERY
+      // owner, so the recorded euro VANISHES from totalPaid and the payer's debt
+      // re-opens — strictly worse than the pre-C2 proportional split, which is
+      // ownerKey-independent and always conserves the money. Require that ALL
+      // tagged money maps to a current slice; otherwise fall back to the
+      // lossless proportional path. Invariant: Σ slicePaid === paidAmount.
+      const matchedTagged = slices.reduce(
+        (s: number, sl: any) =>
+          _round(s + (sl.ownerKey ? taggedPaidByKey.get(sl.ownerKey) || 0 : 0)),
+        0
+      );
+      const useTaggedPaidForSlices =
+        useTaggedPaid && matchedTagged >= taggedPaid - 0.005;
       // Map each slice to the ownerKey it belongs to (by name match or by
       // position-aligned fallback). When only one owner, full charge on them.
       if (keys.length === 1 || slices.length <= 1) {
@@ -570,12 +615,17 @@ export function _aggregateOwners(
           // row has charge.amount=0 (so amount-ratio would be 0 and DROP the
           // preserved payment across co-owners, F1/F3). For a credit, split the
           // preserved payment by the owner's PERCENTAGE instead.
-          // slicePaid: for a normal charge, paidAmount × (this owner's exact euro
-          // share of amount). For a credit (amount 0), use the carrier-corrected
-          // ownerSlicesOf split of the preserved payment so it matches a sibling
-          // liability's euro slice exactly (Step-7 round-5 — was rounded %).
-          const slicePaid =
-            charge.amount > 0
+          // slicePaid resolution, in priority order:
+          //  1. ATTRIBUTED (C2): if this row's payments are tagged with the
+          //     paying owner's key, this owner is credited EXACTLY their own
+          //     tagged καταβολές — never a co-owner's. This is the correct path
+          //     for owner καταβολές recorded after the C2 fix.
+          //  2. credit row (amount 0): carrier-corrected ownerSlicesOf split.
+          //  3. legacy fallback: proportional paidAmount × (slice share) — for
+          //     pre-C2 untagged rows where we cannot know who paid.
+          const slicePaid = useTaggedPaidForSlices
+            ? _round(taggedPaidByKey.get(sliceKey || '') || 0)
+            : charge.amount > 0
               ? _round(paidAmount * (sliceAmount / charge.amount))
               : charge.source === 'credit'
                 ? creditPaidByKey.get(sliceKey || '') || 0
@@ -1095,7 +1145,10 @@ export async function pay(req: Req, res: Res) {
       amount: t.amount,
       type,
       reference: payment.reference || '',
-      description: payment.description || ''
+      description: payment.description || '',
+      // Attribute this slice to the PAYING owner so a building-wide co-owned
+      // charge's read-time re-split credits it to the right owner (audit C2).
+      ownerKey
     });
     recomputeOwnerExpensePaid(t.row);
     touchedBuildings.add(String(t.building._id));

@@ -163,7 +163,11 @@ function Building() {
           <TabsTrigger value="expenses" className="w-1/5" data-cy="expensesTab">
             {t('Expenses')}
           </TabsTrigger>
-          <TabsTrigger value="repairs" className="w-1/5" data-cy="repairsTab">
+          <TabsTrigger
+            value="contractors"
+            className="w-1/5"
+            data-cy="contractorsTab"
+          >
             {t('Contractors')}
           </TabsTrigger>
           <TabsTrigger value="settings" className="w-1/5" data-cy="settingsTab">
@@ -195,7 +199,7 @@ function Building() {
             </div>
           </Card>
         </TabsContent>
-        <TabsContent value="repairs">
+        <TabsContent value="contractors">
           <Card className="p-6">
             <ContractorList building={building} />
           </Card>

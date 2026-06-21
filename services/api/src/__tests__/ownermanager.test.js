@@ -432,3 +432,163 @@ describe('deleted-expense owner payment survives as a credit row', () => {
     expect(agg.totalOutstanding).toBeCloseTo(50, 2); // repB still owed, NOT masked
   });
 });
+
+// C2 (audit 2026-06-21): a building-wide co-owned charge's payments[] is shared.
+// A payment is attributed to the PAYING owner via payment.ownerKey; _aggregateOwners
+// must credit ONLY that owner — never re-split one owner's καταβολή to a co-owner.
+describe('C2 — co-owner payment attribution (no cross-owner credit)', () => {
+  const ALPHA = { name: 'ALPHA', taxId: '1', percentage: 50 };
+  const BETA = { name: 'BETA', taxId: '2', percentage: 50 };
+  // Building-wide owner charge (propertyId null) co-owned 50/50; €100 owner-portion.
+  const mk = (payments) => ({
+    _id: 'b1',
+    name: 'B1',
+    units: [
+      { propertyId: 'p1', atakNumber: 'AK1', floor: 1, owners: [{ ...ALPHA }] },
+      { propertyId: 'p2', atakNumber: 'AK2', floor: 1, owners: [{ ...BETA }] }
+    ],
+    expenses: [],
+    repairs: [{ _id: 'rep1', title: 'roof', chargeableTo: 'owners' }],
+    ownerMonthlyExpenses: [
+      {
+        _id: 'r1', expenseId: 'rep1', term: 2026060100, amount: 100,
+        source: 'repair', paid: false, payments
+      }
+    ]
+  });
+
+  it('ALPHA pays their €50 slice (tagged ownerKey) → ALPHA settled, BETA untouched', () => {
+    const map = _aggregateOwners(
+      [mk([{ amount: 50, date: '2026-06-01', type: 'cash', ownerKey: ownerKeyOf(ALPHA) }])],
+      new Set()
+    );
+    const a = map.get(ownerKeyOf(ALPHA));
+    const b = map.get(ownerKeyOf(BETA));
+    // ALPHA's €50 lands fully on ALPHA's €50 slice → settled.
+    expect(a.totalPaid).toBeCloseTo(50, 2);
+    expect(a.totalOutstanding).toBeCloseTo(0, 2);
+    // BETA gets NONE of ALPHA's money — still owes their full €50.
+    expect(b.totalPaid).toBeCloseTo(0, 2);
+    expect(b.totalOutstanding).toBeCloseTo(50, 2);
+  });
+
+  it('legacy UNTAGGED payment falls back to the proportional split (no regression)', () => {
+    const map = _aggregateOwners(
+      [mk([{ amount: 50, date: '2026-06-01', type: 'cash' }])], // no ownerKey
+      new Set()
+    );
+    const a = map.get(ownerKeyOf(ALPHA));
+    const b = map.get(ownerKeyOf(BETA));
+    // Untagged €50 splits 50/50 (the documented legacy behavior).
+    expect(a.totalPaid).toBeCloseTo(25, 2);
+    expect(b.totalPaid).toBeCloseTo(25, 2);
+  });
+
+  it('both owners pay their own tagged slice → both settled, no double/mis-credit', () => {
+    const map = _aggregateOwners(
+      [mk([
+        { amount: 50, date: '2026-06-01', type: 'cash', ownerKey: ownerKeyOf(ALPHA) },
+        { amount: 50, date: '2026-06-02', type: 'cash', ownerKey: ownerKeyOf(BETA) }
+      ])],
+      new Set()
+    );
+    expect(map.get(ownerKeyOf(ALPHA)).totalOutstanding).toBeCloseTo(0, 2);
+    expect(map.get(ownerKeyOf(BETA)).totalOutstanding).toBeCloseTo(0, 2);
+  });
+
+  // C2-1 (Step-7 self-bug): carryOwnerPayments MUST carry ownerKey, else the
+  // first recompute (saveMonthlyStatement / _recomputeVacantOwnerCharges strips
+  // + rebuilds the row via carryOwnerPayments) drops the tag → _aggregateOwners
+  // re-splits the payment proportionally → one owner's debt re-opens and a
+  // co-owner is credited money they never paid. This guards attribution
+  // SURVIVAL across the carry round-trip, not just a freshly-tagged row.
+  it('ownerKey survives carryOwnerPayments (no attribution loss on recompute)', () => {
+    const carried = carryOwnerPayments({
+      payments: [
+        { amount: 50, date: '2026-06-01', type: 'cash', ownerKey: ownerKeyOf(ALPHA) }
+      ],
+      paid: false,
+      amount: 100
+    });
+    expect(carried.payments[0].ownerKey).toBe(ownerKeyOf(ALPHA));
+  });
+
+  it('attribution HOLDS after a carry round-trip (ALPHA stays settled, BETA not credited)', () => {
+    // Simulate a recompute: strip the row, carry payments via carryOwnerPayments,
+    // rebuild the row with the carried payments, re-aggregate.
+    const carried = carryOwnerPayments({
+      payments: [
+        { amount: 50, date: '2026-06-01', type: 'cash', ownerKey: ownerKeyOf(ALPHA) }
+      ],
+      paid: false,
+      amount: 100
+    });
+    const map = _aggregateOwners([mk(carried.payments)], new Set());
+    const a = map.get(ownerKeyOf(ALPHA));
+    const b = map.get(ownerKeyOf(BETA));
+    // Pre-fix, this re-split 25/25 and re-opened ALPHA's debt to €25.
+    expect(a.totalPaid).toBeCloseTo(50, 2);
+    expect(a.totalOutstanding).toBeCloseTo(0, 2);
+    expect(b.totalPaid).toBeCloseTo(0, 2);
+    expect(b.totalOutstanding).toBeCloseTo(50, 2);
+  });
+
+  // C2-1 round-2 (Step-7): a tagged ownerKey that no longer maps to a current
+  // owner slice (payer renamed / ΑΦΜ-corrected / departed) must NOT zero the
+  // payment. useTaggedPaidForSlices degrades to the lossless proportional split.
+  // INVARIANT: Σ totalPaid across owners === paidAmount, ALWAYS — never drop a euro.
+  it('payer ΑΦΜ-corrected after paying → money conserved (degrades to proportional, not zeroed)', () => {
+    // ALPHA paid €50 tagged with their OLD ownerKey, then taxId corrected.
+    const ALPHA_OLD = { name: 'ALPHA', taxId: '1', percentage: 50 };
+    const oldKey = ownerKeyOf(ALPHA_OLD); // 'n:alpha|1'
+    // Building now has ALPHA with the corrected taxId '999' (key 'n:alpha|999').
+    const building = {
+      _id: 'b1',
+      name: 'B1',
+      units: [
+        { propertyId: 'p1', atakNumber: 'AK1', floor: 1, owners: [{ name: 'ALPHA', taxId: '999', percentage: 50 }] },
+        { propertyId: 'p2', atakNumber: 'AK2', floor: 1, owners: [{ ...BETA }] }
+      ],
+      expenses: [],
+      repairs: [{ _id: 'rep1', title: 'roof', chargeableTo: 'owners' }],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'r1', expenseId: 'rep1', term: 2026060100, amount: 100,
+          source: 'repair', paid: false,
+          payments: [{ amount: 50, date: '2026-06-01', type: 'cash', ownerKey: oldKey }]
+        }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    const totalPaid = Array.from(map.values()).reduce((s, a) => s + a.totalPaid, 0);
+    // Pre-fix the €50 vanished (totalPaid===0). The guard conserves it.
+    expect(totalPaid).toBeCloseTo(50, 2);
+  });
+
+  it('payer DEPARTED the building after paying → money conserved on surviving owners', () => {
+    // GAMMA paid €50 then left; building now co-owned BETA/DELTA 50/50.
+    const GAMMA = { name: 'GAMMA', taxId: '7', percentage: 50 };
+    const DELTA = { name: 'DELTA', taxId: '8', percentage: 50 };
+    const building = {
+      _id: 'b1',
+      name: 'B1',
+      units: [
+        { propertyId: 'p1', atakNumber: 'AK1', floor: 1, owners: [{ ...BETA }] },
+        { propertyId: 'p2', atakNumber: 'AK2', floor: 1, owners: [{ ...DELTA }] }
+      ],
+      expenses: [],
+      repairs: [{ _id: 'rep1', title: 'roof', chargeableTo: 'owners' }],
+      ownerMonthlyExpenses: [
+        {
+          _id: 'r1', expenseId: 'rep1', term: 2026060100, amount: 100,
+          source: 'repair', paid: false,
+          payments: [{ amount: 50, date: '2026-06-01', type: 'cash', ownerKey: ownerKeyOf(GAMMA) }]
+        }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    const totalPaid = Array.from(map.values()).reduce((s, a) => s + a.totalPaid, 0);
+    // The departed owner's €50 must not vanish — proportional fallback keeps it.
+    expect(totalPaid).toBeCloseTo(50, 2);
+  });
+});

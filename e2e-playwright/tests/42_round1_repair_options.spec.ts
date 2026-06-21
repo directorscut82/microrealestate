@@ -269,7 +269,7 @@ test('42.1 · F1 — Add Repair dialog opens on 0-contractor building (no Radix 
   await signIn(page);
   await page.goto(`${encodeURIComponent(base.realmName)}/buildings/${buildingId}`);
   await expect(page.locator('[data-cy=buildingPage]')).toBeVisible({ timeout: 20_000 });
-  await page.locator('[data-cy=repairsTab]').click();
+  await page.locator('[data-cy=expensesTab]').click();
   await page.locator('[data-cy=addRepair]').click();
   await expect(page.locator('text=/^(Add repair|Προσθήκη επισκευής)$/').first()).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('input#title')).toBeVisible();
@@ -294,7 +294,7 @@ test('42.2 · F1 — contractor dropdown lists "None" + N items', async ({ page 
   await signIn(page);
   await page.goto(`${encodeURIComponent(base.realmName)}/buildings/${buildingId}`);
   await expect(page.locator('[data-cy=buildingPage]')).toBeVisible({ timeout: 20_000 });
-  await page.locator('[data-cy=repairsTab]').click();
+  await page.locator('[data-cy=expensesTab]').click();
   await page.locator('[data-cy=addRepair]').click();
   await expect(page.locator('text=/^(Add repair|Προσθήκη επισκευής)$/').first()).toBeVisible({ timeout: 10_000 });
   const contractorLabel = page.locator('label', { hasText: /^(Contractor|Εργολάβος)$/ }).first();
@@ -334,7 +334,7 @@ test('42.3 · edit existing repair — all fields round-trip through dialog', as
   await signIn(page);
   await page.goto(`${encodeURIComponent(base.realmName)}/buildings/${buildingId}`);
   await expect(page.locator('[data-cy=buildingPage]')).toBeVisible({ timeout: 20_000 });
-  await page.locator('[data-cy=repairsTab]').click();
+  await page.locator('[data-cy=expensesTab]').click();
   const row = page.locator('tr', { hasText: repairTitle });
   await expect(row).toHaveCount(1);
   await row.locator('button[aria-label="Edit"], button[aria-label="Επεξεργασία"]').first().click();
@@ -616,7 +616,7 @@ test('42.13 · dialog at 768px viewport — desktop ScrollArea keeps submit reac
   await signIn(page);
   await page.goto(`${encodeURIComponent(base.realmName)}/buildings/${buildingId}`);
   await expect(page.locator('[data-cy=buildingPage]')).toBeVisible({ timeout: 20_000 });
-  await page.locator('[data-cy=repairsTab]').click();
+  await page.locator('[data-cy=expensesTab]').click();
   await page.locator('[data-cy=addRepair]').click();
   await expect(page.locator('text=/^(Add repair|Προσθήκη επισκευής)$/').first()).toBeVisible({ timeout: 10_000 });
   const heights = await page.evaluate(() => {

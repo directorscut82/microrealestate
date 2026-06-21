@@ -157,256 +157,182 @@ export function _computePaidByBucket(rent: AnyRecord): AnyRecord {
   return buckets;
 }
 
-export async function all(req: Req, res: Res) {
-  const now = moment.utc();
-  const beginOfTheMonth = moment.utc(now).startOf('month');
-  const endOfTheMonth = moment.utc(now).endOf('month');
-  const beginOfTheYear = moment.utc(now).startOf('year');
-  const endOfTheYear = moment.utc(now).endOf('year');
+// --------------------------------------------------------------------------
+// Pure dashboard computations (M3 test-integrity).
+//
+// These were inlined inside `all()`; the dashboard.test.js suite re-implemented
+// each as a hand-copied "mirror" because there was nothing to import. Those
+// mirrors silently DRIFTED from production (the mirror's revenue total lacked
+// the M6 VAT/allocation exclusion; its notPaid kept the pre-Wave-26 signed
+// value; its top-unpaid lacked the carry-forward settle check) so the suite was
+// green while asserting a contract the API no longer ships. Extracted verbatim
+// and exported so the test imports the SAME code the handler runs — a future
+// drift now fails the build, not just the (deleted) mirror.
+// --------------------------------------------------------------------------
 
-  const realmId = req.realm!._id;
-  const yearStr = String(now.year());
-  const prevYearStr = String(now.year() - 1);
+// Active = has ≥1 property AND (terminationDate||endDate) is a valid date that
+// is not before `now` (both UTC). See the T2.1 note in `all()`.
+export function _computeActiveTenants(
+  allTenants: AnyRecord[],
+  now: moment.Moment
+): AnyRecord[] {
+  return allTenants.reduce((acc: AnyRecord[], tenant: AnyRecord) => {
+    if (!tenant.properties?.length) return acc;
+    const endValue = tenant.terminationDate || tenant.endDate;
+    if (!endValue) return acc;
+    const endMoment = moment.utc(endValue);
+    if (!endMoment.isValid()) return acc;
+    if (endMoment.isSameOrAfter(now, 'day')) {
+      acc.push(tenant);
+    }
+    return acc;
+  }, []);
+}
 
-  // Load tenants with only needed fields and rents filtered to current year
-  const allTenants: AnyRecord[] = await Collections.Tenant.aggregate([
-    { $match: { realmId } },
-    {
-      $project: {
-        name: 1,
-        firstName: 1,
-        lastName: 1,
-        terminationDate: 1,
-        endDate: 1,
-        'properties.propertyId': 1,
-        rents: {
-          $filter: {
-            input: '$rents',
-            as: 'r',
-            cond: {
-              $in: [
-                { $substrBytes: [{ $toString: '$$r.term' }, 0, 4] },
-                [yearStr, prevYearStr]
-              ]
-            }
-          }
-        }
+// Occupancy excludes owner_occupied + parking units from both numerator and
+// denominator. Returns 0 when no rentable property exists.
+export function _computeOccupancyRate(
+  activeTenants: AnyRecord[],
+  propertyCount: number,
+  buildings: AnyRecord[]
+): number {
+  const nonRentablePropertyIds = new Set<string>();
+  for (const building of buildings) {
+    for (const unit of building.units || []) {
+      if (
+        unit.propertyId &&
+        (unit.occupancyType === 'owner_occupied' ||
+          unit.occupancyType === 'parking')
+      ) {
+        nonRentablePropertyIds.add(String(unit.propertyId));
       }
     }
-  ]);
-
-  // T2.1: a tenant counts as "active" only when:
-  //   1) it has at least one property assigned (property-less tenants are
-  //      flagged with the amber warning surfaced by T1.7 — they are setup-
-  //      incomplete and don't generate rent records, so they shouldn't
-  //      inflate the dashboard's active-tenant tile or the occupancy
-  //      denominator), AND
-  //   2) (terminationDate || endDate) is a valid date that is not in the
-  //      past. Both sides of the comparison are kept in UTC. Tenants with
-  //      neither field present are treated as inactive — without an end
-  //      date we cannot prove the lease is ongoing, and frontdata.ts's
-  //      `terminated` flag relies on the same field-pair so the surfaces
-  //      stay aligned (frontdata parses with an explicit format which
-  //      makes a missing pair Invalid → terminated stays false there; the
-  //      practical drift is the same: no end date == not yet billable).
-  const activeTenants = allTenants.reduce(
-    (acc: AnyRecord[], tenant: AnyRecord) => {
-      if (!tenant.properties?.length) return acc;
-      const endValue = tenant.terminationDate || tenant.endDate;
-      if (!endValue) return acc;
-      const endMoment = moment.utc(endValue);
-      if (!endMoment.isValid()) return acc;
-      if (endMoment.isSameOrAfter(now, 'day')) {
-        acc.push(tenant);
-      }
+  }
+  const rentablePropertyCount = propertyCount - nonRentablePropertyIds.size;
+  if (rentablePropertyCount <= 0) return 0;
+  const countPropertyRented = activeTenants.reduce(
+    (acc: Set<string>, { properties = [] }: AnyRecord) => {
+      properties.forEach(({ propertyId }: AnyRecord) => {
+        if (!nonRentablePropertyIds.has(String(propertyId))) {
+          acc.add(propertyId);
+        }
+      });
       return acc;
     },
-    []
+    new Set<string>()
+  ).size;
+  return countPropertyRented / rentablePropertyCount;
+}
+
+// Headline revenue KPI: payments dated within the year, counting ONLY the
+// rent/charge income portion (M6 — VAT/deposit/previous-balance/extra-charge
+// are pass-through or carry-in, not revenue). An un-allocated legacy payment
+// counts in full (it is rent cash).
+export function _computeTotalYearRevenues(
+  allTenants: AnyRecord[],
+  beginOfTheYear: moment.Moment,
+  endOfTheYear: moment.Moment
+): number {
+  if (!(allTenants.length > 0)) return 0;
+  const total = allTenants.reduce(
+    (runningTotal: number, { rents = [] }: AnyRecord) => {
+      let sumPayments = 0;
+      rents.forEach((rent: AnyRecord) => {
+        (rent.payments || []).forEach((payment: AnyRecord) => {
+          if (!payment.date || Number(payment.amount) === 0) {
+            return;
+          }
+          const paymentMoment = moment.utc(payment.date, 'DD/MM/YYYY');
+          if (
+            paymentMoment.isBetween(beginOfTheYear, endOfTheYear, 'day', '[]')
+          ) {
+            const allocation = Array.isArray(payment.allocation)
+              ? payment.allocation
+              : null;
+            if (allocation && allocation.length) {
+              const NON_REVENUE = new Set([
+                'vat',
+                'previousBalance',
+                'extracharge',
+                'deposit'
+              ]);
+              const nonRevenue = allocation.reduce(
+                (s: number, a: AnyRecord) =>
+                  NON_REVENUE.has(String(a?.category || ''))
+                    ? s + (Number(a?.amount) || 0)
+                    : s,
+                0
+              );
+              const income = Math.max(
+                0,
+                (Number(payment.amount) || 0) - nonRevenue
+              );
+              sumPayments = sumPayments + income;
+            } else {
+              sumPayments = sumPayments + payment.amount;
+            }
+          }
+        });
+      });
+      return runningTotal + sumPayments;
+    },
+    0
   );
-  const tenantCount = activeTenants.length;
+  return _round(total);
+}
 
-  // Wave-20 F9: exclude building shells from the rentable count. A
-  // type='building' Property is a building wrapper, not a rentable unit;
-  // including it inflates propertyCount and dilutes occupancyRate.
-  const propertyCount = await Collections.Property.countDocuments({
-    realmId,
-    type: { $ne: 'building' }
-  });
-
-  // Compute occupancy rate excluding owner_occupied and parking units
-  let occupancyRate: number | undefined;
-  if (propertyCount > 0) {
-    const buildings: AnyRecord[] = await Collections.Building.find({
-      realmId
-    }).lean();
-
-    const nonRentablePropertyIds = new Set<string>();
-    for (const building of buildings) {
-      for (const unit of building.units || []) {
-        if (
-          unit.propertyId &&
-          (unit.occupancyType === 'owner_occupied' ||
-            unit.occupancyType === 'parking')
-        ) {
-          nonRentablePropertyIds.add(String(unit.propertyId));
+// "Top 5 unpaid" tile: current-month remaining-owed as a POSITIVE amount,
+// excluding tenants whose month is settled by a future-month overpayment
+// (mirrors /rents' carry-forward status), biggest debtor first.
+export function _computeTopUnpaid(
+  activeTenants: AnyRecord[],
+  beginOfTheMonth: moment.Moment,
+  endOfTheMonth: moment.Moment
+): AnyRecord[] {
+  return activeTenants
+    .reduce((acc: AnyRecord[], tenant: AnyRecord) => {
+      const currentRent = (tenant.rents || []).find((rent: AnyRecord) => {
+        const termMoment = rent.term && moment.utc(rent.term, 'YYYYMMDDHH');
+        return (
+          termMoment &&
+          termMoment.isBetween(beginOfTheMonth, endOfTheMonth, 'day', '[]')
+        );
+      });
+      if (currentRent) {
+        const remaining = _round(
+          Math.max(
+            0,
+            (currentRent.total?.grandTotal || 0) -
+              (currentRent.total?.payment || 0)
+          )
+        );
+        const settledByCarry = _isSettledByCarryForward(
+          Number(currentRent.term),
+          tenant.rents || []
+        );
+        if (remaining > 0.005 && !settledByCarry) {
+          acc.push({
+            tenant: { _id: tenant._id, name: _tenantName(tenant) },
+            balance: remaining
+          });
         }
       }
-    }
+      return acc;
+    }, [])
+    .sort((t1: AnyRecord, t2: AnyRecord) => t2.balance - t1.balance)
+    .slice(0, 5);
+}
 
-    const rentablePropertyCount = propertyCount - nonRentablePropertyIds.size;
-
-    if (rentablePropertyCount > 0) {
-      const countPropertyRented = activeTenants.reduce(
-        (acc: Set<string>, { properties = [] }: AnyRecord) => {
-          properties.forEach(({ propertyId }: AnyRecord) => {
-            if (!nonRentablePropertyIds.has(String(propertyId))) {
-              acc.add(propertyId);
-            }
-          });
-          return acc;
-        },
-        new Set<string>()
-      ).size;
-      occupancyRate = countPropertyRented / rentablePropertyCount;
-    } else {
-      occupancyRate = 0;
-    }
-  }
-
-  let totalYearRevenues = 0;
-
-  if (allTenants.length > 0) {
-    totalYearRevenues = allTenants.reduce(
-      (total: number, { rents = [] }: AnyRecord) => {
-        let sumPayments = 0;
-        rents.forEach((rent: AnyRecord) => {
-          (rent.payments || []).forEach((payment: AnyRecord) => {
-            if (!payment.date || Number(payment.amount) === 0) {
-              return;
-            }
-
-            const paymentMoment = moment.utc(payment.date, 'DD/MM/YYYY');
-            if (
-              paymentMoment.isBetween(
-                beginOfTheYear,
-                endOfTheYear,
-                'day',
-                '[]'
-              )
-            ) {
-              // Round-1 audit M6: the headline revenue KPI must count only the
-              // RENT/CHARGE income portion of a payment, not VAT / deposit /
-              // previous-balance / extra-charge cash (those are pass-through or
-              // carry-in, not revenue). Mirror the category exclusion
-              // _computePaidByBucket uses. When a payment carries an explicit
-              // allocation, sum only the income categories; an un-allocated
-              // (legacy) payment counts in full as before (it is rent cash).
-              const allocation = Array.isArray(payment.allocation)
-                ? payment.allocation
-                : null;
-              if (allocation && allocation.length) {
-                // Revenue = the payment MINUS its explicitly NON-revenue
-                // allocation (VAT / deposit / previous-balance / extra-charge).
-                // Computing it as (amount − non-revenue) rather than summing the
-                // income lines is critical for an OVERPAYMENT: the surplus has
-                // no owed-line to allocate to, so Σ(allocation) < amount; the
-                // unallocated surplus is rent PREPAYMENT (real collected cash,
-                // becomes a carry-forward credit) and must still count as
-                // revenue (Step-7 R1-M6 — summing income lines dropped it).
-                const NON_REVENUE = new Set([
-                  'vat',
-                  'previousBalance',
-                  'extracharge',
-                  'deposit'
-                ]);
-                const nonRevenue = allocation.reduce(
-                  (s: number, a: AnyRecord) =>
-                    NON_REVENUE.has(String(a?.category || ''))
-                      ? s + (Number(a?.amount) || 0)
-                      : s,
-                  0
-                );
-                const income = Math.max(0, (Number(payment.amount) || 0) - nonRevenue);
-                sumPayments = sumPayments + income;
-              } else {
-                sumPayments = sumPayments + payment.amount;
-              }
-            }
-          });
-        });
-
-        return total + sumPayments;
-      },
-      0
-    );
-    // Round once at the outer aggregate; nested .reduce on Number adds noise.
-    totalYearRevenues = _round(totalYearRevenues);
-  }
-
-  const overview =
-    tenantCount || propertyCount
-      ? {
-          tenantCount,
-          propertyCount,
-          occupancyRate,
-          totalYearRevenues
-        }
-      : null;
-
-  const topUnpaid =
-    tenantCount || propertyCount
-      ? activeTenants
-          .reduce((acc: AnyRecord[], tenant: AnyRecord) => {
-            const currentRent = (tenant.rents || []).find(
-              (rent: AnyRecord) => {
-                const termMoment =
-                  rent.term && moment.utc(rent.term, 'YYYYMMDDHH');
-                return (
-                  termMoment &&
-                  termMoment.isBetween(
-                    beginOfTheMonth,
-                    endOfTheMonth,
-                    'day',
-                    '[]'
-                  )
-                );
-              }
-            );
-            if (currentRent) {
-              // Emit remaining-unpaid as a POSITIVE amount so the
-              // dashboard tile shows the same number a landlord reads
-              // on /rents as 'συνολική οφειλή - ποσό καταβληθέν'.
-              const remaining = _round(
-                Math.max(
-                  0,
-                  (currentRent.total?.grandTotal || 0) -
-                    (currentRent.total?.payment || 0)
-                )
-              );
-              // Skip tenants whose current month is settled by a
-              // future-month overpayment. /rents shows them as 'paid'
-              // via frontdata.toRentData status logic; without the same
-              // check here, the dashboard's "Top 5 unpaid" tile would
-              // list a tenant /rents already says is settled —
-              // confusing the landlord. Use the same helper /rents
-              // uses, against the tenant's full ledger.
-              const settledByCarry = _isSettledByCarryForward(
-                Number(currentRent.term),
-                tenant.rents || []
-              );
-              if (remaining > 0.005 && !settledByCarry) {
-                acc.push({
-                  tenant: { _id: tenant._id, name: _tenantName(tenant) },
-                  balance: remaining
-                });
-              }
-            }
-            return acc;
-          }, [])
-          .sort((t1: AnyRecord, t2: AnyRecord) => t2.balance - t1.balance)
-          .slice(0, 5)
-      : [];
-
+// Per-month revenue series (the YearFigures chart + pie). paid/notPaid per
+// month, notPaid being the unsigned shortfall on THIS month's bill only (carry
+// stripped + clamped ≥0 so a credit can't inflate it). Plus per-tenant lines
+// and per-bucket paid for the tooltips.
+export function _computeRevenues(
+  allTenants: AnyRecord[],
+  beginOfTheYear: moment.Moment,
+  endOfTheYear: moment.Moment,
+  now: moment.Moment
+): AnyRecord[] {
   const emptyRevenues = moment
     .months()
     .reduce((acc: AnyRecord, _month: string, index: number) => {
@@ -426,7 +352,7 @@ export async function all(req: Req, res: Res) {
       return acc;
     }, {});
 
-  const revenues = Object.entries(
+  return Object.entries(
     allTenants.reduce((acc: AnyRecord, tenant: AnyRecord) => {
       const tenantName = _tenantName(tenant);
       (tenant.rents || []).forEach((rent: AnyRecord) => {
@@ -604,6 +530,111 @@ export async function all(req: Req, res: Res) {
         ? -1
         : 1
     );
+}
+
+export async function all(req: Req, res: Res) {
+  const now = moment.utc();
+  const beginOfTheMonth = moment.utc(now).startOf('month');
+  const endOfTheMonth = moment.utc(now).endOf('month');
+  const beginOfTheYear = moment.utc(now).startOf('year');
+  const endOfTheYear = moment.utc(now).endOf('year');
+
+  const realmId = req.realm!._id;
+  const yearStr = String(now.year());
+  const prevYearStr = String(now.year() - 1);
+
+  // Load tenants with only needed fields and rents filtered to current year
+  const allTenants: AnyRecord[] = await Collections.Tenant.aggregate([
+    { $match: { realmId } },
+    {
+      $project: {
+        name: 1,
+        firstName: 1,
+        lastName: 1,
+        terminationDate: 1,
+        endDate: 1,
+        'properties.propertyId': 1,
+        rents: {
+          $filter: {
+            input: '$rents',
+            as: 'r',
+            cond: {
+              $in: [
+                { $substrBytes: [{ $toString: '$$r.term' }, 0, 4] },
+                [yearStr, prevYearStr]
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]);
+
+  // T2.1: a tenant counts as "active" only when:
+  //   1) it has at least one property assigned (property-less tenants are
+  //      flagged with the amber warning surfaced by T1.7 — they are setup-
+  //      incomplete and don't generate rent records, so they shouldn't
+  //      inflate the dashboard's active-tenant tile or the occupancy
+  //      denominator), AND
+  //   2) (terminationDate || endDate) is a valid date that is not in the
+  //      past. Both sides of the comparison are kept in UTC. Tenants with
+  //      neither field present are treated as inactive — without an end
+  //      date we cannot prove the lease is ongoing, and frontdata.ts's
+  //      `terminated` flag relies on the same field-pair so the surfaces
+  //      stay aligned (frontdata parses with an explicit format which
+  //      makes a missing pair Invalid → terminated stays false there; the
+  //      practical drift is the same: no end date == not yet billable).
+  const activeTenants = _computeActiveTenants(allTenants, now);
+  const tenantCount = activeTenants.length;
+
+  // Wave-20 F9: exclude building shells from the rentable count. A
+  // type='building' Property is a building wrapper, not a rentable unit;
+  // including it inflates propertyCount and dilutes occupancyRate.
+  const propertyCount = await Collections.Property.countDocuments({
+    realmId,
+    type: { $ne: 'building' }
+  });
+
+  // Compute occupancy rate excluding owner_occupied and parking units
+  let occupancyRate: number | undefined;
+  if (propertyCount > 0) {
+    const buildings: AnyRecord[] = await Collections.Building.find({
+      realmId
+    }).lean();
+    occupancyRate = _computeOccupancyRate(
+      activeTenants,
+      propertyCount,
+      buildings
+    );
+  }
+
+  const totalYearRevenues = _computeTotalYearRevenues(
+    allTenants,
+    beginOfTheYear,
+    endOfTheYear
+  );
+
+  const overview =
+    tenantCount || propertyCount
+      ? {
+          tenantCount,
+          propertyCount,
+          occupancyRate,
+          totalYearRevenues
+        }
+      : null;
+
+  const topUnpaid =
+    tenantCount || propertyCount
+      ? _computeTopUnpaid(activeTenants, beginOfTheMonth, endOfTheMonth)
+      : [];
+
+  const revenues = _computeRevenues(
+    allTenants,
+    beginOfTheYear,
+    endOfTheYear,
+    now
+  );
 
   // Pending bills grouped by building
   let pendingBills: AnyRecord[] = [];

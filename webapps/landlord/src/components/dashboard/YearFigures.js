@@ -9,7 +9,6 @@ import {
 } from 'recharts';
 import { useMemo } from 'react';
 import { ChartContainer } from '../ui/chart';
-import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
 import { LuBanknote } from 'react-icons/lu';
 import moment from 'moment';
@@ -92,12 +91,14 @@ export default function YearFigures({ className, dashboardData }) {
     const data = payload[0]?.payload;
     if (!data) return null;
     const tenants = data.tenants || [];
-    // D4: the OUTER wrapper caps height + owns the scroll, and pointer-events
-    // are enabled (also on the recharts <Tooltip wrapperStyle>) so the mouse can
-    // rest on it and the wheel scrolls THIS, not the page. The tooltip is pinned
-    // (non-cursor-following) via <Tooltip position> so it doesn't flee the cursor.
+    // H4: this is a HOVER tooltip — recharts positions it at the cursor and it
+    // follows the mouse (no `position` prop pins it). A `max-h + overflow-y-auto`
+    // scroll region is therefore unreachable: moving the mouse toward the
+    // scrollbar moves the tooltip away. The old code also set pointerEvents:auto
+    // and claimed it was "pinned", which it never was — dead UI. Let the tooltip
+    // size to its content like a normal hover tooltip instead.
     return (
-      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-60 max-h-[400px] overflow-y-auto scrollbar-branded">
+      <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-60">
         <div className="font-medium text-body text-ink mb-1 leading-tight">
           {moment(data.month, 'MMYYYY').format('MMMM YYYY')}
         </div>
@@ -215,14 +216,10 @@ export default function YearFigures({ className, dashboardData }) {
                 </div>
               )}
             />
-            {/* D3+D4: HOVER (no trigger='click' — that broke hover) + pinned,
-                pointer-interactive tooltip so it can be scrolled. The wrapper's
-                pointerEvents:auto lets the mouse enter; the content div owns the
-                overflow/scroll. */}
+            {/* HOVER tooltip (no trigger='click' — that broke hover). */}
             <Tooltip
               content={<CustomBarTooltip />}
               cursor={{ fill: 'oklch(96% 0.006 85)', opacity: 0.6 }}
-              wrapperStyle={{ pointerEvents: 'auto' }}
               isAnimationActive={false}
             />
             {/* Wave-26 round-3t: paid (dark) renders first so it sits
