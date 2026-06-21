@@ -726,6 +726,27 @@ function formatBasis(t, basis) {
       return t('fixed amount for this unit');
     case 'single_unit':
       return t('whole amount on one unit');
+    // §1.2/§1.3: repair owner-portion = cost × owner% (= 100 − tenant%).
+    case 'repair_split':
+      return t('{{total}} € × {{pct}}% owner share = {{share}} €', {
+        total: basis.total,
+        pct: basis.ownerPct,
+        share: basis.result
+      });
+    // §1.2/§1.3: a vacant unit's slice of the repair's tenant pool, routed to
+    // the owner. Shows the pool (cost × tenant%) AND this unit's allocated slice
+    // — an allocation, not a "× %" equation (the slice is a fraction of the pool
+    // by thousandths/surface, so a "pool × % = slice" line would not reconcile).
+    case 'repair_vacant':
+      return t(
+        '{{total}} € × {{pct}}% tenant share = {{pool}} € → vacant unit share {{share}} €',
+        {
+          total: basis.total,
+          pct: basis.tenantPct,
+          pool: basis.pool,
+          share: basis.result
+        }
+      );
     default:
       return '';
   }

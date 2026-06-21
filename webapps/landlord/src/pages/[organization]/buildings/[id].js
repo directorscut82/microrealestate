@@ -164,7 +164,7 @@ function Building() {
             {t('Expenses')}
           </TabsTrigger>
           <TabsTrigger value="repairs" className="w-1/5" data-cy="repairsTab">
-            {t('Repairs & Contractors')}
+            {t('Contractors')}
           </TabsTrigger>
           <TabsTrigger value="settings" className="w-1/5" data-cy="settingsTab">
             {t('Information')}
@@ -182,23 +182,22 @@ function Building() {
         </TabsContent>
         <TabsContent value="expenses">
           <Card className="p-6">
-            <ExpenseList building={building} />
-          </Card>
-        </TabsContent>
-        <TabsContent value="repairs">
-          <Card className="p-6">
+            {/* §4: Repairs live in the Expenses tab — they ARE expenses
+                (one-time costs distributed to tenants/owners), so the landlord
+                manages recurring expenses + repairs in one place. Contractors
+                (a directory, not money) stay on their own tab. */}
             <div className="space-y-8">
+              <ExpenseList building={building} />
               <div>
                 <h3 className="text-lg font-semibold mb-4">{t('Repairs')}</h3>
                 <RepairList building={building} />
               </div>
-              <div>
-                <h3 className="text-lg font-semibold mb-4">
-                  {t('Contractors')}
-                </h3>
-                <ContractorList building={building} />
-              </div>
             </div>
+          </Card>
+        </TabsContent>
+        <TabsContent value="repairs">
+          <Card className="p-6">
+            <ContractorList building={building} />
           </Card>
         </TabsContent>
         <TabsContent value="settings">

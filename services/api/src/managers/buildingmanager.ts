@@ -2840,12 +2840,60 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       owners: ownerSlices,
       amount: rowAmount,
       // Calc basis (same shape renter rows carry) so the UI can render the
-      // "÷ units = share" explanation on owner rows too. Only present for the
-      // vacant sources (an allocated share); owner-direct flat entries have
-      // none, which the UI renders as no-basis (like a manual entry).
-      basis:
-        basisByKey.get(`${String(e.expenseId)}|${String(e.propertyId)}`) ||
-        null,
+      // "÷ units = share" explanation on owner rows too. For building-EXPENSE
+      // owner rows the engine's per-row basis is grafted by expenseId+propertyId.
+      // For REPAIR rows the engine has no basis (repairs aren't in
+      // building.expenses), so we compute one from the repair (§1.2): a
+      // 'repair' owner-portion shows cost × owner% (=1−tenant%); a
+      // 'repair-vacant' per-unit row shows the vacant unit's tenant-share slice.
+      basis: (() => {
+        const fromEngine = basisByKey.get(
+          `${String(e.expenseId)}|${String(e.propertyId)}`
+        );
+        if (fromEngine) return fromEngine;
+        if (!rep) return null;
+        const cost = Number(rep.actualCost) || Number(rep.estimatedCost) || 0;
+        // Stale/zero-cost repair (cost cleared after the row was materialised):
+        // a "0 € × pct = nonzero" line is self-contradictory — show no basis
+        // rather than a wrong explanation (Step-7 staleness note).
+        if (!(cost > 0)) return null;
+        const tenantPct =
+          rep.chargeableTo === 'owners'
+            ? 0
+            : typeof rep.tenantSharePercentage === 'number' &&
+                Number.isFinite(rep.tenantSharePercentage)
+              ? Math.max(0, Math.min(100, rep.tenantSharePercentage))
+              : rep.chargeableTo === 'tenants'
+                ? 100
+                : 0;
+        if (e.source === 'repair') {
+          // Building-wide owner portion = cost × (100 − tenantPct)%.
+          return {
+            kind: 'repair_split',
+            total: Math.round(cost * 100) / 100,
+            ownerPct: 100 - tenantPct,
+            result: rowAmount
+          };
+        }
+        if (e.source === 'repair-vacant') {
+          // A vacant unit's slice of the tenant-billed pool, routed to the owner.
+          // The pool is cost × tenantPct%; THIS row is only this unit's allocated
+          // slice of that pool (by thousandths/surface/equal), so we must NOT
+          // print "pool × tenantPct% = result" (that claims the whole pool — it
+          // doesn't reconcile in a multi-unit building, Step-7). Show the pool
+          // AND the unit's slice as an allocation: "pool € → result € (unit's
+          // share)", both figures truthful, no false equation.
+          const pool = Math.round(cost * (tenantPct / 100) * 100) / 100;
+          return {
+            kind: 'repair_vacant',
+            total: Math.round(cost * 100) / 100,
+            tenantPct,
+            pool,
+            result: rowAmount
+          };
+        }
+        return null;
+      })(),
       source: e.source || 'expense',
       paid: !!e.paid
     };

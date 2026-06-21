@@ -1173,6 +1173,8 @@
   "{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €": "{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €",
   "{{total}} ÷ {{count}}": "{{total}} ÷ {{count}}",
   "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} μονάδες = {{share}} €",
+  "{{total}} € × {{pct}}% owner share = {{share}} €": "{{total}} € × {{pct}}% μερίδιο ιδιοκτητών = {{share}} €",
+  "{{total}} € × {{pct}}% tenant share = {{pool}} € → vacant unit share {{share}} €": "{{total}} € × {{pct}}% μερίδιο ενοικιαστών = {{pool}} € → μερίδιο κενής μονάδας {{share}} €",
   "Payment of {{amount}} recorded": "Καταγράφηκε καταβολή {{amount}}",
   "Over-allocated by {{amount}}": "Υπερκατανομή κατά {{amount}}",
   "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν.",
