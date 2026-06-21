@@ -39,12 +39,19 @@ beforeAll(async () => {
       this.status = status;
     }
   }
+  // accountingmanager now imports ownermanager (for the owner-settlements
+  // export), which imports OwnerStatement from common — provide the REAL util so
+  // the mock is complete.
+  const OwnerStatement = await import(
+    '../../../common/src/utils/ownerstatement.ts'
+  );
   jest.unstable_mockModule('@microrealestate/common', () => ({
     Collections: {
       Tenant: { aggregate: (...a) => m.aggregate(...a) }
     },
     ServiceError,
-    logger: { info() {}, error() {}, warn() {}, debug() {} }
+    logger: { info() {}, error() {}, warn() {}, debug() {} },
+    OwnerStatement
   }));
   accountingManager = await import('../managers/accountingmanager.js');
 });

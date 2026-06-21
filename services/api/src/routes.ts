@@ -473,6 +473,11 @@ export default function routes(): express.Router {
     '/csv/settlements/:year',
     Middlewares.asyncWrapper(accountingManager.csv.settlements as any)
   );
+  // OS4/OS6: owner-side settlements export (xlsx), twin of /csv/settlements.
+  router.get(
+    '/csv/owner-settlements/:year',
+    Middlewares.asyncWrapper(accountingManager.csv.ownerSettlements as any)
+  );
 
   const emailRouter = express.Router();
   emailRouter.post('/', Middlewares.asyncWrapper(emailManager.send as any));

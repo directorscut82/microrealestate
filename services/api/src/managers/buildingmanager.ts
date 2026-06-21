@@ -33,7 +33,8 @@ import {
 import {
   computeBuildingChargeForProperty,
   computeBuildingExpenseBreakdown,
-  isExpenseActiveForTerm
+  isExpenseActiveForTerm,
+  repairTenantSharePercentage
 } from '../businesslogic/tasks/1_base.js';
 import moment from 'moment';
 
@@ -2857,15 +2858,7 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
         // a "0 € × pct = nonzero" line is self-contradictory — show no basis
         // rather than a wrong explanation (Step-7 staleness note).
         if (!(cost > 0)) return null;
-        const tenantPct =
-          rep.chargeableTo === 'owners'
-            ? 0
-            : typeof rep.tenantSharePercentage === 'number' &&
-                Number.isFinite(rep.tenantSharePercentage)
-              ? Math.max(0, Math.min(100, rep.tenantSharePercentage))
-              : rep.chargeableTo === 'tenants'
-                ? 100
-                : 0;
+        const tenantPct = repairTenantSharePercentage(rep);
         if (e.source === 'repair') {
           // Building-wide owner portion = cost × (100 − tenantPct)%.
           return {
@@ -3919,17 +3912,9 @@ export async function _distributeRepairCharge(
 
   // Respect explicit tenantSharePercentage when provided. Default depends on
   // chargeableTo: 'tenants' implies 100% to tenants, 'split' implies 0%
-  // unless a percentage was set explicitly.
-  const sharePercentage = (() => {
-    if (repair.chargeableTo === 'owners') return 0;
-    if (
-      typeof repair.tenantSharePercentage === 'number' &&
-      Number.isFinite(repair.tenantSharePercentage)
-    ) {
-      return Math.max(0, Math.min(100, repair.tenantSharePercentage));
-    }
-    return repair.chargeableTo === 'tenants' ? 100 : 0;
-  })();
+  // unless a percentage was set explicitly. Shared helper (the SINGLE source the
+  // eksoda reader + breakdown Αχρέωτα emission also use) so the three can't drift.
+  const sharePercentage = repairTenantSharePercentage(repair);
 
   // Owner share is the inverse of the tenant share. 'owners' = 100% owner;
   // 'split' with 60% tenant = 40% owner; 'tenants' = 0% owner.
@@ -5019,17 +5004,9 @@ export async function computeOwnerEksodaByMonth(
     const cost = repair.actualCost || repair.estimatedCost || 0;
     if (!(cost > 0)) continue;
     const repairIdStr = String(repair._id);
-    // Same share% resolution as _distributeRepairCharge.
-    const sharePercentage = (() => {
-      if (repair.chargeableTo === 'owners') return 0;
-      if (
-        typeof repair.tenantSharePercentage === 'number' &&
-        Number.isFinite(repair.tenantSharePercentage)
-      ) {
-        return Math.max(0, Math.min(100, repair.tenantSharePercentage));
-      }
-      return repair.chargeableTo === 'tenants' ? 100 : 0;
-    })();
+    // Shared share% resolution (the ONE helper the writer + breakdown also use,
+    // so the three can't drift). Same result as the prior inline copy.
+    const sharePercentage = repairTenantSharePercentage(repair);
     const ownerPortion =
       repair.chargeableTo === 'owners' ? cost : cost * (1 - sharePercentage / 100);
     // owner-portion (source:'repair', no propertyId) — skip if materialised.

@@ -4,6 +4,7 @@ import i18n from 'i18n';
 import moment from 'moment';
 import { Parser } from 'json2csv';
 import { validateYear } from '../validators.js';
+import * as OwnerManager from './ownermanager.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -638,8 +639,124 @@ async function settlementsAsCsv(req: Req, res: Res) {
   return res.send(Buffer.from(buffer));
 }
 
+// OS4/OS6: the OWNER-side twin of settlementsAsCsv — owner καταβολές vs
+// outstanding per month, as a .xlsx. Same layout (id cols + per-month
+// πληρωμή/οφειλή pairs + Σύνολα), but over owner-ledger data: paid-by-month
+// from each charge's payments[] grouped by term→month, owed-by-month from each
+// charge's NETTED `outstanding` (the same figure _aggregateOwners / the owner
+// statement show). Year-scoped via _aggregateOwners(..., year).
+async function ownerSettlementsAsCsv(req: Req, res: Res) {
+  const realm = req.realm!;
+  const realmId = String(realm._id);
+  const year = req.params?.year
+    ? validateYear(req.params.year, 'year')
+    : new Date().getFullYear();
+  i18n.setLocale(realm.locale);
+
+  const buildings = await Collections.Building.find({ realmId }).lean();
+  const occupiedKeys = await OwnerManager._occupiedKeysForBuildings(
+    realmId,
+    buildings as AnyRecord[]
+  );
+  const owners = OwnerManager._aggregateOwners(
+    buildings as AnyRecord[],
+    occupiedKeys,
+    year
+  );
+  await OwnerManager._markAlsoRents(realmId, owners);
+
+  const monthNames = moment
+    .localeData(realm.locale)
+    .months() as unknown as string[];
+
+  const rows = Array.from(owners.values()).map((agg: AnyRecord) => {
+    const paidByMonth: number[] = new Array(12).fill(0);
+    const owedByMonth: number[] = new Array(12).fill(0);
+    for (const c of agg.charges || []) {
+      // term YYYYMM..; month index 0-11. Year already scoped by _aggregateOwners.
+      const mi = Math.floor((Number(c.term) % 1000000) / 10000) - 1;
+      if (mi < 0 || mi > 11) continue;
+      const paid = (c.payments || []).reduce(
+        (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
+        0
+      );
+      paidByMonth[mi] = _round(paidByMonth[mi] + paid);
+      owedByMonth[mi] = _round(owedByMonth[mi] + (Number(c.outstanding) || 0));
+    }
+    return {
+      name: _sanitizeCsvText(agg.name || ''),
+      taxId: _sanitizeCsvText(agg.taxId || ''),
+      units: Number(agg.unitCount) || 0,
+      buildings: agg.buildingIds ? agg.buildingIds.size : 0,
+      paidByMonth,
+      owedByMonth,
+      totalPaid: _round(Number(agg.totalPaid) || 0),
+      totalOwed: _round(Number(agg.totalOutstanding) || 0)
+    };
+  });
+  // Useful default order: biggest outstanding first, then name.
+  rows.sort(
+    (a, b) => b.totalOwed - a.totalOwed || a.name.localeCompare(b.name)
+  );
+
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(i18n.__('Owner payments'));
+  const columns: AnyRecord[] = [
+    { header: i18n.__('Name'), key: 'name', width: 28 },
+    { header: i18n.__('Tax ID'), key: 'taxId', width: 16 },
+    { header: i18n.__('Units'), key: 'units', width: 10 },
+    { header: i18n.__('Buildings'), key: 'buildings', width: 10 }
+  ];
+  monthNames.forEach((m, i) => {
+    columns.push({ header: `${m} (${i18n.__('Payment')})`, key: `p${i}`, width: 13 });
+    columns.push({ header: `${m} (${i18n.__('Owed')})`, key: `o${i}`, width: 13 });
+  });
+  columns.push({ header: i18n.__('Total payments'), key: 'totalPaid', width: 15 });
+  columns.push({ header: i18n.__('Total owed'), key: 'totalOwed', width: 15 });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ws.columns = columns as any;
+
+  const moneyFmt = '#,##0.00';
+  rows.forEach((r: AnyRecord) => {
+    const rowObj: AnyRecord = {
+      name: r.name,
+      taxId: r.taxId,
+      units: r.units,
+      buildings: r.buildings,
+      totalPaid: r.totalPaid,
+      totalOwed: r.totalOwed
+    };
+    for (let i = 0; i < 12; i++) {
+      rowObj[`p${i}`] = r.paidByMonth[i] > 0 ? r.paidByMonth[i] : null;
+      rowObj[`o${i}`] = r.owedByMonth[i] > 0 ? r.owedByMonth[i] : null;
+    }
+    const added = ws.addRow(rowObj);
+    ['totalPaid', 'totalOwed'].forEach((k) => {
+      const c = added.getCell(k);
+      if (typeof c.value === 'number') c.numFmt = moneyFmt;
+    });
+    for (let i = 0; i < 12; i++) {
+      ['p', 'o'].forEach((pre) => {
+        const c = added.getCell(`${pre}${i}`);
+        if (typeof c.value === 'number') c.numFmt = moneyFmt;
+      });
+    }
+  });
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 1 }];
+
+  const buffer = await wb.xlsx.writeBuffer();
+  res.header(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  return res.send(Buffer.from(buffer));
+}
+
 export const csv = {
   incomingTenants: incomingTenantsAsCsv,
   outgoingTenants: outgoingTenantsAsCsv,
-  settlements: settlementsAsCsv
+  settlements: settlementsAsCsv,
+  ownerSettlements: ownerSettlementsAsCsv
 };

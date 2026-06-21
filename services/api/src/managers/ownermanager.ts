@@ -643,7 +643,7 @@ export function _aggregateOwners(
 // rows. One Tenant query (projected to date fields), one shared occupancy
 // algorithm (common.occupiedPropertyTermKeys). Returns an empty set when there
 // are no propertyId-scoped vacant/owner-resident rows to validate (no query).
-async function _occupiedKeysForBuildings(
+export async function _occupiedKeysForBuildings(
   realmId: string,
   buildings: any[]
 ): Promise<Set<string>> {
@@ -682,7 +682,7 @@ async function _occupiedKeysForBuildings(
 
 // Mark owners who ALSO rent a unit (occupancy pill). A tenant whose taxId or
 // name matches an owner identity is "alsoRents".
-async function _markAlsoRents(
+export async function _markAlsoRents(
   realmId: string,
   owners: Map<string, OwnerAgg>
 ): Promise<void> {

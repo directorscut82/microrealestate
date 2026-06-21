@@ -121,12 +121,22 @@ export type ShareBasis = {
     | 'single_unit'
     | 'custom_ratio'
     | 'custom_percentage'
+    // Repair bases (§1.2/§1.8): repair_split = building-wide owner portion
+    // (cost × ownerPct); repair_vacant = a vacant unit's slice of the tenant
+    // pool (cost × tenantPct → this unit's allocated share).
+    | 'repair_split'
+    | 'repair_vacant'
     | 'none';
   count?: number; // equal: number of PARTIES splitting (tenants + vacant units)
   part?: number; // surface m² / thousandths ‰ for this unit
   whole?: number; // total surface / total thousandths
   total?: number; // the expense amount being split
   share?: number; // the resulting per-unit euro amount (the "= X €" tail)
+  // repair bases:
+  ownerPct?: number; // repair_split: owner share % (= 100 − tenantPct)
+  tenantPct?: number; // repair_vacant: tenant share %
+  pool?: number; // repair_vacant: the tenant pool (cost × tenantPct%)
+  result?: number; // repair_*: the resulting euro (mirrors `share`)
 };
 
 // `partyCount` is the actual divisor the equal-allocation engine uses for
@@ -409,6 +419,88 @@ export function computeBuildingExpenseBreakdown(
         ...(recipient === 'owner'
           ? { owners: ownerSlicesFor(Math.round(amt * 100) / 100) }
           : {})
+      });
+    }
+  }
+
+  // 3. REPAIR Αχρέωτα (§1.8): a flag-OFF repair's vacant-unit share is billed
+  //    to NOBODY (not the tenant — no rent term; not the owner —
+  //    chargeOwnerWhenVacant is off), so _distributeRepairCharge persists no row
+  //    for it and it would silently evaporate. Surface it here as a
+  //    recipient:'owner', ownerBilled:false row so it lands in the Αχρέωτα
+  //    (uncollected) section + ownerUnbilledTotal — mirroring a flag-OFF vacant
+  //    building expense. Flag-ON repairs already materialise a persisted
+  //    source:'repair-vacant' owner row (surfaced via ownerDirect), so they are
+  //    EXCLUDED here (the !== true gate) to avoid double-counting.
+  const repairs = (building?.repairs || []) as any[];
+  for (const unit of units) {
+    if (!unit.propertyId) continue;
+    if (unit.tenant) continue; // occupied → its share bills the tenant's rent
+    if (unit.occupancyType === 'owner_occupied') continue; // owner's own cost, not Αχρέωτα
+    const ownerName =
+      ((unit.owners || []).find((o: any) => o && o.name) || {}).name || null;
+    const propertyName =
+      unit.property?.name || unit.name || String(unit.propertyId);
+    // De-dup against section 2: a repair distributed while the unit was OCCUPIED
+    // persisted a tenant monthlyCharge {repairId, term, amount}. If the tenant
+    // later moved out (unit now vacant for the term) that charge is STALE but
+    // section 2 still surfaces it (recipient:'owner', !ownerBilled) — so §1.8
+    // must NOT re-emit the same repair's share or the Αχρέωτα doubles
+    // (Step-7 §1.8 double-count). Skip any repairId already carried by this
+    // unit's monthlyCharges for the term. (No tenancy hook re-runs
+    // _distributeRepairCharge, so these stale charges genuinely occur.)
+    const chargedRepairIdsThisTerm = new Set<string>();
+    for (const c of unit.monthlyCharges || []) {
+      if (Number(c.term) === term && c.repairId) {
+        chargedRepairIdsThisTerm.add(String(c.repairId));
+      }
+    }
+    for (const repair of repairs) {
+      if (repair.status === 'cancelled') continue;
+      if (!repair.chargeableTo || !repair.chargeTerm) continue;
+      if (Number(repair.chargeTerm) !== term) continue;
+      if (repair.chargeOwnerWhenVacant === true) continue; // flag ON → owner-billed elsewhere
+      if (chargedRepairIdsThisTerm.has(String(repair._id))) continue; // already surfaced by §2
+      const cost = Number(repair.actualCost) || Number(repair.estimatedCost) || 0;
+      if (!(cost > 0)) continue;
+      const tenantPct = repairTenantSharePercentage(repair);
+      const effectiveAmount = cost * (tenantPct / 100);
+      if (!(effectiveAmount > 0)) continue;
+      const restrictUnits =
+        Array.isArray(repair.affectedUnitIds) && repair.affectedUnitIds.length > 0
+          ? new Set(repair.affectedUnitIds.map((u: any) => String(u)))
+          : null;
+      if (restrictUnits && !restrictUnits.has(String(unit._id))) continue;
+      const share = computeBuildingChargeForProperty(
+        building,
+        String(unit.propertyId),
+        {
+          amount: effectiveAmount,
+          allocationMethod: repair.allocationMethod || 'general_thousandths',
+          name: repair.title
+        } as any,
+        term
+      );
+      const shareR = Math.round(share * 100) / 100;
+      if (shareR <= 0) continue;
+      rows.push({
+        expenseId: String(repair._id),
+        expenseName: repair.title || '',
+        expenseType: 'repair',
+        allocationMethod: repair.allocationMethod || 'general_thousandths',
+        propertyId: String(unit.propertyId),
+        propertyName,
+        recipient: 'owner',
+        recipientName: ownerName,
+        amount: shareR,
+        basis: {
+          kind: 'repair_vacant',
+          total: Math.round(cost * 100) / 100,
+          tenantPct,
+          pool: Math.round(cost * (tenantPct / 100) * 100) / 100,
+          result: shareR
+        },
+        ownerBilled: false
       });
     }
   }
@@ -835,6 +927,23 @@ export function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense,
     return false;
   }
   return true;
+}
+
+// The tenant-share % of a repair, resolved the ONE way every consumer must use
+// (the writer _distributeRepairCharge, the eksoda reader computeOwnerEksodaByMonth,
+// and the breakdown's repair-Αχρέωτα emission). owners → 0, an explicit finite
+// tenantSharePercentage → that (clamped 0..100), else tenants → 100 / split → 0.
+// Shared so the three never drift (a divergence here is a money bug).
+export function repairTenantSharePercentage(repair: any): number {
+  if (!repair) return 0;
+  if (repair.chargeableTo === 'owners') return 0;
+  if (
+    typeof repair.tenantSharePercentage === 'number' &&
+    Number.isFinite(repair.tenantSharePercentage)
+  ) {
+    return Math.max(0, Math.min(100, repair.tenantSharePercentage));
+  }
+  return repair.chargeableTo === 'tenants' ? 100 : 0;
 }
 
 export default function taskBase(

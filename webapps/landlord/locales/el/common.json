@@ -1,5 +1,6 @@
 {
   "Payments - {{year}}.xlsx": "Πληρωμές - {{year}}.xlsx",
+  "Owner payments - {{year}}.xlsx": "Πληρωμές ιδιοκτητών - {{year}}.xlsx",
   "Vacant / owner-occupied unit shares": "Μερίδια κενών / ιδιοκατοίκητων μονάδων",
   "Pending": "Εκκρεμεί",
   "Overdue": "Εκπρόθεσμη",

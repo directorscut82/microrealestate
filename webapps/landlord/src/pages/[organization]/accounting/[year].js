@@ -131,6 +131,18 @@ function Accounting() {
     [t, year]
   );
 
+  // OS4/OS6: owner-side settlements export (xlsx), twin of getSettlementsAsCsv.
+  const getOwnerSettlementsAsCsv = useCallback(
+    async (e) => {
+      e.stopPropagation();
+      downloadDocument({
+        endpoint: `/csv/owner-settlements/${year}`,
+        documentName: t('Owner payments - {{year}}.xlsx', { year })
+      });
+    },
+    [t, year]
+  );
+
   const getIncomingTenantsAsCsv = useCallback(
     async (e) => {
       e.stopPropagation();
@@ -253,6 +265,7 @@ function Accounting() {
           <OwnerStatements
             data={filteredOwners}
             onDownloadStatement={getOwnerStatement}
+            onCSVClick={getOwnerSettlementsAsCsv}
           />
         </TabsContent>
       </Tabs>

@@ -203,6 +203,118 @@ describe('computeBuildingExpenseBreakdown', () => {
     expect(r.tenantTotal).toBe(50); // both billed to renters, matching the engine
   });
 
+  // §1.8: a flag-OFF repair's vacant-unit share is billed to NOBODY (no rent
+  // term, flag off) → it must surface in the breakdown as recipient:'owner',
+  // ownerBilled:false (Αχρέωτα) instead of silently evaporating. Flag-ON repairs
+  // materialise a persisted source:'repair-vacant' owner row (surfaced via
+  // ownerDirect, NOT the engine) so the engine must NOT also emit them (double-count).
+  it('§1.8: flag-OFF repair vacant share surfaces as owner-UNCOLLECTED (Αχρέωτα)', () => {
+    const mk = (chargeOwnerWhenVacant) => ({
+      _id: 'br18', name: 'BR18', atakPrefix: '005578',
+      units: [
+        { ...makeUnit('o1', { generalThousandths: 500 }), property: { name: 'Occ' }, tenant: { _id: 't1', name: 'Alice' } },
+        { ...makeUnit('v1', { generalThousandths: 500 }), property: { name: 'Vac' }, tenant: null } // vacant
+      ],
+      expenses: [],
+      repairs: [{
+        _id: 'rep1', title: 'Elevator', category: 'elevator', status: 'planned',
+        chargeableTo: 'tenants', tenantSharePercentage: 100, allocationMethod: 'general_thousandths',
+        chargeTerm: 2024060100, actualCost: 200, affectedUnitIds: [],
+        chargeOwnerWhenVacant
+      }],
+      address: {}, blockStreets: [], contractors: [], ownerMonthlyExpenses: []
+    });
+    // Flag OFF: the vacant unit's €100 share (200 × 500/1000) is uncollected.
+    const off = computeBuildingExpenseBreakdown(mk(false), 2024060100);
+    const vacRow = off.rows.find((r) => r.propertyId === 'v1' && r.expenseType === 'repair');
+    expect(vacRow).toBeDefined(); // flag-off repair vacant row present
+    expect(vacRow.recipient).toBe('owner');
+    expect(vacRow.ownerBilled).toBe(false); // Αχρέωτα
+    expect(vacRow.amount).toBe(100);
+    expect(vacRow.basis.kind).toBe('repair_vacant');
+    expect(vacRow.basis.pool).toBe(200); // 200 × 100%
+    expect(off.ownerUnbilledTotal).toBe(100); // surfaces in the uncollected total
+    // NOTE: the occupied unit's repair tenant-charge is NOT emitted by the
+    // engine here — repairs reach tenants only via a persisted monthlyCharge
+    // written by _distributeRepairCharge (section 2), which this pure-engine
+    // fixture has none of. §1.8 is solely the vacant-Αχρέωτα emission; the
+    // occupied/tenant side is the distributor's job and is covered elsewhere
+    // (spec 51 / repairCancelUncancel). So we only assert the vacant row here.
+    const engineEmittedOccRepair = off.rows.find(
+      (r) => r.propertyId === 'o1' && r.expenseType === 'repair'
+    );
+    expect(engineEmittedOccRepair).toBeUndefined();
+
+    // Flag ON: the engine must NOT emit a vacant repair row (the flag-on path
+    // persists a source:'repair-vacant' owner row elsewhere; emitting here too
+    // would double-count). So no engine repair row for the vacant unit.
+    const on = computeBuildingExpenseBreakdown(mk(true), 2024060100);
+    const onVac = on.rows.find((r) => r.propertyId === 'v1' && r.expenseType === 'repair');
+    expect(onVac).toBeUndefined(); // flag-on must NOT emit an engine vacant repair row
+    expect(on.ownerUnbilledTotal).toBe(0);
+  });
+
+  it('§1.8: a cancelled / zero-cost / owners-only repair contributes no Αχρέωτα', () => {
+    const base = (repairOverrides) => ({
+      _id: 'br18b', name: 'BR18b', atakPrefix: '005578',
+      units: [
+        { ...makeUnit('v1', { generalThousandths: 1000 }), property: { name: 'Vac' }, tenant: null }
+      ],
+      expenses: [],
+      repairs: [{
+        _id: 'rep1', title: 'X', category: 'general', status: 'planned',
+        chargeableTo: 'tenants', tenantSharePercentage: 100, allocationMethod: 'general_thousandths',
+        chargeTerm: 2024060100, actualCost: 200, affectedUnitIds: [], chargeOwnerWhenVacant: false,
+        ...repairOverrides
+      }],
+      address: {}, blockStreets: [], contractors: [], ownerMonthlyExpenses: []
+    });
+    // cancelled → nothing
+    expect(computeBuildingExpenseBreakdown(base({ status: 'cancelled' }), 2024060100).ownerUnbilledTotal).toBe(0);
+    // zero cost → nothing
+    expect(computeBuildingExpenseBreakdown(base({ actualCost: 0, estimatedCost: 0 }), 2024060100).ownerUnbilledTotal).toBe(0);
+    // owners-only (tenantPct 0) → no tenant pool → no vacant Αχρέωτα slice
+    expect(computeBuildingExpenseBreakdown(base({ chargeableTo: 'owners' }), 2024060100).ownerUnbilledTotal).toBe(0);
+    // wrong term → nothing
+    expect(computeBuildingExpenseBreakdown(base({ chargeTerm: 2024070100 }), 2024060100).ownerUnbilledTotal).toBe(0);
+  });
+
+  // §1.8 double-count guard (Step-7): a repair distributed while the unit was
+  // OCCUPIED persisted a tenant monthlyCharge {repairId, term, amount}. If the
+  // tenant later moved out (unit vacant for the term) that charge is stale but
+  // section 2 still surfaces it as owner-uncollected. §1.8 must NOT re-emit the
+  // same repair's share — else Αχρέωτα doubles. The share surfaces EXACTLY ONCE.
+  it('§1.8: a stale repair monthlyCharge on a now-vacant unit surfaces ONCE (no double-count)', () => {
+    const b = {
+      _id: 'br18c', name: 'BR18c', atakPrefix: '005578',
+      units: [
+        {
+          ...makeUnit('v1', { generalThousandths: 1000 }),
+          property: { name: 'Vac' },
+          tenant: null, // vacant for the term now
+          // stale tenant repair charge written when v1 was occupied
+          monthlyCharges: [
+            { term: 2024060100, amount: 100, description: 'Repair: Elevator', repairId: 'rep1' }
+          ]
+        }
+      ],
+      expenses: [],
+      repairs: [{
+        _id: 'rep1', title: 'Elevator', category: 'elevator', status: 'planned',
+        chargeableTo: 'tenants', tenantSharePercentage: 100, allocationMethod: 'general_thousandths',
+        chargeTerm: 2024060100, actualCost: 100, affectedUnitIds: [], chargeOwnerWhenVacant: false
+      }],
+      address: {}, blockStreets: [], contractors: [], ownerMonthlyExpenses: []
+    };
+    const r = computeBuildingExpenseBreakdown(b, 2024060100);
+    const repairRows = r.rows.filter(
+      (x) => x.propertyId === 'v1' && (x.expenseType === 'repair' || String(x.expenseId) === 'rep1')
+    );
+    // EXACTLY ONE repair row for v1 (the stale section-2 row), NOT two.
+    expect(repairRows.length).toBe(1);
+    expect(r.ownerUnbilledTotal).toBe(100); // €100, not €200
+  });
+
   // Round-1 audit M2: the thousandths basis `whole` (the printed denominator)
   // must reduce over ALL building.units — the SAME denominator the engine bills
   // with — so the equation part ÷ whole × total reconciles to the billed share

@@ -19,5 +19,9 @@
   "Owed": "Οφειλή",
   "Total payments": "Σύνολο πληρωμών",
   "Total owed": "Σύνολο οφειλών",
-  "Payments": "Καταβολές"
+  "Payments": "Καταβολές",
+  "Owner payments": "Πληρωμές ιδιοκτητών",
+  "Tax ID": "ΑΦΜ",
+  "Units": "Μονάδες",
+  "Buildings": "Κτίρια"
 }
