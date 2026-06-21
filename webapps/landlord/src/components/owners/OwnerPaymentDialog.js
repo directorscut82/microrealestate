@@ -422,7 +422,18 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                 <SelectContent>
                   {outstandingCharges.map((c) => (
                     <SelectItem key={c.ownerExpenseId} value={c.ownerExpenseId}>
-                      {_termLabel(c.term)} · {ownerChargeLabel(t, c)}
+                      {/* Append the outstanding amount so two charges of the
+                          same type/month (identical label) are still
+                          distinguishable in the list — and so the landlord sees
+                          what each option costs. */}
+                      <span className="inline-flex w-full items-baseline justify-between gap-3">
+                        <span className="truncate">
+                          {_termLabel(c.term)} · {ownerChargeLabel(t, c)}
+                        </span>
+                        <span className="font-mono tabular-nums text-ink-muted shrink-0">
+                          <NumberFormat value={c.outstanding} />
+                        </span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -13,7 +13,6 @@ import {
 } from '../ui/table';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
-import { Progress } from '../ui/progress';
 import { cn } from '../../utils';
 import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
@@ -112,6 +111,96 @@ function FloorLabel({ floor }) {
   );
 }
 
+// Uppercase section label — the architectural-calm section marker (DESIGN.md
+// Label role): small, tracked, ink-muted. One per section inside a card.
+function SectionLabel({ children, className }) {
+  return (
+    <div
+      className={cn(
+        'text-label uppercase tracking-wide text-ink-muted',
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+// A thin two-tone progress bar matching the mockup: 8px rounded track on
+// `stone`, a colored fill (olive=paid/collected, sea=rent). Replaces the fat
+// near-black <Progress> blob. `pct` is clamped 0..100 by the caller.
+function BarRow({ label, valueNode, pct, fill = 'olive', footLeft, footRight }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 mb-1.5">
+        <span className="text-body text-ink-soft">{label}</span>
+        <span className="font-mono tabular-nums text-body text-ink">
+          {valueNode}
+        </span>
+      </div>
+      <div className="h-2 rounded-pill bg-stone overflow-hidden">
+        <div
+          className={cn(
+            'h-full rounded-pill',
+            fill === 'sea' ? 'bg-sea' : 'bg-olive'
+          )}
+          style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+        />
+      </div>
+      {(footLeft || footRight) && (
+        <div className="flex justify-between text-label mt-1.5">
+          <span className="text-olive">{footLeft}</span>
+          <span className="text-oxide">{footRight}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One eksoda-composition cell (the mockup's `.comp .cell`): quiet cream tile,
+// a 2-line label, a mono value under it. NOT a hero metric and NOT an
+// identical-grid card — it's a labelled figure in a flow grid.
+function CompCell({ label, value, owner }) {
+  return (
+    <div
+      className={cn(
+        'rounded-sm border bg-cream px-3 py-2.5',
+        owner ? 'border-oxide/40' : 'border-stone-line'
+      )}
+    >
+      <div className="text-label text-ink-muted leading-tight min-h-[2.4em] normal-case tracking-normal">
+        {label}
+      </div>
+      <div className="font-mono tabular-nums text-body text-ink mt-1">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+// A unit-count cell for the Μονάδες summary (mockup `.ucard`): serif number
+// over a small label, centered. Tonal, bordered, no shadow — distinct from the
+// banned hero-metric template (no gradient, no accent chip, plain count).
+function UnitCountCell({ n, label, tone }) {
+  return (
+    <div className="rounded-md border border-stone-line bg-bone px-2 py-4 text-center">
+      <div
+        className={cn(
+          'font-display text-2xl leading-none',
+          tone === 'rent' && 'text-olive',
+          tone === 'own' && 'text-sea',
+          tone === 'mut' && 'text-ink-muted'
+        )}
+      >
+        {n}
+      </div>
+      <div className="text-label text-ink-muted mt-1 normal-case tracking-normal">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 export default function BuildingDashboard({ building }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
@@ -168,7 +257,7 @@ export default function BuildingDashboard({ building }) {
       0
     );
     if (paid >= owed - 0.005 && owed > 0) {
-      return { key: 'paid', label: t('Paid'), cls: 'bg-olive/15 text-olive' };
+      return { key: 'paid', label: t('Paid'), variant: 'paid' };
     }
     // time check: has the charge term / completion date passed?
     const term = Number(repair.completionDate
@@ -177,8 +266,8 @@ export default function BuildingDashboard({ building }) {
     const nowYM = Number(moment().format('YYYYMM'));
     const overdue = term > 0 && term < nowYM;
     return overdue
-      ? { key: 'overdue', label: t('Overdue'), cls: 'bg-oxide/15 text-oxide' }
-      : { key: 'pending', label: t('Pending'), cls: 'bg-stone text-ink-muted' };
+      ? { key: 'overdue', label: t('Overdue'), variant: 'overdue' }
+      : { key: 'pending', label: t('Pending'), variant: 'neutral' };
   };
 
   const { data: properties } = useQuery({
@@ -700,53 +789,49 @@ export default function BuildingDashboard({ building }) {
   if (!building) return null;
 
   return (
-    <div className="space-y-6">
-      {/* Esoda / Eksoda summary (annual projection) — at the top so the
-          landlord sees the headline financial picture before the unit list. */}
-      <Card className="p-4">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-          <div>
-            <div className="text-label text-muted-foreground uppercase tracking-wide">
-              {t('Annual projection')}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">
+    <div className="space-y-4">
+      {/* CARD 1 — Ετήσια προβολή (annual projection). Header: label + note on
+          the left, the three figures (Έσοδα / Έξοδα ιδιοκτήτη / Καθαρό) aligned
+          right. Then "Ανάλυση εξόδων κτιρίου": who pays — ΕΝΟΙΚΙΑΣΤΕΣ cells (not
+          subtracted from Net) + ΙΔΙΟΚΤΗΤΕΣ cell (the only part subtracted).
+          Matches documentation/mockups/building-overview-redesign.html. */}
+      <Card className="p-5">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div className="min-w-0 md:max-w-[58%]">
+            <SectionLabel>
+              {t('Annual projection')} {new Date().getFullYear()}
+            </SectionLabel>
+            <p className="text-body text-ink-muted mt-1.5">
               {/* A1/A5: pure annual projection; only OWNER expenses are
                   subtracted from Net (pass-through κοινόχρηστα/tenant repairs
                   are the tenants' money). */}
               {t(
                 'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
               )}
-            </div>
+            </p>
           </div>
-          <div className="grid grid-cols-3 gap-6 text-right">
-            <div>
-              <div className="text-label text-muted-foreground uppercase">
-                {t('Income')}
-              </div>
-              <div className="text-xl font-medium text-olive">
+          {/* Three figures, right-aligned, each label over a mono value. The
+              labels wrap above their own value so the figures never collide. */}
+          <div className="flex items-start justify-end gap-6 shrink-0">
+            <div className="text-right">
+              <SectionLabel>{t('Income')}</SectionLabel>
+              <div className="font-mono tabular-nums text-headline text-olive mt-1">
                 <NumberFormat value={finance.annualEsoda} showZero />
               </div>
             </div>
-            <div>
-              <div className="text-label text-muted-foreground uppercase">
-                {t('Owner expenses')}
-              </div>
-              <div className="text-xl font-medium text-oxide">
-                {/* A5: the subtracted figure is owner-borne only — includes the
-                    vacant/owner-resident expense shares so Income − this === Net. */}
+            <div className="text-right">
+              <SectionLabel>{t('Owner expenses')}</SectionLabel>
+              <div className="font-mono tabular-nums text-headline text-oxide mt-1">
+                {/* A5: owner-borne only — includes vacant/owner-resident shares
+                    so Income − this === Net. */}
                 <NumberFormat value={finance.ownerBorneTotal} showZero />
               </div>
             </div>
-            <div>
-              <div className="text-label text-muted-foreground uppercase">
-                {t('Net')}
-              </div>
+            <div className="text-right">
+              <SectionLabel>{t('Net')}</SectionLabel>
               <div
                 className={cn(
-                  'text-xl font-semibold',
-                  // F6-buildingdash: break-even (net===0) shouldn't be
-                  // colored as profit. Three-way state — green for
-                  // positive, red for loss, neutral for zero.
+                  'font-mono tabular-nums text-headline mt-1',
                   finance.net > 0 && 'text-olive',
                   finance.net < 0 && 'text-oxide',
                   finance.net === 0 && 'text-ink-muted'
@@ -757,94 +842,278 @@ export default function BuildingDashboard({ building }) {
             </div>
           </div>
         </div>
+
         {(finance.annualEksoda > 0 || finance.variableYtdEksoda > 0) && (
-          /* H3: variableYtdEksoda is NOT part of annualEksoda (which only sums
-             fixed×12 + one-time + repairs + ownerEksoda). A building whose only
-             expenses are κυμαινόμενα (variable monthly — electricity/water) thus
-             had annualEksoda 0 and the whole "who pays" breakdown, including its
-             real Variable YTD figure, was hidden. Surface it when either is > 0. */
-          /* A5/A6 — "who pays" breakdown, two plain groups. ΕΝΟΙΚΙΑΣΤΕΣ pay the
-             pass-through (κοινόχρηστα + one-time + tenant repairs) — NOT
-             subtracted from Net; ΙΔΙΟΚΤΗΤΕΣ pay έξοδα ιδιοκτήτη — the only part
-             subtracted from Net. */
-          <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-2 text-xs text-muted-foreground">
-            <div>
-              <div className="font-medium text-olive mb-1">
+          /* H3: surface the who-pays breakdown when EITHER annualEksoda or the
+             variable YTD is > 0 (a variable-only building has annualEksoda 0). */
+          <div className="mt-4 pt-4 border-t border-stone-line">
+            <SectionLabel className="mb-2.5">
+              {t('Building expense breakdown')}
+            </SectionLabel>
+
+            {/* ΕΝΟΙΚΙΑΣΤΕΣ — pass-through; not subtracted from Net. */}
+            <div className="mb-3">
+              <div className="text-label text-olive font-medium mb-1.5 normal-case tracking-normal">
                 {t('TENANTS')}{' '}
-                <span className="text-muted-foreground/70 font-normal">
+                <span className="text-ink-muted font-normal">
                   — {t('not subtracted from Net')}
                 </span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pl-2">
-                <div>
-                  {t('Fixed recurring')} ×12:{' '}
-                  <NumberFormat
-                    value={finance.recurringMonthlyEksoda * 12}
-                    showZero
-                  />
-                </div>
-                {/* A6: κυμαινόμενα are NOT ×12 — the actual typed totals YTD. */}
-                <div>
-                  {t('Variable (year to date)')}:{' '}
-                  <NumberFormat value={finance.variableYtdEksoda} showZero />
-                </div>
-                <div>
-                  {t('One-time')}:{' '}
-                  <NumberFormat value={finance.oneTimeEksoda} showZero />
-                </div>
-                <div>
-                  {t('Tenant repairs')}:{' '}
-                  <NumberFormat value={finance.repairEksoda} showZero />
-                </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                <CompCell
+                  label={`${t('Fixed recurring')} ×12`}
+                  value={
+                    <NumberFormat
+                      value={finance.recurringMonthlyEksoda * 12}
+                      showZero
+                    />
+                  }
+                />
+                <CompCell
+                  label={t('Variable (year to date)')}
+                  value={
+                    <NumberFormat value={finance.variableYtdEksoda} showZero />
+                  }
+                />
+                <CompCell
+                  label={t('One-time')}
+                  value={<NumberFormat value={finance.oneTimeEksoda} showZero />}
+                />
+                <CompCell
+                  label={t('Tenant repairs')}
+                  value={<NumberFormat value={finance.repairEksoda} showZero />}
+                />
               </div>
             </div>
+
+            {/* ΙΔΙΟΚΤΗΤΕΣ — the only part subtracted from Net. */}
             <div>
-              <div className="font-medium text-oxide mb-1">
+              <div className="text-label text-oxide font-medium mb-1.5 normal-case tracking-normal">
                 {t('OWNERS')}{' '}
-                <span className="text-muted-foreground/70 font-normal">
+                <span className="text-ink-muted font-normal">
                   — {t('subtracted from Net')}
                 </span>
               </div>
-              <div className="pl-2 space-y-0.5">
-                <div>
-                  {t('Owner expenses')}:{' '}
-                  <NumberFormat value={finance.ownerEksoda} showZero />
-                </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                <CompCell
+                  owner
+                  label={t('Owner expenses')}
+                  value={<NumberFormat value={finance.ownerEksoda} showZero />}
+                />
                 {finance.vacantOwnerResidentEksoda > 0 && (
-                  <div>
-                    {t('Vacant / owner-occupied unit shares')}:{' '}
-                    <NumberFormat
-                      value={finance.vacantOwnerResidentEksoda}
-                      showZero
-                    />
-                  </div>
+                  <CompCell
+                    owner
+                    label={t('Vacant / owner-occupied unit shares')}
+                    value={
+                      <NumberFormat
+                        value={finance.vacantOwnerResidentEksoda}
+                        showZero
+                      />
+                    }
+                  />
                 )}
               </div>
             </div>
           </div>
         )}
-        {/* Per-repair financial line items — each repair with title, term,
-            charge attribution, and total cost so repairs are visible as named
-            entities in the overview, not just aggregated into a single number.
-            All 22 downstream read-surfaces (expense panel, owner ledger, rent
-            detail, invoices, PDFs, charts) render repair-BILLING data
-            (monthlyCharges/ownerMonthlyExpenses) which requires the distribution
-            to have run; this section shows the REPAIR ITSELF regardless. */}
-        {(building?.repairs || []).filter(
-          (r) => (r.actualCost || r.estimatedCost) && r.status !== 'cancelled'
-        ).length > 0 && (
-          <div className="mt-3 pt-3 border-t border-stone-line/60">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-              {t('Repairs')}
+      </Card>
+
+      {/* CARD 2 — ΑΠΟ ΑΡΧΗΣ ΕΤΟΥΣ: this year's actuals, both bars in ONE card
+          (A2). Rent collected-vs-owed + owner expenses paid-vs-outstanding,
+          thin two-tone tracks (not the fat near-black blob). Only the bars that
+          have data render. */}
+      {(() => {
+        const ytd = building?.tenantRentYTD || { collected: 0, owed: 0 };
+        const rentTotal = (Number(ytd.collected) || 0) + (Number(ytd.owed) || 0);
+        const hasRent = rentTotal > 0;
+        const hasOwner = finance.ownerLedgerTotal > 0;
+        if (!hasRent && !hasOwner) return null;
+        return (
+          <Card className="p-5">
+            <SectionLabel className="mb-3">
+              {t('Year to date')} {new Date().getFullYear()}
+            </SectionLabel>
+            <div className="space-y-4">
+              {hasRent && (
+                <BarRow
+                  label={t('Rent collected')}
+                  valueNode={
+                    <>
+                      <NumberFormat value={ytd.collected} showZero />
+                      <span className="text-ink-muted">
+                        {' / '}
+                        <NumberFormat value={rentTotal} showZero />
+                      </span>
+                    </>
+                  }
+                  pct={Math.round((ytd.collected / rentTotal) * 100)}
+                  fill="sea"
+                  footLeft={
+                    <>
+                      {t('Collected')}:{' '}
+                      <NumberFormat value={ytd.collected} showZero />
+                    </>
+                  }
+                  footRight={
+                    <>
+                      {t('Owed')}: <NumberFormat value={ytd.owed} showZero />
+                    </>
+                  }
+                />
+              )}
+              {hasOwner && (
+                <BarRow
+                  label={t('Owner expenses paid')}
+                  valueNode={
+                    <>
+                      <NumberFormat value={finance.ownerPaid} showZero />
+                      <span className="text-ink-muted">
+                        {' / '}
+                        <NumberFormat
+                          value={finance.ownerLedgerTotal}
+                          showZero
+                        />
+                      </span>
+                    </>
+                  }
+                  pct={Math.round(
+                    (finance.ownerPaid / finance.ownerLedgerTotal) * 100
+                  )}
+                  fill="olive"
+                  footLeft={
+                    <>
+                      {t('Paid')}:{' '}
+                      <NumberFormat value={finance.ownerPaid} showZero />
+                    </>
+                  }
+                  footRight={
+                    <>
+                      {t('Outstanding')}:{' '}
+                      <NumberFormat value={finance.ownerUnpaid} showZero />
+                    </>
+                  }
+                />
+              )}
             </div>
-            <div className="space-y-1">
-              {(building.repairs || [])
-                .filter(
-                  (r) =>
-                    (r.actualCost || r.estimatedCost) &&
-                    r.status !== 'cancelled'
-                )
-                .map((r, i) => {
+          </Card>
+        );
+      })()}
+
+      {/* §5: Αχρέωτα (uncollected) — vacant-unit expense money billed to NOBODY
+          (the share of an expense/repair on a vacant unit with the
+          chargeOwnerWhenVacant flag off). NOT a debt — it's money the building
+          simply doesn't collect. The tile shows the cumulative year total and
+          how much has been VOLUNTARILY covered (building.uncollected, computed
+          server-side, netted by uncollectedPayments). Server returns it only on
+          the building detail read. */}
+      {building?.uncollected && building.uncollected.total > 0 && (
+        <Card className="p-5">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div className="min-w-0 md:max-w-[62%]">
+              <SectionLabel>{t('Uncollected')}</SectionLabel>
+              <p className="text-body text-ink-muted mt-1.5">
+                {t(
+                  'Vacant-unit expense shares billed to nobody for {{year}}. Not a debt — coverage payments reduce it.',
+                  { year: new Date().getFullYear() }
+                )}
+              </p>
+            </div>
+            {building.uncollected.outstanding > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setUncollectedDialogOpen(true)}
+              >
+                {t('Coverage payment')}
+              </Button>
+            )}
+          </div>
+          <BarRow
+            label={t('Covered')}
+            valueNode={
+              <>
+                <NumberFormat value={building.uncollected.outstanding} showZero />
+                <span className="text-ink-muted">
+                  {' / '}
+                  <NumberFormat value={building.uncollected.total} showZero />
+                </span>
+              </>
+            }
+            pct={Math.round(
+              (building.uncollected.paidTotal /
+                (building.uncollected.total || 1)) *
+                100
+            )}
+            fill="olive"
+            footLeft={
+              <>
+                {t('Covered')}:{' '}
+                <NumberFormat value={building.uncollected.paidTotal} showZero />
+              </>
+            }
+            footRight={
+              <>
+                {t('Still uncollected')}:{' '}
+                <NumberFormat
+                  value={building.uncollected.outstanding}
+                  showZero
+                />
+              </>
+            }
+          />
+          <UncollectedPaymentDialog
+            open={uncollectedDialogOpen}
+            setOpen={setUncollectedDialogOpen}
+            building={building}
+            outstanding={building.uncollected.outstanding}
+          />
+        </Card>
+      )}
+
+      {/* CARD 3 — Επισκευές (A3: moved BEFORE units). Two lines per repair:
+          name + dual status badge + cost on line 1; the charge split on line 2.
+          Plus a one-line operational summary (open / in progress / emergencies)
+          in the header. Every repair value is preserved (no data dropped). */}
+      {(building?.repairs || []).length > 0 && (
+        <Card className="p-5">
+          <div className="flex items-baseline justify-between gap-3 mb-3">
+            <span className="font-display text-headline">{t('Repairs')}</span>
+            <div className="flex items-center gap-5 text-label text-ink-muted">
+              <span>
+                {t('Open')}:{' '}
+                <span className="font-medium text-ink">
+                  {finance.repairStats.open}
+                </span>
+              </span>
+              <span>
+                {t('In progress')}:{' '}
+                <span className="font-medium text-ink">
+                  {finance.repairStats.inProgress}
+                </span>
+              </span>
+              {finance.repairStats.emergencies > 0 && (
+                <span className="text-oxide font-medium">
+                  {t('Emergencies')}: {finance.repairStats.emergencies}
+                </span>
+              )}
+            </div>
+          </div>
+          {(() => {
+            const billed = (building.repairs || []).filter(
+              (r) =>
+                (r.actualCost || r.estimatedCost) && r.status !== 'cancelled'
+            );
+            if (billed.length === 0) {
+              return (
+                <p className="text-body text-ink-muted">
+                  {t('No billable repairs recorded.')}
+                </p>
+              );
+            }
+            return (
+              <div>
+                {billed.map((r, i) => {
                   const cost = Number(r.actualCost || r.estimatedCost || 0);
                   const tp = r.tenantSharePercentage || 0;
                   const chargeLabel =
@@ -855,7 +1124,6 @@ export default function BuildingDashboard({ building }) {
                         : r.chargeableTo === 'split'
                           ? `${t('Tenants')} ${tp}% · ${t('Owners')} ${100 - tp}%`
                           : t('Unassigned');
-                  // A7: term or MM/YYYY–MM/YYYY span (when completionDate set).
                   const startYM = r.chargeTerm
                     ? `${String(r.chargeTerm).slice(4, 6)}/${String(r.chargeTerm).slice(0, 4)}`
                     : '';
@@ -871,288 +1139,67 @@ export default function BuildingDashboard({ building }) {
                   return (
                     <div
                       key={r._id || i}
-                      className="flex items-center justify-between gap-2 text-xs"
+                      className={cn(
+                        'py-2.5',
+                        i > 0 && 'border-t border-stone-line'
+                      )}
                     >
-                      <span className="flex items-center gap-2 min-w-0">
-                        <span className="text-ink truncate">
-                          {r.title || r.description || t('Repair')}
-                        </span>
-                        {/* A7 dual status: work badge + (owner-side) money badge */}
-                        <span className="inline-block px-1.5 rounded-pill bg-sea-tint text-sea-deep">
-                          {work}
-                        </span>
-                        {money && (
-                          <span
-                            className={cn('inline-block px-1.5 rounded-pill', money.cls)}
-                          >
-                            {money.label}
+                      <div className="flex items-baseline justify-between gap-4">
+                        <div className="min-w-0 flex items-baseline gap-2 flex-wrap">
+                          <span className="font-medium text-ink truncate">
+                            {r.title || r.description || t('Repair')}
                           </span>
-                        )}
-                      </span>
-                      <span className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
-                        {termLabel && <span>{termLabel}</span>}
-                        <span>→ {chargeLabel}</span>
-                        <NumberFormat
-                          value={cost}
-                          className="text-ink font-medium"
-                        />
-                      </span>
+                          {termLabel && (
+                            <span className="text-label text-ink-muted">
+                              {termLabel}
+                            </span>
+                          )}
+                          <Badge variant="pending">{work}</Badge>
+                          {money && (
+                            <Badge variant={money.variant}>{money.label}</Badge>
+                          )}
+                        </div>
+                        <span className="font-mono tabular-nums text-body text-ink whitespace-nowrap">
+                          <NumberFormat value={cost} />
+                        </span>
+                      </div>
+                      <div className="text-label text-ink-soft mt-1 normal-case tracking-normal">
+                        {t('Allocation')}: {chargeLabel}
+                      </div>
                     </div>
                   );
                 })}
-            </div>
+              </div>
+            );
+          })()}
+        </Card>
+      )}
+
+      {/* CARD 4 — Μονάδες (B3: Κενά and Στάθμευση distinct; A4 occupancy). One
+          card holding a 5-cell count row, NOT five identical cards. */}
+      <Card className="p-5">
+        <SectionLabel className="mb-3">{t('Units')}</SectionLabel>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+          <UnitCountCell n={stats.total} label={t('Total units')} />
+          <UnitCountCell n={stats.rented} label={t('Rented')} tone="rent" />
+          <UnitCountCell
+            n={stats.ownerOccupied}
+            label={t('Owner occupied')}
+            tone="own"
+          />
+          <UnitCountCell n={stats.vacant} label={t('Vacant')} tone="mut" />
+          <UnitCountCell n={stats.parking} label={t('Parking')} tone="mut" />
+        </div>
+        {stats.total > 0 && (
+          <div className="text-label text-ink-muted text-right mt-2.5 normal-case tracking-normal">
+            {t('Occupancy')}:{' '}
+            <span className="font-medium text-ink">
+              {Math.round((stats.rented / stats.total) * 100)}%
+            </span>{' '}
+            ({stats.rented} {t('of')} {stats.total})
           </div>
         )}
       </Card>
-
-      {/* A2: tenant rent collected vs owed (φέτος μέχρι σήμερα) — the tenant
-          twin of the owner paid/unpaid tile below. collected = Σ rent payments
-          this year, owed = Σ unpaid rent this year (server-computed in
-          _toBuildingData from the tenants' rents). Shown when there is any rent
-          activity this year. */}
-      {(() => {
-        const ytd = building?.tenantRentYTD || { collected: 0, owed: 0 };
-        const total = (Number(ytd.collected) || 0) + (Number(ytd.owed) || 0);
-        if (!(total > 0)) return null;
-        return (
-          <Card className="p-4">
-            <div className="flex items-end justify-between gap-4 mb-2">
-              <div>
-                <div className="text-label text-muted-foreground uppercase tracking-wide">
-                  {t('Rent collected')}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {t('Tenant rent for {{year}}: collected vs owed.', {
-                    year: new Date().getFullYear()
-                  })}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-xl font-medium">
-                  <NumberFormat value={ytd.collected} showZero />
-                  <span className="text-sm text-muted-foreground">
-                    {' / '}
-                    <NumberFormat value={total} showZero />
-                  </span>
-                </div>
-              </div>
-            </div>
-            <Progress value={Math.round((ytd.collected / total) * 100)} />
-            <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-              <span className="text-olive">
-                {t('Collected')}:{' '}
-                <NumberFormat value={ytd.collected} showZero />
-              </span>
-              <span className="text-oxide">
-                {t('Owed')}: <NumberFormat value={ytd.owed} showZero />
-              </span>
-            </div>
-          </Card>
-        );
-      })()}
-
-      {/* Owner expenses paid vs unpaid — directly under the income card, the
-          eksoda counterpart to the esoda headline. Only shown when the owner
-          ledger has entries this year. The landlord marks each owner-side
-          charge paid from the building Expenses → breakdown; this tile rolls
-          them up so "how much of this year's owner expenses have I settled?"
-          is answerable at a glance. */}
-      {finance.ownerLedgerTotal > 0 && (
-        <Card className="p-4">
-          <div className="flex items-end justify-between gap-4 mb-2">
-            <div>
-              <div className="text-label text-muted-foreground uppercase tracking-wide">
-                {t('Owner expenses paid')}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {t('Owner-side charges for {{year}}: paid vs outstanding.', {
-                  year: new Date().getFullYear()
-                })}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xl font-medium">
-                <NumberFormat value={finance.ownerPaid} showZero />
-                <span className="text-sm text-muted-foreground">
-                  {' / '}
-                  <NumberFormat value={finance.ownerLedgerTotal} showZero />
-                </span>
-              </div>
-            </div>
-          </div>
-          <Progress
-            value={
-              finance.ownerLedgerTotal > 0
-                ? Math.round(
-                    (finance.ownerPaid / finance.ownerLedgerTotal) * 100
-                  )
-                : 0
-            }
-          />
-          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-            <span className="text-olive">
-              {t('Paid')}: <NumberFormat value={finance.ownerPaid} showZero />
-            </span>
-            <span className="text-oxide">
-              {t('Outstanding')}:{' '}
-              <NumberFormat value={finance.ownerUnpaid} showZero />
-            </span>
-          </div>
-        </Card>
-      )}
-
-      {/* §5: Αχρέωτα (uncollected) — vacant-unit expense money billed to NOBODY
-          (the share of an expense/repair on a vacant unit with the
-          chargeOwnerWhenVacant flag off). NOT a debt — it's money the building
-          simply doesn't collect. The tile shows the cumulative year total and
-          how much has been VOLUNTARILY covered (building.uncollected, computed
-          server-side, netted by uncollectedPayments). Server returns it only on
-          the building detail read. */}
-      {building?.uncollected && building.uncollected.total > 0 && (
-        <Card className="p-4">
-          <div className="flex items-end justify-between gap-4 mb-2">
-            <div>
-              <div className="text-label text-muted-foreground uppercase tracking-wide">
-                {t('Uncollected')}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {t(
-                  'Vacant-unit expense shares billed to nobody for {{year}}. Not a debt — coverage payments reduce it.',
-                  { year: new Date().getFullYear() }
-                )}
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-xl font-medium">
-                <NumberFormat value={building.uncollected.outstanding} showZero />
-                <span className="text-sm text-muted-foreground">
-                  {' / '}
-                  <NumberFormat value={building.uncollected.total} showZero />
-                </span>
-              </div>
-            </div>
-          </div>
-          <Progress
-            value={
-              building.uncollected.total > 0
-                ? Math.min(
-                    100,
-                    Math.round(
-                      (building.uncollected.paidTotal /
-                        building.uncollected.total) *
-                        100
-                    )
-                  )
-                : 0
-            }
-          />
-          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
-            <span className="text-olive">
-              {t('Covered')}:{' '}
-              <NumberFormat value={building.uncollected.paidTotal} showZero />
-            </span>
-            <span className="text-oxide">
-              {t('Still uncollected')}:{' '}
-              <NumberFormat value={building.uncollected.outstanding} showZero />
-            </span>
-          </div>
-          {building.uncollected.outstanding > 0 && (
-            <div className="mt-3 flex justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setUncollectedDialogOpen(true)}
-              >
-                {t('Coverage payment')}
-              </Button>
-            </div>
-          )}
-          <UncollectedPaymentDialog
-            open={uncollectedDialogOpen}
-            setOpen={setUncollectedDialogOpen}
-            building={building}
-            outstanding={building.uncollected.outstanding}
-          />
-        </Card>
-      )}
-
-      {/* Summary cards — B3: Κενά and Στάθμευση are DISTINCT categories, shown
-          as separate cards (was one merged "Vacant / Parking"). A4: occupancy %
-          below. */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-bold">{stats.total}</div>
-          <div className="text-sm text-muted-foreground">{t('Total units')}</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-bold text-green-600">
-            {stats.rented}
-          </div>
-          <div className="text-sm text-muted-foreground">{t('Rented')}</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-bold text-blue-600">
-            {stats.ownerOccupied}
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {t('Owner occupied')}
-          </div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-bold text-muted-foreground">
-            {stats.vacant}
-          </div>
-          <div className="text-sm text-muted-foreground">{t('Vacant')}</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-bold text-muted-foreground">
-            {stats.parking}
-          </div>
-          <div className="text-sm text-muted-foreground">{t('Parking')}</div>
-        </Card>
-      </div>
-      {/* A4: occupancy rate (rented of total). */}
-      {stats.total > 0 && (
-        <div className="text-xs text-muted-foreground text-right -mt-3">
-          {t('Occupancy')}:{' '}
-          <span className="font-semibold text-ink">
-            {Math.round((stats.rented / stats.total) * 100)}%
-          </span>{' '}
-          ({stats.rented} {t('of')} {stats.total})
-        </div>
-      )}
-
-      {/* Repairs operational summary — open (planned + in-progress) repairs
-          and any emergencies, so scheduled work is visible on the overview
-          instead of only inside the Repairs tab. */}
-      {(building?.repairs || []).length > 0 && (
-        <Card className="p-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <span className="text-sm font-medium">
-              {t('Repairs / scheduled work')}
-            </span>
-            <div className="flex items-center gap-6 text-sm">
-              <span className="text-muted-foreground">
-                {t('Open')}:{' '}
-                <span className="font-semibold text-ink">
-                  {finance.repairStats.open}
-                </span>
-              </span>
-              <span className="text-muted-foreground">
-                {t('In progress')}:{' '}
-                <span className="font-semibold text-ink">
-                  {finance.repairStats.inProgress}
-                </span>
-              </span>
-              {finance.repairStats.emergencies > 0 && (
-                <span className="text-oxide font-medium">
-                  {t('Emergencies')}: {finance.repairStats.emergencies}
-                </span>
-              )}
-            </div>
-          </div>
-        </Card>
-      )}
 
       {/* Floor-by-floor table */}
       <div className="rounded-md border">

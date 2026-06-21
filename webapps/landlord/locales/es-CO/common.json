@@ -1092,5 +1092,8 @@
   "Tenant settlements": "Liquidaciones de inquilinos",
   "Owner settlements": "Liquidaciones de propietarios",
   "vacant unit": "unidad vacía",
-  "owner share": "parte propietario"
+  "owner share": "parte propietario",
+  "Year to date": "En lo que va del año",
+  "Building expense breakdown": "Desglose de gastos del edificio",
+  "No billable repairs recorded.": "No hay reparaciones facturables registradas."
 }

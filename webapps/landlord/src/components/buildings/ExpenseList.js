@@ -50,11 +50,9 @@ import {
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
-import BuildingExpensePanel from './BuildingExpensePanel';
 import BillImportDialog from './BillImportDialog';
 import PaymentReceiptDialog from './PaymentReceiptDialog';
 import ResponsiveDialog from '../ResponsiveDialog';
-import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
@@ -1201,12 +1199,9 @@ export default function ExpenseList({ building }) {
         </DialogContent>
       </Dialog>
 
-      {expenses.length > 0 && (
-        <>
-          <Separator className="mt-8 mb-8" />
-          <BuildingExpensePanel building={building} />
-        </>
-      )}
+      {/* BuildingExpensePanel (the month calendar + ΧΡΕΩΣΕΙΣ breakdown) is
+          rendered by the page AFTER RepairList, so Επισκευές sits before the
+          dates + right panel (user-specified order). */}
 
       <BillImportDialog
         open={openBillImport}

@@ -20,6 +20,7 @@ import ConfirmDialog from '../../../components/ConfirmDialog';
 import ErrorPage from 'next/error';
 import ContractorList from '../../../components/buildings/ContractorList';
 import ExpenseList from '../../../components/buildings/ExpenseList';
+import BuildingExpensePanel from '../../../components/buildings/BuildingExpensePanel';
 import Page from '../../../components/Page';
 import PresenceBanner from '../../../components/PresenceBanner';
 import RepairList from '../../../components/buildings/RepairList';
@@ -189,13 +190,21 @@ function Building() {
             {/* §4: Repairs live in the Expenses tab — they ARE expenses
                 (one-time costs distributed to tenants/owners), so the landlord
                 manages recurring expenses + repairs in one place. Contractors
-                (a directory, not money) stay on their own tab. */}
+                (a directory, not money) stay on their own tab.
+                ORDER (user-specified): expense list → Επισκευές → the month
+                calendar + ΧΡΕΩΣΕΙΣ breakdown panel. Επισκευές sits BEFORE the
+                dates and the right panel. */}
             <div className="space-y-8">
               <ExpenseList building={building} />
               <div>
-                <h3 className="text-lg font-semibold mb-4">{t('Repairs')}</h3>
+                <h3 className="font-display text-headline mb-4">
+                  {t('Repairs')}
+                </h3>
                 <RepairList building={building} />
               </div>
+              {(building?.expenses || []).length > 0 && (
+                <BuildingExpensePanel building={building} />
+              )}
             </div>
           </Card>
         </TabsContent>

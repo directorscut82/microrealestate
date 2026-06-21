@@ -1092,5 +1092,8 @@
   "Tenant settlements": "Mieterabrechnungen",
   "Owner settlements": "Eigentümerabrechnungen",
   "vacant unit": "leere Einheit",
-  "owner share": "Eigentümeranteil"
+  "owner share": "Eigentümeranteil",
+  "Year to date": "Seit Jahresbeginn",
+  "Building expense breakdown": "Aufschlüsselung der Gebäudekosten",
+  "No billable repairs recorded.": "Keine abrechenbaren Reparaturen erfasst."
 }
