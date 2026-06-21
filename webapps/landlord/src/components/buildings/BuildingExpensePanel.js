@@ -814,8 +814,11 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
       )}
       {Array.from(byProperty.values()).map((g, gi) => (
         <div key={`p-${gi}`} className="mb-2 last:mb-0">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="font-medium truncate mr-2">
+          <div className="flex items-baseline justify-between gap-2 text-sm">
+            {/* min-w-0 + flex-1 so `truncate` can actually clip the label
+                instead of overflowing the column's right edge (the clipped
+                ΧΡΕΩΣΕΙΣ column bug). */}
+            <span className="font-medium truncate min-w-0 flex-1">
               {g.propertyName}
               <span className="ml-1 font-normal text-muted-foreground">
                 ·{' '}
@@ -824,16 +827,16 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                   : t('Renter')}
               </span>
             </span>
-            <span className="tabular-nums font-medium whitespace-nowrap">
+            <span className="tabular-nums font-medium whitespace-nowrap shrink-0">
               <NumberFormat value={g.total} />
             </span>
           </div>
           {g.items.map((it, ii) => (
             <div
               key={`pi-${gi}-${ii}`}
-              className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+              className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground pl-3"
             >
-              <span className="truncate mr-2">
+              <span className="truncate min-w-0 flex-1">
                 {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
                 {formatBasis(t, it.basis) && (
                   <span className="ml-1 text-muted-foreground/60">
@@ -841,7 +844,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                   </span>
                 )}
               </span>
-              <span className="tabular-nums whitespace-nowrap">
+              <span className="tabular-nums whitespace-nowrap shrink-0">
                 <NumberFormat value={it.amount} />
               </span>
             </div>
@@ -890,24 +893,24 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               .values()
           ).map((g, gi) => (
             <div key={`og-${gi}`} className="mb-2 last:mb-0">
-              <div className="flex items-baseline justify-between text-sm">
-                <span className="font-medium truncate mr-2 text-ink-muted">
+              <div className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="font-medium truncate min-w-0 flex-1 text-ink-muted">
                   {g.propertyName || t('Owners')}
                   <OwnerName
                     name={g.ownerName}
                     percentage={g.ownerPercentage}
                   />
                 </span>
-                <span className="tabular-nums font-medium whitespace-nowrap">
+                <span className="tabular-nums font-medium whitespace-nowrap shrink-0">
                   <NumberFormat value={g.total} />
                 </span>
               </div>
               {g.items.map((e, ii) => (
                 <div
                   key={`oi-${gi}-${ii}`}
-                  className="flex items-baseline justify-between text-xs text-muted-foreground pl-3"
+                  className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground pl-3"
                 >
-                  <span className="truncate mr-2">
+                  <span className="truncate min-w-0 flex-1">
                     {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
                     {formatBasis(t, e.basis) && (
                       <span className="ml-1 text-muted-foreground/60">
@@ -921,7 +924,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                       formatNumber={formatNumber}
                     />
                   </span>
-                  <span className="tabular-nums whitespace-nowrap">
+                  <span className="tabular-nums whitespace-nowrap shrink-0">
                     <NumberFormat value={e.amount} />
                   </span>
                 </div>
@@ -942,10 +945,10 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             onClick={() => setShowUncollected((v) => !v)}
             className="flex w-full items-center justify-between gap-2 text-sm text-left"
           >
-            <span className="font-medium text-oxide truncate mr-2">
+            <span className="font-medium text-oxide truncate min-w-0 flex-1">
               ⚠ {t('Uncollected (vacant units)')}
             </span>
-            <span className="tabular-nums font-medium text-oxide whitespace-nowrap">
+            <span className="tabular-nums font-medium text-oxide whitespace-nowrap shrink-0">
               <NumberFormat value={uncollectedTotal} />
               {showUncollected ? (
                 <LuChevronRight className="inline size-3 ml-1 rotate-90" />
@@ -963,13 +966,13 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             ownerVacantRows.map((r, i) => (
               <div
                 key={`ov-${i}`}
-                className="flex items-baseline justify-between text-xs text-oxide/80 pl-3 mt-0.5"
+                className="flex items-baseline justify-between gap-2 text-xs text-oxide/80 pl-3 mt-0.5"
               >
-                <span className="truncate mr-2">
+                <span className="truncate min-w-0 flex-1">
                   {r.propertyName} ·{' '}
                   {expenseDisplayLabel(t, r.expenseName, r.expenseType)}
                 </span>
-                <span className="tabular-nums whitespace-nowrap">
+                <span className="tabular-nums whitespace-nowrap shrink-0">
                   <NumberFormat value={r.amount} />
                 </span>
               </div>
