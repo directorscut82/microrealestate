@@ -183,7 +183,10 @@ function CompCell({ label, value, owner }) {
 // banned hero-metric template (no gradient, no accent chip, plain count).
 function UnitCountCell({ n, label, tone }) {
   return (
-    <div className="rounded-md border border-stone-line bg-bone px-2 py-4 text-center">
+    // Borderless count cell — NO per-cell border/bg so the Μονάδες row reads as
+    // one labelled strip inside its card, not 5 bordered tiles nested in a card
+    // (DESIGN.md: nested cards / identical-card-grids banned).
+    <div className="px-2 py-1 text-center">
       <div
         className={cn(
           'font-display text-2xl leading-none',
@@ -347,6 +350,28 @@ export default function BuildingDashboard({ building }) {
     });
     return floors;
   }, [sortedUnits]);
+
+  // Floor-table column totals (mockup A4 'Σύνολο' row): total surface + total
+  // rent across all units, so the operator sees the building's totals at a
+  // glance. Rent is the active tenant's rent for each unit (same source the
+  // rows render).
+  const floorTotals = useMemo(() => {
+    let surface = 0;
+    let rent = 0;
+    sortedUnits.forEach((unit) => {
+      surface += Number(unit.surface) || 0;
+      const prop = unit.propertyId
+        ? propertyMap.get(
+            typeof unit.propertyId === 'string'
+              ? unit.propertyId
+              : unit.propertyId?._id
+          )
+        : null;
+      const t = prop ? tenantByPropertyId.get(prop._id) : null;
+      if (t?.rent) rent += Number(t.rent) || 0;
+    });
+    return { surface, rent };
+  }, [sortedUnits, propertyMap, tenantByPropertyId]);
 
   // Stats
   const stats = useMemo(() => {
@@ -802,7 +827,10 @@ export default function BuildingDashboard({ building }) {
         <div className="mt-3 max-w-xl space-y-1.5">
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-body text-ink-soft">{t('Income')}</span>
-            <span className="font-mono tabular-nums text-headline text-olive">
+            {/* Income is a routine gross projection, NOT a credit — render ink.
+                Olive/oxide are reserved for paid/credit vs debit (Έξοδα keeps
+                the − + oxide; Net keeps the conditional color). */}
+            <span className="font-mono tabular-nums text-headline text-ink">
               <NumberFormat value={finance.annualEsoda} showZero />
             </span>
           </div>
@@ -853,7 +881,7 @@ export default function BuildingDashboard({ building }) {
               <div className="text-label text-olive font-medium mb-1.5 normal-case tracking-normal">
                 {t('TENANTS')}{' '}
                 <span className="text-ink-muted font-normal">
-                  — {t('not subtracted from Net')}
+                  ({t('not subtracted from Net')})
                 </span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
@@ -888,26 +916,32 @@ export default function BuildingDashboard({ building }) {
               <div className="text-label text-oxide font-medium mb-1.5 normal-case tracking-normal">
                 {t('OWNERS')}{' '}
                 <span className="text-ink-muted font-normal">
-                  — {t('subtracted from Net')}
+                  ({t('subtracted from Net')})
                 </span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                <CompCell
-                  owner
-                  label={t('Owner expenses')}
-                  value={<NumberFormat value={finance.ownerEksoda} showZero />}
-                />
-                {finance.vacantOwnerResidentEksoda > 0 && (
+              {/* Owner cells: flex with capped width so a lone cell doesn't
+                  stretch across 4 empty columns (mockup .comp.one). */}
+              <div className="flex flex-wrap gap-2.5">
+                <div className="w-full sm:w-[240px]">
                   <CompCell
                     owner
-                    label={t('Vacant / owner-occupied unit shares')}
-                    value={
-                      <NumberFormat
-                        value={finance.vacantOwnerResidentEksoda}
-                        showZero
-                      />
-                    }
+                    label={t('Owner expenses')}
+                    value={<NumberFormat value={finance.ownerEksoda} showZero />}
                   />
+                </div>
+                {finance.vacantOwnerResidentEksoda > 0 && (
+                  <div className="w-full sm:w-[240px]">
+                    <CompCell
+                      owner
+                      label={t('Vacant / owner-occupied unit shares')}
+                      value={
+                        <NumberFormat
+                          value={finance.vacantOwnerResidentEksoda}
+                          showZero
+                        />
+                      }
+                    />
+                  </div>
                 )}
               </div>
             </div>
@@ -1030,7 +1064,10 @@ export default function BuildingDashboard({ building }) {
             label={t('Covered')}
             valueNode={
               <>
-                <NumberFormat value={building.uncollected.outstanding} showZero />
+                {/* Header must agree with the label + fill: Καλυμμένα = paidTotal
+                    of total (was wrongly fed `outstanding`, so it read
+                    "Καλυμμένα 10,85 / 10,85" while the track + foot said 0). */}
+                <NumberFormat value={building.uncollected.paidTotal} showZero />
                 <span className="text-ink-muted">
                   {' / '}
                   <NumberFormat value={building.uncollected.total} showZero />
@@ -1305,6 +1342,19 @@ export default function BuildingDashboard({ building }) {
                   className="text-center text-muted-foreground py-8"
                 >
                   {t('No units registered. Import an E9 or add units manually.')}
+                </TableCell>
+              </TableRow>
+            )}
+            {/* Σύνολο totals row (mockup A4): total surface + total rent. */}
+            {sortedUnits.length > 0 && (
+              <TableRow className="bg-cream border-t-2 border-marble hover:bg-cream">
+                <TableCell className="font-medium">{t('Total')}</TableCell>
+                <TableCell numeric className="font-medium">
+                  {fmtNum(floorTotals.surface)}
+                </TableCell>
+                <TableCell colSpan={3} />
+                <TableCell numeric className="font-medium">
+                  <NumberFormat value={floorTotals.rent} showZero />
                 </TableCell>
               </TableRow>
             )}
