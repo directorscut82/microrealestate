@@ -7,7 +7,7 @@ import {
   TableRow
 } from '../ui/table';
 import { EmptyIllustration } from '../Illustrations';
-import { LuAlertTriangle } from 'react-icons/lu';
+import { LuInfo } from 'react-icons/lu';
 import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -82,15 +82,17 @@ export default function BuildingList({ data }) {
                 </TableCell>
                 <TableCell>
                   {gaps.length > 0 ? (
+                    // "Missing details" is informational, not an error, so it
+                    // uses a neutral stone pill (oxide is reserved for
+                    // overdue/destructive). Naming the missing fields makes the
+                    // column discriminating instead of an identical-row wall.
                     <span
                       data-cy="buildingMissingFields"
-                      className="inline-flex items-center gap-1.5 rounded-pill bg-oxide-tint px-2 py-0.5 text-label text-oxide"
+                      title={gaps.join(', ')}
+                      className="inline-flex items-center gap-1.5 rounded-pill bg-cream border border-stone-line px-2 py-0.5 text-label text-ink-muted"
                     >
-                      <LuAlertTriangle
-                        className="size-3 shrink-0"
-                        aria-hidden="true"
-                      />
-                      {t('Missing details')}
+                      <LuInfo className="size-3 shrink-0" aria-hidden="true" />
+                      {t('Missing')}: {gaps.join(', ')}
                     </span>
                   ) : (
                     <span className="text-label text-ink-muted">—</span>

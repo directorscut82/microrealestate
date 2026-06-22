@@ -497,7 +497,7 @@ export default function BuildingExpensePanel({ building }) {
               className={cn(
                 'relative px-2 py-1.5 text-xs rounded-md transition-all duration-150 border border-transparent',
                 isSelected
-                  ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                  ? 'bg-sea-tint text-sea-deep border-sea/40 font-medium'
                   : isFuture
                     ? 'text-muted-foreground/40 cursor-not-allowed'
                     : 'bg-muted/60 hover:bg-muted text-foreground cursor-pointer hover:border-border'
@@ -529,7 +529,7 @@ export default function BuildingExpensePanel({ building }) {
           </span>
           {ownerTotal !== 0 && (
             <span className="block text-xs text-muted-foreground">
-              {t('Tenants')}
+              {t('Charged to tenants')}
             </span>
           )}
         </span>
@@ -648,6 +648,22 @@ function _looksLikeId(name) {
   return false;
 }
 
+// Strip the redundant building-name prefix from a unit's property name so the
+// breakdown doesn't repeat 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - ' on every one of 11 rows. The
+// building name is already the page title, so each row only needs its unit
+// suffix ('Υπόγειο', '1ος όροφος'). Returns the original name when it isn't a
+// '<building> - <unit>' compound (so non-conforming names never get mangled).
+function unitLabel(buildingName, propertyName) {
+  const p = String(propertyName || '').trim();
+  const b = String(buildingName || '').trim();
+  if (!p || !b || p === b) return p;
+  if (p.startsWith(b)) {
+    const rest = p.slice(b.length).replace(/^[\s\-·,]+/, '').trim();
+    return rest || p;
+  }
+  return p;
+}
+
 // The human label for an expense/owner/repair row: prefer the TYPE label;
 // append the user-given name only when it's a real name (not an id, not equal
 // to the type label). So 'Κοιν. Νερό' for an id-named water expense, and
@@ -655,7 +671,24 @@ function _looksLikeId(name) {
 function expenseDisplayLabel(t, name, type) {
   const typeLabel = type && EXPENSE_TYPE_LABEL[type] ? t(EXPENSE_TYPE_LABEL[type]) : '';
   const realName = !_looksLikeId(name) ? String(name).trim() : '';
-  if (typeLabel && realName && realName !== typeLabel) {
+  // Compare diacritic- and case-insensitively so 'Ρευμα' (the type label minus
+  // the tonos) is recognised as a duplicate of 'Ρεύμα'. Also drop the
+  // parenthetical when the user-name is wholly contained in the type label (or
+  // vice-versa) — 'Ρευμα' is a word inside 'Κοινόχρηστο Ρεύμα', so appending it
+  // adds nothing and read as 'Κοινόχρηστο Ρεύμα (Ρευμα)'.
+  const norm = (s) =>
+    String(s)
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .trim();
+  const nName = norm(realName);
+  const nType = norm(typeLabel);
+  const redundant =
+    nName &&
+    nType &&
+    (nName === nType || nType.includes(nName) || nName.includes(nType));
+  if (typeLabel && realName && !redundant) {
     return `${typeLabel} (${realName})`;
   }
   return typeLabel || realName || t('Expense');
@@ -819,8 +852,12 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
   }
 
   return (
-    <div className="mt-4 rounded-md border border-stone-line/60 bg-muted/20 p-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
+    // No inner card chrome: the Expenses tab is already the single paper
+    // surface. Render the breakdown as a plain column separated from the
+    // calendar by whitespace + a top hairline rule (no border box, no
+    // bg-muted) so we never nest a card inside a card.
+    <div className="mt-4 lg:mt-0 lg:border-t lg:border-stone-line/60 lg:pt-4">
+      <div className="text-label uppercase tracking-wide text-ink-muted mb-2">
         {t('Charges')}
       </div>
 
@@ -837,7 +874,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                 instead of overflowing the column's right edge (the clipped
                 ΧΡΕΩΣΕΙΣ column bug). */}
             <span className="font-medium truncate min-w-0 flex-1">
-              {g.propertyName}
+              {unitLabel(building?.name, g.propertyName)}
               <span className="ml-1 font-normal text-muted-foreground">
                 ·{' '}
                 {g.recipientName
@@ -864,7 +901,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                 {/* calc-basis on its OWN full-width line so the '= 0,15 €' end
                     is never clipped by the amount column (was truncated). */}
                 {basis && (
-                  <div className="text-label text-muted-foreground/60 font-mono tabular-nums leading-tight">
+                  <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
                     {basis}
                   </div>
                 )}
@@ -917,7 +954,9 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             <div key={`og-${gi}`} className="mb-2 last:mb-0">
               <div className="flex items-baseline justify-between gap-2 text-sm">
                 <span className="font-medium truncate min-w-0 flex-1 text-ink-muted">
-                  {g.propertyName || t('Owners')}
+                  {g.propertyName
+                    ? unitLabel(building?.name, g.propertyName)
+                    : t('Owners')}
                   <OwnerName
                     name={g.ownerName}
                     percentage={g.ownerPercentage}
@@ -946,7 +985,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                       </span>
                     </div>
                     {basis && (
-                      <div className="text-label text-muted-foreground/60 font-mono tabular-nums leading-tight">
+                      <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
                         {basis}
                       </div>
                     )}
@@ -993,7 +1032,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                 className="flex items-baseline justify-between gap-2 text-xs text-oxide/80 pl-3 mt-0.5"
               >
                 <span className="truncate min-w-0 flex-1">
-                  {r.propertyName} ·{' '}
+                  {unitLabel(building?.name, r.propertyName)} ·{' '}
                   {expenseDisplayLabel(t, r.expenseName, r.expenseType)}
                 </span>
                 <span className="tabular-nums whitespace-nowrap shrink-0">

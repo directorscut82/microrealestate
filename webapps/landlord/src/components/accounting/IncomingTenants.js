@@ -14,9 +14,11 @@ export default function IncomingTenants({ data, onCSVClick }) {
 
   return hasData ? (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex justify-between items-center text-lg md:text-xl">
-          {t('Incoming tenants')}
+      {/* No duplicate card title: the active tab already reads
+          "Εισερχόμενοι ενοικιαστές (N)". Keep only the CSV-export affordance,
+          right-aligned. */}
+      <CardHeader className="pb-2">
+        <CardTitle className="flex justify-end items-center">
           <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
             <GrDocumentCsv className="size-6" />
           </Button>
@@ -31,19 +33,23 @@ export default function IncomingTenants({ data, onCSVClick }) {
               'border-b first:border-t last:border-none py-2'
             )}
           >
-            <div>
-              <div className="text-xl">{tenant.name}</div>
-              <div className="text-muted-foreground">
+            <div className="min-w-0">
+              {/* The tenant NAME is the row title and must dominate; the
+                  deposit (often 0,00 €) must not out-size it. */}
+              <div className="text-title font-medium text-ink">
+                {tenant.name}
+              </div>
+              <div className="text-sm text-muted-foreground">
                 {moment(tenant.beginDate).format('L')}
                 {/* _incomingTenants intentionally omits endDate; moment(undefined)
                     rendered TODAY (advancing daily) as a fabricated contract-end
                     (round-2 audit M4). Only render the end side when present —
                     matching the CSV which omits the column. */}
                 {tenant.endDate
-                  ? ` - ${moment(tenant.endDate).format('L')}`
+                  ? ` ${t('to')} ${moment(tenant.endDate).format('L')}`
                   : ''}
               </div>
-              <div className="flex items-center flex-wrap gap-2 md:text-xl mt-2 mb-4">
+              <div className="flex items-center flex-wrap gap-2 mt-1.5">
                 {tenant.properties.map((property) => (
                   <div
                     className="flex items-center gap-1 text-xs text-muted-foreground"
@@ -55,15 +61,21 @@ export default function IncomingTenants({ data, onCSVClick }) {
                 ))}
               </div>
             </div>
-            <div>
+            <div className="shrink-0">
               <div className="text-muted-foreground text-xs md:text-right">
                 {t('Deposit')}
               </div>
-              <NumberFormat
-                value={tenant.guaranty}
-                className="text-2xl md:text-right"
-                showZero={true}
-              />
+              {/* Demoted from text-2xl: a deposit (frequently 0,00 €) must not
+                  be the most dominant element on the row. Zero renders as a
+                  muted '—' rather than five identical loud zeros. */}
+              {Number(tenant.guaranty) > 0 ? (
+                <NumberFormat
+                  value={tenant.guaranty}
+                  className="font-mono tabular-nums text-headline md:text-right"
+                />
+              ) : (
+                <div className="text-ink-muted md:text-right">—</div>
+              )}
             </div>
           </div>
         ))}

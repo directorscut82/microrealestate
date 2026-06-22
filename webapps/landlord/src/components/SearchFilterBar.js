@@ -45,7 +45,7 @@ function FilterBar({ filters, selectedFilterIds, onChange }) {
     >
       <Button
         variant="secondary"
-        className="flex rounded-md border-dotted border-2 p-2 w-fit"
+        className="flex rounded-md h-10 px-3 w-fit items-center"
       >
         <div className="flex items-center gap-1.5">
           <div>

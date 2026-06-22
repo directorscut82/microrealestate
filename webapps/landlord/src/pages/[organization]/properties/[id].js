@@ -35,8 +35,11 @@ function PropertyOverviewCard({ property }) {
       title={t('Property')}
       renderContent={() => (
         <div className="text-base space-y-2">
+          {/* The property name is already the page H1 and the editable 'Όνομα'
+              field, so this card leads with its only net-new figure: the
+              price. (Dropped the third repeat of the name.) */}
           <div className="flex justify-between">
-            <span className="text-muted-foreground">{property?.name}</span>
+            <span className="text-muted-foreground">{t('Rent')}</span>
             <NumberFormat value={property?.price} />
           </div>
           {property?.buildingId && (

@@ -41,17 +41,17 @@ function Address({ address }) {
 export default function TenantPropertyList({ tenant, className }) {
   const { t } = useTranslation('common');
   if (!tenant.properties?.length) {
-    // T1.7: Surface a subtle amber warning in the address slot when the
-    // tenant has no property assigned. Without a property+lease the rent
-    // pipeline produces no rent records — the user needs to know they
-    // must finish setup before billing kicks in. Mirror the amber palette
-    // used by ChannelStatusBanners so the visual language is consistent.
+    // T1.7: Surface a warning in the address slot when the tenant has no
+    // property assigned. Without a property+lease the rent pipeline produces
+    // no rent records, so the user must finish setup before billing starts.
+    // Uses the oxide warning token (the system's single warning color); raw
+    // tailwind amber is off-palette.
     return (
       <div
         role="status"
         className={cn(
           'flex items-start gap-2 px-2.5 py-1.5 border rounded-md text-xs',
-          'bg-amber-50 text-amber-700 border-amber-200',
+          'bg-oxide-tint text-oxide border-oxide/40',
           className
         )}
       >
@@ -61,7 +61,7 @@ export default function TenantPropertyList({ tenant, className }) {
         />
         <span className="leading-snug">
           {t(
-            'No property assigned — set a property/lease for rent billing to start'
+            'No property assigned. Set a property/lease for rent billing to start.'
           )}
         </span>
       </div>

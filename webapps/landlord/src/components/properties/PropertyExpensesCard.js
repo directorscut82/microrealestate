@@ -3,7 +3,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '../ui/collapsible';
-import { LuChevronsUpDown, LuReceipt } from 'react-icons/lu';
+import { LuChevronsUpDown, LuWallet } from 'react-icons/lu';
 import { useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { DashboardCard } from '../dashboard/DashboardCard';
@@ -227,7 +227,11 @@ export default function PropertyExpensesCard({ propertyId }) {
       ? _formatTermShort(data.fromTerm, lang)
       : '';
     const toStr = data?.toTerm ? _formatTermShort(data.toTerm, lang) : '';
-    return fromStr && toStr ? `${base} (${fromStr} — ${toStr})` : base;
+    // ' έως ' (not an em dash, which is banned in copy) — matches the
+    // previous-tenants card's range wording.
+    return fromStr && toStr
+      ? `${base} (${fromStr} ${t('to')} ${toStr})`
+      : base;
   }, [data?.fromTerm, data?.toTerm, lang, t]);
 
   const currentTotal = useMemo(() => {
@@ -248,7 +252,7 @@ export default function PropertyExpensesCard({ propertyId }) {
 
   return (
     <DashboardCard
-      Icon={LuReceipt}
+      Icon={LuWallet}
       title={t('Property expenses')}
       renderContent={() => {
         if (isLoading) {

@@ -14,9 +14,10 @@ export default function OutgoingTenants({ data, onCSVClick }) {
 
   return hasData ? (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex justify-between items-center text-lg md:text-xl">
-          {t('Outgoing tenants')}
+      {/* No duplicate card title: the active tab already reads
+          "Αποχωρούντες ενοικιαστές (N)". Keep only the CSV-export affordance. */}
+      <CardHeader className="pb-2">
+        <CardTitle className="flex justify-end items-center">
           <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
             <GrDocumentCsv className="size-6" />
           </Button>
@@ -31,10 +32,14 @@ export default function OutgoingTenants({ data, onCSVClick }) {
               'border-b first:border-t last:border-none py-2'
             )}
           >
-            <div>
-              <div className="text-xl">{tenant.name}</div>
-              <div className="text-muted-foreground">
-                {moment(tenant.beginDate).format('L')} -{' '}
+            <div className="min-w-0">
+              {/* Name dominates the row; the final-balance figure must not
+                  out-size it. */}
+              <div className="text-title font-medium text-ink">
+                {tenant.name}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                {moment(tenant.beginDate).format('L')} {t('to')}{' '}
                 {tenant.terminationDate
                   ? moment(tenant.terminationDate).format('L')
                   : moment(tenant.endDate).format('L')}
@@ -77,7 +82,7 @@ export default function OutgoingTenants({ data, onCSVClick }) {
                 value={tenant.finalBalance}
                 withColor
                 showZero={true}
-                className="text-2xl md:text-right"
+                className="font-mono tabular-nums text-headline md:text-right"
               />
             </div>
           </div>

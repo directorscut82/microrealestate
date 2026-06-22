@@ -100,25 +100,47 @@ export default function OwnerList({ owners = [] }) {
                   )}
                 </TableCell>
                 <TableCell>
+                  {/* State pills carry a leading glyph, not color alone, so
+                      they read for color-blind users and match the card
+                      variant (OwnerListItem.js). */}
                   {!hasExpenses ? (
                     <Badge
                       data-owner-state="none"
-                      variant="neutral"
-                      className="font-normal"
+                      variant="outline"
+                      className="font-normal text-ink-muted border-stone-line gap-1.5"
                     >
+                      <span
+                        aria-hidden="true"
+                        className="size-1.5 rounded-pill shrink-0 bg-ink-muted/40"
+                      />
                       {t('No owner expenses')}
                     </Badge>
                   ) : settled ? (
-                    <Badge data-owner-state="settled" variant="paid">
+                    <Badge
+                      data-owner-state="settled"
+                      variant="paid"
+                      className="gap-1.5"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-1.5 rounded-pill shrink-0 bg-olive"
+                      />
                       {t('Settled')}
                     </Badge>
                   ) : (
                     <Badge
                       data-owner-state="outstanding"
                       variant="overdue"
-                      className="font-normal"
+                      className="font-normal gap-1.5"
                     >
-                      {t('Outstanding')}: {formatNumber(outstanding)}
+                      <span
+                        aria-hidden="true"
+                        className="size-1.5 rounded-pill shrink-0 bg-oxide"
+                      />
+                      {t('Outstanding')}:{' '}
+                      <span className="font-mono tabular-nums">
+                        {formatNumber(outstanding)}
+                      </span>
                     </Badge>
                   )}
                 </TableCell>

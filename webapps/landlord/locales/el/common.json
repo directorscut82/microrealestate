@@ -560,7 +560,6 @@
   "No payment recorded yet for this term.": "Δεν έχει καταχωρηθεί καταβολή για αυτόν τον μήνα.",
   "No previous balance carried over.": "Δεν υπάρχει υπόλοιπο από προηγούμενους μήνες.",
   "No properties found": "Δεν βρέθηκαν ακίνητα",
-  "No property assigned — set a property/lease for rent billing to start": "Δεν έχει οριστεί ακίνητο — ορίστε ακίνητο/συμβόλαιο για να ξεκινήσει η χρέωση ενοικίου",
   "No rents found": "Δεν βρέθηκαν ενοίκια",
   "No repairs found": "Δεν βρέθηκαν επισκευές",
   "No outstanding owner charges.": "Δεν υπάρχουν εκκρεμείς χρεώσεις ιδιοκτήτη.",
@@ -1200,5 +1199,9 @@
   "vacant unit": "κενή μονάδα",
   "owner share": "μερίδιο ιδιοκτήτη",
   "Month": "Μήνας",
-  "No payments for {{year}}": "Καμία καταβολή για το {{year}}"
+  "No payments for {{year}}": "Καμία καταβολή για το {{year}}",
+  "Missing": "Λείπει",
+  "Charged to tenants": "Χρέωση ενοικιαστών",
+  "to": "έως",
+  "No property assigned. Set a property/lease for rent billing to start.": "Δεν έχει οριστεί ακίνητο. Ορίστε ακίνητο/συμβόλαιο για να ξεκινήσει η χρέωση ενοικίου."
 }

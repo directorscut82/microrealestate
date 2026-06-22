@@ -547,7 +547,6 @@
   "No payment recorded yet for this term.": "No payment recorded yet for this term.",
   "No previous balance carried over.": "No previous balance carried over.",
   "No properties found": "No properties found",
-  "No property assigned — set a property/lease for rent billing to start": "No property assigned — set a property/lease for rent billing to start",
   "No rents found": "No rents found",
   "No repairs found": "No repairs found",
   "No outstanding owner charges.": "No outstanding owner charges.",
@@ -1187,5 +1186,9 @@
   "Building expense breakdown": "Building expense breakdown",
   "No billable repairs recorded.": "No billable repairs recorded.",
   "Month": "Month",
-  "No payments for {{year}}": "No payments for {{year}}"
+  "No payments for {{year}}": "No payments for {{year}}",
+  "Missing": "Missing",
+  "Charged to tenants": "Charged to tenants",
+  "to": "to",
+  "No property assigned. Set a property/lease for rent billing to start.": "No property assigned. Set a property/lease for rent billing to start."
 }

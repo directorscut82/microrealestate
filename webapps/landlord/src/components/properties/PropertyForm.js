@@ -261,6 +261,10 @@ const PropertyForm = ({ property, onSubmit }) => {
             <Input
               id="energyCertIssueDate"
               type="date"
+              // lang='el' so the native date input's empty placeholder renders
+              // 'ηη/μμ/εεεε' instead of the Latin 'dd/mm/yyyy' — the only Latin
+              // text on an otherwise fully-Greek form.
+              lang="el"
               max={new Date().toISOString().substring(0, 10)}
               {...register('energyCertIssueDate')}
             />

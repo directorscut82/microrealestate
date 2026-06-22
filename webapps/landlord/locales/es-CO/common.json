@@ -514,7 +514,6 @@
   "No payment recorded yet for this term.": "Aún no hay pago registrado para este período.",
   "No previous balance carried over.": "No hay saldo de meses anteriores.",
   "No properties found": "No se encontraron propiedades",
-  "No property assigned — set a property/lease for rent billing to start": "Sin inmueble asignado — asigne un inmueble/contrato para iniciar la facturación del alquiler",
   "No rents found": "No se encontraron alquileres",
   "No repairs found": "No se encontraron reparaciones",
   "No tenants found": "No se encontraron inquilinos",
@@ -1097,5 +1096,9 @@
   "Building expense breakdown": "Desglose de gastos del edificio",
   "No billable repairs recorded.": "No hay reparaciones facturables registradas.",
   "Month": "Mes",
-  "No payments for {{year}}": "Sin pagos para {{year}}"
+  "No payments for {{year}}": "Sin pagos para {{year}}",
+  "Missing": "Falta",
+  "Charged to tenants": "Cobrado a inquilinos",
+  "to": "a",
+  "No property assigned. Set a property/lease for rent billing to start.": "Sin inmueble asignado. Asigne un inmueble/contrato para iniciar el cobro del alquiler."
 }

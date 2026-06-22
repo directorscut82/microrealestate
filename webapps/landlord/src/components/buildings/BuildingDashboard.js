@@ -129,7 +129,15 @@ function SectionLabel({ children, className }) {
 // A thin two-tone progress bar matching the mockup: 8px rounded track on
 // `stone`, a colored fill (olive=paid/collected, sea=rent). Replaces the fat
 // near-black <Progress> blob. `pct` is clamped 0..100 by the caller.
-function BarRow({ label, valueNode, pct, fill = 'olive', footLeft, footRight }) {
+function BarRow({
+  label,
+  valueNode,
+  pct,
+  fill = 'olive',
+  footLeft,
+  footRight,
+  subdued = false
+}) {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3 mb-1.5">
@@ -138,11 +146,23 @@ function BarRow({ label, valueNode, pct, fill = 'olive', footLeft, footRight }) 
           {valueNode}
         </span>
       </div>
-      <div className="h-2 rounded-pill bg-stone overflow-hidden">
+      {/* `subdued` thins the track + lowers the fill chroma so a 100% bar for a
+          trivial total (e.g. €0.21) doesn't become the loudest thing on the
+          card. */}
+      <div
+        className={cn(
+          'rounded-pill bg-stone overflow-hidden',
+          subdued ? 'h-1' : 'h-2'
+        )}
+      >
         <div
           className={cn(
             'h-full rounded-pill',
-            fill === 'sea' ? 'bg-sea' : 'bg-olive'
+            subdued
+              ? 'bg-olive/40'
+              : fill === 'sea'
+                ? 'bg-sea'
+                : 'bg-olive'
           )}
           style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
         />
@@ -840,8 +860,11 @@ export default function BuildingDashboard({ building }) {
             </span>
             {/* A5: owner-borne only — includes vacant/owner-resident shares so
                 Income − this === Net. Shown as a subtraction (− …). */}
+            {/* Tighten the minus to the number (was '− ' + value, which read
+                as a stray dash with a gap). The sign hugs the figure. */}
             <span className="font-mono tabular-nums text-headline text-oxide">
-              − <NumberFormat value={finance.ownerBorneTotal} showZero />
+              {'−'}
+              <NumberFormat value={finance.ownerBorneTotal} showZero />
             </span>
           </div>
           <div className="border-t border-stone-line my-1" />
@@ -1011,6 +1034,7 @@ export default function BuildingDashboard({ building }) {
                     (finance.ownerPaid / finance.ownerLedgerTotal) * 100
                   )}
                   fill="olive"
+                  subdued={finance.ownerLedgerTotal < 1}
                   footLeft={
                     <>
                       {t('Paid')}:{' '}
@@ -1241,7 +1265,7 @@ export default function BuildingDashboard({ building }) {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[100px]">{t('Floor')}</TableHead>
-              <TableHead className="w-[80px]">{t('m²')}</TableHead>
+              <TableHead className="w-[80px] text-right">{t('m²')}</TableHead>
               <TableHead>{t('Status')}</TableHead>
               <TableHead>{t('Owner')}</TableHead>
               <TableHead>{t('Tenant / Occupant')}</TableHead>
@@ -1315,10 +1339,19 @@ export default function BuildingDashboard({ building }) {
                       OCCUPANCY_CONFIG[effectiveOccupancy]?.bgColor
                     )}
                   >
-                    <TableCell className="font-medium">
-                      {idx === 0 ? <FloorLabel floor={floor} /> : ''}
+                    {/* Repeat the floor label on every row (was blanked on
+                        all but idx===0). A faint label on continuation rows
+                        keeps the first row dominant while letting every row
+                        self-identify, per the approved mockup (B1). */}
+                    <TableCell
+                      className={cn(
+                        'font-medium',
+                        idx !== 0 && 'text-ink-muted/50'
+                      )}
+                    >
+                      <FloorLabel floor={floor} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell numeric className="font-mono tabular-nums">
                       {unit.surface ? fmtNum(unit.surface) : '—'}
                     </TableCell>
                     <TableCell>
@@ -1328,7 +1361,7 @@ export default function BuildingDashboard({ building }) {
                     <TableCell className="font-medium">
                       {occupantDisplay}
                     </TableCell>
-                    <TableCell className="text-right font-medium">
+                    <TableCell className="text-right font-medium font-mono tabular-nums">
                       {rentDisplay}
                     </TableCell>
                   </TableRow>
@@ -1349,11 +1382,11 @@ export default function BuildingDashboard({ building }) {
             {sortedUnits.length > 0 && (
               <TableRow className="bg-cream border-t-2 border-marble hover:bg-cream">
                 <TableCell className="font-medium">{t('Total')}</TableCell>
-                <TableCell numeric className="font-medium">
+                <TableCell numeric className="font-medium font-mono tabular-nums">
                   {fmtNum(floorTotals.surface)}
                 </TableCell>
                 <TableCell colSpan={3} />
-                <TableCell numeric className="font-medium">
+                <TableCell numeric className="font-medium font-mono tabular-nums">
                   <NumberFormat value={floorTotals.rent} showZero />
                 </TableCell>
               </TableRow>
