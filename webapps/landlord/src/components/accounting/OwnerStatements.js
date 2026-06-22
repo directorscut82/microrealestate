@@ -12,25 +12,35 @@ import useTranslation from 'next-translate/useTranslation';
 
 const months = moment.localeData().months();
 
-function StatementMonthPicker({ onPick, t }) {
+// Per-month receipt picker — IDENTICAL to TenantSettlements' ReceiptMonthPicker
+// (the owner tab must mirror the tenant tab exactly). The button reads
+// «Απόδειξη» (Receipt), same as the tenant tab.
+function ReceiptMonthPicker({ onPick, t }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState([]);
   const localeMonths = moment.localeData().months();
 
-  const toggleMonth = (month) =>
+  const toggleMonth = (month) => {
     setSelected((prev) =>
-      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
+      prev.includes(month)
+        ? prev.filter((m) => m !== month)
+        : [...prev, month]
     );
-  const allYear = () =>
-    setSelected(
-      selected.length === 12 ? [] : Array.from({ length: 12 }, (_, i) => i + 1)
-    );
+  };
+
+  const allYear = () => {
+    const allSelected = selected.length === 12;
+    setSelected(allSelected ? [] : Array.from({ length: 12 }, (_, i) => i + 1));
+  };
+
   const submit = () => {
     if (!selected.length) return;
-    onPick([...selected].sort((a, b) => a - b));
+    const sorted = [...selected].sort((a, b) => a - b);
+    onPick(sorted);
     setOpen(false);
     setSelected([]);
   };
+
   const handleOpenChange = (next) => {
     setOpen(next);
     if (!next) setSelected([]);
@@ -40,9 +50,7 @@ function StatementMonthPicker({ onPick, t }) {
     <Popover open={open} onOpenChange={handleOpenChange} modal>
       <PopoverTrigger asChild>
         <Button variant="secondary" className="flex items-center gap-1">
-          {/* OS7: this downloads a STATEMENT (εκκαθαριστικό), not a receipt.
-              The tenant tab correctly uses 'Receipt'/Απόδειξη for receipts. */}
-          <LuPaperclip /> {t('Statement')}
+          <LuPaperclip /> {t('Receipt')}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-2" align="end">
@@ -75,7 +83,12 @@ function StatementMonthPicker({ onPick, t }) {
           })}
         </div>
         <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t">
-          <Button variant="ghost" size="sm" className="text-xs h-7" onClick={allYear}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7"
+            onClick={allYear}
+          >
             {t('All year')}
           </Button>
           <Button
@@ -85,7 +98,7 @@ function StatementMonthPicker({ onPick, t }) {
             disabled={!selected.length}
             onClick={submit}
           >
-            {t('Download {{count}} statements', { count: selected.length })}
+            {t('Download {{count}} receipts', { count: selected.length })}
           </Button>
         </div>
       </PopoverContent>
@@ -93,63 +106,57 @@ function StatementMonthPicker({ onPick, t }) {
   );
 }
 
-function SettlementRow({ month, ownerKey, settlements }) {
+// One month row — IDENTICAL structure to TenantSettlements' SettlementList.
+function SettlementList({ month, ownerKey, settlements }) {
   const { t } = useTranslation('common');
+
   const hasSettlements = !!settlements?.length;
-  // Derive the month name at RENDER from moment (locale set by _app), NOT the
-  // module-level `months` array captured at import before the locale was set —
-  // that rendered every month in the wrong language (Spanish: Enero/Febrero…).
+  // Month name at RENDER from moment (locale set by _app), not the stale
+  // module-level array captured at import before the locale was set.
   const rawMonth = moment().month(month).format('MMMM');
   const monthName = rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
-
   return (
-    // Hairline-only ledger row: a single bottom rule, no per-cell vertical
-    // borders, no two-tone fill on empty months (was a striped block of blank
-    // rectangles — the raw-spreadsheet look). Columns separate by alignment.
     <div className={cn('grid grid-cols-6 border-b first:border-t')}>
-      <div className="text-sm text-muted-foreground col-span-2 md:col-span-1 px-4 py-2">
+      <div className="text-muted-foreground md:text-lg border-l border-r col-span-2 md:col-span-1 px-4 py-2">
         {monthName}
       </div>
       <div
         className={cn(
-          // MIDDLE = the money column (mirrors TenantSettlements): each
-          // καταβολή's date + payment type + amount. OS1/OS2: was empty / showed
-          // charge metadata; now shows recorded payments.
-          'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2'
+          'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2 border-r',
+          !hasSettlements ? 'bg-muted' : ''
         )}
       >
         {hasSettlements
-          ? settlements.map((s, index) => {
-              return s.amount > 0 ? (
+          ? settlements.map((settlement, index) => {
+              const { date, amount, type } = settlement;
+              return amount > 0 ? (
                 <div
                   key={`${ownerKey}_${month}_${index}`}
                   className="text-right min-w-[8rem] flex-shrink-0"
                 >
-                  {s.date && (
-                    <div className="text-xs text-muted-foreground">
-                      {moment(s.date).format('L')}
-                    </div>
-                  )}
                   <div className="text-xs text-muted-foreground">
-                    {/* payment TYPE (Μεταφορά/Μετρητά/Επιταγή), like the tenant
-                        grid — guard a legacy/empty type (H7 class). */}
-                    {s.type ? t(s.type[0].toUpperCase() + s.type.slice(1)) : ''}
+                    {moment(date).format('L')}
                   </div>
-                  <NumberFormat value={s.amount} withColor className="text-lg" />
+                  <div className="text-xs text-muted-foreground">
+                    {/* Guard a legacy/typeless payment (type==='' or undefined):
+                        type[0] threw and blanked the page (H7 class). */}
+                    {type ? t(type[0].toUpperCase() + type.slice(1)) : ''}
+                  </div>
+                  <NumberFormat value={amount} withColor className="text-lg" />
                 </div>
               ) : null;
             })
           : null}
       </div>
-      <div className="col-span-2 px-4 py-2 text-xs text-muted-foreground space-y-1">
-        {/* RIGHT = notes recorded during the καταβολή (mirrors the tenant grid's
-            notes column). OS1: owed was wrongly rendered here; owed now lives in
-            the header total only. */}
+      <div className="col-span-2 px-4 py-2 border-r text-xs text-muted-foreground space-y-1">
         {hasSettlements
           ? settlements
               .filter((s) => s.amount > 0 && s.description)
               .map((s, index) => (
-                <div key={`${ownerKey}_${month}_note_${index}`} className="leading-snug">
+                <div
+                  key={`${ownerKey}_${month}_note_${index}`}
+                  className="leading-snug"
+                >
                   {s.description}
                 </div>
               ))
@@ -167,11 +174,9 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
       <CardHeader>
         <CardTitle className="flex justify-between items-center text-lg md:text-xl">
           {t('Payments')}
-          {onCSVClick && (
-            <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
-              <GrDocumentCsv className="size-6" />
-            </Button>
-          )}
+          <Button variant="ghost" size="icon" onClick={onCSVClick} aria-label={t('Download CSV')}>
+            <GrDocumentCsv className="size-6" />
+          </Button>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -180,20 +185,11 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
             key={owner.ownerKey}
             className="border-b first:border-t last:border-none py-4"
           >
-            {/* Owner name demoted below the card title (was text-xl = the
-                card's own title size). */}
-            <div className="flex justify-between items-baseline text-title font-medium px-2">
+            <div className="flex justify-between text-xl px-2">
               <div>{owner.name || t('Owner')}</div>
-              <StatementMonthPicker
-                onPick={onDownloadStatement(owner)}
-                t={t}
-              />
+              <ReceiptMonthPicker onPick={onDownloadStatement(owner)} t={t} />
             </div>
-            {/* OS5/OS6: a second header line so the owner block matches the
-                tenant block's height (tenant shows the lease date range). Owners
-                have no lease range → show units/buildings + ΑΦΜ instead, so the
-                two tabs line up row-for-row. */}
-            <div className="text-muted-foreground mb-2 px-2 text-sm">
+            <div className="text-muted-foreground mb-2">
               {[
                 owner.unitCount != null
                   ? t('{{count}} units', { count: owner.unitCount })
@@ -206,38 +202,16 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
                 .filter(Boolean)
                 .join(' · ')}
             </div>
-            {(owner.settlements || []).some((s) => s?.length) ? (
-              <div>
-                {/* Column header row (Label type, ink-muted, ruled) — the grid
-                    previously had no headers. */}
-                <div className="grid grid-cols-6 border-b text-label uppercase tracking-wide text-ink-muted">
-                  <div className="col-span-2 md:col-span-1 px-4 py-1.5">
-                    {t('Month')}
-                  </div>
-                  <div className="col-span-2 md:col-span-3 px-4 py-1.5 text-right">
-                    {t('Payments')}
-                  </div>
-                  <div className="col-span-2 px-4 py-1.5 text-right">
-                    {t('Note')}
-                  </div>
-                </div>
-                {months.map((_m, index) => (
-                  <SettlementRow
-                    key={`${owner.ownerKey}_${index}`}
-                    ownerKey={owner.ownerKey}
-                    month={index}
-                    settlements={owner.settlements?.[index]}
-                  />
-                ))}
-              </div>
-            ) : (
-              // No καταβολές this year → one muted line, not 12 empty rows.
-              <div className="px-2 py-2 text-sm text-ink-muted">
-                {t('No payments for {{year}}', {
-                  year: new Date().getFullYear()
-                })}
-              </div>
-            )}
+            <div>
+              {months.map((_m, index) => (
+                <SettlementList
+                  key={`${owner.ownerKey}_${index}`}
+                  ownerKey={owner.ownerKey}
+                  month={index}
+                  settlements={owner.settlements?.[index]}
+                />
+              ))}
+            </div>
           </div>
         ))}
       </CardContent>

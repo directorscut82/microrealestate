@@ -17,26 +17,15 @@ export default function RentOverviewCard({ tenant }) {
             <span className="text-muted-foreground">{t('Rent')}</span>
             <NumberFormat value={tenant.rental} />
           </div>
-          {/* Property-level recurring expenses (tenant's own surcharges) */}
+          {/* ONLY two charge types on this panel, per spec: the rent (above)
+              and "Δαπάνη επί του ενοικίου" (property-level charges on the rent).
+              Building-allocated κοινόχρηστα are NOT itemized here. */}
           {tenant.expenses > 0 && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">
-                {t('Additional charges')}
+                {t('Property charge')}
               </span>
               <NumberFormat value={tenant.expenses} />
-            </div>
-          )}
-          {/* Building charges (per-unit allocated from building expenses) */}
-          {(tenant.buildingCharges || []).length > 0 && (
-            <div className="space-y-0.5">
-              {tenant.buildingCharges.map((c, i) => (
-                <div key={i} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground truncate mr-2">
-                    {c.description || t('Building charge')}
-                  </span>
-                  <NumberFormat value={c.amount} />
-                </div>
-              ))}
             </div>
           )}
           {tenant.discount > 0 ? (

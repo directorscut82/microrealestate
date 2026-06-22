@@ -275,7 +275,6 @@ function Tenant() {
           <ShortcutButton
             label={t('Delete')}
             Icon={LuTrash}
-            variant="destructive"
             disabled={selected.hasPayments}
             onClick={handleDeleteTenant}
             dataCy="removeResourceButton"
@@ -284,7 +283,6 @@ function Tenant() {
             <ShortcutButton
               label={t('Terminate')}
               Icon={LuStopCircle}
-              variant="destructive"
               onClick={handleTerminateLease}
             />
           ) : null}
@@ -292,7 +290,6 @@ function Tenant() {
             <ShortcutButton
               label={t('Edit')}
               Icon={LuPencil}
-              variant="primary"
               onClick={handleEditTenant}
             />
           ) : null}
