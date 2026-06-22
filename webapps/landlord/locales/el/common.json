@@ -811,7 +811,7 @@
   "Settlement #{{count}}": "Καταβολή #{{count}}",
   "Settlements": "Εκκαθαρίσεις",
   "Settlements - {{year}}.csv": "Καταβολές - {{year}}.csv",
-  "Setup incomplete": "Ημιτελής ρύθμιση",
+  "Setup incomplete": "Ελλιπή στοιχεία",
   "Show archived": "Εμφάνιση αρχειοθετημένων",
   "Sign in": "Σύνδεση",
   "Sign in to your account": "Συνδεθείτε στον λογαριασμό σας",
@@ -1203,5 +1203,6 @@
   "Missing": "Λείπει",
   "Charged to tenants": "Χρέωση ενοικιαστών",
   "to": "έως",
-  "No property assigned. Set a property/lease for rent billing to start.": "Δεν έχει οριστεί ακίνητο. Ορίστε ακίνητο/συμβόλαιο για να ξεκινήσει η χρέωση ενοικίου."
+  "No property assigned. Set a property/lease for rent billing to start.": "Δεν έχει οριστεί ακίνητο. Ορίστε ακίνητο/συμβόλαιο για να ξεκινήσει η χρέωση ενοικίου.",
+  "Custom contract": "Ειδικό συμβόλαιο"
 }

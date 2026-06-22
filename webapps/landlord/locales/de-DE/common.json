@@ -1100,5 +1100,6 @@
   "Missing": "Fehlt",
   "Charged to tenants": "Mietern berechnet",
   "to": "bis",
-  "No property assigned. Set a property/lease for rent billing to start.": "Keine Immobilie zugewiesen. Weisen Sie eine Immobilie/einen Mietvertrag zu, damit die Mietabrechnung beginnt."
+  "No property assigned. Set a property/lease for rent billing to start.": "Keine Immobilie zugewiesen. Weisen Sie eine Immobilie/einen Mietvertrag zu, damit die Mietabrechnung beginnt.",
+  "Custom contract": "Individueller Vertrag"
 }

@@ -103,8 +103,11 @@ function SettlementRow({ month, ownerKey, settlements }) {
   const monthName = rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
 
   return (
+    // Hairline-only ledger row: a single bottom rule, no per-cell vertical
+    // borders, no two-tone fill on empty months (was a striped block of blank
+    // rectangles — the raw-spreadsheet look). Columns separate by alignment.
     <div className={cn('grid grid-cols-6 border-b first:border-t')}>
-      <div className="text-muted-foreground md:text-lg border-l border-r col-span-2 md:col-span-1 px-4 py-2">
+      <div className="text-sm text-muted-foreground col-span-2 md:col-span-1 px-4 py-2">
         {monthName}
       </div>
       <div
@@ -112,8 +115,7 @@ function SettlementRow({ month, ownerKey, settlements }) {
           // MIDDLE = the money column (mirrors TenantSettlements): each
           // καταβολή's date + payment type + amount. OS1/OS2: was empty / showed
           // charge metadata; now shows recorded payments.
-          'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2 border-r',
-          !hasSettlements ? 'bg-muted' : ''
+          'flex flex-wrap gap-x-6 gap-y-2 items-center justify-end col-span-2 md:col-span-3 px-4 py-2'
         )}
       >
         {hasSettlements
@@ -139,7 +141,7 @@ function SettlementRow({ month, ownerKey, settlements }) {
             })
           : null}
       </div>
-      <div className="col-span-2 px-4 py-2 border-r text-xs text-muted-foreground space-y-1">
+      <div className="col-span-2 px-4 py-2 text-xs text-muted-foreground space-y-1">
         {/* RIGHT = notes recorded during the καταβολή (mirrors the tenant grid's
             notes column). OS1: owed was wrongly rendered here; owed now lives in
             the header total only. */}
@@ -209,13 +211,13 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
                 {/* Column header row (Label type, ink-muted, ruled) — the grid
                     previously had no headers. */}
                 <div className="grid grid-cols-6 border-b text-label uppercase tracking-wide text-ink-muted">
-                  <div className="col-span-2 md:col-span-1 border-l border-r px-4 py-1.5">
+                  <div className="col-span-2 md:col-span-1 px-4 py-1.5">
                     {t('Month')}
                   </div>
-                  <div className="col-span-3 md:col-span-4 border-r px-4 py-1.5">
+                  <div className="col-span-2 md:col-span-3 px-4 py-1.5 text-right">
                     {t('Payments')}
                   </div>
-                  <div className="border-r px-4 py-1.5 text-right">
+                  <div className="col-span-2 px-4 py-1.5 text-right">
                     {t('Note')}
                   </div>
                 </div>

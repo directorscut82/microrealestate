@@ -1100,5 +1100,6 @@
   "Missing": "Falta",
   "Charged to tenants": "Cobrado a inquilinos",
   "to": "a",
-  "No property assigned. Set a property/lease for rent billing to start.": "Sin inmueble asignado. Asigne un inmueble/contrato para iniciar el cobro del alquiler."
+  "No property assigned. Set a property/lease for rent billing to start.": "Sin inmueble asignado. Asigne un inmueble/contrato para iniciar el cobro del alquiler.",
+  "Custom contract": "Contrato personalizado"
 }

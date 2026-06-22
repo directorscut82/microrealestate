@@ -1190,5 +1190,6 @@
   "Missing": "Missing",
   "Charged to tenants": "Charged to tenants",
   "to": "to",
-  "No property assigned. Set a property/lease for rent billing to start.": "No property assigned. Set a property/lease for rent billing to start."
+  "No property assigned. Set a property/lease for rent billing to start.": "No property assigned. Set a property/lease for rent billing to start.",
+  "Custom contract": "Custom contract"
 }

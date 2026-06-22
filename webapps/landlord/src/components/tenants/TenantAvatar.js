@@ -23,7 +23,9 @@ export default function TenantAvatar({ tenant }) {
   }, [tenant]);
   return (
     <Avatar className="size-14">
-      <AvatarFallback className="bg-primary/20 font-medium">
+      {/* Warm sea-tint fill (not a chroma-0 / cobalt grey, which reads cold
+          against the bone/cream surface). */}
+      <AvatarFallback className="bg-sea-tint text-sea-deep font-medium">
         {initials}
       </AvatarFallback>
     </Avatar>

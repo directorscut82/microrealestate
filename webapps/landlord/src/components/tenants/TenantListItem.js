@@ -164,14 +164,17 @@ export default function TenantListItem({ tenant }) {
         <div className="cursor-pointer" onClick={handleClick}>
           <div>
             {tenant.beginDate
-              ? tenant.lease?.name || t('custom')
+              ? tenant.lease?.name || t('Custom contract')
               : t('No associated contract')}
           </div>
+          {/* Time-elapsed bar, NOT a success metric — render neutral stone so
+              it doesn't collide with olive=paid/success or compete with the
+              real status pill below. */}
           <Progress
             value={progress}
-            className={cn('h-2 my-2 bg-secondary')}
+            className={cn('h-1.5 my-2 bg-secondary')}
             indicatorClassName={
-              tenant.terminated ? 'bg-muted-foreground/30' : 'bg-success'
+              tenant.terminated ? 'bg-ink-muted/30' : 'bg-ink-muted/50'
             }
           />
           <div className="text-xs">
@@ -205,9 +208,9 @@ export default function TenantListItem({ tenant }) {
                 variant="outline"
                 // Size comes from the Badge base (text-[0.6875rem]); only
                 // override weight + colour here. font-normal matches the
-                // lease pill; softened amber border so it doesn't read as a
-                // thick box. No leading-none (it clipped Greek descenders).
-                className="font-normal border-amber-500/50 text-amber-700"
+                // lease pill. Oxide is the system's single warning color
+                // (raw tailwind amber is off-palette).
+                className="font-normal border-oxide/40 text-oxide"
               >
                 {f === 'firstName' && t('First name')}
                 {f === 'lastName' && t('Last name')}
@@ -250,7 +253,7 @@ export default function TenantListItem({ tenant }) {
             {leaseState === 'future' ? (
               <LuCalendarClock
                 aria-hidden="true"
-                className="size-3 shrink-0 text-amber-500"
+                className="size-3 shrink-0 text-sea"
               />
             ) : leaseState === 'incomplete' ? (
               <LuAlertTriangle

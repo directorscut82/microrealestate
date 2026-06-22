@@ -1100,5 +1100,6 @@
   "Missing": "Manquant",
   "Charged to tenants": "Facturé aux locataires",
   "to": "à",
-  "No property assigned. Set a property/lease for rent billing to start.": "Aucun bien attribué. Définissez un bien/bail pour démarrer la facturation du loyer."
+  "No property assigned. Set a property/lease for rent billing to start.": "Aucun bien attribué. Définissez un bien/bail pour démarrer la facturation du loyer.",
+  "Custom contract": "Contrat personnalisé"
 }
