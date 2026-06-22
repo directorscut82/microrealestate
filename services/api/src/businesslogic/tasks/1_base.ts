@@ -128,8 +128,8 @@ export type ShareBasis = {
     | 'repair_vacant'
     | 'none';
   count?: number; // equal: number of PARTIES splitting (tenants + vacant units)
-  part?: number; // surface m² / thousandths ‰ for this unit
-  whole?: number; // total surface / total thousandths
+  part?: number; // surface m² / thousandths ‰ / custom ratio share / custom % for this unit
+  whole?: number; // total surface / total thousandths / sum of custom ratios
   total?: number; // the expense amount being split
   share?: number; // the resulting per-unit euro amount (the "= X €" tail)
   // repair bases:
@@ -208,10 +208,38 @@ function _shareBasis(
       return { kind: 'fixed', share: fmt(share) };
     case 'single_unit':
       return { kind: 'single_unit', share: fmt(share) };
-    case 'custom_ratio':
-      return { kind: 'custom_ratio', share: fmt(share) };
-    case 'custom_percentage':
-      return { kind: 'custom_percentage', share: fmt(share) };
+    case 'custom_ratio': {
+      // Ship the ratio numbers so the UI can render "(part ÷ whole) × cost":
+      // part = this unit's ratio value, whole = sum of all ratio values.
+      const allocs = expense.customAllocations || [];
+      const mine = allocs.find(
+        (a: any) => String(a.propertyId) === String(unit.propertyId)
+      );
+      const whole = allocs.reduce(
+        (s: number, a: any) => s + (Number(a.value) || 0),
+        0
+      );
+      return {
+        kind: 'custom_ratio',
+        part: Number(mine?.value) || 0,
+        whole: fmt(whole),
+        total: fmt(total),
+        share: fmt(share)
+      };
+    }
+    case 'custom_percentage': {
+      // Ship the unit's percentage so the UI can render "part% × cost".
+      const allocs = expense.customAllocations || [];
+      const mine = allocs.find(
+        (a: any) => String(a.propertyId) === String(unit.propertyId)
+      );
+      return {
+        kind: 'custom_percentage',
+        part: Number(mine?.value) || 0,
+        total: fmt(total),
+        share: fmt(share)
+      };
+    }
     default:
       return { kind: 'none', share: fmt(share) };
   }
@@ -420,6 +448,33 @@ export function computeBuildingExpenseBreakdown(
         isOwnerOccupied ||
         !!srcExpense?.chargeOwnerWhenVacant ||
         !!srcRepair?.chargeOwnerWhenVacant;
+      // Reconstruct the split formula for a persisted EXPENSE charge so it
+      // shows the SAME "÷ μονάδες / × τ.μ. / ‰" basis as a live-computed one
+      // (section 1) — EVERY expense, every category, displays its breakdown
+      // consistently (Ασφάλιση/Ρεύμα were showing none). The charge stores
+      // `inputAmount` (the full statement figure the landlord typed, e.g.
+      // 1,21 €); _shareBasis derives the equation from that total + the
+      // expense's allocationMethod, exactly as section 1 does. `basis` is
+      // DISPLAY-ONLY (never summed into a money total — verified), so this
+      // cannot change any euro amount.
+      //   - REPAIR charges (c.repairId, no srcExpense): keep {kind:'none'};
+      //     their split is the repair distribution (section 3 basis), not an
+      //     allocation formula.
+      //   - Legacy charges with no inputAmount: {kind:'none'} (no reliable
+      //     total to reconstruct from).
+      const persistedBasis =
+        srcExpense && c.inputAmount != null && Number(c.inputAmount) > 0
+          ? _shareBasis(
+              building,
+              unit,
+              srcExpense,
+              Number(c.inputAmount),
+              Math.round(amt * 100) / 100,
+              (srcExpense.allocationMethod || 'equal') === 'equal'
+                ? _equalPartyCount(building, term)
+                : undefined
+            )
+          : { kind: 'none' as const };
       rows.push({
         expenseId: String(c.expenseId || c.repairId || ''),
         expenseName:
@@ -431,9 +486,7 @@ export function computeBuildingExpenseBreakdown(
         recipient,
         recipientName,
         amount: Math.round(amt * 100) / 100,
-        // Variable statement amounts + repair distributions are stored
-        // directly (no split formula to explain) → no calc basis.
-        basis: { kind: 'none' },
+        basis: persistedBasis,
         ...(recipient === 'owner'
           ? {
               ownerBilled: ownerBilledForCharge,

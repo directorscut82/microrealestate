@@ -1101,5 +1101,19 @@
   "Charged to tenants": "Mietern berechnet",
   "to": "bis",
   "No property assigned. Set a property/lease for rent billing to start.": "Keine Immobilie zugewiesen. Weisen Sie eine Immobilie/einen Mietvertrag zu, damit die Mietabrechnung beginnt.",
-  "Custom contract": "Individueller Vertrag"
+  "Custom contract": "Individueller Vertrag",
+  "Owner share {{pct}}% of {{total}} € = {{share}} €": "Eigentümeranteil {{pct}}% von {{total}} € = {{share}} €",
+  "Vacant-unit share {{share}} € (from the {{pool}} € tenants portion of the repair)": "Anteil leere Einheit {{share}} € (aus {{pool}} € Mieteranteil der Reparatur)",
+  "{{name}} {{pct}}% ({{amount}})": "{{name}} {{pct}}% ({{amount}})",
+  "unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €": "unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €",
+  "unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €": "unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €",
+  "fixed amount per unit: {{share}} €": "fixed amount per unit: {{share}} €",
+  "the whole amount is charged to one unit: {{share}} €": "the whole amount is charged to one unit: {{share}} €",
+  "({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €": "({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €",
+  "custom ratio share: {{share}} €": "custom ratio share: {{share}} €",
+  "unit percentage {{part}}% × cost {{total}} € = {{share}} €": "unit percentage {{part}}% × cost {{total}} € = {{share}} €",
+  "custom percentage share: {{share}} €": "custom percentage share: {{share}} €",
+  "cost {{total}} € × owner share {{pct}}% = {{share}} €": "cost {{total}} € × owner share {{pct}}% = {{share}} €",
+  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €",
+  "vacant-unit share: {{share}} €": "vacant-unit share: {{share}} €"
 }

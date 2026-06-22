@@ -1204,5 +1204,19 @@
   "Charged to tenants": "Χρέωση ενοικιαστών",
   "to": "έως",
   "No property assigned. Set a property/lease for rent billing to start.": "Δεν έχει οριστεί ακίνητο. Ορίστε ακίνητο/συμβόλαιο για να ξεκινήσει η χρέωση ενοικίου.",
-  "Custom contract": "Ειδικό συμβόλαιο"
+  "Custom contract": "Ειδικό συμβόλαιο",
+  "Owner share {{pct}}% of {{total}} € = {{share}} €": "Μερίδιο ιδιοκτήτη {{pct}}% επί {{total}} € = {{share}} €",
+  "Vacant-unit share {{share}} € (from the {{pool}} € tenants portion of the repair)": "Μερίδιο κενής μονάδας {{share}} € (από {{pool}} € μερίδιο ενοικιαστών της επισκευής)",
+  "{{name}} {{pct}}% ({{amount}})": "{{name}} {{pct}}% ({{amount}})",
+  "unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €": "επιφάνεια μονάδας {{part}} τ.μ. ÷ συνολική {{whole}} τ.μ. × κόστος {{total}} € = {{share}} €",
+  "unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €": "χιλιοστά μονάδας {{part}} ÷ {{whole}} συνολικά × κόστος {{total}} € = {{share}} €",
+  "fixed amount per unit: {{share}} €": "σταθερό ποσό ανά μονάδα: {{share}} €",
+  "the whole amount is charged to one unit: {{share}} €": "ολόκληρο το ποσό χρεώνεται σε μία μονάδα: {{share}} €",
+  "({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €": "({{part}} ÷ {{whole}}) × κόστος {{total}} € = {{share}} €",
+  "custom ratio share: {{share}} €": "μερίδιο αναλογίας: {{share}} €",
+  "unit percentage {{part}}% × cost {{total}} € = {{share}} €": "ποσοστό μονάδας {{part}}% × κόστος {{total}} € = {{share}} €",
+  "custom percentage share: {{share}} €": "μερίδιο ποσοστού: {{share}} €",
+  "cost {{total}} € × owner share {{pct}}% = {{share}} €": "κόστος {{total}} € × μερίδιο ιδιοκτητών {{pct}}% = {{share}} €",
+  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "κόστος {{total}} € × μερίδιο ενοικιαστών {{pct}}% = {{pool}} €",
+  "vacant-unit share: {{share}} €": "μερίδιο κενής μονάδας: {{share}} €"
 }

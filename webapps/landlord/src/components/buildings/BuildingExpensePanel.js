@@ -712,6 +712,10 @@ function formatBasis(t, basis, fmt) {
   const e = (n) =>
     fmt ? fmt(Number(n) || 0).replace(/\s*€\s*/g, '').trim() : n;
   switch (basis.kind) {
+    // Wording approved by the user (2026-06): original equation order, with a
+    // short label naming each non-currency number (επιφάνεια/χιλιοστά). Fixed +
+    // single_unit have no division → state the rule. custom_ratio shows the
+    // bare ratio in parens "(2 ÷ 5)".
     case 'equal':
       return t('{{total}} € ÷ {{count}} units = {{share}} €', {
         total: e(basis.total),
@@ -719,47 +723,81 @@ function formatBasis(t, basis, fmt) {
         share: e(basis.share)
       });
     case 'surface':
-      return t('{{part}} m² ÷ {{whole}} m² × {{total}} € = {{share}} €', {
-        part: basis.part,
-        whole: basis.whole,
-        total: e(basis.total),
-        share: e(basis.share)
-      });
+      return t(
+        'unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €',
+        {
+          part: basis.part,
+          whole: basis.whole,
+          total: e(basis.total),
+          share: e(basis.share)
+        }
+      );
     case 'thousandths':
-      return t('{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €', {
-        part: basis.part,
-        whole: basis.whole,
-        total: e(basis.total),
+      return t(
+        'unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €',
+        {
+          part: basis.part,
+          whole: basis.whole,
+          total: e(basis.total),
+          share: e(basis.share)
+        }
+      );
+    case 'fixed':
+      return t('fixed amount per unit: {{share}} €', { share: e(basis.share) });
+    case 'single_unit':
+      return t('the whole amount is charged to one unit: {{share}} €', {
         share: e(basis.share)
       });
-    case 'fixed':
-      return t('fixed amount for this unit');
-    case 'single_unit':
-      return t('whole amount on one unit');
+    case 'custom_ratio':
+      // Server ships part/whole (the unit's ratio share and the sum of ratios);
+      // render "(2 ÷ 5) × cost 30,00 € = 12,00 €". Falls back to just the share
+      // when the numbers aren't present (legacy basis).
+      return basis.part != null && basis.whole != null
+        ? t('({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €', {
+            part: basis.part,
+            whole: basis.whole,
+            total: e(basis.total),
+            share: e(basis.share)
+          })
+        : t('custom ratio share: {{share}} €', { share: e(basis.share) });
+    case 'custom_percentage':
+      return basis.part != null
+        ? t('unit percentage {{part}}% × cost {{total}} € = {{share}} €', {
+            part: basis.part,
+            total: e(basis.total),
+            share: e(basis.share)
+          })
+        : t('custom percentage share: {{share}} €', { share: e(basis.share) });
     // §1.2/§1.3: repair owner-portion = cost × owner% (= 100 − tenant%).
     case 'repair_split':
-      return t('{{total}} € × {{pct}}% owner share = {{share}} €', {
+      return t('cost {{total}} € × owner share {{pct}}% = {{share}} €', {
         total: e(basis.total),
         pct: basis.ownerPct,
         share: e(basis.result)
       });
     // §1.2/§1.3: a vacant unit's slice of the repair's tenant pool, routed to
-    // the owner. Shows the pool (cost × tenant%) AND this unit's allocated slice
-    // — an allocation, not a "× %" equation (the slice is a fraction of the pool
-    // by thousandths/surface, so a "pool × % = slice" line would not reconcile).
+    // the owner. Approved 2-line form: line 1 = cost × tenant% = pool; line 2 =
+    // this vacant unit's share. We return the FIRST line here; the second
+    // ("μερίδιο κενής μονάδας: X €") is rendered as its own line by the caller
+    // (see repairVacantShareLine).
     case 'repair_vacant':
-      return t(
-        '{{total}} € × {{pct}}% tenant share = {{pool}} € → vacant unit share {{share}} €',
-        {
-          total: e(basis.total),
-          pct: basis.tenantPct,
-          pool: e(basis.pool),
-          share: e(basis.result)
-        }
-      );
+      return t('cost {{total}} € × tenants share {{pct}}% = {{pool}} €', {
+        total: e(basis.total),
+        pct: basis.tenantPct,
+        pool: e(basis.pool)
+      });
     default:
       return '';
   }
+}
+
+// Second line for a repair_vacant basis: this vacant unit's share of the
+// tenant pool (the figure actually billed to the owner). Rendered under the
+// formatBasis line so the two read as the approved 2-step κατανομή.
+function repairVacantShareLine(t, basis, fmt) {
+  if (!basis || basis.kind !== 'repair_vacant') return '';
+  const e = (n) => (fmt ? fmt(Number(n) || 0).replace(/\s*€\s*/g, '').trim() : n);
+  return t('vacant-unit share: {{share}} €', { share: e(basis.result) });
 }
 
 function OwnerName({ name, percentage }) {
@@ -783,19 +821,97 @@ function OwnerName({ name, percentage }) {
 // only carried one of the co-owners.
 function CoOwnerSplit({ owners, t, formatNumber }) {
   if (!Array.isArray(owners) || owners.length < 2) return null;
-  // Own full-width line (NOT appended inside the truncating label span, where
-  // it clipped mid-number as '50% = 2,43 …'). Mirrors the calc-basis line.
+  // Own full-width line, prefixed «Ιδιοκτήτες:» so the co-owner split is clearly
+  // labelled (was a bare "50% = 2,43" that read as gibberish). Each co-owner as
+  // "NAME pct% (€amount)".
   return (
     <div className="text-label text-muted-foreground/80 leading-tight">
+      <span className="uppercase tracking-wide mr-1">{t('Owners')}:</span>
       {owners
         .map((o) =>
-          t('{{name}} {{pct}}% = {{amount}}', {
+          t('{{name}} {{pct}}% ({{amount}})', {
             name: o.isRest ? t('others') : o.name,
             pct: o.percentage,
             amount: formatNumber(o.amount)
           })
         )
         .join(' · ')}
+    </div>
+  );
+}
+
+// Collapsible per-unit group in the breakdown (the user-approved layout):
+// a clickable header row (unit label · recipient — total, with a ▸/▾ chevron)
+// that expands to each expense line + its «Επιμερισμός:» basis + co-owner
+// split. Collapsed by default so the panel reads as a clean list of units.
+function UnitGroup({ title, total, items, t, formatNumber, ownerTinted }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-1.5 last:mb-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-baseline justify-between gap-2 text-sm text-left"
+      >
+        <span
+          className={cn(
+            'font-medium truncate min-w-0 flex-1',
+            ownerTinted && 'text-ink-muted'
+          )}
+        >
+          {title}
+        </span>
+        <span className="flex items-baseline gap-1 shrink-0">
+          <span className="tabular-nums font-medium whitespace-nowrap">
+            <NumberFormat value={total} />
+          </span>
+          <LuChevronRight
+            className={cn(
+              'inline size-3 text-muted-foreground transition-transform',
+              open && 'rotate-90'
+            )}
+          />
+        </span>
+      </button>
+      {open && (
+        <div className="pl-3 mt-1 space-y-2">
+          {items.map((it, ii) => {
+            const basis = formatBasis(t, it.basis, formatNumber);
+            return (
+              <div key={ii}>
+                <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="truncate min-w-0 flex-1">
+                    {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
+                  </span>
+                  <span className="tabular-nums whitespace-nowrap shrink-0">
+                    <NumberFormat value={it.amount} />
+                  </span>
+                </div>
+                {/* Allocation formula line — no prefix label (the user flagged
+                    «ΚΑΤΑΝΟΜΗ:» as meaningless); the equation stands on its own. */}
+                {basis && (
+                  <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
+                    {basis}
+                  </div>
+                )}
+                {/* repair_vacant: the vacant unit's share on its own 2nd line */}
+                {it.basis?.kind === 'repair_vacant' && (
+                  <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight">
+                    {repairVacantShareLine(t, it.basis, formatNumber)}
+                  </div>
+                )}
+                {it.owners && (
+                  <CoOwnerSplit
+                    owners={it.owners}
+                    t={t}
+                    formatNumber={formatNumber}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -871,12 +987,10 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
         </div>
       )}
       {Array.from(byProperty.values()).map((g, gi) => (
-        <div key={`p-${gi}`} className="mb-2 last:mb-0">
-          <div className="flex items-baseline justify-between gap-2 text-sm">
-            {/* min-w-0 + flex-1 so `truncate` can actually clip the label
-                instead of overflowing the column's right edge (the clipped
-                ΧΡΕΩΣΕΙΣ column bug). */}
-            <span className="font-medium truncate min-w-0 flex-1">
+        <UnitGroup
+          key={`p-${gi}`}
+          title={
+            <>
               {unitLabel(building?.name, g.propertyName)}
               <span className="ml-1 font-normal text-muted-foreground">
                 ·{' '}
@@ -884,34 +998,13 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                   ? t('Renter: {{name}}', { name: g.recipientName })
                   : t('Renter')}
               </span>
-            </span>
-            <span className="tabular-nums font-medium whitespace-nowrap shrink-0">
-              <NumberFormat value={g.total} />
-            </span>
-          </div>
-          {g.items.map((it, ii) => {
-            const basis = formatBasis(t, it.basis, formatNumber);
-            return (
-              <div key={`pi-${gi}-${ii}`} className="pl-3">
-                <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
-                  <span className="truncate min-w-0 flex-1">
-                    {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
-                  </span>
-                  <span className="tabular-nums whitespace-nowrap shrink-0">
-                    <NumberFormat value={it.amount} />
-                  </span>
-                </div>
-                {/* calc-basis on its OWN full-width line so the '= 0,15 €' end
-                    is never clipped by the amount column (was truncated). */}
-                {basis && (
-                  <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
-                    {basis}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+            </>
+          }
+          total={g.total}
+          items={g.items}
+          t={t}
+          formatNumber={formatNumber}
+        />
       ))}
 
       {/* ONE consolidated owner block. Grouped by property and labeled with
@@ -954,9 +1047,11 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               }, new Map())
               .values()
           ).map((g, gi) => (
-            <div key={`og-${gi}`} className="mb-2 last:mb-0">
-              <div className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="font-medium truncate min-w-0 flex-1 text-ink-muted">
+            <UnitGroup
+              key={`og-${gi}`}
+              ownerTinted
+              title={
+                <>
                   {g.propertyName
                     ? unitLabel(building?.name, g.propertyName)
                     : t('Owners')}
@@ -964,39 +1059,13 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                     name={g.ownerName}
                     percentage={g.ownerPercentage}
                   />
-                </span>
-                <span className="tabular-nums font-medium whitespace-nowrap shrink-0">
-                  <NumberFormat value={g.total} />
-                </span>
-              </div>
-              {g.items.map((e, ii) => {
-                const basis = formatBasis(t, e.basis, formatNumber);
-                return (
-                  <div key={`oi-${gi}-${ii}`} className="pl-3">
-                    <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
-                      <span className="truncate min-w-0 flex-1">
-                        {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
-                      </span>
-                      <span className="tabular-nums whitespace-nowrap shrink-0">
-                        <NumberFormat value={e.amount} />
-                      </span>
-                    </div>
-                    {/* per-owner € split on its OWN full-width line so the
-                        figures are never clipped by the amount column */}
-                    <CoOwnerSplit
-                      owners={e.owners}
-                      t={t}
-                      formatNumber={formatNumber}
-                    />
-                    {basis && (
-                      <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
-                        {basis}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                </>
+              }
+              total={g.total}
+              items={g.items}
+              t={t}
+              formatNumber={formatNumber}
+            />
           ))}
         </div>
       )}
