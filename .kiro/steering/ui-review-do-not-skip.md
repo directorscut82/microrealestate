@@ -43,6 +43,17 @@ review. This is the rule that breaks that cycle.
    MUST still be present and correct after it. Diff the information content, not
    just the looks.
 
+6. **ALWAYS show the proposed change as an ASCII or HTML render BEFORE writing
+   code, and get explicit approval.** The agent has a documented track record of
+   building UI changes the user never approved, then showing them after the fact
+   (black button, repair-formula wording, owner-tab grid collapse — all rejected
+   as "who approved this junk"). The agent is NOT trusted to choose layout or
+   wording on its own. For any change to a rendered surface (a label, a formula
+   line, a row layout, a column, a tab): first paste a concrete ASCII mock (or
+   an HTML snippet) of the BEFORE and AFTER in the chat, let the user pick/edit,
+   and only then implement the approved version verbatim. "Build it then show a
+   screenshot" is the banned anti-pattern — show the mock first.
+
 ## How to capture — the FAST local-dev loop (proven 2026-06-22)
 
 DO NOT deploy to NAS just to *look* at a UI change. A NAS deploy is ~10 min
