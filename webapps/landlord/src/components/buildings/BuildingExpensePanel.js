@@ -705,9 +705,12 @@ function expenseDisplayLabel(t, name, type) {
 function formatBasis(t, basis, fmt) {
   if (!basis || typeof basis !== 'object') return '';
   // el-GR money formatter for the euro tokens inside the basis string. Without
-  // it the raw JS numbers render '1.7 €' (dot decimal, unpadded) instead of the
-  // mandated '1,70 €'. count/‰/m² are NOT currency — leave them raw.
-  const e = (n) => (fmt ? fmt(Number(n) || 0) : n);
+  // it the raw JS numbers render '1.7' (dot decimal, unpadded) instead of the
+  // mandated '1,70'. The template strings already carry a literal ' €', so we
+  // STRIP the currency symbol the formatter adds — otherwise the cell rendered
+  // a doubled sign ('1,70 € €'). count/‰/m² are NOT currency — leave them raw.
+  const e = (n) =>
+    fmt ? fmt(Number(n) || 0).replace(/\s*€\s*/g, '').trim() : n;
   switch (basis.kind) {
     case 'equal':
       return t('{{total}} € ÷ {{count}} units = {{share}} €', {
@@ -780,9 +783,10 @@ function OwnerName({ name, percentage }) {
 // only carried one of the co-owners.
 function CoOwnerSplit({ owners, t, formatNumber }) {
   if (!Array.isArray(owners) || owners.length < 2) return null;
+  // Own full-width line (NOT appended inside the truncating label span, where
+  // it clipped mid-number as '50% = 2,43 …'). Mirrors the calc-basis line.
   return (
-    <span className="ml-1 text-muted-foreground/60">
-      (
+    <div className="text-label text-muted-foreground/80 leading-tight">
       {owners
         .map((o) =>
           t('{{name}} {{pct}}% = {{amount}}', {
@@ -791,9 +795,8 @@ function CoOwnerSplit({ owners, t, formatNumber }) {
             amount: formatNumber(o.amount)
           })
         )
-        .join(', ')}
-      )
-    </span>
+        .join(' · ')}
+    </div>
   );
 }
 
@@ -973,17 +976,18 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                     <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
                       <span className="truncate min-w-0 flex-1">
                         {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
-                        {/* per-owner € split when the unit is co-owned */}
-                        <CoOwnerSplit
-                          owners={e.owners}
-                          t={t}
-                          formatNumber={formatNumber}
-                        />
                       </span>
                       <span className="tabular-nums whitespace-nowrap shrink-0">
                         <NumberFormat value={e.amount} />
                       </span>
                     </div>
+                    {/* per-owner € split on its OWN full-width line so the
+                        figures are never clipped by the amount column */}
+                    <CoOwnerSplit
+                      owners={e.owners}
+                      t={t}
+                      formatNumber={formatNumber}
+                    />
                     {basis && (
                       <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
                         {basis}
