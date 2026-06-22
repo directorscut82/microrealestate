@@ -100,6 +100,20 @@ render and its screenshot is worthless; fix auth/timing and re-capture before
 reviewing it. (Last run, 8/13 were silently the crash overlay — that's why the
 guard exists.)
 
+### Known capture-harness gotcha — the rents URL must be zero-padded
+
+The rents page (`[organization]/rents/[yearMonth]/index.js`) validates
+`yearMonth` in **strict** `moment(yearMonth, 'YYYY.MM', true)` mode and returns
+`<ErrorPage 404 />` on any mismatch. So the term MUST be zero-padded:
+`2026.06`, never `2026.6`. The real nav link (`AppMenu`) already builds the
+padded form via `moment().format('YYYY.MM')`, so the app is fine — but a
+hand-built capture URL with an unpadded month (`${yr}.${getMonth()+1}`) renders
+the in-shell 404 and a critique agent will (correctly, from the pixels) flag it
+as a P0 "rents is a dead page." **It is NOT a dead page — it's a harness bug.**
+Two separate critique rounds flagged this; both times the page renders the full
+RentTable at the padded URL. If you see the rents-404 finding, check the capture
+URL's month padding before touching any route.
+
 ### Screenshot size gotcha
 `fullPage` shots of long pages exceed the 2000px image-read limit. Use
 viewport-only shots (no `fullPage`) at `deviceScaleFactor: 1.5`, or
