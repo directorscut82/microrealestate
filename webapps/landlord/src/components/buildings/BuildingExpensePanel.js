@@ -630,8 +630,22 @@ function _looksLikeId(name) {
   if (!name || typeof name !== 'string') return true;
   const s = name.trim();
   if (!s) return true;
-  // 8+ chars, hex-only, no spaces → an id, not a human label.
-  return /^[0-9a-f]{8,}$/i.test(s) || /^[0-9a-f]{24}$/i.test(s);
+  // A pure hex/objectid token is an id.
+  if (/^[0-9a-f]{8,}$/i.test(s)) return true;
+  // Also treat a single space-free token that is DOMINATED by a long hex run as
+  // an id, even with a short junk suffix — e.g. 'd6aa8660a511asdas' (12 hex +
+  // 'asdas'). The strict pure-hex regex missed these, so the gibberish leaked
+  // into the UI as 'Κοινόχρηστο Νερό (d6aa8660a511asdas)'. Rule: no spaces, no
+  // Greek letters, length >= 10, and at least an 8-char contiguous hex run.
+  if (
+    !/\s/.test(s) &&
+    !/[Ͱ-Ͽἀ-῿]/.test(s) && // no Greek → not a real Greek name
+    s.length >= 10 &&
+    /[0-9a-f]{8,}/i.test(s)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 // The human label for an expense/owner/repair row: prefer the TYPE label;
@@ -655,28 +669,32 @@ function expenseDisplayLabel(t, name, type) {
 //   fixed:       σταθερό ποσό μονάδας
 //   single_unit: όλο το ποσό σε μία μονάδα
 // Returns '' only when there is genuinely nothing to explain ('none').
-function formatBasis(t, basis) {
+function formatBasis(t, basis, fmt) {
   if (!basis || typeof basis !== 'object') return '';
+  // el-GR money formatter for the euro tokens inside the basis string. Without
+  // it the raw JS numbers render '1.7 €' (dot decimal, unpadded) instead of the
+  // mandated '1,70 €'. count/‰/m² are NOT currency — leave them raw.
+  const e = (n) => (fmt ? fmt(Number(n) || 0) : n);
   switch (basis.kind) {
     case 'equal':
       return t('{{total}} € ÷ {{count}} units = {{share}} €', {
-        total: basis.total,
+        total: e(basis.total),
         count: basis.count,
-        share: basis.share
+        share: e(basis.share)
       });
     case 'surface':
       return t('{{part}} m² ÷ {{whole}} m² × {{total}} € = {{share}} €', {
         part: basis.part,
         whole: basis.whole,
-        total: basis.total,
-        share: basis.share
+        total: e(basis.total),
+        share: e(basis.share)
       });
     case 'thousandths':
       return t('{{part}}‰ ÷ {{whole}}‰ × {{total}} € = {{share}} €', {
         part: basis.part,
         whole: basis.whole,
-        total: basis.total,
-        share: basis.share
+        total: e(basis.total),
+        share: e(basis.share)
       });
     case 'fixed':
       return t('fixed amount for this unit');
@@ -685,9 +703,9 @@ function formatBasis(t, basis) {
     // §1.2/§1.3: repair owner-portion = cost × owner% (= 100 − tenant%).
     case 'repair_split':
       return t('{{total}} € × {{pct}}% owner share = {{share}} €', {
-        total: basis.total,
+        total: e(basis.total),
         pct: basis.ownerPct,
-        share: basis.result
+        share: e(basis.result)
       });
     // §1.2/§1.3: a vacant unit's slice of the repair's tenant pool, routed to
     // the owner. Shows the pool (cost × tenant%) AND this unit's allocated slice
@@ -697,10 +715,10 @@ function formatBasis(t, basis) {
       return t(
         '{{total}} € × {{pct}}% tenant share = {{pool}} € → vacant unit share {{share}} €',
         {
-          total: basis.total,
+          total: e(basis.total),
           pct: basis.tenantPct,
-          pool: basis.pool,
-          share: basis.result
+          pool: e(basis.pool),
+          share: e(basis.result)
         }
       );
     default:
@@ -831,24 +849,28 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               <NumberFormat value={g.total} />
             </span>
           </div>
-          {g.items.map((it, ii) => (
-            <div
-              key={`pi-${gi}-${ii}`}
-              className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground pl-3"
-            >
-              <span className="truncate min-w-0 flex-1">
-                {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
-                {formatBasis(t, it.basis) && (
-                  <span className="ml-1 text-muted-foreground/60">
-                    ({formatBasis(t, it.basis)})
+          {g.items.map((it, ii) => {
+            const basis = formatBasis(t, it.basis, formatNumber);
+            return (
+              <div key={`pi-${gi}-${ii}`} className="pl-3">
+                <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="truncate min-w-0 flex-1">
+                    {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
                   </span>
+                  <span className="tabular-nums whitespace-nowrap shrink-0">
+                    <NumberFormat value={it.amount} />
+                  </span>
+                </div>
+                {/* calc-basis on its OWN full-width line so the '= 0,15 €' end
+                    is never clipped by the amount column (was truncated). */}
+                {basis && (
+                  <div className="text-label text-muted-foreground/60 font-mono tabular-nums leading-tight">
+                    {basis}
+                  </div>
                 )}
-              </span>
-              <span className="tabular-nums whitespace-nowrap shrink-0">
-                <NumberFormat value={it.amount} />
-              </span>
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       ))}
 
@@ -905,30 +927,32 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                   <NumberFormat value={g.total} />
                 </span>
               </div>
-              {g.items.map((e, ii) => (
-                <div
-                  key={`oi-${gi}-${ii}`}
-                  className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground pl-3"
-                >
-                  <span className="truncate min-w-0 flex-1">
-                    {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
-                    {formatBasis(t, e.basis) && (
-                      <span className="ml-1 text-muted-foreground/60">
-                        ({formatBasis(t, e.basis)})
+              {g.items.map((e, ii) => {
+                const basis = formatBasis(t, e.basis, formatNumber);
+                return (
+                  <div key={`oi-${gi}-${ii}`} className="pl-3">
+                    <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="truncate min-w-0 flex-1">
+                        {expenseDisplayLabel(t, e.expenseName, e.expenseType)}
+                        {/* per-owner € split when the unit is co-owned */}
+                        <CoOwnerSplit
+                          owners={e.owners}
+                          t={t}
+                          formatNumber={formatNumber}
+                        />
                       </span>
+                      <span className="tabular-nums whitespace-nowrap shrink-0">
+                        <NumberFormat value={e.amount} />
+                      </span>
+                    </div>
+                    {basis && (
+                      <div className="text-label text-muted-foreground/60 font-mono tabular-nums leading-tight">
+                        {basis}
+                      </div>
                     )}
-                    {/* per-owner € split when the unit is co-owned */}
-                    <CoOwnerSplit
-                      owners={e.owners}
-                      t={t}
-                      formatNumber={formatNumber}
-                    />
-                  </span>
-                  <span className="tabular-nums whitespace-nowrap shrink-0">
-                    <NumberFormat value={e.amount} />
-                  </span>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>

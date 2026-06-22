@@ -1,10 +1,4 @@
 import { LuArrowLeft, LuBuilding2, LuHistory, LuKeyRound, LuTrash } from 'react-icons/lu';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger
-} from '../../../components/ui/tabs';
 import { useCallback, useState } from 'react';
 import {
   createProperty,
@@ -226,19 +220,19 @@ function Property() {
       dataCy="propertyPage"
     >
       <PresenceBanner viewers={viewers} />
+      {/* Display-serif page title (the "where am I?" anchor). Replaces the
+          single-tab dead-chrome wrapper. */}
+      {property?.name && (
+        <h1 className="font-display text-display text-ink mb-4">
+          {property.name}
+        </h1>
+      )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Tabs defaultValue="property" className="md:col-span-2">
-          <TabsList className="flex justify-start overflow-x-auto overflow-y-hidden">
-            <TabsTrigger value="property" className="w-1/2">
-              {t('Property')}
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="property">
-            <Card className="p-6">
-              <PropertyForm property={property} onSubmit={onSubmit} />
-            </Card>
-          </TabsContent>
-        </Tabs>
+        <div className="md:col-span-2">
+          <Card className="p-6">
+            <PropertyForm property={property} onSubmit={onSubmit} />
+          </Card>
+        </div>
         <div className="hidden md:grid grid-cols-1 gap-4 h-fit">
           <PropertyOverviewCard property={property} />
           <OccupancyHistoryCard property={property} />

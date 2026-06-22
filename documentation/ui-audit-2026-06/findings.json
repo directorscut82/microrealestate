@@ -1,0 +1,594 @@
+[
+ {
+  "surface": "building-overview",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P0",
+    "category": "banned-pattern",
+    "what": "Em dashes (—) used in UX copy in at least four places, which DESIGN.md explicitly bans ('Don't use em dashes in copy'). Visible: ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ body 'Δεν αποτελούν οφειλή — οι καταβολές κάλυψης τα μειώνουν.'; breakdown sub-labels 'ΕΝΟΙΚΙΑΣΤΕΣ — δεν αφαιρούνται από το Καθαρό' and 'ΙΔΙΟΚΤΗΤΕΣ — αφαιρούνται από το Καθαρό'. In source they are literal — characters in the strings (BuildingDashboard.js: 'not subtracted from Net', 'subtracted from Net', and the uncollected description via the en translation).",
+    "where": "Card 'ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ' body line; 'ΑΝΑΛΥΣΗ ΕΞΟΔΩΝ ΚΤΙΡΙΟΥ' ΕΝΟΙΚΙΑΣΤΕΣ / ΙΔΙΟΚΤΗΤΕΣ group labels (top + mid screenshots)",
+    "fix": "Replace every — with a colon, comma, or parenthetical per DESIGN.md voice. e.g. 'Δεν αποτελούν οφειλή· οι καταβολές κάλυψης τα μειώνουν.' and 'ΕΝΟΙΚΙΑΣΤΕΣ (δεν αφαιρούνται από το Καθαρό)'. Fix the source strings in BuildingDashboard.js and the el/en locale files, not just the render."
+   },
+   {
+    "severity": "P0",
+    "category": "other",
+    "what": "The 'ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ' progress bar is internally contradictory. Header reads 'Καλυμμένα  10,85 € / 10,85 €' (Covered = 10,85 of 10,85 → looks fully covered) but the track is rendered EMPTY (0% grey, no olive fill) and the foot reads 'Καλυμμένα: 0,00 €' and 'Μη εισπραχθέντα υπόλοιπα: 10,85 €'. Cause: BarRow valueNode is passed building.uncollected.outstanding (10,85) as the FIRST number while the label is t('Covered'); the fill pct uses paidTotal (0). So the value labeled 'Covered' is actually the outstanding amount. A landlord reads 'fully covered' from the header and 'nothing covered' from the bar+foot simultaneously.",
+    "where": "Card 'ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ' (mid screenshot); BuildingDashboard.js BarRow label={t('Covered')} valueNode first number = building.uncollected.outstanding",
+    "fix": "Make the header number agree with the label and the fill. The 'Καλυμμένα' (Covered) figure should be paidTotal, not outstanding: valueNode first number = building.uncollected.paidTotal / total. The bar then reads 0,00 € / 10,85 € with an empty track and foot Καλυμμένα 0,00 € / Μη εισπραχθέντα 10,85 €, which is consistent."
+   },
+   {
+    "severity": "P1",
+    "category": "mockup-divergence",
+    "what": "The floor table is missing the totals row the approved mockup specifies. The mockup ends the table with a 'Σύνολο' row (493,25 τ.μ. and 650,00 € rent total, bold, top-ruled with marble, cream background). The shipped table just stops after the last unit with no summary row, so the operator cannot see total m² or total rent at a glance.",
+    "where": "Floor-by-floor table at the bottom of the page (bottom screenshot); BuildingDashboard.js TableBody has no totals TableRow",
+    "fix": "Add the totals row from the mockup: sum unit.surface and tenant rent, render bold with border-top border-marble and bg-cream, m² total formatted via fmtNum and rent via NumberFormat."
+   },
+   {
+    "severity": "P1",
+    "category": "hierarchy",
+    "what": "The 'ΑΠΟ ΑΡΧΗΣ ΕΤΟΥΣ' card is dominated by a full-width 100%-filled olive bar representing a trivial 0,21 € figure ('Πληρωμένα έξοδα ιδιοκτήτη 0,21 € / 0,21 €'). A 21-cent owner expense gets the same heavyweight progress-bar treatment as a meaningful rent-collection figure, which is visual over-emphasis of a near-zero value and reads as broken (a 'fully paid' bar for nothing). Same pattern repeats in ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ with 10,85 €. The page has three near-identical stacked progress-bar cards (ΑΠΟ ΑΡΧΗΣ rent bar + owner bar, ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ bar) which is monotonous.",
+    "where": "Cards 'ΑΠΟ ΑΡΧΗΣ ΕΤΟΥΣ 2026' and 'ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ' (top + mid screenshots)",
+    "fix": "Consider suppressing the bar (show a plain figure) when the total is below a meaningful threshold, or de-emphasize sub-euro rows. At minimum vary the visual weight so three full-width tracks don't stack identically; the rent bar should read as the primary one."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "Income (360,00 €) is rendered in olive/green and Owner expenses (− 0,21 €) in oxide/terracotta in the 'ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ' card. DESIGN.md says currency color should be ink for default and reserve olive for credits/paid, oxide for debits/overdue — a gross income projection is not a 'credit/paid' event. Coloring a routine projection figure green spends the earned-accent budget on decoration. Net (359,79 €) being olive is defensible (positive result), but Income should be ink.",
+    "where": "Card 'ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ 2026' — Έσοδα row (top screenshot); BuildingDashboard.js text-olive on annualEsoda",
+    "fix": "Render Έσοδα in text-ink (default money color). Keep the − sign + oxide on Έξοδα ιδιοκτήτη (it is a subtraction) and the olive/oxide/ink-muted conditional on Net only."
+   },
+   {
+    "severity": "P2",
+    "category": "cramping",
+    "what": "In 'ΑΝΑΛΥΣΗ ΕΞΟΔΩΝ ΚΤΙΡΙΟΥ' the ΙΔΙΟΚΤΗΤΕΣ group renders a single lonely 'Έξοδα ιδιοκτήτη 0,21 €' cell on its own row, leaving roughly three empty grid columns of dead space to its right, while the ΕΝΟΙΚΙΑΣΤΕΣ group above is a full 4-up row. The asymmetry (4 cells then 1 cell with a big gap) looks unfinished. The mockup intentionally used .comp.one (max-width 260px) for the single owner cell so it doesn't span a 4-col grid; the shipped version uses the same grid-cols-4 wrapper so the cell stretches/leaves a ragged gap.",
+    "where": "Card 'ΑΝΑΛΥΣΗ ΕΞΟΔΩΝ ΚΤΙΡΙΟΥ', ΙΔΙΟΚΤΗΤΕΣ row (top screenshot); BuildingDashboard.js OWNERS grid grid-cols-2 md:grid-cols-4",
+    "fix": "When the owner group has a single cell, constrain its width (e.g. an explicit grid that does not stretch a lone cell across 4 columns, like the mockup's .comp.one max-w-[260px]) so it reads as a labelled figure, not a stranded card with a void beside it."
+   },
+   {
+    "severity": "P2",
+    "category": "typography",
+    "what": "The 'Διαγραφή' (Delete) button in the top-right is styled as a plain secondary/outline button with ink-muted text and a trash glyph, indistinguishable from a neutral action. DESIGN.md requires destructive actions to use the destructive style (oxide text, 1px oxide border). A bare 'Delete building' affordance with no destructive signal is both a safety issue and an inconsistency.",
+    "where": "Top-right header action 'Διαγραφή' (top screenshot)",
+    "fix": "Apply the destructive button style (oxide text + oxide border, oxide-tint hover) to the Διαγραφή control. This is in the page header rather than BuildingDashboard.js, but it sits on this surface."
+   },
+   {
+    "severity": "P3",
+    "category": "greek-wording",
+    "what": "'ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ' body: 'Μερίδια εξόδων κενών μονάδων που δεν χρεώνονται σε κανέναν για το 2026.' is grammatically fine but 'χρεώνονται σε κανέναν' is slightly machine-flavored; a clearer accountant phrasing is 'Μερίδια εξόδων κενών μονάδων που δεν επιβαρύνουν κανέναν για το 2026.' Also 'Καταβολή κάλυψης' as a button label is terse jargon; 'Καταχώριση κάλυψης' or 'Πληρωμή κάλυψης' reads more naturally as an action.",
+    "where": "Card 'ΜΗ ΕΙΣΠΡΑΧΘΕΝΤΑ' body + 'Καταβολή κάλυψης' button (mid screenshot)",
+    "fix": "Reword to 'δεν επιβαρύνουν κανέναν' and reconsider the button verb; align with the term used elsewhere for recording an owner payment."
+   },
+   {
+    "severity": "P3",
+    "category": "spacing",
+    "what": "Owner name column repeats 'ΔΟΚΙΜΗ ΒΗΤΑ' identically on every one of ~7 vacant basement rows (some with '(50%)', some without — inconsistent rendering of the same owner across rows because percentage is only shown when <100, so a 50%/50% pair shows '(50%)' but a single 100% owner shows bare). The repeated owner name down the whole column is visually noisy and the inconsistent (50%) suffix between otherwise identical-looking rows looks like a data glitch.",
+    "where": "Floor table 'Ιδιοκτήτης' column, basement rows (bottom screenshot)",
+    "fix": "This is partly data, but consider collapsing the repeated owner display per floor group (like the floor label which only prints on the first row of a group) so the owner column reads less like a stutter, and ensure the (50%) suffix is consistent within a unit."
+   }
+  ]
+ },
+ {
+  "surface": "xreoseis-expenses",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P1",
+    "category": "truncation",
+    "what": "Raw database id leaks into the human-facing expense label. The water expense renders as 'Κοινόχρηστο Νερό (d6aa8660a511asdas)' in the left panel, the ΕΝΟΙΚΙΑΣΤΕΣ rows AND the ΙΔΙΟΚΤΗΤΕΣ row — the junk token 'd6aa8660a511asdas' is shown to the landlord as if it were a real name. Root cause: _looksLikeId() in BuildingExpensePanel.js (line 629-635) only matches hex-only tokens (/^[0-9a-f]{8,}$/i). 'd6aa8660a511asdas' contains the non-hex letters 's' (twice) so the regex fails, the string is treated as a 'real name', and expenseDisplayLabel appends it in parens. A bare 16-char id-looking blob is meaningless and unprofessional in a Greek accountant's ledger.",
+    "where": "Right ΧΡΕΩΣΕΙΣ panel ΙΔΙΟΚΤΗΤΕΣ row + left-panel rows; code at BuildingExpensePanel.js _looksLikeId() ~line 629-635 and ExpenseList.js line 1022 (same /^[0-9a-f]{8,}$/i test on the Όνομα cell)",
+    "fix": "Broaden the id heuristic: treat any single-token, space-free, mostly-alphanumeric-with-no-vowel-pattern name longer than ~10 chars as an id, OR (better) detect when name has no spaces and no Greek/word characters that form a pronounceable label. Practically: also strip names that match /^[0-9a-z]{10,}$/i with no spaces. Verify the same fix in ExpenseList.js line 1022 so the Όνομα table cell doesn't leak it either."
+   },
+   {
+    "severity": "P1",
+    "category": "cramping",
+    "what": "The ΧΡΕΩΣΕΙΣ breakdown is a wall of ~13 near-identical rows, every one reading 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος N (or Υπόγειο) · Ενοικιαστής: ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ' with a second tiny grey sub-line 'Κοινόχρηστο Ρεύμα (Ρεύμα) ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ × ...' and amounts that are almost all 4,86 €. The same tenant name is repeated on all 13 lines and the same expense name on every sub-line. This is the monotonous identical-stack anti-pattern the DESIGN doc warns against, and it reads as machine-generated noise rather than a ledger a person would lay out.",
+    "where": "Right column ChargeBreakdown — byProperty renter rows (BuildingExpensePanel.js line 815-853)",
+    "fix": "Since one tenant (ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ) is charged across many units for the same expense, collapse repeated identical rows: group by recipient first (tenant name once as a section header) then list the units beneath, or show 'ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ — 13 units, Κοινόχρηστο Ρεύμα, σύνολο 63,18 €' with an expand affordance. Don't render 13 visually-identical lines."
+   },
+   {
+    "severity": "P1",
+    "category": "truncation",
+    "what": "The calc-basis grey sub-line in the ΧΡΕΩΣΕΙΣ rows is clipped/running into the amount column. Lines like 'Κοινόχρηστο Ρεύμα (Ρεύμα) ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ × 2,45 ...' are cut off mid-formula — the user cannot read the full 'X € ÷ N μονάδες = share €' explanation that formatBasis() is supposed to provide. The panel is too narrow for the content it carries (formatBasis output + expense label + co-owner split all on one truncated line).",
+    "where": "Right column ChargeBreakdown item rows, formatBasis span (BuildingExpensePanel.js line 834-851), panel constrained to lg:grid-cols-2 half width",
+    "fix": "Either give the breakdown its own full-width row below the calendar instead of cramming it into the right half of a 2-col grid, or move the calc-basis to a second line that wraps instead of truncating, or expose it on hover/tooltip. The amount must not collide with the label."
+   },
+   {
+    "severity": "P2",
+    "category": "hierarchy",
+    "what": "Money figures across the two panels do not share one aligned column at one size, violating the 'figures that stack/compare must share one aligned column at one size' law. The left panel's month total '55,14 €' is large/semibold, the left-panel per-row amounts (1,70 €, 53,44 € input, 0,21 €) are mono at body size, and the right ΧΡΕΩΣΕΙΣ amounts (5,01 €, 4,86 €...) sit in a separate right-edge column at yet another size. A landlord trying to reconcile 'what I billed' vs 'who got charged' has three unaligned money columns at different scales.",
+    "where": "Left panel header total (line 524-536) vs left rows (ExpenseRow) vs right ChargeBreakdown amounts",
+    "fix": "Right-align all money in a single consistent mono column width and one body size; reserve the larger weight only for the single month total. Consider putting the breakdown directly under the entry rows so the same € column runs straight down the page."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "The 'Επαναλαμβανόμενη' column badges ('Ναι (short)' and 'Ναι (κυμαινόμενο)') use the Badge variant='default' = solid ink background with bone text. A heavy dark solid pill for a routine yes/no status is visually loud in an otherwise calm bone/cream ledger and draws the eye to the wrong place; it reads like a primary action, not a quiet status. DESIGN.md status pills should be quiet tints (neutral/pending), not the ink-filled primary chip.",
+    "where": "Έξοδα tab table, Επαναλαμβανόμενη column (ExpenseList.js line 1058-1066, Badge variant='default')",
+    "fix": "Use a quiet variant — variant='neutral' (cream/ink) or 'pending' (sea-tint) for the 'Ναι' state and 'archived'/'secondary' for 'Όχι' — so recurring status reads as metadata, not as a loud filled chip. Pair with a small glyph per the Pair-Color-With-Glyph rule."
+   },
+   {
+    "severity": "P2",
+    "category": "other",
+    "what": "A variable (κυμαινόμενο) expense in the Έξοδα table shows '—' (em-dash) in the Ποσό column (the Ρεύμα row). For a recurring-variable expense the amount is genuinely unknown until the monthly statement, but rendering a bare em-dash gives no signal of WHY it is blank, and an em-dash as a value placeholder reads as missing data / broken. Adjacent the dash sits a 'Ναι (κυμαινόμενο)' badge, so the meaning is split across two columns.",
+    "where": "Έξοδα tab table, Ποσό column for variable expenses (ExpenseList.js line 1032-1034, NumberFormat returns '—' for null/0)",
+    "fix": "For variable expenses show 'μηνιαία καταχώριση' / 'κυμαινόμενο' as an explicit ink-muted label in the Ποσό cell instead of an em-dash, so the cell communicates 'entered monthly' rather than 'missing'."
+   },
+   {
+    "severity": "P2",
+    "category": "mockup-divergence",
+    "what": "The same expense 'Κοινόχρηστο Νερό' appears in BOTH the ΕΝΟΙΚΙΑΣΤΕΣ section (top of the right panel) and the ΙΔΙΟΚΤΗΤΕΣ section with the same 0,21 € figure, and also appears in the left panel under both 'Ιούνιος 2026' and a separate 'ΙΔΙΟΚΤΗΤΕΣ' sub-block at 0,21 €. Showing the identical line/amount in two sections with no clarifying difference looks like a double-count to a landlord and undermines trust in the totals. The 'ΙΔΙΟΚΤΗΤΕΣ' single-row block also duplicates the leaked id label.",
+    "where": "Right ΧΡΕΩΣΕΙΣ panel ΙΔΙΟΚΤΗΤΕΣ block + left panel ΙΔΙΟΚΤΗΤΕΣ sub-block (BuildingExpensePanel.js ownerLiabilities block line 862-935 and ownerRows render line 556-581)",
+    "fix": "Make the renter-vs-owner distinction explicit on the duplicated row (e.g. 'κενή μονάδα → ιδιοκτήτης' suffix) so the two 0,21 € entries clearly represent different recipients, not a double charge; or visually tie them so the reconciliation is obvious."
+   },
+   {
+    "severity": "P3",
+    "category": "spacing",
+    "what": "The left-panel entry rows are tight: the variable-amount Input ('53,44') with its trailing '€' and save-icon button sit on a py-0.5 row (ExpenseRow), giving very little vertical breathing room between rows. Combined with the read-only rows mixing in at a different visual weight, the left column reads cramped relative to the generous whitespace the design system calls for.",
+    "where": "Left panel ExpenseRow rows (BuildingExpensePanel.js line 217-256, py-0.5)",
+    "fix": "Increase row vertical padding to at least py-1.5/py-2 and add consistent gap; align the read-only amount column with the input column's right edge so fixed and variable rows share one money column."
+   }
+  ]
+ },
+ {
+  "surface": "buildings-list",
+  "verdict": "awful",
+  "findings": [
+   {
+    "severity": "P0",
+    "category": "banned-pattern",
+    "what": "Every card carries a thick colored left side-stripe. BuildingListItem renders `className={cn('cursor-pointer border-l-4 ...', accent)}` where `accent` cycles through ACCENT_COLORS = ['border-l-blue-500','border-l-emerald-500','border-l-amber-500','border-l-violet-500','border-l-rose-500','border-l-cyan-500','border-l-orange-500','border-l-indigo-500']. This is the absolutely-banned 'side-stripe borders > 1px' pattern AND the stripe colors are raw Tailwind cobalt/neon (blue-500, violet-500, rose-500, cyan-500) that exist nowhere in the palette. DESIGN.md: 'Don't use border-left greater than 1px as a colored stripe on cards. Side-stripe borders are absolutely banned.' The decorative rainbow has zero semantic meaning (it's just index%8).",
+    "where": "BuildingListItem.js line 17-26 (ACCENT_COLORS) and line 68 (border-l-4 + accent); visible as the colored left edge on each card in the screenshot",
+    "fix": "Delete ACCENT_COLORS entirely and remove `border-l-4` + `accent` from the Card className. The card already gets its 1px stone-line border from the Card component; that is the only border it should have."
+   },
+   {
+    "severity": "P0",
+    "category": "banned-pattern",
+    "what": "Identical-card grid. Five visually identical cards laid out in a 3-column grid (grid-cols-1 md:grid-cols-2 lg:grid-cols-3), every one the same template: grey avatar circle + name + (code) + address line + amber warning box + footer count. DESIGN.md absolute bans: 'identical-card-grids BANNED' and 'monotonous stacks of same-size cards.' Nothing distinguishes one building from another except the text; the eye has no anchor and the page reads as an AI-generated card wall.",
+    "where": "BuildingList.js line 9 (the grid) rendering BuildingListItem repeated; whole screenshot body",
+    "fix": "Replace the card grid with a ruled ledger table (per DESIGN.md Tables: 'the most-used surface in this app, must read like a printed ledger'). Columns: Building name + code, address, managed/total units (mono, right-aligned), status. Drop the per-card avatar and warning box; carry the missing-data state as a pill in a status column."
+   },
+   {
+    "severity": "P1",
+    "category": "color",
+    "what": "Building avatar circle uses the forbidden cobalt demo primary. BuildingAvatar renders AvatarFallback with `className=\"bg-primary/20\"` — `--primary` is the cobalt 221 83 53 that DESIGN.md explicitly names as the anti-reference to remove ('the cobalt --primary currently shipped is the gap to close'). At 20% opacity it reads as a flat clinical grey-blue circle, repeated identically on all 5 cards as pure decoration carrying no information.",
+    "where": "BuildingAvatar.js line 7 (bg-primary/20); the grey circle top-left of every card",
+    "fix": "If a building glyph is kept at all, use a palette tint (e.g. bg-stone or sea-tint) and a tinted-ink icon, never bg-primary. Better: in a ledger-table layout drop the decorative avatar entirely."
+   },
+   {
+    "severity": "P1",
+    "category": "greek-wording",
+    "what": "Spelling error in the warning label. The amber box reads 'Ελλειπή στοιχεία' which is misspelled — correct Greek is 'Ελλιπή στοιχεία' (single λ, ι not ει). The locale value at common.json:519 is hardcoded wrong: \"Missing details\": \"Ελλειπή στοιχεία\". A competent Greek accountant would never write 'Ελλειπή'. This appears on nearly every card so the error is everywhere.",
+    "where": "webapps/landlord/locales/el/common.json line 519; rendered in the warning box on 4 of 5 cards",
+    "fix": "Change the el translation to \"Ελλιπή στοιχεία\". Also fix the parenthesized gap terms if needed (e.g. ensure 'διαχειριστής' / 'διεύθυνση' read naturally)."
+   },
+   {
+    "severity": "P1",
+    "category": "color",
+    "what": "Warning callout uses raw Tailwind amber, off-palette. The missing-details box is `bg-amber-50 text-amber-700 border-amber-200` with an amber triangle. The palette has no amber — warnings/destructive use oxide (oklch 55% 0.144 35) on oxide-tint (oklch 94% 0.030 35). Amber-700 is a SaaS yellow that clashes with the warm bone/cream surface and the architectural-calm North Star.",
+    "where": "BuildingListItem.js line 105 (bg-amber-50 text-amber-700 border-amber-200); the yellow box on each card",
+    "fix": "Switch to the oxide tokens: bg-oxide-tint, text-oxide, border at oxide. Use the warning glyph from the Pills spec rather than a raw amber triangle."
+   },
+   {
+    "severity": "P1",
+    "category": "typography",
+    "what": "Unit counts are not tabular mono and the figures don't align. The footer shows '11 διαχειριζόμενα από 11 μονάδες' in proportional Inter, and the count pill '11 μονάδες' is also proportional. These are numbers that stack and compare across cards (11/11, 1/1, 5/5, 2/2, 5/5) so by DESIGN.md's Tabular-Numeral Rule they must be JetBrains Mono tabular. Proportional digits stacked down a column 'read as sloppy bookkeeping.'",
+    "where": "BuildingListItem.js lines 116-124 (footer count text + Badge); footer of each card",
+    "fix": "Render the managed/total counts in the numeric (mono, tabular) type role, right-aligned in a dedicated column if moving to a table."
+   },
+   {
+    "severity": "P2",
+    "category": "other",
+    "what": "Redundant count badge. The footer states '11 διαχειριζόμενα από 11 μονάδες' and then a pill immediately to its right repeats '11 μονάδες'. The pill adds no information — the total (11) is already in the sentence. It also forces the layout cramped and the pill wraps its label to two lines ('11' over 'μονάδες') in the upscaled view, looking awkward.",
+    "where": "BuildingListItem.js lines 116-124; footer right side of each card",
+    "fix": "Remove the duplicate Badge. Show the count once, e.g. 'Διαχειριζόμενες: 11 / 11' with the figures in mono."
+   },
+   {
+    "severity": "P2",
+    "category": "greek-wording",
+    "what": "Grammatical mismatch on singular counts. The Odos Zita card reads '1 διαχειριζόμενα από 1 μονάδα' — 'διαχειριζόμενα' is plural but the count is 1, so it should agree as singular ('1 διαχειριζόμενη μονάδα'). The i18n key '{{count}} managed of {{total}} units' has no Greek plural form for the participle.",
+    "where": "BuildingListItem.js lines 117-120; Odos Zita card (1 unit) footer",
+    "fix": "Add proper Greek plural/singular handling for the 'managed' participle, or rephrase to a count-agnostic form like 'Διαχειριζόμενες μονάδες: 1 / 1'."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "Drop shadow under the cards. Each card sits on the cream body with a visible soft shadow beneath its rounded corners. DESIGN.md Flat-Card Rule: 'Cards do not have drop shadows... the current shadcn shadow-sm on cards is the visual signature of every Vercel demo and must be removed.' The base Card component is correctly flat, so the shadow is being introduced elsewhere (a wrapping container, the ResourceList grid, or a residual shadow utility) and must be hunted down.",
+    "where": "Rendered on every card in the screenshot; not in BuildingListItem/card.js className, so check the List/ResourceList wrapper and any global card shadow",
+    "fix": "Locate and remove the shadow (likely a shadow-sm/shadow on a wrapper). Depth should come from cream→bone tonal step + the 1px stone-line border only."
+   },
+   {
+    "severity": "P3",
+    "category": "typography",
+    "what": "Building ID codes are proportional, not mono. The '(008495)', '(005578)', '(001172)' ATAK-prefix codes next to each building name are rendered in proportional Inter at text-xs. DESIGN.md numeric rule lists 'every ATAK number' as belonging to the mono numeric role. Minor here because they're inline IDs, but they do stack down the card column.",
+    "where": "BuildingListItem.js lines 81-85 (atakLabel span); the grey (NNNNNN) after each building name",
+    "fix": "Render the code in the numeric mono role, or drop the parentheses code from the list view if it isn't load-bearing for scanning."
+   },
+   {
+    "severity": "P3",
+    "category": "spacing",
+    "what": "The full-width amber warning box dominates each card and makes a directory of healthy buildings look like a wall of errors. Combined with the colored side-stripe and grey avatar, the actual content (name, address, units) gets the least visual weight while decoration and warnings get the most — weak/inverted hierarchy.",
+    "where": "BuildingListItem.js lines 101-112 (warning) competing with the data; whole card",
+    "fix": "Demote the missing-data signal to a compact inline pill/icon next to the building name rather than a full-width tinted box, so the building identity reads first."
+   }
+  ]
+ },
+ {
+  "surface": "tenants-list",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P1",
+    "category": "banned-pattern",
+    "what": "The entire surface is a 3-column grid of six visually IDENTICAL cards — same avatar circle, same 'Μίσθωση N μηνών' line, same green progress bar, same address block, same footer pill — i.e. a monotonous identical-card grid. DESIGN.md explicitly bans 'identical-card-grids' and 'monotonous stacks of same-size cards'. A tenant LIST is a ledger and should read like one; this looks like a generic SaaS dashboard template, the exact AI-generated signature DESIGN.md tells you to avoid.",
+    "where": "TenantList.js line 9 (grid gap-8 grid-cols-1 md:grid-cols-2 lg:grid-cols-3) rendering TenantListItem cards",
+    "fix": "Replace the card grid with a ruled table/ledger per DESIGN.md Tables section: columns for Tenant (avatar+name), Contract/duration, Property, Status pill, right-aligned. Reserve the card layout for the tenant DETAIL page. If a list view is kept, kill the per-card progress bar and collapse to a single dense row per tenant so the screen stops reading as six clones."
+   },
+   {
+    "severity": "P1",
+    "category": "hierarchy",
+    "what": "There is NO page title on the screen. The only large/centered text at the top is the dev banner 'Λειτουργία ανάπτυξης'. The surface has no display-serif 'Ενοικιαστές' title to answer 'where am I?', so the page reads as a floating card grid with no anchor. DESIGN.md's Single-Display-Per-Page rule assumes a serif page title exists; here the slot is empty and the user orients only via the highlighted nav item.",
+    "where": "pages/[organization]/tenants/index.js — <Page> / <List> render no visible H1; List header only contains the search box, filters and action buttons",
+    "fix": "Add a page-level title 'Ενοικιαστές' in display serif (Source Serif 4, 1.75rem) at the top of the List header, above or left of the search/actions row, matching the other top-level surfaces."
+   },
+   {
+    "severity": "P1",
+    "category": "greek-wording",
+    "what": "First card's address reads 'ΑΘΗΝΑ GR' — a raw ISO country code leaked into Greek-language UI. Other cards correctly render 'ΑΘΗΝΑ Ελλάδα'. 'GR' next to a Greek city is machine output, not text a competent Greek accountant wrote, and it is inconsistent within the same screen.",
+    "where": "TenantPropertyList.js Address() lines 23-27 — `${address.state} ${address.country}` prints whatever raw value is stored (here country='GR'); first card (3ed3ed) bottom address line",
+    "fix": "Map/normalize country codes to localized names ('GR' → 'Ελλάδα') before display, or strip the country line when it duplicates the implicit locale. Ensure all cards render the country the same way; never print bare ISO codes in el-GR copy."
+   },
+   {
+    "severity": "P1",
+    "category": "color",
+    "what": "Lease pill semantics contradict the card body. Multiple cards show the amber 'Δεν έχει οριστεί ακίνητο…' no-property warning AND the 'Λείπουν στοιχεία: Ελλιπές όνομα, ΑΦΜ' badges, yet the footer pill reads 'Μίσθωση σε ισχύ' (Lease running) in olive/success. The leaseState logic is supposed to downgrade no-property tenants to 'incomplete', but on screen these cards still show the green running pill alongside the no-property warning — a visible incoherence (green = healthy while the card screams setup-incomplete).",
+    "where": "TenantListItem.js leaseState useMemo (lines 114-132) vs TenantPropertyList no-property branch (lines 40-59); see card '3ed3ed' (green 'Μίσθωση σε ισχύ' + missing fields) and the middle card (no-property box) ",
+    "fix": "Make leaseState authoritative: if the no-property warning shows OR missingFields is non-empty, the pill must NOT be the olive 'running' state — show oxide 'Ημιτελής ρύθμιση' instead. Olive/success must never coexist with a no-property warning on the same card."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "Three different, non-palette warning treatments coexist on one screen: (a) amber-outlined 'Ελλιπές όνομα / ΑΦΜ' badges, (b) amber-50/amber-200 'no property' box, (c) oxide-tinted 'Ημιτελής ρύθμιση' pill. DESIGN.md defines exactly ONE warning color, oxide (terracotta, oklch(55% 0.144 35)) with oxide-tint background. Raw Tailwind amber-50/200/500/700 is not in the palette and breaks the tinted-neutral + earned-color discipline; having amber and oxide both signalling 'warning' on the same card is doubly wrong.",
+    "where": "TenantListItem.js missing-fields Badge (line 210 'border-amber-500/50 text-amber-700') and TenantPropertyList.js (line 46 'bg-amber-50 text-amber-700 border-amber-200') vs the oxide pill (line 241)",
+    "fix": "Replace all amber-* utilities with the oxide token (text-oxide, border-oxide/40, bg-oxide-tint) so every warning on the card uses one consistent earned color, matching the 'Ημιτελής ρύθμιση' pill."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "Each card carries a green progress bar that is unlabeled and semantically misused. It encodes lease-time-elapsed but uses bg-success (olive/green), DESIGN.md's reserved 'paid/success/resolved' color. On cards that are setup-incomplete the green bar still renders, so green is being spent as decoration on a generic metric — an unearned-accent violation. The bars also vary wildly (near-empty on '3ed3ed', ~full on others) with no legend, so they read as noise rather than information.",
+    "where": "TenantListItem.js Progress (lines 170-176), indicatorClassName 'bg-success'",
+    "fix": "Either drop the progress bar from the list entirely (move it to the detail view) or render it in a neutral tone (stone/ink-muted), not olive-success, and add no color meaning. Green must stay reserved for paid/resolved per the Earned-Accent rule."
+   },
+   {
+    "severity": "P2",
+    "category": "typography",
+    "what": "Card title names ('3ed3ed', 'DashTest2-178093431761...', 'DOKIMASTI E2ETEST', 'ΜΙΣΘΩΤΗΣ ΕΜΜΑΝΟΥΗΛ') are rendered as link-styled Inter text, while monetary/identifier-like strings such as the long tax-id tail 'DashTest2-178093431761…' run as proportional sans and clip at the card edge. There is no mono treatment for the ΑΦΜ/identifier and the long token truncates against the avatar column.",
+    "where": "TenantListItem.js CardTitle Button (lines 145-151) renders tenant.name; long company/ref strings overflow in the lg:grid-cols-3 narrow column",
+    "fix": "Truncate long names with ellipsis inside the title (truncate/min-w-0) so they never run to the card edge, and render any embedded ΑΦΜ/identifier in JetBrains Mono per the numeric/identifier rule rather than mixing it into the proportional title."
+   },
+   {
+    "severity": "P3",
+    "category": "cramping",
+    "what": "Cards on the same row are uneven height and the content is loosely scattered: 'Μίσθωση 24 μηνών' sits far above the progress bar, then a date line, then a gap, then the address, then a hairline, then the missing-fields strip, then the pill row — five horizontal divisions inside one small card. The result is airy-yet-cluttered: lots of dividing rules competing in a ~300px-wide card, which reads as AI-assembled sections rather than one considered unit.",
+    "where": "TenantListItem.js CardContent/CardFooter stack (lines 163-276); CardFooter adds a border-t plus an inner border-t on the missing-fields strip (line 195) = two stacked hairlines",
+    "fix": "Reduce the internal rule count: merge the missing-fields strip and the status pill into a single footer row (no double hairline), tighten the contract/date/progress block spacing, and standardize card height. Fewer internal dividers per card."
+   }
+  ]
+ },
+ {
+  "surface": "tenant-detail",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P1",
+    "category": "hierarchy",
+    "what": "The 'Σύνολο' (total) row in the right-hand 'Ενοικίαση' card renders at the EXACT same mono size, weight and ink-soft color as its component rows ('Ενοίκιο 450,00 €', 'Πρόσθετες χρεώσεις 100,00 €'). The figure the user is meant to pause on is visually indistinguishable from the line items it sums. Confirmed at high zoom: 450,00 / 100,00 / 550,00 are one undifferentiated stack separated only by a hairline. DESIGN.md: figures that stack/compare must share one aligned column but the total must carry hierarchy.",
+    "where": "Right column 'Ενοικίαση' card, 'Σύνολο 550,00 €' row (RentOverviewCard.js line 64-67, the Total block).",
+    "fix": "Promote the total: render the 'Σύνολο' label in Title weight (Inter 600, ink) and the amount one step larger (e.g. 1.125rem mono) or in display-scale, keep it on its own line below the hairline. Component rows stay body/ink-muted. The total should be the heaviest figure in the card."
+   },
+   {
+    "severity": "P1",
+    "category": "banned-pattern",
+    "what": "Nested card: the 'Επαφή #1' contact block is a fully-bordered, rounded card sitting INSIDE the already-bordered 'Στοιχεία επικοινωνίας' content card. DESIGN.md §5 Cards: 'Nested Cards: Forbidden.' This is a card-in-a-card.",
+    "where": "Center column, 'Στοιχεία επικοινωνίας' section, the 'Επαφή #1' box.",
+    "fix": "Remove the inner card border/background. Replace with a section heading ('Επαφή #1' in Title type) + a 1px stone-line rule, contacts laid out flat inside the parent card. If multiple contacts, separate them with hairline dividers, not nested cards."
+   },
+   {
+    "severity": "P1",
+    "category": "banned-pattern",
+    "what": "Action bar is toolbar-soup: six identical large bordered, rounded, icon-over-label boxes in a row (Πίσω, Αρχειοθέτηση, Διαγραφή, Τερματισμός, Επεξεργασία, Πρόγραμμα). This is the enterprise-CRM 'toolbar soup' anti-reference plus a monotonous identical-box grid. There is zero hierarchy: 'Πίσω' (navigation), 'Διαγραφή' (destructive), and 'Επεξεργασία' (the actual primary action) all look the same. 'Διαγραφή'/'Τερματισμός' get no oxide/destructive treatment.",
+    "where": "Top of page, the row of 6 buttons above the tab bar.",
+    "fix": "Collapse to a real toolbar: one primary action (Επεξεργασία, ink button), 'Πίσω' as a plain back-link not a box, and group destructive/secondary actions (Αρχειοθέτηση, Διαγραφή, Τερματισμός) into an overflow '...' menu or at minimum render Διαγραφή/Τερματισμός as destructive (oxide text + 1px oxide border). Drop the uniform card-button grid."
+   },
+   {
+    "severity": "P1",
+    "category": "typography",
+    "what": "Two display-serif headlines appear in the same content column ('Πληροφορίες ενοικιαστή' and 'Στοιχεία επικοινωνίας'), and neither is the page title. The single biggest serif on the page is a section header, so there is no 'where am I?' anchor naming the tenant (ΕΜΜΑΝΟΥΗΛ ΜΙΣΘΩΤΗΣ). Violates the Single-Display-Per-Page rule and leaves the page without a title.",
+    "where": "Center column section headers; absent page title.",
+    "fix": "Add one display-serif page title with the tenant's name ('ΕΜΜΑΝΟΥΗΛ ΜΙΣΘΩΤΗΣ') at the top. Downgrade both section headers ('Πληροφορίες ενοικιαστή', 'Στοιχεία επικοινωνίας') to Headline (serif 500, 1.375rem) or Title (Inter 600) so the display serif appears exactly once."
+   },
+   {
+    "severity": "P2",
+    "category": "other",
+    "what": "Lease status 'Σε εξέλιξη' renders as plain ink text with no pill, no glyph, no color. DESIGN.md §Pills + 'state carries glyph+label not color alone' expects a lease/rent status to be a status pill. Here it is just words in the value column, indistinguishable from a date.",
+    "where": "Right column 'Μίσθωση' card, 'Κατάσταση' row.",
+    "fix": "Render the status as a pill: for an active lease, olive-tint background + olive text + filled-circle glyph (or sea-tint 'pending' if not yet started). Pair color with a glyph and label per the Pills spec."
+   },
+   {
+    "severity": "P2",
+    "category": "other",
+    "what": "Dangling empty key: the 'Συμβόλαιο' row in the 'Μίσθωση' card shows a label with no value at all to its right (blank), while every other row in the card has a value or an em-dash placeholder. It reads as a rendering bug / missing data, not an intentional empty state.",
+    "where": "Right column 'Μίσθωση' card, first row 'Συμβόλαιο'.",
+    "fix": "Either show the lease/template name as the value, render the same '—' placeholder used for 'Εγγύηση' when empty, or hide the row entirely when there is no contract reference. Do not leave a label floating with no value."
+   },
+   {
+    "severity": "P2",
+    "category": "greek-wording",
+    "what": "'Σε εξέλιξη' for a lease status reads like a task/process state ('in progress'), not how a Greek accountant labels a lease. A lease that has started and not ended is 'Ενεργή' (active); 'Σε εξέλιξη' is machine-ish for this domain.",
+    "where": "Right column 'Μίσθωση' card, 'Κατάσταση' value.",
+    "fix": "Use lease-appropriate Greek: 'Ενεργή' (active), 'Λήγει' / 'Λήξασα' (expiring/expired), 'Μελλοντική' (future). Reserve 'Σε εξέλιξη' for process states elsewhere."
+   },
+   {
+    "severity": "P3",
+    "category": "hierarchy",
+    "what": "Right column stacks two near-identical bordered cards ('Μίσθωση' and 'Ενοικίαση') of the same width, same radius, same header+icon treatment, same row layout. Combined with the 6-up button grid above, the screen leans on repeated identical boxes, which reads as AI-generated template filler rather than a designed ledger.",
+    "where": "Right column, the two stacked metadata cards.",
+    "fix": "Differentiate or consolidate: the money summary ('Ενοικίαση') is the more important block; give it slightly more emphasis (e.g. quiet cream card vs bone, or merge lease metadata + rent breakdown into one sectioned card with a hairline divider) so the column does not read as two clones."
+   }
+  ]
+ },
+ {
+  "surface": "owners-list",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P1",
+    "category": "banned-pattern",
+    "what": "Identical-card-grid: four owner cards rendered as the same fixed-size paper rectangle in a 3-column grid. DESIGN.md explicitly bans identical-card-grids and 'monotonous stacks of same-size cards'. It's worse here because the frames are identical but the interiors are ragged — Kappa/Lamda/Beta have a progress block, Georgios has none, so its card carries a large dead vertical gap with a 'Χωρίς έξοδα ιδιοκτήτη' pill floating mid-card while the others are packed.",
+    "where": "OwnerList grid / OwnerListItem Card (each <Card> in the 3-col grid)",
+    "fix": "Replace the card grid with a single paper list (rows + 1px stone-line dividers), like a ledger: name + ΑΦΜ left, units/buildings middle, one right-aligned money column (paid / total) and the state pill far right. One surface, aligned columns, no repeated card chrome. If cards must stay, vary by content density and drop the empty progress slot for no-expense owners so frames aren't identical."
+   },
+   {
+    "severity": "P1",
+    "category": "alignment",
+    "what": "The paid/total money figures do not share one aligned column at one size. Kappa & Lamda render '— / 35,00 €' INLINE on the label row pushed to the card's right edge; Beta's identical figure wraps onto TWO lines ('0,21 € /' then '0,21 €') because the label 'Πληρωμένα έξοδα ιδιοκτήτη' is long enough to force a break. So the same datum appears in three different positions/shapes across the four cards. DESIGN.md: 'figures that stack/compare must share ONE aligned column at ONE size.'",
+    "where": "OwnerListItem.js lines 84-93 (the flex justify-between label+value row)",
+    "fix": "Give the value its own fixed right-aligned column that never wraps (whitespace-nowrap, shorten or stack the label above it). Use the same paid/total format on every card so the eye scans one column down the list."
+   },
+   {
+    "severity": "P1",
+    "category": "typography",
+    "what": "Paid value shows an em-dash '—' for zero. 'Πληρωμένα έξοδα ιδιοκτήτη — / 35,00 €' reads as 'paid: dash of 35,00 €' — the '—' collides visually with the ' / ' separator and is ambiguous (none? minus? blank?). NumberFormat returns '—' for value 0 unless showZero is set, and OwnerListItem passes paid (=0) without showZero.",
+    "where": "OwnerListItem.js line 87 `<NumberFormat value={paid} />`",
+    "fix": "Pass showZero so a zero-paid owner shows '0,00 €' (a real figure aligned in the money column), not a dash. Reserve '—' for genuinely-absent data, not a legitimate 0."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "Progress bar uses the shadcn default bg-primary (ink) for the fill and bg-secondary for the track. On Beta's 100%-paid card the bar is a solid near-black slab; on Kappa/Lamda (0% paid) it's a faint empty track with a tiny sliver. A large near-black fill violates the spirit of the No-Black rule and is not the single sea-accent that progress/quantity should use; it also reads heavier than anything else on the screen.",
+    "where": "ui/progress.jsx (bg-primary / bg-secondary) as used by OwnerListItem.js line 94",
+    "fix": "Recolor the indicator to the sea accent (or olive when settled) at a restrained weight, and the track to a tinted stone, per the 'color is earned' palette. Better still, drop the bar entirely in the list and show just the paid/total figure + state pill — a meter per row is decorative noise here."
+   },
+   {
+    "severity": "P2",
+    "category": "greek-wording",
+    "what": "'Πληρωμένα έξοδα ιδιοκτήτη' as an inline label next to a value reads like machine output, not an accountant. The genitive 'ιδιοκτήτη' (owner's) is redundant on an owners screen where every row IS an owner, and combined with the dash it produces the broken 'Πληρωμένα έξοδα ιδιοκτήτη — / 35,00 €'. Same redundancy in the 'Χωρίς έξοδα ιδιοκτήτη' pill.",
+    "where": "OwnerListItem.js line 85 (label) and line 112 ('No owner expenses' pill)",
+    "fix": "Shorten the label to 'Εξοφλημένα' or 'Πληρωμένα' as a column header, drop 'ιδιοκτήτη', and present as 'Πληρωμένα: 0,00 € από 35,00 €' or a two-column 'Πληρωμένα / Σύνολο'. Pill → 'Χωρίς έξοδα'."
+   },
+   {
+    "severity": "P2",
+    "category": "cramping",
+    "what": "Beta card: the label 'Πληρωμένα έξοδα ιδιοκτήτη' wraps to two lines AND the value '0,21 € / 0,21 €' wraps to two lines, so a single trivial datum (21 cents paid of 21 cents) consumes four wrapped lines in a cramped block — the card looks broken/over-stuffed versus the others. Caused by the long label competing with the value on one flex row inside a narrow card.",
+    "where": "OwnerListItem.js lines 84-96 inside the ~330px card",
+    "fix": "Stack label above value (label on its own row, value right-aligned on the next), or widen the value column and force nowrap. Once the figures live in one fixed column the wrapping disappears."
+   },
+   {
+    "severity": "P3",
+    "category": "hierarchy",
+    "what": "Georgios (no-expense) card has a large empty vertical band between the units/buildings line and a 'Χωρίς έξοδα ιδιοκτήτη' pill that sits mid-card, because the progress block is conditionally omitted but the card height is dictated by its siblings. The empty gap makes the card read as 'loading' or 'broken'.",
+    "where": "OwnerListItem.js — CardContent renders nothing when total<=0, CardFooter pill anchors at bottom",
+    "fix": "For no-expense owners, collapse the card to its natural height (don't pad to match expense cards) or surface a quiet 'Δεν υπάρχουν έξοδα ιδιοκτήτη' line in the body so the space is intentional, not dead."
+   }
+  ]
+ },
+ {
+  "surface": "property-detail",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P0",
+    "category": "banned-pattern",
+    "what": "The 'Έξοδα ακινήτου' (Property expenses) card prints a raw garbage identifier in the expense line: 'Ύδρευση (d6aa8660a511asdas)'. The _looksLikeId() guard in PropertyExpensesCard.js (regex /^[0-9a-f]{8,}$/i) is meant to suppress hash-named expenses, but this token contains the letters 's', so it fails the hex test and the meaningless id leaks straight into the Greek UI in parentheses. This is exactly the bug that comment block I2-06 claims to have fixed, and it is still visible to the user.",
+    "where": "Right sidebar, 'Έξοδα ακινήτου' card, current-month expanded line under 'Τρέχων μήνας (Ιουν 2026)'",
+    "fix": "Loosen _looksLikeId to catch mixed alphanumeric junk that is clearly an auto-generated handle (e.g. /^[0-9a-f]{8,}[0-9a-z]*$/i, or treat any token that is >8 chars with no spaces and no Greek/word characters as an id). When suppressed, fall back to the category label 'Ύδρευση' alone with no parenthetical."
+   },
+   {
+    "severity": "P0",
+    "category": "mockup-divergence",
+    "what": "The current-month expense TOTAL (5,01 €) does not reconcile with the only line shown beneath it (Ύδρευση 0,15 €). A user reading the card sees a 5,01 € header with a single 0,15 € child line and no explanation of the missing 4,86 €. Either lines are being dropped from the breakdown or the total is wrong — either way the ledger does not add up, which in an accounting product is a category-1 trust failure.",
+    "where": "Right sidebar, 'Έξοδα ακινήτου' card: 'Τρέχων μήνας (Ιουν 2026) 5,01 €' header vs the single 'Ύδρευση 0,15 €' line",
+    "fix": "Audit the currentMonth.lines vs byCategory data path in useFetchPropertyExpenses/PropertyExpensesCard. Every euro in the collapsible header total must be itemised in the expanded lines (or shown as an explicit 'other/uncategorised' remainder line). A total that exceeds the sum of its visible children must never ship."
+   },
+   {
+    "severity": "P1",
+    "category": "other",
+    "what": "The 'Ακίνητο' overview card shows the property name 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος 1' with a bare '—' in the price slot on the right. NumberFormat renders '—' when property.price is undefined/null/0 (NumberFormat.js line 45/53). So the single most important figure on a property card — its rent/price — is blank, and the placeholder reads as a stray dash floating next to the title. The card looks broken/empty.",
+    "where": "Right sidebar, top 'Ακίνητο' card, right of the property name row",
+    "fix": "If price is genuinely zero/unset, render '0,00 €' with showZero (so it reads as a real figure) or hide the price slot entirely and label it; do not leave a lone '—' beside the name. Confirm the property actually has a price flowing through (the form has rent 81,44-area data but the overview shows nothing)."
+   },
+   {
+    "severity": "P1",
+    "category": "typography",
+    "what": "Numeric form values render in proportional Inter sans, not the mandated tabular mono numeric role. PropertyForm.js uses plain <Input> for Surface (81,44), ATAK Number (00849565780) and the ΔΕΗ supply number. DESIGN.md's Tabular-Numeral / Numeric rule explicitly names 'every ATAK number' as mono. ATAK and supply codes are exactly the identifiers that must read straight in JetBrains Mono.",
+    "where": "Main form, 'Επιφάνεια' (81,44), 'Αριθμός ΑΤΑΚ' (00849565780), 'Αριθμός Παροχής ΔΕΗ' fields",
+    "fix": "Apply the input-numeric role (className 'font-mono tabular-nums') to the Surface, ATAK, plot-surface, and ΔΕΗ inputs so identifiers and measurements render in JetBrains Mono per the design system."
+   },
+   {
+    "severity": "P1",
+    "category": "banned-pattern",
+    "what": "The left content column is wrapped in a Tabs/TabsList that contains exactly ONE TabsTrigger ('Ακίνητο'). A tab strip with a single tab is dead chrome: it renders a full-width tab bar and an active underline for a tab that can never be switched away from. It reads as an unfinished or AI-scaffolded layout and wastes vertical space above the form.",
+    "where": "Main content area, the 'Ακίνητο' tab bar above the property form card",
+    "fix": "Remove the Tabs/TabsList wrapper entirely when there is only one panel; render the form Card directly. If a page title is wanted, replace the lone tab with a proper page-level heading (see next finding)."
+   },
+   {
+    "severity": "P1",
+    "category": "hierarchy",
+    "what": "There is no display-serif page title identifying the property. The page's only 'where am I?' marker is the single lifeless 'Ακίνητο' tab and a repeated 'Ακίνητο' card title in the sidebar. DESIGN.md requires the display serif once per page on the page-level title (e.g. the property name 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος 1'). The screen has no top-level identity, so it reads as a generic form, not 'this property'.",
+    "where": "Top of the page, between the 'Πίσω' back button row and the form",
+    "fix": "Add a Source Serif 4 display-scale page title showing the property name (with the building/floor) once at the top of the page. Demote or remove the duplicate 'Ακίνητο' labels so the property name is the single biggest type on the screen."
+   },
+   {
+    "severity": "P2",
+    "category": "typography",
+    "what": "The 'Ημερομηνία έκδοσης πιστοποιητικού ενεργειακής απόδοσης' date field is a raw native HTML <input type=\"date\"> showing the browser-default 'dd/mm/yyyy' placeholder with the OS calendar glyph. It is unstyled relative to the rest of the design system inputs (different internal text colour, English-format placeholder, native spinner), and 'dd/mm/yyyy' is an English placeholder shown to a Greek user.",
+    "where": "Main form, bottom-left, 'Ημερομηνία έκδοσης πιστοποιητικού ενεργειακής απόδοσης' field",
+    "fix": "Wrap the date input in the design-system styled field (or use the app's date-picker component) so it matches the 40px / 10px-radius / stone-line inputs, and present the placeholder/format in el-GR (ηη/μμ/εεεε) rather than the native English dd/mm/yyyy."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "The card icons (LuKeyRound key, LuHistory clock, LuReceipt receipt, LuBuilding2) and the dotted-underline building link in the overview card are rendered in the sea-blue accent. With multiple blue glyphs plus the blue link and the building-name link all visible in the narrow right column at once, the earned-accent ≤5% rule is being stretched: a stranger can spot the accent in three-plus places simultaneously, and none of these icons carry semantic 'action/selection/pending' weight.",
+    "where": "Right sidebar card header icons (key, history, receipt) and the 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28' building link",
+    "fix": "Render the decorative card-header icons in ink-muted, not sea-blue. Reserve sea-blue for the genuinely interactive building link (which legitimately earns it) and focus/selected states only."
+   },
+   {
+    "severity": "P2",
+    "category": "alignment",
+    "what": "In the 'Έξοδα ακινήτου' card the two money figures do not share one aligned right column at one size. The 'Τρέχων μήνας' total (5,01 €) sits with a chevron toggle to its right, while the child 'Ύδρευση' line's amount (0,15 €) right-aligns to a different edge (no chevron), so the decimal commas and € symbols do not line up vertically. Money that stacks must share one aligned column per the design laws.",
+    "where": "Right sidebar 'Έξοδα ακινήτου' card: '5,01 €' (with chevron) vs '0,15 €' below it",
+    "fix": "Right-align all amounts to a single rail; keep the disclosure chevron in a separate fixed-width gutter outside the number column so the header total and the line amounts align on their decimal/€ position."
+   },
+   {
+    "severity": "P3",
+    "category": "spacing",
+    "what": "The previous-tenant entry '3ed3ed' / '8 Ιουν 2026 έως 7 Ιουν 2028' looks like leftover test/seed garbage (a tenant literally named '3ed3ed'), which makes the 'Προηγούμενοι ενοικιαστές' card read as broken data. While this is fixture data, the card gives a junk-named tenant a full-height card to itself, leaving large empty space below the single line.",
+    "where": "Right sidebar, 'Προηγούμενοι ενοικιαστές' card",
+    "fix": "Not a layout law per se, but verify the occupancyHistory name isn't a raw id; tighten the card so a single short entry doesn't leave a tall empty block. (Confirm against real, non-seed data.)"
+   }
+  ]
+ },
+ {
+  "surface": "accounting-tenants",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P1",
+    "category": "typography",
+    "what": "The display serif mandated by DESIGN.md (Source Serif 4 'for figures the user should pause on', one per page as the title) does not exist anywhere on this screen. tailwind.config.js aliases `display` and `font-display`/`font-headline` to `var(--font-sans)` (Manrope), so EVERY token — the 'Εισερχόμενοι ενοικιαστές' card title, the '2026' year, the tenant names — renders in one rounded geometric sans. The pixels confirm a single uniform sans family. DESIGN's first commitment ('typography carries the weight... a display serif for figures, a precise sans for everything operational') is wholesale unimplemented, so the page has no typographic hierarchy or 'where am I?' anchor. This reads as generic/AI-default rather than the intended editorial system.",
+    "where": "globals.css lines 209-217 + tailwind.config.js fontFamily.display; visible in the '2026' header and the card title in the screenshot",
+    "fix": "Wire Source Serif 4 as a real `font-display`/`font-headline` family per DESIGN.md typography tokens and apply it to the page title only. At minimum, restore a serif page-level title so the screen has a single display anchor instead of all-sans uniformity."
+   },
+   {
+    "severity": "P1",
+    "category": "hierarchy",
+    "what": "Inverted size hierarchy in every tenant row: the deposit value is `text-2xl` (24px) while the tenant name — the actual subject of the row — is only `text-xl` (20px). The largest, loudest element in each row is a zero-euro deposit (`0,00 €`), not the person. The eye is pulled to a meaningless figure.",
+    "where": "IncomingTenants.js line 35 (name `text-xl`) vs line 64 (deposit NumberFormat `text-2xl`)",
+    "fix": "Make the tenant name the dominant element (title/headline weight, ≥ the figure size) and demote the deposit to body/numeric size. The figure should never out-size its row's subject."
+   },
+   {
+    "severity": "P1",
+    "category": "other",
+    "what": "Five visible rows all show an identical, loud `0,00 €` deposit at 24px. A monotonous stack of identical zero figures rendered as the biggest thing on screen makes the emptiness shout and looks like un-seeded placeholder/AI demo data. The repetition carries zero information.",
+    "where": "Deposit column, all five tenant rows in the screenshot",
+    "fix": "Render `0,00 €` deposits muted (ink-muted, body size) or collapse a zero deposit to an em-dash placeholder per the NumberFormat empty convention, so a non-zero deposit actually stands out. Reserve emphasis for figures the landlord must act on."
+   },
+   {
+    "severity": "P2",
+    "category": "spacing",
+    "what": "The top search card is a tall, near-empty box: only the 'Αναζήτηση' placeholder sits top-left and a large '2026' top-right, with the prev/next chevron arrows stacked below the year and a large dead band of empty vertical space across the middle. The year, the arrows, and the search field do not align to a shared baseline and the card wastes most of its height.",
+    "where": "[year].js TopBar (lines 43-54): SearchFilterBar + PeriodPicker inside the `Card className='px-4 py-2 mb-6'`",
+    "fix": "Tighten the header card to a single row: search field left, year + chevrons grouped on one baseline at right. Remove the excess vertical padding so the card is one input-height tall, not a half-empty panel."
+   },
+   {
+    "severity": "P2",
+    "category": "greek-wording",
+    "what": "Tab labels mix grammatical case inconsistently across siblings: 'Εισερχόμενοι ενοικιαστές' and 'Αποχωρούντες ενοικιαστές' use nominative plural, while 'Εκκαθαριστικά ενοικιαστών' and 'Εκκαθαριστικά ιδιοκτητών' use genitive. Each phrase is individually grammatical, but the inconsistent register across one tab strip reads as if assembled from separate translation strings rather than written by one accountant. The four long labels also overflow the strip width (it scrolls).",
+    "where": "[year].js TabsList lines 229-243",
+    "fix": "Harmonize the labels into one consistent voice (e.g. all noun-led: 'Εισερχόμενοι', 'Αποχωρούντες', 'Εκκαθαριστικά ενοικιαστών', 'Εκκαθαριστικά ιδιοκτητών') and/or shorten them so all four fit without horizontal scroll on desktop."
+   },
+   {
+    "severity": "P3",
+    "category": "typography",
+    "what": "The card title is forced to `text-lg md:text-xl` (CardTitle's own `text-title` token is overridden), so the section title is sized like ad-hoc body-large rather than the DESIGN Title (16px Inter 600) or a proper headline. Combined with the all-sans family, the section heading has no distinct typographic identity versus the rows beneath it.",
+    "where": "IncomingTenants.js line 18 CardTitle `className='... text-lg md:text-xl'` overriding card.js base `text-title font-medium`",
+    "fix": "Drop the size override and use the design's Title/Headline token so the card heading is a deliberate hierarchy step, not an arbitrary `text-xl`."
+   }
+  ]
+ },
+ {
+  "surface": "accounting-owners",
+  "verdict": "poor",
+  "findings": [
+   {
+    "severity": "P0",
+    "category": "greek-wording",
+    "what": "On this el-GR (Greek) screen every month label in the statement grid renders in SPANISH: Enero, Febrero, Marzo, Abril, Mayo, Junio, Julio, Agosto, Septiembre, Octubre, Noviembre (and Diciembre below the fold). The correct Greek month names (Ιανουάριος, Φεβρουάριος, Μάρτιος, …) are required. Root cause: OwnerStatements.js line 13 `const months = moment.localeData().months();` runs at MODULE-EVAL time, which happens during import — BEFORE `_app.js` line 64 calls `moment.locale(pageProps.__lang)`. Because `_app.js` lines 2-6 import moment locales in the order fr,pt,de,el,es, the LAST import (`moment/locale/es`) leaves Spanish as the active global locale, so the frozen `months` array is Spanish. This is a category-1 i18n correctness failure, not cosmetic.",
+    "where": "Statement grid left column, all 12 month rows (Enero…Diciembre). Source: OwnerStatements.js:13 and :18; aggravated by _app.js:2-6 import order and the module-eval-vs-runtime timing of moment.locale().",
+    "fix": "Stop capturing month names at module load. Compute them inside the component at render time, after the locale is set, e.g. `const months = moment.localeData().months();` moved INSIDE OwnerStatements/SettlementRow (or pass a localized month-name array down), or better use `moment().month(i).format('MMMM')` per row at render. Apply the identical fix to TenantSettlements.js:13/27 which has the same module-level capture. As a belt-and-braces measure, ensure `moment.locale('el')` is set before these components first render."
+   },
+   {
+    "severity": "P1",
+    "category": "hierarchy",
+    "what": "The entire money grid is empty: all 12 month rows show blank middle (payments) and right (notes) cells for this owner, producing a ~900px-tall striped skeleton that conveys nothing. A statement card with zero recorded καταβολές should not render 12 empty ruled rows; it reads as a broken/half-loaded table. DESIGN.md tables spec calls for a single centered ink-muted empty-state line, not a full empty grid.",
+    "where": "Καταβολές card, owner ΔΟΚΙΜΗ ΚΑΠΠΑ — all month rows (the grey muted middle column + white notes column are blank top to bottom).",
+    "fix": "When an owner has no settlements for the displayed year, collapse the 12-row grid to a single ink-muted line (e.g. 'Καμία καταβολή για το 2026') instead of rendering 12 empty SettlementRow blocks. Keep the month grid only for owners that actually have payment data."
+   },
+   {
+    "severity": "P1",
+    "category": "other",
+    "what": "The statement grid has NO column headers. Three columns (month / payments / notes) are rendered with no Label-type header row, so the user cannot tell what the (currently empty) middle and right columns are for. DESIGN.md Tables: 'Column headers: Label type, ink-muted, 1px stone-line bottom rule.'",
+    "where": "Καταβολές grid — the row immediately above Enero/Ιανουάριος should be a header row but is absent.",
+    "fix": "Add a header row in Label type / ink-muted with stone-line bottom rule: e.g. Μήνας · Καταβολές · Σημειώσεις, aligned to the three grid columns (right-align the money column)."
+   },
+   {
+    "severity": "P2",
+    "category": "color",
+    "what": "The empty grid is two-tone for no semantic reason: the month column and notes column sit on bone (white-ish), while the middle payments column is filled with grey `bg-muted` (applied via `!hasSettlements ? 'bg-muted'`). Across 12 empty rows this paints a solid grey vertical band down the card center, which looks like a rendering artifact rather than intentional state. Grey-band-as-empty is not in the design vocabulary (empty cells should be plain bone).",
+    "where": "Middle (payments) column of every month row in the Καταβολές grid.",
+    "fix": "Drop the `bg-muted` fill on empty payment cells. Empty money cells should remain bone like the rest of the row; convey 'no payment' via the empty-state line (see the empty-grid finding), not a grey column wash."
+   },
+   {
+    "severity": "P2",
+    "category": "typography",
+    "what": "Money figures in this grid use `text-lg` plain font via NumberFormat (OwnerStatements.js:132) rather than a dedicated tabular-mono treatment, and the design's Tabular-Numeral / el-GR currency rules can only be verified as correct if NumberFormat outputs `1.234,56 €` in mono. With the grid currently empty I cannot confirm the rendered figures obey the el-GR format and tabular alignment — but the surrounding screen has no visible money formatted anywhere to spot-check, which is itself a coverage gap given this is the Καταβολές (payments) statement.",
+    "where": "OwnerStatements.js:132 `<NumberFormat value={s.amount} withColor className=\"text-lg\" />` — the money column of each settlement.",
+    "fix": "Verify on a populated owner that NumberFormat renders `1.234,56 €` in IBM Plex Mono with tabular-nums and right-alignment matching the column. Ensure the figure size is consistent with sibling figures (text-lg) and shares one aligned column."
+   },
+   {
+    "severity": "P3",
+    "category": "other",
+    "what": "The download-statement button uses a paperclip icon (LuPaperclip) for 'Εκκαθαριστικό'. A paperclip conventionally means 'attachment', not 'download/generate a statement'. The action generates/downloads a clearing statement, so a download or document glyph would read more correctly.",
+    "where": "Owner header row, right side — 'Εκκαθαριστικό' button (OwnerStatements.js:45).",
+    "fix": "Swap LuPaperclip for a download or document icon (e.g. a download arrow or file glyph) to match the action of producing a statement; reserve the paperclip for genuine attachments."
+   }
+  ]
+ },
+ {
+  "surface": "rents",
+  "verdict": "awful",
+  "findings": [
+   {
+    "severity": "P0",
+    "category": "truncation",
+    "what": "The rents surface does not render at all. The captured screenshot shows the Next.js default 404 page ('404 | This page could not be found.') inside the content area, with the left nav 'Ενοίκια' (Rents) item highlighted as active. This is NOT a one-off capture glitch: THREE independently captured rents screenshots all show the identical 404 (e2e-playwright/_ui/13_rents_.png with full app chrome, e2e-playwright/_screens/08_rents.png full-page, and e2e-playwright/_greek/10_rents.png full-page). The cause is structural: the only route file is webapps/landlord/src/pages/[organization]/rents/[yearMonth]/index.js, so the rents route REQUIRES a [yearMonth] dynamic segment. There is no index page at /rents, and AppMenu.js line 51 links to pathname '/rents/[yearMonth]'. Navigating to bare '/rents' (which the capture did) resolves to a hard 404. The RentTable.js component requested for review never mounts on this URL. A user clicking 'Ενοίκια' without a resolved month, or any bookmark/deep-link to /rents, lands on a dead page.",
+    "where": "Entire content area of the rents page (right of the nav rail); route /[organization]/rents with no [yearMonth] segment",
+    "fix": "Add an index redirect page at src/pages/[organization]/rents/index.js (and/or a router push in AppMenu) that resolves the current year-month and redirects to /rents/[yearMonth] (e.g. moment().format('YYYY.M') or the app's default term) so /rents never 404s. Verify the nav link and any external links (dashboard YearFigures.js builds /rents/${yearMonth}) always carry a valid term. Re-capture the rents screenshot against a resolved /rents/<term> URL so the actual RentTable can be reviewed."
+   },
+   {
+    "severity": "P1",
+    "category": "greek-wording",
+    "what": "The 404 error page is rendered entirely in English ('This page could not be found.') on an el-GR locale app. This is the stock Next.js default 404 — it was never localized or branded. A Greek landlord hitting this dead route sees raw English boilerplate, which reads as broken/unfinished software.",
+    "where": "Content area: '404 | This page could not be found.' centered text",
+    "fix": "Provide a localized, branded 404 page (src/pages/404.js) with Greek copy (e.g. 'Η σελίδα δεν βρέθηκε' and a link back to Επισκόπηση/Ενοίκια). Per DESIGN.md voice rules: competent-neighbor tone, no exclamation marks, no em dashes."
+   },
+   {
+    "severity": "P2",
+    "category": "typography",
+    "what": "The 404 page uses the Next.js default system font and a thin vertical hairline divider between '404' and the message — none of the design system's typography (Source Serif 4 display, Inter body) or tinted-neutral treatment is applied. It is visually indistinguishable from any unstyled Next.js app, contradicting DESIGN.md's editorial-typography north star. Even an error state should read as part of 'The Pangrati Apartment', not a framework default.",
+    "where": "Content area 404 block (the '404' numeral, divider rule, and message)",
+    "fix": "Style the custom 404 page with the design tokens: display serif for a short headline, Inter body for the explanatory line, ink/ink-muted text on the cream surface, and a secondary button back to a working route. Remove reliance on the Next.js default error component."
+   }
+  ]
+ }
+]

@@ -80,7 +80,15 @@ const _SOURCE_LABEL_KEY = {
 function _looksLikeId(name) {
   const s = _trim(name);
   if (!s) return true;
-  return /^[0-9a-f]{8,}$/i.test(s);
+  if (/^[0-9a-f]{8,}$/i.test(s)) return true;
+  // Space-free non-Greek token dominated by a long hex run, even with a short
+  // junk suffix ('d6aa8660a511asdas') — the pure-hex regex missed these.
+  return (
+    !/\s/.test(s) &&
+    !/[Ͱ-Ͽἀ-῿]/.test(s) &&
+    s.length >= 10 &&
+    /[0-9a-f]{8,}/i.test(s)
+  );
 }
 export function ownerChargeLabel(t, charge) {
   const typeKey = charge?.expenseType

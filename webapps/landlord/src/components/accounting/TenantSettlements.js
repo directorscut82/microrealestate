@@ -119,7 +119,10 @@ function SettlementList({ month, tenantId, settlements, notes }) {
   const { t } = useTranslation('common');
 
   const hasSettlements = !!settlements?.length;
-  const monthName = months[month][0].toUpperCase() + months[month].slice(1);
+  // Month name at RENDER from moment (locale set by _app), not the stale
+  // module-level array captured at import before the locale was set.
+  const rawMonth = moment().month(month).format('MMMM');
+  const monthName = rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
   // Wave-26 (5): rent-level notes for this month — rent.description (private),
   // notepromo (printed on receipts as discount reason), noteextracharge
   // (printed as extra-charge reason). Concatenated into a single readable

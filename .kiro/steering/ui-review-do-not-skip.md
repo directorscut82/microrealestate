@@ -43,30 +43,93 @@ review. This is the rule that breaks that cycle.
    MUST still be present and correct after it. Diff the information content, not
    just the looks.
 
-## How to capture (Greek, readable, deployed)
+## How to capture — the FAST local-dev loop (proven 2026-06-22)
 
-The harness is `e2e-playwright/tests/_greek_sweep.spec.ts` (visual sweep; not
-pass/fail, writes PNGs to `e2e-playwright/_greek/`). To review your own change:
+DO NOT deploy to NAS just to *look* at a UI change. A NAS deploy is ~10 min
+(CI build + image pull + stack update) and is the slowest possible way to
+iterate on layout. Use the **local dev server** instead: it reads your live
+source files (hot reload, ~1s/edit) and proxies API/data to NAS so screens show
+REAL Greek data. Seconds per look, not minutes. Deploy to NAS ONCE at the end.
 
-1. Deploy your change to NAS and verify the container revision matches your
-   commit (see test-running-guide "Verifying a deploy"). The UI must be the
-   deployed one, not local.
-2. Run the Greek sweep (or add your surface to it):
+### Why it's safe
+The local server runs on your machine (`localhost:8180`); it only READS NAS data
+through a proxy. It cannot write to or break production. The proxy is env-gated
+(`LOCAL_UI_PROXY` unset in CI/prod → no effect) and the `next.config.js` rewrite
+block + the `impeccable` devDep stay LOCAL (do not commit them to a NAS deploy).
+
+### Setup (one time per session)
+1. `next.config.js` has an env-gated `rewrites()` that proxies `/api/*` +
+   `/tenantapi/*` to the NAS gateway when `LOCAL_UI_PROXY` is set. The rewrite
+   rules MUST carry `basePath: false` — the app's `basePath:/landlord` would
+   otherwise turn `/api/...` into `/landlord/api/...` and the browser's real
+   `/api/v2` call (fetch.js builds `window.location.origin + /api/v2`) 404s.
+2. Start the dev server (reads live source, hot-reloads on save):
    ```bash
-   cd e2e-playwright
+   cd webapps/landlord
    export PATH="/usr/local/opt/node@20/bin:$PATH"
-   npx playwright test --project=chromium tests/_greek_sweep.spec.ts
+   LOCAL_UI_PROXY="http://192.168.0.96:1350" BASE_PATH="/landlord" PORT=8180 \
+     nohup yarn dev > /tmp/landlord_dev.log 2>&1 &
    ```
-   It signs in, forces the `el` locale via the `http://192.168.0.96:1350/landlord/el`
-   base, navigates each surface, and screenshots at a 2× device scale so Greek is
-   legible. Seed a building/tenant/owner with REAL data first (mongoExec) so the
-   surface isn't empty — an empty screen hides every defect.
-3. **Read every PNG with the Read tool.** Look, don't skim. For each surface,
-   write down what is wrong before you touch code.
+
+### Auth (the /signin form is dead in dev — work around it)
+The `/signin` page hits a Next.js dev **hydration error** (server/client markup
+mismatch under basePath+externalDir), so its submit handler never attaches and
+clicking does nothing. EVERY OTHER in-app interaction works once authenticated
+(tabs, dialogs, buttons — verified). So bypass the form: API-signin to get the
+`refreshToken` cookie and inject it into the browser; the app's refresh effect
+authenticates on load.
+- The refresh JWT expires (~10 min) — fetch a FRESH cookie before EACH
+  navigation, or stale sessions bounce to the crashing signin page.
+- Cookie is host-only (no domain) → set `domain:'localhost'`.
+
+### Capture harness
+`e2e-playwright/tests/_local_capture_all.spec.ts` does exactly this against the
+real `landlord` realm + real Greek buildings (ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 etc.). It:
+fresh-cookie per page, navigates, RETRIES if it lands on the error overlay, and
+tags any shot that's the overlay/signin `_BROKEN_` so a crashed capture can
+never be mistaken for a reviewed surface. Writes to `e2e-playwright/_ui/`.
+```bash
+cd e2e-playwright
+export PATH="/usr/local/opt/node@20/bin:$PATH"
+REAL_EMAIL="<account>" REAL_PASSWORD="<pw>" \
+  npx playwright test --project=chromium tests/_local_capture_all.spec.ts
+```
+Watch the `OK / OVERLAY / SIGNIN` log line per surface — every surface MUST log
+`OK`. An `OVERLAY`/`SIGNIN` (or a `_BROKEN_` filename) means that page did NOT
+render and its screenshot is worthless; fix auth/timing and re-capture before
+reviewing it. (Last run, 8/13 were silently the crash overlay — that's why the
+guard exists.)
+
+### Screenshot size gotcha
+`fullPage` shots of long pages exceed the 2000px image-read limit. Use
+viewport-only shots (no `fullPage`) at `deviceScaleFactor: 1.5`, or
+`sips -Z 1400 in.png --out out.png` to downscale before reading. **Read every
+PNG with the Read tool. Look, don't skim.**
+
+## How to REVIEW — the impeccable critique fan-out (proven 2026-06-22)
+
+Eyeballing one screenshot and self-certifying is exactly the failure that
+shipped the ΚΑΘΑΡΟ-misaligned header twice. Instead, fan out INDEPENDENT
+design-review agents — one per surface — that each read the screenshot + the
+source file + DESIGN.md + (for the overview) the approved mockup, default to
+finding problems, and return structured findings; then adversarially verify the
+P0/P1 ones and synthesize a prioritised catalogue. The reusable workflow lives
+at `.secrets/ui_critique.js` (Workflow tool). This is the `impeccable critique`
+methodology; run it on the `_ui/` captures, not by hand.
+
+Tooling notes:
+- `impeccable detect` (the deterministic 27-pattern scanner) is the npm package
+  `impeccable@3.1.0` — installed as a LOCAL devDep in `webapps/landlord` (do NOT
+  ship it to NAS). `yarn impeccable detect --json <files>` scans SOURCE for
+  static slop patterns (nested cards, side-stripes, gradient text, hero-metric).
+- `impeccable detect <URL>` (live browser scan) does NOT work in this env: its
+  bundled Puppeteer can't launch Chrome (x64 Node on arm64 Mac → Rosetta
+  timeout) and can't auth. Use the agent critique + Playwright capture for
+  rendered-pixel review instead.
 
 For a single sub-state (a dialog, a specific tab, a breakdown panel), capture
 that element: click into it, `scrollIntoViewIfNeeded`, screenshot. Empty tabs
-prove nothing — seed the rows.
+prove nothing — use real data.
 
 ## The three passes (per surface, all required)
 

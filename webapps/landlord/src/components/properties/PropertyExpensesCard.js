@@ -76,7 +76,15 @@ function _looksLikeId(name) {
   if (!name || typeof name !== 'string') return false;
   const s = name.trim();
   if (!s) return false;
-  return /^[0-9a-f]{8,}$/i.test(s) || /^[0-9a-f]{24}$/i.test(s);
+  if (/^[0-9a-f]{8,}$/i.test(s)) return true;
+  // Also a space-free non-Greek token dominated by a long hex run, even with a
+  // short junk suffix ('d6aa8660a511asdas') — the pure-hex regex missed these.
+  return (
+    !/\s/.test(s) &&
+    !/[Ͱ-Ͽἀ-῿]/.test(s) &&
+    s.length >= 10 &&
+    /[0-9a-f]{8,}/i.test(s)
+  );
 }
 
 function CategoryBreakdown({ byCategory, t }) {

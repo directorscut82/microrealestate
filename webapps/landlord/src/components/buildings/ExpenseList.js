@@ -1019,9 +1019,24 @@ export default function ExpenseList({ building }) {
             {expenses.map((expense) => (
               <TableRow key={expense._id}>
                 <TableCell>
-                  {/^[0-9a-f]{8,}$/i.test((expense.name || '').trim())
-                    ? t(expenseTypes.find((et) => et.id === expense.type)?.labelId || expense.type)
-                    : expense.name}
+                  {(() => {
+                    const nm = (expense.name || '').trim();
+                    // Treat a pure-hex OR a space-free non-Greek token dominated
+                    // by a long hex run (e.g. 'd6aa8660a511asdas') as an id and
+                    // show the TYPE label instead of leaking the gibberish.
+                    const looksId =
+                      /^[0-9a-f]{8,}$/i.test(nm) ||
+                      (!/\s/.test(nm) &&
+                        !/[Ͱ-Ͽἀ-῿]/.test(nm) &&
+                        nm.length >= 10 &&
+                        /[0-9a-f]{8,}/i.test(nm));
+                    return looksId
+                      ? t(
+                          expenseTypes.find((et) => et.id === expense.type)
+                            ?.labelId || expense.type
+                        )
+                      : expense.name;
+                  })()}
                 </TableCell>
                 <TableCell>
                   {t(
@@ -1055,14 +1070,17 @@ export default function ExpenseList({ building }) {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="cursor-help">
+                          {/* Recurring status is metadata, not a primary
+                              action — use quiet tinted variants, not the
+                              solid-ink default (reserved for primary buttons). */}
                           {expense.isRecurring && expense.amount > 0 ? (
-                            <Badge variant="default">{t('Yes')}</Badge>
+                            <Badge variant="pending">{t('Yes')}</Badge>
                           ) : expense.isRecurring && !expense.amount ? (
-                            <Badge variant="default">
+                            <Badge variant="pending">
                               {t('Yes')} ({t('variable')})
                             </Badge>
                           ) : (
-                            <Badge variant="secondary">{t('No')}</Badge>
+                            <Badge variant="neutral">{t('No')}</Badge>
                           )}
                         </span>
                       </TooltipTrigger>

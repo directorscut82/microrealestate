@@ -96,7 +96,11 @@ function StatementMonthPicker({ onPick, t }) {
 function SettlementRow({ month, ownerKey, settlements }) {
   const { t } = useTranslation('common');
   const hasSettlements = !!settlements?.length;
-  const monthName = months[month][0].toUpperCase() + months[month].slice(1);
+  // Derive the month name at RENDER from moment (locale set by _app), NOT the
+  // module-level `months` array captured at import before the locale was set —
+  // that rendered every month in the wrong language (Spanish: Enero/Febrero…).
+  const rawMonth = moment().month(month).format('MMMM');
+  const monthName = rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
 
   return (
     <div className={cn('grid grid-cols-6 border-b first:border-t')}>
