@@ -122,6 +122,7 @@ function Properties() {
     <Page title={t('Properties')} loading={isLoading} dataCy="propertiesPage">
       <List
         data={allProperties}
+        title={t('Properties')}
         filters={[
           { id: 'vacant', label: t('Vacant') },
           { id: 'occupied', label: t('Rented') },

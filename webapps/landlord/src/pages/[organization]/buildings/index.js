@@ -72,6 +72,7 @@ function Buildings() {
     <Page title={t('Buildings')} loading={isLoading} dataCy="buildingsPage">
       <List
         data={data}
+        title={t('Buildings')}
         filters={[
           { id: 'hasElevator', label: t('Has elevator') },
           { id: 'hasCentralHeating', label: t('Has heating') }

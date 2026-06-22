@@ -4,12 +4,23 @@ import { LuAlertTriangle } from 'react-icons/lu';
 import PropertyIcon from '../properties/PropertyIcon';
 
 import useTranslation from 'next-translate/useTranslation';
+// Map a raw ISO-3166 country code to a localized name so the address doesn't
+// leak 'GR' into Greek UI ('ΑΘΗΝΑ GR'). Unknown codes pass through unchanged.
+const _COUNTRY_NAMES = {
+  GR: 'Ελλάδα',
+  CY: 'Κύπρος'
+};
+function _countryName(c) {
+  if (!c) return '';
+  return _COUNTRY_NAMES[String(c).trim().toUpperCase()] || c;
+}
+
 function Address({ address }) {
-  const { t } = useTranslation('common');
   if (!address?.street1) {
     return null;
   }
 
+  const country = _countryName(address.country);
   return (
     <p className="text-xs text-muted-foreground leading-snug">
       {address.street1}
@@ -22,9 +33,7 @@ function Address({ address }) {
       ) : null}
       {address.city} {address.zipCode}
       <br />
-      {address.state && address.country
-        ? `${address.state} ${address.country}`
-        : address.country}
+      {address.state && country ? `${address.state} ${country}` : country}
     </p>
   );
 }

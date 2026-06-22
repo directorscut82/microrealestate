@@ -56,6 +56,7 @@ function Owners() {
     <Page loading={isLoading} dataCy="ownersPage">
       <List
         data={owners}
+        title={t('Owners')}
         filters={[
           { id: 'outstanding', label: t('Has outstanding') },
           { id: 'settled', label: t('Settled') }

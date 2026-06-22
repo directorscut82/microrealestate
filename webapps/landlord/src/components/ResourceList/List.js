@@ -23,6 +23,7 @@ function _computeChunks(chunkSize, data = []) {
 
 export default function List({
   data,
+  title,
   filters,
   filterFn,
   renderActions,
@@ -99,6 +100,11 @@ export default function List({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Display-serif page title (the "where am I?" anchor the list pages
+          lacked — only the dev banner was large text at the top). */}
+      {title && (
+        <h1 className="font-display text-display text-ink">{title}</h1>
+      )}
       <Header
         filters={filters}
         renderActions={renderActions}
