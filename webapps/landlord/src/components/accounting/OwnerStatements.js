@@ -178,7 +178,9 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
             key={owner.ownerKey}
             className="border-b first:border-t last:border-none py-4"
           >
-            <div className="flex justify-between text-xl px-2">
+            {/* Owner name demoted below the card title (was text-xl = the
+                card's own title size). */}
+            <div className="flex justify-between items-baseline text-title font-medium px-2">
               <div>{owner.name || t('Owner')}</div>
               <StatementMonthPicker
                 onPick={onDownloadStatement(owner)}
@@ -202,16 +204,38 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
                 .filter(Boolean)
                 .join(' · ')}
             </div>
-            <div>
-              {months.map((_m, index) => (
-                <SettlementRow
-                  key={`${owner.ownerKey}_${index}`}
-                  ownerKey={owner.ownerKey}
-                  month={index}
-                  settlements={owner.settlements?.[index]}
-                />
-              ))}
-            </div>
+            {(owner.settlements || []).some((s) => s?.length) ? (
+              <div>
+                {/* Column header row (Label type, ink-muted, ruled) — the grid
+                    previously had no headers. */}
+                <div className="grid grid-cols-6 border-b text-label uppercase tracking-wide text-ink-muted">
+                  <div className="col-span-2 md:col-span-1 border-l border-r px-4 py-1.5">
+                    {t('Month')}
+                  </div>
+                  <div className="col-span-3 md:col-span-4 border-r px-4 py-1.5">
+                    {t('Payments')}
+                  </div>
+                  <div className="border-r px-4 py-1.5 text-right">
+                    {t('Note')}
+                  </div>
+                </div>
+                {months.map((_m, index) => (
+                  <SettlementRow
+                    key={`${owner.ownerKey}_${index}`}
+                    ownerKey={owner.ownerKey}
+                    month={index}
+                    settlements={owner.settlements?.[index]}
+                  />
+                ))}
+              </div>
+            ) : (
+              // No καταβολές this year → one muted line, not 12 empty rows.
+              <div className="px-2 py-2 text-sm text-ink-muted">
+                {t('No payments for {{year}}', {
+                  year: new Date().getFullYear()
+                })}
+              </div>
+            )}
           </div>
         ))}
       </CardContent>

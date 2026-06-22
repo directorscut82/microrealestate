@@ -1095,5 +1095,7 @@
   "owner share": "parte proprietário",
   "Year to date": "No acumulado do ano",
   "Building expense breakdown": "Detalhamento das despesas do edifício",
-  "No billable repairs recorded.": "Nenhum reparo faturável registrado."
+  "No billable repairs recorded.": "Nenhum reparo faturável registrado.",
+  "Month": "Mês",
+  "No payments for {{year}}": "Sem pagamentos para {{year}}"
 }

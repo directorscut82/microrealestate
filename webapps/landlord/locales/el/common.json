@@ -1198,5 +1198,7 @@
   "Tenant settlements": "Εκκαθαριστικά ενοικιαστών",
   "Owner settlements": "Εκκαθαριστικά ιδιοκτητών",
   "vacant unit": "κενή μονάδα",
-  "owner share": "μερίδιο ιδιοκτήτη"
+  "owner share": "μερίδιο ιδιοκτήτη",
+  "Month": "Μήνας",
+  "No payments for {{year}}": "Καμία καταβολή για το {{year}}"
 }

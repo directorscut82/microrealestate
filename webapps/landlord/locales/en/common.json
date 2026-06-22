@@ -1185,5 +1185,7 @@
   "owner share": "owner share",
   "Year to date": "Year to date",
   "Building expense breakdown": "Building expense breakdown",
-  "No billable repairs recorded.": "No billable repairs recorded."
+  "No billable repairs recorded.": "No billable repairs recorded.",
+  "Month": "Month",
+  "No payments for {{year}}": "No payments for {{year}}"
 }

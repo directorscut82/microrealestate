@@ -305,6 +305,13 @@ function Tenant() {
       dataCy="tenantPage"
     >
       <PresenceBanner viewers={viewers} />
+      {/* Display-serif page title (the tenant name) — the "where am I?" anchor
+          the page lacked (only section headers existed). */}
+      {!selected.stepperMode && selected.name && (
+        <h1 className="font-display text-display text-ink mb-4">
+          {selected.name}
+        </h1>
+      )}
       {selected.stepperMode ? (
         <Card>
           <TenantStepper tenant={selected} leases={leases} properties={properties} organization={store.organization.selected} onSubmit={onSubmit} />

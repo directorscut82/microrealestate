@@ -61,9 +61,14 @@ export default function RentOverviewCard({ tenant }) {
             </>
           )}
           <Separator />
-          <div className="flex justify-between mt-4">
-            <span className="text-muted-foreground">{t('Total')}</span>
-            <NumberFormat value={tenant.total} />
+          {/* Promote the total: it's the figure the user pauses on, so it must
+              outweigh its summands (Title-weight ink label + larger mono value),
+              not match them at muted size. */}
+          <div className="flex items-baseline justify-between mt-4">
+            <span className="text-title font-medium text-ink">{t('Total')}</span>
+            <span className="font-mono tabular-nums text-headline text-ink">
+              <NumberFormat value={tenant.total} />
+            </span>
           </div>
         </div>
       )}
