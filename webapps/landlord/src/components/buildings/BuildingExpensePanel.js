@@ -344,6 +344,10 @@ export default function BuildingExpensePanel({ building }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
       queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+      // Saving a statement now materialises vacant-owner rows (variable-expense
+      // shares), so the owner ledger + accounting tabs must refresh too.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
     }
   });
 

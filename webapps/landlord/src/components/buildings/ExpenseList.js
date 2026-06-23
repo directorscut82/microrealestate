@@ -352,6 +352,15 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
     queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    // The ΧΡΕΩΣΕΙΣ breakdown panel (BuildingExpensePanel) is a SEPARATE query
+    // key ['expense-breakdown', buildingId, term] — without invalidating it,
+    // toggling a flag (Καταγραφή/Χρέωση ιδιοκτήτη), editing an amount, or
+    // adding an expense updated the building doc but left the right-hand
+    // breakdown stale until a manual page refresh. Invalidate the whole
+    // 'expense-breakdown' family (all terms) + the owner ledger surfaces.
+    queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
   };
 
   const addMutation = useMutation({
@@ -919,6 +928,11 @@ export default function ExpenseList({ building }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+      // Deleting an expense must also refresh the ΧΡΕΩΣΕΙΣ breakdown panel
+      // (separate query key) + the owner ledger / accounting surfaces.
+      queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
     }
   });
 

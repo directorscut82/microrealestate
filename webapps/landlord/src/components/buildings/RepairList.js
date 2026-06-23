@@ -230,6 +230,13 @@ export default function RepairList({ building }) {
     queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    // A repair's owner-portion + vacant-unit shares appear on the ΧΡΕΩΣΕΙΣ
+    // breakdown panel (separate query key) AND the owner ledger / accounting
+    // tabs. Without these, adding/editing/deleting a repair left those surfaces
+    // stale until a manual refresh.
+    queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
   };
 
   const addMutation = useMutation({
