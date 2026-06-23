@@ -1033,24 +1033,10 @@ export default function ExpenseList({ building }) {
             {expenses.map((expense) => (
               <TableRow key={expense._id}>
                 <TableCell>
-                  {(() => {
-                    const nm = (expense.name || '').trim();
-                    // Treat a pure-hex OR a space-free non-Greek token dominated
-                    // by a long hex run (e.g. 'd6aa8660a511asdas') as an id and
-                    // show the TYPE label instead of leaking the gibberish.
-                    const looksId =
-                      /^[0-9a-f]{8,}$/i.test(nm) ||
-                      (!/\s/.test(nm) &&
-                        !/[Ͱ-Ͽἀ-῿]/.test(nm) &&
-                        nm.length >= 10 &&
-                        /[0-9a-f]{8,}/i.test(nm));
-                    return looksId
-                      ? t(
-                          expenseTypes.find((et) => et.id === expense.type)
-                            ?.labelId || expense.type
-                        )
-                      : expense.name;
-                  })()}
+                  {/* The Όνομα column shows the declared name VERBATIM (user
+                      rule, 2026-06: never hide a typed name — the Τύπος column
+                      beside it already shows the kind). No id-hiding here. */}
+                  {expense.name}
                 </TableCell>
                 <TableCell>
                   {t(
