@@ -626,32 +626,6 @@ const EXPENSE_TYPE_LABEL = {
   other: 'Other'
 };
 
-// A name "looks like an id" when it's a bare hex/objectid-ish token with no
-// spaces — e.g. 'd6aa8660a511'. Such names are meaningless to a human, so the
-// UI shows the expense TYPE label instead (per the user's decision: show type
-// when the name is a hash, append the real name only when it's real).
-function _looksLikeId(name) {
-  if (!name || typeof name !== 'string') return true;
-  const s = name.trim();
-  if (!s) return true;
-  // A pure hex/objectid token is an id.
-  if (/^[0-9a-f]{8,}$/i.test(s)) return true;
-  // Also treat a single space-free token that is DOMINATED by a long hex run as
-  // an id, even with a short junk suffix — e.g. 'd6aa8660a511asdas' (12 hex +
-  // 'asdas'). The strict pure-hex regex missed these, so the gibberish leaked
-  // into the UI as 'Κοινόχρηστο Νερό (d6aa8660a511asdas)'. Rule: no spaces, no
-  // Greek letters, length >= 10, and at least an 8-char contiguous hex run.
-  if (
-    !/\s/.test(s) &&
-    !/[Ͱ-Ͽἀ-῿]/.test(s) && // no Greek → not a real Greek name
-    s.length >= 10 &&
-    /[0-9a-f]{8,}/i.test(s)
-  ) {
-    return true;
-  }
-  return false;
-}
-
 // Strip the redundant building-name prefix from a unit's property name so the
 // breakdown doesn't repeat 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - ' on every one of 11 rows. The
 // building name is already the page title, so each row only needs its unit
@@ -672,27 +646,25 @@ function unitLabel(buildingName, propertyName) {
 // append the user-given name only when it's a real name (not an id, not equal
 // to the type label). So 'Κοιν. Νερό' for an id-named water expense, and
 // 'Κοιν. Νερό (ΔΕΗ Ιουνίου)' when a real name adds information.
+// ALWAYS render "Τύπος (Όνομα)" so the user sees BOTH the expense kind AND the
+// name they declared in the form. The ONLY suppression is when the name is
+// EXACTLY equal to the type label (diacritic/case-insensitive) — then the
+// parenthetical would be a pure duplicate ('Κοινόχρηστο Νερό (Κοινόχρηστο
+// Νερό)'). The user's rule (2026-06): never silently drop a name the user
+// typed — not even hash-looking ones; if a name is junk the user must SEE it
+// to fix it, not have the UI hide it.
 function expenseDisplayLabel(t, name, type) {
   const typeLabel = type && EXPENSE_TYPE_LABEL[type] ? t(EXPENSE_TYPE_LABEL[type]) : '';
-  const realName = !_looksLikeId(name) ? String(name).trim() : '';
-  // Compare diacritic- and case-insensitively so 'Ρευμα' (the type label minus
-  // the tonos) is recognised as a duplicate of 'Ρεύμα'. Also drop the
-  // parenthetical when the user-name is wholly contained in the type label (or
-  // vice-versa) — 'Ρευμα' is a word inside 'Κοινόχρηστο Ρεύμα', so appending it
-  // adds nothing and read as 'Κοινόχρηστο Ρεύμα (Ρευμα)'.
+  const realName = String(name || '').trim();
   const norm = (s) =>
     String(s)
       .normalize('NFD')
       .replace(/[̀-ͯ]/g, '')
       .toLowerCase()
       .trim();
-  const nName = norm(realName);
-  const nType = norm(typeLabel);
-  const redundant =
-    nName &&
-    nType &&
-    (nName === nType || nType.includes(nName) || nName.includes(nType));
-  if (typeLabel && realName && !redundant) {
+  const isExactDuplicate =
+    realName && typeLabel && norm(realName) === norm(typeLabel);
+  if (typeLabel && realName && !isExactDuplicate) {
     return `${typeLabel} (${realName})`;
   }
   return typeLabel || realName || t('Expense');

@@ -66,9 +66,11 @@ export function debtLineLabel(t, debt) {
 // Localized label for an OWNER ledger charge (ownerMonthlyExpenses row). Used
 // by the owner detail page + owner payment dialog so neither leaks a raw
 // English source enum ('repair-vacant', 'owner-fixed') or 'Repair:' prefix.
-// Rule: prefer the expense TYPE label (Επισκευή for repairs, Κοιν. Νερό, …);
-// append a real description in parentheses; never show a bare hex id. Falls
-// back to a per-source label so even a typeless row reads in Greek.
+// Rule (user, 2026-06): ALWAYS show "Τύπος (Όνομα)" — the type label PLUS the
+// name the user declared, so the kind AND the name are both visible. Drop the
+// parenthetical ONLY when the name is exactly the type label (pure duplicate).
+// Never silently hide a user-typed name (even hash-looking ones — the user
+// must SEE a junk name to fix it).
 const _SOURCE_LABEL_KEY = {
   expense: 'Owner expense',
   'owner-fixed': 'Owner expense',
@@ -77,26 +79,12 @@ const _SOURCE_LABEL_KEY = {
   repair: 'Repair',
   'repair-vacant': 'Repair'
 };
-function _looksLikeId(name) {
-  const s = _trim(name);
-  if (!s) return true;
-  if (/^[0-9a-f]{8,}$/i.test(s)) return true;
-  // Space-free non-Greek token dominated by a long hex run, even with a short
-  // junk suffix ('d6aa8660a511asdas') — the pure-hex regex missed these.
-  return (
-    !/\s/.test(s) &&
-    !/[Ͱ-Ͽἀ-῿]/.test(s) &&
-    s.length >= 10 &&
-    /[0-9a-f]{8,}/i.test(s)
-  );
-}
 export function ownerChargeLabel(t, charge) {
   const typeKey = charge?.expenseType
     ? BUILDING_TYPE_LABEL_KEY[charge.expenseType]
     : null;
   // strip a hardcoded legacy "Repair: <title>" English prefix if present
-  const rawDesc = _trim(charge?.description).replace(/^Repair:\s*/i, '');
-  const desc = _looksLikeId(rawDesc) ? '' : rawDesc;
+  const desc = _trim(charge?.description).replace(/^Repair:\s*/i, '');
   const base = typeKey
     ? t(typeKey)
     : t(_SOURCE_LABEL_KEY[charge?.source] || 'Owner expense');
