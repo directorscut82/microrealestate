@@ -2996,19 +2996,64 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
         }
         if (e.source === 'repair-vacant') {
           // A vacant unit's slice of the tenant-billed pool, routed to the owner.
-          // The pool is cost × tenantPct%; THIS row is only this unit's allocated
-          // slice of that pool (by thousandths/surface/equal), so we must NOT
-          // print "pool × tenantPct% = result" (that claims the whole pool — it
-          // doesn't reconcile in a multi-unit building, Step-7). Show the pool
-          // AND the unit's slice as an allocation: "pool € → result € (unit's
-          // share)", both figures truthful, no false equation.
+          // The pool is cost × tenantPct%; THIS row is the unit's allocated slice
+          // of that pool by the repair's allocationMethod. Ship the per-unit
+          // DIVISOR (part/whole/count + kind) so the UI renders the real
+          // division "pool ÷/× allocation = slice", not just "pool → slice".
           const pool = Math.round(cost * (tenantPct / 100) * 100) / 100;
+          const method = (rep as any).allocationMethod || 'general_thousandths';
+          // Resolve the unit's part + the building total for this method, mirroring
+          // _shareBasis (1_base). Managed units only, matching the billing engine.
+          const mu = ((hydrated as any).units || []).filter(
+            (u: any) => u.propertyId
+          );
+          let allocKind: string | undefined;
+          let part: number | undefined;
+          let whole: number | undefined;
+          let count: number | undefined;
+          if (method === 'by_surface') {
+            allocKind = 'surface';
+            part = Math.round((Number(unit?.surface) || 0) * 100) / 100;
+            whole =
+              Math.round(
+                mu.reduce((s: number, u: any) => s + (Number(u.surface) || 0), 0) *
+                  100
+              ) / 100;
+          } else if (
+            method === 'general_thousandths' ||
+            method === 'heating_thousandths' ||
+            method === 'elevator_thousandths'
+          ) {
+            const key =
+              method === 'general_thousandths'
+                ? 'generalThousandths'
+                : method === 'heating_thousandths'
+                  ? 'heatingThousandths'
+                  : 'elevatorThousandths';
+            allocKind = 'thousandths';
+            part = Math.round((Number((unit as any)?.[key]) || 0) * 100) / 100;
+            whole =
+              Math.round(
+                ((hydrated as any).units || []).reduce(
+                  (s: number, u: any) => s + (Number(u[key]) || 0),
+                  0
+                ) * 100
+              ) / 100;
+          } else if (method === 'equal') {
+            allocKind = 'equal';
+            count = mu.length;
+          }
           return {
             kind: 'repair_vacant',
             total: Math.round(cost * 100) / 100,
             tenantPct,
             pool,
-            result: rowAmount
+            result: rowAmount,
+            // per-unit divisor of the pool (when resolvable):
+            allocKind,
+            part,
+            whole,
+            count
           };
         }
         return null;

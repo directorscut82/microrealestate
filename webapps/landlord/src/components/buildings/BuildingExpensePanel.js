@@ -791,13 +791,35 @@ function formatBasis(t, basis, fmt) {
   }
 }
 
-// Second line for a repair_vacant basis: this vacant unit's share of the
-// tenant pool (the figure actually billed to the owner). Rendered under the
-// formatBasis line so the two read as the approved 2-step κατανομή.
+// Second line for a repair_vacant basis: how the tenant pool is split to THIS
+// vacant unit — the REAL division (pool ÷ N μονάδες / by m² / by ‰ = slice),
+// when the server resolved the per-unit divisor (basis.allocKind). Falls back
+// to the bare "vacant-unit share: X €" when the divisor isn't resolvable.
 function repairVacantShareLine(t, basis, fmt) {
   if (!basis || basis.kind !== 'repair_vacant') return '';
   const e = (n) => (fmt ? fmt(Number(n) || 0).replace(/\s*€\s*/g, '').trim() : n);
-  return t('vacant-unit share: {{share}} €', { share: e(basis.result) });
+  const pool = e(basis.pool);
+  const share = e(basis.result);
+  switch (basis.allocKind) {
+    case 'equal':
+      return t('vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €', {
+        pool,
+        count: basis.count,
+        share
+      });
+    case 'surface':
+      return t(
+        'vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €',
+        { part: basis.part, whole: basis.whole, pool, share }
+      );
+    case 'thousandths':
+      return t(
+        'vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €',
+        { part: basis.part, whole: basis.whole, pool, share }
+      );
+    default:
+      return t('vacant-unit share: {{share}} €', { share });
+  }
 }
 
 function OwnerName({ name, percentage }) {

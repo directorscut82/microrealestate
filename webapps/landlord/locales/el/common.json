@@ -1218,5 +1218,8 @@
   "custom percentage share: {{share}} €": "μερίδιο ποσοστού: {{share}} €",
   "cost {{total}} € × owner share {{pct}}% = {{share}} €": "κόστος {{total}} € × μερίδιο ιδιοκτητών {{pct}}% = {{share}} €",
   "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "κόστος {{total}} € × μερίδιο ενοικιαστών {{pct}}% = {{pool}} €",
-  "vacant-unit share: {{share}} €": "μερίδιο κενής μονάδας: {{share}} €"
+  "vacant-unit share: {{share}} €": "μερίδιο κενής μονάδας: {{share}} €",
+  "vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €": "μερίδιο κενής μονάδας: {{pool}} € ÷ {{count}} μονάδες = {{share}} €",
+  "vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €": "μερίδιο κενής μονάδας: {{part}} τ.μ. ÷ {{whole}} τ.μ. × {{pool}} € = {{share}} €",
+  "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €": "μερίδιο κενής μονάδας: {{part}} ÷ {{whole}} χιλιοστά × {{pool}} € = {{share}} €"
 }

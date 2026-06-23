@@ -1205,5 +1205,8 @@
   "custom percentage share: {{share}} €": "custom percentage share: {{share}} €",
   "cost {{total}} € × owner share {{pct}}% = {{share}} €": "cost {{total}} € × owner share {{pct}}% = {{share}} €",
   "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €",
-  "vacant-unit share: {{share}} €": "vacant-unit share: {{share}} €"
+  "vacant-unit share: {{share}} €": "vacant-unit share: {{share}} €",
+  "vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €": "vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €",
+  "vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €": "vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €",
+  "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €": "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €"
 }

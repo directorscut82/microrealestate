@@ -137,6 +137,8 @@ export type ShareBasis = {
   tenantPct?: number; // repair_vacant: tenant share %
   pool?: number; // repair_vacant: the tenant pool (cost × tenantPct%)
   result?: number; // repair_*: the resulting euro (mirrors `share`)
+  // repair_vacant per-unit divisor (how the pool is split to THIS unit):
+  allocKind?: string; // 'surface' | 'thousandths' | 'equal' (undefined → no divisor line)
 };
 
 // `partyCount` is the actual divisor the equal-allocation engine uses for
