@@ -587,13 +587,39 @@ export function computeBuildingExpenseBreakdown(
         recipient: 'owner',
         recipientName: ownerName,
         amount: shareR,
-        basis: {
-          kind: 'repair_vacant',
-          total: Math.round(cost * 100) / 100,
-          tenantPct,
-          pool: Math.round(cost * (tenantPct / 100) * 100) / 100,
-          result: shareR
-        },
+        basis: (() => {
+          const pool = Math.round(cost * (tenantPct / 100) * 100) / 100;
+          // Per-unit divisor of the pool, via the repair's allocationMethod —
+          // reuse _shareBasis (the same engine the expense rows use) on the pool
+          // so the UI shows the REAL division (pool ÷ N / by m² / by ‰ = slice).
+          const sub = _shareBasis(
+            building,
+            unit,
+            { allocationMethod: repair.allocationMethod || 'general_thousandths' },
+            pool,
+            shareR,
+            (repair.allocationMethod || 'general_thousandths') === 'equal'
+              ? _equalPartyCount(building, term)
+              : undefined
+          );
+          const allocKind =
+            sub.kind === 'surface' ||
+            sub.kind === 'thousandths' ||
+            sub.kind === 'equal'
+              ? sub.kind
+              : undefined;
+          return {
+            kind: 'repair_vacant',
+            total: Math.round(cost * 100) / 100,
+            tenantPct,
+            pool,
+            result: shareR,
+            allocKind,
+            part: sub.part,
+            whole: sub.whole,
+            count: sub.count
+          };
+        })(),
         ownerBilled: false
       });
     }
