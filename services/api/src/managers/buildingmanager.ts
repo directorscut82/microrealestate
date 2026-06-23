@@ -2683,6 +2683,19 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     }
   }
 
+  // Materialise vacant/owner-resident owner rows for THIS term before saving.
+  // Statement entry is the ONLY place a VARIABLE expense (Ρεύμα/Νερό, amount 0)
+  // gets its per-unit monthlyCharges figure — and _recomputeVacantOwnerCharges
+  // (which writes the owner-side source:'vacant' rows the owner tab + dashboard
+  // read) was NOT fired here, only on expense/tenancy edits. So a vacant unit's
+  // variable-expense share was billed in the breakdown but absent from the owner
+  // tab + dashboard until an unrelated edit (Step-7: Beta 0,21 € vs ~48,81 €
+  // owed). Fire it on the in-memory building for the saved term, then one
+  // version-checked save (mirrors addExpense). The breakdown persistedVacantKeys
+  // dedup + dashboard `covered` set suppress the now-duplicate live rows, so this
+  // is additive, not double-counting (Step-7 checks 1+4 confirmed safe).
+  await _recomputeVacantOwnerCharges(building, realm!._id as string, Number(term));
+
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
 
@@ -4750,15 +4763,24 @@ export async function _recomputeVacantOwnerCharges(
   // / owner-occupied unit's €40 IS owner-borne. Mirrors the dashboard gap-fill
   // predicate (computeOwnerEksodaByMonth) so the ledger, the breakdown panel,
   // AND the dashboard agree (June 2026 round-4 — the recompute used to skip
-  // amount===0 fixed expenses, leaving them dashboard-only). Truly-VARIABLE
-  // expenses (amount 0, non-fixed — materialised into monthlyCharges at
-  // statement time) are still skipped; the downstream `share <= 0` guard
-  // discards any zero per-unit share.
-  const billableExpenses = activeExpenses.filter(
-    (e) => e.allocationMethod === 'fixed' || Number(e.amount) > 0
-  );
-  for (const expense of billableExpenses) {
+  // amount===0 fixed expenses, leaving them dashboard-only).
+  //
+  // VARIABLE expenses (amount 0, non-fixed — e.g. Ρεύμα/Νερό entered per month)
+  // are ALSO included now: their per-unit share for a vacant/owner-occupied
+  // unit lives in unit.monthlyCharges (written at statement-entry time), NOT in
+  // expense.amount (so computeBuildingChargeForProperty returns 0 for them).
+  // Reading that persisted share and writing it as a 'vacant'/'owner-resident'
+  // ownerMonthlyExpenses row makes the owner tab show + settle the money the
+  // breakdown already bills. Without this, a vacant unit's variable-expense
+  // share (Ρεύμα 4,86 € × 10 units) was billed in the breakdown but NEVER
+  // persisted, so the owner tab under-reported (Beta showed 0,21 €, owed
+  // ~48,81 €). The breakdown's persistedVacantKeys dedup (getExpenseBreakdown
+  // ~3030) drops its now-duplicate live row, so no double-count.
+  const isVariableExpense = (e: any) =>
+    (e.allocationMethod || 'equal') !== 'fixed' && !(Number(e.amount) > 0);
+  for (const expense of activeExpenses) {
     const flagOn = !!expense.chargeOwnerWhenVacant;
+    const variable = isVariableExpense(expense);
     for (const unit of building.units) {
       if (!unit.propertyId) continue;
       if (occupied.has(String(unit.propertyId))) continue; // billed to renter
@@ -4766,12 +4788,25 @@ export async function _recomputeVacantOwnerCharges(
       // Empty unit → bill the owner only if the expense opts in; owner-occupied
       // unit → always the resident owner's own cost.
       if (!isResident && !flagOn) continue;
-      const share = computeBuildingChargeForProperty(
-        buildingObj,
-        String(unit.propertyId),
-        expense,
-        term
-      );
+      // VARIABLE expense → share = the persisted per-unit monthlyCharge for this
+      // expense+term (the statement figure the landlord entered). FIXED /
+      // amount>0 → compute from the engine as before.
+      let share: number;
+      if (variable) {
+        const mc = (unit.monthlyCharges || []).find(
+          (c: any) =>
+            Number(c.term) === term &&
+            String(c.expenseId) === String(expense._id)
+        );
+        share = mc ? Math.round((Number(mc.amount) || 0) * 100) / 100 : 0;
+      } else {
+        share = computeBuildingChargeForProperty(
+          buildingObj,
+          String(unit.propertyId),
+          expense,
+          term
+        );
+      }
       if (share <= 0) continue;
       const carried = carryOwnerPayments(
         consume(`${String(expense._id)}|${String(unit.propertyId)}|${term}`)
