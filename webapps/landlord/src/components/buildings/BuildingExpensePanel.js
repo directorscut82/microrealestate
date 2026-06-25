@@ -458,8 +458,11 @@ export default function BuildingExpensePanel({ building }) {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-start">
-      {/* LEFT column — calendar + month total + variable-amount entry rows */}
+    // Single full-width vertical stack (user request 2026-06): the calendar +
+    // month detail span the whole panel on top; the ΧΡΕΩΣΕΙΣ breakdown sits
+    // entirely BELOW (was a side-by-side 2-col grid that cramped both halves).
+    <div className="space-y-6">
+      {/* TOP — calendar + month total + variable-amount entry rows */}
       <div className="min-w-0">
       {/* Centered year navigator */}
       <div className="flex items-center justify-center gap-6 mb-3">
@@ -483,8 +486,9 @@ export default function BuildingExpensePanel({ building }) {
         </button>
       </div>
 
-      {/* Month grid */}
-      <div className="grid grid-cols-4 gap-1.5 mb-5">
+      {/* Month grid — 6 columns × 2 rows now that the calendar owns the full
+          panel width (was 4×3 in the cramped left column). */}
+      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-1.5 mb-5">
         {Array.from({ length: 12 }, (_, i) => {
           const m = moment(
             `${visibleYear}-${String(i + 1).padStart(2, '0')}-01`
@@ -518,24 +522,17 @@ export default function BuildingExpensePanel({ building }) {
 
       <Separator className="mb-4" />
 
-      {/* Selected month detail. The headline figure is the TENANT total
-          (the money billed to tenants), matching the ExpenseHistory tile's
-          convention. When owner-tracked amounts also exist they are
-          additional money, not a sub-split — so label the headline
-          explicitly as the tenant total and surface the owner subtotal
-          below, rather than letting a bare number ambiguously understate
-          the full month. */}
+      {/* Selected month header. The headline figure is the COMBINED month
+          total (tenants + owners) — the full money entered for the month, not
+          just the tenant slice. The old "Χρέωση ενοικιαστών" caption is gone:
+          the two amounts are now itemized under their own ΕΝΟΙΚΙΑΣΤΕΣ /
+          ΙΔΙΟΚΤΗΤΕΣ subheaders below, each with a right-aligned subtotal in
+          the SAME style (no italics, same size) so the block reads
+          consistently top to bottom. */}
       <div className="flex items-baseline justify-between mb-3">
         <span className="text-sm font-medium">{monthLabel}</span>
-        <span className="text-right">
-          <span className="text-sm font-semibold tabular-nums">
-            <NumberFormat value={tenantTotal} />
-          </span>
-          {ownerTotal !== 0 && (
-            <span className="block text-xs text-muted-foreground">
-              {t('Charged to tenants')}
-            </span>
-          )}
+        <span className="text-sm font-semibold tabular-nums">
+          <NumberFormat value={tenantTotal + ownerTotal} />
         </span>
       </div>
 
@@ -545,30 +542,40 @@ export default function BuildingExpensePanel({ building }) {
         </p>
       ) : (
         <div className="space-y-1">
-          {tenantRows.map((row) => (
-            <ExpenseRow
-              key={`t-${row.expenseId}`}
-              row={row}
-              value={drafts[`tenant:${row.expenseId}`]}
-              onChange={(id, v) => handleDraftChange(id, v, false)}
-              onSave={handleSaveRow}
-              saving={saving}
-              t={t}
-            />
-          ))}
+          {tenantRows.length > 0 && (
+            <>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {t('Tenants')}
+                </span>
+                <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                  <NumberFormat value={tenantTotal} />
+                </span>
+              </div>
+              {tenantRows.map((row) => (
+                <ExpenseRow
+                  key={`t-${row.expenseId}`}
+                  row={row}
+                  value={drafts[`tenant:${row.expenseId}`]}
+                  onChange={(id, v) => handleDraftChange(id, v, false)}
+                  onSave={handleSaveRow}
+                  saving={saving}
+                  t={t}
+                />
+              ))}
+            </>
+          )}
 
           {ownerRows.length > 0 && (
             <>
-              <Separator className="my-2" />
+              {tenantRows.length > 0 && <Separator className="my-2" />}
               <div className="flex items-baseline justify-between mb-1">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t('Owners')}
                 </span>
-                {ownerTotal !== 0 && (
-                  <span className="text-xs italic text-muted-foreground tabular-nums">
-                    <NumberFormat value={ownerTotal} />
-                  </span>
-                )}
+                <span className="text-xs font-medium text-muted-foreground tabular-nums">
+                  <NumberFormat value={ownerTotal} />
+                </span>
               </div>
               {ownerRows.map((row) => (
                 <ExpenseRow
@@ -587,7 +594,7 @@ export default function BuildingExpensePanel({ building }) {
       )}
       </div>
 
-      {/* RIGHT column — who is charged (the breakdown), beside the calendar */}
+      {/* BOTTOM — who is charged (the breakdown), full width below the calendar */}
       <div className="min-w-0">
         <ChargeBreakdown
           breakdown={breakdown}
@@ -914,9 +921,38 @@ function UnitGroup({ title, total, items, t, formatNumber, ownerTinted }) {
   );
 }
 
+// Truncate a long ΑΤΑΚ for inline display: keep the first 4 + last 4 digits
+// ('0501…6789'). ΑΤΑΚs are ~12 digits — the full string crowds every row, and
+// the user asked for the ΑΤΑΚ shown but truncated. Returns '' for empty input.
+function truncateAtak(atak) {
+  const s = String(atak || '').trim();
+  if (!s) return '';
+  if (s.length <= 9) return s;
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
+}
+
 function ChargeBreakdown({ breakdown, building, term, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
   const formatNumber = useFormatNumber();
+  // ΑΤΑΚ per unit, keyed by propertyId, so every breakdown row can show the
+  // unit's cadastral code (truncated) in parens. Built from the building's
+  // units (the breakdown rows carry propertyId but not the ΑΤΑΚ).
+  const atakByPropertyId = useMemo(() => {
+    const m = new Map();
+    for (const u of building?.units || []) {
+      if (u.propertyId && u.atakNumber) {
+        m.set(String(u.propertyId), String(u.atakNumber));
+      }
+    }
+    return m;
+  }, [building]);
+  const atakSuffix = useCallback(
+    (propertyId) => {
+      const a = truncateAtak(atakByPropertyId.get(String(propertyId)));
+      return a ? ` (${t('ATAK')} ${a})` : '';
+    },
+    [atakByPropertyId, t]
+  );
   if (!breakdown || !Array.isArray(breakdown.rows)) return null;
   const renterRows = breakdown.rows.filter((r) => r.recipient === 'renter');
   // The ONLY owner rows we take from breakdown.rows are the UNCOLLECTED ones
@@ -929,6 +965,16 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
     (r) => r.recipient === 'owner' && !r.ownerBilled
   );
   const ownerLiabilities = breakdown.ownerDirect || [];
+  // Are there any vacant-unit lines in this month's breakdown? True when a
+  // vacant unit is either billed to the owner (ownerDirect source
+  // 'vacant'/'repair-vacant') OR left uncollected (ownerVacantRows). Drives the
+  // "(πλην κενών)" suffix on the building-wide owner line — those vacant units
+  // appear as their OWN lines below, so the building-wide figure excludes them.
+  const hasVacantOwnerRows =
+    ownerVacantRows.length > 0 ||
+    ownerLiabilities.some(
+      (e) => e.source === 'vacant' || e.source === 'repair-vacant'
+    );
   const uncollectedGross = ownerVacantRows.reduce(
     (s, r) => s + (Number(r.amount) || 0),
     0
@@ -970,10 +1016,11 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
 
   return (
     // No inner card chrome: the Expenses tab is already the single paper
-    // surface. Render the breakdown as a plain column separated from the
-    // calendar by whitespace + a top hairline rule (no border box, no
-    // bg-muted) so we never nest a card inside a card.
-    <div className="mt-4 lg:mt-0 lg:border-t lg:border-stone-line/60 lg:pt-4">
+    // surface. Render the breakdown as a plain section separated from the
+    // calendar above by a top hairline rule (no border box, no bg-muted) so we
+    // never nest a card inside a card. The panel is now a vertical stack, so
+    // the rule + spacing apply at every breakpoint (was lg:-only side-by-side).
+    <div className="border-t border-stone-line/60 pt-4">
       <div className="text-label uppercase tracking-wide text-ink-muted mb-2">
         {t('Charges')}
       </div>
@@ -984,12 +1031,15 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
           {t('Tenants')}
         </div>
       )}
-      {Array.from(byProperty.values()).map((g, gi) => (
+      {Array.from(byProperty.entries()).map(([propertyId, g], gi) => (
         <UnitGroup
           key={`p-${gi}`}
           title={
             <>
               {unitLabel(building?.name, g.propertyName)}
+              <span className="font-normal text-muted-foreground/70">
+                {atakSuffix(propertyId)}
+              </span>
               <span className="ml-1 font-normal text-muted-foreground">
                 ·{' '}
                 {g.recipientName
@@ -1028,9 +1078,16 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                 const key = e.propertyId || '__nameless__';
                 if (!map.has(key)) {
                   map.set(key, {
+                    propertyId: e.propertyId || null,
                     propertyName: e.propertyName || null,
                     ownerName: e.ownerName || null,
                     ownerPercentage: e.ownerPercentage,
+                    // A group is "vacant" when ALL its rows come from a
+                    // vacant-unit source ('vacant' = empty unit billed to the
+                    // owner; 'repair-vacant' = vacant slice of a repair). Such
+                    // a unit gets the "— ΚΕΝΟ" suffix so the reader sees WHY the
+                    // owner is billed (the unit is empty), not a bare unit name.
+                    isVacant: true,
                     items: [],
                     total: 0
                   });
@@ -1041,6 +1098,8 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                 if (!g.ownerName && e.ownerName) g.ownerName = e.ownerName;
                 if (g.ownerPercentage === undefined && e.ownerPercentage !== undefined)
                   g.ownerPercentage = e.ownerPercentage;
+                if (e.source !== 'vacant' && e.source !== 'repair-vacant')
+                  g.isVacant = false;
                 return map;
               }, new Map())
               .values()
@@ -1049,15 +1108,41 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               key={`og-${gi}`}
               ownerTinted
               title={
-                <>
-                  {g.propertyName
-                    ? unitLabel(building?.name, g.propertyName)
-                    : t('Owners')}
-                  <OwnerName
-                    name={g.ownerName}
-                    percentage={g.ownerPercentage}
-                  />
-                </>
+                g.propertyId ? (
+                  // A specific unit: its label, the "— ΚΕΝΟ" suffix when the
+                  // owner is billed because the unit is empty, then the ΑΤΑΚ.
+                  <>
+                    {unitLabel(building?.name, g.propertyName)}
+                    {g.isVacant && (
+                      <span className="font-normal text-oxide/80">
+                        {' '}
+                        — {t('Vacant')}
+                      </span>
+                    )}
+                    <span className="font-normal text-muted-foreground/70">
+                      {atakSuffix(g.propertyId)}
+                    </span>
+                    <OwnerName
+                      name={g.ownerName}
+                      percentage={g.ownerPercentage}
+                    />
+                  </>
+                ) : (
+                  // Building-wide owner-tracked cost (no single unit): label it
+                  // "Όλες οι μονάδες", with "(πλην κενών)" appended only when the
+                  // building actually has vacant units (whose owner shares are
+                  // itemized on their own lines below). The per-owner € split
+                  // shows on expand via CoOwnerSplit.
+                  <>
+                    {t('All units')}
+                    {hasVacantOwnerRows && (
+                      <span className="font-normal text-muted-foreground/70">
+                        {' '}
+                        {t('(excluding vacant)')}
+                      </span>
+                    )}
+                  </>
+                )
               }
               total={g.total}
               items={g.items}
@@ -1103,7 +1188,8 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                 className="flex items-baseline justify-between gap-2 text-xs text-oxide/80 pl-3 mt-0.5"
               >
                 <span className="truncate min-w-0 flex-1">
-                  {unitLabel(building?.name, r.propertyName)} ·{' '}
+                  {unitLabel(building?.name, r.propertyName)}
+                  {atakSuffix(r.propertyId)} ·{' '}
                   {expenseDisplayLabel(t, r.expenseName, r.expenseType)}
                 </span>
                 <span className="tabular-nums whitespace-nowrap shrink-0">

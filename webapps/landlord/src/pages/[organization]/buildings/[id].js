@@ -11,7 +11,7 @@ import {
   TabsList,
   TabsTrigger
 } from '../../../components/ui/tabs';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import BuildingForm from '../../../components/buildings/BuildingForm';
 import BuildingDashboard from '../../../components/buildings/BuildingDashboard';
@@ -38,6 +38,9 @@ function Building() {
   const queryClient = useQueryClient();
   const [openConfirmDeleteBuilding, setOpenConfirmDeleteBuilding] =
     useState(false);
+  // Lets the shared expense-tab button row trigger RepairList's "Add repair"
+  // dialog (the repair add-action lives in ExpenseList's row, not RepairList).
+  const repairListRef = useRef(null);
 
   const buildingId = router.query.id;
   const viewers = usePresence('building', buildingId);
@@ -193,15 +196,17 @@ function Building() {
                 (a directory, not money) stay on their own tab.
                 ORDER (user-specified): expense list → Επισκευές → the month
                 calendar + ΧΡΕΩΣΕΙΣ breakdown panel. Επισκευές sits BEFORE the
-                dates and the right panel. */}
+                dates and the right panel.
+                The "Add repair" action is hoisted into ExpenseList's top
+                button row (all actions in one row) and fires RepairList's
+                dialog via the ref. RepairList renders its own heading + table
+                only when repairs exist, so an empty building shows no section. */}
             <div className="space-y-8">
-              <ExpenseList building={building} />
-              <div>
-                <h3 className="font-display text-headline mb-4">
-                  {t('Repairs')}
-                </h3>
-                <RepairList building={building} />
-              </div>
+              <ExpenseList
+                building={building}
+                onAddRepair={() => repairListRef.current?.openAdd()}
+              />
+              <RepairList ref={repairListRef} building={building} />
               {(building?.expenses || []).length > 0 && (
                 <BuildingExpensePanel building={building} />
               )}

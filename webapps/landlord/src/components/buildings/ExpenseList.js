@@ -907,7 +907,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   );
 }
 
-export default function ExpenseList({ building }) {
+export default function ExpenseList({ building, onAddRepair }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [openExpenseDialog, setOpenExpenseDialog] = useState(false);
@@ -1014,6 +1014,20 @@ export default function ExpenseList({ building }) {
             <LuFileUp className="size-4" />
             {t('Payment Receipts')}
           </Button>
+          {/* "Add repair" lives in the SAME button row as the expense actions
+              (repairs ARE expenses). It triggers RepairList's dialog through
+              the onAddRepair callback the page wires to RepairList's ref. */}
+          {onAddRepair && (
+            <Button
+              variant="secondary"
+              className="gap-2"
+              onClick={onAddRepair}
+              data-cy="addRepair"
+            >
+              <LuPlusCircle className="size-4" />
+              {t('Add repair')}
+            </Button>
+          )}
         </div>
       </div>
 

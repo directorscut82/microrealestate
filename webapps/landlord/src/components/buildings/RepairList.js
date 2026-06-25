@@ -6,7 +6,7 @@ import {
   removeBuildingRepair,
   updateBuildingRepair
 } from '../../utils/restcalls';
-import { LuPencil, LuPlusCircle, LuTrash2 } from 'react-icons/lu';
+import { LuPencil, LuTrash2 } from 'react-icons/lu';
 import {
   Select,
   SelectContent,
@@ -22,7 +22,14 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -192,7 +199,13 @@ function generateTermOptions() {
   return options;
 }
 
-export default function RepairList({ building }) {
+// RepairList is rendered by the Expenses tab with its "Add repair" trigger
+// hoisted into the shared top button row (ExpenseList) — so the page holds a
+// ref and calls `openAdd()`. The component still owns its own dialog + table;
+// it exposes only the add entry point. The whole section (heading + table)
+// renders nothing when there are no repairs, so the empty "Επισκευές / Δεν
+// βρέθηκαν επισκευές" block no longer occupies the tab (user request 2026-06).
+const RepairList = forwardRef(function RepairList({ building }, ref) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
@@ -391,6 +404,9 @@ export default function RepairList({ building }) {
     setOpenDialog(true);
   }, [reset]);
 
+  // The page's shared top button row triggers "Add repair" through this ref.
+  useImperativeHandle(ref, () => ({ openAdd: handleAdd }), [handleAdd]);
+
   const handleEdit = useCallback((repair) => {
     setSelectedRepair(repair);
     setOpenDialog(true);
@@ -519,20 +535,14 @@ export default function RepairList({ building }) {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <Button
-          variant="secondary"
-          onClick={handleAdd}
-          className="gap-2"
-          data-cy="addRepair"
-        >
-          <LuPlusCircle className="size-4" />
-          {t('Add repair')}
-        </Button>
-      </div>
-
-      {repairs.length > 0 ? (
-        <Table>
+      {/* The whole Επισκευές section (heading + table) renders only when at
+          least one repair exists. The "Add repair" button now lives in the
+          shared top button row (ExpenseList) — see the page's onAddRepair
+          wiring — so an empty building shows no Επισκευές block at all. */}
+      {repairs.length > 0 && (
+        <div>
+          <h3 className="font-display text-headline mb-4">{t('Repairs')}</h3>
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>{t('Title')}</TableHead>
@@ -600,10 +610,7 @@ export default function RepairList({ building }) {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
-      ) : (
-        <div className="text-center py-8 text-muted-foreground">
-          {t('No repairs found')}
+          </Table>
         </div>
       )}
 
@@ -1164,4 +1171,6 @@ export default function RepairList({ building }) {
       />
     </>
   );
-}
+});
+
+export default RepairList;
