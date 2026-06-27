@@ -897,15 +897,26 @@ const DOT_CLASS = {
 // amount). The calc cell carries the full equation, the repair_vacant 2nd line,
 // AND the co-owner split — all verbatim, never abbreviated. `tone` alternates
 // the unit-block background so adjacent units are visually distinct.
-function UnitRows({ header, total, items, tone, ownerTinted, t, formatNumber }) {
+function UnitRows({ header, total, items, tone, ownerTinted, gap, t, formatNumber }) {
   const cell = 'border border-stone-line px-3 py-1.5 align-top';
   return (
     <>
+      {/* Spacer row between consecutive units (καταχωρήσεις) so each block has
+          breathing room and the grid doesn't read as one dense wall. A bare
+          cream gap with no side borders. */}
+      {gap && (
+        <tr aria-hidden="true">
+          <td colSpan={3} className="h-2 bg-cream border-0 p-0" />
+        </tr>
+      )}
       <tr className={tone}>
-        <td className={cn(cell, 'font-semibold', ownerTinted && 'text-ink')} colSpan={2}>
+        <td
+          className={cn(cell, 'border-t-2 border-t-marble font-semibold', ownerTinted && 'text-ink')}
+          colSpan={2}
+        >
           {header}
         </td>
-        <td className={cn(cell, 'text-right tabular-nums font-semibold whitespace-nowrap')}>
+        <td className={cn(cell, 'border-t-2 border-t-marble text-right tabular-nums font-semibold whitespace-nowrap')}>
           <NumberFormat value={total} />
         </td>
       </tr>
@@ -923,7 +934,12 @@ function UnitRows({ header, total, items, tone, ownerTinted, t, formatNumber }) 
               />
               {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
             </td>
-            <td className={cn(cell, 'text-label text-ink-muted/90 font-mono tabular-nums leading-snug')}>
+            {/* Calc cell: NO font-mono — IBM Plex Mono has no Greek glyphs, so a
+                mono calc string («10,00 € ÷ 11 μονάδες», «ΔΟΚΙΜΗ ΒΗΤΑ 50%»)
+                fell back to a different font/size per Greek word (the
+                "20 fonts/ransom-note" look). Render in the regular sans (Manrope,
+                full Greek) with tabular-nums so the figures still align. */}
+            <td className={cn(cell, 'text-label text-ink-muted/90 tabular-nums leading-snug')}>
               {basis}
               {it.basis?.kind === 'repair_vacant' && (
                 <span className="block">
@@ -986,13 +1002,13 @@ function UnitGroup({ title, total, items, t, formatNumber, ownerTinted }) {
               {/* Full allocation calc directly under the line (no prefix
                   label; the equation stands on its own). Never abbreviated. */}
               {basis && (
-                <div className="text-label text-ink-muted/90 font-mono tabular-nums leading-snug mt-0.5">
+                <div className="text-label text-ink-muted/90 tabular-nums leading-snug mt-0.5">
                   {basis}
                 </div>
               )}
               {/* repair_vacant: the vacant unit's share on its own 2nd line */}
               {it.basis?.kind === 'repair_vacant' && (
-                <div className="text-label text-ink-muted/90 font-mono tabular-nums leading-snug">
+                <div className="text-label text-ink-muted/90 tabular-nums leading-snug">
                   {repairVacantShareLine(t, it.basis, formatNumber)}
                 </div>
               )}
@@ -1083,6 +1099,10 @@ function truncateAtak(atak) {
 
 function ChargeBreakdown({ breakdown, building, term, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
+  // Vacant-units-billed-to-owner section is COLLAPSED by default: in a building
+  // with many identical vacant units it was a wall of repeated rows (the user's
+  // complaint). One «Κενές μονάδες (N) — Σ€» line that expands on click.
+  const [showVacant, setShowVacant] = useState(false);
   const formatNumber = useFormatNumber();
   // ΑΤΑΚ per unit, keyed by propertyId, so every breakdown row can show the
   // unit's cadastral code (truncated) in parens. Built from the building's
@@ -1244,6 +1264,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
           {Array.from(byProperty.entries()).map(([propertyId, g], gi) => (
             <UnitRows
               key={`p-${gi}`}
+              gap={gi > 0}
               tone={gi % 2 ? 'bg-cream' : 'bg-bone'}
               header={
                 <>
@@ -1278,6 +1299,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             <UnitRows
               key={`og-${gi}`}
               ownerTinted
+              gap={gi > 0}
               tone={gi % 2 ? 'bg-cream' : 'bg-bone'}
               header={
                 g.propertyId ? (
@@ -1310,14 +1332,26 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             />
           ))}
 
-          {/* ── ΙΔΙΟΚΤΗΤΕΣ — ΚΕΝΕΣ ΜΟΝΑΔΕΣ ── (oxide-tinted section; every
-              vacant unit billed to the owner is shown in full, never hidden) */}
+          {/* ── ΙΔΙΟΚΤΗΤΕΣ — ΚΕΝΕΣ ΜΟΝΑΔΕΣ ── (oxide-tinted, COLLAPSIBLE).
+              The header row is a toggle showing the count + aggregate total;
+              the per-unit rows render in FULL when expanded (no info hidden —
+              just folded away by default so many identical vacant units don't
+              dominate as a wall). */}
           {vacantGroups.length > 0 && (
-            <tr>
+            <tr
+              onClick={() => setShowVacant((v) => !v)}
+              className="cursor-pointer"
+            >
               <td
                 colSpan={2}
                 className="border border-stone-line bg-oxide-tint text-label uppercase tracking-wide font-semibold text-oxide px-3 py-1.5"
               >
+                <LuChevronRight
+                  className={cn(
+                    'inline size-3 mr-1 transition-transform',
+                    showVacant && 'rotate-90'
+                  )}
+                />
                 ⚠ {t('Owners')} — {t('Vacant units ({{count}})', { count: vacantGroups.length })}
               </td>
               <td className="border border-stone-line bg-oxide-tint text-right tabular-nums font-semibold text-oxide px-3 py-1.5 whitespace-nowrap">
@@ -1325,28 +1359,30 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               </td>
             </tr>
           )}
-          {vacantGroups.map((g, gi) => (
-            <UnitRows
-              key={`vg-${gi}`}
-              ownerTinted
-              tone="bg-oxide-tint/40"
-              header={
-                <>
-                  <span className="text-ink">
-                    {unitLabel(building?.name, g.propertyName)}
-                    {g.ownerName ? ` — ${g.ownerName}` : ''}
-                  </span>
-                  <span className="ml-2 font-normal text-label text-ink-muted">
-                    {atakSuffix(g.propertyId)}
-                  </span>
-                </>
-              }
-              total={g.total}
-              items={g.items}
-              t={t}
-              formatNumber={formatNumber}
-            />
-          ))}
+          {showVacant &&
+            vacantGroups.map((g, gi) => (
+              <UnitRows
+                key={`vg-${gi}`}
+                ownerTinted
+                gap={gi > 0}
+                tone="bg-oxide-tint/40"
+                header={
+                  <>
+                    <span className="text-ink">
+                      {unitLabel(building?.name, g.propertyName)}
+                      {g.ownerName ? ` — ${g.ownerName}` : ''}
+                    </span>
+                    <span className="ml-2 font-normal text-label text-ink-muted">
+                      {atakSuffix(g.propertyId)}
+                    </span>
+                  </>
+                }
+                total={g.total}
+                items={g.items}
+                t={t}
+                formatNumber={formatNumber}
+              />
+            ))}
         </tbody>
       </table>
 
