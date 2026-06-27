@@ -847,13 +847,14 @@ function OwnerName({ name, percentage }) {
 // with isRest:true is the un-identified remainder co-owner — labeled "λοιποί"
 // (others) so the parenthesis still reconciles to the full share when the E9
 // only carried one of the co-owners.
-function CoOwnerSplit({ owners, t, formatNumber }) {
+function CoOwnerSplit({ owners, t, formatNumber, inline }) {
   if (!Array.isArray(owners) || owners.length < 2) return null;
   // Own full-width line, prefixed «Ιδιοκτήτες:» so the co-owner split is clearly
   // labelled (was a bare "50% = 2,43" that read as gibberish). Each co-owner as
-  // "NAME pct% (€amount)".
-  return (
-    <div className="text-label text-muted-foreground/80 leading-tight">
+  // "NAME pct% (€amount)". `inline` drops the wrapping <div> margins so it sits
+  // cleanly inside a grid calc cell (Grid 18·4).
+  const text = (
+    <>
       <span className="uppercase tracking-wide mr-1">{t('Owners')}:</span>
       {owners
         .map((o) =>
@@ -864,18 +865,94 @@ function CoOwnerSplit({ owners, t, formatNumber }) {
           })
         )
         .join(' · ')}
-    </div>
+    </>
+  );
+  if (inline) return text;
+  return (
+    <div className="text-label text-muted-foreground/80 leading-tight">{text}</div>
   );
 }
 
-// Per-unit group in the breakdown — the user-approved "Zebra 5·1" layout:
-// each unit opens with a STRONG top rule (border-ink) + a bold header (unit
-// label · recipient — total), then its expense lines INDENTED, each with the
-// full allocation calc directly beneath. ALWAYS expanded (no collapse) so every
-// figure + its derivation is visible at once; the rule per unit is what gives
-// the clear "where each unit starts/ends" boundary the user asked for. NO
-// information is ever hidden or abbreviated — label, amount, full calc string,
-// repair-vacant 2nd line, and co-owner split all render verbatim.
+// Color-dot per expense TYPE so the eye can group expense kinds at a glance
+// (the user-approved Grid 18·4 cue). Coarse mapping onto the 3 design accents +
+// marble; any unknown type falls back to marble (a neutral tint).
+const DOT_CLASS = {
+  heating: 'bg-oxide',
+  elevator: 'bg-oxide',
+  repair: 'bg-sea-deep',
+  insurance: 'bg-sea',
+  management_fee: 'bg-marble',
+  cleaning: 'bg-olive',
+  garden: 'bg-olive',
+  water_common: 'bg-sea',
+  electricity_common: 'bg-oxide',
+  repairs_fund: 'bg-sea-deep',
+  pest_control: 'bg-olive',
+  other: 'bg-marble'
+};
+
+// Grid 18·4 row emitter: returns the <tr>s for ONE unit — a bold header row
+// («Μονάδα — ΟΝΟΜΑ» both readable, ΑΤΑΚ small + faint, total on the right) plus
+// one row per expense line (color-dot + «Τύπος (Όνομα)» | FULL allocation calc |
+// amount). The calc cell carries the full equation, the repair_vacant 2nd line,
+// AND the co-owner split — all verbatim, never abbreviated. `tone` alternates
+// the unit-block background so adjacent units are visually distinct.
+function UnitRows({ header, total, items, tone, ownerTinted, t, formatNumber }) {
+  const cell = 'border border-stone-line px-3 py-1.5 align-top';
+  return (
+    <>
+      <tr className={tone}>
+        <td className={cn(cell, 'font-semibold', ownerTinted && 'text-ink')} colSpan={2}>
+          {header}
+        </td>
+        <td className={cn(cell, 'text-right tabular-nums font-semibold whitespace-nowrap')}>
+          <NumberFormat value={total} />
+        </td>
+      </tr>
+      {items.map((it, ii) => {
+        const basis = formatBasis(t, it.basis, formatNumber);
+        return (
+          <tr key={ii} className={tone}>
+            <td className={cn(cell, 'text-ink-soft pl-5')}>
+              <span
+                className={cn(
+                  'inline-block size-2 rounded-sm mr-2 align-middle',
+                  DOT_CLASS[it.expenseType] || 'bg-marble'
+                )}
+                aria-hidden="true"
+              />
+              {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
+            </td>
+            <td className={cn(cell, 'text-label text-ink-muted/90 font-mono tabular-nums leading-snug')}>
+              {basis}
+              {it.basis?.kind === 'repair_vacant' && (
+                <span className="block">
+                  {repairVacantShareLine(t, it.basis, formatNumber)}
+                </span>
+              )}
+              {it.owners && (
+                <span className="block">
+                  <CoOwnerSplit
+                    owners={it.owners}
+                    t={t}
+                    formatNumber={formatNumber}
+                    inline
+                  />
+                </span>
+              )}
+            </td>
+            <td className={cn(cell, 'text-right tabular-nums text-ink whitespace-nowrap')}>
+              <NumberFormat value={it.amount} />
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+// (legacy non-grid UnitGroup retained below for reference paths that still use a
+// vertical list; the breakdown now renders via UnitRows in a grid table.)
 function UnitGroup({ title, total, items, t, formatNumber, ownerTinted }) {
   return (
     <div className="border-t-2 border-ink/80 pt-2 mt-2 first:mt-0">
@@ -1129,78 +1206,101 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
           "Μηνιαία Καταχώρηση" title, so the two zones read as peers. */}
       <div className="font-display text-headline mb-4">{t('Charges')}</div>
 
-      {/* Renters → per apartment */}
-      {byProperty.size > 0 && (
-        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
-          {t('Tenants')}
-        </div>
-      )}
-      {Array.from(byProperty.entries()).map(([propertyId, g], gi) => (
-        <UnitGroup
-          key={`p-${gi}`}
-          title={
-            <>
-              {unitLabel(building?.name, g.propertyName)}
-              <span className="font-normal text-muted-foreground/70">
-                {atakSuffix(propertyId)}
-              </span>
-              <span className="ml-1 font-normal text-muted-foreground">
-                ·{' '}
-                {g.recipientName
-                  ? t('Renter: {{name}}', { name: g.recipientName })
-                  : t('Renter')}
-              </span>
-            </>
-          }
-          total={g.total}
-          items={g.items}
-          t={t}
-          formatNumber={formatNumber}
-        />
-      ))}
+      {/* Grid 18·4 (user-selected): a bordered spreadsheet-style table. Every
+          unit is a bold header row («Μονάδα — ΟΝΟΜΑ», both readable, ΑΤΑΚ small +
+          faint) followed by its expense lines (color-dot + «Τύπος (Όνομα)» |
+          FULL allocation calc | amount). Section header rows separate
+          ΕΝΟΙΚΙΑΣΤΕΣ / ΙΔΙΟΚΤΗΤΕΣ / κενές μονάδες. Alternating unit-block tone
+          gives clear "where each unit starts/ends" boundaries. No information is
+          hidden or abbreviated — calc strings, repair-vacant 2nd line, and
+          co-owner split all render verbatim. Mirrored 1:1 into the XLSX/PDF
+          exports (buildingExportRows). */}
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr>
+            <th className="border border-stone-line bg-sea text-bone text-label uppercase tracking-wide text-left px-3 py-2">
+              {t('Unit / expense')}
+            </th>
+            <th className="border border-stone-line bg-sea text-bone text-label uppercase tracking-wide text-left px-3 py-2">
+              {t('Calculation')}
+            </th>
+            <th className="border border-stone-line bg-sea text-bone text-label uppercase tracking-wide text-right px-3 py-2">
+              {t('Amount')}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {/* ── ΕΝΟΙΚΙΑΣΤΕΣ ── */}
+          {byProperty.size > 0 && (
+            <tr>
+              <td
+                colSpan={3}
+                className="border border-stone-line bg-marble text-label uppercase tracking-wide font-semibold text-ink px-3 py-1.5"
+              >
+                {t('Tenants')}
+              </td>
+            </tr>
+          )}
+          {Array.from(byProperty.entries()).map(([propertyId, g], gi) => (
+            <UnitRows
+              key={`p-${gi}`}
+              tone={gi % 2 ? 'bg-cream' : 'bg-bone'}
+              header={
+                <>
+                  <span className="text-ink">
+                    {unitLabel(building?.name, g.propertyName)}
+                    {g.recipientName ? ` — ${g.recipientName}` : ''}
+                  </span>
+                  <span className="ml-2 font-normal text-label text-ink-muted">
+                    {atakSuffix(propertyId)}
+                  </span>
+                </>
+              }
+              total={g.total}
+              items={g.items}
+              t={t}
+              formatNumber={formatNumber}
+            />
+          ))}
 
-      {/* ONE consolidated owner block. Grouped by property and labeled with
-          the OWNER NAME exactly like the renter rows ("property · Ιδιοκτήτης:
-          <name>"), so each owner charge is attributed to a person, not left
-          anonymous. Owner-direct rows that carry no propertyId (building-wide
-          owner costs) fall under a nameless "Owner expenses" group. NO
-          paid/settlement controls here — settlement (καταβολές, paid/unpaid)
-          lives on the dedicated owner tab. */}
-      {ownerLiabilities.length > 0 && (
-        <div className="mt-5">
-          <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
-            {t('Owners')}
-          </div>
-          {/* Building-wide + owner-tracked unit charges (non-vacant). */}
+          {/* ── ΙΔΙΟΚΤΗΤΕΣ ── */}
+          {ownerGroups.length > 0 && (
+            <tr>
+              <td
+                colSpan={3}
+                className="border border-stone-line bg-marble text-label uppercase tracking-wide font-semibold text-ink px-3 py-1.5"
+              >
+                {t('Owners')}
+              </td>
+            </tr>
+          )}
           {ownerGroups.map((g, gi) => (
-            <UnitGroup
+            <UnitRows
               key={`og-${gi}`}
               ownerTinted
-              title={
+              tone={gi % 2 ? 'bg-cream' : 'bg-bone'}
+              header={
                 g.propertyId ? (
                   <>
-                    {unitLabel(building?.name, g.propertyName)}
-                    <span className="font-normal text-muted-foreground/70">
+                    <span className="text-ink">
+                      {unitLabel(building?.name, g.propertyName)}
+                      {g.ownerName ? ` — ${g.ownerName}` : ''}
+                      {g.ownerName &&
+                      Number.isFinite(Number(g.ownerPercentage)) &&
+                      Number(g.ownerPercentage) < 100
+                        ? ` (${g.ownerPercentage}%)`
+                        : ''}
+                    </span>
+                    <span className="ml-2 font-normal text-label text-ink-muted">
                       {atakSuffix(g.propertyId)}
                     </span>
-                    <OwnerName
-                      name={g.ownerName}
-                      percentage={g.ownerPercentage}
-                    />
                   </>
                 ) : (
-                  // Building-wide owner-tracked cost (no single unit): label it
-                  // "Όλες οι μονάδες", with "(πλην κενών)" appended only when the
-                  // building has vacant units (itemized in the roll-up below).
-                  <>
+                  <span className="text-ink">
                     {t('All units')}
-                    {vacantGroups.length > 0 && (
-                      <span className="font-normal text-muted-foreground/70">
-                        {' '}
-                        {t('(excluding vacant)')}
-                      </span>
-                    )}
-                  </>
+                    {g.ownerName ? ` — ${g.ownerName}` : ''}
+                    {vacantGroups.length > 0 ? ` ${t('(excluding vacant)')}` : ''}
+                  </span>
                 )
               }
               total={g.total}
@@ -1209,23 +1309,46 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               formatNumber={formatNumber}
             />
           ))}
-          {/* Vacant units billed to the owner → ONE oxide roll-up with a count
-              + aggregate total, expanding to each unit's UnitGroup. Collapses
-              the wall of ~10 identical "Υπόγειο — Κενό … 0,91 €" rows into a
-              single meaningful line. No information dropped — every per-unit
-              row (ΑΤΑΚ, owner, amount, basis-on-expand) lives one level in. */}
+
+          {/* ── ΙΔΙΟΚΤΗΤΕΣ — ΚΕΝΕΣ ΜΟΝΑΔΕΣ ── (oxide-tinted section; every
+              vacant unit billed to the owner is shown in full, never hidden) */}
           {vacantGroups.length > 0 && (
-            <VacantOwnerGroup
-              groups={vacantGroups}
-              total={vacantTotal}
-              building={building}
-              atakSuffix={atakSuffix}
+            <tr>
+              <td
+                colSpan={2}
+                className="border border-stone-line bg-oxide-tint text-label uppercase tracking-wide font-semibold text-oxide px-3 py-1.5"
+              >
+                ⚠ {t('Owners')} — {t('Vacant units ({{count}})', { count: vacantGroups.length })}
+              </td>
+              <td className="border border-stone-line bg-oxide-tint text-right tabular-nums font-semibold text-oxide px-3 py-1.5 whitespace-nowrap">
+                <NumberFormat value={vacantTotal} />
+              </td>
+            </tr>
+          )}
+          {vacantGroups.map((g, gi) => (
+            <UnitRows
+              key={`vg-${gi}`}
+              ownerTinted
+              tone="bg-oxide-tint/40"
+              header={
+                <>
+                  <span className="text-ink">
+                    {unitLabel(building?.name, g.propertyName)}
+                    {g.ownerName ? ` — ${g.ownerName}` : ''}
+                  </span>
+                  <span className="ml-2 font-normal text-label text-ink-muted">
+                    {atakSuffix(g.propertyId)}
+                  </span>
+                </>
+              }
+              total={g.total}
+              items={g.items}
               t={t}
               formatNumber={formatNumber}
             />
-          )}
-        </div>
-      )}
+          ))}
+        </tbody>
+      </table>
 
       {/* Uncollected (vacant units, chargeOwnerWhenVacant OFF) — money that
           nobody pays. Collapsed by default into a single warning line so it
