@@ -701,6 +701,15 @@ function formatBasis(t, basis, fmt) {
   // a doubled sign ('1,70 € €'). count/‰/m² are NOT currency — leave them raw.
   const e = (n) =>
     fmt ? fmt(Number(n) || 0).replace(/\s*€\s*/g, '').trim() : n;
+  // Non-currency quantity formatter (m² / thousandths): el-GR decimal comma,
+  // but NO € sign and NO forced 2-decimals (a surface like 66,75 keeps its
+  // value; an integer ‰ like 150 stays 150). Without this, part/whole rendered
+  // as raw JS '66.75' with a DOT — wrong for el-GR (the user flagged it).
+  const q = (n) => {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return n;
+    return num.toLocaleString('el-GR', { maximumFractionDigits: 2 });
+  };
   switch (basis.kind) {
     // Wording approved by the user (2026-06): original equation order, with a
     // short label naming each non-currency number (επιφάνεια/χιλιοστά). Fixed +
@@ -716,8 +725,8 @@ function formatBasis(t, basis, fmt) {
       return t(
         'unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €',
         {
-          part: basis.part,
-          whole: basis.whole,
+          part: q(basis.part),
+          whole: q(basis.whole),
           total: e(basis.total),
           share: e(basis.share)
         }
@@ -726,8 +735,8 @@ function formatBasis(t, basis, fmt) {
       return t(
         'unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €',
         {
-          part: basis.part,
-          whole: basis.whole,
+          part: q(basis.part),
+          whole: q(basis.whole),
           total: e(basis.total),
           share: e(basis.share)
         }
@@ -788,6 +797,13 @@ function formatBasis(t, basis, fmt) {
 function repairVacantShareLine(t, basis, fmt) {
   if (!basis || basis.kind !== 'repair_vacant') return '';
   const e = (n) => (fmt ? fmt(Number(n) || 0).replace(/\s*€\s*/g, '').trim() : n);
+  // el-GR quantity formatter (comma decimal, no €) for m²/‰ part/whole.
+  const q = (n) => {
+    const num = Number(n);
+    return Number.isFinite(num)
+      ? num.toLocaleString('el-GR', { maximumFractionDigits: 2 })
+      : n;
+  };
   const pool = e(basis.pool);
   const share = e(basis.result);
   switch (basis.allocKind) {
@@ -800,12 +816,12 @@ function repairVacantShareLine(t, basis, fmt) {
     case 'surface':
       return t(
         'vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €',
-        { part: basis.part, whole: basis.whole, pool, share }
+        { part: q(basis.part), whole: q(basis.whole), pool, share }
       );
     case 'thousandths':
       return t(
         'vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €',
-        { part: basis.part, whole: basis.whole, pool, share }
+        { part: q(basis.part), whole: q(basis.whole), pool, share }
       );
     default:
       return t('vacant-unit share: {{share}} €', { share });
