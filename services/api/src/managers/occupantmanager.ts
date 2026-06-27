@@ -430,6 +430,34 @@ async function _recomputeVacantOwnerForProperties(
   }
 }
 
+// REPAIR twin of the vacant-owner recompute. _distributeRepairCharge (the
+// repair→rent writer) only fires on repair add/edit, so when a unit's occupancy
+// changes, a repair share distributed while the unit was vacant stays stuck in
+// the vacant/owner bucket and is never moved onto the new tenant's rent (the
+// ΟΔΟΣ ΗΤΑ 24 lift-repair under-billing). Re-fire the already-correct writer for
+// every active repair on the affected buildings so occupancy changes re-route
+// repair shares between tenant-rent and owner-ledger. MUST run BEFORE
+// _recomputeSiblingTenantsInBuildings so the freshly-written repair
+// monthlyCharges are included when the tenant rents are recomputed. Best-effort:
+// a recompute failure must not fail the lifecycle write.
+async function _redistributeRepairsForProperties(
+  realmId: string,
+  propertyIds: string[]
+): Promise<void> {
+  if (!propertyIds || !propertyIds.length) return;
+  try {
+    const buildingManager = await import('./buildingmanager.js');
+    if (typeof buildingManager.redistributeRepairsForProperties === 'function') {
+      await buildingManager.redistributeRepairsForProperties(
+        realmId,
+        propertyIds
+      );
+    }
+  } catch (error) {
+    logger.error(`repair re-distribution failed for buildings: ${error}`);
+  }
+}
+
 // Update building unit occupancyType based on tenant assignments.
 // Call after tenant add/update/delete to keep building overview in sync.
 async function _syncOccupancyForProperties(
@@ -1128,6 +1156,9 @@ export async function add(req: Req, res: Res) {
   // Wave-20 F1: cohort changed — sibling tenants in the same building(s)
   // need re-allocation (equal-method denominator depends on cohort size).
   if (linkedPropIds.length) {
+    // Re-route repair shares BEFORE the sibling rent recompute so a repair
+    // distributed while this unit was vacant lands on the new tenant's rent.
+    await _redistributeRepairsForProperties(realm!._id, linkedPropIds);
     await _recomputeSiblingTenantsInBuildings(
       realm!._id,
       linkedPropIds,
@@ -1577,6 +1608,10 @@ export async function update(req: Req, res: Res) {
     new Set([...oldPropIds, ...newPropIds])
   );
   if (allTouchedPropIds.length) {
+    // Re-route repair shares BEFORE the sibling rent recompute so an occupancy
+    // change (move-in / move-out / termination) re-bills or releases each
+    // repair share onto the right ledger before rents are recomputed.
+    await _redistributeRepairsForProperties(realm!._id, allTouchedPropIds);
     await _recomputeSiblingTenantsInBuildings(
       realm!._id,
       allTouchedPropIds,
@@ -1779,6 +1814,10 @@ export async function remove(req: Req, res: Res) {
   // the surviving tenants see the correct (smaller) denominator on
   // their NEXT current/future term.
   if (removedPropIds.length) {
+    // The deleted tenant vacated these units — re-route their repair shares
+    // (off the gone tenant's rent → owner/vacant bucket) BEFORE the sibling
+    // recompute so the released shares are reflected correctly.
+    await _redistributeRepairsForProperties(realm!._id, removedPropIds);
     await _recomputeSiblingTenantsInBuildings(
       realm!._id,
       removedPropIds,
@@ -2230,6 +2269,10 @@ export async function extendLease(req: Req, res: Res) {
   // members until the next mutation triggers a recompute.
   if (computedRents && propIds.length) {
     try {
+      // Extending a lease changes which months a unit is occupied — re-route
+      // repair shares BEFORE the sibling recompute so a month that flipped
+      // vacant→occupied picks up its repair share on the tenant's rent.
+      await _redistributeRepairsForProperties(realm!._id, propIds);
       await _recomputeSiblingTenantsInBuildings(
         realm!._id,
         propIds,

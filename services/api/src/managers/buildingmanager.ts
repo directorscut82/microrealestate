@@ -3851,9 +3851,29 @@ const VALID_REPAIR_CATEGORIES = [
   'other'
 ];
 
-async function _removeRepairCharges(building: any, repair: any): Promise<void> {
+async function _removeRepairCharges(
+  building: any,
+  repair: any,
+  // Optional set of propertyIds whose TENANT monthlyCharge for this repair must
+  // be PRESERVED, not pulled (Step-7 r6 medium). Used by the zero-cost /
+  // cleared-billing edit early-returns: a frozen+occupied unit's rent is cloned
+  // verbatim by Contract.update (it keeps billing the repair on a closed month),
+  // so pulling its persisted monthlyCharge would desync the breakdown panel
+  // (€0) from the rent the tenant was actually billed. The cancel/delete callers
+  // pass nothing → every charge is removed (the repair is genuinely gone).
+  preserveTenantChargePropIds?: Set<string>
+): Promise<void> {
   const repairIdStr = String(repair._id);
   for (const unit of building.units) {
+    // A frozen+occupied unit's tenant charge is pinned by the rent freeze —
+    // leave it so the panel keeps matching the (immutable) rent.
+    if (
+      preserveTenantChargePropIds &&
+      unit.propertyId &&
+      preserveTenantChargePropIds.has(String(unit.propertyId))
+    ) {
+      continue;
+    }
     // Prefer scoping by repairId (handles renames). Fall back to legacy
     // description match for charges created before repairId was introduced.
     const legacyDescription = `Repair: ${repair.title}`;
@@ -3932,7 +3952,13 @@ function _applyRepairPaymentPool(
   // a per-bucket flag) so a credit and a genuine overpay sharing one property
   // bucket are split correctly (Step-7 re-review: a flag rescued/dropped the
   // whole contaminated bucket).
-  droppableByProp: Map<string, number> = new Map()
+  droppableByProp: Map<string, number> = new Map(),
+  // When true, a leftover that would be DROPPED as a presumed overpay is instead
+  // PRESERVED as a source:'credit' remnant (the owner's recorded money survives
+  // as a refundable credit). Set only by the tenancy-triggered re-distribution —
+  // see _distributeRepairCharge's preserveOverpayAsCredit doc. Default false
+  // keeps the deliberate-edit drop behaviour exactly as prior rounds settled it.
+  preserveOverpayAsCredit = false
 ): void {
   const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
   const OWNER_KEY = '__owner__';
@@ -4120,7 +4146,16 @@ function _applyRepairPaymentPool(
   let preserved = 0;
   for (const [k, left] of leftoverByProp) {
     if (left <= 0.005) continue;
-    const dropBudget = droppableByProp.get(k) || 0;
+    // preserveOverpayAsCredit (tenancy-triggered re-distribution): the
+    // "droppable overpay" classification assumes the re-billed tenant share is
+    // already covered by the owner's cash, so dropping avoids a double-count.
+    // On an AUTOMATIC tenancy flip that assumption is unsafe — the new tenant
+    // charge is UNPAID, so the owner's recorded payment is genuine surplus that
+    // must survive as a refundable credit, not vanish. Force the whole leftover
+    // into the preserve branch (dropBudget 0) in that mode.
+    const dropBudget = preserveOverpayAsCredit
+      ? 0
+      : droppableByProp.get(k) || 0;
     const toDrop = Math.min(_round(left), _round(dropBudget));
     const toPreserve = _round(left - toDrop);
     if (toPreserve > 0.005) {
@@ -4158,7 +4193,20 @@ function _applyRepairPaymentPool(
 export async function _distributeRepairCharge(
   building: any,
   repair: any,
-  realmId: string
+  realmId: string,
+  // PRESERVE-OVERPAY mode (Step-7 round-2 high). Normally, when an occupied
+  // unit's repair share is re-billed to the tenant, a recorded owner καταβολή
+  // on the old repair-vacant row is DROPPED as a presumed overpay (avoids the
+  // owner-credit + tenant-rent double-count when the landlord DELIBERATELY edits
+  // the repair). But when this writer is re-fired AUTOMATICALLY by a tenancy
+  // change (redistributeRepairsForProperties), silently destroying the owner's
+  // recorded money is wrong — the expense path (reattachPaidOrphans) preserves
+  // the identical case as a settled credit remnant. With this flag set, the
+  // leftover owner payment is PRESERVED as a source:'credit' row instead of
+  // dropped, so the owner's recorded cash survives on every surface as a
+  // refundable credit. Default false → the edit path keeps its existing,
+  // multi-round-stabilised drop behaviour untouched.
+  preserveOverpayAsCredit = false
 ): Promise<void> {
   // Cancelled repairs must not retain monthly charges. Wipe any prior
   // distribution for this repair and bail out before re-creating.
@@ -4181,20 +4229,57 @@ export async function _distributeRepairCharge(
   // ownerMonthlyExpenses[]. The chargeTerm guard still applies — without a
   // term we don't know which month the entry belongs to.
   // A repair without billing info (no chargeableTo, no chargeTerm, or zero
-  // cost) is a draft — no distribution needed, but the building still must be
-  // SAVED so the repair subdoc (pushed by addRepair / mutated by updateRepair)
-  // persists. Without this save the early-return leaves the repair in-memory
-  // only — the client sees it in the response but it vanishes on next GET
-  // (Step-7 WRITE-PATH finding).
+  // cost) is a draft — no NEW distribution, but a PRIOR distribution (the repair
+  // was billable before this edit zeroed its cost / cleared its billing) must be
+  // STRIPPED + recomputed, exactly like the cancel path. Without this, editing a
+  // billable repair down to €0 (or clearing chargeableTo/chargeTerm) left the
+  // old tenant monthlyCharge stranded — the rent engine kept billing it verbatim
+  // (it reads unit.monthlyCharges, never the repair's current cost), permanently
+  // over-billing the tenant for a now-free repair (Step-7 r3 high). The building
+  // is still SAVED so the repair subdoc persists (Step-7 WRITE-PATH finding).
+  // Preserve a frozen+occupied unit's pinned tenant charge across the strip
+  // (Step-7 r6 medium): Contract.update clones a frozen rent verbatim, so the
+  // tenant keeps being billed the repair on a closed month — pulling the
+  // persisted charge would desync the breakdown panel from that rent. Compute
+  // the frozen∩occupied set for the repair's chargeTerm (when it has one) and
+  // hand it to _removeRepairCharges so those tenant charges survive.
+  const _frozenOccupiedForStrip = async (): Promise<Set<string>> => {
+    if (!repair.chargeTerm) return new Set();
+    const t = Number(repair.chargeTerm);
+    const propIds = building.units
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    const [frozen, occupied] = await Promise.all([
+      _frozenPropertyIdsForTerm(realmId, propIds, t),
+      _occupiedPropertyIdsForTerm(building, realmId, t)
+    ]);
+    return new Set(
+      propIds.filter((p: string) => frozen.has(p) && occupied.has(p))
+    );
+  };
   if (!repair.chargeableTo || !repair.chargeTerm) {
+    await _removeRepairCharges(building, repair, await _frozenOccupiedForStrip());
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
+    const propertyIds = building.units
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    for (const propId of propertyIds) {
+      await _recomputeTenantsForProperty(realmId, propId);
+    }
     return;
   }
   const cost = repair.actualCost || repair.estimatedCost || 0;
   if (cost <= 0) {
+    await _removeRepairCharges(building, repair, await _frozenOccupiedForStrip());
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
+    const propertyIds = building.units
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    for (const propId of propertyIds) {
+      await _recomputeTenantsForProperty(realmId, propId);
+    }
     return;
   }
 
@@ -4213,6 +4298,37 @@ export async function _distributeRepairCharge(
 
   const term = Number(repair.chargeTerm);
   const repairIdStr = String(repair._id);
+
+  // EQUAL-ALLOCATION FROZEN BAIL (Step-7 r5/r6). For 'equal' the per-unit share
+  // = pool ÷ party-count and the count shifts with occupancy, so there is NO
+  // internally-consistent PARTIAL re-division (re-divide thawed units at the NEW
+  // count while a frozen sibling stays pinned at the OLD count → Σ(shares) ≠
+  // cost). If ANY unit is frozen for this term, leave the ENTIRE prior
+  // distribution exactly as it stands (it already sums to cost) and bail NOW —
+  // BEFORE the owner-payment pool capture + strip below. Bailing later (after
+  // the unconditional strip+rebuild) would discard the captured pool and DESTROY
+  // recorded owner καταβολές (Step-7 r6 critical). This must run before any
+  // mutation. The building is still saved so a repair-subdoc field edit
+  // (title/notes/contractor) persists. The tenancy-triggered redistribute guard
+  // already screens equal repairs out building-wide; this covers the direct
+  // edit path (updateRepair), which has no such guard.
+  const isEqualAlloc =
+    (repair.allocationMethod || 'general_thousandths') === 'equal';
+  if (isEqualAlloc) {
+    const allUnitPropIdsEq = (building.units || [])
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    const frozenEq = await _frozenPropertyIdsForTerm(
+      realmId,
+      allUnitPropIdsEq,
+      term
+    );
+    if (frozenEq.size > 0) {
+      building.updatedDate = new Date();
+      await _saveBuildingWithVersionCheck(building);
+      return;
+    }
+  }
 
   // ── UNIFIED OWNER-SIDE PAYMENT POOL (round-1 C2; hardened across 3 Step-7
   //    rounds) ────────────────────────────────────────────────────────────
@@ -4379,7 +4495,8 @@ export async function _distributeRepairCharge(
       paidByProp,
       flagByProp,
       mkPoolPayment,
-      droppableByProp
+      droppableByProp,
+      preserveOverpayAsCredit
     );
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
@@ -4419,6 +4536,24 @@ export async function _distributeRepairCharge(
   // re-applied after the rebuild. The unit loop below pushes ZERO-payment
   // repair-vacant rows; the pool reconciliation at the end distributes paidPool.)
 
+  // FROZEN-UNIT handling for NON-equal methods (Step-7 r4). A unit whose
+  // covering tenant's rent is frozen for the term (past, or current-fully-paid)
+  // must not have its persisted repair charge re-priced — Contract.update clones
+  // the frozen rent verbatim and ignores a re-divided monthlyCharge, so
+  // overwriting it desyncs the breakdown panel from the rent the tenant was
+  // actually billed. The per-unit skip below leaves a frozen+occupied unit's
+  // charge pinned. (EQUAL allocation already bailed wholesale far above when any
+  // unit was frozen — its divisor couples all units, so a partial skip would
+  // break Σ(shares)=cost; here every non-equal share is computed from a FIXED
+  // unit attribute occupancy never changes, so pinning one unit is consistent.)
+  const frozenPropIds = await _frozenPropertyIdsForTerm(
+    realmId,
+    (building.units || [])
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId)),
+    term
+  );
+
   // Tier I-3.c: when affectedUnitIds is set, restrict the distribution to
   // only those unit ids. Otherwise spread across all units (legacy).
   // affectedUnitIds is a list of unit subdoc _ids — match against
@@ -4430,6 +4565,27 @@ export async function _distributeRepairCharge(
 
   for (const unit of building.units) {
     if (!unit.propertyId) continue;
+    // Frozen + OCCUPIED unit → its prior TENANT repair charge is pinned by the
+    // rent freeze (Contract.update clones the frozen rent verbatim and ignores a
+    // re-divided monthlyCharge). Do NOT strip/rebuild it — leave it EXACTLY as
+    // the freeze pinned it, so the breakdown panel keeps matching the rent the
+    // tenant was actually billed (Step-7 r4). For EQUAL allocation we already
+    // bailed wholesale above when any unit was frozen (a partial re-division
+    // would break Σ(shares)=cost — Step-7 r5), so reaching here for a frozen
+    // unit means a NON-equal method, whose per-unit denominator is a FIXED unit
+    // attribute (thousandths/surface/fixed/single/custom) that occupancy never
+    // changes — so pinning this one unit while re-pricing thawed siblings stays
+    // internally consistent (every share is computed independently of the others).
+    // Gate on OCCUPIED: a VACANT unit routes to an OWNER repair-vacant row, which
+    // is NOT subject to the tenant-rent freeze, so a vacant unit (incl. a vacant
+    // PAST term) must still be processed normally — otherwise a legitimate
+    // backdated owner repair-vacant row would never be created.
+    if (
+      frozenPropIds.has(String(unit.propertyId)) &&
+      occupiedForRepair.has(String(unit.propertyId))
+    ) {
+      continue;
+    }
     if (restrictUnits && !restrictUnits.has(String(unit._id))) {
       // Unit was excluded — make sure we strip any prior charge in case it
       // was previously included. Same scoping as the create path below.
@@ -4529,7 +4685,8 @@ export async function _distributeRepairCharge(
     paidByProp,
     flagByProp,
     mkPoolPayment,
-    droppableByProp
+    droppableByProp,
+    preserveOverpayAsCredit
   );
 
   building.updatedDate = new Date();
@@ -4949,6 +5106,140 @@ export async function recomputeVacantOwnerForProperties(
     if (changed) {
       building.updatedDate = new Date();
       await _saveBuildingWithVersionCheck(building);
+    }
+  }
+}
+
+// REPAIR-OCCUPANCY-STALENESS fix. _distributeRepairCharge (the repair→rent
+// writer) runs ONLY when a repair is added/edited. So when a tenant later
+// occupies a unit that was vacant when a repair was distributed, that unit's
+// repair share stays stuck in the vacant/owner bucket (source 'repair-vacant',
+// or uncollected Αχρέωτα when the flag is off) and is NEVER moved onto the new
+// tenant's rent — the occupied tenant is silently under-billed (confirmed on
+// ΟΔΟΣ ΗΤΑ 24: 3 tenants missing their 10 € lift-repair share). The tenant
+// lifecycle (occupantmanager link/move/unlink) already re-runs the vacant-OWNER
+// EXPENSE recompute via recomputeVacantOwnerForProperties; this is its REPAIR
+// twin — re-fire the same, already-correct _distributeRepairCharge writer for
+// every active repair on each affected building so occupancy changes re-route
+// repair shares between tenant-rent and owner-ledger exactly as an expense edit
+// would. _distributeRepairCharge is idempotent (it strips + rebuilds this
+// repair's rows, carrying recorded καταβολές forward via the payment pool), so
+// re-running it on an unchanged building is a no-op. Best-effort per building:
+// one repair's failure must not abort the rest of the lifecycle write.
+export async function redistributeRepairsForProperties(
+  realmId: string,
+  propertyIds: string[]
+): Promise<void> {
+  if (!propertyIds || propertyIds.length === 0) return;
+  const buildings = await Collections.Building.find({
+    realmId,
+    'units.propertyId': { $in: propertyIds.map((p) => String(p)) }
+  });
+  if (!buildings.length) return;
+  // FREEZE GUARD (Step-7 round-2 critical + timezone). A repair share may only
+  // be re-routed on a tenancy change when its chargeTerm tenant rent is THAWED —
+  // because Contract.update IGNORES a freshly-written monthlyCharge on a FROZEN
+  // term (it clones the frozen rent verbatim). If we re-distributed a repair
+  // whose chargeTerm is frozen, _distributeRepairCharge would STRIP the owner
+  // 'repair-vacant' row (and DROP any recorded owner καταβολή as a presumed
+  // overpay) while the frozen rent never absorbs the share → the euro vanishes
+  // from BOTH ledgers (vacant→occupied) or double-counts (occupied→vacant: the
+  // frozen rent keeps the old charge AND a fresh owner row is created). The
+  // repair-EDIT path already refuses a frozen chargeTerm via
+  // _assertChargeTermNotFrozen (422); this tenancy-triggered path mirrors that.
+  // Frozen is the FULL Contract._isFrozen rule (past = always; current = if any
+  // covering tenant fully paid), checked in UTC to match Contract — a bare
+  // `chargeTerm < currentTerm` test missed the frozen-PAID current term and
+  // disagreed with Contract's UTC boundary at month edges.
+  //
+  // SCOPE the freeze check to the AFFECTED units (the propertyIds whose
+  // occupancy actually changed), NOT the whole building (Step-7 r3 high). The
+  // freeze is PER TENANT (Contract.update freezes each tenant's own rent), so a
+  // paid sibling on an UNRELATED unit must not block re-routing an affected
+  // unit's thawed share — that re-introduced the ΟΔΟΣ ΗΤΑ-24 under-billing for
+  // the current term. We only re-route the affected units' shares anyway, so the
+  // freeze gate must look only at the tenants covering those units.
+  const affectedSet = new Set(propertyIds.map((p) => String(p)));
+  for (const building of buildings as any[]) {
+    const affectedBuildingPropIds = ((building as any).units || [])
+      .filter((u: any) => u.propertyId && affectedSet.has(String(u.propertyId)))
+      .map((u: any) => String(u.propertyId));
+    if (!affectedBuildingPropIds.length) continue;
+    // Collect the IDs of the repairs to re-distribute, THEN process each by
+    // re-fetching the building doc fresh per repair (Step-7 medium: a single
+    // shared in-memory doc let a repair that threw AFTER its in-memory strip
+    // but BEFORE its save leak the half-stripped state into the NEXT repair's
+    // save, destroying the first repair's owner rows + καταβολές). A fresh doc
+    // per repair guarantees per-repair atomicity: a failed repair leaves the
+    // persisted state untouched and cannot corrupt a sibling. The fresh fetch
+    // also naturally satisfies the optimistic-lock retry — a concurrent edit
+    // just means the next repair (or the recompute) re-reads the new __v.
+    const candidates = (((building as any).repairs || []) as any[]).filter(
+      (r: any) => {
+        // Skip cancelled (nothing billable) and drafts (no chargeableTo/Term).
+        if (r.status === 'cancelled') return false;
+        if (!r.chargeableTo || !r.chargeTerm) return false;
+        return true;
+      }
+    );
+    const allBuildingPropIds = ((building as any).units || [])
+      .filter((u: any) => u.propertyId)
+      .map((u: any) => String(u.propertyId));
+    const repairIds: string[] = [];
+    for (const r of candidates) {
+      // EQUAL allocation couples ALL units (share = pool ÷ party-count, and the
+      // party-count shifts with occupancy). So a partial re-division — re-divide
+      // thawed units at the NEW count while a frozen sibling stays pinned at the
+      // OLD count — makes Σ(shares) ≠ cost (over/under-collection, Step-7 r5).
+      // For equal, the only internally-consistent options are all-or-nothing:
+      // gate on BUILDING-WIDE ANY-frozen so a frozen sibling blocks the whole
+      // re-division (stale-but-consistent, matching the pre-fix behaviour). For
+      // every other method the per-unit denominator is a FIXED unit attribute
+      // (thousandths/surface/fixed/single/custom) that occupancy never changes,
+      // so a frozen unit's share is stable and the AFFECTED-scoped check is safe
+      // (a paid sibling elsewhere must not block re-routing an affected unit).
+      const isEqual = (r.allocationMethod || 'general_thousandths') === 'equal';
+      const scope = isEqual ? allBuildingPropIds : affectedBuildingPropIds;
+      const frozen = await _isRepairTermFrozenForBuilding(
+        realmId,
+        scope,
+        Number(r.chargeTerm)
+      );
+      if (!frozen) repairIds.push(String(r._id));
+    }
+
+    for (const repairId of repairIds) {
+      // ONE bounded retry on a concurrency conflict (409), re-reading fresh.
+      let attempt = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        attempt++;
+        try {
+          const fresh = await Collections.Building.findById(building._id);
+          if (!fresh) break; // building deleted mid-flight — nothing to do
+          const repair = (((fresh as any).repairs || []) as any[]).find(
+            (r: any) => String(r._id) === repairId
+          );
+          if (!repair) break; // repair removed mid-flight
+          // preserveOverpayAsCredit: this is an AUTOMATIC tenancy-triggered
+          // re-distribution, so a stranded owner καταβολή must be kept as a
+          // refundable credit, never silently dropped (Step-7 round-2 high).
+          await _distributeRepairCharge(fresh as any, repair, realmId, true);
+          break; // success
+        } catch (error) {
+          // ServiceError carries the HTTP code in `.statusCode` (NOT `.status`)
+          // — _saveBuildingWithVersionCheck maps a Mongoose VersionError to
+          // ServiceError(…, 409). Reading the wrong field made this retry dead
+          // code (Step-7 r3), so a real version conflict silently abandoned the
+          // re-route. Read statusCode.
+          const statusCode = (error as any)?.statusCode;
+          if (statusCode === 409 && attempt < 3) continue; // retry on version conflict
+          logger.error(
+            `repair re-distribution failed (building ${building._id}, repair ${repairId}): ${error}`
+          );
+          break;
+        }
+      }
     }
   }
 }
@@ -5513,6 +5804,89 @@ async function _isPastPaidTermFrozenInBuilding(
       }
     } as any)
   );
+}
+
+// Is `term`'s tenant rent FROZEN for ANY tenant covering this building — i.e.
+// would Contract.update IGNORE a freshly-written repair monthlyCharge for that
+// term? Mirrors Contract._isFrozen EXACTLY so the redistribute guard and the
+// rent recompute agree on the same euro (Step-7 round-2 critical + timezone):
+//   - term  < currentTerm (UTC) → ALWAYS frozen (closed month).
+//   - term == currentTerm (UTC) → frozen ONLY if some covering tenant has that
+//     month FULLY PAID (Σpayments ≥ grandTotal − 1c).
+//   - term  > currentTerm → never frozen.
+// UTC throughout to match Contract._currentTermFor (the documented timezone
+// gotcha: both sides of the comparison must be UTC or both local — never mixed).
+async function _isRepairTermFrozenForBuilding(
+  realmId: string,
+  buildingPropertyIds: string[],
+  term: number
+): Promise<boolean> {
+  if (!buildingPropertyIds.length) return false;
+  const frozen = await _frozenPropertyIdsForTerm(
+    realmId,
+    buildingPropertyIds,
+    term
+  );
+  // ANY covering unit frozen → the repair (which re-divides across all of them)
+  // must be treated as frozen for the redistribute guard's scoped check.
+  return buildingPropertyIds.some((pid) => frozen.has(String(pid)));
+}
+
+// The SET of propertyIds whose covering tenant's rent is FROZEN for `term`
+// (Contract.update would ignore a freshly-written monthlyCharge on them).
+// Single source of truth for the per-unit freeze test, shared by the
+// redistribute guard (_isRepairTermFrozenForBuilding) AND the writer loop
+// (_distributeRepairCharge skips strip/rebuild of a frozen unit so an equal-
+// allocation divisor shift can't overwrite a frozen sibling's pinned share —
+// Step-7 r4 medium). Mirrors Contract._isFrozen EXACTLY, UTC throughout:
+//   - term  < currentTerm (UTC) → ALL given units frozen (closed month).
+//   - term == currentTerm (UTC) → a unit is frozen iff its covering tenant has
+//     that month FULLY PAID (Σpayments ≥ grandTotal − 1c).
+//   - term  > currentTerm → none frozen.
+async function _frozenPropertyIdsForTerm(
+  realmId: string,
+  buildingPropertyIds: string[],
+  term: number
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!buildingPropertyIds.length) return out;
+  const currentTermUtc = Number(
+    moment.utc().startOf('month').format('YYYYMMDDHH')
+  );
+  if (term > currentTermUtc) return out; // future → none frozen
+  if (term < currentTermUtc) {
+    // past → every given unit is frozen
+    for (const pid of buildingPropertyIds) out.add(String(pid));
+    return out;
+  }
+  // Current term: a unit is frozen iff its covering tenant has it fully paid.
+  // (Σpayments vs grandTotal cannot be a Mongo query — compute in JS, identical
+  // to Contract._isFullyPaid.)
+  const tenants = await Collections.Tenant.find(
+    {
+      realmId,
+      'properties.propertyId': { $in: buildingPropertyIds }
+    },
+    { rents: 1, 'properties.propertyId': 1 }
+  ).lean();
+  for (const t of tenants as any[]) {
+    const rent = (t.rents || []).find((r: any) => Number(r.term) === term);
+    if (!rent) continue;
+    const totalDue = Number(
+      rent?.total?.grandTotal ?? rent?.totalToPay ?? rent?.totalAmount ?? 0
+    );
+    if (!Number.isFinite(totalDue) || totalDue <= 0) continue;
+    const paid = (rent.payments || []).reduce(
+      (s: number, p: any) => s + (Number(p.amount) || 0),
+      0
+    );
+    if (paid < totalDue - 0.01) continue; // not fully paid → thawed
+    // This tenant's term is fully paid → every property it covers is frozen.
+    for (const p of t.properties || []) {
+      if (p.propertyId) out.add(String(p.propertyId));
+    }
+  }
+  return out;
 }
 
 // Shared past-paid frozen-term guard for addRepair AND updateRepair.
