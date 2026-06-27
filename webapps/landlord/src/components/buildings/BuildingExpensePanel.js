@@ -524,21 +524,19 @@ export default function BuildingExpensePanel({ building }) {
 
       <Separator className="mb-5" />
 
-      {/* ZONE A title — names the entry zone ("Μηνιαία Καταχώρηση") so it reads
-          as a distinct concept from the ΧΡΕΩΣΕΙΣ breakdown zone below, instead
-          of both looking like the same grey stack (the user's "two areas not
-          separated" complaint). Serif headline = the design-system register for
-          figures/labels to pause on. */}
-      <div className="font-display text-headline mb-3">{t('Monthly entry')}</div>
-
-      {/* Selected month headline. The COMBINED month total (tenants + owners)
-          is the one figure to pause on, so it's promoted to the serif display
-          register (was text-sm, indistinguishable from a leaf 0,91 €). The old
-          "Χρέωση ενοικιαστών" caption is gone: the two amounts are itemized
-          under their own ΕΝΟΙΚΙΑΣΤΕΣ / ΙΔΙΟΚΤΗΤΕΣ subheaders below. */}
-      <div className="flex items-baseline justify-between mb-4">
-        <span className="font-display text-headline">{monthLabel}</span>
-        <span className="font-display text-headline tabular-nums">
+      {/* ZONE A header — ONE line: «Μηνιαία Καταχώρηση (Ιούνιος 2026)» + the
+          COMBINED month total (tenants + owners) on the right. Names the entry
+          zone AND its month in a single title so it reads as one distinct
+          concept from the ΧΡΕΩΣΕΙΣ breakdown zone below (the user's "two areas
+          not separated" complaint + the explicit "one line" request). Serif
+          display register = the figure/label to pause on. The old "Χρέωση
+          ενοικιαστών" caption is gone: the two amounts are itemized under their
+          own ΕΝΟΙΚΙΑΣΤΕΣ / ΙΔΙΟΚΤΗΤΕΣ subheaders below. */}
+      <div className="flex items-baseline justify-between gap-2 mb-4">
+        <span className="font-display text-headline min-w-0">
+          {t('Monthly entry')} ({monthLabel})
+        </span>
+        <span className="font-display text-headline tabular-nums whitespace-nowrap">
           <NumberFormat value={tenantTotal + ownerTotal} />
         </span>
       </div>
@@ -854,81 +852,68 @@ function CoOwnerSplit({ owners, t, formatNumber }) {
   );
 }
 
-// Collapsible per-unit group in the breakdown (the user-approved layout):
-// a clickable header row (unit label · recipient — total, with a ▸/▾ chevron)
-// that expands to each expense line + its «Επιμερισμός:» basis + co-owner
-// split. Collapsed by default so the panel reads as a clean list of units.
+// Per-unit group in the breakdown — the user-approved "Zebra 5·1" layout:
+// each unit opens with a STRONG top rule (border-ink) + a bold header (unit
+// label · recipient — total), then its expense lines INDENTED, each with the
+// full allocation calc directly beneath. ALWAYS expanded (no collapse) so every
+// figure + its derivation is visible at once; the rule per unit is what gives
+// the clear "where each unit starts/ends" boundary the user asked for. NO
+// information is ever hidden or abbreviated — label, amount, full calc string,
+// repair-vacant 2nd line, and co-owner split all render verbatim.
 function UnitGroup({ title, total, items, t, formatNumber, ownerTinted }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="mb-1.5 last:mb-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-baseline justify-between gap-2 text-sm text-left"
-      >
+    <div className="border-t-2 border-ink/80 pt-2 mt-2 first:mt-0">
+      {/* Unit header: label (+ recipient) on the left, total on the right rail. */}
+      <div className="flex items-baseline justify-between gap-2 text-sm">
         <span
           className={cn(
-            'font-medium truncate min-w-0 flex-1',
+            'font-semibold min-w-0 flex-1',
             ownerTinted && 'text-ink-muted'
           )}
         >
           {title}
         </span>
-        <span className="flex items-baseline gap-1 shrink-0">
-          {/* fixed-width money cell → all breakdown amounts share one right
-              rail; the chevron sits OUTSIDE it so grouped rows don't shove the
-              figure left of ungrouped ones (ledger alignment). */}
-          <span className="w-20 text-right tabular-nums font-medium whitespace-nowrap">
-            <NumberFormat value={total} />
-          </span>
-          <LuChevronRight
-            className={cn(
-              'inline size-3 text-muted-foreground transition-transform',
-              open && 'rotate-90'
-            )}
-          />
+        <span className="w-24 text-right tabular-nums font-semibold whitespace-nowrap">
+          <NumberFormat value={total} />
         </span>
-      </button>
-      {open && (
-        <div className="pl-3 mt-1 space-y-2">
-          {items.map((it, ii) => {
-            const basis = formatBasis(t, it.basis, formatNumber);
-            return (
-              <div key={ii}>
-                <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
-                  <span className="truncate min-w-0 flex-1">
-                    {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
-                  </span>
-                  <span className="tabular-nums whitespace-nowrap shrink-0">
-                    <NumberFormat value={it.amount} />
-                  </span>
-                </div>
-                {/* Allocation formula line — no prefix label (the user flagged
-                    «ΚΑΤΑΝΟΜΗ:» as meaningless); the equation stands on its own. */}
-                {basis && (
-                  <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight mt-0.5">
-                    {basis}
-                  </div>
-                )}
-                {/* repair_vacant: the vacant unit's share on its own 2nd line */}
-                {it.basis?.kind === 'repair_vacant' && (
-                  <div className="text-label text-muted-foreground/80 font-mono tabular-nums leading-tight">
-                    {repairVacantShareLine(t, it.basis, formatNumber)}
-                  </div>
-                )}
-                {it.owners && (
-                  <CoOwnerSplit
-                    owners={it.owners}
-                    t={t}
-                    formatNumber={formatNumber}
-                  />
-                )}
+      </div>
+      <div className="mt-1 space-y-1.5">
+        {items.map((it, ii) => {
+          const basis = formatBasis(t, it.basis, formatNumber);
+          return (
+            <div key={ii} className="pl-4">
+              <div className="flex items-baseline justify-between gap-2 text-sm text-ink-soft">
+                <span className="min-w-0 flex-1">
+                  {expenseDisplayLabel(t, it.expenseName, it.expenseType)}
+                </span>
+                <span className="w-24 text-right tabular-nums whitespace-nowrap">
+                  <NumberFormat value={it.amount} />
+                </span>
               </div>
-            );
-          })}
-        </div>
-      )}
+              {/* Full allocation calc directly under the line (no prefix
+                  label; the equation stands on its own). Never abbreviated. */}
+              {basis && (
+                <div className="text-label text-ink-muted/90 font-mono tabular-nums leading-snug mt-0.5">
+                  {basis}
+                </div>
+              )}
+              {/* repair_vacant: the vacant unit's share on its own 2nd line */}
+              {it.basis?.kind === 'repair_vacant' && (
+                <div className="text-label text-ink-muted/90 font-mono tabular-nums leading-snug">
+                  {repairVacantShareLine(t, it.basis, formatNumber)}
+                </div>
+              )}
+              {it.owners && (
+                <CoOwnerSplit
+                  owners={it.owners}
+                  t={t}
+                  formatNumber={formatNumber}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

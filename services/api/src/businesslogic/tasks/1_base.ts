@@ -464,25 +464,61 @@ export function computeBuildingExpenseBreakdown(
       //     allocation formula.
       //   - Legacy charges with no inputAmount: {kind:'none'} (no reliable
       //     total to reconstruct from).
-      const persistedBasis =
-        srcExpense && c.inputAmount != null && Number(c.inputAmount) > 0
-          ? _shareBasis(
-              building,
-              unit,
-              srcExpense,
-              Number(c.inputAmount),
-              Math.round(amt * 100) / 100,
-              (srcExpense.allocationMethod || 'equal') === 'equal'
-                ? _equalPartyCount(building, term)
-                : undefined
-            )
-          : { kind: 'none' as const };
+      // REPAIR charge (c.repairId, srcRepair resolved above): build the row so
+      // it reads like every other expense — its GREEK title (never the English
+      // "Repair: …" monthlyCharge description) AND a real calc basis (cost ×
+      // tenant% ÷ allocation = share), instead of the bare {kind:'none'} that
+      // left repair rows with no formula and an English label (UI bug: repairs
+      // looked unlike all other eksoda). DISPLAY-ONLY (never summed) — no euro.
+      let persistedBasis: any = { kind: 'none' as const };
+      if (srcExpense && c.inputAmount != null && Number(c.inputAmount) > 0) {
+        persistedBasis = _shareBasis(
+          building,
+          unit,
+          srcExpense,
+          Number(c.inputAmount),
+          Math.round(amt * 100) / 100,
+          (srcExpense.allocationMethod || 'equal') === 'equal'
+            ? _equalPartyCount(building, term)
+            : undefined
+        );
+      } else if (srcRepair) {
+        // Tenant-side repair share = cost × tenantPct% allocated by the repair's
+        // method. Reconstruct the SAME equation _shareBasis produces for an
+        // expense, using the repair's tenant pool (cost × tenantPct%) as the
+        // total so the formula reads "<pool> ÷ N μονάδες = <share>" etc.
+        const repCost =
+          Number(srcRepair.actualCost) || Number(srcRepair.estimatedCost) || 0;
+        const tenantPct = repairTenantSharePercentage(srcRepair);
+        const tenantPool = Math.round(repCost * (tenantPct / 100) * 100) / 100;
+        if (tenantPool > 0) {
+          persistedBasis = _shareBasis(
+            building,
+            unit,
+            {
+              allocationMethod: srcRepair.allocationMethod || 'equal',
+              customAllocations: srcRepair.customAllocations
+            },
+            tenantPool,
+            Math.round(amt * 100) / 100,
+            (srcRepair.allocationMethod || 'equal') === 'equal'
+              ? _equalPartyCount(building, term)
+              : undefined
+          );
+        }
+      }
       rows.push({
         expenseId: String(c.expenseId || c.repairId || ''),
-        expenseName:
-          c.description || srcExpense?.name || (c.repairId ? 'Repair' : ''),
+        // GREEK repair title (srcRepair.title), never the English
+        // "Repair: …" monthlyCharge description, for a repair row.
+        expenseName: srcRepair
+          ? srcRepair.title || srcExpense?.name || c.description || ''
+          : c.description || srcExpense?.name || '',
         expenseType: srcExpense?.type || (c.repairId ? 'repair' : undefined),
-        allocationMethod: srcExpense?.allocationMethod || 'equal',
+        allocationMethod:
+          srcExpense?.allocationMethod ||
+          srcRepair?.allocationMethod ||
+          'equal',
         propertyId: String(unit.propertyId),
         propertyName,
         recipient,
