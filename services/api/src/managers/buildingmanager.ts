@@ -3266,12 +3266,99 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   // "1,70 € ÷ 11 μονάδες = 0,15 €"). The basis is computed by the live engine
   // on breakdown.rows; the persisted ownerDirect rows don't carry it, so we
   // graft it on by matching the unit + source expense.
+  //
+  // CRITICAL (owner-amount display fix): this graft is keyed by
+  // expenseId|propertyId and carries the TENANT amount basis ("10 € ÷ 11"). A
+  // per-unit OWNER-amount row (source 'owner-fixed' / 'expense') shares the same
+  // expenseId+propertyId as the unit's vacant-share row, so grafting gave the
+  // €9.09 owner-fixed line the WRONG "10 € ÷ 11 = 0,90 €" calc (it should read
+  // "100 € ÷ 11 = 9,09 €"). The graft is correct ONLY for vacant/owner-resident
+  // rows (whose euro IS the tenant-amount share routed to the owner). For
+  // owner-amount rows we build the basis from the OWNER total below.
   const basisByKey = new Map<string, any>();
   for (const r of (breakdown.rows || []) as any[]) {
     if (r.basis) {
       basisByKey.set(`${String(r.expenseId)}|${String(r.propertyId)}`, r.basis);
     }
   }
+  // The full OWNER amount per expense for THIS term = Σ of every per-unit owner
+  // -amount row (source 'owner-fixed' or 'expense') sharing the expenseId. For
+  // an equal €100 owner-fixed split across 11 units this sums the 11 × €9.09
+  // rows back to €100 — the `total` the per-unit calc divides. Computed from the
+  // rows themselves (not exp.ownerAmount) so it is correct for BOTH the fixed
+  // (ownerAmount) and the variable (landlord-typed) owner-amount paths and needs
+  // no extra stored field.
+  const ownerAmountTotalByExpense = new Map<string, number>();
+  for (const e of ownerEntries) {
+    if ((e.source || 'expense') === 'owner-fixed' || (e.source || '') === 'expense') {
+      const k = String(e.expenseId);
+      ownerAmountTotalByExpense.set(
+        k,
+        Math.round(
+          ((ownerAmountTotalByExpense.get(k) || 0) + (Number(e.amount) || 0)) * 100
+        ) / 100
+      );
+    }
+  }
+  const _managedUnitsForBasis = hydratedUnits.filter((u: any) => u.propertyId);
+  // Build the per-unit ShareBasis for an OWNER-amount row from the owner total
+  // (not the tenant amount). Mirrors the engine's _shareBasis divisor resolution
+  // (the same shape `formatBasis` renders): equal → ÷ managed-unit count;
+  // thousandths/surface → unit part ÷ building whole × total. `fixed` owner
+  // amounts are split equally (their customAllocations describe the TENANT
+  // amount), so 'fixed' resolves to the equal basis here too.
+  const _ownerAmountBasis = (
+    unit: any,
+    method: string,
+    total: number,
+    share: number
+  ): any => {
+    const fmt = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+    const m = method === 'fixed' ? 'equal' : method || 'equal';
+    if (m === 'by_surface') {
+      const whole = _managedUnitsForBasis.reduce(
+        (s: number, u: any) => s + (Number(u.surface) || 0),
+        0
+      );
+      return {
+        kind: 'surface',
+        part: fmt(unit?.surface || 0),
+        whole: fmt(whole),
+        total: fmt(total),
+        share: fmt(share)
+      };
+    }
+    if (
+      m === 'general_thousandths' ||
+      m === 'heating_thousandths' ||
+      m === 'elevator_thousandths'
+    ) {
+      const key =
+        m === 'general_thousandths'
+          ? 'generalThousandths'
+          : m === 'heating_thousandths'
+            ? 'heatingThousandths'
+            : 'elevatorThousandths';
+      const whole = hydratedUnits.reduce(
+        (s: number, u: any) => s + (Number(u[key]) || 0),
+        0
+      );
+      return {
+        kind: 'thousandths',
+        part: fmt(unit?.[key] || 0),
+        whole: fmt(whole),
+        total: fmt(total),
+        share: fmt(share)
+      };
+    }
+    // equal / fixed (and any unmapped method) → split over managed units.
+    return {
+      kind: 'equal',
+      count: _managedUnitsForBasis.length,
+      total: fmt(total),
+      share: fmt(share)
+    };
+  };
   // Building-wide owner rows (source:'expense'/'repair'/'owner-fixed') carry NO
   // propertyId, so they cannot resolve an owner from a single unit. Resolve
   // from the building's DISTINCT owner set instead: one distinct owner → that
@@ -3369,6 +3456,21 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       // 'repair' owner-portion shows cost × owner% (=1−tenant%); a
       // 'repair-vacant' per-unit row shows the vacant unit's tenant-share slice.
       basis: (() => {
+        // OWNER-AMOUNT row (per-unit owner-fixed / variable 'expense'): build the
+        // calc from the OWNER total ("100 € ÷ 11 = 9,09 €"), NOT the tenant-amount
+        // graft below (which would wrongly show "10 € ÷ 11"). Only for a
+        // propertyId-scoped row with a resolved owner total > 0.
+        if (
+          (e.source === 'owner-fixed' || e.source === 'expense') &&
+          e.propertyId &&
+          unit
+        ) {
+          const ownerTotal = ownerAmountTotalByExpense.get(String(e.expenseId));
+          if (ownerTotal && ownerTotal > 0) {
+            const method = exp?.allocationMethod || 'equal';
+            return _ownerAmountBasis(unit, method, ownerTotal, rowAmount);
+          }
+        }
         const fromEngine = basisByKey.get(
           `${String(e.expenseId)}|${String(e.propertyId)}`
         );
@@ -3454,6 +3556,26 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
         return null;
       })(),
       source: e.source || 'expense',
+      // kindLabel: a stable descriptor key the UI appends to the expense label so
+      // the TWO owner rows a vacant unit carries — the per-unit OWNER amount
+      // (source 'owner-fixed'/'expense') AND the vacant unit's share of the
+      // TENANT amount (source 'vacant') — read as DISTINCT lines instead of two
+      // identical "Κοιν. Νερό" rows. The UI maps these to localized suffixes.
+      kindLabel:
+        e.source === 'owner-fixed' || e.source === 'expense'
+          ? 'owner-amount'
+          : e.source === 'vacant'
+            ? 'vacant-share'
+            : e.source === 'owner-resident'
+              ? 'owner-resident'
+              : undefined,
+      // vacant: true when this euro is a VACANT unit's share routed to the owner
+      // (the tenant-amount share of an empty unit). Drives the ΚΕΝΟ pill AND the
+      // collapsible "Κενές μονάδες" grouping. The per-unit OWNER amount is NOT
+      // vacant-flagged (it is owed whether or not the unit is occupied), so it
+      // stays in the regular ΙΔΙΟΚΤΗΤΕΣ section — restoring the grouping the
+      // per-unit materialisation broke.
+      vacant: e.source === 'vacant' || e.source === 'repair-vacant',
       paid: !!e.paid
     };
   });
