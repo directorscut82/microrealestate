@@ -526,10 +526,19 @@ export function _aggregateOwners(
       // outstanding = slice(amount) − slice(paid) per owner.
       // When there's a single owner, the full amount lands on them (no split).
       const sortedKeys = [...keys].sort();
-      const sliceOwners =
-        charge.propertyId && propertyOwnerArr.has(charge.propertyId)
-          ? propertyOwnerArr.get(charge.propertyId)!
-          : buildingOwnerArr.get(bid) || [];
+      // sliceFromUnit: did sliceOwners come FROM THIS UNIT (deterministic %s)?
+      // Only then is the per-owner slice billing safe. A per-unit row whose unit
+      // has EMPTY owners[] (legacy/E9-corrupt data — the real Beta realm shape)
+      // falls back to the building owner set, whose stored % is import-order-
+      // dependent and borrowed from a DIFFERENT unit; slicing by it mis-attributes
+      // (Step-7 r4 #2 — Beta billed a unit she doesn't own). When false, keep
+      // the FULL amount on the canonical owner (matches the dashboard/panel which
+      // read the full per-unit row), never a borrowed-% slice.
+      const sliceFromUnit =
+        !!charge.propertyId && propertyOwnerArr.has(charge.propertyId);
+      const sliceOwners = sliceFromUnit
+        ? propertyOwnerArr.get(charge.propertyId as string)!
+        : buildingOwnerArr.get(bid) || [];
       const slices = ownerSlicesOf(sliceOwners, charge.amount);
       // C2-1 round-2 (Step-7): useTaggedPaid alone is NOT safe for the
       // multi-owner split. It only checks that the tagged payments cover
@@ -550,12 +559,61 @@ export function _aggregateOwners(
       );
       const useTaggedPaidForSlices =
         useTaggedPaid && matchedTagged >= taggedPaid - 0.005;
+      // This owner's BILLED share of the charge. ownerSlicesOf appends a "rest"
+      // slice (ownerKey '') for any un-identified co-owner; the named slices are
+      // what real owners owe. When the sole identified owner does NOT cover the
+      // whole charge (a unit declared at 50% whose co-owner is absent from the
+      // data), bill only their share — the residual is the missing co-owner's,
+      // billed to nobody (MONEY BUG: ΔΟΚΙΜΗ ΒΗΤΑ, sole 50% owner of a unit,
+      // was billed the full per-unit share instead of 50%). For a true sole 100%
+      // owner the identified slice === charge.amount, so nothing changes. SAFE
+      // because the charge is now PER-UNIT (propertyId set): sliceOwners is the
+      // unit's own owners → deterministic, not the import-order-dependent
+      // building-wide owner set the reverted patch read (Step-7 r-prev).
+      const identifiedSliceTotal = _round(
+        slices.reduce(
+          (s: number, sl: any) => s + (sl.ownerKey ? sl.amount : 0),
+          0
+        )
+      );
       // Map each slice to the ownerKey it belongs to (by name match or by
-      // position-aligned fallback). When only one owner, full charge on them.
+      // position-aligned fallback). When only one identified owner, bill them
+      // their identified share (not necessarily the full amount).
       if (keys.length === 1 || slices.length <= 1) {
-        // Single-owner fast path — full amount, no split needed.
         const agg = owners.get(sortedKeys[0]);
         if (!agg) continue;
+        // Bill the identified owner's slice — but ONLY for a PROPERTY-SCOPED
+        // charge (propertyId set), where sliceOwners is that unit's own owners
+        // (deterministic). For a BUILDING-WIDE charge (propertyId null — a
+        // repair owner-portion / owner-fixed) sliceOwners is the dedup-by-key
+        // building owner set, whose stored % is import-order-dependent for an
+        // owner declared at different %s across units; slicing by it would
+        // nondeterministically under/over-bill (Step-7 r-prev critical). So a
+        // building-wide single-owner charge keeps the FULL amount; per-unit
+        // owner-tracked expenses (now materialised per unit) get the slice.
+        // GATE on sliceFromUnit, NOT charge.propertyId (Step-7 r4 #2): a per-unit
+        // row whose unit has empty owners[] resolved sliceOwners from the building
+        // set (borrowed %) — slicing by it mis-attributes, so keep the FULL amount
+        // on the canonical owner (matches dashboard/panel). Empty slices
+        // (legacy/no owners) → full amount. A 'credit' row keeps amount 0.
+        const billed =
+          !sliceFromUnit || slices.length === 0
+            ? _round(charge.amount)
+            : identifiedSliceTotal;
+        // Payment share: NEVER scale-erase recorded money (Step-7 #3/#7/#14).
+        // Take this owner's TAGGED payments when attribution is sound; otherwise
+        // keep the FULL recorded payment on the row. The earlier
+        // Math.min(paidAmount, billed) clamp DROPPED recorded money whenever the
+        // row carried more than the identified owner's reduced slice (a 50% unit
+        // whose row holds the full per-unit καταβολή): she paid €16,67 but billed
+        // €8,34 → €8,33 silently vanished, and the dashboard (which counts the
+        // full row payment) then disagreed with the ledger. Keep the full
+        // recorded paid visible (outstanding floors at 0 below — an overpayment
+        // shows owed<paid, never negative), mirroring the multi-owner overpay
+        // handling. A 'credit' row (amount 0) likewise keeps its full payment.
+        const paidShare = useTaggedPaidForSlices
+          ? _round(taggedPaidByKey.get(sortedKeys[0]) || 0)
+          : _round(paidAmount);
         if (keys.length > 1) {
           charge.coOwnerCount = keys.length;
           charge.coOwnerNames = sortedKeys
@@ -563,10 +621,28 @@ export function _aggregateOwners(
             .filter(Boolean) as string[];
           charge.coOwners = slices.length > 1 ? slices : undefined;
         }
-        agg.charges.push(charge);
-        agg.totalAmount = _round(agg.totalAmount + charge.amount);
-        agg.totalPaid = _round(agg.totalPaid + charge.paidAmount);
-        agg.totalOutstanding = _round(agg.totalOutstanding + charge.outstanding);
+        const ownCharge = {
+          ...charge,
+          amount: billed,
+          paidAmount: paidShare,
+          outstanding: Math.max(0, _round(billed - paidShare)),
+          paid: billed > 0 && paidShare >= billed - 0.005,
+          // expose the co-owner split for display when we actually billed the
+          // partial slice (unit-resolved owners, identified owner < whole) so the
+          // line can show "50% (€25) · λοιποί …".
+          coOwners:
+            sliceFromUnit &&
+            slices.length > 1 &&
+            identifiedSliceTotal < _round(charge.amount) - 0.005
+              ? slices
+              : charge.coOwners
+        };
+        agg.charges.push(ownCharge);
+        agg.totalAmount = _round(agg.totalAmount + ownCharge.amount);
+        agg.totalPaid = _round(agg.totalPaid + ownCharge.paidAmount);
+        agg.totalOutstanding = _round(
+          agg.totalOutstanding + ownCharge.outstanding
+        );
       } else {
         // Multi-owner proportional split: each owner gets their percentage
         // of amount AND paidAmount so the ledger reflects their own liability.

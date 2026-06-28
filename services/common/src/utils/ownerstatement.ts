@@ -176,12 +176,27 @@ export function netOwnerChargeOutstanding(
     propertyId?: any;
     amount?: number;
     paidAmount?: number;
+    source?: any;
   }[]
 ): Map<number, number> {
   const _r = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+  // Source-FAMILY of a row for netting (Step-7 r5 #2). A 'credit' must net ONLY
+  // its own obligation's sibling, NEVER a DISTINCT vacant building-expense share
+  // that merely shares the unit (different obligations — the writer's fx|/vr|
+  // settleKey split encodes this). The vacant/owner-resident family is isolated;
+  // every other source (expense / owner-fixed / repair / repair-vacant / credit)
+  // shares one family — safe because the expenseId in the key already separates a
+  // repair (keyed by repair _id) from an owner-amount (keyed by expense _id), so
+  // a repair-credit can only meet repair siblings and an owner-amount-credit only
+  // owner-amount siblings. This nets credit↔repair (cancel/un-cancel) AND
+  // credit↔owner-fixed (overpay) while shielding the vacant share.
+  const _fam = (src: any): string => {
+    const s = String(src || 'expense');
+    return s === 'vacant' || s === 'owner-resident' ? 'vr' : 'ob';
+  };
   const groups = new Map<string, number[]>();
   charges.forEach((c, i) => {
-    const key = `${String(c.expenseId)}|${String(c.term)}|${
+    const key = `${_fam(c.source)}|${String(c.expenseId)}|${String(c.term)}|${
       c.propertyId == null ? '' : String(c.propertyId)
     }`;
     if (!groups.has(key)) groups.set(key, []);
@@ -189,13 +204,28 @@ export function netOwnerChargeOutstanding(
   });
   const out = new Map<number, number>();
   for (const idxs of groups.values()) {
-    // Fast path: a lone row keeps its own clamped outstanding (no sibling to net).
-    if (idxs.length === 1) {
-      const c = charges[idxs[0]];
-      out.set(
-        idxs[0],
-        Math.max(0, _r((Number(c.amount) || 0) - (Number(c.paidAmount) || 0)))
-      );
+    // CREDIT-ONLY netting (Step-7 r2 #5): net a group ONLY when it contains a
+    // source:'credit' row — that is the documented intent ("net a credit's
+    // surplus against its same-obligation sibling"). Two GENUINE liabilities
+    // that now happen to share (expenseId|term|propertyId) — e.g. a per-unit
+    // owner-fixed row AND a vacant/owner-resident building-expense share for the
+    // same expense+unit (both real, distinct debts) — must EACH keep their own
+    // clamped outstanding, never cross-net (which would mark one paid by the
+    // other's payment). Giving owner-fixed rows a propertyId made that collision
+    // newly possible; this guard prevents the paid/unpaid swap on ledger + PDF.
+    const hasCredit = idxs.some(
+      (i) => (charges[i].source || '') === 'credit'
+    );
+    // Fast path: a lone row, OR a multi-row group with NO credit → each row
+    // keeps its own clamped outstanding (no netting).
+    if (idxs.length === 1 || !hasCredit) {
+      for (const i of idxs) {
+        const c = charges[i];
+        out.set(
+          i,
+          Math.max(0, _r((Number(c.amount) || 0) - (Number(c.paidAmount) || 0)))
+        );
+      }
       continue;
     }
     const sumAmount = _r(
@@ -509,8 +539,8 @@ export function buildOwnerStatement(
           continue;
         }
       }
-      // Attribute to the SAME canonical owner the ledger does (lex-first
-      // ownerKey of the row's owner set), counted once.
+      // Resolve the owner set this row belongs to (propertyId-scoped → the
+      // unit's owners; building-wide → the building's distinct owners).
       let keys: string[] = [];
       const pid = row.propertyId ? String(row.propertyId) : null;
       if (pid && propertyOwnerKeys.has(pid)) {
@@ -520,8 +550,8 @@ export function buildOwnerStatement(
       }
       keys = Array.from(new Set(keys));
       if (keys.length === 0) continue;
-      const canonicalKey = [...keys].sort()[0];
-      if (canonicalKey !== ownerKey) continue; // not this owner's charge
+      const sortedKeys = [...keys].sort();
+      const canonicalKey = sortedKeys[0];
       const payments = Array.isArray(row.payments) ? row.payments : [];
       const paidAmount = _round(
         payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
@@ -531,23 +561,103 @@ export function buildOwnerStatement(
         src === 'repair' || src === 'repair-vacant'
           ? 'repair'
           : expTypeById.get(String(row.expenseId)) || undefined;
-      // Per-owner slices for a co-owned charge (display).
-      const sliceOwners =
-        pid && propertyOwnerArr.has(pid)
-          ? propertyOwnerArr.get(pid)!
-          : buildingOwnerArr.get(bid) || [];
+      // Per-owner slices for a co-owned charge (display + this owner's share).
+      // sliceFromUnit: was sliceOwners resolved FROM THE UNIT (deterministic %s)?
+      // A per-unit row whose unit has empty owners[] falls back to the building
+      // set (borrowed %) → slicing would mis-attribute (Step-7 r4 #2). Mirror
+      // _aggregateOwners: only slice when unit-resolved; else keep full amount.
+      const sliceFromUnit = !!pid && propertyOwnerArr.has(pid);
+      const sliceOwners = sliceFromUnit
+        ? propertyOwnerArr.get(pid as string)!
+        : buildingOwnerArr.get(bid) || [];
       const slices = ownerSlicesOf(sliceOwners, amount);
+      const mySlice = slices.find((sl: any) => sl.ownerKey === ownerKey);
+      const identifiedSliceTotal = _round(
+        slices.reduce(
+          (s: number, sl: any) => s + (sl.ownerKey ? sl.amount : 0),
+          0
+        )
+      );
+      // C2 TAGGED-PAYMENT attribution — MUST mirror ownermanager._aggregateOwners
+      // (Step-7 r2 #1/#4): a payment recorded by a specific owner carries that
+      // owner's ownerKey, so each co-owner is credited ONLY their own tagged
+      // καταβολές. A purely proportional split would tell a non-paying co-owner
+      // they are PAID (and the paying one over-paid) — the legal PDF would then
+      // contradict the on-screen ledger. Fall back to proportional only for
+      // legacy untagged rows.
+      const taggedPaidByKey = new Map<string, number>();
+      let taggedPaid = 0;
+      for (const p of payments) {
+        const k = p && p.ownerKey ? String(p.ownerKey) : '';
+        if (!k) continue;
+        const amt = Number(p.amount) || 0;
+        taggedPaidByKey.set(k, _round((taggedPaidByKey.get(k) || 0) + amt));
+        taggedPaid = _round(taggedPaid + amt);
+      }
+      const useTaggedPaid = taggedPaid >= paidAmount - 0.005 && taggedPaid > 0;
+      const matchedTagged = slices.reduce(
+        (s: number, sl: any) =>
+          _round(s + (sl.ownerKey ? taggedPaidByKey.get(sl.ownerKey) || 0 : 0)),
+        0
+      );
+      const useTaggedPaidForSlices =
+        useTaggedPaid && matchedTagged >= taggedPaid - 0.005;
+      // BILLING — MUST mirror ownermanager._aggregateOwners EXACTLY so the legal
+      // PDF and the on-screen ledger agree to the cent (Step-7 #9/#11/#16). Two
+      // branches, same discriminant the ledger uses:
+      //   SINGLE path (keys.length===1 || slices.length<=1): only the lex-first
+      //     owner carries the row. billed = the identified slice for a
+      //     property-scoped charge (a sole 50%-owner unit with the co-owner
+      //     absent bills only 50%), or the FULL amount for a building-wide
+      //     charge / no resolvable slices. paid = TAGGED owner's payments when
+      //     attribution is sound, else the FULL recorded payment (no Math.min
+      //     clamp — that DROPPED recorded money, Step-7 #14).
+      //   MULTI path (2+ identified co-owners, slices>1): EACH co-owner's
+      //     statement carries THEIR OWN slice; paid = their TAGGED καταβολές when
+      //     sound, else proportional (credit rows split the preserved payment by
+      //     %), conserving Σ (Step-7 #1/#4/#9/#11).
+      let billed: number;
+      let paidShare: number;
+      if (keys.length === 1 || slices.length <= 1) {
+        if (canonicalKey !== ownerKey) continue; // single path: canonical only
+        // Gate on sliceFromUnit (Step-7 r4 #2): a per-unit row on a unit with no
+        // owners resolved a borrowed building % → keep the FULL amount, not a
+        // mis-attributed slice (mirrors _aggregateOwners).
+        billed =
+          !sliceFromUnit || slices.length === 0 ? amount : identifiedSliceTotal;
+        paidShare = useTaggedPaidForSlices
+          ? _round(taggedPaidByKey.get(ownerKey) || 0)
+          : _round(paidAmount); // full recorded; outstanding floors ≥0
+      } else {
+        if (!mySlice) continue; // ownerKey is not an identified owner of this row
+        billed = _round(mySlice.amount);
+        if (useTaggedPaidForSlices) {
+          paidShare = _round(taggedPaidByKey.get(ownerKey) || 0);
+        } else if (src === 'credit') {
+          // amount 0 → split the preserved payment by ownership %.
+          const creditSlices = ownerSlicesOf(sliceOwners, paidAmount);
+          const myCredit = creditSlices.find(
+            (sl: any) => sl.ownerKey === ownerKey
+          );
+          paidShare = _round(myCredit ? myCredit.amount : 0);
+        } else {
+          paidShare =
+            amount > 0
+              ? _round(paidAmount * (mySlice.amount / amount))
+              : 0;
+        }
+      }
       charges.push({
         buildingId: bid,
         buildingName: bname,
         expenseId: String(row.expenseId),
         term,
-        amount,
-        paidAmount,
-        // CLAMP outstanding to ≥0 so an over-paid repair row never prints a
-        // negative outstanding on the legal owner statement (Step-7 r2/r5).
-        outstanding: Math.max(0, _round(amount - paidAmount)),
-        paid: paidAmount >= amount - 0.005,
+        amount: billed,
+        paidAmount: paidShare,
+        // CLAMP outstanding to ≥0 so an over-paid row never prints a negative
+        // outstanding on the legal owner statement (Step-7 r2/r5).
+        outstanding: Math.max(0, _round(billed - paidShare)),
+        paid: billed > 0 && paidShare >= billed - 0.005,
         source: src,
         expenseType,
         description: String(row.description || '').replace(/^Repair:\s*/i, ''),

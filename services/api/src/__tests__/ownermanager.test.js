@@ -289,6 +289,38 @@ describe('owner settlements grid reconciles with header (Step-7 batch1)', () => 
     expect(gridSum(s1)).toBeCloseTo(50, 2);
     expect(gridSum(s2)).toBeCloseTo(50, 2);
   });
+
+  // ΔΟΚΙΜΗ ΒΗΤΑ owner-tracked bug, fixed at the WRITER (per-unit
+  // materialisation). The owner amount is now stored as PER-UNIT source:'expense'
+  // rows (propertyId set), each carrying that unit's allocated share. A unit
+  // owned 50% bills the owner only €X·50%; a unit owned 100% bills the full
+  // share. The owner's ledger total = Σ of her per-unit shares — NOT the full
+  // building amount dumped on her. (Was: one building-wide lump → full €100.)
+  it('per-unit owner-expense rows bill each unit owner their declared % share (ΒΗΤΑ fix)', () => {
+    const beta = (pct) => ({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '111', percentage: pct });
+    // €100 owner-water, equal across 2 units = €50/unit. Unit A: Beta 50%
+    // (co-owner absent) → she owes €25. Unit B: Beta 100% → she owes €50.
+    // Her ledger total = €75, NOT €100.
+    const building = {
+      _id: 'b1',
+      name: 'AG ODOS EPSILON',
+      units: [
+        { propertyId: 'pA', atakNumber: 'AKA', floor: 0, owners: [beta(50)] },
+        { propertyId: 'pB', atakNumber: 'AKB', floor: 1, owners: [beta(100)] }
+      ],
+      expenses: [{ _id: 'water', type: 'water_common' }],
+      repairs: [],
+      ownerMonthlyExpenses: [
+        { _id: 'a', expenseId: 'water', term: 2026060100, amount: 50, source: 'expense', propertyId: 'pA', payments: [] },
+        { _id: 'b', expenseId: 'water', term: 2026060100, amount: 50, source: 'expense', propertyId: 'pB', payments: [] }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    const s = _serializeOwnerSummary(map.get(ownerKeyOf(beta(50))));
+    // €25 (50% of unit A's €50) + €50 (100% of unit B's €50) = €75 — her share.
+    expect(s.totalAmount).toBeCloseTo(75, 2);
+    expect(s.totalOutstanding).toBeCloseTo(75, 2);
+  });
 });
 
 // ───────────────────────────────────────────────────────────────────────────

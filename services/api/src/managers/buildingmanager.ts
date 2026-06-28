@@ -2479,6 +2479,213 @@ export async function removeMonthlyCharge(req: Req, res: Res) {
   return res.json(result[0]);
 }
 
+// Allocate an OWNER-ONLY euro amount (a fixed ownerAmount or a landlord-typed
+// variable owner amount) across a building's MANAGED units, returning one
+// {propertyId, share} per unit with Σ(share) === amount EXACTLY.
+//
+// CRITICAL (Step-7): this MUST NOT reuse the tenant `equal` allocator
+// (computeBuildingChargeForProperty with _tenantGroups). That allocator divides
+// by tenant PARTIES and collapses a multi-unit tenant's units onto ONE carrier
+// (the others return 0) — correct for a tenant-billed expense, but WRONG for an
+// owner-only amount, which is an OWNER cost that must split per UNIT among the
+// units' owners regardless of who rents them. Routing it through the tenant
+// allocator billed one unit's owner €0 and double-billed the carrier unit's
+// owner (Step-7 #6/#10/#12). Likewise `fixed` reads customAllocations (the
+// TENANT split) and ignores the amount → split equally instead (Step-7 #1/#2).
+//
+//   - equal / fixed → split equally over managed units, carrier-remainder on the
+//     lex-max propertyId so Σ === amount.
+//   - thousandths / surface → per-unit ratio over the FULL building denominator
+//     (occupancy-independent already); residual snapped onto the largest share.
+//   - custom_ratio / custom_percentage → the engine's per-unit value (these are
+//     genuine per-unit allocations); residual snapped.
+// `buildingPlainNoGroups` is a plain building snapshot WITHOUT _tenantGroups, so
+// even if a thousandths/surface path falls through, the equal fallback is the
+// per-managed-unit one (1_base ~891), never the tenant-party split.
+function _allocateOwnerAmountPerUnit(
+  buildingPlainNoGroups: any,
+  amount: number,
+  allocationMethod: string,
+  term: number,
+  // The source expense's customAllocations — REQUIRED for custom_ratio /
+  // custom_percentage / single_unit so the engine can compute the per-unit
+  // distribution of the OWNER amount (Step-7 r2 #7/#10). custom_ratio /
+  // custom_percentage describe per-unit RATIOS/PERCENTAGES (applicable to any
+  // amount); single_unit targets one unit — all genuine per-unit allocations,
+  // UNLIKE 'fixed' whose customAllocations are absolute TENANT euros (handled by
+  // the equal branch). Omitted → custom_*/single_unit can't allocate and the
+  // caller falls back to a building-wide lump.
+  customAllocations?: any[]
+): { propertyId: string; share: number }[] {
+  const amt = Math.round(Number(amount) * 100) / 100;
+  if (!(amt > 0)) return [];
+  const managed = (buildingPlainNoGroups.units || []).filter(
+    (u: any) => u.propertyId
+  );
+  if (managed.length === 0) return [];
+  const method = allocationMethod || 'equal';
+  let perUnit: { propertyId: string; share: number }[] = [];
+  if (method === 'equal' || method === 'fixed') {
+    // Equal split over MANAGED UNITS (NOT tenant parties). Carrier-remainder on
+    // the lex-max propertyId so Σ === amount. 'fixed' joins here because its
+    // customAllocations are the TENANT euro split, NOT a description of the
+    // owner amount (Step-7 #1/#2).
+    const ids = managed.map((u: any) => String(u.propertyId)).sort();
+    const base = Math.round((amt / ids.length) * 100) / 100;
+    perUnit = ids.map((pid: string, i: number) => ({
+      propertyId: pid,
+      share:
+        i === ids.length - 1
+          ? Math.round((amt - base * (ids.length - 1)) * 100) / 100
+          : base
+    }));
+  } else if (
+    method === 'general_thousandths' ||
+    method === 'heating_thousandths' ||
+    method === 'elevator_thousandths'
+  ) {
+    // Thousandths over the MANAGED denominator only (Step-7 r4 #1). The TENANT
+    // engine divides thousandths over the FULL building (incl. unmanaged units),
+    // intentionally leaking a vacant/unmanaged unit's share to the owner. But the
+    // owner AMOUNT is an owner-only euro figure the landlord entered for the
+    // MANAGED portfolio — it must be CONSERVED across managed units, not leaked
+    // to an unmanaged unit that has no owner row (which silently under-billed the
+    // owner by the unmanaged thousandths share). Carrier-remainder on lex-max.
+    const key =
+      method === 'general_thousandths'
+        ? 'generalThousandths'
+        : method === 'heating_thousandths'
+          ? 'heatingThousandths'
+          : 'elevatorThousandths';
+    const totalT = managed.reduce(
+      (s: number, u: any) => s + (Number(u[key]) || 0),
+      0
+    );
+    if (totalT > 0) {
+      const withT = managed
+        .filter((u: any) => (Number(u[key]) || 0) > 0)
+        .map((u: any) => String(u.propertyId))
+        .sort();
+      let allocated = 0;
+      for (let i = 0; i < withT.length; i++) {
+        const u = managed.find(
+          (m: any) => String(m.propertyId) === withT[i]
+        );
+        const raw = (amt * (Number(u[key]) || 0)) / totalT;
+        const share =
+          i === withT.length - 1
+            ? Math.round((amt - allocated) * 100) / 100
+            : Math.round(raw * 100) / 100;
+        if (i < withT.length - 1) allocated = Math.round((allocated + share) * 100) / 100;
+        if (share > 0) perUnit.push({ propertyId: withT[i], share });
+      }
+    }
+  } else {
+    // surface / custom_ratio / custom_percentage / single_unit → per-unit value
+    // from the engine (surface uses the MANAGED denominator + carrier-remainder;
+    // custom_* read the threaded customAllocations). buildingPlainNoGroups carries
+    // NO _tenantGroups.
+    for (const u of managed) {
+      const share = computeBuildingChargeForProperty(
+        buildingPlainNoGroups,
+        String(u.propertyId),
+        {
+          amount: amt,
+          allocationMethod: method,
+          ...(customAllocations ? { customAllocations } : {})
+        } as any,
+        term
+      );
+      const r = Math.round(share * 100) / 100;
+      if (r > 0) perUnit.push({ propertyId: String(u.propertyId), share: r });
+    }
+  }
+  // CONSERVATION SNAP: a per-unit ROUNDING residual (a few cents) is snapped onto
+  // the largest share so Σ === amount EXACTLY. equal/fixed/thousandths/surface
+  // are full-coverage methods → any residual is rounding, always snap. BUT
+  // custom_percentage / custom_ratio legitimately sum to LESS than 100% (the
+  // tenant engine leaves that gap UNBILLED), so for those we snap ONLY the
+  // rounding part and LEAVE the deliberate gap unbilled (Step-7 r3 #3 / r4 #3):
+  // bound the snap by the intended coverage, not a flat euro band.
+  if (perUnit.length > 0) {
+    const sum = perUnit.reduce((s, p) => s + p.share, 0);
+    let target = amt; // full-coverage methods → conserve the whole amount
+    if (
+      (method === 'custom_percentage' || method === 'custom_ratio') &&
+      Array.isArray(customAllocations) &&
+      customAllocations.length
+    ) {
+      if (method === 'custom_percentage') {
+        const pct = customAllocations.reduce(
+          (s: number, a: any) => s + (Number(a.value) || 0),
+          0
+        );
+        // Mirror the ENGINE's isFullSplit test (1_base custom_percentage,
+        // |Σ%−100|<0.05 → full split with carrier-remainder) so the allocator and
+        // the engine agree on whether ~100% means "full" (Step-7 r6 #5): e.g. 3×
+        // 33.33% = 99.99 is a FULL 3-way split → target the whole amount and snap
+        // the cent. Only a MATERIALLY <100% sum is a deliberate partial → target
+        // just the intended coverage and leave the gap unbilled.
+        target =
+          Math.abs(pct - 100) < 0.05
+            ? amt
+            : Math.round(amt * (Math.min(pct, 100) / 100) * 100) / 100;
+      }
+      // custom_ratio always covers 100% of the amount (shares are relative) → amt.
+    }
+    const residual = Math.round((target - sum) * 100) / 100;
+    const roundingTolerance = managed.length * 0.01 + 0.01;
+    if (Math.abs(residual) >= 0.005 && Math.abs(residual) <= roundingTolerance) {
+      const largest = perUnit.reduce((a, b) => (b.share > a.share ? b : a));
+      largest.share = Math.round((largest.share + residual) * 100) / 100;
+    }
+  }
+  return perUnit;
+}
+
+// A FIFO queue over a legacy lump's ORIGINAL payments, used to migrate the
+// recorded καταβολές onto the new per-unit rows while PRESERVING each payment's
+// own ownerKey / date / type / reference (Step-7 r3 #4 — the prior code
+// re-stamped every drained sub-payment with payments[0]'s metadata, collapsing
+// two co-owners' tagged payments onto one key and losing installment dates).
+// `take(room)` draws up to `room` euros off the front of the queue, splitting a
+// payment when it straddles the room boundary, and returns the taken sub-payment
+// objects (each carrying its source payment's metadata). `remaining()` is the
+// undrained euro left (→ the building-level standing credit).
+function _makePaymentQueue(payments: any[]) {
+  const q = (Array.isArray(payments) ? payments : [])
+    .map((p) => ({
+      date: p.date,
+      amount: Math.round((Number(p.amount) || 0) * 100) / 100,
+      type: p.type || 'transfer',
+      reference: p.reference || '',
+      description: p.description || '',
+      ownerKey: p.ownerKey || null
+    }))
+    .filter((p) => p.amount > 0.005);
+  return {
+    take(room: number): any[] {
+      let left = Math.round(Number(room) * 100) / 100;
+      const out: any[] = [];
+      while (left > 0.005 && q.length) {
+        const head = q[0];
+        const give = Math.min(head.amount, left);
+        out.push({ ...head, amount: Math.round(give * 100) / 100 });
+        head.amount = Math.round((head.amount - give) * 100) / 100;
+        left = Math.round((left - give) * 100) / 100;
+        if (head.amount <= 0.005) q.shift();
+      }
+      return out;
+    },
+    remaining(): any[] {
+      return q.map((p) => ({ ...p }));
+    },
+    remainingTotal(): number {
+      return Math.round(q.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+    }
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Monthly Statement (batch distribution of expenses to units for a given month)
 // ---------------------------------------------------------------------------
@@ -2528,6 +2735,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   // wave-17 (51bbefca).
   const buildingPlain = (building as any).toObject();
   await _attachTenantGroupsToBuildings(realm!._id as string, [buildingPlain]);
+  // A SEPARATE plain snapshot WITHOUT _tenantGroups for OWNER-amount allocation:
+  // the owner amount must split per-UNIT, never by tenant party (Step-7
+  // #6/#10/#12). _allocateOwnerAmountPerUnit uses this so an equal fallback is
+  // per-managed-unit, not tenant-party.
+  const buildingPlainNoGroups = (building as any).toObject();
 
   // Validate every referenced expenseId exists on the building before we
   // mutate any unit. Silently accepting unknown ids leaves orphan charges.
@@ -2642,19 +2854,28 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   // statement DELETED the vacant / repair-vacant / repair owner charges for
   // that term (data loss). Scope the strip to source:'expense' only.
   if (ownerExpensesProvided) {
-    // Snapshot the landlord-recorded SETTLEMENT (payments + derived paid)
-    // on the expense rows before the strip+rebuild so re-saving a statement
-    // doesn't wipe recorded καταβολές (mirrors _recomputeVacantOwnerCharges /
-    // _distributeRepairCharge). Keyed by expenseId (these rows carry no
-    // propertyId; one owner-direct row per expense per term).
+    // Snapshot the landlord-recorded SETTLEMENT (payments + derived paid) on the
+    // source:'expense' rows before the strip+rebuild so re-saving a statement
+    // doesn't wipe recorded καταβολές. PER-UNIT now (keyed expenseId|propertyId)
+    // because the owner amount is materialised per-unit (see below); the legacy
+    // building-wide rows (no propertyId) are also captured under expenseId|__b__
+    // so a one-time migration carries their payments onto the new per-unit rows.
     const priorExpenseSettle = new Map<string, any>();
+    const priorBuildingWide = new Map<string, any>();
     for (const e of (building as any).ownerMonthlyExpenses as any[]) {
       const src = e.source || 'expense';
       if (src === 'expense' && Number(e.term) === Number(term)) {
-        priorExpenseSettle.set(String(e.expenseId), e);
+        if (e.propertyId) {
+          priorExpenseSettle.set(
+            `${String(e.expenseId)}|${String(e.propertyId)}`,
+            e
+          );
+        } else {
+          priorBuildingWide.set(String(e.expenseId), e);
+        }
       }
     }
-    // Strip ONLY source:'expense' rows for this term.
+    // Strip ONLY source:'expense' rows for this term (per-unit AND legacy lump).
     const idsToRemove = (building as any).ownerMonthlyExpenses
       .filter(
         (e: any) =>
@@ -2664,22 +2885,196 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     for (const eid of idsToRemove) {
       (building as any).ownerMonthlyExpenses.pull(eid);
     }
-    // Add new owner expenses, carrying recorded καταβολές forward.
+    // Materialise each owner-tracked amount PER UNIT, allocated by the expense's
+    // allocationMethod (the SAME engine the tenant side uses), so each unit's
+    // share is attributed to THAT unit's owner(s) by their declared % on the
+    // read surfaces — instead of one building-wide lump that the owner ledger
+    // dumped entirely on the sole identified owner (MONEY BUG: ΔΟΚΙΜΗ ΒΗΤΑ,
+    // 50%/100% mixed, billed the full €100 instead of her real per-unit share).
+    // Σ(per-unit shares) === the entered amount (computeBuildingChargeForProperty
+    // is the same conserving allocator the tenant charges use). Recorded
+    // καταβολές are carried forward per-unit; a legacy building-wide row's
+    // payments are re-applied to the unit rows largest-share-first so no money
+    // is lost on the one-time migration.
+    const arr = (building as any).ownerMonthlyExpenses;
     for (const entry of ownerExpenses) {
       if (!entry.amount || entry.amount <= 0) continue;
-      const carried = carryOwnerPayments(
-        priorExpenseSettle.get(String(entry.expenseId))
+      const buildingExpense = (building as any).expenses.id(entry.expenseId);
+      const allocationMethod =
+        entry.allocationMethod ||
+        buildingExpense?.allocationMethod ||
+        'equal';
+      const description =
+        entry.description || buildingExpense?.name || 'Building charge';
+      // Per-unit shares of the entered owner amount — split per MANAGED UNIT
+      // (NOT tenant party; fixed→equal); Σ === entry.amount (helper snaps).
+      // customAllocations threaded so custom_ratio/custom_percentage/single_unit
+      // allocate per-unit instead of returning empty (Step-7 r2 #2/#6).
+      const perUnit = _allocateOwnerAmountPerUnit(
+        buildingPlainNoGroups,
+        Number(entry.amount),
+        allocationMethod,
+        Number(term),
+        buildingExpense?.customAllocations
       );
-      const arr = (building as any).ownerMonthlyExpenses;
+      // FALLBACK (Step-7 r2 #2): if the owner amount still can't be allocated
+      // per-unit (no managed units / a custom expense with no usable
+      // customAllocations), DON'T `continue` — that would drop the prior row's
+      // recorded καταβολή (already stripped above) with no reattach. Emit ONE
+      // building-wide source:'expense' row carrying the legacy payment so the
+      // money survives (mirrors the owner-fixed loop's fallback).
+      if (perUnit.length === 0) {
+        const legacyFb = priorBuildingWide.get(String(entry.expenseId));
+        const carriedFb = carryOwnerPayments(legacyFb);
+        arr.push({
+          expenseId: entry.expenseId,
+          term: Number(term),
+          amount: Math.round(Number(entry.amount) * 100) / 100,
+          propertyId: null,
+          description,
+          source: 'expense',
+          payments: carriedFb.payments
+        });
+        applyCarriedSettlement(arr[arr.length - 1], carriedFb);
+        continue;
+      }
+      // Migrate a legacy building-wide row's recorded payments onto the new
+      // per-unit rows, largest share first, so the total preserved === what was
+      // recorded (no money lost when an old lump row is split).
+      const legacy = priorBuildingWide.get(String(entry.expenseId));
+      const legacyCarried = legacy ? carryOwnerPayments(legacy) : null;
+      const migrationPayments = legacyCarried
+        ? [...legacyCarried.payments]
+        : [];
+      // ORPHAN-FLOW (Step-7 r6 #4 — parity with the owner-fixed loop): a prior
+      // per-unit 'expense' row whose unit LEFT the new allocation (single_unit/
+      // custom retarget, equal share → 0) must FLOW its payment onto the new
+      // target unit — but ONLY if the payer owns a surviving target unit. A
+      // foreign-tagged payment stays in priorExpenseSettle and the reattach-
+      // orphans pass below re-attaches it as a credit on its OWN unit (so it is
+      // never mis-credited to another owner — CRITICAL r6 #1 parity).
+      {
+        const newPidSet = new Set(perUnit.map((p) => p.propertyId));
+        const unitByPid = new Map<string, any>(
+          (units || [])
+            .filter((u: any) => u.propertyId)
+            .map((u: any) => [String(u.propertyId), u])
+        );
+        const targetOwnerKeys = new Set<string>();
+        for (const pid of newPidSet) {
+          for (const o of (unitByPid.get(pid)?.owners || []) as any[]) {
+            const k = ownerKeyOf(o);
+            if (k) targetOwnerKeys.add(k);
+          }
+        }
+        const pfx = `${String(entry.expenseId)}|`;
+        for (const k of Array.from(priorExpenseSettle.keys())) {
+          if (!k.startsWith(pfx)) continue;
+          const pid = k.slice(pfx.length);
+          if (!pid || newPidSet.has(pid)) continue; // still-billed unit
+          const orphanRow = priorExpenseSettle.get(k);
+          const orphan = carryOwnerPayments(orphanRow);
+          if (!orphan.payments.length) continue;
+          const flowable = orphan.payments.every(
+            (p: any) => !p.ownerKey || targetOwnerKeys.has(String(p.ownerKey))
+          );
+          if (flowable) {
+            migrationPayments.push(...orphan.payments);
+            priorExpenseSettle.delete(k); // consumed → not double-reattached
+          }
+          // else: leave in priorExpenseSettle → reattach-orphans makes a credit.
+        }
+      }
+      // FIFO queue over the ORIGINAL payments (preserve each payment's
+      // ownerKey/date/type/reference — Step-7 r3 #4, r2 #11).
+      const legacyQueue = _makePaymentQueue(migrationPayments);
+      const legacyHadPayments = legacyQueue.remainingTotal() > 0.005;
+      // Bare manual-paid lump (paid=true, no payments) → carry the settled state
+      // onto the per-unit rows so a settled liability doesn't re-open (Step-7 r2
+      // #8/#9).
+      const legacyManualPaid =
+        !!(legacyCarried && legacyCarried.priorPaid) && !legacyHadPayments;
+      const ordered = [...perUnit].sort((a, b) => b.share - a.share);
+      for (const pu of ordered) {
+        // Carry this unit's OWN prior per-unit settlement first. MARK CONSUMED
+        // (delete from the map) so the reattach-orphans pass below can tell which
+        // prior paid rows the rebuild did NOT recreate (Step-7 r3 #2).
+        const _puKey = `${String(entry.expenseId)}|${pu.propertyId}`;
+        const _prior = priorExpenseSettle.get(_puKey);
+        if (_prior !== undefined) priorExpenseSettle.delete(_puKey);
+        const carried = carryOwnerPayments(_prior);
+        const payments = [...carried.payments];
+        // Then top up from the legacy lump queue, capped at this unit's free room.
+        const carriedSum = payments.reduce(
+          (s: number, p: any) => s + (Number(p.amount) || 0),
+          0
+        );
+        const room = Math.round((pu.share - carriedSum) * 100) / 100;
+        if (room > 0.005) payments.push(...legacyQueue.take(room));
+        arr.push({
+          expenseId: entry.expenseId,
+          term: Number(term),
+          amount: pu.share,
+          propertyId: pu.propertyId,
+          description,
+          source: 'expense',
+          payments
+        });
+        recomputeOwnerExpensePaid(arr[arr.length - 1]);
+        // Propagate a bare legacy manual-paid toggle (no payments) onto this row.
+        if (legacyManualPaid && payments.length === 0) {
+          arr[arr.length - 1].paid = true;
+          arr[arr.length - 1].paidDate =
+            legacyCarried.priorPaidDate || new Date();
+        }
+      }
+      // OVERPAY PRESERVATION (Step-7 #4): undrained legacy pool → a BUILDING-LEVEL
+      // standing overpayment (propertyId null) so it is counted as PAID yet never
+      // cross-nets a distinct liability / mis-credits a unit (Step-7 r3 #1/#5/#6).
+      // Keeps the ORIGINAL payments verbatim (each with its own ownerKey/date).
+      const leftover = legacyQueue.remaining();
+      if (leftover.length > 0) {
+        arr.push({
+          expenseId: entry.expenseId,
+          term: Number(term),
+          amount: 0,
+          propertyId: null,
+          description,
+          source: 'credit',
+          payments: leftover
+        });
+        recomputeOwnerExpensePaid(arr[arr.length - 1]);
+      }
+    }
+    // REATTACH ORPHANS (Step-7 r3 #2): any prior per-unit source:'expense' row
+    // that the rebuild did NOT recreate (its unit left the new allocation — a
+    // single_unit target changed, an equal share went to 0, the unit was
+    // unlinked) was deleted by the strip above and never carried forward. If it
+    // held recorded καταβολές, that money would VANISH (owner payments live only
+    // in these subdocs). Re-attach each un-consumed paid prior row as a
+    // source:'credit' row (amount 0, payments kept) — NOT amount=paidSum
+    // (Step-7 r4 #4): a remnant carrying its old amount would add a PHANTOM owed
+    // line, inflating the gross owner-eksoda above the real expense when the
+    // method merely changed. A credit is counted as PAID (addOwed(0) no-op),
+    // so the recorded money survives without re-opening a liability. (Zero-
+    // payment orphans are safe to drop.)
+    for (const prior of priorExpenseSettle.values()) {
+      const carried = carryOwnerPayments(prior);
+      const paidSum = carried.payments.reduce(
+        (s: number, p: any) => s + (Number(p.amount) || 0),
+        0
+      );
+      if (paidSum <= 0.005) continue;
       arr.push({
-        expenseId: entry.expenseId,
+        expenseId: prior.expenseId,
         term: Number(term),
-        amount: entry.amount,
-        description: entry.description || '',
-        source: 'expense',
+        amount: 0,
+        propertyId: prior.propertyId || null,
+        description: prior.description || '',
+        source: 'credit',
         payments: carried.payments
       });
-      applyCarriedSettlement(arr[arr.length - 1], carried);
+      recomputeOwnerExpensePaid(arr[arr.length - 1]);
     }
   }
 
@@ -4829,8 +5224,18 @@ export async function _recomputeVacantOwnerCharges(
   // finding). Keyed by expenseId+propertyId+term — the natural identity of a
   // recomputed row (the _id is regenerated on rebuild). Covers BOTH the vacant
   // and owner-fixed sources this function owns.
+  // Source-GROUP-qualified key (Step-7 #5): now that owner-fixed rows carry a
+  // propertyId, an expense that is BOTH trackOwnerExpense (owner-fixed) AND
+  // chargeOwnerWhenVacant (vacant) produces TWO rows at the same expenseId|pid|
+  // term — an un-qualified key would collide and one source's recorded καταβολή
+  // would be dropped. Group owner-fixed in its OWN namespace; keep vacant +
+  // owner-resident SHARING a namespace (a vacant↔owner-resident occupancy flip
+  // is the SAME money and must carry across the transition).
+  const settleGroup = (src: string) => (src === 'owner-fixed' ? 'fx' : 'vr');
   const settleKey = (e: any) =>
-    `${String(e.expenseId)}|${String(e.propertyId || '')}|${Number(e.term)}`;
+    `${settleGroup(e.source || '')}|${String(e.expenseId)}|${String(
+      e.propertyId || ''
+    )}|${Number(e.term)}`;
   const priorSettle = new Map<string, any>();
   for (const e of (building.ownerMonthlyExpenses || []) as any[]) {
     if (
@@ -4868,24 +5273,35 @@ export async function _recomputeVacantOwnerCharges(
       );
       if (paidSum <= 0) continue; // nothing recorded → safe to drop
       const arr = building.ownerMonthlyExpenses;
+      // An OWNER-FIXED orphan (a unit that left the per-unit allocation because
+      // the expense's allocationMethod changed) is different from a vacant/
+      // owner-resident orphan: the owner AMOUNT it carried is STILL owed — it has
+      // been re-materialised on the OTHER units this run. Re-attaching its paidSum
+      // as a settled remnant (amount=paidSum) would DOUBLE-count the gross owed
+      // (the euro is owed on the new units AND as this remnant), inflating the
+      // owner-eksoda above the real expense (Step-7 r4 #4). So an owner-fixed
+      // orphan becomes a pure source:'credit' (amount 0) — the recorded money is
+      // preserved as an overpayment, never re-asserting a liability.
+      //
+      // A vacant/owner-resident orphan (flag off / unit occupied / inactive) is
+      // NOT re-billed anywhere else, so it stays a SETTLED REMNANT: amount
+      // collapses to paidSum → owed === paid, outstanding 0 (carrying the full
+      // prior amount created a phantom residual, Step-7-r2 B2/B5).
+      const isOwnerFixed = (prior.source || '') === 'owner-fixed';
       arr.push({
         expenseId: prior.expenseId,
         term,
-        // SETTLED REMNANT: the row is no longer actively billed (flag off /
-        // unit occupied / inactive), so it must NOT assert the old liability —
-        // its amount collapses to what was actually paid so owed === paid and
-        // outstanding === 0 on EVERY surface (eksoda caps paid to amount; the
-        // ledger + statement compute amount−paid). Carrying the full prior
-        // amount created a phantom residual / negative-outstanding split across
-        // surfaces (Step-7-r2 B2/B5). The recorded καταβολή is preserved; only
-        // the dead owed-basis is dropped.
-        amount: Math.round(paidSum * 100) / 100,
+        amount: isOwnerFixed ? 0 : Math.round(paidSum * 100) / 100,
         propertyId: prior.propertyId || null,
-        source: prior.source,
+        source: isOwnerFixed ? 'credit' : prior.source,
         description: prior.description || '',
         payments: carried.payments
       });
-      applyCarriedSettlement(arr[arr.length - 1], carried);
+      if (isOwnerFixed) {
+        recomputeOwnerExpensePaid(arr[arr.length - 1]);
+      } else {
+        applyCarriedSettlement(arr[arr.length - 1], carried);
+      }
       // mark consumed so a second exit-call cannot double-attach.
       priorSettle.delete(settleKey(prior));
     }
@@ -4903,22 +5319,194 @@ export async function _recomputeVacantOwnerCharges(
   );
   for (const e of stale) building.ownerMonthlyExpenses.pull(e._id);
 
-  // Materialise the fixed owner-only amount rows (independent of vacancy).
+  // Plain snapshot + tenant-group attach — needed by BOTH the owner-fixed
+  // per-unit allocation (immediately below) and the vacant/owner-resident loop
+  // further down. Hoisted above the owner-fixed loop because the fixed owner
+  // amount is now split PER-UNIT by the expense's allocationMethod, which needs
+  // the same equal-party divisor (active tenant-groups + vacant managed units)
+  // the tenant engine uses.
+  const buildingObj = building.toObject ? building.toObject() : building;
+  await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
+
+  // Materialise the fixed owner-only amount, allocated PER-UNIT by the expense's
+  // allocationMethod (the SAME engine the tenant side + the variable owner-amount
+  // path use), so each unit's share is attributed to THAT unit's owner(s) by
+  // their declared % on the read surfaces — instead of one building-wide lump
+  // that the owner ledger dumped entirely on the sole identified owner (MONEY
+  // BUG: ΔΟΚΙΜΗ ΒΗΤΑ, owner of 50% on some units / 100% on others, was
+  // billed the full €100 owner-water amount instead of her per-unit share).
+  // Σ(per-unit shares) === ownerAmount (computeBuildingChargeForProperty is the
+  // conserving allocator). Recorded καταβολές are carried per-unit; a legacy
+  // building-wide owner-fixed row's payments are re-applied to the unit rows
+  // largest-share-first so no money is lost on the one-time migration. The
+  // owner-fixed amount is owner-only (NEVER billed to a tenant), so a per-unit
+  // row is kept even when the unit is occupied — no tenant-rent double-count.
   for (const expense of ownerFixedExpenses) {
-    const carried = carryOwnerPayments(
-      consume(`${String(expense._id)}||${term}`)
+    const ownerAmount = Math.round(Number(expense.ownerAmount) * 100) / 100;
+    if (!(ownerAmount > 0)) continue;
+    // Per-unit shares of the OWNER amount — split per MANAGED UNIT (NOT tenant
+    // party; fixed→equal; Σ === ownerAmount via the helper's snap). See
+    // _allocateOwnerAmountPerUnit for why the tenant equal-allocator is wrong
+    // for owner money (Step-7 #1/#2/#6/#10/#12). buildingObj carries
+    // _tenantGroups (needed by the vacant loop below); the helper ignores them
+    // for equal/fixed and the no-groups property is irrelevant for
+    // thousandths/surface (full-denominator, occupancy-independent).
+    const perUnit = _allocateOwnerAmountPerUnit(
+      buildingObj,
+      ownerAmount,
+      expense.allocationMethod || 'equal',
+      term,
+      expense.customAllocations
     );
     const arr = building.ownerMonthlyExpenses;
-    arr.push({
-      expenseId: String(expense._id),
-      term,
-      amount: Math.round(Number(expense.ownerAmount) * 100) / 100,
-      propertyId: null,
-      source: 'owner-fixed',
-      description: expense.name || '',
-      payments: carried.payments
-    });
-    applyCarriedSettlement(arr[arr.length - 1], carried);
+    if (perUnit.length === 0) {
+      // No resolvable per-unit share (no managed units / zero divisor): fall
+      // back to a single building-wide row so the owner amount is not lost.
+      const carried = carryOwnerPayments(
+        consume(`fx|${String(expense._id)}||${term}`)
+      );
+      arr.push({
+        expenseId: String(expense._id),
+        term,
+        amount: ownerAmount,
+        propertyId: null,
+        source: 'owner-fixed',
+        description: expense.name || '',
+        payments: carried.payments
+      });
+      applyCarriedSettlement(arr[arr.length - 1], carried);
+      continue;
+    }
+    // Migration payment pool = the legacy building-wide lump's payments PLUS any
+    // ORPHANED per-unit owner-fixed prior payments — a per-unit row whose unit is
+    // NO LONGER in the new allocation (a single_unit/custom RETARGET, or an equal
+    // share that went to 0). Those payments must FLOW ONTO the new target units
+    // (Step-7 r5 #1/#3): stranding them as a credit on the OLD unit made the
+    // ledger/PDF (per-propertyId net) disagree with the dashboard (term-level
+    // net) — the owner saw €0 owed on one surface and €100 on another for money
+    // she already paid. Routing the payment to the live liability keeps all four
+    // surfaces in lockstep. Units STILL in the allocation keep their OWN prior
+    // (consumed inside the loop below), so only genuinely-orphaned payments pool.
+    const legacyCarried = carryOwnerPayments(
+      consume(`fx|${String(expense._id)}||${term}`)
+    );
+    const migrationPayments = [...legacyCarried.payments];
+    const newPidSet = new Set(perUnit.map((p) => p.propertyId));
+    // Owner-key set across ALL surviving target units — an orphaned payment may
+    // ONLY flow onto the new units if its payer OWNS one of them (Step-7 r6 #1).
+    const arrFx = building.ownerMonthlyExpenses;
+    const unitByPidFx = new Map<string, any>(
+      (building.units || [])
+        .filter((u: any) => u.propertyId)
+        .map((u: any) => [String(u.propertyId), u])
+    );
+    const targetOwnerKeys = new Set<string>();
+    for (const pid of newPidSet) {
+      const u = unitByPidFx.get(pid);
+      for (const o of (u?.owners || []) as any[]) {
+        const k = ownerKeyOf(o);
+        if (k) targetOwnerKeys.add(k);
+      }
+    }
+    const fxPrefix = `fx|${String(expense._id)}|`;
+    const fxSuffix = `|${term}`;
+    for (const k of Array.from(priorSettle.keys())) {
+      if (!k.startsWith(fxPrefix) || !k.endsWith(fxSuffix)) continue;
+      const pid = k.slice(fxPrefix.length, k.length - fxSuffix.length);
+      if (!pid || newPidSet.has(pid)) continue; // building-wide / still-billed
+      const orphan = carryOwnerPayments(consume(k));
+      if (!orphan.payments.length) continue;
+      // Route the orphan's payments ONTO the new units ONLY if every payment's
+      // payer owns a surviving target unit (the single-owner retarget the r5 fix
+      // targets). A FOREIGN-tagged payment (a DIFFERENT co-owner paid the old
+      // unit) must NOT land on another owner's unit (CRITICAL r6 #1: it would
+      // credit the wrong owner and erase the real payer's money). Re-attach those
+      // as a source:'credit' row on the orphan's OWN propertyId, preserving the
+      // payer's ownerKey — mirrors saveMonthlyStatement's reattach-orphans.
+      const flowable = orphan.payments.every(
+        (p: any) => !p.ownerKey || targetOwnerKeys.has(String(p.ownerKey))
+      );
+      if (flowable) {
+        migrationPayments.push(...orphan.payments);
+      } else {
+        arrFx.push({
+          expenseId: String(expense._id),
+          term,
+          amount: 0,
+          propertyId: pid,
+          source: 'credit',
+          description: expense.name || '',
+          payments: orphan.payments
+        });
+        recomputeOwnerExpensePaid(arrFx[arrFx.length - 1]);
+      }
+    }
+    // FIFO queue over the ORIGINAL payments — preserves each payment's own
+    // ownerKey/date/type/reference as it drains onto per-unit rows (Step-7 r3 #4:
+    // don't collapse two co-owners' tagged payments onto one key).
+    const legacyQueue = _makePaymentQueue(migrationPayments);
+    const legacyHadPayments = legacyQueue.remainingTotal() > 0.005;
+    // A BARE manual-paid lump (setOwnerExpensePaid: paid=true, EMPTY payments)
+    // must carry its settled state onto the per-unit rows, else a settled
+    // liability silently RE-OPENS on the next recompute (Step-7 r2 #8/#9).
+    const legacyManualPaid = legacyCarried.priorPaid && !legacyHadPayments;
+    const ordered = [...perUnit].sort((a, b) => b.share - a.share);
+    for (const pu of ordered) {
+      // This unit's OWN prior per-unit owner-fixed settlement first (fx| group).
+      const carried = carryOwnerPayments(
+        consume(`fx|${String(expense._id)}|${pu.propertyId}|${term}`)
+      );
+      const payments = [...carried.payments];
+      // Then top up from the legacy lump queue, capped at this unit's free room,
+      // drawing ORIGINAL payments (tagged ownerKey/date preserved).
+      const carriedSum = payments.reduce(
+        (s: number, p: any) => s + (Number(p.amount) || 0),
+        0
+      );
+      const room = Math.round((pu.share - carriedSum) * 100) / 100;
+      if (room > 0.005) payments.push(...legacyQueue.take(room));
+      arr.push({
+        expenseId: String(expense._id),
+        term,
+        amount: pu.share,
+        propertyId: pu.propertyId,
+        source: 'owner-fixed',
+        description: expense.name || '',
+        payments
+      });
+      // applyCarriedSettlement: derives paid from payments vs the new per-unit
+      // amount when payments exist; preserves a manual paid toggle only when
+      // the per-unit amount is unchanged (mirrors the original owner-fixed row).
+      applyCarriedSettlement(arr[arr.length - 1], carried);
+      // Propagate a bare legacy manual-paid toggle (no payments) onto this
+      // per-unit row (applyCarriedSettlement only saw the empty per-unit prior).
+      if (legacyManualPaid && payments.length === 0) {
+        arr[arr.length - 1].paid = true;
+        arr[arr.length - 1].paidDate =
+          legacyCarried.priorPaidDate || new Date();
+      }
+    }
+    // OVERPAY PRESERVATION (Step-7 #4): an undrained legacy pool is a genuine
+    // BUILDING-LEVEL standing overpayment (the per-unit rows above are already
+    // filled to their full share). Preserve it as a source:'credit' row with
+    // propertyId:null (Step-7 r3 #1/#5/#6) — counted as paid, standing alone in
+    // its netting group so it never cross-nets a distinct vacant/owner-resident
+    // liability, never mis-credits a unit's owner, and matches the dashboard's
+    // term-level pool. The undrained ORIGINAL payments are kept verbatim (each
+    // with its own ownerKey/date), so multi-co-owner attribution survives.
+    const leftover = legacyQueue.remaining();
+    if (leftover.length > 0) {
+      arr.push({
+        expenseId: String(expense._id),
+        term,
+        amount: 0,
+        propertyId: null,
+        source: 'credit',
+        description: expense.name || '',
+        payments: leftover
+      });
+      recomputeOwnerExpensePaid(arr[arr.length - 1]);
+    }
   }
 
   // Owner-occupied units (the OWNER lives there). Their building-expense share
@@ -4957,8 +5545,8 @@ export async function _recomputeVacantOwnerCharges(
   // For each active expense, write each non-tenant unit's share to the owner —
   // 'owner-resident' for an owner-occupied unit (flag-independent), 'vacant'
   // for a truly-empty unit (only when the expense opts in via the flag).
-  const buildingObj = building.toObject ? building.toObject() : building;
-  await _attachTenantGroupsToBuildings(realmId, [buildingObj]);
+  // (buildingObj / _tenantGroups already prepared above for the owner-fixed
+  // per-unit allocation; reuse it.)
   // Include FIXED-allocation expenses even when top-level amount===0: their
   // real per-unit cost lives in customAllocations
   // (computeBuildingChargeForProperty returns the per-unit value), so a vacant
@@ -5010,8 +5598,11 @@ export async function _recomputeVacantOwnerCharges(
         );
       }
       if (share <= 0) continue;
+      // vr| group (vacant + owner-resident share a namespace so an occupancy
+      // flip carries the recorded payment; distinct from the fx| owner-fixed
+      // namespace — Step-7 #5).
       const carried = carryOwnerPayments(
-        consume(`${String(expense._id)}|${String(unit.propertyId)}|${term}`)
+        consume(`vr|${String(expense._id)}|${String(unit.propertyId)}|${term}`)
       );
       const arr = building.ownerMonthlyExpenses;
       arr.push({
@@ -5390,6 +5981,15 @@ export async function computeOwnerEksodaByMonth(
   const covered = new Set<string>();
   const covKey = (expenseId: any, propertyId: any, term: number) =>
     `${String(expenseId)}|${propertyId ? String(propertyId) : ''}|${term}`;
+  // owner-fixed is now materialised PER-UNIT (each row carries a propertyId),
+  // so the building-wide null cov-key the gap-fill used to check is never set.
+  // Track which (expenseId, term) pairs have ANY materialised owner-fixed row
+  // so the owner-fixed gap-fill below skips an already-materialised expense
+  // regardless of how many per-unit rows it produced (else the full ownerAmount
+  // is re-added on top of the per-unit rows — a double-count).
+  const ownerFixedMaterialised = new Set<string>();
+  const ownerFixedKey = (expenseId: any, term: number) =>
+    `${String(expenseId)}|${term}`;
 
   // STALE-VACANT GUARD (mirrors getBuildingExpenseBreakdown's read-time guard,
   // 2335-2361). The vacant/repair-vacant recompute only re-derives the CURRENT
@@ -5476,26 +6076,40 @@ export async function computeOwnerEksodaByMonth(
         }
       }
     }
-    covered.add(covKey(row.expenseId, row.propertyId, term));
-    // Materialised row → owed AND paid from the same amount basis. paid is
-    // CLAMPED to the row amount (an over-paid row — owner overpaid a repair then
-    // a transition reduced its owner-portion — contributes owed===paid===amount,
-    // outstanding 0; the surplus stays in payments[] without inflating owed or
-    // going negative).
+    // owner-fixed coverage lives in its OWN namespace (ownerFixedMaterialised),
+    // NOT the shared `covered` set (Step-7 #8/#13). A per-unit owner-fixed row
+    // now carries a propertyId, so adding it to `covered` under
+    // covKey(expenseId|propertyId|term) would collide with — and wrongly
+    // suppress — the DISTINCT owner-resident/vacant building-expense gap-fill for
+    // the SAME (expenseId, propertyId, term). Those are two different liabilities
+    // (the fixed owner-only amount vs the tenant-amount share routed to the
+    // owner). So owner-fixed rows ONLY mark ownerFixedMaterialised (which gates
+    // the owner-fixed gap-fill); every other source uses the shared `covered`.
+    if (row.source === 'owner-fixed') {
+      ownerFixedMaterialised.add(ownerFixedKey(row.expenseId, term));
+    } else {
+      covered.add(covKey(row.expenseId, row.propertyId, term));
+    }
+    // Materialised row → owed AND paid. The PAID figure MUST match the ledger
+    // (_aggregateOwners) and the legal PDF (buildOwnerStatement), which both
+    // count the FULL recorded payment with NO Math.min(...,amount) clamp and
+    // floor outstanding at 0 (Step-7 #3/#7/#14). The dashboard previously clamped
+    // paid to the row amount → an over-paid row (owner paid the full share, then
+    // ownerAmount was reduced) showed paid=amount here but paid=full on the
+    // ledger/PDF — a cross-surface disagreement (Step-7 r6 #2/#3). Count the full
+    // recorded payment; the dashboard bridge floors notPaid at max(0, owed−paid)
+    // so an over-payment never goes negative. (fromFlag covers a bare manual
+    // paid:true with no payments[].)
     addOwed(term, amount);
     const fromPayments = ((row.payments || []) as any[]).reduce(
       (s, p) => s + (Number(p.amount) || 0),
       0
     );
     const fromFlag = row.paid ? amount : 0;
-    // A delete-time 'credit' row has amount=0 but carries preserved payments;
-    // the normal min(...,amount) clamp would zero them. For 'credit', count the
-    // recorded payments verbatim (it adds PAID without owed — addOwed(0) above
-    // is a no-op — so it can't inflate owed or go negative).
     const rowPaid =
       row.source === 'credit'
         ? fromPayments
-        : Math.min(Math.max(fromPayments, fromFlag), amount);
+        : Math.max(fromPayments, fromFlag);
     addPaid(term, rowPaid);
     // breakdown line: category from source (repair → 'repair', else the
     // source expense's schema type), owner from the row's unit (vacant /
@@ -5539,10 +6153,17 @@ export async function computeOwnerEksodaByMonth(
     const term = Number(
       moment.utc(`${mm}/${year}`, 'MM/YYYY').format('YYYYMMDDHH')
     );
-    // owner-fixed: the fixed owner-only amount for each active expense.
+    // owner-fixed: the fixed owner-only amount for each active expense. The
+    // amount is materialised PER-UNIT now (each row carries a propertyId), so
+    // check BOTH the legacy building-wide null cov-key AND the per-(expense,
+    // term) materialised set — skip the gap-fill when EITHER says the expense
+    // is already materialised this term (else the full ownerAmount is re-added
+    // on top of the per-unit rows). The gap-fill only fires for legacy/pre-
+    // feature data with no materialised owner-fixed row at all.
     for (const e of ownerFixed) {
       if (!isExpenseActiveForTerm(e, term)) continue;
-      if (covered.has(covKey(e._id, null, term))) continue; // materialised
+      if (covered.has(covKey(e._id, null, term))) continue; // legacy lump
+      if (ownerFixedMaterialised.has(ownerFixedKey(e._id, term))) continue; // per-unit
       const fixedAmt = Math.round(Number(e.ownerAmount) * 100) / 100;
       addOwed(term, fixedAmt);
       addDetail(term, buildingOwnerName, e.type || 'other', e.name || '', fixedAmt, 0);

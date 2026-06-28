@@ -111,8 +111,13 @@ describe('buildOwnerStatement', () => {
     expect(st.charges[0].amount).toBe(20);
   });
 
-  it('does NOT attribute a co-owned charge to the non-canonical owner', () => {
-    // Two owners on the unit; canonical (lex-first by ownerKey) gets the charge.
+  it('bills EACH co-owner their OWN slice on a co-owned charge (mirrors the ledger)', () => {
+    // Two co-owners on the unit, no declared % → equal split €15/€15. The PDF
+    // statement MUST mirror the on-screen ledger (_aggregateOwners), which gives
+    // each co-owner their own slice — NOT attribute the whole charge to the
+    // lex-first owner and drop the other's statement (Step-7 #9/#11/#16: the old
+    // canonical-only behaviour made a non-canonical co-owner's legal PDF omit
+    // their slice while their ledger showed it).
     const a = { name: 'AAA', taxId: '1' };
     const z = { name: 'ZZZ', taxId: '2' };
     const buildings = [
@@ -128,11 +133,14 @@ describe('buildOwnerStatement', () => {
     ];
     const keyA = ownerKeyOf(a);
     const keyZ = ownerKeyOf(z);
-    const canonical = [keyA, keyZ].sort()[0];
-    const stCanonical = buildOwnerStatement(buildings, canonical, []);
-    const stOther = buildOwnerStatement(buildings, canonical === keyA ? keyZ : keyA, []);
-    expect(stCanonical.charges).toHaveLength(1); // counted once on canonical
-    expect(stOther.charges).toHaveLength(0); // NOT double-counted on the other
+    const stA = buildOwnerStatement(buildings, keyA, []);
+    const stZ = buildOwnerStatement(buildings, keyZ, []);
+    // Each owner's statement carries their OWN €15 slice — not €30 on one, €0
+    // on the other. Σ of the two statements === the €30 charge (conserved).
+    expect(stA.charges).toHaveLength(1);
+    expect(stZ.charges).toHaveLength(1);
+    expect(stA.charges[0].amount).toBeCloseTo(15, 2);
+    expect(stZ.charges[0].amount).toBeCloseTo(15, 2);
   });
 
   it('returns null owner + empty charges for an unknown ownerKey', () => {
