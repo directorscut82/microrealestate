@@ -879,19 +879,33 @@ function lineLabel(t, it) {
 // («9,09 € × 50% = 4,55 €») and that owner's € — the user's directive: no name
 // in the header, the breakdown spelled out per owner. A vacant-share line shows
 // a ΚΕΝΟ pill. `tone` alternates the unit-block background.
-function UnitRows({ header, total, items, tone, gap, t, formatNumber }) {
-  // ONE uniform 1px border on EVERY cell — no exceptions. The previous version
-  // mixed border-t-2 / opacity borders (/60) / border-b-0 / spacer rows, which
-  // under border-collapse merged into UNEVEN, doubled hairlines (the "weird
-  // thick spots" the user saw). A single consistent border + per-block
-  // background tone (the `tone` prop) gives a clean readable grid with zero
-  // doubling. All information stays — purely how the cells are drawn.
+function UnitRows({ header, total, items, tone, gap, seq, t, formatNumber }) {
+  // ONE uniform 1px border on EVERY cell — no exceptions. (The earlier version
+  // mixed border widths / opacity / border-b-0 under border-collapse → uneven
+  // doubled hairlines.) Unit separation (user-selected variant 7): a numbered
+  // chip on the unit header + a bare gap-band row between consecutive units.
+  // The gap <td> spans all 3 columns with NO border, so it can't double a
+  // hairline. All information stays — purely presentation.
   const cell = 'border border-stone-line px-3 py-2 align-top';
-  void gap; // block separation is by background tone now, not a spacer row
   return (
     <>
+      {/* Gap band between consecutive units so each μονάδα reads as its own
+          block. Background-tone fill, no side borders (avoids hairline doubling). */}
+      {gap && (
+        <tr aria-hidden="true">
+          <td colSpan={3} className="h-2.5 bg-cream border-x-0 border-y border-stone-line p-0" />
+        </tr>
+      )}
       <tr className={tone}>
         <td className={cn(cell, 'font-semibold text-ink')} colSpan={2}>
+          {Number.isFinite(seq) && (
+            <span
+              className="mr-2.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-[5px] bg-marble px-1 text-label font-semibold text-bone align-middle tabular-nums"
+              aria-hidden="true"
+            >
+              {seq}
+            </span>
+          )}
           {header}
         </td>
         <td className={cn(cell, 'text-right tabular-nums font-semibold text-ink whitespace-nowrap')}>
@@ -1149,6 +1163,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             <UnitRows
               key={`p-${gi}`}
               gap={gi > 0}
+              seq={gi + 1}
               tone={gi % 2 ? 'bg-cream' : 'bg-bone'}
               header={
                 <>
@@ -1183,6 +1198,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
             <UnitRows
               key={`og-${gi}`}
               gap={gi > 0}
+              seq={gi + 1}
               tone={gi % 2 ? 'bg-cream' : 'bg-bone'}
               header={
                 g.propertyId ? (
@@ -1246,6 +1262,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               <UnitRows
                 key={`vg-${gi}`}
                 gap={gi > 0}
+                seq={gi + 1}
                 tone="bg-oxide-tint/40"
                 header={
                   <>
