@@ -282,10 +282,10 @@ export default function BuildingDashboard({ building }) {
     if (paid >= owed - 0.005 && owed > 0) {
       return { key: 'paid', label: t('Paid'), variant: 'paid' };
     }
-    // time check: has the charge term / completion date passed?
-    const term = Number(repair.completionDate
-      ? moment(repair.completionDate).format('YYYYMM')
-      : String(repair.chargeTerm || '').slice(0, 6));
+    // Overdue = the BILLING month (chargeTerm) has passed. Billing keys solely
+    // off chargeTerm (server), so the badge must too — not completionDate (a
+    // cosmetic field that diverged the badge from the actual charge month).
+    const term = Number(String(repair.chargeTerm || '').slice(0, 6));
     const nowYM = Number(moment().format('YYYYMM'));
     const overdue = term > 0 && term < nowYM;
     return overdue
@@ -844,7 +844,11 @@ export default function BuildingDashboard({ building }) {
         <SectionLabel>
           {t('Annual projection')} {new Date().getFullYear()}
         </SectionLabel>
-        <div className="mt-3 max-w-xl space-y-1.5">
+        {/* Figures on the LEFT, the explanatory caption on the RIGHT — fills the
+            empty right space the figures block left behind (user request). On
+            narrow screens they stack. */}
+        <div className="mt-3 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="w-full max-w-md space-y-1.5">
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-body text-ink-soft">{t('Income')}</span>
             {/* Income is a routine gross projection, NOT a credit — render ink.
@@ -882,14 +886,15 @@ export default function BuildingDashboard({ building }) {
             </span>
           </div>
         </div>
-        <p className="text-body text-ink-muted mt-3 max-w-prose">
-          {/* A1/A5: pure annual projection; only OWNER expenses are subtracted
-              from Net (pass-through κοινόχρηστα/tenant repairs are the tenants'
-              money). */}
+        {/* Caption on the RIGHT (was full-width below, leaving a big empty right
+            gap beside the figures). A1/A5: pure annual projection; only OWNER
+            expenses are subtracted from Net. */}
+        <p className="text-body text-ink-muted md:max-w-xs md:text-right">
           {t(
             'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
           )}
         </p>
+        </div>
 
         {(finance.annualEksoda > 0 || finance.variableYtdEksoda > 0) && (
           /* H3: surface the who-pays breakdown when EITHER annualEksoda or the
@@ -902,14 +907,11 @@ export default function BuildingDashboard({ building }) {
             {/* ΕΝΟΙΚΙΑΣΤΕΣ — pass-through; not subtracted from Net. */}
             <div className="mb-3">
               <div className="text-label text-olive font-medium mb-1.5 normal-case tracking-normal">
-                {t('TENANTS')}{' '}
-                <span className="text-ink-muted font-normal">
-                  ({t('not subtracted from Net')})
-                </span>
+                {t('TENANTS')}
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                 <CompCell
-                  label={`${t('Fixed recurring')} ×12`}
+                  label={`${t('Fixed recurring short')} ×12`}
                   value={
                     <NumberFormat
                       value={finance.recurringMonthlyEksoda * 12}
@@ -918,7 +920,7 @@ export default function BuildingDashboard({ building }) {
                   }
                 />
                 <CompCell
-                  label={t('Variable (year to date)')}
+                  label={t('Variable short')}
                   value={
                     <NumberFormat value={finance.variableYtdEksoda} showZero />
                   }
@@ -937,10 +939,7 @@ export default function BuildingDashboard({ building }) {
             {/* ΙΔΙΟΚΤΗΤΕΣ — the only part subtracted from Net. */}
             <div>
               <div className="text-label text-oxide font-medium mb-1.5 normal-case tracking-normal">
-                {t('OWNERS')}{' '}
-                <span className="text-ink-muted font-normal">
-                  ({t('subtracted from Net')})
-                </span>
+                {t('OWNERS')}
               </div>
               {/* Owner cells: flex with capped width so a lone cell doesn't
                   stretch across 4 empty columns (mockup .comp.one). */}
@@ -985,7 +984,9 @@ export default function BuildingDashboard({ building }) {
         return (
           <Card className="p-5">
             <SectionLabel className="mb-3">
-              {t('Year to date')} {new Date().getFullYear()}
+              {t('From {{date}}', {
+                date: `01/01/${new Date().getFullYear()}`
+              })}
             </SectionLabel>
             <div className="space-y-4">
               {hasRent && (
@@ -1017,7 +1018,7 @@ export default function BuildingDashboard({ building }) {
               )}
               {hasOwner && (
                 <BarRow
-                  label={t('Owner expenses paid')}
+                  label={t('Owner expenses short')}
                   valueNode={
                     <>
                       <NumberFormat value={finance.ownerPaid} showZero />
@@ -1065,13 +1066,7 @@ export default function BuildingDashboard({ building }) {
         <Card className="p-5">
           <div className="flex items-start justify-between gap-4 mb-3">
             <div className="min-w-0 md:max-w-[62%]">
-              <SectionLabel>{t('Uncollected')}</SectionLabel>
-              <p className="text-body text-ink-muted mt-1.5">
-                {t(
-                  'Vacant-unit expense shares billed to nobody for {{year}}. Not a debt — coverage payments reduce it.',
-                  { year: new Date().getFullYear() }
-                )}
-              </p>
+              <SectionLabel>{t('Uncollected expenses short')}</SectionLabel>
             </div>
             {building.uncollected.outstanding > 0 && (
               <Button
@@ -1085,7 +1080,7 @@ export default function BuildingDashboard({ building }) {
             )}
           </div>
           <BarRow
-            label={t('Covered')}
+            label={t('Covered expenses short')}
             valueNode={
               <>
                 {/* Header must agree with the label + fill: Καλυμμένα = paidTotal
@@ -1106,7 +1101,7 @@ export default function BuildingDashboard({ building }) {
             fill="olive"
             footLeft={
               <>
-                {t('Covered')}:{' '}
+                {t('Covered expenses short')}:{' '}
                 <NumberFormat value={building.uncollected.paidTotal} showZero />
               </>
             }
@@ -1139,7 +1134,7 @@ export default function BuildingDashboard({ building }) {
             <span className="font-display text-headline">{t('Repairs')}</span>
             <div className="flex items-center gap-5 text-label text-ink-muted">
               <span>
-                {t('Open')}:{' '}
+                {t('Repairs new count')}:{' '}
                 <span className="font-medium text-ink">
                   {finance.repairStats.open}
                 </span>
@@ -1174,7 +1169,24 @@ export default function BuildingDashboard({ building }) {
                 {billed.map((r, i) => {
                   const cost = Number(r.actualCost || r.estimatedCost || 0);
                   const tp = r.tenantSharePercentage || 0;
-                  const chargeLabel =
+                  // Allocation-method label (Ισομερής / Γενικά Χιλιοστά …), same
+                  // keys ExpenseList uses, so the tile shows HOW the share splits
+                  // (user: tile needs «50/50 + the method»).
+                  const METHOD_LABEL = {
+                    general_thousandths: 'General Thousandths',
+                    heating_thousandths: 'Heating Thousandths',
+                    elevator_thousandths: 'Elevator Thousandths',
+                    equal: 'Equal',
+                    by_surface: 'By Surface',
+                    fixed: 'Fixed',
+                    custom_ratio: 'Custom Ratio',
+                    custom_percentage: 'Custom Percentage',
+                    single_unit: 'Single Unit'
+                  };
+                  const methodLabel = METHOD_LABEL[r.allocationMethod]
+                    ? t(METHOD_LABEL[r.allocationMethod])
+                    : '';
+                  const splitLabel =
                     r.chargeableTo === 'tenants'
                       ? t('Tenants')
                       : r.chargeableTo === 'owners'
@@ -1182,23 +1194,24 @@ export default function BuildingDashboard({ building }) {
                         : r.chargeableTo === 'split'
                           ? `${t('Tenants')} ${tp}% · ${t('Owners')} ${100 - tp}%`
                           : t('Unassigned');
-                  const startYM = r.chargeTerm
+                  const chargeLabel = methodLabel
+                    ? `${splitLabel} · ${methodLabel}`
+                    : splitLabel;
+                  // A repair bills to ONE month (chargeTerm). The old code glued
+                  // chargeTerm to completionDate as a «MM/YYYY – MM/YYYY» range,
+                  // which rendered BACKWARDS (06/2026 – 05/2026) and implied a
+                  // multi-month span that does not exist. Show only the charge
+                  // month. (completionDate is cosmetic; see the audit.)
+                  const termLabel = r.chargeTerm
                     ? `${String(r.chargeTerm).slice(4, 6)}/${String(r.chargeTerm).slice(0, 4)}`
                     : '';
-                  const endYM = r.completionDate
-                    ? moment(r.completionDate).format('MM/YYYY')
-                    : '';
-                  const termLabel =
-                    endYM && endYM !== startYM
-                      ? `${startYM} – ${endYM}`
-                      : startYM;
                   const work = _workStatusLabel(r.status);
                   const money = _repairMoneyBadge(r);
                   return (
                     <div
                       key={r._id || i}
                       className={cn(
-                        'py-2.5',
+                        'py-3.5',
                         i > 0 && 'border-t border-stone-line'
                       )}
                     >

@@ -996,6 +996,21 @@ export default function ExpenseList({ building, onAddRepair }) {
             <LuPlusCircle className="size-4" />
             {t('Add Expense')}
           </Button>
+          {/* "Add repair" sits IMMEDIATELY after "Add expense" (both are the
+              "add a charge" actions; repairs ARE expenses). It triggers
+              RepairList's dialog via the onAddRepair callback the page wires to
+              RepairList's ref. */}
+          {onAddRepair && (
+            <Button
+              variant="secondary"
+              className="gap-2"
+              onClick={onAddRepair}
+              data-cy="addRepair"
+            >
+              <LuPlusCircle className="size-4" />
+              {t('Add repair')}
+            </Button>
+          )}
           <Button
             variant="outline"
             className="gap-2"
@@ -1014,20 +1029,6 @@ export default function ExpenseList({ building, onAddRepair }) {
             <LuFileUp className="size-4" />
             {t('Payment Receipts')}
           </Button>
-          {/* "Add repair" lives in the SAME button row as the expense actions
-              (repairs ARE expenses). It triggers RepairList's dialog through
-              the onAddRepair callback the page wires to RepairList's ref. */}
-          {onAddRepair && (
-            <Button
-              variant="secondary"
-              className="gap-2"
-              onClick={onAddRepair}
-              data-cy="addRepair"
-            >
-              <LuPlusCircle className="size-4" />
-              {t('Add repair')}
-            </Button>
-          )}
         </div>
       </div>
 

@@ -255,9 +255,11 @@ function ExpenseRow({ row, value, onChange, onSave, saving, t }) {
           </Button>
         </div>
       ) : (
-        // Fixed-width money cell so read-only amounts align to the same right
-        // rail as the subtotals + breakdown figures (ledger alignment).
-        <span className="w-28 text-right tabular-nums font-medium whitespace-nowrap shrink-0">
+        // Per-EXPENSE line amount: SMALLER + regular weight + muted — it is
+        // secondary to the section subtotal (ΕΝΟΙΚΙΑΣΤΕΣ/ΙΔΙΟΚΤΗΤΕΣ), which is
+        // the bold/large figure to land on. Fixed-width so it aligns to the same
+        // right rail as the subtotals.
+        <span className="w-28 text-right tabular-nums text-xs font-normal text-ink-muted whitespace-nowrap shrink-0">
           <NumberFormat value={Number(row.amount || 0)} />
         </span>
       )}
@@ -556,11 +558,13 @@ export default function BuildingExpensePanel({ building }) {
         <div className="space-y-1">
           {tenantRows.length > 0 && (
             <>
-              <div className="flex items-baseline justify-between mb-1">
+              {/* Section subtotal: the LARGE/BOLD figure (the number to land on);
+                  per-expense line amounts below are smaller + muted. */}
+              <div className="flex items-baseline justify-between mb-1.5">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t('Tenants')}
                 </span>
-                <span className="w-28 text-right text-xs font-medium text-muted-foreground tabular-nums">
+                <span className="w-28 text-right text-base font-semibold text-ink tabular-nums">
                   <NumberFormat value={tenantTotal} />
                 </span>
               </div>
@@ -580,14 +584,14 @@ export default function BuildingExpensePanel({ building }) {
 
           {ownerRows.length > 0 && (
             <>
-              {/* whitespace, not a hairline — the uppercase subheader is enough
-                  of a delimiter (the user flagged "all those lines"). */}
-              {tenantRows.length > 0 && <div className="mt-4" />}
-              <div className="flex items-baseline justify-between mb-1">
+              {/* Larger whitespace between the ΕΝΟΙΚΙΑΣΤΕΣ and ΙΔΙΟΚΤΗΤΕΣ blocks
+                  so the two groups read as distinct (user request). */}
+              {tenantRows.length > 0 && <div className="mt-6" />}
+              <div className="flex items-baseline justify-between mb-1.5">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t('Owners')}
                 </span>
-                <span className="w-28 text-right text-xs font-medium text-muted-foreground tabular-nums">
+                <span className="w-28 text-right text-base font-semibold text-ink tabular-nums">
                   <NumberFormat value={ownerTotal} />
                 </span>
               </div>

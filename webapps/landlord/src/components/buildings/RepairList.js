@@ -98,14 +98,12 @@ const schema = z.object({
   // Tier I-3.c: subdocument _ids of building.units that this repair is
   // scoped to. Empty = applies to all units (legacy default).
   affectedUnitIds: z.array(z.string()).optional(),
-  reportedDate: z.string().optional(),
-  startDate: z.string().optional(),
+  // reportedDate / startDate / invoiceReference / notes removed: written +
+  // stored but read by nobody (audit) — dead fields.
   completionDate: z.string().optional(),
-  invoiceReference: z.string().optional(),
   // Tier I-3.d: storage key returned by /documents/upload after the
   // landlord attaches an invoice scan.
-  invoiceDocumentId: z.string().nullable().optional(),
-  notes: z.string().optional()
+  invoiceDocumentId: z.string().nullable().optional()
 }).superRefine((data, ctx) => {
   // A COMPLETED repair that is meant to be charged must carry both a
   // charge month AND a cost — otherwise _distributeRepairCharge silently
@@ -294,21 +292,13 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
         ? String(selectedRepair.chargeTerm)
         : getCurrentTerm(),
       contractorId: selectedRepair?.contractorId ?? '',
-      reportedDate: selectedRepair?.reportedDate
-        ? selectedRepair.reportedDate.substring(0, 10)
-        : new Date().toISOString().substring(0, 10),
-      startDate: selectedRepair?.startDate
-        ? selectedRepair.startDate.substring(0, 10)
-        : '',
       completionDate: selectedRepair?.completionDate
         ? selectedRepair.completionDate.substring(0, 10)
         : '',
-      invoiceReference: selectedRepair?.invoiceReference ?? '',
       invoiceDocumentId: selectedRepair?.invoiceDocumentId ?? null,
       affectedUnitIds: Array.isArray(selectedRepair?.affectedUnitIds)
         ? selectedRepair.affectedUnitIds
-        : [],
-      notes: selectedRepair?.notes ?? ''
+        : []
     }),
     [selectedRepair]
   );
@@ -924,31 +914,10 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
 
               <Separator />
 
+              {/* reportedDate + startDate inputs removed: both were written and
+                  stored but READ BY NOBODY (audit) — dead fields. Only the
+                  completion date is kept (it records when the work finished). */}
               <div className="sm:flex sm:gap-2">
-                <div className="space-y-2 flex-1">
-                  <Label htmlFor="reportedDate">{t('Reported date')}</Label>
-                  <Input
-                    id="reportedDate"
-                    type="date"
-                    {...register('reportedDate')}
-                  />
-                </div>
-
-                <div className="space-y-2 flex-1">
-                  {/* Tier I-3.e: keep the schema field name (startDate) but
-                      surface "Scheduled date" so the timeline reads
-                      reported -> scheduled -> completed. The Greek
-                      translation of "Start date" was clinically worse:
-                      "Ημερομηνία έναρξης" suggests work began, not that
-                      it was planned. */}
-                  <Label htmlFor="startDate">{t('Scheduled date')}</Label>
-                  <Input
-                    id="startDate"
-                    type="date"
-                    {...register('startDate')}
-                  />
-                </div>
-
                 <div className="space-y-2 flex-1">
                   <Label htmlFor="completionDate">
                     {t('Completed date')}
@@ -992,17 +961,9 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
               )}
 
               {/* §3: removed the 'Paid from repairs fund' Switch — AI-slop
-                  informational toggle that affected no computation. */}
-
-              <div className="space-y-2">
-                <Label htmlFor="invoiceReference">
-                  {t('Invoice reference')}
-                </Label>
-                <Input
-                  id="invoiceReference"
-                  {...register('invoiceReference')}
-                />
-              </div>
+                  informational toggle that affected no computation.
+                  invoiceReference text input removed: written + stored but read
+                  by nobody (audit). The invoice FILE upload below is wired. */}
 
               {/* Tier I-3.d: optional invoice scan. Uploads to the same
                   /documents/upload endpoint as the lease document attach
@@ -1139,10 +1100,8 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                 ) : null}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="notes">{t('Notes')}</Label>
-                <Textarea id="notes" {...register('notes')} rows={2} />
-              </div>
+              {/* notes textarea removed: written + stored but read by nobody
+                  (audit) — never displayed on any surface. */}
             </div>
           </form>
         )}
