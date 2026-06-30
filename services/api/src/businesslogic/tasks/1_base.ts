@@ -1,5 +1,5 @@
 import type { CollectionTypes } from '@microrealestate/types';
-import { logger, OwnerStatement } from '@microrealestate/common';
+import { logger, OwnerStatement, ShareBasis as ShareBasisUtil } from '@microrealestate/common';
 import moment from 'moment';
 
 export interface Contract {
@@ -112,140 +112,13 @@ export type ExpenseBreakdownRow = {
 // frontend renders it via i18n (the old free-text string leaked English
 // words like "units" into the Greek UI). `kind` selects the template;
 // `share`/`whole`/`part`/`total` fill its numbers.
-export type ShareBasis = {
-  kind:
-    | 'equal'
-    | 'surface'
-    | 'thousandths'
-    | 'fixed'
-    | 'single_unit'
-    | 'custom_ratio'
-    | 'custom_percentage'
-    // Repair bases (§1.2/§1.8): repair_split = building-wide owner portion
-    // (cost × ownerPct); repair_vacant = a vacant unit's slice of the tenant
-    // pool (cost × tenantPct → this unit's allocated share).
-    | 'repair_split'
-    | 'repair_vacant'
-    | 'none';
-  count?: number; // equal: number of PARTIES splitting (tenants + vacant units)
-  part?: number; // surface m² / thousandths ‰ / custom ratio share / custom % for this unit
-  whole?: number; // total surface / total thousandths / sum of custom ratios
-  total?: number; // the expense amount being split
-  share?: number; // the resulting per-unit euro amount (the "= X €" tail)
-  // repair bases:
-  ownerPct?: number; // repair_split: owner share % (= 100 − tenantPct)
-  tenantPct?: number; // repair_vacant: tenant share %
-  pool?: number; // repair_vacant: the tenant pool (cost × tenantPct%)
-  result?: number; // repair_*: the resulting euro (mirrors `share`)
-  // repair_vacant per-unit divisor (how the pool is split to THIS unit):
-  allocKind?: string; // 'surface' | 'thousandths' | 'equal' (undefined → no divisor line)
-};
-
-// `partyCount` is the actual divisor the equal-allocation engine uses for
-// `term` (active tenant-groups + vacant managed units). Passing it in lets
-// the basis text show the SAME number the money was divided by, instead of
-// the raw managed-unit count (they differ once a multi-unit tenant or a
-// vacant unit is involved — that mismatch is the "(1.7 ÷ 11)" confusion).
-function _shareBasis(
-  building: any,
-  unit: any,
-  expense: any,
-  total: number,
-  share: number,
-  partyCount?: number
-): ShareBasis {
-  const method = expense.allocationMethod || 'equal';
-  const managed = (building.units || []).filter((u: any) => u.propertyId);
-  const fmt = (n: number) => Math.round(n * 100) / 100;
-  switch (method) {
-    case 'by_surface': {
-      const sumS = managed.reduce(
-        (s: number, u: any) => s + (Number(u.surface) || 0),
-        0
-      );
-      return {
-        kind: 'surface',
-        part: fmt(unit.surface || 0),
-        whole: fmt(sumS),
-        total: fmt(total),
-        share: fmt(share)
-      };
-    }
-    case 'general_thousandths':
-    case 'heating_thousandths':
-    case 'elevator_thousandths': {
-      const key =
-        method === 'general_thousandths'
-          ? 'generalThousandths'
-          : method === 'heating_thousandths'
-            ? 'heatingThousandths'
-            : 'elevatorThousandths';
-      // Round-1 audit M2: the engine (_computeBuildingChargeRaw) divides
-      // thousandths over ALL building.units, not just managed units. Sum the
-      // displayed `whole` over the SAME full set so the printed equation
-      // (part ÷ whole × total) reconciles to the billed share when an unmanaged
-      // unit carries thousandths. (`part`/`share`/`amount` are unchanged.)
-      const sumT = (building.units || []).reduce(
-        (s: number, u: any) => s + (Number(u[key]) || 0),
-        0
-      );
-      return {
-        kind: 'thousandths',
-        part: fmt(unit[key] || 0),
-        whole: fmt(sumT),
-        total: fmt(total),
-        share: fmt(share)
-      };
-    }
-    case 'equal':
-      // count = the real divisor (parties), not managed.length. Falls back to
-      // managed.length only when partyCount wasn't resolved (legacy callers).
-      return {
-        kind: 'equal',
-        count: partyCount != null ? partyCount : managed.length,
-        total: fmt(total),
-        share: fmt(share)
-      };
-    case 'fixed':
-      return { kind: 'fixed', share: fmt(share) };
-    case 'single_unit':
-      return { kind: 'single_unit', share: fmt(share) };
-    case 'custom_ratio': {
-      // Ship the ratio numbers so the UI can render "(part ÷ whole) × cost":
-      // part = this unit's ratio value, whole = sum of all ratio values.
-      const allocs = expense.customAllocations || [];
-      const mine = allocs.find(
-        (a: any) => String(a.propertyId) === String(unit.propertyId)
-      );
-      const whole = allocs.reduce(
-        (s: number, a: any) => s + (Number(a.value) || 0),
-        0
-      );
-      return {
-        kind: 'custom_ratio',
-        part: Number(mine?.value) || 0,
-        whole: fmt(whole),
-        total: fmt(total),
-        share: fmt(share)
-      };
-    }
-    case 'custom_percentage': {
-      // Ship the unit's percentage so the UI can render "part% × cost".
-      const allocs = expense.customAllocations || [];
-      const mine = allocs.find(
-        (a: any) => String(a.propertyId) === String(unit.propertyId)
-      );
-      return {
-        kind: 'custom_percentage',
-        part: Number(mine?.value) || 0,
-        total: fmt(total),
-        share: fmt(share)
-      };
-    }
-    default:
-      return { kind: 'none', share: fmt(share) };
-  }
-}
+// ShareBasis type + the shareBasis()/equalPartyCount() builders were RELOCATED
+// to common (services/common/src/utils/sharebasis.ts) so the PDF generator (a
+// separate service that depends on `common`, not `api`) renders the IDENTICAL
+// calc-basis equation as the on-screen ΧΡΕΩΣΕΙΣ breakdown — one source of
+// truth, no drift. These thin aliases keep the existing call sites unchanged.
+export type ShareBasis = ShareBasisUtil.ShareBasis;
+const _shareBasis = ShareBasisUtil.shareBasis;
 
 // Resolve the equal-allocation PARTY COUNT for a term: the number of distinct
 // shares the pool is split into (active tenant-groups + vacant managed units),
@@ -253,41 +126,8 @@ function _shareBasis(
 // logic in _computeBuildingChargeRaw's 'equal' branch so the basis text's
 // "÷ N" equals the real division. Returns managed-unit count as a safe
 // fallback when no tenant groups are attached (un-grouped/legacy path).
-function _equalPartyCount(building: any, term?: number): number {
-  const managed = (building.units || []).filter((u: any) => u.propertyId);
-  const rawGroups = (building as any)._tenantGroups as any[] | undefined;
-  if (!rawGroups || rawGroups.length === 0) return managed.length;
-  const isNewShape = !Array.isArray(rawGroups[0]);
-  const normalized = isNewShape
-    ? rawGroups
-    : (rawGroups as unknown as string[][]).map((ids) => ({
-        propertyIds: ids,
-        properties: ids.map((id) => ({ propertyId: id })),
-        beginDate: null,
-        endDate: null,
-        terminationDate: null
-      }));
-  const activeGroups = term
-    ? normalized.filter((g: any) =>
-        (g.propertyIds || []).some((pid: string) =>
-          _isGroupActiveForTerm(g, term, pid)
-        )
-      )
-    : normalized;
-  const occupied = new Set<string>(
-    activeGroups.flatMap((g: any) =>
-      (g.propertyIds || [])
-        .filter((pid: string) =>
-          term ? _isGroupActiveForTerm(g, term, String(pid)) : true
-        )
-        .map((pid: string) => String(pid))
-    )
-  );
-  const vacantCount = managed.filter(
-    (u: any) => !occupied.has(String(u.propertyId))
-  ).length;
-  return activeGroups.length + vacantCount;
-}
+// Relocated to common (sharebasis.equalPartyCount); thin alias keeps call sites.
+const _equalPartyCount = ShareBasisUtil.equalPartyCount;
 
 // Authoritative per-recipient breakdown of who gets charged what for a
 // building in a given term. Reads from the SAME sources the rent engine

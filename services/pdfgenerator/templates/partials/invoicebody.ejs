@@ -42,6 +42,43 @@ function debtLabel(debt) {
   var d = (debt && debt.description ? String(debt.description).trim() : '');
   return d || _.t('Additional cost');
 }
+// Item 6: render a charge's calc-basis equation (the SAME wording as the
+// on-screen ΧΡΕΩΣΕΙΣ panel's formatBasis). euros use the currency formatter
+// with the € symbol stripped (the i18n strings carry a literal ' €'); m²/‰ and
+// counts stay raw. Returns '' when no basis applies (→ no sub-line rendered).
+function formatBasis(basis) {
+  if (!basis || typeof basis !== 'object') return '';
+  var e = function (n) {
+    return String(_.formatNumber(Number(n) || 0, 'currency')).replace(/\s*€\s*/g, '').trim();
+  };
+  var q = function (n) { return (Number(n) || 0).toString().replace('.', ','); };
+  switch (basis.kind) {
+    case 'equal':
+      return _.t('{{total}} € ÷ {{count}} units = {{share}} €', { total: e(basis.total), count: basis.count, share: e(basis.share) });
+    case 'surface':
+      return _.t('unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €', { part: q(basis.part), whole: q(basis.whole), total: e(basis.total), share: e(basis.share) });
+    case 'thousandths':
+      return _.t('unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €', { part: q(basis.part), whole: q(basis.whole), total: e(basis.total), share: e(basis.share) });
+    case 'fixed':
+      return _.t('fixed amount per unit: {{share}} €', { share: e(basis.share) });
+    case 'single_unit':
+      return _.t('the whole amount is charged to one unit: {{share}} €', { share: e(basis.share) });
+    case 'custom_ratio':
+      return (basis.part != null && basis.whole != null)
+        ? _.t('({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €', { part: basis.part, whole: basis.whole, total: e(basis.total), share: e(basis.share) })
+        : _.t('custom ratio share: {{share}} €', { share: e(basis.share) });
+    case 'custom_percentage':
+      return (basis.part != null)
+        ? _.t('unit percentage {{part}}% × cost {{total}} € = {{share}} €', { part: basis.part, total: e(basis.total), share: e(basis.share) })
+        : _.t('custom percentage share: {{share}} €', { share: e(basis.share) });
+    case 'repair_split':
+      return _.t('cost {{total}} € × owner share {{pct}}% = {{share}} €', { total: e(basis.total), pct: basis.ownerPct, share: e(basis.result) });
+    case 'repair_vacant':
+      return _.t('cost {{total}} € × tenants share {{pct}}% = {{pool}} €', { total: e(basis.total), pct: basis.tenantPct, pool: e(basis.pool) });
+    default:
+      return '';
+  }
+}
 %>
 
 <%# R2-L9: `|| []` guard — a legacy/direct-mongo rent row that bypassed
@@ -67,8 +104,12 @@ function debtLabel(debt) {
       }).join(', ') + ')';
     }
   %>
+  <% var basisText = formatBasis(charge.basis); %>
   <tr class="item-row">
-    <td class="description"><%= buildingLabel(charge) %><%= coSuffix %></td>
+    <td class="description">
+      <%= buildingLabel(charge) %><%= coSuffix %>
+      <% if (basisText) { %><div class="calc-basis"><%= basisText %></div><% } %>
+    </td>
     <td class="txtAlignRight">1</td>
     <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>
     <td class="txtAlignRight"><%= _.formatNumber(charge.amount, 'currency') %></td>

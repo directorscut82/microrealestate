@@ -105,6 +105,7 @@ module.exports = {
         stone: 'var(--color-stone)',
         'stone-line': 'var(--color-stone-line)',
         marble: 'var(--color-marble)',
+        bark: 'var(--color-bark)',
         sea: {
           DEFAULT: 'var(--color-sea)',
           deep: 'var(--color-sea-deep)',

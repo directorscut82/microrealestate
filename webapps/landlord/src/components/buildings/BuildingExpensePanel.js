@@ -1140,13 +1140,13 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th className="border border-stone-line bg-sea text-bone text-label uppercase tracking-wide text-left px-3 py-2">
+            <th className="border border-stone-line bg-bark text-bone text-label uppercase tracking-wide text-left px-3 py-2">
               {t('Unit / expense')}
             </th>
-            <th className="border border-stone-line bg-sea text-bone text-label uppercase tracking-wide text-left px-3 py-2">
+            <th className="border border-stone-line bg-bark text-bone text-label uppercase tracking-wide text-left px-3 py-2">
               {t('Calculation')}
             </th>
-            <th className="border border-stone-line bg-sea text-bone text-label uppercase tracking-wide text-right px-3 py-2">
+            <th className="border border-stone-line bg-bark text-bone text-label uppercase tracking-wide text-right px-3 py-2">
               {t('Amount')}
             </th>
           </tr>

@@ -29,6 +29,10 @@ beforeAll(async () => {
   const OwnerStatement = await import(
     '../../../common/src/utils/ownerstatement.ts'
   );
+  // 1_base (transitively imported) now imports ShareBasis from common — provide the REAL util.
+  const ShareBasis = await import(
+    '../../../common/src/utils/sharebasis.ts'
+  );
   jest.unstable_mockModule('@microrealestate/common', () => ({
     Collections: {
       // _occupiedPropertyIdsForTerm: .find({...}).lean() → tenants
@@ -38,7 +42,8 @@ beforeAll(async () => {
     },
     logger: { warn() {}, info() {}, error() {} },
     ServiceError,
-    OwnerStatement
+    OwnerStatement,
+    ShareBasis
   }));
   // _attachTenantGroupsToBuildings hits the DB; the cases here use fixed /
   // thousandths allocation (which never read _tenantGroups), so a no-op that

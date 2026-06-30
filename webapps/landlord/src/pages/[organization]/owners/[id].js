@@ -321,23 +321,53 @@ function OwnerDetail() {
                                 </span>
                               ) : null}
                             </span>
-                            <span className="flex items-center gap-3 shrink-0 tabular-nums">
-                              <span
-                                className={c.paid ? 'text-olive' : 'text-oxide'}
-                              >
-                                <NumberFormat value={c.amount} />
-                              </span>
-                              <Badge
-                                variant={c.paid ? 'success' : 'outline'}
-                                className={
-                                  'font-normal ' +
-                                  (!c.paid ? 'border-oxide/40 text-oxide' : '')
-                                }
-                              >
-                                {c.paid ? t('Paid') : `${t('Outstanding')} `}
-                                {!c.paid && <NumberFormat value={c.outstanding} />}
-                              </Badge>
-                            </span>
+                            {/* Money column. Three states, no redundant
+                                repeat of the same number (user: when unpaid the
+                                amount and «Οφειλές» were identical pills):
+                                  • fully paid  → amount (olive) + «Πληρωμένο»
+                                  • partially   → amount + «X πληρωμένο / Y οφειλή»
+                                  • unpaid      → amount (oxide) ONLY, no pill
+                                «paidAmount»/«outstanding» are server-computed. */}
+                            {(() => {
+                              const partiallyPaid =
+                                !c.paid &&
+                                Number(c.paidAmount) > 0.005 &&
+                                Number(c.outstanding) > 0.005;
+                              return (
+                                <span className="flex items-center gap-3 shrink-0 tabular-nums">
+                                  <span
+                                    className={
+                                      c.paid ? 'text-olive' : 'text-oxide'
+                                    }
+                                  >
+                                    <NumberFormat value={c.amount} />
+                                  </span>
+                                  {c.paid && (
+                                    <Badge variant="success" className="font-normal">
+                                      {t('Charge settled')}
+                                    </Badge>
+                                  )}
+                                  {partiallyPaid && (
+                                    <Badge
+                                      variant="outline"
+                                      className="font-normal border-oxide/40 text-oxide gap-1"
+                                    >
+                                      <span className="text-olive">
+                                        <NumberFormat value={c.paidAmount} />
+                                      </span>
+                                      <span className="text-muted-foreground">
+                                        {t('paid')}
+                                      </span>
+                                      <span>·</span>
+                                      <NumberFormat value={c.outstanding} />
+                                      <span className="text-muted-foreground">
+                                        {t('owed')}
+                                      </span>
+                                    </Badge>
+                                  )}
+                                </span>
+                              );
+                            })()}
                           </div>
                         );
                       })}

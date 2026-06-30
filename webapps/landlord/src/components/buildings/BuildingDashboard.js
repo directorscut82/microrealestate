@@ -1011,7 +1011,8 @@ export default function BuildingDashboard({ building }) {
                   }
                   footRight={
                     <>
-                      {t('Owed')}: <NumberFormat value={ytd.owed} showZero />
+                      {t('Rent owed')}:{' '}
+                      <NumberFormat value={ytd.owed} showZero />
                     </>
                   }
                 />
@@ -1038,13 +1039,13 @@ export default function BuildingDashboard({ building }) {
                   subdued={finance.ownerLedgerTotal < 1}
                   footLeft={
                     <>
-                      {t('Paid')}:{' '}
+                      {t('Settled')}:{' '}
                       <NumberFormat value={finance.ownerPaid} showZero />
                     </>
                   }
                   footRight={
                     <>
-                      {t('Outstanding')}:{' '}
+                      {t('Owner owed')}:{' '}
                       <NumberFormat value={finance.ownerUnpaid} showZero />
                     </>
                   }
@@ -1099,12 +1100,6 @@ export default function BuildingDashboard({ building }) {
                 100
             )}
             fill="olive"
-            footLeft={
-              <>
-                {t('Covered expenses short')}:{' '}
-                <NumberFormat value={building.uncollected.paidTotal} showZero />
-              </>
-            }
             footRight={
               <>
                 {t('Still uncollected')}:{' '}

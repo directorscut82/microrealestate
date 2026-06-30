@@ -49,6 +49,10 @@ beforeAll(async () => {
   const OwnerStatement = await import(
     '../../../common/src/utils/ownerstatement.ts'
   );
+  // 1_base (transitively imported) now imports ShareBasis from common — provide the REAL util.
+  const ShareBasis = await import(
+    '../../../common/src/utils/sharebasis.ts'
+  );
   // lean()-able query result helper
   const leanable = (val) => ({ lean: async () => val });
   jest.unstable_mockModule('@microrealestate/common', () => ({
@@ -85,6 +89,7 @@ beforeAll(async () => {
     logger: { info() {}, error() {}, warn() {}, debug() {} },
     ServiceError,
     OwnerStatement,
+    ShareBasis,
     Pagination: {},
     Service: { getInstance: () => ({ envConfig: { getValues: () => ({}) } }) }
   }));

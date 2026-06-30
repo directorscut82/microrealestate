@@ -231,6 +231,15 @@ span.error {
   width: 220pt;
   padding-left: 10pt;
 }
+/* Item 6: the per-charge calc-basis sub-line under a building charge ("100 € ÷
+   11 μονάδες = 9,09 €"). Small + muted so it reads as a secondary explanation,
+   not a separate line item. */
+.items td.description .calc-basis {
+  font-size: 7.5pt;
+  color: #777;
+  margin-top: 2pt;
+  font-style: italic;
+}
 .items td.total-line {
   border-right: none;
   text-align: left;

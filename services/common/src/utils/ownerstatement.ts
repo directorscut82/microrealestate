@@ -10,6 +10,8 @@
 // requested term(s), plus the owner's identity/contact. It does NOT settle or
 // mutate anything.
 
+import { ownerChargeBasis, type ShareBasis } from './sharebasis.js';
+
 // Owner identity key — MUST match api/managers/ownermanager.ts ownerKeyOf.
 export function ownerKeyOf(owner: any): string {
   if (!owner) return '';
@@ -414,6 +416,9 @@ export interface OwnerStatementCharge {
   // DISPLAY-only per-owner split of `amount` (when co-owned); same slices the
   // on-screen breakdown shows, so the PDF reconciles per owner.
   coOwners?: OwnerSlice[];
+  // Calc-basis equation for the owner-statement PDF (item 6) — same shape the
+  // ΧΡΕΩΣΕΙΣ panel uses. null when no meaningful basis applies.
+  basis?: ShareBasis | null;
 }
 
 export interface OwnerStatementData {
@@ -662,6 +667,16 @@ export function buildOwnerStatement(
         expenseType,
         description: String(row.description || '').replace(/^Repair:\s*/i, ''),
         propertyId: pid,
+        // Calc-basis equation ("100 € ÷ 11 μονάδες = 9,09 €" / "cost 100 € ×
+        // owner 50% = 50 €") so the owner-statement PDF shows the SAME
+        // breakdown as the on-screen ΧΡΕΩΣΕΙΣ panel. Computed from the source
+        // expense/repair via the shared builder (item 6).
+        basis: ownerChargeBasis(b, {
+          expenseId: row.expenseId,
+          source: src,
+          propertyId: pid,
+          amount: billed
+        }),
         ...(slices.length > 1 ? { coOwners: slices } : {})
       });
     }

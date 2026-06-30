@@ -60,5 +60,16 @@
   "Rent": "Loyer",
   "Additional cost": "Coût supplémentaire",
   "Property charge": "Charge sur le loyer",
-  "Tax id": "N° fiscal"
+  "Tax id": "N° fiscal",
+  "{{total}} € ÷ {{count}} units = {{share}} €": "{{total}} € ÷ {{count}} units = {{share}} €",
+  "unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €": "unit surface {{part}} m² ÷ total {{whole}} m² × cost {{total}} € = {{share}} €",
+  "unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €": "unit thousandths {{part}} ÷ {{whole}} total × cost {{total}} € = {{share}} €",
+  "fixed amount per unit: {{share}} €": "fixed amount per unit: {{share}} €",
+  "the whole amount is charged to one unit: {{share}} €": "the whole amount is charged to one unit: {{share}} €",
+  "({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €": "({{part}} ÷ {{whole}}) × cost {{total}} € = {{share}} €",
+  "custom ratio share: {{share}} €": "custom ratio share: {{share}} €",
+  "unit percentage {{part}}% × cost {{total}} € = {{share}} €": "unit percentage {{part}}% × cost {{total}} € = {{share}} €",
+  "custom percentage share: {{share}} €": "custom percentage share: {{share}} €",
+  "cost {{total}} € × owner share {{pct}}% = {{share}} €": "cost {{total}} € × owner share {{pct}}% = {{share}} €",
+  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €"
 }

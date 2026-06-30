@@ -1,4 +1,5 @@
 {
+  "+{{count}} more": "+{{count}} ακόμη",
   "Payments - {{year}}.xlsx": "Πληρωμές - {{year}}.xlsx",
   "Owner payments - {{year}}.xlsx": "Πληρωμές ιδιοκτητών - {{year}}.xlsx",
   "Vacant / owner-occupied unit shares": "Μερίδια κενών / ιδιοκατοίκητων μονάδων",
@@ -166,6 +167,7 @@
   "Central Gas": "Κεντρική Θέρμανση Αερίου",
   "Central Oil": "Κεντρική Θέρμανση Πετρελαίου",
   "Charge Month": "Μήνας Χρέωσης",
+  "Charge settled": "Εξοφλημένο",
   "Charge owner for vacant units": "Χρέωση ιδιοκτήτη για κενές μονάδες",
   "When a unit is vacant, charge its tenant-share of this repair to the owner. Off: it stays uncollected (Αχρέωτα).": "Όταν μια μονάδα είναι κενή, το μερίδιο ενοικιαστή της επισκευής χρεώνεται στον ιδιοκτήτη. Ανενεργό: παραμένει ακάλυπτο (Αχρέωτα).",
   "Charged to": "Χρέωση σε",
@@ -625,6 +627,7 @@
   "Owner (vacant units)": "Ιδιοκτήτης (κενές μονάδες)",
   "Owner expense": "Έξοδο ιδιοκτήτη",
   "Owner expenses": "Έξοδα ιδιοκτήτη",
+  "Owner owed": "Οφειλές ιδιοκτητών",
   "Owner expenses of {{year}}": "Έξοδα ιδιοκτήτη {{year}}",
   "Owner expenses paid": "Πληρωμένα έξοδα ιδιοκτήτη",
   "Owner monthly amount": "Μηνιαίο ποσό ιδιοκτήτη",

@@ -36,12 +36,17 @@ beforeAll(async () => {
   const OwnerStatement = await import(
     '../../../common/src/utils/ownerstatement.ts'
   );
+  // 1_base (transitively imported) now imports ShareBasis from common — provide the REAL util.
+  const ShareBasis = await import(
+    '../../../common/src/utils/sharebasis.ts'
+  );
   buildOwnerStatement = OwnerStatement.buildOwnerStatement;
   jest.unstable_mockModule('@microrealestate/common', () => ({
     Collections: { Tenant: { find: () => ({ lean: async () => TENANTS }) } },
     logger: { warn() {}, info() {}, error() {} },
     ServiceError,
-    OwnerStatement
+    OwnerStatement,
+    ShareBasis
   }));
   jest.unstable_mockModule('../managers/occupantmanager.js', () => ({
     _attachTenantGroupsToBuildings: async (_realmId, buildings) => {

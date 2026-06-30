@@ -115,7 +115,35 @@ function YearBreakdown({ byYear, t }) {
   );
 }
 
-function ExpenseLines({ lines, t }) {
+// Render ONE expense line's label: "<Category> (<name>)" + payer tag.
+// Shared by the flat list and the grouped-by-category list.
+function _lineLabel(t, line) {
+  const categoryLabel = line.category ? _categoryLabel(t, line.category) : '';
+  let desc = line.description || '';
+  // Strip the server's legacy English "Repair: <title>" prefix.
+  desc = desc.replace(/^Repair:\s*/i, '');
+  if (!desc && line.descriptionKey) {
+    desc = _resolveDescriptionKey(t, line.descriptionKey);
+  }
+  return categoryLabel && desc && desc !== categoryLabel
+    ? `${categoryLabel} (${desc})`
+    : desc || categoryLabel || t('Other');
+}
+
+function _payerTag(t, line) {
+  return line.payer === 'owner'
+    ? t('owner')
+    : line.payer === 'renter'
+      ? t('tenant')
+      : '';
+}
+
+// Grouped list (user-chosen layout): lines bucketed by category. A category
+// with ONE line renders as a single row (no redundant subtotal). A category
+// with 2+ lines renders a subtotal row, then its members indented beneath. This
+// replaces the old "category rollup block + flat line list" pair, which printed
+// single-line categories twice (double-vision).
+function GroupedExpenseLines({ lines, t }) {
   if (!lines?.length) {
     return (
       <div className="text-sm text-muted-foreground">
@@ -123,60 +151,91 @@ function ExpenseLines({ lines, t }) {
       </div>
     );
   }
+  // Preserve first-seen category order.
+  const order = [];
+  const groups = new Map();
+  for (const line of lines) {
+    const key = line.category || 'other';
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key).push(line);
+  }
   return (
-    <div className="space-y-1">
-      {lines.map((line, idx) => {
-        // Render "<Category> (<description>)" so the user sees BOTH the
-        // panel bucket AND the actual expense entry name. When the
-        // server didn't tag a category (legacy line), or the description
-        // is empty / equal to the category label, collapse to whatever
-        // is informative.
-        const categoryLabel = line.category
-          ? _categoryLabel(t, line.category)
-          : '';
-        // I2-06: server emits empty description for legacy/unnamed
-        // entries plus a descriptionKey ('monthly_charge', 'owner_repair',
-        // 'owner_expense', 'repair', 'category_<panel>') that the client
-        // resolves to the active locale. Without this, English fallback
-        // strings bled into the Greek UI.
-        // ALWAYS keep the name the user declared (user rule, 2026-06): show
-        // "Κατηγορία (Όνομα)" so both the kind and the name are visible — never
-        // silently drop a typed name, even a hash-looking one. Fall back to the
-        // localized descriptionKey only when there is genuinely no description.
-        let desc = line.description || '';
-        if (!desc && line.descriptionKey) {
-          desc = _resolveDescriptionKey(t, line.descriptionKey);
+    <div className="space-y-1.5">
+      {order.map((key) => {
+        const members = groups.get(key);
+        const subtotal = members.reduce(
+          (s, l) => s + Number(l.amount || 0),
+          0
+        );
+        // Single-line category → one plain row (label carries the name).
+        if (members.length === 1) {
+          const line = members[0];
+          const payer = _payerTag(t, line);
+          return (
+            <div
+              key={key}
+              className="flex justify-between gap-2 text-sm"
+            >
+              <span className="text-muted-foreground break-words min-w-0 flex-1">
+                {_lineLabel(t, line)}
+                {payer && (
+                  <span className="ml-1 text-xs text-muted-foreground/60">
+                    ({payer})
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0">
+                <NumberFormat value={Number(line.amount || 0)} />
+              </span>
+            </div>
+          );
         }
-        const display =
-          categoryLabel && desc && desc !== categoryLabel
-            ? `${categoryLabel} (${desc})`
-            : desc || categoryLabel || t('Other');
-        // Who bears this line — renter (billed to the tenant) vs owner (an
-        // owner-side liability attributed to this unit, e.g. a vacant-month
-        // share). Surfaced as a small tag so the user sees the split the
-        // category total is composed of, instead of an opaque sum.
-        const payerLabel =
-          line.payer === 'owner'
-            ? t('owner')
-            : line.payer === 'renter'
-              ? t('tenant')
-              : '';
+        // Multi-line category → subtotal header + indented members.
         return (
-          <div
-            key={`${line.source}-${idx}-${line.description}`}
-            className="flex justify-between gap-2 text-sm"
-          >
-            <span className="text-muted-foreground break-words min-w-0 flex-1">
-              {display}
-              {payerLabel && (
-                <span className="ml-1 text-xs text-muted-foreground/60">
-                  ({payerLabel})
-                </span>
-              )}
-            </span>
-            <span className="shrink-0">
-              <NumberFormat value={Number(line.amount || 0)} />
-            </span>
+          <div key={key}>
+            <div className="flex justify-between gap-2 text-sm font-medium text-ink">
+              <span>{_categoryLabel(t, key)}</span>
+              <NumberFormat value={subtotal} />
+            </div>
+            <div className="mt-0.5 space-y-0.5">
+              {members.map((line, i) => {
+                const payer = _payerTag(t, line);
+                // Indented member label: drop the leading category (it's in the
+                // header) and show just the name + payer.
+                const name = (() => {
+                  let desc = (line.description || '').replace(
+                    /^Repair:\s*/i,
+                    ''
+                  );
+                  if (!desc && line.descriptionKey) {
+                    desc = _resolveDescriptionKey(t, line.descriptionKey);
+                  }
+                  return desc || _categoryLabel(t, key);
+                })();
+                return (
+                  <div
+                    key={i}
+                    className="flex justify-between gap-2 text-sm pl-3"
+                  >
+                    <span className="text-muted-foreground break-words min-w-0 flex-1">
+                      <span className="text-muted-foreground/50">↳ </span>
+                      {name}
+                      {payer && (
+                        <span className="ml-1 text-xs text-muted-foreground/60">
+                          ({payer})
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-muted-foreground">
+                      <NumberFormat value={Number(line.amount || 0)} />
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         );
       })}
@@ -269,50 +328,34 @@ export default function PropertyExpensesCard({ propertyId }) {
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pt-2 pb-1">
-                {/* The per-line list and the by-category rollup carry the
-                    SAME numbers whenever every category maps to exactly one
-                    line (e.g. Θέρμανση 0,05 + Ασφάλιση 0,04 appears once as a
-                    category and once as a line — double-vision). The category
-                    rollup only ADDS information when at least one category
-                    aggregates 2+ lines. So: prefer the line list (it's the
-                    most specific, and shows descriptions); show the category
-                    breakdown ONLY when it's a genuine rollup of multiple lines
-                    into fewer categories. */}
+                {/* ONE grouped list (user-chosen): lines bucketed by category;
+                    a single-line category is one row, a multi-line category
+                    shows a subtotal + indented members. This replaced the old
+                    "ΑΝΑ ΚΑΤΗΓΟΡΙΑ rollup block + flat line list" pair, which
+                    printed single-line categories twice (double-vision). When
+                    there are no per-line details (legacy data) fall back to the
+                    category rollup so the figures still show. */}
                 {(() => {
                   const lines = data.currentMonth?.lines || [];
                   const cats = data.currentMonth?.byCategory || {};
                   const nonZeroCats = CATEGORY_KEYS.filter(
                     (k) => Number(cats[k] || 0) !== 0
                   );
-                  // A rollup is only additive when there are strictly more
-                  // lines than non-zero categories (i.e. some category bundles
-                  // multiple lines). Equal counts → 1:1 → redundant.
-                  const categoryAddsInfo =
-                    lines.length > 0 && lines.length > nonZeroCats.length;
-                  // No lines at all but we do have category totals (legacy
-                  // data without per-line detail): fall back to the rollup.
-                  const showCategoryOnly =
-                    lines.length === 0 && nonZeroCats.length > 0;
+                  if (lines.length > 0) {
+                    return <GroupedExpenseLines lines={lines} t={t} />;
+                  }
+                  if (nonZeroCats.length > 0) {
+                    return (
+                      <CategoryBreakdown
+                        byCategory={data.currentMonth?.byCategory}
+                        t={t}
+                      />
+                    );
+                  }
                   return (
-                    <>
-                      {(categoryAddsInfo || showCategoryOnly) && (
-                        <CategoryBreakdown
-                          byCategory={data.currentMonth?.byCategory}
-                          t={t}
-                        />
-                      )}
-                      {lines.length > 0 ? (
-                        <div className={categoryAddsInfo ? 'mt-3' : ''}>
-                          <ExpenseLines lines={lines} t={t} />
-                        </div>
-                      ) : (
-                        !showCategoryOnly && (
-                          <div className="text-sm text-muted-foreground">
-                            {t('No expenses for this period')}
-                          </div>
-                        )
-                      )}
-                    </>
+                    <div className="text-sm text-muted-foreground">
+                      {t('No expenses for this period')}
+                    </div>
                   );
                 })()}
               </CollapsibleContent>

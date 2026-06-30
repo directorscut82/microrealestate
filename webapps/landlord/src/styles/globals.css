@@ -34,6 +34,11 @@
     --color-stone: oklch(91% 0.012 70);
     --color-stone-line: oklch(86% 0.018 78);
     --color-marble: oklch(80% 0.018 78);
+    /* Bark — warm dark espresso in the paper hue family (NOT the cold teal
+     * `sea`). Dark enough to carry bone text; used for the ΧΡΕΩΣΕΙΣ breakdown
+     * table header so the header bar belongs to the warm palette instead of
+     * clashing as a harsh blue. */
+    --color-bark: oklch(37% 0.022 65);
 
     /* Accents — Petrol is the single earned accent.
      * Quiet dark teal-blue, far from the original cobalt sea. Used only for

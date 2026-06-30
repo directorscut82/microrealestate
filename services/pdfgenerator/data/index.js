@@ -1,5 +1,106 @@
-import { Collections, logger } from '@microrealestate/common';
+import { Collections, logger, ShareBasis } from '@microrealestate/common';
 import moment from 'moment';
+
+// Item 6: attach the per-unit calc-basis equation to each tenant building
+// charge so the receipt prints the SAME breakdown as the on-screen ΧΡΕΩΣΕΙΣ
+// panel. The stored rent.buildingCharges rows carry only {type, amount, …}; we
+// match each to the building expense (by type) and compute the renter unit's
+// share via the shared ShareBasis builder. Best-effort: a charge with no
+// building, no matching expense, or no resolvable unit keeps basis = null (the
+// EJS then renders no sub-line for it). Repair-typed charges have no
+// building.expense — their basis is omitted on the tenant side (the owner
+// statement carries the repair basis).
+// Does a tenant-side basis equation actually evaluate to the billed share?
+// Used as a correct-or-nothing gate on the receipt (Step-7): if the recomputed
+// divisor disagrees with the engine's (e.g. _tenantGroups not attached to the
+// PDF's building snapshot), the printed equation would be arithmetically false
+// — so we drop it. Tolerance 0,02 € absorbs cent rounding across units.
+function _basisReconciles(basis, billedShare) {
+  if (!basis || typeof basis !== 'object') return false;
+  const share = Number(billedShare) || 0;
+  let computed;
+  switch (basis.kind) {
+    case 'equal':
+      if (!(Number(basis.count) > 0)) return false;
+      computed = (Number(basis.total) || 0) / Number(basis.count);
+      break;
+    case 'surface':
+    case 'thousandths':
+      if (!(Number(basis.whole) > 0)) return false;
+      computed =
+        ((Number(basis.part) || 0) / Number(basis.whole)) *
+        (Number(basis.total) || 0);
+      break;
+    case 'custom_ratio':
+      if (!(Number(basis.whole) > 0)) return false;
+      computed =
+        ((Number(basis.part) || 0) / Number(basis.whole)) *
+        (Number(basis.total) || 0);
+      break;
+    case 'custom_percentage':
+      computed = ((Number(basis.part) || 0) / 100) * (Number(basis.total) || 0);
+      break;
+    case 'fixed':
+    case 'single_unit':
+      // No divisor to contradict — the share IS the stated amount.
+      return true;
+    default:
+      return false;
+  }
+  return Math.abs(computed - share) <= 0.02;
+}
+
+function _enrichTenantChargeBasis(charges, building, tenantPropertyId, term) {
+  if (!Array.isArray(charges) || charges.length === 0) return charges;
+  if (!building || !Array.isArray(building.units)) return charges;
+  const unit = building.units.find(
+    (u) => String(u.propertyId) === String(tenantPropertyId)
+  );
+  if (!unit) return charges;
+  const expenses = building.expenses || [];
+  const partyCount = ShareBasis.equalPartyCount(building, Number(term));
+  return charges.map((c) => {
+    if (c.basis) return c; // already resolved upstream
+    // Match by type first; if multiple expenses share a type, prefer one whose
+    // name matches the charge description. Repairs (type 'repair') have no
+    // building.expense — skip (the owner statement carries repair basis).
+    if (!c.type || c.type === 'repair') return c;
+    const candidates = expenses.filter((e) => e.type === c.type);
+    const exp =
+      candidates.find(
+        (e) =>
+          c.description &&
+          String(e.name || '').trim() === String(c.description).trim()
+      ) || candidates[0];
+    if (!exp) return c;
+    // CORRECT-OR-NOTHING on a legal receipt: the equation needs the EXPENSE
+    // TOTAL (the pool), not the per-unit charge amount. Only a recurring/fixed
+    // expense carries a reliable stored total (exp.amount); a VARIABLE expense
+    // stores 0 on the expense (the real amount lives per-month in
+    // monthlyCharges, not reachable here), so we cannot reconstruct its pool —
+    // skip the basis rather than print "0 € ÷ 11 = 9,09 €". share = the charge.
+    const total = Number(exp.amount) || 0;
+    if (!(total > 0)) return c;
+    const basis = ShareBasis.shareBasis(
+      building,
+      unit,
+      exp,
+      total,
+      Number(c.amount) || 0,
+      partyCount
+    );
+    // CORRECT-OR-NOTHING on a legal receipt (Step-7): only keep the basis when
+    // its equation actually evaluates to the billed share. The receipt's
+    // `firstBuilding` is fetched WITHOUT _tenantGroups, so equalPartyCount can
+    // fall back to managed.length instead of the engine's real divisor (active
+    // groups + vacant) — which would print "100 € ÷ 4 = 33,33 €" (false) for a
+    // multi-unit tenant. Verifying total/count ≈ share drops exactly those
+    // mismatches while keeping every consistent equation. Same guard covers
+    // surface/thousandths (part/whole × total) and the custom kinds.
+    if (!_basisReconciles(basis, Number(c.amount) || 0)) return c;
+    return { ...c, basis };
+  });
+}
 
 export async function getRentsData(params, documentId) {
   const { id: tenantId, term, realmId } = params;
@@ -86,6 +187,14 @@ export async function getRentsData(params, documentId) {
   // terms ("2026010100,2026020100,2026030100"). The route validates
   // shape and count; we just OR across sub-terms here so the data
   // picker stays agnostic to single vs. batch callers.
+  // The tenant's unit propertyId — used to compute the renter-side calc-basis
+  // (item 6). First property (the receipt renders a single property row).
+  const tenantPropertyId = String(
+    dbTenant.properties?.[0]?.propertyId?._id ||
+      dbTenant.properties?.[0]?.propertyId ||
+      ''
+  );
+
   const terms = String(term).split(',');
   let rents = [];
   if (dbTenant.rents.length) {
@@ -99,6 +208,18 @@ export async function getRentsData(params, documentId) {
         billingReference: `${moment(rent.term, 'YYYYMMDDHH').format('MM_YY_')}${
           dbTenant.reference
         }`,
+        // Item 6: enrich each building charge with its calc-basis equation (the
+        // SAME per-unit breakdown the on-screen ΧΡΕΩΣΕΙΣ panel shows) so the
+        // receipt prints "100 € ÷ 11 μονάδες = 9,09 €" under the line. Matches
+        // the charge to the building expense by type and computes the renter's
+        // unit share via the shared ShareBasis builder. Best-effort — a charge
+        // we can't resolve (no building / no matching expense) keeps basis null.
+        buildingCharges: _enrichTenantChargeBasis(
+          rent.buildingCharges || [],
+          firstBuilding,
+          tenantPropertyId,
+          rent.term
+        ),
         // Wave-26 round-3v: tell the shared invoicebody.ejs whether to
         // render the rent.charges (property-surcharge) loop. Receipts
         // omit it; rent-calls keep it so the line items sum to the

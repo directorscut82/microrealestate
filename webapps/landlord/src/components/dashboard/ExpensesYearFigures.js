@@ -93,10 +93,25 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
     if (!d) return null;
-    const breakdown = Array.isArray(d.breakdown) ? d.breakdown : [];
-    // H4: hover tooltip — recharts positions it at the cursor (no `position`
-    // prop), so it follows the mouse and a max-h+overflow scroll region is
-    // unreachable. Mirrors the YearFigures fix: size to content, no dead scroll.
+    const allLines = Array.isArray(d.breakdown) ? d.breakdown : [];
+    // Item-8 fix: a long per-owner breakdown grew the tooltip UNBOUNDED, so
+    // recharts pushed it above the viewport (top clipped at y≈-191) and the
+    // list was unreadable. A scroll region is useless here — the tooltip
+    // FOLLOWS THE CURSOR (no `position` prop), so the mouse can never enter a
+    // scrollbar without the tooltip moving (see the prior H4 note). Instead cap
+    // the visible rows so the tooltip always fits on-screen, and summarise the
+    // remainder as a single "+N more" line with its rolled-up totals.
+    const ROW_CAP = 10;
+    const breakdown = allLines.slice(0, ROW_CAP);
+    const overflowLines = allLines.slice(ROW_CAP);
+    const overflowPaid = overflowLines.reduce(
+      (s, l) => s + (Number(l.paid) || 0),
+      0
+    );
+    const overflowOwed = overflowLines.reduce(
+      (s, l) => s + (Number(l.owed) || 0),
+      0
+    );
     return (
       <div className="bg-bone border border-stone-line rounded-lg shadow-floating px-2.5 py-1.5 text-label max-w-72">
         <div className="font-medium text-body text-ink mb-1 leading-tight">
@@ -144,6 +159,16 @@ export default function ExpensesYearFigures({ className, dashboardData }) {
                 ))}
               </div>
             ))}
+            {overflowLines.length > 0 && (
+              <div className="flex justify-between gap-2 pl-2 pt-1 border-t border-stone-line/60 font-mono tabular-nums text-label text-ink-muted">
+                <span className="font-sans">
+                  {t('+{{count}} more', { count: overflowLines.length })}
+                </span>
+                <span className="whitespace-nowrap">
+                  {formatNumber(overflowPaid)} / {formatNumber(overflowOwed)}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
