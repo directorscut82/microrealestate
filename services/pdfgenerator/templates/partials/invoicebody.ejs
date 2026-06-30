@@ -48,6 +48,32 @@ function debtLabel(debt) {
 // counts stay raw. Returns '' when no basis applies (→ no sub-line rendered).
 function formatBasis(basis) {
   if (!basis || typeof basis !== 'object') return '';
+  // Internal-consistency backstop (Step-7 / PDF-render finding): NEVER print an
+  // equation whose LHS does not evaluate to its stated RHS. A co-owned charge
+  // arrives sliced (€25 of a €50 owner pool); the basis must show the full pool
+  // (€50) with a co-owner suffix bridging to €25. If the numbers don't
+  // reconcile (legacy/edge data), render NO sub-line rather than a false one.
+  var EPS = 0.02;
+  var ok = false, lhs;
+  switch (basis.kind) {
+    case 'equal': ok = Number(basis.count) > 0; if (ok) lhs = (Number(basis.total)||0)/Number(basis.count); break;
+    case 'surface':
+    case 'thousandths':
+    case 'custom_ratio': ok = Number(basis.whole) > 0; if (ok) lhs = ((Number(basis.part)||0)/Number(basis.whole))*(Number(basis.total)||0); break;
+    case 'custom_percentage': ok = true; lhs = ((Number(basis.part)||0)/100)*(Number(basis.total)||0); break;
+    case 'repair_split': ok = true; lhs = (Number(basis.total)||0)*((Number(basis.ownerPct)||0)/100); break;
+    case 'repair_vacant': ok = true; lhs = (Number(basis.total)||0)*((Number(basis.tenantPct)||0)/100); break; // RHS = pool
+    case 'fixed':
+    case 'single_unit': ok = true; break; // no divisor to contradict
+    default: return '';
+  }
+  if (!ok) return '';
+  if (lhs !== undefined) {
+    var rhs = (basis.kind === 'repair_vacant') ? (Number(basis.pool)||0)
+            : (basis.kind === 'repair_split') ? (Number(basis.result)||0)
+            : (Number(basis.share)||0);
+    if (Math.abs(lhs - rhs) > EPS) return '';
+  }
   var e = function (n) {
     return String(_.formatNumber(Number(n) || 0, 'currency')).replace(/\s*€\s*/g, '').trim();
   };

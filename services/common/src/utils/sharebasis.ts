@@ -232,12 +232,16 @@ function _repairTenantPct(repair: any): number {
 // 'expense') — the owner total split across managed units by the expense's
 // allocation method. 'fixed' resolves to equal (no per-unit divisor). Mirrors
 // buildingmanager._ownerAmountBasis.
+// The `share` (= the equation's RHS) is COMPUTED from the equation's own LHS
+// (total × part/whole, or total ÷ count) so the printed line is always
+// self-consistent — it shows the PER-UNIT owner amount, NOT a co-owner slice.
+// The co-owner suffix ("Name 50% = €X") bridges the per-unit amount to the
+// individual's slice, mirroring the on-screen ΧΡΕΩΣΕΙΣ panel's parent row.
 function _ownerAmountBasis(
   building: any,
   unit: any,
   method: string,
-  total: number,
-  share: number
+  total: number
 ): ShareBasis {
   const fmt = (n: number) => _round(n);
   const managed = (building.units || []).filter((u: any) => u.propertyId);
@@ -247,12 +251,13 @@ function _ownerAmountBasis(
       (s: number, u: any) => s + (Number(u.surface) || 0),
       0
     );
+    const part = Number(unit?.surface) || 0;
     return {
       kind: 'surface',
-      part: fmt(unit?.surface || 0),
+      part: fmt(part),
       whole: fmt(whole),
       total: fmt(total),
-      share: fmt(share)
+      share: whole > 0 ? fmt((part / whole) * total) : 0
     };
   }
   if (
@@ -270,19 +275,21 @@ function _ownerAmountBasis(
       (s: number, u: any) => s + (Number(u[key]) || 0),
       0
     );
+    const part = Number(unit?.[key]) || 0;
     return {
       kind: 'thousandths',
-      part: fmt(unit?.[key] || 0),
+      part: fmt(part),
       whole: fmt(whole),
       total: fmt(total),
-      share: fmt(share)
+      share: whole > 0 ? fmt((part / whole) * total) : 0
     };
   }
+  const count = managed.length;
   return {
     kind: 'equal',
-    count: managed.length,
+    count,
     total: fmt(total),
-    share: fmt(share)
+    share: count > 0 ? fmt(total / count) : 0
   };
 }
 
@@ -292,10 +299,15 @@ function _ownerAmountBasis(
 // the source expense/repair from the building so it never needs the api engine.
 //   charge: { expenseId, source, propertyId, amount }
 // Returns null when no meaningful basis applies (legacy/zero-cost rows).
+// NOTE on co-owned charges: a charge passed here may be a single co-owner's
+// SLICE (e.g. €25 = €50 owner pool × 50%). The basis equation always shows the
+// SELF-CONSISTENT per-unit/whole owner figure (€50), and the caller renders a
+// co-owner suffix "(Name 50% = €25, …)" to bridge to the individual — exactly
+// like the on-screen ΧΡΕΩΣΕΙΣ panel's parent row + indented children. So the
+// equation's RHS is NEVER the sliced amount; it is computed from its own LHS.
 export function ownerChargeBasis(building: any, charge: any): ShareBasis | null {
   if (!building || !charge) return null;
   const source = charge.source || 'expense';
-  const rowAmount = _round(charge.amount);
   const managed = (building.units || []).filter((u: any) => u.propertyId);
   const unit = charge.propertyId
     ? (building.units || []).find(
@@ -324,8 +336,7 @@ export function ownerChargeBasis(building: any, charge: any): ShareBasis | null 
         building,
         unit,
         exp?.allocationMethod || 'equal',
-        ownerTotal,
-        rowAmount
+        ownerTotal
       );
     }
     return null;
@@ -341,11 +352,13 @@ export function ownerChargeBasis(building: any, charge: any): ShareBasis | null 
   const tenantPct = _repairTenantPct(rep);
 
   if (source === 'repair') {
+    const ownerPct = 100 - tenantPct;
+    // RHS computed from the LHS (cost × owner%), NOT the co-owner slice.
     return {
       kind: 'repair_split',
       total: _round(cost),
-      ownerPct: 100 - tenantPct,
-      result: rowAmount
+      ownerPct,
+      result: _round(cost * (ownerPct / 100))
     };
   }
   if (source === 'repair-vacant') {
@@ -384,12 +397,19 @@ export function ownerChargeBasis(building: any, charge: any): ShareBasis | null 
       allocKind = 'equal';
       count = managed.length;
     }
+    // result = this vacant unit's slice of the pool, computed from the divisor
+    // (self-consistent), NOT a co-owner slice. The EJS renders only the first
+    // line ("cost × tenants% = pool"); `result` is kept for completeness.
+    let result = pool;
+    if (allocKind === 'equal' && count && count > 0) result = _round(pool / count);
+    else if ((allocKind === 'surface' || allocKind === 'thousandths') && whole && whole > 0)
+      result = _round((Number(part) / whole) * pool);
     return {
       kind: 'repair_vacant',
       total: _round(cost),
       tenantPct,
       pool,
-      result: rowAmount,
+      result,
       allocKind,
       part,
       whole,
