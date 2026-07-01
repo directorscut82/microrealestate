@@ -232,10 +232,20 @@ function Tenant() {
     router.back();
   }, [router]);
 
-  const handleDeleteTenant = useCallback(
-    () => setOpenConfirmDeleteTenant(true),
-    []
-  );
+  const handleDeleteTenant = useCallback(() => {
+    // A tenant with recorded payments CANNOT be hard-deleted (the rent history
+    // must be preserved). The button used to be silently disabled/transparent,
+    // so the user got no explanation and no way forward. Explain why + point to
+    // Archive (which preserves the history) instead of opening a doomed dialog.
+    if (selected?.hasPayments) {
+      return toast.error(
+        t(
+          'Cannot delete a tenant with recorded payments. Use Archive to keep the payment history.'
+        )
+      );
+    }
+    setOpenConfirmDeleteTenant(true);
+  }, [selected?.hasPayments, t]);
 
   const handleTerminateLease = useCallback(
     () => setOpenTerminateLeaseDialog(true),
@@ -275,7 +285,6 @@ function Tenant() {
           <ShortcutButton
             label={t('Delete')}
             Icon={LuTrash}
-            disabled={selected.hasPayments}
             onClick={handleDeleteTenant}
             dataCy="removeResourceButton"
           />

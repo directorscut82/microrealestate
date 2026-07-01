@@ -399,13 +399,24 @@ export default function BuildingDashboard({ building }) {
     sortedUnits.forEach((unit) => {
       s.total++;
       const occ = unit.occupancyType || 'vacant';
+      // BUGFIX (parking not shown after E9 import, reported 2026-07): the E9
+      // import types the PROPERTY as 'parking' but never sets the unit's
+      // occupancyType (it defaults to 'vacant'), so parking spots fell into
+      // Κενά and Στάθμευση showed 0. Derive parking from property.type too,
+      // OR'd with occupancyType so a manually-set parking unit still counts.
+      const pid =
+        typeof unit.propertyId === 'string'
+          ? unit.propertyId
+          : unit.propertyId?._id;
+      const ptype = pid ? propertyMap.get(pid)?.type : null;
       if (occ === 'rented') s.rented++;
       else if (occ === 'owner_occupied') s.ownerOccupied++;
-      else if (occ === 'parking') s.parking++;
+      else if (occ === 'parking' || (occ === 'vacant' && ptype === 'parking'))
+        s.parking++;
       else s.vacant++;
     });
     return s;
-  }, [sortedUnits]);
+  }, [sortedUnits, propertyMap]);
 
   // Annual esoda / eksoda summary for this building.
   // Esoda  = sum of monthly rent across all currently-rented units × 12.
@@ -1302,6 +1313,15 @@ export default function BuildingDashboard({ building }) {
                   tenantInfo
                 ) {
                   effectiveOccupancy = 'rented';
+                } else if (
+                  occupancy === 'vacant' &&
+                  !tenantInfo &&
+                  property?.type === 'parking'
+                ) {
+                  // Match the stats fix: an E9-imported parking spot has
+                  // occupancyType 'vacant' but property.type 'parking' — show
+                  // the parking badge so the row agrees with the Στάθμευση count.
+                  effectiveOccupancy = 'parking';
                 }
 
                 // Owner display

@@ -449,7 +449,10 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
     occupant.terminationDate || occupant.endDate,
     'DD/MM/YYYY'
   );
-  if (endMoment.isBefore(currentDate, 'day')) {
+  // Inclusive of the termination day itself: setting terminationDate = today
+  // marks the lease ended TODAY (user intent — "end it now"). `isBefore` left
+  // a lease terminated-today still showing "in force" until tomorrow.
+  if (endMoment.isSameOrBefore(currentDate, 'day')) {
     occupant.terminated = true;
     occupant.status = 'stopped';
   }

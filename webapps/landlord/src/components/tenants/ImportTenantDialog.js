@@ -371,14 +371,25 @@ export default function ImportTenantDialog({ open, setOpen }) {
       // silently auto-navigated on a single success even when N rows
       // were dropped (occupied / invalid dates / no resolvable property).
       let skipped = 0;
+      // BUGFIX (multi-tenant import collapse, reported 2026-07): the loop body
+      // used to let ANY non-409 error (e.g. the server's 422 double-occupancy
+      // guard) throw straight out of mutationFn — aborting the WHOLE batch, so
+      // only tenants created before the first failure survived and the rest
+      // vanished with just a raw error toast. Now every row is wrapped in
+      // try/catch: a failure records a reason and continues, so one bad PDF
+      // can't drop the others. `failures[]` is surfaced in the result toast.
+      const failures = [];
 
       for (let idx = 0; idx < parsedResults.length; idx++) {
         const parsed = parsedResults[idx];
         const matchInfo = matchInfos[idx];
+        const rowName =
+          parsed?.tenants?.[0]?.name || t('Tenant {{n}}', { n: idx + 1 });
 
         // Skip entries where property is occupied by another tenant
         if (matchInfo?.occupiedBy) {
           skipped += 1;
+          failures.push({ name: rowName, reason: 'occupied' });
           continue;
         }
         // P2.10 / N7: defense in depth — the Import button is disabled
@@ -387,8 +398,11 @@ export default function ImportTenantDialog({ open, setOpen }) {
         // race), skip it cleanly rather than persist a backwards lease.
         if (matchInfo?.dateInvalid) {
           skipped += 1;
+          failures.push({ name: rowName, reason: 'invalidDates' });
           continue;
         }
+
+        try {
 
         const months =
           matchInfo?.months ||
@@ -416,6 +430,11 @@ export default function ImportTenantDialog({ open, setOpen }) {
         // outputs are accumulated into `resolvedProperties` and threaded
         // into the tenant body's properties[] array further down.
         const resolvedProperties = [];
+        // Track properties dropped because they're occupied by ANOTHER tenant,
+        // so a multi-property lease that loses SOME (but not all) properties
+        // doesn't silently attach the tenant to fewer units than the PDF
+        // declared (GAP A). Surfaced after the loop.
+        const droppedOccupiedProps = [];
         for (let pIdx = 0; pIdx < parsed.properties.length; pIdx++) {
           const prop = parsed.properties[pIdx];
         // Compute a proper name from address (e.g. "ΟΔΟΣ ΗΤΑ 24 - Ισόγειο")
@@ -488,8 +507,16 @@ export default function ImportTenantDialog({ open, setOpen }) {
 
         // Skip properties already occupied by another tenant — the user
         // saw the warning at preview time. Continue with the remaining
-        // properties on the same lease so we don't lose data.
-        if (perPropertyOccupiedBy) continue;
+        // properties on the same lease so we don't lose data. RECORD the drop
+        // so a partial-property loss is surfaced (GAP A), not silent.
+        if (perPropertyOccupiedBy) {
+          droppedOccupiedProps.push(
+            (prop.address?.street1 || '').split(',')[0].trim() ||
+              perPropertyOccupiedBy.name ||
+              t('a unit')
+          );
+          continue;
+        }
 
         let property;
         if (perPropertyMatch) {
@@ -841,54 +868,96 @@ export default function ImportTenantDialog({ open, setOpen }) {
           // actual endpoint (services/api/src/routes.ts:200) which
           // returns the full per-term rent ledger for this tenant in a
           // single round-trip and is correct across multi-year leases.
-          let tenantRents = [];
-          try {
-            const rentsData = await fetchTenantRents(tenant._id);
-            tenantRents = rentsData?.rents || [];
-          } catch {
-            tenantRents = [];
-          }
-
           const startDate = moment(parsed.validityStart || parsed.originalStartDate, 'DD/MM/YYYY');
           const now = moment();
           let termDate = startDate.clone();
-          // Past-month settlement amount: prefer the existing rent's
-          // grandTotal (accurate ledger), then the sum of all resolved
-          // properties' monthlyRent (in-scope here — `prop` from the
-          // earlier per-property loop is NOT in scope at this point and
-          // referencing it threw ReferenceError on every settlement
-          // where grandTotal was falsy).
+          // Fallback single-month rent — used only when a term has no ledger row.
           const sumPropertyRents = (resolvedProperties || []).reduce(
             (s, rp) => s + (Number(rp.rent) || 0),
             0
           );
+          const fallbackMonthly =
+            sumPropertyRents || Number(parsed.totalMonthlyRent) || 0;
+          // BUGFIX (mark-past-paid balance snowball — reproduced live 2026-07):
+          // the old code read `rentForTerm.total.grandTotal`, but the
+          // /rents/tenant/:id payload (fetchTenantRents) has NO `.total`
+          // object — the amounts are TOP-LEVEL (`totalAmount`, `balance`,
+          // `payment`). So `.total.grandTotal` was ALWAYS undefined and every
+          // month fell back to the flat monthly rent (180), underpaying while
+          // the carried balance snowballed (180→360→540→720) and dumping a
+          // phantom balance into the current month ("huge owed").
+          // Fix: RE-FETCH the ledger before each term (so each term's owed
+          // reflects prior settlements) and pay that term's TRUE owed =
+          // totalAmount − already-paid. Verified: every past month settles to
+          // newBalance 0 and the current month carries only its own rent.
           while (termDate.isBefore(now, 'month')) {
             const term = termDate.format('YYYYMM') + '0100';
-            const rentForTerm = tenantRents.find((r) => String(r.term) === term);
-            const amount =
-              rentForTerm?.total?.grandTotal ||
-              sumPropertyRents ||
-              parsed.totalMonthlyRent ||
-              0;
+            let amount = fallbackMonthly;
             try {
-              await apiFetcher().patch(
-                `/rents/payment/${tenant._id}/${term}`,
-                {
-                  _id: tenant._id,
-                  payments: [{ amount, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
-                }
+              const snap = await fetchTenantRents(tenant._id);
+              const rentForTerm = (snap?.rents || []).find(
+                (r) => String(r.term) === term
               );
-            } catch { /* skip if term doesn't exist */ }
+              if (rentForTerm) {
+                // totalAmount already includes the carried balance + this
+                // month's rent/charges; subtract anything already paid.
+                const owed =
+                  (Number(rentForTerm.totalAmount) || 0) -
+                  (Number(rentForTerm.payment) || 0);
+                amount = Math.max(0, Math.round(owed * 100) / 100);
+              }
+            } catch {
+              /* ledger fetch failed → fall back to single-month rent */
+            }
+            if (amount > 0.005) {
+              try {
+                await apiFetcher().patch(
+                  `/rents/payment/${tenant._id}/${term}`,
+                  {
+                    _id: tenant._id,
+                    payments: [{ amount, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
+                  }
+                );
+              } catch { /* skip if term doesn't exist */ }
+            }
             termDate.add(1, 'month');
           }
         }
 
         created.push(tenant);
+        // GAP A: the tenant WAS created but one or more of its declared
+        // properties were dropped as already-occupied — surface that so the
+        // operator knows the tenant has fewer units than the PDF declared.
+        if (droppedOccupiedProps.length > 0) {
+          failures.push({
+            name: rowName,
+            reason: 'partialProperties',
+            props: droppedOccupiedProps
+          });
+        }
+        } catch (err) {
+          // Per-row isolation: a failure on ONE tenant must not abort the
+          // whole batch (was the multi-tenant-collapse bug). Record why and
+          // move on. 409 duplicate-taxId is already handled inline above; any
+          // other status (esp. the 422 double-occupancy guard) lands here.
+          const status = err?.response?.status;
+          const serverMsg =
+            err?.response?.data?.error || err?.response?.data?.message;
+          const reason =
+            status === 422 && /already assigned|occupied/i.test(serverMsg || '')
+              ? 'occupied'
+              : serverMsg || err?.message || 'error';
+          skipped += 1;
+          failures.push({ name: rowName, reason, status });
+          // eslint-disable-next-line no-console
+          console.warn(`import: skipped tenant "${rowName}"`, status, serverMsg);
+          continue;
+        }
       }
 
-      return { created, skipped };
+      return { created, skipped, failures };
     },
-    onSuccess: ({ created: tenants, skipped }) => {
+    onSuccess: ({ created: tenants, skipped, failures = [] }) => {
       // Bulk-import touches tenants, properties, leases, and (when past
       // months are settled) the rent + accounting ledgers. Buildings can
       // be created mid-import as well. Invalidate the entire stack so no
@@ -905,12 +974,58 @@ export default function ImportTenantDialog({ open, setOpen }) {
       // so a single-success import that swallowed N occupied / invalid
       // rows isn't silently auto-navigated. Always toast first; navigate
       // afterwards.
+      // Surface WHICH tenants were skipped/partial and WHY (was a bare count
+      // that hid a whole-batch collapse AND silent partial-property loss).
+      const occupied = failures.filter((f) => f.reason === 'occupied').length;
+      const invalid = failures.filter((f) => f.reason === 'invalidDates').length;
+      const partial = failures.filter((f) => f.reason === 'partialProperties');
+      const other = failures.filter(
+        (f) =>
+          f.reason !== 'occupied' &&
+          f.reason !== 'invalidDates' &&
+          f.reason !== 'partialProperties'
+      );
+      const parts = [];
+      if (occupied)
+        parts.push(t('{{count}} occupied by another tenant', { count: occupied }));
+      if (invalid) parts.push(t('{{count}} invalid dates', { count: invalid }));
+      if (partial.length)
+        parts.push(
+          t('{{count}} imported without some occupied units', {
+            count: partial.length
+          }) +
+            ': ' +
+            partial.map((f) => `${f.name} (${(f.props || []).join(', ')})`).join(', ')
+        );
+      if (other.length)
+        parts.push(
+          t('{{count}} error', { count: other.length }) +
+            ': ' +
+            other.map((f) => `${f.name} (${f.reason})`).join(', ')
+        );
+      const detail = parts.join(' · ');
+
       if (skipped > 0) {
-        toast.success(
-          t(
-            'Imported {{count}} tenant ({{skipped}} skipped — already occupied or invalid)',
-            { count: tenants.length, skipped }
-          )
+        if (tenants.length > 0) {
+          toast.warning(
+            t('Imported {{count}} · {{skipped}} skipped', {
+              count: tenants.length,
+              skipped
+            }) + (detail ? ` — ${detail}` : '')
+          );
+        } else {
+          // NOTHING imported — make this loud (was a silent single-tenant result).
+          toast.error(
+            t('No tenants imported — {{skipped}} skipped', { skipped }) +
+              (detail ? ` — ${detail}` : '')
+          );
+        }
+      } else if (partial.length > 0) {
+        // All requested tenants imported, but at least one lost occupied
+        // properties — warn (not a silent success).
+        toast.warning(
+          t('{{count}} tenants imported', { count: tenants.length }) +
+            (detail ? ` — ${detail}` : '')
         );
       } else if (tenants.length !== 1) {
         toast.success(

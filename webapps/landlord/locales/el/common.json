@@ -1243,5 +1243,14 @@
   "vacant-unit share: {{share}} €": "μερίδιο κενής μονάδας: {{share}} €",
   "vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €": "μερίδιο κενής μονάδας: {{pool}} € ÷ {{count}} μονάδες = {{share}} €",
   "vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €": "μερίδιο κενής μονάδας: {{part}} τ.μ. ÷ {{whole}} τ.μ. × {{pool}} € = {{share}} €",
-  "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €": "μερίδιο κενής μονάδας: {{part}} ÷ {{whole}} χιλιοστά × {{pool}} € = {{share}} €"
+  "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €": "μερίδιο κενής μονάδας: {{part}} ÷ {{whole}} χιλιοστά × {{pool}} € = {{share}} €",
+  "Cannot delete a tenant with recorded payments. Use Archive to keep the payment history.": "Δεν μπορεί να διαγραφεί ενοικιαστής με καταγεγραμμένες πληρωμές. Χρησιμοποιήστε την Αρχειοθέτηση για να διατηρηθεί το ιστορικό πληρωμών.",
+  "Tenant {{n}}": "Ενοικιαστής {{n}}",
+  "a unit": "μια μονάδα",
+  "{{count}} occupied by another tenant": "{{count}} κατειλημμένα από άλλον ενοικιαστή",
+  "{{count}} invalid dates": "{{count}} με μη έγκυρες ημερομηνίες",
+  "{{count}} imported without some occupied units": "{{count}} εισήχθησαν χωρίς κάποιες κατειλημμένες μονάδες",
+  "{{count}} error": "{{count}} σφάλμα",
+  "Imported {{count}} · {{skipped}} skipped": "Εισήχθησαν {{count}} · {{skipped}} παραλείφθηκαν",
+  "No tenants imported — {{skipped}} skipped": "Δεν εισήχθη κανένας ενοικιαστής — {{skipped}} παραλείφθηκαν"
 }

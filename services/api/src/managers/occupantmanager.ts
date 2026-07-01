@@ -2028,10 +2028,13 @@ export async function overview(req: Req, res: Res) {
     const endMoment = endValue ? moment.utc(endValue) : null;
     const dateOk = !!endMoment && endMoment.isValid();
     const propertyOk = !!occupant.properties?.length;
+    // Consistent with frontdata's terminated flag: the termination day itself
+    // counts as ended (isSameOrBefore), so a tenant terminated TODAY is
+    // inactive here too — not still active until tomorrow.
     if (
       dateOk &&
       propertyOk &&
-      !endMoment!.isBefore(currentDate, 'day')
+      !endMoment!.isSameOrBefore(currentDate, 'day')
     ) {
       acc.countActive++;
     } else {

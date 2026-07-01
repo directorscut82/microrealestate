@@ -1223,5 +1223,14 @@
   "vacant-unit share: {{share}} €": "vacant-unit share: {{share}} €",
   "vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €": "vacant-unit share: {{pool}} € ÷ {{count}} units = {{share}} €",
   "vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €": "vacant-unit share: unit {{part}} m² ÷ total {{whole}} m² × {{pool}} € = {{share}} €",
-  "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €": "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €"
+  "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €": "vacant-unit share: unit {{part}} ÷ {{whole}} total × {{pool}} € = {{share}} €",
+  "Cannot delete a tenant with recorded payments. Use Archive to keep the payment history.": "Cannot delete a tenant with recorded payments. Use Archive to keep the payment history.",
+  "Tenant {{n}}": "Tenant {{n}}",
+  "a unit": "a unit",
+  "{{count}} occupied by another tenant": "{{count}} occupied by another tenant",
+  "{{count}} invalid dates": "{{count}} with invalid dates",
+  "{{count}} imported without some occupied units": "{{count}} imported without some occupied units",
+  "{{count}} error": "{{count}} error",
+  "Imported {{count}} · {{skipped}} skipped": "Imported {{count}} · {{skipped}} skipped",
+  "No tenants imported — {{skipped}} skipped": "No tenants imported — {{skipped}} skipped"
 }
