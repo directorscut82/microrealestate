@@ -236,6 +236,7 @@ For every NEW spec file, in the same session you author it:
    - Tests that mock the network for a UI flow that exists to catch real-network bugs — drive the real endpoint or skip the test.
    - Tests with `{ ... }` placeholder bodies, `// TODO: implement`, or function stubs without `expect()` — these are not tests, they're scaffolding.
    - Tests counted in a "X tests added" claim that have not passed at least once on the live NAS.
+6. **A jest/API test is NEVER sufficient sign-off for a bug the user hit in the UI.** If the reported symptom was observed in the browser (a button that fails, a wrong amount on screen, a toast, an express/payment/import flow), the fix is NOT verified until a **Playwright browser spec drives that exact flow in Greek (`/el/...`), passes on the live NAS, AND the agent has opened the resulting screenshot and confirmed the rendered state.** An API-contract test (`request.post(...)` asserting HTTP 200) proves the server; it does NOT prove the user's button works, and reporting it as "verified" is the documented multi-session failure. Do not tell the user to "click it yourself to confirm" — that IS the agent's job. Anchor: `tests/63_express_past_month_ui.spec.ts` (drives signin → past-month rents page → «Έξπρες εξόφληση» drawer → «Εκτέλεση» → asserts 200 + persisted payment + zero error toasts, and the screenshots are read).
 
 ### When a previously-passing spec starts failing
 
