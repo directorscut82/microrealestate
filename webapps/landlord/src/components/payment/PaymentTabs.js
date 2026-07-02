@@ -480,13 +480,17 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
           return;
         }
       }
-      // Wave-26 round-3o + 3t: client-side guard against payment dates
-      // OUTSIDE this rent month (with a 7-day cushion after term end).
-      // Prevents a misclick on the wrong month's rents page from
-      // silently recording an April payment under May's term — and
-      // catches the previously-missed forward case (date in May while
-      // recording against April) which produced negative grandTotals.
+      // Wave-26 round-3o: client-side guard against payment dates BEFORE
+      // this rent month. Prevents a misclick on the wrong month's rents
+      // page from silently recording an April payment under May's term.
       // Server enforces the same rule.
+      //
+      // 2026-07: the round-3t "after term-end + 7d" mirror was REMOVED
+      // (see rentmanager.ts) — it blocked legitimately settling arrears /
+      // express-settling an old month with today's real date. The date is
+      // never used in money math and the "negative grandTotal" it claimed
+      // to prevent is legitimate credit-carry produced by overpayment
+      // regardless of date. Only the before-term guard remains here.
       const _termStr = String(rent?.term || '');
       const _termFirstDay =
         _termStr.length === 10
@@ -496,9 +500,6 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
               true
             )
           : null;
-      const _termLastDay = _termFirstDay
-        ? _termFirstDay.clone().endOf('month').add(7, 'days')
-        : null;
       const _draftValues = values?.payments || [];
       for (const _draft of _draftValues) {
         if (!_draft?.date || Number(_draft?.amount) <= 0) continue;
@@ -512,20 +513,6 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
           toast.error(
             t(
               'Payment date is before this rent month. Switch to that month’s rents page to record against it.'
-            )
-          );
-          onError?.();
-          return;
-        }
-        if (
-          _termLastDay &&
-          _termLastDay.isValid() &&
-          _parsed.isValid() &&
-          _parsed.isAfter(_termLastDay)
-        ) {
-          toast.error(
-            t(
-              'Payment date is after this rent month. Switch to that month’s rents page to record against it.'
             )
           );
           onError?.();

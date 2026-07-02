@@ -1051,13 +1051,23 @@ async function _updateByTerm(
             );
           }
           // Wave-26 round-3o: reject payment dates BEFORE the rent term's
-          // first day. round-3t: also reject payment dates AFTER the
-          // term's last day + 7d cheque-clearing cushion. Both cases
-          // almost always mean the user opened the wrong rents page;
-          // accepting the payment carries the credit/debit forward and
-          // can produce a NEGATIVE grandTotal on the next month
-          // (Contract.payTerm has no clamp). Forces the landlord to
-          // record against the correct term explicitly.
+          // first day (pre-dating a term almost always means the wrong
+          // rents page was opened). Forces the landlord to record against
+          // the correct term explicitly.
+          //
+          // 2026-07: the round-3t "after term-end + 7d" guard was REMOVED.
+          // It rejected a payment dated TODAY against any term >~1 month
+          // old, which broke the legitimate + common action of settling
+          // arrears (and express-settle) late — the whole point of paying
+          // an old unpaid month is that you pay it after the fact. The
+          // payment date is never used in any money computation (5_balance
+          // / 7_total read amounts only; Contract.payTerm re-prices with
+          // the TERM moment, not the payment date), and the "negative
+          // grandTotal" it claimed to prevent is legitimate credit-carry
+          // (an overpayment carries a negative balance forward, by design)
+          // AND is produced by overpayment regardless of date — so the
+          // date guard never actually prevented it. Only the before-term
+          // (wrong-page pre-dating) and >7-day-future (typo) guards remain.
           //
           // term is YYYYMMDDHH (e.g. 2026050100 -> 2026-05-01).
           const termStr = String(term);
@@ -1074,21 +1084,6 @@ async function _updateByTerm(
             ) {
               throw new ServiceError(
                 `payments[${idx}].date is before this rent month — switch to that month's rents page to record against it`,
-                422
-              );
-            }
-            // Last day of the term-month, +7 days cushion.
-            const termLastDay = termFirstDay
-              .clone()
-              .endOf('month')
-              .add(7, 'days');
-            if (
-              parsed.isValid() &&
-              termLastDay.isValid() &&
-              parsed.isAfter(termLastDay)
-            ) {
-              throw new ServiceError(
-                `payments[${idx}].date is after this rent month — switch to that month's rents page to record against it`,
                 422
               );
             }
