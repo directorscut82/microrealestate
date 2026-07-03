@@ -14,7 +14,7 @@ import {
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 import { cn } from '../../utils';
-import { LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
+import { LuArchive, LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import { Button } from '../ui/button';
@@ -79,6 +79,17 @@ const OCCUPANCY_CONFIG = {
     textColor: 'text-amber-700',
     bgColor: 'bg-amber-50',
     icon: LuCar
+  },
+  // Storage (Αποθήκη) is a special non-residential space like parking — an
+  // E9-imported storage room has property.type 'storage' but occupancyType
+  // 'vacant', so without its own badge it rendered as plain «Κενό». Distinct
+  // sea/teal tone so it reads apart from parking's amber and vacant's grey.
+  storage: {
+    label: 'Storage',
+    color: 'bg-sea',
+    textColor: 'text-sea',
+    bgColor: 'bg-sea/10',
+    icon: LuArchive
   }
 };
 
@@ -395,15 +406,23 @@ export default function BuildingDashboard({ building }) {
 
   // Stats
   const stats = useMemo(() => {
-    const s = { total: 0, rented: 0, ownerOccupied: 0, vacant: 0, parking: 0 };
+    const s = {
+      total: 0,
+      rented: 0,
+      ownerOccupied: 0,
+      vacant: 0,
+      parking: 0,
+      storage: 0
+    };
     sortedUnits.forEach((unit) => {
       s.total++;
       const occ = unit.occupancyType || 'vacant';
       // BUGFIX (parking not shown after E9 import, reported 2026-07): the E9
-      // import types the PROPERTY as 'parking' but never sets the unit's
-      // occupancyType (it defaults to 'vacant'), so parking spots fell into
-      // Κενά and Στάθμευση showed 0. Derive parking from property.type too,
-      // OR'd with occupancyType so a manually-set parking unit still counts.
+      // import types the PROPERTY as 'parking'/'storage' but never sets the
+      // unit's occupancyType (it defaults to 'vacant'), so parking/storage
+      // spots fell into Κενά and their own counts showed 0. Derive the type
+      // from property.type too, OR'd with occupancyType so a manually-set
+      // parking/storage unit still counts.
       const pid =
         typeof unit.propertyId === 'string'
           ? unit.propertyId
@@ -413,6 +432,8 @@ export default function BuildingDashboard({ building }) {
       else if (occ === 'owner_occupied') s.ownerOccupied++;
       else if (occ === 'parking' || (occ === 'vacant' && ptype === 'parking'))
         s.parking++;
+      else if (occ === 'storage' || (occ === 'vacant' && ptype === 'storage'))
+        s.storage++;
       else s.vacant++;
     });
     return s;
@@ -1256,7 +1277,7 @@ export default function BuildingDashboard({ building }) {
           card holding a 5-cell count row, NOT five identical cards. */}
       <Card className="p-5">
         <SectionLabel className="mb-3">{t('Units')}</SectionLabel>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2.5">
           <UnitCountCell n={stats.total} label={t('Total units')} />
           <UnitCountCell n={stats.rented} label={t('Rented')} tone="rent" />
           <UnitCountCell
@@ -1266,6 +1287,7 @@ export default function BuildingDashboard({ building }) {
           />
           <UnitCountCell n={stats.vacant} label={t('Vacant')} tone="mut" />
           <UnitCountCell n={stats.parking} label={t('Parking')} tone="mut" />
+          <UnitCountCell n={stats.storage} label={t('Storage')} tone="mut" />
         </div>
         {stats.total > 0 && (
           <div className="text-label text-ink-muted text-right mt-2.5 normal-case tracking-normal">
@@ -1322,6 +1344,16 @@ export default function BuildingDashboard({ building }) {
                   // occupancyType 'vacant' but property.type 'parking' — show
                   // the parking badge so the row agrees with the Στάθμευση count.
                   effectiveOccupancy = 'parking';
+                } else if (
+                  occupancy === 'vacant' &&
+                  !tenantInfo &&
+                  property?.type === 'storage'
+                ) {
+                  // Same as parking: an E9-imported storage room (Αποθήκη) has
+                  // occupancyType 'vacant' but property.type 'storage'. Show the
+                  // «Αποθήκη» badge so the row reads as the special space it is
+                  // and agrees with the Αποθήκη count (not plain «Κενό»).
+                  effectiveOccupancy = 'storage';
                 }
 
                 // Owner display
