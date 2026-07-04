@@ -2340,6 +2340,18 @@ export async function updateUnit(req: Req, res: Res) {
     const pid = String(req.body.propertyId || oldPropertyId || '');
     if (pid) {
       await recomputeVacantOwnerForProperties(realm!._id as string, [pid]);
+      // Also redistribute REPAIR shares: an occupancy flip changes whether a
+      // repair's tenant-share bills the tenant, the resident owner, or Αχρέωτα.
+      // The expense twin above only refreshes expense-sourced owner rows; the
+      // repair twin refreshes repair-vacant rows so a bare owner move-in/out
+      // (no tenant lifecycle event) doesn't leave a stale repair-vacant row
+      // until the next repair edit (Step-7 follow-up (b)). Best-effort — a
+      // redistribution failure must not fail the unit edit.
+      try {
+        await redistributeRepairsForProperties(realm!._id as string, [pid]);
+      } catch (err) {
+        logger.error(`repair redistribution after occupancy flip failed: ${err}`);
+      }
     }
   }
 
@@ -3611,18 +3623,29 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       kindLabel:
         e.source === 'owner-fixed' || e.source === 'expense'
           ? 'owner-amount'
-          : e.source === 'vacant'
-            ? 'vacant-share'
-            : e.source === 'owner-resident'
-              ? 'owner-resident'
-              : undefined,
+          : // A repair-vacant row on an OWNER-OCCUPIED unit is the resident
+            // owner's own cost, not a vacant-unit share → label it owner-resident.
+            e.source === 'repair-vacant' &&
+              unit?.occupancyType === 'owner_occupied'
+            ? 'owner-resident'
+            : e.source === 'vacant'
+              ? 'vacant-share'
+              : e.source === 'owner-resident'
+                ? 'owner-resident'
+                : undefined,
       // vacant: true when this euro is a VACANT unit's share routed to the owner
       // (the tenant-amount share of an empty unit). Drives the ΚΕΝΟ pill AND the
       // collapsible "Κενές μονάδες" grouping. The per-unit OWNER amount is NOT
       // vacant-flagged (it is owed whether or not the unit is occupied), so it
       // stays in the regular ΙΔΙΟΚΤΗΤΕΣ section — restoring the grouping the
       // per-unit materialisation broke.
-      vacant: e.source === 'vacant' || e.source === 'repair-vacant',
+      // vacant ΚΕΝΟ pill: true only for a truly-empty unit's share. A
+      // repair-vacant row on an OWNER-OCCUPIED unit is the resident owner's
+      // cost, NOT a vacant-unit charge, so it stays in the regular ΙΔΙΟΚΤΗΤΕΣ
+      // section (no ΚΕΝΟ pill).
+      vacant:
+        (e.source === 'vacant' || e.source === 'repair-vacant') &&
+        unit?.occupancyType !== 'owner_occupied',
       paid: !!e.paid
     };
   });
@@ -5095,6 +5118,15 @@ export async function _distributeRepairCharge(
     realmId,
     term
   );
+  // OWNER-OCCUPIED units have no tenant, so they are NOT in occupiedForRepair
+  // (that set is built from tenant records only). But an owner LIVES there — the
+  // repair's tenant-share is the resident owner's own cost, NOT vacant/
+  // uncollected money. Without this the tenant-share of a repair on an
+  // owner-occupied unit EVAPORATED (flag off) or was mislabelled 'repair-vacant'
+  // (flag on). Route it to the owner ledger as source:'owner-resident',
+  // FLAG-INDEPENDENT, mirroring the building-expense path (1_base.ts:196/265 and
+  // the expense materialiser's isResident branch).
+  const ownerOccupiedForRepair = _ownerOccupiedPropertyIds(building);
   // (Owner-side rows for this repair — both 'repair' and 'repair-vacant' — were
   // already stripped up front; their payments live in paidPool and are
   // re-applied after the rebuild. The unit loop below pushes ZERO-payment
@@ -5211,15 +5243,26 @@ export async function _distributeRepairCharge(
           dk,
           _round((droppableByProp.get(dk) || 0) + share)
         );
-      } else if (repair.chargeOwnerWhenVacant) {
-        // VACANT this term AND the repair opts vacant units into owner-billing
-        // (§2 chargeOwnerWhenVacant, mirroring building expenses): the tenant
-        // share would be stranded (no rent term), so route it to the owner
-        // ledger. Tagged 'repair-vacant' (NOT 'vacant') so the building-expense
-        // vacant recompute, which strips+rebuilds source:'vacant' rows from
-        // building.expenses only, never touches it — otherwise this euro would
-        // silently disappear on the next unrelated tenancy change
-        // (REPAIR-VACANT-VANISHES). ZERO payments — paidPool applied after loop.
+      } else if (
+        ownerOccupiedForRepair.has(String(unit.propertyId)) ||
+        repair.chargeOwnerWhenVacant
+      ) {
+        // Two owner-billed cases share ONE well-tested path (source
+        // 'repair-vacant'): (a) OWNER LIVES HERE (owner_occupied) — the repair
+        // tenant-share is the resident owner's own cost, billed FLAG-
+        // INDEPENDENTLY (chargeOwnerWhenVacant governs only truly-EMPTY units);
+        // (b) VACANT unit AND the repair opts vacant units into owner-billing.
+        // Before this fix an owner-occupied unit (never in occupiedForRepair,
+        // which is tenant-only) with the flag OFF fell through to the else
+        // below and its tenant-share EVAPORATED (HIGH bug). Reusing
+        // 'repair-vacant' means every reader (ledger, statement PDF, xlsx,
+        // dashboard, property card) already bills it to the owner and per-owner-
+        // slices it, and it survives the expense recompute (that recompute
+        // strips vacant/owner-fixed/owner-resident from building.expenses only,
+        // never a repair source). The display label is corrected to read
+        // 'owner-resident' for an owner-occupied unit at render time (a
+        // repair-vacant row on an owner_occupied unit is the resident's cost,
+        // not a vacant unit) — see the breakdown/ledger readers.
         const rvArr = (building as any).ownerMonthlyExpenses;
         rvArr.push({
           expenseId: repairIdStr,
@@ -5231,10 +5274,10 @@ export async function _distributeRepairCharge(
           payments: []
         });
       }
-      // else: VACANT and chargeOwnerWhenVacant OFF → the share is NOT billed to
-      // the owner; it becomes Αχρέωτα (uncollected), surfaced live by the
-      // breakdown panel (computed, not persisted) — same as a vacant building
-      // expense with the flag off. No owner row created.
+      // else: VACANT unit (not owner-occupied) AND chargeOwnerWhenVacant OFF →
+      // the share is NOT billed to the owner; it becomes Αχρέωτα (uncollected),
+      // surfaced live by the breakdown panel (computed, not persisted) — same as
+      // a vacant building expense with the flag off. No owner row created.
     }
   }
 
@@ -6297,7 +6340,11 @@ export async function computeOwnerEksodaByMonth(
       row.description || srcExp?.name || '',
       amount,
       rowPaid,
-      row.source === 'vacant' || row.source === 'repair-vacant'
+      // ΚΕΝΟ only for a truly-vacant unit's share. A repair-vacant (or vacant)
+      // row on an OWNER-OCCUPIED unit is the resident owner's own cost — not a
+      // vacant-unit charge — so it must NOT carry the ΚΕΝΟ marker.
+      (row.source === 'vacant' || row.source === 'repair-vacant') &&
+        !(row.propertyId && ownerOccupiedNow.has(String(row.propertyId)))
     );
   }
 
@@ -6422,7 +6469,15 @@ export async function computeOwnerEksodaByMonth(
     // does, else the dashboard eksoda bills the owner for a share the writer
     // never materialised (writer/reader disagreement, Step-7 §2-read finding).
     const effectiveAmount = cost * (sharePercentage / 100);
-    if (effectiveAmount > 0 && repair.chargeOwnerWhenVacant) {
+    // The tenant-share of a repair falls to the owner in TWO cases (mirroring
+    // the writer _distributeRepairCharge): a truly-EMPTY unit when the repair
+    // opts in via chargeOwnerWhenVacant, AND an OWNER-OCCUPIED unit ALWAYS
+    // (flag-independent — the owner lives there, it's their own cost). Before
+    // this, the reader gated solely on the flag, so an owner-occupied unit's
+    // repair tenant-share was never billed on the dashboard when the flag was
+    // OFF — reader/writer disagreement (the resident-owner repair bug).
+    const ownerOccForRepair = _ownerOccupiedPropertyIds(building);
+    if (effectiveAmount > 0 && (repair.chargeOwnerWhenVacant || ownerOccForRepair.size > 0)) {
       const allocationMethod = repair.allocationMethod || 'general_thousandths';
       const restrictUnits =
         Array.isArray(repair.affectedUnitIds) && repair.affectedUnitIds.length > 0
@@ -6434,6 +6489,10 @@ export async function computeOwnerEksodaByMonth(
         if (restrictUnits && !restrictUnits.has(String(unit._id))) continue;
         if (occupied.has(String(unit.propertyId))) continue; // billed to tenant
         if (covered.has(covKey(repairIdStr, unit.propertyId, term))) continue;
+        const isResidentUnit = ownerOccForRepair.has(String(unit.propertyId));
+        // A truly-empty (vacant) unit is owner-billed ONLY with the flag; an
+        // owner-occupied unit is owner-billed regardless.
+        if (!isResidentUnit && !repair.chargeOwnerWhenVacant) continue;
         const share = computeBuildingChargeForProperty(
           buildingObj,
           String(unit.propertyId),
@@ -6449,7 +6508,9 @@ export async function computeOwnerEksodaByMonth(
           repair.title || '',
           shareR,
           0,
-          true // vacant-unit repair share routed to owner → ΚΕΝΟ
+          // ΚΕΝΟ only for a truly-vacant unit; an owner-occupied unit's repair
+          // share is the resident owner's cost, NOT a vacant-unit charge.
+          !isResidentUnit
         );
       }
     }
