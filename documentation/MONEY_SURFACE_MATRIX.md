@@ -58,4 +58,18 @@ Every money mutation must invalidate the keys for the surfaces above. The establ
 2. **jest** (node@20): `services/api` suite green — proves no backend money-path regression.
 3. **Playwright money specs** on live NAS (serial): `49_vacant_owner_money`, `54_repair_vacant_flag_credit`, `56_uncollected_coverage_payment`, `48_building_expense_panel`, `50_owner_expenses_paid_tile`, `58_settlements_xlsx_owed_strip`, `61_breakdown_ownerbilled_dedup`.
 4. **Render-review** (Greek, `/landlord/el/...`) every surface in the table above that reads the field you touched — value AND layout.
-5. **Step-7 adversarial review** for any change to a money COMPUTATION path (not display-only).
+5. **For any change to a PDF or xlsx: generate the REAL artifact from live data and READ it.** A green unit suite and a static-HTML mock are NOT enough — the July 2026 PDF-basis work shipped two arithmetically-false equations that only a real generated PDF exposed («100 € ÷ 4 = 33,33 €» and «100 € × 50% = 25,00 €»). Owner-statement PDF: `GET /api/v2/documents/owner-statement/:ownerKey/:term`; tenant receipt: `GET /api/v2/documents/invoice/:tenantId/:term` (both via the authenticated gateway).
+6. **Step-7 adversarial review** for any change to a money COMPUTATION path (not display-only).
+
+## Standing invariants
+
+### Dual-role: a person can be BOTH a tenant AND an owner
+
+The same person (keyed by `name+ΑΦΜ` or `memberId`) can simultaneously **rent** unit X (an `Occupant` record) and **own / co-own** unit Y (`building.units[].owners[]`). "renter" and "owner" are roles, NOT mutually-exclusive identities. Audited July 1 2026 (4-dimension workflow + adversarial verify: 19 findings / 0 real). The invariant holds because:
+
+- **Recipient is decided PER-UNIT, PER-TERM — never per-person.** `1_base.ts` `computeBuildingExpenseBreakdown` does `recipient = unit.tenant ? 'renter' : 'owner'`, and `unit.tenant` is re-derived for each term by **propertyId** occupancy before the breakdown runs (`getExpenseBreakdown` nulls it for un-occupied units; the 12-month rollup sets it per-term from `_occupiedFromOccupancyRows`). Owning unit Y never makes you the owner-recipient of unit X you rent, and renting X never suppresses Y's owner charge.
+- **The two ledgers are physically disjoint and never netted.** Rent → `Occupant.rents[]`; owner liabilities → `building.ownerMonthlyExpenses[]`. `netOwnerChargeOutstanding` nets strictly WITHIN the owner ledger (same `expenseId|term|propertyId`), never against rent. A dual-role person correctly gets a tenant receipt for X AND an owner statement for Y — two separate obligations, not a double-count.
+- **Owner identity is built only from `units[].owners[]`**, never matched from tenant records. The one tenant↔owner match (`ownermanager._markAlsoRents`) sets a **display-only** «Also a tenant» badge and feeds zero money logic.
+- **Occupancy keys (`occupiedPropertyTermKeys`) are `propertyId+term`, not person** — a co-owner who rents a different unit doesn't wrongly mark their co-owned unit occupied.
+
+**Latent caveat (not a live bug):** `unit.tenant` is attached date-blind in `_toBuildingData` and only nulled per-term by the two current breakdown consumers. Any FUTURE consumer of `unit.tenant` for a renter-vs-owner decision MUST re-derive per-term occupancy by propertyId first, or it will misclassify a dual-role person.
