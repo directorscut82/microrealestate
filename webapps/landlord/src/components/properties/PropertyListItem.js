@@ -24,6 +24,7 @@ export default function PropertyListItem({ property }) {
     );
   }, [router, property]);
 
+  const isOwnerOccupied = property.status === 'owner_occupied';
   const isVacant = property.status === 'vacant';
 
   return (
@@ -64,15 +65,21 @@ export default function PropertyListItem({ property }) {
 
       <div className="flex items-center justify-between gap-3 px-5 py-2 border-t border-stone-line">
         <div className="text-label text-ink-muted truncate">
-          {!isVacant && property.occupantLabel
-            ? t('Occupied by {{tenant}}', { tenant: property.occupantLabel })
-            : null}
+          {isOwnerOccupied
+            ? t('Occupied by the owner')
+            : !isVacant && property.occupantLabel
+              ? t('Occupied by {{tenant}}', { tenant: property.occupantLabel })
+              : null}
         </div>
         <Badge
-          variant={isVacant ? 'secondary' : 'success'}
+          variant={isOwnerOccupied ? 'default' : isVacant ? 'secondary' : 'success'}
           className="shrink-0 px-2 py-0 text-[11px] leading-none font-normal"
         >
-          {isVacant ? t('Vacant') : t('Rented')}
+          {isOwnerOccupied
+            ? t('Owner occupied')
+            : isVacant
+              ? t('Vacant')
+              : t('Rented')}
         </Badge>
       </div>
     </button>

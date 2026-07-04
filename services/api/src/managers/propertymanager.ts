@@ -50,10 +50,22 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
   const buildings = buildingIds.length
     ? await Collections.Building.find(
         { realmId: realm!._id, _id: { $in: buildingIds } },
-        { name: 1 }
+        // `units` is needed so an OWNER-OCCUPIED (ιδιοκατοίκηση) unit is
+        // surfaced on the property list/detail — occupancyType lives on
+        // Building.units[], never on the Property, so without this the card
+        // labelled an owner-occupied unit «Κενό» (it has no tenant → status
+        // stayed vacant). Live-caught on ΟΔΟΣ ΗΤΑ 24 Όροφος 4.
+        { name: 1, units: 1 }
       ).lean()
     : [];
   const buildingMap = new Map((buildings as any[]).map((b: any) => [String(b._id), b.name]));
+  // propertyId → occupancyType, from the building units (owner-occupied signal).
+  const occByPropertyId = new Map<string, string>();
+  for (const b of buildings as any[]) {
+    for (const u of b.units || []) {
+      if (u.propertyId) occByPropertyId.set(String(u.propertyId), u.occupancyType || '');
+    }
+  }
 
   const allTenants = await Collections.Tenant.find({
     realmId: realm!._id,
@@ -77,7 +89,14 @@ async function _toPropertiesData(realm: Req['realm'], inputProperties: any[]) {
         const t2EndDate = t2.terminationDate || t2.endDate;
         return t2EndDate - t1EndDate;
       });
-    return { ...FD.toProperty(property, tenants?.[0], tenants), buildingName };
+    const base = FD.toProperty(property, tenants?.[0], tenants);
+    // Owner-occupied overrides the tenant-derived status: an owner_occupied unit
+    // has no tenant so toProperty leaves it 'vacant', which the card renders as
+    // «Κενό». Mark it so the UI shows «Ιδιοκατοίκηση» instead.
+    if (occByPropertyId.get(String(property._id)) === 'owner_occupied') {
+      base.status = 'owner_occupied';
+    }
+    return { ...base, buildingName };
   });
 }
 
