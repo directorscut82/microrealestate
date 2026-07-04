@@ -1232,5 +1232,7 @@
   "{{count}} imported without some occupied units": "{{count}} imported without some occupied units",
   "{{count}} error": "{{count}} error",
   "Imported {{count}} · {{skipped}} skipped": "Imported {{count}} · {{skipped}} skipped",
-  "No tenants imported — {{skipped}} skipped": "No tenants imported — {{skipped}} skipped"
+  "No tenants imported — {{skipped}} skipped": "No tenants imported — {{skipped}} skipped",
+  "The unit is rented — end the lease first.": "The unit is rented — end the lease first.",
+  "Turn on when an owner lives in this unit (no rent charged; owner pays the building-expense share).": "Turn on when an owner lives in this unit (no rent charged; owner pays the building-expense share)."
 }

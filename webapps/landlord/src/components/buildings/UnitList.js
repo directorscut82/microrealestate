@@ -1,6 +1,7 @@
 import {
   addBuildingUnit,
   fetchProperties,
+  fetchTenants,
   QueryKeys,
   removeBuildingUnit,
   updateBuildingUnit
@@ -75,13 +76,6 @@ const unitSchema = z.object({
     .optional()
 });
 
-const OCCUPANCY_TYPES = [
-  { value: 'rented', labelKey: 'rented' },
-  { value: 'owner_occupied', labelKey: 'owner_occupied' },
-  { value: 'vacant', labelKey: 'vacant' },
-  { value: 'parking', labelKey: 'parking' }
-];
-
 // Wave-24 B4: turn propertyId from a free-text 24-hex input into a Select
 // over the realm's properties. The previous UX required the user to paste
 // an ObjectId which they had no way to find from the UI.
@@ -116,6 +110,14 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
     queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+    // B-B: changing a unit's occupancyType/thousandths re-routes owner-expense
+    // allocation, so the owner ledger, ΧΡΕΩΣΕΙΣ breakdown and accounting/xlsx
+    // must refetch too — mirrors ExpenseList/RepairList/BuildingExpensePanel.
+    // Without these three, the owner tab / breakdown / Τιμολόγια showed stale
+    // money until a hard reload.
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
+    queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
   };
 
   const addMutation = useMutation({
@@ -180,6 +182,30 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   const occupancyType = watch('occupancyType');
   const propertyIdValue = watch('propertyId');
   const ownersValue = watch('owners');
+
+  // Occupancy detection: is THIS unit's property rented by an active tenant?
+  // Same rule the dashboard uses (BuildingDashboard tenantByPropertyId): skip
+  // terminated / archived tenants so a moved-out tenant doesn't count. Used to
+  // DISABLE the «Ιδιοκατοίκηση» switch — an owner cannot occupy a unit a tenant
+  // is renting (the server enforces the same guard, this is the UX surface).
+  const { data: tenantsForOcc } = useQuery({
+    queryKey: [QueryKeys.TENANTS],
+    queryFn: () => fetchTenants()
+  });
+  const isOccupiedByTenant = useMemo(() => {
+    const pid = unit?.propertyId ? String(unit.propertyId) : null;
+    if (!pid) return false;
+    const list = Array.isArray(tenantsForOcc)
+      ? tenantsForOcc
+      : tenantsForOcc?.pages?.flatMap((p) => p.data || p) || [];
+    return list.some(
+      (tn) =>
+        !tn?.terminated &&
+        !tn?.archived &&
+        (tn?.properties || []).some((tp) => String(tp.propertyId) === pid)
+    );
+  }, [tenantsForOcc, unit?.propertyId]);
+  const isOwnerOccupied = occupancyType === 'owner_occupied';
   const ownersPctSum = (ownersValue || []).reduce(
     (s, o) => s + (Number(o?.percentage) || 0),
     0
@@ -286,28 +312,42 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
               />
               <Label htmlFor="isManaged">{t('Managed Unit')}</Label>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="occupancyType">{t('Occupancy type')}</Label>
-              <Select
-                value={occupancyType}
-                onValueChange={(val) => setValue('occupancyType', val)}
-              >
-                <SelectTrigger id="occupancyType">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OCCUPANCY_TYPES.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {t(opt.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-label text-ink-muted">
-                {t(
-                  'Mark a unit as owner-occupied to track owner expenses and exclude from occupancy rate.'
-                )}
-              </p>
+            {/* Ιδιοκατοίκηση — a single switch, NOT a status dropdown. rented /
+                vacant are DERIVED from tenant links (never hand-set); parking /
+                storage are derived from property.type. The only occupancy state
+                the landlord sets by hand is "an owner lives here". Disabled when
+                the unit is rented — the server enforces the same guard. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="ownerOccupied">{t('Owner occupied')}</Label>
+                <p className="text-label text-ink-muted">
+                  {isOccupiedByTenant
+                    ? t('The unit is rented — end the lease first.')
+                    : t(
+                        'Turn on when an owner lives in this unit (no rent charged; owner pays the building-expense share).'
+                      )}
+                </p>
+              </div>
+              <Switch
+                id="ownerOccupied"
+                checked={isOwnerOccupied}
+                disabled={isOccupiedByTenant}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setValue('occupancyType', 'owner_occupied');
+                  } else {
+                    // Toggle OFF reverts to the derived state. Preserve a
+                    // parking unit's type (parking is a space kind, not a status
+                    // the switch owns); otherwise fall to 'vacant' (rented is
+                    // re-derived server-side when a tenant is linked).
+                    const original = unit?.occupancyType;
+                    setValue(
+                      'occupancyType',
+                      original === 'parking' ? 'parking' : 'vacant'
+                    );
+                  }
+                }}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="propertyId">{t('Linked property')}</Label>

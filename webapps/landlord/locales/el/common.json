@@ -1252,5 +1252,7 @@
   "{{count}} imported without some occupied units": "{{count}} εισήχθησαν χωρίς κάποιες κατειλημμένες μονάδες",
   "{{count}} error": "{{count}} σφάλμα",
   "Imported {{count}} · {{skipped}} skipped": "Εισήχθησαν {{count}} · {{skipped}} παραλείφθηκαν",
-  "No tenants imported — {{skipped}} skipped": "Δεν εισήχθη κανένας ενοικιαστής — {{skipped}} παραλείφθηκαν"
+  "No tenants imported — {{skipped}} skipped": "Δεν εισήχθη κανένας ενοικιαστής — {{skipped}} παραλείφθηκαν",
+  "The unit is rented — end the lease first.": "Η μονάδα είναι ενοικιασμένη — τερματίστε πρώτα τη μίσθωση.",
+  "Turn on when an owner lives in this unit (no rent charged; owner pays the building-expense share).": "Ενεργοποιήστε το όταν στη μονάδα κατοικεί ιδιοκτήτης (δεν χρεώνεται ενοίκιο· ο ιδιοκτήτης πληρώνει το μερίδιο των κοινοχρήστων)."
 }

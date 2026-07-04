@@ -93,6 +93,23 @@ const OCCUPANCY_CONFIG = {
   }
 };
 
+// B-D + B-E: the ONE source of truth for a unit's effective occupancy, used by
+// BOTH the ΜΟΝΑΔΕΣ counts and the per-row badge so they can never disagree.
+// Priority: an active tenant → 'rented' (regardless of space type); else the
+// space TYPE from property.type ('parking'/'storage') — B-E: parking/storage
+// are space kinds derived from property.type, NOT hand-set occupancy statuses;
+// else the unit's own occupancyType ('owner_occupied'); else 'vacant'.
+function deriveEffectiveOccupancy(unit, property, tenantInfo) {
+  const occ = unit?.occupancyType || 'vacant';
+  if (occ === 'owner_occupied') return 'owner_occupied';
+  if (tenantInfo) return 'rented';
+  if (occ === 'rented') return 'rented'; // tenant not yet joined this term but flagged
+  const ptype = property?.type || null;
+  if (occ === 'parking' || ptype === 'parking') return 'parking';
+  if (occ === 'storage' || ptype === 'storage') return 'storage';
+  return 'vacant';
+}
+
 function OccupancyBadge({ type }) {
   const { t } = useTranslation('common');
   const config = OCCUPANCY_CONFIG[type] || OCCUPANCY_CONFIG.vacant;
@@ -416,28 +433,25 @@ export default function BuildingDashboard({ building }) {
     };
     sortedUnits.forEach((unit) => {
       s.total++;
-      const occ = unit.occupancyType || 'vacant';
-      // BUGFIX (parking not shown after E9 import, reported 2026-07): the E9
-      // import types the PROPERTY as 'parking'/'storage' but never sets the
-      // unit's occupancyType (it defaults to 'vacant'), so parking/storage
-      // spots fell into Κενά and their own counts showed 0. Derive the type
-      // from property.type too, OR'd with occupancyType so a manually-set
-      // parking/storage unit still counts.
+      // B-D: counts use the SAME deriveEffectiveOccupancy helper the rows use,
+      // so the ΜΟΝΑΔΕΣ tallies can never disagree with the per-row badges. The
+      // helper resolves tenant→rented, then property.type→parking/storage
+      // (B-E), then owner_occupied, then vacant.
       const pid =
         typeof unit.propertyId === 'string'
           ? unit.propertyId
           : unit.propertyId?._id;
-      const ptype = pid ? propertyMap.get(pid)?.type : null;
-      if (occ === 'rented') s.rented++;
-      else if (occ === 'owner_occupied') s.ownerOccupied++;
-      else if (occ === 'parking' || (occ === 'vacant' && ptype === 'parking'))
-        s.parking++;
-      else if (occ === 'storage' || (occ === 'vacant' && ptype === 'storage'))
-        s.storage++;
+      const property = pid ? propertyMap.get(pid) : null;
+      const tenantInfo = property ? tenantByPropertyId.get(property._id) : null;
+      const eff = deriveEffectiveOccupancy(unit, property, tenantInfo);
+      if (eff === 'rented') s.rented++;
+      else if (eff === 'owner_occupied') s.ownerOccupied++;
+      else if (eff === 'parking') s.parking++;
+      else if (eff === 'storage') s.storage++;
       else s.vacant++;
     });
     return s;
-  }, [sortedUnits, propertyMap]);
+  }, [sortedUnits, propertyMap, tenantByPropertyId]);
 
   // Annual esoda / eksoda summary for this building.
   // Esoda  = sum of monthly rent across all currently-rented units × 12.
@@ -1316,7 +1330,6 @@ export default function BuildingDashboard({ building }) {
           <TableBody>
             {Array.from(floorSummary.entries()).map(([floor, units]) =>
               units.map((unit, idx) => {
-                const occupancy = unit.occupancyType || 'vacant';
                 const property = unit.propertyId
                   ? propertyMap.get(
                       typeof unit.propertyId === 'string'
@@ -1328,33 +1341,13 @@ export default function BuildingDashboard({ building }) {
                   ? tenantByPropertyId.get(property._id)
                   : null;
 
-                // Determine effective occupancy
-                let effectiveOccupancy = occupancy;
-                if (
-                  occupancy === 'vacant' &&
+                // B-D: same shared helper as the ΜΟΝΑΔΕΣ counts — badge and
+                // tally can never diverge.
+                const effectiveOccupancy = deriveEffectiveOccupancy(
+                  unit,
+                  property,
                   tenantInfo
-                ) {
-                  effectiveOccupancy = 'rented';
-                } else if (
-                  occupancy === 'vacant' &&
-                  !tenantInfo &&
-                  property?.type === 'parking'
-                ) {
-                  // Match the stats fix: an E9-imported parking spot has
-                  // occupancyType 'vacant' but property.type 'parking' — show
-                  // the parking badge so the row agrees with the Στάθμευση count.
-                  effectiveOccupancy = 'parking';
-                } else if (
-                  occupancy === 'vacant' &&
-                  !tenantInfo &&
-                  property?.type === 'storage'
-                ) {
-                  // Same as parking: an E9-imported storage room (Αποθήκη) has
-                  // occupancyType 'vacant' but property.type 'storage'. Show the
-                  // «Αποθήκη» badge so the row reads as the special space it is
-                  // and agrees with the Αποθήκη count (not plain «Κενό»).
-                  effectiveOccupancy = 'storage';
-                }
+                );
 
                 // Owner display
                 const ownerName =

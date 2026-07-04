@@ -2117,6 +2117,24 @@ export async function addUnit(req: Req, res: Res) {
     }
   }
 
+  // B-C (add path): a NEW unit can't be created owner-occupied on a property a
+  // tenant actively rents — same mutually-exclusive rule as updateUnit, DATE-
+  // aware so a moved-out tenant doesn't block it.
+  if (req.body.occupancyType === 'owner_occupied' && req.body.propertyId) {
+    const currentTerm = Number(moment.utc().format('YYYYMM')) * 10000 + 100;
+    const occupiedNow = await _occupiedPropertyIdsForTerm(
+      building as any,
+      realm!._id as string,
+      currentTerm
+    );
+    if (occupiedNow.has(String(req.body.propertyId))) {
+      throw new ServiceError(
+        'Η μονάδα είναι ενοικιασμένη — τερματίστε πρώτα τη μίσθωση πριν την ορίσετε ως ιδιοκατοίκηση.',
+        422
+      );
+    }
+  }
+
   (building as any).units.push(req.body);
 
   // Building-wide thousandths sums must not exceed 1000 across all units —
@@ -2229,11 +2247,40 @@ export async function updateUnit(req: Req, res: Res) {
 
   const oldPropertyId = unit.propertyId;
   const oldOccupancyType = unit.occupancyType;
+
+  // B-C: refuse to mark a unit owner-occupied while a tenant actively rents its
+  // property — the two states are mutually exclusive (a unit can't both bill a
+  // tenant rent AND route its expense share to a resident owner). Mirror the
+  // active-tenant guard removeUnit already has, but DATE-AWARE (via the shared
+  // occupancy helper) so a TERMINATED / moved-out tenant does NOT block the
+  // flip. The UI disables the switch too; this is the authoritative gate a raw
+  // API call can't bypass.
+  if (
+    req.body.occupancyType === 'owner_occupied' &&
+    oldOccupancyType !== 'owner_occupied' &&
+    (req.body.propertyId || oldPropertyId)
+  ) {
+    const currentTerm = Number(moment.utc().format('YYYYMM')) * 10000 + 100;
+    const occupiedNow = await _occupiedPropertyIdsForTerm(
+      building as any,
+      realm!._id as string,
+      currentTerm
+    );
+    const pidToCheck = String(req.body.propertyId || oldPropertyId);
+    if (occupiedNow.has(pidToCheck)) {
+      throw new ServiceError(
+        'Η μονάδα είναι ενοικιασμένη — τερματίστε πρώτα τη μίσθωση πριν την ορίσετε ως ιδιοκατοίκηση.',
+        422
+      );
+    }
+  }
+
   unit.set(req.body);
-  const occupancyChanged =
-    unit.occupancyType !== oldOccupancyType &&
-    (oldOccupancyType === 'owner_occupied' ||
-      unit.occupancyType === 'owner_occupied');
+  // B-A: recompute owner-side rows on ANY occupancy change (was scoped to
+  // owner_occupied transitions only, so rented↔vacant/parking flips left stale
+  // owner / uncollected money). recomputeVacantOwnerForProperties is a no-op
+  // when nothing owner-side changed, so widening the trigger is safe.
+  const occupancyChanged = unit.occupancyType !== oldOccupancyType;
 
   // Validate building-wide thousandths totals after the update — if the
   // edit pushes any of the three schemes above 1000, refuse the change.
