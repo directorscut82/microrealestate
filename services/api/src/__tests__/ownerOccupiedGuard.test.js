@@ -180,3 +180,108 @@ describe('B-C owner-occupied guard (date-aware)', () => {
     expect(state.building.units[0].occupancyType).toBe('owner_occupied');
   });
 });
+
+describe('Finding D — owner_occupied requires a linked property', () => {
+  beforeEach(() => {
+    state.building.units[0].occupancyType = 'vacant';
+    state.tenants = [];
+  });
+
+  it('updateUnit REFUSES owner_occupied when the unit has no propertyId (422)', async () => {
+    // Body clears the propertyId; the unit's oldPropertyId is also cleared for
+    // this case so the effective propertyId resolves empty.
+    state.building.units[0].propertyId = '';
+    const req = updateReq('owner_occupied');
+    req.body.propertyId = '';
+    const res = makeRes();
+    await expect(buildingManager.updateUnit(req, res)).rejects.toMatchObject({
+      status: 422
+    });
+    // restore for other tests
+    state.building.units[0].propertyId = '6a4551f5efd7970071c44001';
+  });
+
+  it('updateUnit ALLOWS owner_occupied when a propertyId IS present (no false block)', async () => {
+    state.building.units[0].propertyId = '6a4551f5efd7970071c44001';
+    const res = makeRes();
+    await buildingManager.updateUnit(updateReq('owner_occupied'), res);
+    expect(res.json).toHaveBeenCalled();
+    expect(state.building.units[0].occupancyType).toBe('owner_occupied');
+  });
+});
+
+describe('Finding C — removeUnit does not orphan owner charges', () => {
+  function removeReq() {
+    return {
+      realm: { _id: 'r1', locale: 'el' },
+      params: {
+        id: '6a4551f5efd7970071c44002',
+        unitId: '6a4551f5efd7970071c44003'
+      }
+    };
+  }
+
+  beforeEach(() => {
+    state.tenants = [];
+    state.building.units[0].propertyId = '6a4551f5efd7970071c44001';
+    // Give the building a DocumentArray-like ownerMonthlyExpenses with .pull.
+    const rows = [];
+    rows.pull = function (uid) {
+      const i = this.findIndex((r) => String(r._id) === String(uid));
+      if (i >= 0) this.splice(i, 1);
+    };
+    state.building.ownerMonthlyExpenses = rows;
+    // units.pull so removeUnit can drop the unit.
+    if (!state.building.units.pull) {
+      state.building.units.pull = function (uid) {
+        const i = this.findIndex((u) => String(u._id) === String(uid));
+        if (i >= 0) this.splice(i, 1);
+      };
+    }
+  });
+
+  it('BLOCKS delete (422) when a propertyId-scoped owner row carries recorded καταβολές', async () => {
+    state.building.ownerMonthlyExpenses.push({
+      _id: 'ome_paid',
+      expenseId: 'e1',
+      term: 2026060100,
+      amount: 100,
+      source: 'owner-resident',
+      propertyId: '6a4551f5efd7970071c44001',
+      payments: [{ amount: 100, type: 'transfer', date: '01/06/2026' }]
+    });
+    const res = makeRes();
+    await expect(
+      buildingManager.removeUnit(removeReq(), res)
+    ).rejects.toMatchObject({ status: 422 });
+    // unit + paid row both preserved (no silent drop of recorded money)
+    expect(state.building.units.length).toBe(1);
+    expect(state.building.ownerMonthlyExpenses.length).toBe(1);
+  });
+
+  it('DROPS an UNPAID propertyId-scoped owner row and removes the unit (no orphan)', async () => {
+    state.building.ownerMonthlyExpenses.push({
+      _id: 'ome_unpaid',
+      expenseId: 'e1',
+      term: 2026060100,
+      amount: 100,
+      source: 'owner-resident',
+      propertyId: '6a4551f5efd7970071c44001',
+      payments: []
+    });
+    const res = makeRes();
+    await buildingManager.removeUnit(removeReq(), res);
+    expect(res.json).toHaveBeenCalled();
+    // unpaid orphan cleaned up, unit removed
+    expect(
+      state.building.ownerMonthlyExpenses.find(
+        (r) => String(r.propertyId) === '6a4551f5efd7970071c44001'
+      )
+    ).toBeUndefined();
+    expect(
+      state.building.units.find(
+        (u) => String(u._id) === '6a4551f5efd7970071c44003'
+      )
+    ).toBeUndefined();
+  });
+});

@@ -1,4 +1,4 @@
-import { LuArrowLeft, LuBuilding2, LuHistory, LuKeyRound, LuTrash } from 'react-icons/lu';
+import { LuArrowLeft, LuBuilding2, LuHistory, LuHome, LuKeyRound, LuTrash } from 'react-icons/lu';
 import { useCallback, useState } from 'react';
 import {
   createProperty,
@@ -42,6 +42,17 @@ function PropertyOverviewCard({ property }) {
             <span className="text-muted-foreground">{t('Rent')}</span>
             <NumberFormat value={property?.price} />
           </div>
+          {/* Owner-occupied (Ιδιοκατοίκηση) is a per-unit occupancy state that
+              lives on Building.units[], not on the Property. The single-property
+              GET surfaces it as property.status ('owner_occupied'); render it
+              here so the detail page matches the property list card and the
+              building overview instead of implying the unit is simply vacant. */}
+          {property?.status === 'owner_occupied' && (
+            <div className="flex items-center gap-2 text-sm text-ink">
+              <LuHome className="size-3.5 shrink-0" />
+              <span>{t('Owner occupied')}</span>
+            </div>
+          )}
           {property?.buildingId && (
             <div
               className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer hover:text-ink transition-colors"
@@ -86,6 +97,14 @@ function OccupancyHistoryCard({ property }) {
               </div>
             );
           })
+        ) : property?.status === 'owner_occupied' ? (
+          // An owner-occupied unit has no tenant history, but it is NOT
+          // "never rented" — the owner lives there. Show that instead of the
+          // vacant-unit fallback so the two states are distinguishable.
+          <div className="flex items-center gap-2 text-base text-ink">
+            <LuHome className="size-4 shrink-0" />
+            <span>{t('Occupied by the owner')}</span>
+          </div>
         ) : (
           <span className="text-base text-muted-foreground">
             {t('Property not rented so far')}

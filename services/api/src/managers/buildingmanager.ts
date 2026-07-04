@@ -2117,6 +2117,18 @@ export async function addUnit(req: Req, res: Res) {
     }
   }
 
+  // owner-occupied REQUIRES a linked property. The building-expense breakdown
+  // (1_base.ts) skips any unit with no propertyId, so an owner_occupied unit
+  // without one would silently route its owner-resident share to €0 — the
+  // owner never sees the cost they genuinely owe, with no Αχρέωτα warning.
+  // Reject at the write side (mirrors the B-C guard's placement).
+  if (req.body.occupancyType === 'owner_occupied' && !req.body.propertyId) {
+    throw new ServiceError(
+      'Η ιδιοκατοίκηση απαιτεί συνδεδεμένο ακίνητο — συνδέστε πρώτα το ακίνητο της μονάδας.',
+      422
+    );
+  }
+
   // B-C (add path): a NEW unit can't be created owner-occupied on a property a
   // tenant actively rents — same mutually-exclusive rule as updateUnit, DATE-
   // aware so a moved-out tenant doesn't block it.
@@ -2248,6 +2260,29 @@ export async function updateUnit(req: Req, res: Res) {
   const oldPropertyId = unit.propertyId;
   const oldOccupancyType = unit.occupancyType;
 
+  // owner-occupied REQUIRES a linked property (see addUnit). Gate on the
+  // EFFECTIVE state after this update, not only on what the body carries:
+  //   - effectiveOccupancy: body value if sent, else the unit's current type
+  //   - effectivePropertyId: body value if sent, else the current propertyId
+  // Reject any update that would LEAVE the unit owner_occupied with an empty
+  // propertyId — including the Step-7 bypass of clearing propertyId ('') on an
+  // ALREADY owner_occupied unit without resending occupancyType. Otherwise
+  // 1_base.ts (skips !propertyId units) drops the owner-resident share to €0.
+  {
+    const effectiveOccupancy =
+      req.body.occupancyType !== undefined
+        ? req.body.occupancyType
+        : oldOccupancyType;
+    const effectivePropertyId =
+      req.body.propertyId !== undefined ? req.body.propertyId : oldPropertyId;
+    if (effectiveOccupancy === 'owner_occupied' && !effectivePropertyId) {
+      throw new ServiceError(
+        'Η ιδιοκατοίκηση απαιτεί συνδεδεμένο ακίνητο — συνδέστε πρώτα το ακίνητο της μονάδας.',
+        422
+      );
+    }
+  }
+
   // B-C: refuse to mark a unit owner-occupied while a tenant actively rents its
   // property — the two states are mutually exclusive (a unit can't both bill a
   // tenant rent AND route its expense share to a resident owner). Mirror the
@@ -2375,6 +2410,15 @@ export async function removeUnit(req: Req, res: Res) {
     throw new ServiceError('Unit does not exist', 404);
   }
 
+  // --- ALL read-only guards run BEFORE any mutation, so a rejected delete
+  //     never leaves the building/property half-mutated. ---
+  const pid = unit.propertyId ? String(unit.propertyId) : null;
+  const scopedOwnerRows: any[] = pid
+    ? ((building as any).ownerMonthlyExpenses || []).filter(
+        (r: any) => String(r.propertyId) === pid
+      )
+    : [];
+
   if (unit.propertyId) {
     const tenants = await Collections.Tenant.find({
       realmId: realm!._id,
@@ -2387,11 +2431,49 @@ export async function removeUnit(req: Req, res: Res) {
         422
       );
     }
+  }
 
+  // An owner charge row (source 'vacant' / 'repair-vacant' / 'owner-resident' /
+  // 'credit') stores only propertyId — the owner ledger reader re-resolves the
+  // owner(s) via propertyId → unit.owners. Once the unit is gone that lookup
+  // fails and ownermanager falls through to the BUILDING-WIDE owner set
+  // (ownermanager.ts ~514-519), silently re-attributing the row's money to the
+  // wrong owners. A SETTLEMENT-BEARING row therefore BLOCKS the delete: real
+  // money is attached; the landlord must settle/cancel it first (mirrors the
+  // active-tenant guard above and the "never drop recorded payments" invariant).
+  // Checked BEFORE any write so the 422 leaves nothing half-mutated.
+  //
+  // "settlement-bearing" MUST match the settlement definition the rest of the
+  // codebase uses so the guard can't disagree with the readers:
+  //   - a positive recorded payment: payments.some(amount > 0)  (ownerstatement.ts:141)
+  //   - OR paid===true with NO payments: setOwnerExpensePaid marks a row paid
+  //     WITHOUT pushing a payment (a valid recorded settlement state); a bare
+  //     `payments.length > 0` check missed this and would DELETE a paid row.
+  const isSettlementBearing = (r: any) =>
+    r.paid === true ||
+    (r.payments || []).some((p: any) => Number(p && p.amount) > 0);
+  const settledScoped = scopedOwnerRows.filter(isSettlementBearing);
+  if (settledScoped.length) {
+    throw new ServiceError(
+      'Η μονάδα δεν μπορεί να διαγραφεί: υπάρχουν καταχωρημένες καταβολές ιδιοκτήτη σε χρεώσεις της. Τακτοποιήστε ή ακυρώστε τις πρώτα.',
+      422
+    );
+  }
+
+  // --- guards passed → now mutate. ---
+  if (unit.propertyId) {
     await Collections.Property.findOneAndUpdate(
       { _id: unit.propertyId, realmId: realm!._id },
       { $unset: { buildingId: '' } }
     );
+  }
+
+  // Drop this unit's UNSETTLED propertyId-scoped owner rows so no orphan
+  // survives to misattribute. Settlement-bearing rows were blocked above, so
+  // nothing with recorded money is ever pulled here.
+  for (const r of scopedOwnerRows) {
+    if (isSettlementBearing(r)) continue;
+    (building as any).ownerMonthlyExpenses.pull(r._id);
   }
 
   (building as any).units.pull(unit._id);

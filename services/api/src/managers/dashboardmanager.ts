@@ -194,15 +194,40 @@ export function _computeActiveTenants(
 export function _computeOccupancyRate(
   activeTenants: AnyRecord[],
   propertyCount: number,
-  buildings: AnyRecord[]
+  buildings: AnyRecord[],
+  now?: moment.Moment
 ): number {
+  // An ACTIVE tenant outranks the stored owner_occupied/parking flag (Finding
+  // B): when an owner moved out and a tenant was linked, the unit keeps its
+  // owner_occupied flag (the money layer owns it; a scalar can't be per-term),
+  // but for occupancy it is genuinely rented — so it must count as rentable AND
+  // rented, not be excluded. Build the active-tenant propertyId set first, then
+  // exclude a flagged unit ONLY when it has no active tenant.
+  //
+  // Step-7 r2: a FUTURE-START lease (beginDate after now) is NOT occupying yet,
+  // so it must not make the property count as rented (nor un-exclude an
+  // owner_occupied/parking unit). activeTenants is already end-windowed by
+  // _computeActiveTenants; add the begin-window here (occupancy-rate-local, so
+  // the headline tenant count that also uses activeTenants is untouched). When
+  // `now` is omitted (legacy callers/tests) the begin-window is skipped.
+  const activeRentedPropertyIds = new Set<string>();
+  for (const tenant of activeTenants) {
+    if (now && tenant.beginDate) {
+      const begin = moment.utc(tenant.beginDate);
+      if (begin.isValid() && begin.isAfter(now, 'month')) continue;
+    }
+    for (const { propertyId } of (tenant.properties || []) as AnyRecord[]) {
+      if (propertyId) activeRentedPropertyIds.add(String(propertyId));
+    }
+  }
   const nonRentablePropertyIds = new Set<string>();
   for (const building of buildings) {
     for (const unit of building.units || []) {
       if (
         unit.propertyId &&
         (unit.occupancyType === 'owner_occupied' ||
-          unit.occupancyType === 'parking')
+          unit.occupancyType === 'parking') &&
+        !activeRentedPropertyIds.has(String(unit.propertyId))
       ) {
         nonRentablePropertyIds.add(String(unit.propertyId));
       }
@@ -551,6 +576,7 @@ export async function all(req: Req, res: Res) {
         name: 1,
         firstName: 1,
         lastName: 1,
+        beginDate: 1,
         terminationDate: 1,
         endDate: 1,
         'properties.propertyId': 1,
@@ -604,7 +630,8 @@ export async function all(req: Req, res: Res) {
     occupancyRate = _computeOccupancyRate(
       activeTenants,
       propertyCount,
-      buildings
+      buildings,
+      now
     );
   }
 

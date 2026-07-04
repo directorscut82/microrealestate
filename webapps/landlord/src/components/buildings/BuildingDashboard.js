@@ -95,14 +95,24 @@ const OCCUPANCY_CONFIG = {
 
 // B-D + B-E: the ONE source of truth for a unit's effective occupancy, used by
 // BOTH the ΜΟΝΑΔΕΣ counts and the per-row badge so they can never disagree.
-// Priority: an active tenant → 'rented' (regardless of space type); else the
-// space TYPE from property.type ('parking'/'storage') — B-E: parking/storage
+// Priority: an ACTIVE tenant → 'rented' (regardless of the stored flag); else
+// the space TYPE from property.type ('parking'/'storage') — B-E: parking/storage
 // are space kinds derived from property.type, NOT hand-set occupancy statuses;
 // else the unit's own occupancyType ('owner_occupied'); else 'vacant'.
+//
+// An active tenant OUTRANKS owner_occupied here on purpose (Finding B): when an
+// owner moves out and the landlord links a tenant, the unit still carries the
+// owner_occupied flag (the money layer keeps it — a scalar field can't be
+// per-term, and flipping it dropped the owner's still-resident-months share).
+// The DISPLAY must nevertheless show/count the unit as rented while a tenant
+// actually occupies it, so this derivation lets the tenant win WITHOUT touching
+// the stored flag. `tenantInfo` is windowed upstream (tenantByPropertyId skips
+// terminated/archived AND future-start leases), so neither a moved-out tenant
+// nor a not-yet-begun lease keeps the unit "rented" here.
 function deriveEffectiveOccupancy(unit, property, tenantInfo) {
   const occ = unit?.occupancyType || 'vacant';
-  if (occ === 'owner_occupied') return 'owner_occupied';
   if (tenantInfo) return 'rented';
+  if (occ === 'owner_occupied') return 'owner_occupied';
   if (occ === 'rented') return 'rented'; // tenant not yet joined this term but flagged
   const ptype = property?.type || null;
   if (occ === 'parking' || ptype === 'parking') return 'parking';
@@ -342,6 +352,7 @@ export default function BuildingDashboard({ building }) {
 
   const tenantByPropertyId = useMemo(() => {
     const map = new Map();
+    const now = moment();
     if (tenants) {
       tenants.forEach((tenant) => {
         // E22: skip terminated / archived tenants so the building view's
@@ -351,6 +362,17 @@ export default function BuildingDashboard({ building }) {
         // vacancy from the operator until they navigated to the tenant
         // record itself.
         if (tenant.terminated || tenant.archived) return;
+        // Finding B (Step-7 r2): a FUTURE-START lease must not count as
+        // occupying the unit yet — otherwise an owner-occupied (or vacant)
+        // unit shows/counts as «Ενοικιασμένο» before the tenant actually moves
+        // in. The money layer already windows by begin/end per term
+        // (_occupiedFromOccupancyRows); mirror that here. Dates are
+        // 'DD/MM/YYYY' (frontdata.toOccupantData formats them). Compare at
+        // month granularity to match the rent-term projection.
+        if (tenant.beginDate) {
+          const begin = moment(tenant.beginDate, 'DD/MM/YYYY', true);
+          if (begin.isValid() && begin.isAfter(now, 'month')) return;
+        }
         if (tenant.properties) {
           tenant.properties.forEach((tp) => {
             map.set(tp.propertyId, {

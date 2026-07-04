@@ -410,6 +410,61 @@ describe('Dashboard computation logic', () => {
       // 4 rentable, 1 occupied = 25%
       expect(rate).toBe(0.25);
     });
+
+    it('Finding B: an owner_occupied unit WITH an active tenant counts as rented (active tenant outranks the flag)', () => {
+      // The owner moved out and a tenant was linked; the unit keeps its
+      // owner_occupied flag (money layer owns it) but is genuinely rented.
+      const tenant = makeTenant({
+        properties: [{ propertyId: 'prop1' }]
+      });
+      const buildings = [
+        {
+          units: [
+            // prop1 is flagged owner_occupied BUT the active tenant rents it
+            { propertyId: 'prop1', occupancyType: 'owner_occupied' },
+            // prop2 is genuinely owner-occupied (no tenant) → excluded
+            { propertyId: 'prop2', occupancyType: 'owner_occupied' }
+          ]
+        }
+      ];
+      // 2 total props. prop2 (flagged, no tenant) excluded → 1 rentable.
+      // prop1 (flagged BUT tenanted) counts as rentable+rented → 1/1 = 100%.
+      const rate = computeOccupancyRate([tenant], 2, buildings);
+      expect(rate).toBe(1);
+    });
+
+    it('Finding B (Step-7 r2): a FUTURE-START lease does NOT un-exclude an owner_occupied unit', () => {
+      const now = moment('2026-07-05');
+      // Tenant is active (end in 2027) but their lease begins NEXT month —
+      // they do not occupy prop1 yet, so the owner still resides there.
+      const futureTenant = makeTenant({
+        beginDate: '2026-08-01',
+        endDate: '2027-08-01',
+        properties: [{ propertyId: 'prop1' }]
+      });
+      const buildings = [
+        { units: [{ propertyId: 'prop1', occupancyType: 'owner_occupied' }] }
+      ];
+      // prop1 is owner_occupied AND its only tenant hasn't started → excluded.
+      // 1 total - 1 non-rentable = 0 rentable → rate 0 (not "100% rented").
+      const rate = computeOccupancyRate([futureTenant], 1, buildings, now);
+      expect(rate).toBe(0);
+    });
+
+    it('Finding B (Step-7 r2): a lease that BEGAN counts the owner_occupied unit as rented', () => {
+      const now = moment('2026-09-05');
+      const startedTenant = makeTenant({
+        beginDate: '2026-08-01',
+        endDate: '2027-08-01',
+        properties: [{ propertyId: 'prop1' }]
+      });
+      const buildings = [
+        { units: [{ propertyId: 'prop1', occupancyType: 'owner_occupied' }] }
+      ];
+      // lease began in Aug → occupying in Sep → rentable + rented → 1/1 = 100%.
+      const rate = computeOccupancyRate([startedTenant], 1, buildings, now);
+      expect(rate).toBe(1);
+    });
   });
 
   describe('_tenantName', () => {

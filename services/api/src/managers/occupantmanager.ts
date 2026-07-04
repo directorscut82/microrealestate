@@ -476,6 +476,16 @@ async function _syncOccupancyForProperties(
     let changed = false;
     for (const unit of (building as any).units) {
       if (!unit.propertyId || !propertyIds.includes(String(unit.propertyId))) continue;
+      // owner_occupied and parking are NOT auto-derived occupancy: the stored
+      // occupancyType is the money-authoritative flag (owner_occupied routes the
+      // expense share to the resident owner; a per-term recompute reads it), and
+      // a SCALAR field cannot encode "owner-occupied through August, rented from
+      // September" for a future-dated lease. So this sync must NOT flip them on a
+      // tenant link/unlink — doing so dropped the owner-resident share for the
+      // still-resident months (Step-7). The building-view display/count instead
+      // derives "rented" from an ACTIVE tenant on top of the flag
+      // (BuildingDashboard.deriveEffectiveOccupancy), so an occupied
+      // owner-occupied unit reads as rented WITHOUT mutating the money flag.
       if (unit.occupancyType === 'owner_occupied' || unit.occupancyType === 'parking') continue;
 
       const newType = action === 'link' ? 'rented' : 'vacant';
