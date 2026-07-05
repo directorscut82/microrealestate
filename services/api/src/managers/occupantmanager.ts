@@ -961,8 +961,14 @@ export async function add(req: Req, res: Res) {
   // Wave-24 A1+A5: shared body-shape validators (deposit + per-property rent).
   _validateOccupantPayload(req.body);
 
+  // Tenant-import directive (NOT a Tenant schema field): "mark all past months
+  // paid". Capture it from the raw body BEFORE formatting, then ensure it never
+  // reaches the persisted occupant doc. Consumed only by Contract.create below.
+  const markPastPaid = req.body?.markPastPaid === true;
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id, ...occupant } = _formatTenant(req.body);
+  const { _id, markPastPaid: _mpp, ...occupant } = _formatTenant(req.body);
+  void _mpp;
 
   // Validate + normalize name (trim, length cap, non-empty)
   const trimmedName = validateStringField(occupant.name, 'name', {
@@ -1129,18 +1135,30 @@ export async function add(req: Req, res: Res) {
         { properties: occupant.properties }
       );
 
+      // Tenant import "mark all past months paid": when the client sets
+      // markPastPaid, seed every term strictly before the CURRENT term as
+      // already fully paid (see contract.ts create() autoPayThroughTerm). This
+      // replaces the old client PATCH loop that paid each month's CUMULATIVE
+      // grandTotal (over-recording collected N-fold — the ΟΔΟΣ ΗΤΑ 24 garbage).
+      // Current term = moment.utc().startOf(freq) → matches _currentTermFor.
+      const freq = occupant.frequency || 'months';
+      const autoPayThroughTerm = markPastPaid
+        ? Number(moment.utc().startOf(freq as moment.unitOfTime.StartOf).format('YYYYMMDDHH'))
+        : undefined;
+
       // Schema default ('months') applies at persistence time. Fall back
       // here too because Contract.create requires frequency for the rent
       // term math regardless of what Mongoose will set on save.
       const contract = Contract.create({
         begin: occupant.beginDate,
         end: occupant.endDate,
-        frequency: occupant.frequency || 'months',
+        frequency: freq,
         properties: occupant.properties,
         buildings,
         vatRate: occupant.vatRatio,
         discount: occupant.discount || 0,
-        rents: []
+        rents: [],
+        autoPayThroughTerm
       });
 
       occupant.rents = contract.rents;

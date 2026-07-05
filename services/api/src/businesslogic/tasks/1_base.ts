@@ -13,6 +13,16 @@ export interface Contract {
   vatRate?: number;
   discount?: number;
   rents: Rent[];
+  // Create-time directive (NOT persisted): when set, Contract.create seeds
+  // every generated term STRICTLY BEFORE this term already fully paid (a
+  // settlement of that term's own single-month bill). Used by the tenant
+  // import "mark all past months paid" flow so the past ledger is generated
+  // settled — no cumulative carry-in balance ever accrues (5_balance carries
+  // prev.grandTotal − prev.payment = 0). This replaces the old UI PATCH loop
+  // that paid each month's CUMULATIVE grandTotal, over-recording collected
+  // N-fold (200,400,…,2400 for a 200/mo tenant → Σ 15.600 not 2.400). Every
+  // other Contract.create caller leaves this undefined → byte-identical output.
+  autoPayThroughTerm?: number;
 }
 
 export interface Rent {

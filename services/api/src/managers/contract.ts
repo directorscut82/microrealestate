@@ -56,17 +56,44 @@ export function create(contract: Contract): Contract {
 
   const current = moment.utc(momentBegin);
   let previousRent: Rent | null = null;
+  // Create-time "mark past months paid" directive (tenant import). Seed each
+  // term strictly before autoPayThroughTerm already fully paid so no cumulative
+  // carry-in balance ever accrues. Two-pass per term: (A) compute WITHOUT a
+  // settlement to learn this term's own single-month grandTotal — its carry-in
+  // is 0 because the PRIOR term was itself seeded fully-paid; (B) recompute WITH
+  // a payment == that grandTotal so payment == this-month bill. Then 5_balance
+  // for the next term computes prev.grandTotal − prev.payment = 0. Proven
+  // against the real pipeline (probe): 200/mo × 12 → every month grandTotal 200
+  // / payment 200 / balance 0, Σ collected 2.400 (was 15.600 via the old
+  // cumulative-grandTotal UI loop). undefined directive → identical to before.
+  const autoPayThroughTerm = Number(contract.autoPayThroughTerm) || 0;
   while (
     current.isSameOrBefore(
       momentTermination || momentEnd,
       contract.frequency as moment.unitOfTime.StartOf
     )
   ) {
-    const rent = BL.computeRent(
-      contract,
-      current.format('DD/MM/YYYY HH:mm'),
-      previousRent
-    );
+    const rentDate = current.format('DD/MM/YYYY HH:mm');
+    let rent = BL.computeRent(contract, rentDate, previousRent);
+    if (
+      autoPayThroughTerm &&
+      typeof rent.term === 'number' &&
+      rent.term < autoPayThroughTerm &&
+      rent.total.grandTotal > 0
+    ) {
+      // pass B — settle this term's OWN bill (its grandTotal here already
+      // reflects a 0 carry-in from the fully-paid previousRent).
+      rent = BL.computeRent(contract, rentDate, previousRent, {
+        payments: [
+          {
+            amount: rent.total.grandTotal,
+            type: 'transfer',
+            date: current.format('DD/MM/YYYY'),
+            reference: ''
+          }
+        ]
+      });
+    }
     contract.rents.push(rent);
     previousRent = rent;
     current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);

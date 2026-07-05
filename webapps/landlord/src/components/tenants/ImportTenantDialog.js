@@ -747,7 +747,16 @@ export default function ImportTenantDialog({ open, setOpen }) {
               phone2: ''
             }
           ],
-          stepperMode: false
+          stepperMode: false,
+          // "Mark all past months paid" for a NEW tenant: let the server seed
+          // the past ledger already-settled at generation (Contract.create
+          // autoPayThroughTerm). This replaces the old post-create PATCH loop
+          // (below) that paid each month's CUMULATIVE grandTotal and thus
+          // over-recorded collected N-fold (the ΟΔΟΣ ΗΤΑ 24 garbage). Only the
+          // createTenant (strategy 'new') server path threads this; extend/
+          // replace still use the loop until their handlers thread it too.
+          markPastPaid:
+            markPaidFlags[idx] !== false && matchInfo?.pastMonths > 0
         };
 
         let tenant;
@@ -860,8 +869,26 @@ export default function ImportTenantDialog({ open, setOpen }) {
           }
         }
 
-        // Settle past months if flag is set (pays full grandTotal including charges)
-        if (markPaidFlags[idx] !== false && matchInfo?.pastMonths > 0) {
+        // Settle past months if flag is set.
+        //
+        // The 'new' strategy is now handled SERVER-SIDE: createTenant received
+        // markPastPaid above → Contract.create seeds the past ledger already
+        // settled at generation (no cumulative carry-in). Running this client
+        // loop for 'new' too would double-pay. So this loop now covers ONLY the
+        // extend/replace strategies, whose server handlers (extendTenantLease /
+        // updateTenant) do NOT yet thread autoPayThroughTerm.
+        //
+        // NOTE: for extend/replace this loop still pays totalAmount − payment
+        // per term. On those paths the tenant ALREADY EXISTS with a prior
+        // ledger, so a full seed-at-create isn't available; this preserves the
+        // prior behavior for them until their handlers thread the directive
+        // (tracked follow-up). It is NOT the cumulative-snowball path — it
+        // re-fetches and pays each term's residual owed.
+        if (
+          strategy !== 'new' &&
+          markPaidFlags[idx] !== false &&
+          matchInfo?.pastMonths > 0
+        ) {
           // P1.2 / M4: previously hit `/rents/:year` which is not a
           // registered route — the silent catch fell back to base
           // monthlyRent only, dropping charges/VAT/discount. Use the
