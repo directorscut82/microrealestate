@@ -19,7 +19,13 @@ import { parseImportedPdf } from './managers/pdfimportmanager.js';
 // Simple in-memory rate limiter for upload endpoints (no external dep)
 const uploadRateLimits = new Map<string, { count: number; resetAt: number }>();
 const UPLOAD_RATE_WINDOW_MS = 60_000; // 1 minute
-const UPLOAD_RATE_MAX = 10; // 10 uploads per minute per user
+// 60 uploads/minute per user. Raised from 10 (dfb0e2d5, 2026-05-09) because a
+// legitimate BULK import trips the old cap: importing N buildings fires 2N
+// uploads (parse + ?confirmed=true), so 5 buildings alone = 10 = the entire
+// old budget, and a following tenant batch 429s. A real from-scratch batch is
+// ~16 PDFs (buildings ×2 + leases) ≈ 26 uploads; 60/min fits it with headroom
+// while still bounding runaway/abusive upload loops.
+const UPLOAD_RATE_MAX = 60; // 60 uploads per minute per user
 
 // L12: periodic GC for the in-memory rate-limit map. Without this the
 // map grew without bound — each unique key persisted forever even
