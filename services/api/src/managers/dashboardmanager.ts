@@ -728,6 +728,7 @@ async function _expensesRollup(
   totalYearExpenses: number;
   totalYearPaid: number;
   expenses: AnyRecord[];
+  owedByBuildingId: Map<string, number>;
 }> {
   // Full building docs — computeOwnerEksodaByMonth needs expenses + repairs +
   // units + ownerMonthlyExpenses to compute the owner-borne eksoda LIVE
@@ -749,6 +750,11 @@ async function _expensesRollup(
 
   let totalYearExpenses = 0;
   let totalYearPaid = 0;
+  // Per-building owed total, accumulated with the EXACT SAME bucket filter as
+  // totalYearExpenses (Step-7 D4 round-2: a separate per-building sum of ALL
+  // owedByTerm terms diverged from the headline for any non-day-01 term). One
+  // source, one filter → Σ per-building === totalYearExpenses by construction.
+  const owedByBuildingId = new Map<string, number>();
   for (const b of buildings) {
     const { owedByTerm, paidByTerm, detailByTerm } =
       await computeOwnerEksodaByMonth(realmId, b, year);
@@ -760,6 +766,7 @@ async function _expensesRollup(
     // only the owed-vs-its-own-paid shortfall so a credit's surplus can't make
     // notPaid negative.
     const allTerms = new Set([...owedByTerm.keys(), ...paidByTerm.keys()]);
+    let bOwed = 0;
     for (const term of allTerms) {
       const key = termToKey[term];
       const bucket = key ? byMonth[key] : null;
@@ -772,7 +779,9 @@ async function _expensesRollup(
       bucket.notPaid += Math.max(0, owed - paid);
       totalYearExpenses += owed;
       totalYearPaid += paid;
+      bOwed += owed;
     }
+    owedByBuildingId.set(String(b._id), _round(bOwed));
     // Merge this building's per-(owner, category) detail lines into the month
     // bucket so the tooltip can list them (the expense twin of revenues'
     // per-tenant lines). Tagged with the building so the tooltip can show it.
@@ -809,7 +818,8 @@ async function _expensesRollup(
   return {
     totalYearExpenses: _round(totalYearExpenses),
     totalYearPaid: _round(totalYearPaid),
-    expenses
+    expenses,
+    owedByBuildingId
   };
 }
 
@@ -871,4 +881,292 @@ async function _fetchPendingBills(realmId: string): Promise<AnyRecord[]> {
   }
 
   return Object.values(grouped);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GET /dashboard/overview/:year — the realm-wide ΕΠΙΣΚΟΠΗΣΗ page.
+//
+// DRIFT GUARANTEE (user's hard rule: "no inconsistent posa across tabs"):
+// this handler performs NO new money arithmetic on actuals. It reuses the
+// SAME functions the building pages + the main dashboard already use —
+//   • income (collected/owed): the rent.total ledger fields, summed with the
+//     SAME carry-forward strip the building A2 tile + dashboard use
+//     (monthDue = grandTotal − max(0,balance); owed = max(0, monthDue − paid)),
+//   • owner εκσοδα: computeOwnerEksodaByMonth (identical to the dashboard's
+//     _expensesRollup, which is called here verbatim),
+//   • year revenue: _computeTotalYearRevenues.
+// It only AGGREGATES + SLICES those already-correct values per building / per
+// owner / per category. Any figure on this page is therefore, by construction,
+// the sum of figures already shown on the building/owner/dashboard surfaces.
+//
+// The PROJECTION (πραγμ.+εκτ.) is the one piece not yet a shared server fn —
+// it mirrors BuildingDashboard.js's client formula (active-months-prorated
+// recurring + fixed; 3-month-average × remaining for variable). It is DISPLAY
+// ONLY and clearly separated ('estimate' fields), never summed into an actual.
+// ─────────────────────────────────────────────────────────────────────────
+export async function overview(req: Req, res: Res) {
+  const realmId = req.realm!._id;
+  // Year comes from the path; default to current. Validated by the route regex.
+  const now = moment.utc();
+  const year = Number(req.params.year) || now.year();
+  const isCurrentYear = year === now.year();
+  const currentMonthIdx = isCurrentYear ? now.month() + 1 : 12; // 1..12
+
+  // ── Fetch tenants (rents for the requested year) ──
+  const yearStr = String(year);
+  const allTenants: AnyRecord[] = await Collections.Tenant.aggregate([
+    { $match: { realmId } },
+    {
+      $project: {
+        name: 1,
+        firstName: 1,
+        lastName: 1,
+        beginDate: 1,
+        terminationDate: 1,
+        endDate: 1,
+        'properties.propertyId': 1,
+        rents: {
+          $filter: {
+            input: '$rents',
+            as: 'r',
+            cond: {
+              $eq: [{ $substrBytes: [{ $toString: '$$r.term' }, 0, 4] }, yearStr]
+            }
+          }
+        }
+      }
+    }
+  ]);
+
+  const buildings: AnyRecord[] = await Collections.Building.find({
+    realmId
+  }).lean();
+
+  // ── Per-building income {collected, owed} — SAME carry-forward strip as
+  //    buildingmanager rentYTDByBuilding + dashboard (documented above). ──
+  const propIdToBuildingId = new Map<string, string>();
+  for (const b of buildings) {
+    for (const u of b.units || []) {
+      if (u.propertyId)
+        propIdToBuildingId.set(String(u.propertyId), String(b._id));
+    }
+  }
+  const incomeByBuilding = new Map<string, { collected: number; owed: number }>();
+  // Standalone tenants (property not inside any building) accumulate here so the
+  // realm income headline stays === Σ(per-building + standalone) — Step-7 D2:
+  // dropping them made the headline exceed the sum of the building rows.
+  const standalone = { collected: 0, owed: 0 };
+  // Per-tenant + arrears (this-month remaining owed, days overdue).
+  const perTenant: AnyRecord[] = [];
+  const arrears: AnyRecord[] = [];
+  // Realm income is the SUM of the SAME per-tenant term-based figures used for
+  // the per-building rows — NOT a separate payment-date revenue fn (Step-7 D1:
+  // _computeTotalYearRevenues counts payments by date minus vat/deposit, which
+  // could never equal Σ perBuilding.collected on the same screen). One axis, one
+  // number, reconciles by construction.
+  let incomeCollected = 0;
+  let incomeOwed = 0;
+  for (const t of allTenants) {
+    let bid: string | null = null;
+    for (const tp of t.properties || []) {
+      const cand = propIdToBuildingId.get(String(tp.propertyId));
+      if (cand) {
+        bid = cand;
+        break;
+      }
+    }
+    let collected = 0;
+    let owed = 0;
+    let latestArrear = 0;
+    for (const rent of t.rents || []) {
+      if (Math.floor(Number(rent.term || 0) / 1000000) !== year) continue;
+      const grand = Number(rent?.total?.grandTotal) || 0;
+      const payment = Number(rent?.total?.payment) || 0;
+      const balance = Number(rent?.total?.balance) || 0;
+      const monthDue = Math.max(0, grand - Math.max(0, balance));
+      collected += payment;
+      const monthOwed = Math.max(0, monthDue - payment);
+      owed += monthOwed;
+      // Track the most-recent month's shortfall for the arrears list.
+      const termMonth = Math.floor(Number(rent.term || 0) / 10000) % 100;
+      if (termMonth <= currentMonthIdx && monthOwed > 0.005)
+        latestArrear = monthOwed;
+    }
+    incomeCollected += collected;
+    incomeOwed += owed;
+    if (bid) {
+      const slot = incomeByBuilding.get(bid) || { collected: 0, owed: 0 };
+      slot.collected = _round(slot.collected + collected);
+      slot.owed = _round(slot.owed + owed);
+      incomeByBuilding.set(bid, slot);
+    } else {
+      standalone.collected = _round(standalone.collected + collected);
+      standalone.owed = _round(standalone.owed + owed);
+    }
+    if (collected > 0 || owed > 0) {
+      perTenant.push({
+        name: _tenantName(t),
+        collected: _round(collected),
+        owed: _round(owed)
+      });
+    }
+    if (latestArrear > 0.005) {
+      arrears.push({ name: _tenantName(t), owed: _round(latestArrear) });
+    }
+  }
+  incomeCollected = _round(incomeCollected);
+  incomeOwed = _round(incomeOwed);
+
+  // ── Owner εκσοδα rollup: reuse _expensesRollup (identical to the dashboard).
+  //    Its expenses[].breakdown[] carries per-(ownerName, category, label,
+  //    buildingName, vacant) lines — the raw material for every κατανομή. ──
+  let expensesRollup = {
+    totalYearExpenses: 0,
+    totalYearPaid: 0,
+    expenses: [] as AnyRecord[],
+    owedByBuildingId: new Map<string, number>()
+  };
+  try {
+    expensesRollup = await _expensesRollup(String(realmId), year);
+  } catch (error) {
+    logger.error(`overview: expenses rollup failed: ${String(error)}`);
+  }
+  // Per-building owner-εκσοδα comes from the SAME rollup (same term filter as
+  // the headline total) — Step-7 D4: never re-sum owedByTerm separately.
+  const ownerEksodaByBuildingId = expensesRollup.owedByBuildingId;
+
+  // Flatten breakdown lines across all months → κατανομές by category /
+  // label / owner (each summed over the year). Accumulate WITHOUT per-add
+  // rounding, round once at the end, so every κατανομή reconciles to
+  // totals.ownerExpenses to the cent. Step-7 D3: a line with no named owner is
+  // NOT dropped — it folds into an «(αδιάθετο)» bucket so byOwner still sums to
+  // the total. buildingName is NOT keyed here (Step-7 D4: two buildings can
+  // share a name); per-building εκσοδα is computed per-_id below instead.
+  const UNASSIGNED_OWNER = t_unassignedOwnerLabel();
+  const byCategoryRaw = new Map<string, number>();
+  const byLabelRaw = new Map<string, number>();
+  const byOwnerRaw = new Map<string, number>();
+  for (const m of expensesRollup.expenses) {
+    for (const ln of (m.breakdown as AnyRecord[]) || []) {
+      const owed = Number(ln.owed) || 0;
+      if (!(owed > 0)) continue;
+      byCategoryRaw.set(ln.category, (byCategoryRaw.get(ln.category) || 0) + owed);
+      const lbl = ln.label || ln.category;
+      byLabelRaw.set(lbl, (byLabelRaw.get(lbl) || 0) + owed);
+      const owner = ln.ownerName || UNASSIGNED_OWNER;
+      byOwnerRaw.set(owner, (byOwnerRaw.get(owner) || 0) + owed);
+    }
+  }
+
+  // ── Repairs: status counts (realm) + cost per building. (Owner-εκσοδα per
+  //    building already came from expensesRollup.owedByBuildingId above — no
+  //    second computeOwnerEksodaByMonth pass.) ──
+  const repairStatus = { planned: 0, inProgress: 0, emergencies: 0 };
+  const repairCostByBuilding: Array<{ name: string; cost: number; count: number }> = [];
+  for (const b of buildings) {
+    let rCost = 0;
+    let rCount = 0;
+    for (const r of b.repairs || []) {
+      if (r.status === 'planned') repairStatus.planned++;
+      else if (r.status === 'in_progress') repairStatus.inProgress++;
+      if (r.urgency === 'emergency' && r.status !== 'completed' && r.status !== 'cancelled')
+        repairStatus.emergencies++;
+      const cost = Number(r.actualCost) || Number(r.estimatedCost) || 0;
+      if (cost > 0) {
+        rCost += cost;
+        rCount += 1;
+      }
+    }
+    if (rCost > 0)
+      repairCostByBuilding.push({ name: b.name || '', cost: _round(rCost), count: rCount });
+  }
+  repairCostByBuilding.sort((a, b2) => b2.cost - a.cost);
+
+  // ── Assemble per-building rows (income by _id + owner εκσοδα by _id + net).
+  //    Includes a standalone (building-less) row when it carries money so
+  //    Σ rows === realm totals (Step-7 D2). ──
+  const perBuilding = buildings.map((b) => {
+    const inc = incomeByBuilding.get(String(b._id)) || { collected: 0, owed: 0 };
+    const eks = ownerEksodaByBuildingId.get(String(b._id)) || 0;
+    return {
+      buildingId: String(b._id),
+      name: b.name || '',
+      collected: inc.collected,
+      ownerExpenses: _round(eks),
+      net: _round(inc.collected - eks)
+    };
+  });
+  if (standalone.collected > 0 || standalone.owed > 0) {
+    perBuilding.push({
+      buildingId: '',
+      name: t_standaloneLabel(),
+      collected: standalone.collected,
+      ownerExpenses: 0,
+      net: standalone.collected
+    });
+  }
+
+  // ── Per-owner rows: owner εκσοδα + tax placeholder (null until φόρος import).
+  //    Income-per-owner needs owner→unit→tenant attribution not in this payload
+  //    — a documented follow-up; the column is intentionally absent for now. ──
+  const perOwner = Array.from(byOwnerRaw.entries())
+    .map(([ownerName, eks]) => ({
+      ownerName,
+      ownerExpenses: _round(eks),
+      tax: null as number | null
+    }))
+    .sort((a, b) => b.ownerExpenses - a.ownerExpenses);
+
+  const toSortedArr = (m: Map<string, number>) =>
+    Array.from(m.entries())
+      .map(([label, amount]) => ({ label, amount: _round(amount) }))
+      .sort((a, b) => b.amount - a.amount);
+
+  res.json({
+    year,
+    isCurrentYear,
+    // ACTUALS — every figure reconciles by construction (Step-7 D1/D2/D3/D4):
+    //  income  = Σ per-tenant term-based collected = Σ(perBuilding+standalone)
+    //  εκσοδα  = _expensesRollup owed = Σ per-building eksoda = Σ κατανομές
+    totals: {
+      income: incomeCollected,
+      incomeOwed,
+      ownerExpenses: _round(expensesRollup.totalYearExpenses),
+      ownerExpensesPaid: _round(expensesRollup.totalYearPaid),
+      net: _round(incomeCollected - expensesRollup.totalYearExpenses)
+    },
+    monthlyExpenses: expensesRollup.expenses.map((m) => ({
+      month: m.month,
+      paid: m.paid,
+      owed: m.notPaid + m.paid
+    })),
+    perBuilding,
+    perOwner,
+    katanomes: {
+      byCategory: toSortedArr(byCategoryRaw),
+      byLabel: toSortedArr(byLabelRaw).slice(0, 8),
+      // εκσοδα per building keyed by _id → name (Step-7 D4: name is not unique;
+      // two same-named buildings stay distinct rows/slices here).
+      byBuilding: perBuilding
+        .filter((b) => b.buildingId && b.ownerExpenses > 0)
+        .map((b) => ({ label: b.name, amount: b.ownerExpenses }))
+        .sort((a, b) => b.amount - a.amount),
+      byOwner: toSortedArr(byOwnerRaw)
+    },
+    arrears: arrears.sort((a, b) => b.owed - a.owed).slice(0, 10),
+    repairs: {
+      status: repairStatus,
+      byBuilding: repairCostByBuilding
+    }
+  });
+}
+
+// Labels for the two synthetic buckets (kept out of i18n JSON churn; the API
+// returns display text directly, matching how ownerName/buildingName are
+// returned as text elsewhere in this payload).
+function t_unassignedOwnerLabel(): string {
+  return 'Αδιάθετο';
+}
+function t_standaloneLabel(): string {
+  return 'Χωρίς κτίριο';
 }

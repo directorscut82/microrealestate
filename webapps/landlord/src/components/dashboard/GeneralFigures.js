@@ -82,6 +82,11 @@ export default function GeneralFigures({ className, dashboardData }) {
             <NumberFormat value={overview.totalYearRevenues} showZero={true} />
           }
           emphasis
+          onClick={() =>
+            router.push(
+              `/${router.query.organization}/overview/${new Date().getFullYear()}`
+            )
+          }
         />
         <Row
           label={t('Expenses')}

@@ -164,6 +164,12 @@ export default function routes(): express.Router {
     '/',
     Middlewares.asyncWrapper(dashboardManager.all as any)
   );
+  // Realm-wide ΕΠΙΣΚΟΠΗΣΗ page (the ">" drill-down off the Overview card).
+  // :year is a 4-digit year; handler defaults to current year if absent/odd.
+  dashboardRouter.get(
+    '/overview/:year(\\d{4})',
+    Middlewares.asyncWrapper(dashboardManager.overview as any)
+  );
   router.use('/dashboard', dashboardRouter);
 
   const leasesRouter = express.Router();

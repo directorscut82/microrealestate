@@ -51,6 +51,16 @@ export async function fetchDashboard() {
   return response.data;
 }
 
+// Realm-wide ΕΠΙΣΚΟΠΗΣΗ page (the ">" drill-down off the dashboard Overview
+// card). `year` is a 4-digit calendar year. The server reuses the SAME rollup
+// fns the building/owner/dashboard surfaces use, so figures never drift.
+export async function fetchOverview(year) {
+  const response = await apiFetcher().get(
+    `/dashboard/overview/${encodeURIComponent(year)}`
+  );
+  return response.data;
+}
+
 export async function fetchAccounting(year) {
   const response = await apiFetcher().get(`/accounting/${year}`);
   return response.data;
