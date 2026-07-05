@@ -934,8 +934,15 @@ export default function BuildingDashboard({ building }) {
     // Non-recurring (one-time) source expenses keep a single month — no recur.
     const _projectOwnerShare = (row) => {
       const exp = _expByIdH3.get(String(row.expenseId));
-      const months =
-        exp && (exp.isRecurring ?? exp.recurring) ? _expenseActiveMonths(exp) : 1;
+      // A VARIABLE owner expense (recurring but amount 0 — its monthly figure is
+      // landlord-typed per term) must NOT be flat-projected: each month differs,
+      // so its future months are unknown. Count only its ENTERED (materialised)
+      // months — exactly like the κυμαινόμενα cell — matching the server
+      // dashboard (which sums the per-term rows, not a projection). Only a
+      // FIXED recurring expense (amount>0) is projected across active months.
+      const isRecurring = exp && (exp.isRecurring ?? exp.recurring);
+      const isVariable = isRecurring && _expenseMonthlyCost(exp) === 0;
+      const months = isRecurring && !isVariable ? _expenseActiveMonths(exp) : 1;
       return (Number(row.amount) || 0) * months;
     };
     const ownerResidentEksoda = ownerLedgerThisYear
