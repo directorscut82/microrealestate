@@ -218,7 +218,7 @@ function BarRow({
 // One eksoda-composition cell (the mockup's `.comp .cell`): quiet cream tile,
 // a 2-line label, a mono value under it. NOT a hero metric and NOT an
 // identical-grid card — it's a labelled figure in a flow grid.
-function CompCell({ label, value, owner }) {
+function CompCell({ label, value, owner, note }) {
   return (
     <div
       className={cn(
@@ -232,6 +232,12 @@ function CompCell({ label, value, owner }) {
       <div className="font-mono tabular-nums text-body text-ink mt-1">
         {value}
       </div>
+      {/* Optional sub-line: the actual-vs-projected split for κυμαινόμενα. */}
+      {note ? (
+        <div className="text-[10.5px] text-ink-muted leading-tight mt-1">
+          {note}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -382,7 +388,15 @@ export default function BuildingDashboard({ building }) {
               // E1: the tenant's δαπάνες επί ενοικίου for this property — these
               // are charged to the tenant ON TOP of base rent, so the building
               // income projection must include them, not rent alone.
-              expenses: Array.isArray(tp.expenses) ? tp.expenses : []
+              expenses: Array.isArray(tp.expenses) ? tp.expenses : [],
+              // Lease window (DD/MM/YYYY) so the annual Income figure can count
+              // only the months this lease is actually active in the year — a
+              // tenant who started in March is NOT billed 12 months.
+              // Per-property entry/exit take precedence over the lease-level
+              // dates when present (a multi-property lease can stagger units).
+              beginDate: tp.entryDate || tenant.beginDate || null,
+              endDate:
+                tenant.terminationDate || tp.exitDate || tenant.endDate || null
             });
           });
         }
@@ -489,6 +503,21 @@ export default function BuildingDashboard({ building }) {
   // their share of any owner-tracked expenses.
   const finance = useMemo(() => {
     const _now = moment();
+    // Current term (YYYYMMDDHH) + year, defined ONCE at the top so every stream
+    // below shares them (income proration, expense-active-months, year gating).
+    const currentTerm = Number(_now.clone().startOf('month').format('YYYYMMDDHH'));
+    const currentYear = Math.floor(currentTerm / 1000000);
+    // ONE shared "active months in the current year" helper, used by income
+    // (lease window) AND owner/expense projection (expense startTerm/endTerm).
+    // Accepts DD/MM/YYYY strings (leases) OR YYYYMMDDHH terms (expenses); pass
+    // the matching parser. Returns 0 when the window is entirely outside the
+    // year, else the count of months of `currentYear` the window covers.
+    const _monthsInYear = (startMonth, startYear, endMonth, endYear) => {
+      if (startYear > currentYear || endYear < currentYear) return 0;
+      const from = startYear < currentYear ? 1 : startMonth;
+      const to = endYear > currentYear ? 12 : endMonth;
+      return Math.max(0, to - from + 1);
+    };
     // E1: a tenant's δαπάνες-επί-ενοικίου for the CURRENT month — windowed by
     // each expense's [beginDate,endDate] at month granularity, mirroring the
     // rent engine (frontdata.ts toOccupantData / 1_base.ts) so a one-time /
@@ -515,36 +544,48 @@ export default function BuildingDashboard({ building }) {
         .reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
     // Income = base rent + δαπάνες επί ενοικίου (both charged to the tenant).
-    const monthlyEsoda = sortedUnits.reduce((sum, unit) => {
-      if (!unit.propertyId) return sum;
+    // ANNUAL income counts each unit's rent ONLY for the months its lease is
+    // active in the current year — a tenant who started in March is billed 10
+    // months, NOT 12. The old `monthlyEsoda × 12` over-counted every mid-year
+    // lease (the 7.800-vs-7.560,56 discrepancy). Active months come from the
+    // shared _monthsInYear via the lease window (DD/MM/YYYY strings from
+    // frontdata; missing → treated as full-year active).
+    const _leaseActiveMonths = (info) => {
+      const b = info.beginDate ? moment(info.beginDate, 'DD/MM/YYYY', true) : null;
+      const e = info.endDate ? moment(info.endDate, 'DD/MM/YYYY', true) : null;
+      const startMonth = b && b.isValid() ? b.month() + 1 : 1;
+      const startYear = b && b.isValid() ? b.year() : currentYear;
+      const endMonth = e && e.isValid() ? e.month() + 1 : 12;
+      const endYear = e && e.isValid() ? e.year() : currentYear;
+      return _monthsInYear(startMonth, startYear, endMonth, endYear);
+    };
+    // Also keep a "current month" roll for surfaces that want the monthly figure.
+    let monthlyRentOnly = 0;
+    let monthlyRentExpenses = 0;
+    // Annual, active-months-prorated components (drive Έσοδα on the card).
+    let annualRentOnly = 0;
+    let annualRentExpenses = 0;
+    for (const unit of sortedUnits) {
+      if (!unit.propertyId) continue;
       const property = propertyMap.get(
         typeof unit.propertyId === 'string' ? unit.propertyId : unit.propertyId?._id
       );
       const tenantInfo = property ? tenantByPropertyId.get(property._id) : null;
-      if (!tenantInfo) return sum;
-      return (
-        sum +
-        (Number(tenantInfo.rent) || 0) +
-        _monthlyPropExpenses(tenantInfo.expenses)
-      );
-    }, 0);
+      if (!tenantInfo) continue;
+      const rent = Number(tenantInfo.rent) || 0;
+      const exp = _monthlyPropExpenses(tenantInfo.expenses);
+      monthlyRentOnly += rent;
+      monthlyRentExpenses += exp;
+      const months = _leaseActiveMonths(tenantInfo);
+      annualRentOnly += rent * months;
+      annualRentExpenses += exp * months;
+    }
+    const monthlyEsoda = monthlyRentOnly + monthlyRentExpenses;
 
-    // Current term in YYYYMMDDHH so we can ask isExpenseActiveForTerm whether
-    // an expense's [startTerm, endTerm] window covers "now". Using local
-    // moment matches the rent-pipeline projection in 1_base.ts (which
-    // operates on rent.term).
-    const currentTerm = Number(
-      moment().startOf('month').format('YYYYMMDDHH')
-    );
-
-    // The headline reads "Annual projection". Every additive stream below
-    // MUST be scoped to either (a) the current term (for the ×12 monthly
-    // streams) or (b) the current calendar year (for the lifetime
-    // ledgers). Without this scoping the figure becomes a hidden
-    // lifetime sum and inflates monotonically for multi-year buildings —
-    // a class of regression caught in the F1/F2/F3 dashboard audit.
-    // Term shape is YYYYMMDDHH; floor by 1e6 yields the year.
-    const currentYear = Math.floor(currentTerm / 1000000);
+    // (currentTerm / currentYear defined at the top of the memo — shared by
+    // every stream. The headline reads "Ετήσια προβολή"; each stream is scoped
+    // to the current YEAR and, for the projected months, estimated — never a
+    // hidden lifetime sum, the F1/F2/F3 dashboard-audit regression class.)
 
     // Wave-24 A13: legacy seed data persists this flag as `recurring`
     // (without the is- prefix). Read both so existing buildings show the
@@ -570,14 +611,36 @@ export default function BuildingDashboard({ building }) {
       }
       return Number(e.amount) || 0;
     };
-    const recurringMonthlyEksoda = (building?.expenses || [])
-      .filter(
-        (e) =>
-          (e.isRecurring ?? e.recurring) &&
-          _expenseMonthlyCost(e) > 0 &&
-          isExpenseActiveForTerm(e, currentTerm)
-      )
-      .reduce((sum, e) => sum + _expenseMonthlyCost(e), 0);
+    // Active months in the current year for an EXPENSE (its startTerm/endTerm
+    // are YYYYMMDDHH; a recurring expense with no endTerm runs through Δεκ).
+    const _expenseActiveMonths = (e) => {
+      const st = Number(e.startTerm) || 0;
+      const et = Number(e.endTerm) || 0;
+      const startMonth = st ? Math.floor((st % 1000000) / 10000) : 1;
+      const startYear = st ? Math.floor(st / 1000000) : currentYear;
+      const endMonth = et ? Math.floor((et % 1000000) / 10000) : 12;
+      const endYear = et ? Math.floor(et / 1000000) : currentYear;
+      return _monthsInYear(startMonth, startYear, endMonth, endYear);
+    };
+    // Σταθερά (fixed recurring): the per-month cost is constant, so the annual
+    // figure is monthlyCost × the months it is ACTIVE in the year — NOT a blind
+    // ×12. An expense that started in July contributes 6 months, not 12 (the
+    // 576→288 bug). recurringMonthlyEksoda keeps the current-month figure for
+    // other surfaces; recurringAnnualEksoda is the active-months-prorated total.
+    const _recurringFixed = (building?.expenses || []).filter(
+      (e) =>
+        (e.isRecurring ?? e.recurring) &&
+        _expenseMonthlyCost(e) > 0 &&
+        isExpenseActiveForTerm(e, currentTerm)
+    );
+    const recurringMonthlyEksoda = _recurringFixed.reduce(
+      (sum, e) => sum + _expenseMonthlyCost(e),
+      0
+    );
+    const recurringAnnualEksoda = _recurringFixed.reduce(
+      (sum, e) => sum + _expenseMonthlyCost(e) * _expenseActiveMonths(e),
+      0
+    );
     // A6: κυμαινόμενα (variable) recurring expenses have amount 0 — their real
     // monthly figure is the landlord-typed `inputAmount` saved per term on the
     // unit monthlyCharges. They are NOT a ×12 projection (each month differs), so
@@ -588,30 +651,47 @@ export default function BuildingDashboard({ building }) {
     // BuildingExpensePanel's per-term variable read so the two never disagree.
     const _isVariableExpense = (e) =>
       (e.isRecurring ?? e.recurring) && _expenseMonthlyCost(e) === 0;
-    const variableYtdEksoda = (building?.expenses || [])
-      .filter(_isVariableExpense)
-      .reduce((sum, e) => {
-        const perTerm = new Map(); // term -> { input: number|null, shareSum }
-        for (const unit of building?.units || []) {
-          for (const c of unit.monthlyCharges || []) {
-            const inYear =
-              Math.floor(Number(c.term || 0) / 1000000) === currentYear;
-            const matches =
-              String(c.expenseId) === String(e._id) ||
-              c.description === e.name;
-            if (!inYear || !matches) continue;
-            const slot = perTerm.get(c.term) || { input: null, shareSum: 0 };
-            if (c.inputAmount != null) slot.input = Number(c.inputAmount) || 0;
-            else slot.shareSum += Number(c.amount) || 0;
-            perTerm.set(c.term, slot);
-          }
+    // Κυμαινόμενα (variable): each month's amount is landlord-typed per term, so
+    // FUTURE months can't be known — they are ESTIMATED. Per expense:
+    //   actual  = Σ the real typed amounts for months already entered this year
+    //   projected = (average of the last 3 entered months) × remaining active
+    //               months of the year (Αυγ–Δεκ when today is Ιούλ)
+    // The card shows both, projected clearly marked «εκτ.». variableYtdEksoda
+    // stays = the ACTUAL-so-far (used elsewhere); variableProjectedEksoda is the
+    // estimate for the remaining months; their sum is the annual figure.
+    let variableYtdEksoda = 0;
+    let variableProjectedEksoda = 0;
+    for (const e of (building?.expenses || []).filter(_isVariableExpense)) {
+      // Collect this year's entered per-term totals (inputAmount once per term,
+      // legacy fallback = Σ per-unit shares), keyed + sorted by term.
+      const perTerm = new Map(); // term -> { input: number|null, shareSum }
+      for (const unit of building?.units || []) {
+        for (const c of unit.monthlyCharges || []) {
+          const inYear = Math.floor(Number(c.term || 0) / 1000000) === currentYear;
+          const matches =
+            String(c.expenseId) === String(e._id) || c.description === e.name;
+          if (!inYear || !matches) continue;
+          const slot = perTerm.get(c.term) || { input: null, shareSum: 0 };
+          if (c.inputAmount != null) slot.input = Number(c.inputAmount) || 0;
+          else slot.shareSum += Number(c.amount) || 0;
+          perTerm.set(c.term, slot);
         }
-        let exTotal = 0;
-        for (const slot of perTerm.values()) {
-          exTotal += slot.input != null ? slot.input : slot.shareSum;
-        }
-        return sum + exTotal;
-      }, 0);
+      }
+      // Per-term entered amount, oldest→newest.
+      const entered = [...perTerm.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, s]) => (s.input != null ? s.input : s.shareSum));
+      const actual = entered.reduce((s, v) => s + v, 0);
+      variableYtdEksoda += actual;
+      // Remaining ACTIVE months of the year for this variable expense.
+      const activeMonths = _expenseActiveMonths(e);
+      const remaining = Math.max(0, activeMonths - entered.length);
+      if (remaining > 0 && entered.length > 0) {
+        const last3 = entered.slice(-3);
+        const avg = last3.reduce((s, v) => s + v, 0) / last3.length;
+        variableProjectedEksoda += avg * remaining;
+      }
+    }
     // F3-buildingdash: gate one-time expenses on currentYear — a one-time
     // expense saved in 2018 must not appear in the 2026 headline.
     const oneTimeEksoda = (building?.expenses || [])
@@ -697,24 +777,10 @@ export default function BuildingDashboard({ building }) {
           Number(e.ownerAmount) > 0 &&
           isExpenseActiveForTerm(e, currentTerm)
       )
-      .reduce((sum, e) => {
-        const startMonth = e.startTerm
-          ? Math.floor((Number(e.startTerm) % 1000000) / 10000) // YYYYMMDDHH → MM
-          : 1;
-        const endMonth = e.endTerm
-          ? Math.floor((Number(e.endTerm) % 1000000) / 10000)
-          : 12;
-        const startYear = e.startTerm
-          ? Math.floor(Number(e.startTerm) / 1000000)
-          : currentYear;
-        const endYear = e.endTerm
-          ? Math.floor(Number(e.endTerm) / 1000000)
-          : currentYear;
-        const fromMonth = startYear < currentYear ? 1 : startMonth;
-        const toMonth = endYear > currentYear ? 12 : endMonth;
-        const months = Math.max(0, toMonth - fromMonth + 1);
-        return sum + (Number(e.ownerAmount) || 0) * months;
-      }, 0);
+      .reduce(
+        (sum, e) => sum + (Number(e.ownerAmount) || 0) * _expenseActiveMonths(e),
+        0
+      );
     const ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated;
 
     // Owner-side paid vs unpaid (current calendar year). Drives the progress
@@ -830,12 +896,20 @@ export default function BuildingDashboard({ building }) {
     }
     const ownerUnpaid = Math.max(0, ownerLedgerTotal - ownerPaid);
 
-    const annualEsoda = monthlyEsoda * 12;
+    // Annual income = active-months-prorated rent + expenses (NOT flat ×12).
+    const annualEsoda = annualRentOnly + annualRentExpenses;
     // Pass-through (paid by tenants, remitted to providers — κοινόχρηστα,
     // tenant repairs): recurring×12 + one-time + tenant-repair share. These are
     // NOT the owner's money.
+    // Pass-through annual = fixed-recurring PRORATED by active months (not ×12)
+    // + variable ACTUAL-so-far + variable PROJECTED (3-month avg × remaining) +
+    // one-time (real, in its month) + tenant repair shares (real per term).
     const passThroughEksoda =
-      recurringMonthlyEksoda * 12 + oneTimeEksoda + repairEksoda;
+      recurringAnnualEksoda +
+      variableYtdEksoda +
+      variableProjectedEksoda +
+      oneTimeEksoda +
+      repairEksoda;
     // Total building cash flow (kept for the breakdown tiles).
     const annualEksoda = passThroughEksoda + ownerEksoda;
     // Step-7 A5 fix (DASH-A5-VACANT-OWNER-SHARE): a vacant/owner-occupied unit's
@@ -843,12 +917,34 @@ export default function BuildingDashboard({ building }) {
     // (materialised source:'vacant'/'owner-resident'), but it is EXCLUDED from
     // ownerEksoda (correct — the FULL expense is in passThroughEksoda). Since A5
     // no longer subtracts passThrough from Net, that owner share would vanish
-    // from Net. Derive it from the already-year-scoped, stale-dropped owner
-    // ledger and subtract it in Net ONLY (the headline ownerEksoda column still
-    // pairs with the ΕΝΟΙΚΙΑΣΤΕΣ pass-through breakdown).
-    const vacantOwnerResidentEksoda = ownerLedgerThisYear
-      .filter((e) => e.source === 'vacant' || e.source === 'owner-resident')
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    // from Net.
+    //
+    // BUG (2026-07, dashboard-vs-building-screen disagreement): summing the
+    // materialised rows AS-IS counted these shares for ONLY the month(s) the
+    // per-term materialiser (_recomputeVacantOwnerCharges) has run — usually
+    // just the current month — while the fixed owner-portion above is PROJECTED
+    // across all active months (fixedOwnerProrated). So a €51,24/mo owner cost
+    // read 180 (fixed ×6) + 21,24 (1 materialised month) = 201,24 here, but the
+    // server dashboard (computeOwnerEksodaByMonth) projected the SAME shares ×6
+    // = 307,44. A RECURRING expense's vacant/owner-resident share recurs every
+    // active month exactly like its fixed portion, so it must be projected the
+    // same way. Project each row's amount across its SOURCE EXPENSE's active
+    // months, reusing the SHARED _expenseActiveMonths (same month-count as the
+    // fixed owner portion + income proration) so no two surfaces can diverge.
+    // Non-recurring (one-time) source expenses keep a single month — no recur.
+    const _projectOwnerShare = (row) => {
+      const exp = _expByIdH3.get(String(row.expenseId));
+      const months =
+        exp && (exp.isRecurring ?? exp.recurring) ? _expenseActiveMonths(exp) : 1;
+      return (Number(row.amount) || 0) * months;
+    };
+    const ownerResidentEksoda = ownerLedgerThisYear
+      .filter((e) => e.source === 'owner-resident')
+      .reduce((sum, e) => sum + _projectOwnerShare(e), 0);
+    const vacantShareEksoda = ownerLedgerThisYear
+      .filter((e) => e.source === 'vacant')
+      .reduce((sum, e) => sum + _projectOwnerShare(e), 0);
+    const vacantOwnerResidentEksoda = ownerResidentEksoda + vacantShareEksoda;
     // A5 (user decision 2026-06-20): NET subtracts ONLY owner-borne expenses
     // (έξοδα ιδιοκτήτη) — pass-through κοινόχρηστα/tenant-repairs are the
     // tenants' money flowing to providers, never the owner's. Owner-borne =
@@ -872,6 +968,11 @@ export default function BuildingDashboard({ building }) {
     return {
       monthlyEsoda,
       annualEsoda,
+      // Έσοδα inline breakdown: base rent vs δαπάνες επί ενοικίου, each already
+      // prorated by the lease's active months in the year (mid-year leases are
+      // NOT counted ×12), so the two sum to annualEsoda exactly.
+      annualRentOnly,
+      annualRentExpenses,
       recurringMonthlyEksoda,
       variableYtdEksoda,
       oneTimeEksoda,
@@ -881,6 +982,19 @@ export default function BuildingDashboard({ building }) {
       // exactly (includes the vacant/owner-resident expense shares).
       ownerBorneTotal: ownerEksoda + vacantOwnerResidentEksoda,
       vacantOwnerResidentEksoda,
+      // The three additive owner-borne components, for the ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ
+      // breakdown (all already projected across active months):
+      //   fixedOwnerProrated  = Σ ownerAmount × active-months (the fixed owner
+      //     portion) — note ownerEksoda also includes recordedOwnerEksoda
+      //     (variable owner amounts + owner-portion of repairs), surfaced as a
+      //     separate «Λοιπά» line so the three cells still sum to ownerBorneTotal.
+      fixedOwnerProrated,
+      recordedOwnerEksoda,
+      ownerResidentEksoda,
+      vacantShareEksoda,
+      // ΕΝΟΙΚΙΑΣΤΕΣ pass-through, actuals + projection split for the cells:
+      recurringAnnualEksoda, // Σταθερά, active-months-prorated (was ×12)
+      variableProjectedEksoda, // Κυμαινόμενα projected remainder (εκτ.)
       passThroughEksoda,
       annualEksoda,
       net,
@@ -912,39 +1026,80 @@ export default function BuildingDashboard({ building }) {
         <SectionLabel>
           {t('Annual projection')} {new Date().getFullYear()}
         </SectionLabel>
-        {/* Figures on the LEFT, the explanatory caption on the RIGHT — fills the
-            empty right space the figures block left behind (user request). On
-            narrow screens they stack. */}
-        <div className="mt-3 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="w-full max-w-md space-y-1.5">
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-body text-ink-soft">{t('Income')}</span>
-            {/* Income is a routine gross projection, NOT a credit — render ink.
-                Olive/oxide are reserved for paid/credit vs debit (Έξοδα keeps
-                the − + oxide; Net keeps the conditional color). */}
-            <span className="font-mono tabular-nums text-headline text-ink">
+        {/* Each figure carries its OWN inline breakdown to its RIGHT (user
+            request): Income → ενοίκια + δαπάνες επί ενοικίου; Έξοδα ιδιοκτήτη →
+            its 3 projected components on one line. All component figures are
+            projected across active months, so the Έξοδα inline parts sum EXACTLY
+            to the headline (now the correct 307,44, not the old 201,24 that
+            counted the vacant/owner-resident shares for only 1 materialised
+            month). Zero-value parts are dropped so the line stays clean. */}
+        <div className="mt-3 space-y-1.5">
+          {/* Income row + inline breakdown */}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span className="text-body text-ink-soft w-32 shrink-0">
+              {t('Income')}
+            </span>
+            <span className="font-mono tabular-nums text-headline text-ink w-32 text-right shrink-0">
               <NumberFormat value={finance.annualEsoda} showZero />
             </span>
+            <span className="text-label text-ink-muted">
+              {[
+                finance.annualRentOnly > 0 && (
+                  <NumberFormat key="r" value={finance.annualRentOnly} showZero />
+                ),
+                finance.annualRentExpenses > 0 && (
+                  <NumberFormat
+                    key="e"
+                    value={finance.annualRentExpenses}
+                    showZero
+                  />
+                )
+              ]
+                .filter(Boolean)
+                .reduce((acc, node, i) => {
+                  const label =
+                    i === 0 ? t('Rents') : t('Charges on rent short');
+                  return acc.length
+                    ? [...acc, <span key={`s${i}`}> + </span>, <span key={`l${i}`}>{label} {node}</span>]
+                    : [<span key={`l${i}`}>{label} {node}</span>];
+                }, [])}
+            </span>
           </div>
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-body text-ink-soft">
+          {/* Owner expenses row + inline breakdown */}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <span className="text-body text-ink-soft w-32 shrink-0">
               {t('Owner expenses')}
             </span>
-            {/* A5: owner-borne only — includes vacant/owner-resident shares so
-                Income − this === Net. Shown as a subtraction (− …). */}
-            {/* Tighten the minus to the number (was '− ' + value, which read
-                as a stray dash with a gap). The sign hugs the figure. */}
-            <span className="font-mono tabular-nums text-headline text-oxide">
+            <span className="font-mono tabular-nums text-headline text-oxide w-32 text-right shrink-0">
               {'−'}
               <NumberFormat value={finance.ownerBorneTotal} showZero />
             </span>
+            <span className="text-label text-ink-muted">
+              {[
+                [t('Fixed owner share'), finance.fixedOwnerProrated],
+                [t('Owner occupied'), finance.ownerResidentEksoda],
+                [t('Vacant units'), finance.vacantShareEksoda],
+                [t('Other'), finance.recordedOwnerEksoda]
+              ]
+                .filter(([, v]) => Number(v) > 0)
+                .map(([label, v], i, arr) => (
+                  <span key={label}>
+                    {label}{' '}
+                    <span className="font-mono tabular-nums">
+                      <NumberFormat value={v} showZero />
+                    </span>
+                    {i < arr.length - 1 ? ' + ' : ''}
+                  </span>
+                ))}
+            </span>
           </div>
-          <div className="border-t border-stone-line my-1" />
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="text-title text-ink">{t('Net')}</span>
+          <div className="border-t border-stone-line my-1 max-w-[16rem]" />
+          {/* Net row */}
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <span className="text-title text-ink w-32 shrink-0">{t('Net')}</span>
             <span
               className={cn(
-                'font-mono tabular-nums text-headline',
+                'font-mono tabular-nums text-headline w-32 text-right shrink-0',
                 finance.net > 0 && 'text-olive',
                 finance.net < 0 && 'text-oxide',
                 finance.net === 0 && 'text-ink-muted'
@@ -953,15 +1108,11 @@ export default function BuildingDashboard({ building }) {
               <NumberFormat value={finance.net} showZero />
             </span>
           </div>
-        </div>
-        {/* Caption on the RIGHT (was full-width below, leaving a big empty right
-            gap beside the figures). A1/A5: pure annual projection; only OWNER
-            expenses are subtracted from Net. */}
-        <p className="text-body text-ink-muted md:max-w-xs md:text-right">
-          {t(
-            'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
-          )}
-        </p>
+          <p className="text-label text-ink-muted pt-2">
+            {t(
+              'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
+            )}
+          </p>
         </div>
 
         {(finance.annualEksoda > 0 || finance.variableYtdEksoda > 0) && (
@@ -979,10 +1130,10 @@ export default function BuildingDashboard({ building }) {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                 <CompCell
-                  label={`${t('Fixed recurring short')} ×12`}
+                  label={t('Fixed recurring short')}
                   value={
                     <NumberFormat
-                      value={finance.recurringMonthlyEksoda * 12}
+                      value={finance.recurringAnnualEksoda}
                       showZero
                     />
                   }
@@ -990,7 +1141,26 @@ export default function BuildingDashboard({ building }) {
                 <CompCell
                   label={t('Variable short')}
                   value={
-                    <NumberFormat value={finance.variableYtdEksoda} showZero />
+                    <NumberFormat
+                      value={
+                        finance.variableYtdEksoda +
+                        finance.variableProjectedEksoda
+                      }
+                      showZero
+                    />
+                  }
+                  note={
+                    finance.variableProjectedEksoda > 0 ? (
+                      <>
+                        <NumberFormat value={finance.variableYtdEksoda} showZero />{' '}
+                        {t('Actual short')} +{' '}
+                        <NumberFormat
+                          value={finance.variableProjectedEksoda}
+                          showZero
+                        />{' '}
+                        {t('Projected short')}
+                      </>
+                    ) : null
                   }
                 />
                 <CompCell
