@@ -6,18 +6,22 @@
 </tr>
 
 <%
-// Building expense type → localized label key
+// Building expense type → localized label key. MUST match the landlord app's
+// single map (webapps/landlord/src/utils/lineLabels.js) and the expense table,
+// so the SAME type reads identically on the receipt PDF and every on-screen
+// surface (Water Common / Electricity Common / Management Fee — the full labels,
+// not the abbreviated Water/Electricity/Management that diverged before).
 var BUILDING_TYPE_LABEL_KEY = {
   heating: 'Heating',
   elevator: 'Elevator',
   cleaning: 'Cleaning',
-  water_common: 'Water',
-  electricity_common: 'Electricity',
+  water_common: 'Water Common',
+  electricity_common: 'Electricity Common',
   insurance: 'Insurance',
-  management_fee: 'Management',
+  management_fee: 'Management Fee',
   garden: 'Garden',
-  repairs_fund: 'Repairs fund',
-  pest_control: 'Pest control',
+  repairs_fund: 'Repairs Fund',
+  pest_control: 'Pest Control',
   monthly_charge: 'Other',
   other: 'Other',
   repair: 'Repair'

@@ -1069,6 +1069,19 @@ export default function taskBase(
         const unit = building.units.find((u) => String(u.propertyId) === String(property.propertyId));
         const monthlyChargeExpenseIds = new Set<string>();
         if (unit) {
+          // Look up the SOURCE expense's real type by id so a persisted
+          // (e.g. VARIABLE-statement) charge carries the SAME type as its
+          // live-computed sibling below (line ~1112 uses expense.type). Without
+          // this, a κυμαινόμενο electricity_common expense was stamped the
+          // generic 'monthly_charge' → labeled «Λοιπά» on the payment surface
+          // while the fixed one showed «Ηλεκτρισμός» — same expense type, two
+          // category labels (the category-consistency bug the user hit).
+          const _expenseTypeById = new Map<string, string>();
+          for (const e of building.expenses || []) {
+            if (e && e._id && e.type) {
+              _expenseTypeById.set(String(e._id), String(e.type));
+            }
+          }
           unit.monthlyCharges
             .filter((charge) => charge.term === rent.term)
             .forEach((charge) => {
@@ -1081,11 +1094,19 @@ export default function taskBase(
               // (rentmanager._computeOwedByCategory.repairs and
               // dashboardmanager pie's repair color) is dead code.
               const _isRepair = !!(charge as { repairId?: unknown }).repairId;
+              // Non-repair: prefer the source expense's real type (resolved by
+              // expenseId); fall back to 'monthly_charge' only when the charge
+              // carries no resolvable expense (legacy/orphan rows).
+              const _resolvedType = charge.expenseId
+                ? _expenseTypeById.get(String(charge.expenseId))
+                : undefined;
               rent.buildingCharges!.push({
                 description: charge.description || 'Building charges',
                 amount: charge.amount,
                 buildingName: building.name,
-                type: _isRepair ? 'repair' : 'monthly_charge'
+                type: _isRepair
+                  ? 'repair'
+                  : _resolvedType || 'monthly_charge'
               });
             });
         }

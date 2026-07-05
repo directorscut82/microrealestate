@@ -78,6 +78,67 @@ describe('Building Charges Integration', () => {
       expect(rent.buildingCharges[0].description).toBe('Cleaning');
     });
 
+    it('a PERSISTED (variable-statement) monthlyCharge carries its SOURCE expense type, not the generic monthly_charge (category-consistency bug)', () => {
+      // Regression: a κυμαινόμενο electricity_common expense is materialised into
+      // unit.monthlyCharges (with expenseId, no per-charge type). The rent engine
+      // used to stamp such a persisted charge type='monthly_charge' → labeled
+      // «Λοιπά» on the payment surface, while the fixed sibling of the SAME type
+      // showed «Ηλεκτρισμός». Now the engine resolves the source expense's real
+      // type by expenseId, so both read the same category everywhere.
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = {
+        ...makeUnit('prop1', { general: 1000 }),
+        // persisted variable charge for this term (Jan 2024), no `type` on it
+        monthlyCharges: [
+          {
+            term: 2024010100,
+            amount: 30,
+            inputAmount: 30,
+            description: 'Ρευμα',
+            expenseId: 'expElec'
+          }
+        ]
+      };
+      // The source expense is electricity_common (variable → amount 0).
+      const elec = makeExpense('Ρευμα', 0, 'general_thousandths', {
+        _id: 'expElec',
+        type: 'electricity_common'
+      });
+      const building = makeBuilding('011172', [unit1], [elec]);
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+
+      const line = rent.buildingCharges.find((c) => c.description === 'Ρευμα');
+      expect(line).toBeTruthy();
+      // The fix: type is the SOURCE expense's real type, NOT 'monthly_charge'.
+      expect(line.type).toBe('electricity_common');
+      expect(line.type).not.toBe('monthly_charge');
+    });
+
+    it('a persisted charge with NO resolvable expense falls back to monthly_charge', () => {
+      // Orphan/legacy row (expenseId points at a gone expense) → generic type,
+      // so the fallback path is preserved (no crash, no wrong specific type).
+      const prop1 = makeProperty('prop1', 500);
+      const unit1 = {
+        ...makeUnit('prop1', { general: 1000 }),
+        monthlyCharges: [
+          {
+            term: 2024010100,
+            amount: 12,
+            inputAmount: 12,
+            description: 'Legacy',
+            expenseId: 'goneExpense'
+          }
+        ]
+      };
+      const building = makeBuilding('011172', [unit1], []); // no matching expense
+      const contract = makeContract([prop1], [building]);
+      const rent = BL.computeRent(contract, '01/01/2024 00:00', null);
+      const line = rent.buildingCharges.find((c) => c.description === 'Legacy');
+      expect(line).toBeTruthy();
+      expect(line.type).toBe('monthly_charge');
+    });
+
     it('should compute heating_thousandths correctly', () => {
       const prop1 = makeProperty('prop1', 500);
       const unit1 = makeUnit('prop1', { heating: 400 });

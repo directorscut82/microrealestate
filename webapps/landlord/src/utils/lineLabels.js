@@ -18,17 +18,25 @@
 //   bldg empty     → <TypeLabel>  (<buildingName>)
 //   debts empty    → Έκτακτη χρέωση
 
+// SINGLE source of truth for the building-expense type → label. These MUST be
+// the SAME label keys the expense table (ExpenseList.js EXPENSE_TYPES) and the
+// PDF (invoicebody.ejs) use, so the SAME type reads identically on EVERY surface
+// (payment lines, rents tooltip, dashboard chart, owner ledger, PDF, the expense
+// table). Previously this map used ABBREVIATED keys (Water/Electricity/
+// Management) while the table used the full keys (Water Common/Electricity
+// Common/Management Fee) — so «Κοινόχρηστο Ρεύμα» in the table became
+// «Ηλεκτρισμός» in a payment. Aligned to the full expense-table labels.
 export const BUILDING_TYPE_LABEL_KEY = {
   heating: 'Heating',
   elevator: 'Elevator',
   cleaning: 'Cleaning',
-  water_common: 'Water',
-  electricity_common: 'Electricity',
+  water_common: 'Water Common',
+  electricity_common: 'Electricity Common',
   insurance: 'Insurance',
-  management_fee: 'Management',
+  management_fee: 'Management Fee',
   garden: 'Garden',
-  repairs_fund: 'Repairs fund',
-  pest_control: 'Pest control',
+  repairs_fund: 'Repairs Fund',
+  pest_control: 'Pest Control',
   monthly_charge: 'Other',
   other: 'Other',
   repair: 'Repair'
