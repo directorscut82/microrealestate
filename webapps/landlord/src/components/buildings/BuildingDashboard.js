@@ -1075,16 +1075,19 @@ export default function BuildingDashboard({ building }) {
               <NumberFormat value={finance.ownerBorneTotal} showZero />
             </span>
             <span className="text-label text-ink-muted">
+              {/* Fixed owner portion shows the AMOUNT alone (no label — it is
+                  self-evident and «Σταθερό μερίδιο» read as meaningless Greek,
+                  per user). The occupancy shares keep their meaningful labels. */}
               {[
-                [t('Fixed owner share'), finance.fixedOwnerProrated],
+                ['', finance.fixedOwnerProrated],
                 [t('Owner occupied'), finance.ownerResidentEksoda],
                 [t('Vacant units'), finance.vacantShareEksoda],
                 [t('Other'), finance.recordedOwnerEksoda]
               ]
                 .filter(([, v]) => Number(v) > 0)
                 .map(([label, v], i, arr) => (
-                  <span key={label}>
-                    {label}{' '}
+                  <span key={label || 'fixed'}>
+                    {label ? `${label} ` : ''}
                     <span className="font-mono tabular-nums">
                       <NumberFormat value={v} showZero />
                     </span>
@@ -1093,8 +1096,7 @@ export default function BuildingDashboard({ building }) {
                 ))}
             </span>
           </div>
-          <div className="border-t border-stone-line my-1 max-w-[16rem]" />
-          {/* Net row */}
+          {/* Net row (no divider hairline — removed per user) */}
           <div className="flex flex-wrap items-baseline gap-x-3">
             <span className="text-title text-ink w-32 shrink-0">{t('Net')}</span>
             <span
@@ -1110,7 +1112,7 @@ export default function BuildingDashboard({ building }) {
           </div>
           <p className="text-label text-ink-muted pt-2">
             {t(
-              'Annual projection based on the current state. New or changed expenses, repairs or rents in individual months will change this projection.'
+              'New or changed expenses, repairs or rents in individual months will change the annual projection.'
             )}
           </p>
         </div>
@@ -1136,6 +1138,22 @@ export default function BuildingDashboard({ building }) {
                       value={finance.recurringAnnualEksoda}
                       showZero
                     />
+                  }
+                  note={
+                    finance.recurringMonthlyEksoda > 0 ? (
+                      <>
+                        <NumberFormat
+                          value={finance.recurringMonthlyEksoda}
+                          showZero
+                        />
+                        {t('per month × N months', {
+                          n: Math.round(
+                            finance.recurringAnnualEksoda /
+                              finance.recurringMonthlyEksoda
+                          )
+                        })}
+                      </>
+                    ) : null
                   }
                 />
                 <CompCell
