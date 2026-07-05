@@ -285,6 +285,54 @@ function _assertCustomAllocationPropertyIds(
   });
 }
 
+// A thousandths allocation method needs a non-zero denominator (the sum of the
+// building's per-unit thousandths for that dimension) or _computeBuildingChargeRaw
+// returns 0 for EVERY unit → the TENANT/split share bills NOBODY and its cost
+// silently evaporates (found live: a general_thousandths repair on ΟΔΟΣ ΗΤΑ, whose
+// units carry no generalThousandths, lost the whole amount). Reject at save so the
+// landlord must set the thousandths first (or pick equal/by_surface). Mirrors the
+// flag-gating the UI already does for elevator/heating.
+//
+// SCOPE (Step-7): this guards the TENANT-side allocation ONLY. Do NOT call it for
+//  - a pure 'owners' repair (owner portion is one building-wide row, not method-split);
+//  - an owner-AMOUNT expense with no tenant amount (the owner-fixed materialiser
+//    already FALLS BACK to a building-wide row when per-unit thousandths yield
+//    nothing — buildingmanager ~5694 — so the owner money is not lost);
+//  - an unchanged-method PATCH of a legacy expense (else editing amount on a
+//    pre-existing zero-thousandths expense would 422 forever — legacy lockout).
+// The DENOMINATOR sums ALL units (incl. vacant/unmanaged), matching the tenant
+// engine's thousandths branch (1_base.ts:598 sums building.units, not managedUnits).
+const _THOUSANDTHS_FIELD: Record<string, string> = {
+  general_thousandths: 'generalThousandths',
+  heating_thousandths: 'heatingThousandths',
+  elevator_thousandths: 'elevatorThousandths'
+};
+export function _assertThousandthsAvailable(
+  building: any,
+  allocationMethod: string | undefined
+): void {
+  if (!allocationMethod) return;
+  const field = _THOUSANDTHS_FIELD[allocationMethod];
+  if (!field) return; // not a thousandths method
+  // Sum across ALL units — the SAME denominator the tenant engine uses
+  // (1_base.ts general_thousandths branch reduces over building.units).
+  const total = ((building?.units || []) as any[]).reduce(
+    (sum, u) => sum + (Number(u[field]) || 0),
+    0
+  );
+  if (total <= 0) {
+    const labels: Record<string, string> = {
+      general_thousandths: 'general',
+      heating_thousandths: 'heating',
+      elevator_thousandths: 'elevator'
+    };
+    throw new ServiceError(
+      `Allocation method '${allocationMethod}' requires the building's units to have ${labels[allocationMethod]} thousandths (‰) set — none are. Set the unit thousandths first, or choose 'equal' or 'by_surface'.`,
+      422
+    );
+  }
+}
+
 // See businesslogic/inferPropertyType.ts for the documented mapping.
 // Re-exported here so external call sites continue to import from
 // './buildingmanager.js' if they were already doing so.
@@ -4088,6 +4136,12 @@ export async function addExpense(req: Req, res: Res) {
     req.body.customAllocations,
     req.body.allocationMethod
   );
+  // Only the TENANT amount is allocated by the method with no fallback; the
+  // owner amount has a building-wide fallback (~5694). So guard only when a
+  // positive tenant amount is actually being charged (Step-7 false-reject fix).
+  if (Number(req.body.amount) > 0) {
+    _assertThousandthsAvailable(building, req.body.allocationMethod);
+  }
 
   (building as any).expenses.push(req.body);
   (building as any).updatedDate = new Date();
@@ -4268,6 +4322,21 @@ export async function updateExpense(req: Req, res: Res) {
     effectiveCustomAllocations,
     effectiveAllocationMethod
   );
+  // Thousandths-availability guard — but ONLY when this PATCH actually CHANGES the
+  // allocation method to a thousandths one AND a positive tenant amount is in
+  // effect. Guarding on the merged method unconditionally would 422 every future
+  // edit (even {amount: 200}) of a legacy expense that was created on a
+  // thousandths method before this guard existed — a legacy lockout (Step-7). The
+  // owner amount is exempt (it has a building-wide fallback), so gate on the
+  // effective tenant amount.
+  const _effectiveAmount =
+    req.body.amount !== undefined ? req.body.amount : (expense as any).amount;
+  if (
+    req.body.allocationMethod !== undefined &&
+    Number(_effectiveAmount) > 0
+  ) {
+    _assertThousandthsAvailable(building, effectiveAllocationMethod);
+  }
 
   // Strip __v from the body before $set: never write client-provided
   // __v back. Mongoose's save() will manage it.
@@ -6935,6 +7004,16 @@ export async function addRepair(req: Req, res: Res) {
     req.body
   );
 
+  // A thousandths allocation only means anything when a POSITIVE tenant portion
+  // is actually distributed by it. An 'owners' repair — OR a 'split' repair whose
+  // tenantSharePercentage computes to 0 — takes _distributeRepairCharge's owner-only
+  // early-return (sharePercentage<=0, ~5218) and never touches the method, so
+  // blocking it on missing thousandths is a false reject (Step-7 r2). Gate on the
+  // computed tenant share, not just chargeableTo.
+  if (repairTenantSharePercentage(req.body) > 0) {
+    _assertThousandthsAvailable(building, req.body.allocationMethod);
+  }
+
   (building as any).repairs.push(req.body);
   (building as any).updatedDate = new Date();
   // DO NOT save here — _distributeRepairCharge saves the building itself (it
@@ -7086,6 +7165,23 @@ export async function updateRepair(req: Req, res: Res) {
   const { __v: _ignoredRepairV, ...repairPatchBody } = req.body;
   void _ignoredRepairV;
   repair.set(repairPatchBody);
+  // Thousandths-availability guard on the MERGED repair — but ONLY when this
+  // PATCH is actually INTRODUCING/CHANGING the allocation method or chargeableTo
+  // (else an unrelated edit — e.g. actualCost — of a legacy tenants/split repair
+  // on a no-thousandths building would 422 forever: legacy lockout, Step-7).
+  // 'owners' repairs are exempt (owner portion is one building-wide row, not
+  // method-split — verified: writer ~5167, reader getExpenseBreakdown repair_split
+  // uses ownerPct not the method).
+  const _repairAllocTouched =
+    req.body.allocationMethod !== undefined ||
+    req.body.chargeableTo !== undefined ||
+    req.body.tenantSharePercentage !== undefined;
+  if (
+    _repairAllocTouched &&
+    repairTenantSharePercentage(repair as any) > 0
+  ) {
+    _assertThousandthsAvailable(building, (repair as any).allocationMethod);
+  }
   (building as any).updatedDate = new Date();
   // Single-save: _distributeRepairCharge mutates + saves the building itself.
   // Removing the prior separate save eliminates the same race as addRepair
