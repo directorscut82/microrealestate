@@ -152,13 +152,15 @@ function Overview() {
     []
   );
   const cashflow = useMemo(() => {
-    const arr = d.monthlyExpenses || [];
+    // Server returns `monthly` already ordered Jan→Dec (month 1..12) with an
+    // income + expense figure per slot; index i maps to monthNames[i].
+    const arr = d.monthly || [];
     return arr.map((m, i) => ({
       m: monthNames[i] || '',
-      paid: m.paid || 0,
-      owed: m.owed || 0
+      income: m.income || 0,
+      expense: m.expense || 0
     }));
-  }, [d.monthlyExpenses, monthNames]);
+  }, [d.monthly, monthNames]);
 
   const goYear = (delta) =>
     router.push(`/${org}/overview/${year + delta}`);
@@ -328,15 +330,15 @@ function Overview() {
                     axisLine={false}
                     fontSize={10}
                   />
+                  {/* Grouped (not stacked): income vs expense side by side per
+                      month — a real cash-flow, olive in / oxide out. */}
                   <Bar
-                    dataKey="paid"
-                    stackId="a"
+                    dataKey="income"
                     fill="var(--color-olive)"
                     radius={[2, 2, 0, 0]}
                   />
                   <Bar
-                    dataKey="owed"
-                    stackId="a"
+                    dataKey="expense"
                     fill="var(--color-oxide)"
                     radius={[2, 2, 0, 0]}
                   />
@@ -356,14 +358,14 @@ function Overview() {
                   />
                   <Line
                     type="monotone"
-                    dataKey="paid"
+                    dataKey="income"
                     stroke="var(--color-olive)"
                     strokeWidth={2.5}
                     dot={false}
                   />
                   <Line
                     type="monotone"
-                    dataKey="owed"
+                    dataKey="expense"
                     stroke="var(--color-oxide)"
                     strokeWidth={2.5}
                     dot={false}
@@ -551,24 +553,24 @@ function ProjRow({ label, value, valueClass, negative, bold }) {
   );
 }
 
-// small 2-col analysis table (label · value), with a bold total row
+// small 2-col analysis table (label · value), with a bold total row.
+// ONE hairline only — above the total (per user). No header underline, no
+// per-row rules; whitespace separates the rows.
 function MiniTable({ title, rows, totalLabel, totalValue }) {
   return (
     <div>
-      <div className="text-title text-ink-soft border-b border-stone-line pb-1.5 mb-1">
-        {title}
-      </div>
+      <div className="text-title text-ink-soft mb-2">{title}</div>
       <table className="w-full text-body">
         <tbody>
           {rows.map((r, i) => (
-            <tr key={`${r.k}-${i}`} className="border-t border-stone-line">
+            <tr key={`${r.k}-${i}`}>
               <td className="py-1.5 text-ink-soft">{r.k}</td>
               <td className="py-1.5 text-right">
                 <NumberFormat value={r.v} showZero />
               </td>
             </tr>
           ))}
-          <tr className="border-t-2 border-stone-line font-semibold">
+          <tr className="border-t border-stone-line font-semibold">
             <td className="py-1.5">{totalLabel}</td>
             <td className="py-1.5 text-right">
               <NumberFormat value={totalValue} showZero />

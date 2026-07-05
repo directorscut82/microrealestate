@@ -966,6 +966,12 @@ export async function overview(req: Req, res: Res) {
   // number, reconciles by construction.
   let incomeCollected = 0;
   let incomeOwed = 0;
+  // Per-MONTH-NUMBER (1..12) collected income for the cash-flow chart. Keyed by
+  // the integer month so the client can render Jan→Dec in order (the MMYYYY
+  // string keys sort integer-first: "10.."/"11.."/"12.." jump ahead of
+  // "01..".."09.." — that mis-ordering is what put Oct/Nov/Dec's bars in the
+  // Jan/Feb/Mar slots and left a fake gap Apr→Sep).
+  const incomeByMonthNum = new Map<number, number>();
   for (const t of allTenants) {
     let bid: string | null = null;
     for (const tp of t.properties || []) {
@@ -987,8 +993,13 @@ export async function overview(req: Req, res: Res) {
       collected += payment;
       const monthOwed = Math.max(0, monthDue - payment);
       owed += monthOwed;
-      // Track the most-recent month's shortfall for the arrears list.
       const termMonth = Math.floor(Number(rent.term || 0) / 10000) % 100;
+      if (payment > 0)
+        incomeByMonthNum.set(
+          termMonth,
+          (incomeByMonthNum.get(termMonth) || 0) + payment
+        );
+      // Track the most-recent month's shortfall for the arrears list.
       if (termMonth <= currentMonthIdx && monthOwed > 0.005)
         latestArrear = monthOwed;
     }
@@ -1135,11 +1146,25 @@ export async function overview(req: Req, res: Res) {
       ownerExpensesPaid: _round(expensesRollup.totalYearPaid),
       net: _round(incomeCollected - expensesRollup.totalYearExpenses)
     },
-    monthlyExpenses: expensesRollup.expenses.map((m) => ({
-      month: m.month,
-      paid: m.paid,
-      owed: m.notPaid + m.paid
-    })),
+    // Ordered Jan→Dec (month 1..12). Parses each MMYYYY key's leading MM so the
+    // client renders in calendar order regardless of object-key iteration order
+    // (the fake Apr→Sep gap was integer-key sort of "10.."/"11.."/"12.."). Each
+    // slot carries income (collected) AND expense (owed) so it's a real cash-flow.
+    monthly: (() => {
+      const expByNum = new Map<number, number>();
+      for (const m of expensesRollup.expenses) {
+        const mn = Number(String(m.month).slice(0, 2)); // "MMYYYY" → MM
+        expByNum.set(mn, (m.notPaid || 0) + (m.paid || 0));
+      }
+      return Array.from({ length: 12 }, (_v, i) => {
+        const mn = i + 1;
+        return {
+          month: mn,
+          income: _round(incomeByMonthNum.get(mn) || 0),
+          expense: _round(expByNum.get(mn) || 0)
+        };
+      });
+    })(),
     perBuilding,
     perOwner,
     katanomes: {
