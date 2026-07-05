@@ -483,6 +483,16 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
   const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
     allocationMethod
   );
+  // single_unit is in METHODS_NEEDING_ALLOCATIONS (so the submit handler
+  // preserves its customAllocations[0]), but it must NOT render the per-unit
+  // «Κατανομές ανά Μονάδα» table — it has its OWN dedicated unit picker. When
+  // both rendered, the per-unit table's registered `customAllocations.0.value`
+  // input (default 0) overwrote the picker's {propertyId, value:100}, so submit
+  // filtered it out (value 0) → customAllocations:[] → server 422 "requires a
+  // target unit". Most visible on a 1-unit building where the collision is
+  // guaranteed on index 0. The per-unit table is for custom_ratio / custom_%
+  // / fixed ONLY.
+  const showAllocationTable = needsAllocations && allocationMethod !== 'single_unit';
 
   // Reset form when dialog opens in "add" mode (no expense)
   // Handles case where dialog was closed via X button without calling reset()
@@ -749,7 +759,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
               </div>
             )}
 
-            {needsAllocations && unitsWithProperty.length > 0 && (
+            {showAllocationTable && unitsWithProperty.length > 0 && (
               <div className="space-y-2">
                 <Label>
                   {t('Allocations per Unit')}
