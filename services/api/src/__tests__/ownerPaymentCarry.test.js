@@ -88,6 +88,28 @@ function omeArray(initial = []) {
   return arr;
 }
 const term = (mm, year) => Number(`${year}${String(mm).padStart(2, '0')}0100`);
+// The C2 payment-migration tests must run on an ACTIVE (unfrozen) charge term:
+// `_distributeRepairCharge` treats any PAST term as frozen and changes its
+// drop/preserve behaviour, so a hardcoded literal (e.g. 2026060100) silently
+// rots into a failure the moment wall-clock passes that month. Compute the
+// CURRENT month (and the NEXT, for the chargeTerm-move test) at run time, in
+// UTC to match the code's moment.utc().startOf('month') anchor.
+const _curr = (() => {
+  const d = new Date();
+  return Number(
+    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}0100`
+  );
+})();
+const _next = (() => {
+  const d = new Date();
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + 1; // 1..12
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return Number(`${ny}${String(nm).padStart(2, '0')}0100`);
+})();
+const CURRENT_TERM = _curr;
+const NEXT_TERM = _next;
 const mkUnit = (propertyId, extra = {}) => ({
   _id: `u_${propertyId}`,
   propertyId,
@@ -321,7 +343,7 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
         properties: [{ propertyId: 'p1', entryDate: '2026-01-01' }]
       }
     ];
-    const T = 2026060100;
+    const T = CURRENT_TERM; // active/unfrozen term (was hardcoded past June → rotted)
     const building = mkRepairBuilding();
     const repair = {
       _id: 'rep3',
@@ -423,7 +445,7 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
     // reclassify to 100% tenant only p1's €40 stays owner-borne. The €160 beyond
     // the (now-smaller) owner liability is an OVERPAYMENT → dropped (no owner
     // carry-forward ledger). The genuine €40 owed is preserved.
-    const T = 2026060100;
+    const T = CURRENT_TERM; // active/unfrozen term (was hardcoded past June → rotted)
     TENANTS = ['p2', 'p3', 'p4', 'p5'].map((p) => ({
       _id: `t_${p}`,
       beginDate: '2026-01-01',
@@ -988,9 +1010,9 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
   // data. The test pins the decided behavior (no phantom/over-pay), NOT a
   // money-preservation claim.
   it('C2 limitation (r13/r14): chargeTerm-move + move-in drops the orphaned payment cleanly (no phantom owed, no over-pay)', async () => {
-    const A = 2026050100;
-    const B = 2026060100;
-    TENANTS = []; // May: p1 vacant
+    const A = CURRENT_TERM; // was hardcoded past May/June → both frozen after wall-clock advanced
+    const B = NEXT_TERM;
+    TENANTS = []; // month A: p1 vacant
     const building = mkRepairBuilding();
     const repair = {
       _id: 'repTermMove',
@@ -1018,14 +1040,20 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
     );
     expect(rvA).toBeTruthy();
     rvA.payments = [recordedPayment(Number(rvA.amount))];
-    // move charge to June; p1 occupied in June.
+    // move charge to month B; p1 occupied from the start of month A onward (so
+    // the lease covers B). Dates derived from the dynamic terms, not hardcoded.
     repair.chargeTerm = B;
+    const _dateOfTerm = (t) => {
+      const s = String(t);
+      return `${s.slice(0, 4)}-${s.slice(4, 6)}-01`;
+    };
+    const _plusYear = (t) => String(Number(t) + 1000000);
     TENANTS = [
       {
         _id: 't1',
-        beginDate: '2026-06-01',
-        endDate: '2027-06-01',
-        properties: [{ propertyId: 'p1', entryDate: '2026-06-01' }]
+        beginDate: _dateOfTerm(A),
+        endDate: _dateOfTerm(_plusYear(B)),
+        properties: [{ propertyId: 'p1', entryDate: _dateOfTerm(A) }]
       }
     ];
     await _distributeRepairCharge(building, repair, 'r1');
@@ -1141,7 +1169,7 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
     // re-billed to the tenant → they hold a €100 credit, owe €0. Natural 4-step
     // sequence, all via the real writer.
     it('contamination: credit survives in full + tenant billed separately (no double-count, no loss)', async () => {
-      const T = 2026060100;
+      const T = CURRENT_TERM; // active/unfrozen term (was hardcoded past June → rotted)
       const mkB = () => ({
         _id: 'b_contam',
         realmId: 'r1',

@@ -218,6 +218,11 @@ export function shareBasis(
 // Tenant share % of a repair (mirrors 1_base.repairTenantSharePercentage).
 function _repairTenantPct(repair: any): number {
   if (!repair) return 0;
+  // Mirror 1_base.repairTenantSharePercentage EXACTLY (drift = money bug across
+  // the api rent-engine vs the pdfgenerator statement basis). chargeableTo is
+  // the source of truth; tenantSharePercentage is meaningful ONLY for 'split'.
+  // Reading the schema-default 0 for a 'tenants' repair inverted the split.
+  if (repair.chargeableTo === 'tenants') return 100;
   if (repair.chargeableTo === 'owners') return 0;
   if (
     typeof repair.tenantSharePercentage === 'number' &&
@@ -225,7 +230,7 @@ function _repairTenantPct(repair: any): number {
   ) {
     return Math.max(0, Math.min(100, repair.tenantSharePercentage));
   }
-  return repair.chargeableTo === 'tenants' ? 100 : 0;
+  return 0;
 }
 
 // Per-unit divisor of an OWNER-amount expense (owner-fixed / variable

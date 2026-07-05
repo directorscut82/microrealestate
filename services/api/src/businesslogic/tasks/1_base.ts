@@ -942,14 +942,24 @@ export function isExpenseActiveForTerm(expense: CollectionTypes.BuildingExpense,
 // Shared so the three never drift (a divergence here is a money bug).
 export function repairTenantSharePercentage(repair: any): number {
   if (!repair) return 0;
+  // chargeableTo is the semantic source of truth. tenantSharePercentage is
+  // ONLY meaningful for 'split'. A 'tenants' repair means 100% to the tenant;
+  // an 'owners' repair means 0%. These must NOT read the stored percentage:
+  // RepairSchema defaults tenantSharePercentage to 0, and the form sends it
+  // for 'split' only (undefined otherwise → Mongoose persists the 0 default).
+  // Reading that 0 for a 'tenants' repair inverted the split (0% tenant → 100%
+  // owner) — a real money bug found via seeding (ΟΔΟΣ ΖΗΤΑ «κουζίνας» 130€ billed
+  // to the owner). Gate on chargeableTo FIRST so the stored 0 can't win.
+  if (repair.chargeableTo === 'tenants') return 100;
   if (repair.chargeableTo === 'owners') return 0;
+  // 'split' (or any legacy/unknown value): honor the explicit stored %.
   if (
     typeof repair.tenantSharePercentage === 'number' &&
     Number.isFinite(repair.tenantSharePercentage)
   ) {
     return Math.max(0, Math.min(100, repair.tenantSharePercentage));
   }
-  return repair.chargeableTo === 'tenants' ? 100 : 0;
+  return 0;
 }
 
 export default function taskBase(

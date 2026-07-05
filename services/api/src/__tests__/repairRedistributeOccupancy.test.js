@@ -24,7 +24,14 @@ let buildingStore; // the single in-memory building Collections.Building.find re
 let tenantRents; // optional { propertyId: rents[] } so a test can mark a term frozen-paid
 
 const REPAIR_ID = 'rep_lift';
-const TERM = 2026060100;
+// The default repair charge term MUST be the CURRENT month, not a hardcoded
+// past date. `_distributeRepairCharge`'s freeze guard treats any PAST term as
+// frozen and bails before writing charges — so a literal past term (e.g.
+// 2026060100) makes these "active repair distributes onto rent" tests rot into
+// failures the moment wall-clock advances past that month. The sibling
+// frozen-guard tests use `moment.utc().startOf('month')` for the current term;
+// mirror that here so the base fixture is always an unfrozen, active month.
+const TERM = Number(moment.utc().startOf('month').format('YYYYMMDDHH'));
 
 beforeAll(async () => {
   // Mirror the REAL ServiceError shape: the HTTP code lives in `.statusCode`

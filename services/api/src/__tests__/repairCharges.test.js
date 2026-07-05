@@ -1,4 +1,5 @@
 import * as BL from '../businesslogic/index.js';
+import { repairTenantSharePercentage } from '../businesslogic/tasks/1_base.js';
 
 describe('Repair Charges — No Double Counting', () => {
   const makeProperty = (propertyId, rent = 500) => ({
@@ -460,6 +461,45 @@ describe('Repair Charge Distribution Logic', () => {
       const repairTitle = 'Fix elevator door';
       const description = `Repair: ${repairTitle}`;
       expect(description).toBe('Repair: Fix elevator door');
+    });
+  });
+
+  // Regression: chargeableTo is the source of truth for the tenant %. The old
+  // code read repair.tenantSharePercentage first, but RepairSchema defaults it
+  // to 0 and the form only sends it for 'split' — so a 'tenants' repair persisted
+  // tenantSharePercentage:0 and was billed 100% to the OWNER (inverse of intent).
+  // Found on live NAS via seeding (ΟΔΟΣ ΖΗΤΑ «κουζίνας» 130€ → owner). These call
+  // the REAL repairTenantSharePercentage with the exact persisted shape (the old
+  // arithmetic-literal tests above never did, which is why they missed the bug).
+  describe('repairTenantSharePercentage — chargeableTo is source of truth (schema-default-0 regression)', () => {
+    it('tenants repair with schema-default tenantSharePercentage:0 → 100% tenant', () => {
+      expect(
+        repairTenantSharePercentage({ chargeableTo: 'tenants', tenantSharePercentage: 0 })
+      ).toBe(100);
+    });
+    it('tenants repair with undefined tenantSharePercentage → 100% tenant', () => {
+      expect(
+        repairTenantSharePercentage({ chargeableTo: 'tenants' })
+      ).toBe(100);
+    });
+    it('owners repair with any stored % → 0% tenant', () => {
+      expect(
+        repairTenantSharePercentage({ chargeableTo: 'owners', tenantSharePercentage: 80 })
+      ).toBe(0);
+    });
+    it('split repair honors the explicit stored % (incl. a deliberate 0)', () => {
+      expect(
+        repairTenantSharePercentage({ chargeableTo: 'split', tenantSharePercentage: 60 })
+      ).toBe(60);
+      // a deliberate split-0% (100% owner via split) MUST stay 0 — not bumped to 100
+      expect(
+        repairTenantSharePercentage({ chargeableTo: 'split', tenantSharePercentage: 0 })
+      ).toBe(0);
+    });
+    it('split repair with no explicit % → 0% (nothing to the tenant)', () => {
+      expect(
+        repairTenantSharePercentage({ chargeableTo: 'split' })
+      ).toBe(0);
     });
   });
 
