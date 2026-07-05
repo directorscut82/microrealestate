@@ -91,6 +91,10 @@ function Donut({ slices }) {
   let offset = 0;
   return (
     <svg width="112" height="112" viewBox="0 0 42 42" className="shrink-0">
+      {/* pathLength=100 normalizes the circumference to exactly 100 so dash
+          values are exact percentages — without it the ~99.98 user-unit
+          circumference under-draws a single 100% slice (renders as an empty
+          ring). Base stone ring shows only when slices don't cover the circle. */}
       <circle
         cx="21"
         cy="21"
@@ -98,6 +102,7 @@ function Donut({ slices }) {
         fill="none"
         stroke="var(--color-stone)"
         strokeWidth="6"
+        pathLength="100"
       />
       {slices.map((s, i) => {
         const frac = Math.max(0, s.amount) / total;
@@ -111,6 +116,7 @@ function Donut({ slices }) {
             fill="none"
             stroke={DONUT_COLORS[i % DONUT_COLORS.length]}
             strokeWidth="6"
+            pathLength="100"
             strokeDasharray={`${dash} ${100 - dash}`}
             strokeDashoffset={-offset}
             transform="rotate(-90 21 21)"
