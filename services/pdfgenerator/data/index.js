@@ -61,26 +61,58 @@ function _enrichTenantChargeBasis(charges, building, tenantPropertyId, term) {
   const partyCount = ShareBasis.equalPartyCount(building, Number(term));
   return charges.map((c) => {
     if (c.basis) return c; // already resolved upstream
-    // Match by type first; if multiple expenses share a type, prefer one whose
-    // name matches the charge description. Repairs (type 'repair') have no
-    // building.expense — skip (the owner statement carries repair basis).
+    // Repairs (type 'repair') have no building.expense — skip (the owner
+    // statement carries repair basis).
     if (!c.type || c.type === 'repair') return c;
-    const candidates = expenses.filter((e) => e.type === c.type);
-    const exp =
-      candidates.find(
+    // Resolve the SOURCE building expense for this charge. A live-computed
+    // charge is stored with the expense's real type (e.g. 'electricity_common')
+    // — match by type, preferring the expense whose name matches. But a
+    // VARIABLE (κυμαινόμενο) charge is persisted with the GENERIC type
+    // 'monthly_charge' (its per-term amount lives on the unit's monthlyCharge,
+    // not the expense doc), so a type match finds nothing → it printed «Λοιπά»
+    // with no breakdown. Fall back to a name match across ALL expenses to
+    // recover BOTH the correct category label AND the calc basis. The reconcile
+    // gate below still protects against a wrong match printing a false equation.
+    const byType = expenses.filter((e) => e.type === c.type);
+    let exp =
+      byType.find(
         (e) =>
           c.description &&
           String(e.name || '').trim() === String(c.description).trim()
-      ) || candidates[0];
+      ) || byType[0];
+    if (!exp && c.description) {
+      exp = expenses.find(
+        (e) => String(e.name || '').trim() === String(c.description).trim()
+      );
+    }
     if (!exp) return c;
+    // A VARIABLE charge mis-stored with the generic 'monthly_charge' type reads
+    // «Λοιπά»; show the source expense's REAL type so the receipt reads
+    // «Κοινόχρηστο Ρεύμα» — the SAME canonical label as the expense table and
+    // the on-screen ΧΡΕΩΣΕΙΣ panel (one type→label map, no drift). No-op for a
+    // correctly-stored charge (resolvedType === c.type).
+    const resolvedType = exp.type || c.type;
+    const withType = resolvedType !== c.type ? { ...c, type: resolvedType } : c;
     // CORRECT-OR-NOTHING on a legal receipt: the equation needs the EXPENSE
-    // TOTAL (the pool), not the per-unit charge amount. Only a recurring/fixed
-    // expense carries a reliable stored total (exp.amount); a VARIABLE expense
-    // stores 0 on the expense (the real amount lives per-month in
-    // monthlyCharges, not reachable here), so we cannot reconstruct its pool —
-    // skip the basis rather than print "0 € ÷ 11 = 9,09 €". share = the charge.
-    const total = Number(exp.amount) || 0;
-    if (!(total > 0)) return c;
+    // TOTAL (the pool), not the per-unit charge amount. A recurring/fixed
+    // expense carries it on exp.amount; a VARIABLE expense stores 0 there —
+    // its real per-term total lives on the unit's monthlyCharge.inputAmount
+    // (the full statement figure the landlord typed, e.g. 30 €). Prefer
+    // inputAmount so the receipt shows the SAME basis as the ΧΡΕΩΣΕΙΣ panel; if
+    // neither yields a pool, keep the corrected label but render no basis line
+    // (never print "0 € ÷ 11 = 9,09 €").
+    let total = Number(exp.amount) || 0;
+    if (!(total > 0)) {
+      const mc = (unit.monthlyCharges || []).find(
+        (m) =>
+          Number(m.term) === Number(term) &&
+          String(m.expenseId || '') === String(exp._id) &&
+          m.inputAmount != null &&
+          Number(m.inputAmount) > 0
+      );
+      if (mc) total = Number(mc.inputAmount);
+    }
+    if (!(total > 0)) return withType;
     const basis = ShareBasis.shareBasis(
       building,
       unit,
@@ -97,8 +129,8 @@ function _enrichTenantChargeBasis(charges, building, tenantPropertyId, term) {
     // multi-unit tenant. Verifying total/count ≈ share drops exactly those
     // mismatches while keeping every consistent equation. Same guard covers
     // surface/thousandths (part/whole × total) and the custom kinds.
-    if (!_basisReconciles(basis, Number(c.amount) || 0)) return c;
-    return { ...c, basis };
+    if (!_basisReconciles(basis, Number(c.amount) || 0)) return withType;
+    return { ...withType, basis };
   });
 }
 
