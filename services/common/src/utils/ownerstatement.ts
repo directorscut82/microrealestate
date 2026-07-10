@@ -396,6 +396,39 @@ export function ownerSlicesOf(
   });
 }
 
+// ── ΛΟΙΠΟΙ (unnamed co-owner) placeholder identity ─────────────────────────
+// ownerSlicesOf appends a SYNTHETIC `isRest` slice for a co-ownership remainder
+// that has NO name/taxId in the data (a declared co-owner the landlord hasn't
+// filled in yet — the sole-50%-owner unit, or a building-wide part-owned lump).
+// Historically every read surface DROPPED that slice: the euro was billed to
+// NOBODY on the ledger/statement and folded into «Αδιάθετο» on the dashboard,
+// so the three surfaces couldn't reconcile and the money looked like it
+// vanished. Instead we attribute the remainder to an INTERNAL placeholder owner
+// «Λοιποί ιδιοκτήτες» keyed PER UNIT (loipoi:<propertyId>) — a real owner
+// liability with no name yet. Keyed per-unit (the user's explicit choice) so it
+// points at the exact apartment whose co-owner needs a name; the moment the
+// landlord sets that owner's name+ΑΦΜ on the unit, ownerSlicesOf stops emitting
+// a rest slice for it and the ΛΟΙΠΟΙ bucket shrinks/vanishes automatically on
+// the next read (no stored state to migrate). A building-wide part-owned row
+// (propertyId null) keys to loipoi:b:<buildingId>.
+//
+// This is ZERO stored state: nothing is persisted, so naming the owner needs no
+// recompute — the next aggregation simply attributes the euro to the named
+// owner instead. ONE definition so ledger + statement + dashboard agree on the
+// key and label.
+export const LOIPOI_LABEL = 'Λοιποί ιδιοκτήτες';
+export function loipoiKey(
+  buildingId: string,
+  propertyId: string | null | undefined
+): string {
+  return propertyId
+    ? `loipoi:${String(propertyId)}`
+    : `loipoi:b:${String(buildingId)}`;
+}
+export function isLoipoiKey(ownerKey: string | null | undefined): boolean {
+  return !!ownerKey && String(ownerKey).startsWith('loipoi:');
+}
+
 export interface OwnerStatementCharge {
   buildingId: string;
   buildingName: string;
@@ -583,6 +616,47 @@ export function buildOwnerStatement(
           0
         )
       );
+      // ΛΟΙΠΟΙ statement: when the requested ownerKey is the per-unit unnamed-
+      // remainder placeholder, this row contributes ONLY its rest slice (the
+      // un-named co-owner's share), unpaid — mirroring _aggregateOwners so the
+      // statement PDF reconciles with the ledger to the cent. A recorded
+      // καταβολή on the row is a NAMED owner's and is credited on THEIR
+      // statement, never here. Short-circuits the named-owner billing below.
+      if (isLoipoiKey(ownerKey)) {
+        // Gate on sliceFromUnit — MUST mirror _aggregateOwners: only a per-unit
+        // row (unit-declared %s) produces a ΛΟΙΠΟΙ remainder. A building-wide row
+        // resolves slices from the borrowed, import-order-dependent building
+        // owner set, which the ledger refuses to split — so the statement must
+        // not either, or ledger↔statement disagree (Step-7 fact-check). A
+        // building-wide loipoi key therefore never matches a row here.
+        if (!sliceFromUnit) continue;
+        if (loipoiKey(bid, pid) !== ownerKey) continue;
+        const rest = slices.find((sl: any) => sl.isRest && sl.amount > 0.005);
+        if (!rest) continue;
+        const restAmt = _round(rest.amount);
+        charges.push({
+          buildingId: bid,
+          buildingName: bname,
+          expenseId: String(row.expenseId),
+          term,
+          amount: restAmt,
+          paidAmount: 0,
+          outstanding: restAmt,
+          paid: false,
+          source: src,
+          expenseType,
+          description: String(row.description || '').replace(/^Repair:\s*/i, ''),
+          propertyId: pid,
+          basis: ownerChargeBasis(b, {
+            expenseId: row.expenseId,
+            source: src,
+            propertyId: pid,
+            amount: restAmt
+          }),
+          ...(slices.length > 1 ? { coOwners: slices } : {})
+        });
+        continue;
+      }
       // C2 TAGGED-PAYMENT attribution — MUST mirror ownermanager._aggregateOwners
       // (Step-7 r2 #1/#4): a payment recorded by a specific owner carries that
       // owner's ownerKey, so each co-owner is credited ONLY their own tagged
@@ -702,6 +776,19 @@ export function buildOwnerStatement(
     },
     { amount: 0, paid: 0, outstanding: 0 }
   );
+
+  // ΛΟΙΠΟΙ placeholder has no unit-owner subdoc to resolve identity from —
+  // synthesise a name-only identity so the statement header isn't blank.
+  if (!ownerIdentity && isLoipoiKey(ownerKey)) {
+    ownerIdentity = {
+      ownerKey,
+      name: LOIPOI_LABEL,
+      taxId: '',
+      iban: '',
+      phone: '',
+      email: ''
+    };
+  }
 
   return { owner: ownerIdentity, charges, totals };
 }

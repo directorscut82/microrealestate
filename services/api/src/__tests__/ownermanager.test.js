@@ -324,6 +324,131 @@ describe('owner settlements grid reconciles with header (Step-7 batch1)', () => 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// ΛΟΙΠΟΙ — un-named co-owner remainder placeholder. When a per-unit owner row
+// sits on a unit whose named owners sum to < 100% (a declared co-owner has no
+// name/ΑΦΜ yet), the residual % + € used to be DROPPED (billed to nobody on the
+// ledger, «Αδιάθετο» on the dashboard). It is now routed to an internal
+// placeholder owner «Λοιποί ιδιοκτήτες» keyed PER UNIT (loipoi:<propertyId>), a
+// real UNPAID liability with paid=0. Naming the co-owner (add name+ΑΦΜ) makes
+// ownerSlicesOf stop emitting a rest slice → the ΛΟΙΠΟΙ bucket vanishes on the
+// next read (zero stored state). The change is ADDITIVE: it never alters a
+// named owner's billed/paid. Building-wide rows (borrowed import-order % — the
+// deferred repair-writer pass) do NOT get a ΛΟΙΠΟΙ remainder (sliceFromUnit gate).
+// ───────────────────────────────────────────────────────────────────────────
+describe('ΛΟΙΠΟΙ un-named co-owner remainder placeholder', () => {
+  const beta = (pct) => ({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '111', percentage: pct });
+  // Mirrors the real ΑΓ.ΟΔΟΣ ΕΨΙΛΟΝ shape: a per-unit owner row on a unit Beta
+  // owns 50% (co-owner absent), plus a fully-owned unit.
+  const buildingPerUnit = () => ({
+    _id: 'b1',
+    name: 'AG ODOS EPSILON',
+    units: [
+      { propertyId: 'pA', atakNumber: 'AKA', floor: 0, owners: [beta(50)] },
+      { propertyId: 'pB', atakNumber: 'AKB', floor: 1, owners: [beta(100)] }
+    ],
+    expenses: [{ _id: 'water', type: 'water_common' }],
+    repairs: [],
+    ownerMonthlyExpenses: [
+      { _id: 'a', expenseId: 'water', term: 2026060100, amount: 50, source: 'expense', propertyId: 'pA', payments: [] },
+      { _id: 'b', expenseId: 'water', term: 2026060100, amount: 50, source: 'expense', propertyId: 'pB', payments: [] }
+    ]
+  });
+
+  it('routes the sole-50%-unit remainder to a per-unit loipoi:<pid> placeholder (unpaid)', () => {
+    const map = _aggregateOwners([buildingPerUnit()], new Set());
+    const loipoi = map.get('loipoi:pA');
+    expect(loipoi).toBeTruthy();
+    expect(loipoi.name).toBe('Λοιποί ιδιοκτήτες');
+    // Unit A's €50 split: Beta 50% = €25, remainder 50% = €25 → ΛΟΙΠΟΙ.
+    expect(loipoi.totalAmount).toBeCloseTo(25, 2);
+    expect(loipoi.totalOutstanding).toBeCloseTo(25, 2);
+    expect(loipoi.totalPaid).toBeCloseTo(0, 2); // placeholder is never paid
+    // fully-owned unit B produces NO ΛΟΙΠΟΙ entry (owners sum to 100%).
+    expect(map.get('loipoi:pB')).toBeFalsy();
+  });
+
+  it('is ADDITIVE — the named owner ΒΗΤΑ is billed exactly her share, unchanged', () => {
+    const map = _aggregateOwners([buildingPerUnit()], new Set());
+    const s = _serializeOwnerSummary(map.get(ownerKeyOf(beta(50))));
+    // €25 (50% of A) + €50 (100% of B) = €75 — identical to the no-ΛΟΙΠΟΙ case.
+    expect(s.totalAmount).toBeCloseTo(75, 2);
+    expect(s.totalOutstanding).toBeCloseTo(75, 2);
+  });
+
+  it('conserves €: Σ(named + ΛΟΙΠΟΙ) === total charge amount, nothing created/destroyed', () => {
+    const map = _aggregateOwners([buildingPerUnit()], new Set());
+    const total = Array.from(map.values()).reduce(
+      (s, agg) => s + agg.totalAmount,
+      0
+    );
+    // €50 (unit A) + €50 (unit B) = €100 across Beta(75) + ΛΟΙΠΟΙ(25).
+    expect(total).toBeCloseTo(100, 2);
+  });
+
+  it('naming the co-owner removes the ΛΟΙΠΟΙ placeholder (zero stored state, auto-reassign)', () => {
+    const b = buildingPerUnit();
+    // Landlord fills in the co-owner's name+ΑΦΜ on unit A → owners now sum 100%.
+    b.units[0].owners = [beta(50), { name: 'ΝΕΟΣ ΣΥΝΙΔΙΟΚΤΗΤΗΣ', taxId: '999', percentage: 50 }];
+    const map = _aggregateOwners([b], new Set());
+    expect(map.get('loipoi:pA')).toBeFalsy(); // vanished, no recompute needed
+    // the newly-named co-owner now carries the €25 that was ΛΟΙΠΟΙ.
+    const nu = map.get(ownerKeyOf({ name: 'ΝΕΟΣ ΣΥΝΙΔΙΟΚΤΗΤΗΣ', taxId: '999' }));
+    expect(nu).toBeTruthy();
+    expect(nu.totalAmount).toBeCloseTo(25, 2);
+  });
+
+  it('a BUILDING-WIDE part-owned row does NOT create a ΛΟΙΠΟΙ (borrowed-% gate)', () => {
+    // A building-wide repair-owner-portion (propertyId null) on a building whose
+    // sole named owner is 50%. The ledger keeps it WHOLE on the canonical owner
+    // (the % is import-order-dependent/borrowed) — no loipoi:b entry. This is the
+    // sliceFromUnit gate that keeps ledger↔dashboard consistent; per-unit split
+    // of building-wide repairs is the deferred writer pass.
+    const building = {
+      _id: 'b1',
+      name: 'B',
+      units: [{ propertyId: 'pA', atakNumber: 'AKA', floor: 0, owners: [beta(50)] }],
+      expenses: [],
+      repairs: [{ _id: 'r1' }],
+      ownerMonthlyExpenses: [
+        { _id: 'x', expenseId: 'r1', term: 2026060100, amount: 200, source: 'repair', propertyId: null, payments: [] }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    expect(map.get('loipoi:b:b1')).toBeFalsy();
+    // whole €200 stays on the canonical named owner (unchanged behaviour).
+    const s = _serializeOwnerSummary(map.get(ownerKeyOf(beta(50))));
+    expect(s.totalAmount).toBeCloseTo(200, 2);
+  });
+
+  it('a building-wide MULTI-owner part-owned row also creates NO loipoi:b (multi-branch sliceFromUnit gate)', () => {
+    // Two distinct part-owners (each 40%, co-owner absent) → the building owner
+    // set sums to <100%, so ownerSlicesOf WOULD emit a rest slice. But the
+    // multi-owner branch is gated on sliceFromUnit exactly like the single-owner
+    // branch (Step-7 edge-case review): a building-wide row's % is borrowed/
+    // import-order-dependent, so NO loipoi:b is minted — the residual stays with
+    // the named owners (matching the dashboard fold). Prevents a per-owner
+    // ledger↔dashboard disagreement on building-wide part-owned rows.
+    const A = { name: 'ΑΛΦΑ', taxId: '111', percentage: 40 };
+    const B = { name: 'ΒΗΤΑ', taxId: '222', percentage: 40 };
+    const building = {
+      _id: 'b1',
+      name: 'B',
+      units: [
+        { propertyId: 'pA', atakNumber: 'AKA', floor: 0, owners: [A] },
+        { propertyId: 'pB', atakNumber: 'AKB', floor: 1, owners: [B] }
+      ],
+      expenses: [],
+      repairs: [{ _id: 'r1' }],
+      ownerMonthlyExpenses: [
+        { _id: 'x', expenseId: 'r1', term: 2026060100, amount: 100, source: 'repair', propertyId: null, payments: [] }
+      ]
+    };
+    const map = _aggregateOwners([building], new Set());
+    expect(map.get('loipoi:b:b1')).toBeFalsy(); // no phantom building-wide ΛΟΙΠΟΙ
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // Delete-time owner-payment preservation: when an expense/repair is hard-
 // deleted, an owner row that carried recorded καταβολές must NOT vanish — it
 // becomes a zero-amount 'credit' row (payments kept) and MUST still surface on

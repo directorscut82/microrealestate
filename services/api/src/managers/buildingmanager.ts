@@ -6239,14 +6239,14 @@ export async function computeOwnerEksodaByMonth(
   // rows (live gap-fill lines have no recorded paid).
   detailByTerm: Map<
     number,
-    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean }>
+    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean; owners?: Array<{ name: string; percentage: number; amount: number; isRest?: boolean }> }>
   >;
 }> {
   const owedByTerm = new Map<number, number>();
   const paidByTerm = new Map<number, number>();
   const detailByTerm = new Map<
     number,
-    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean }>
+    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean; owners?: Array<{ name: string; percentage: number; amount: number; isRest?: boolean }> }>
   >();
   const addOwed = (term: number, amt: number) => {
     if (!(amt > 0)) return;
@@ -6267,7 +6267,11 @@ export async function computeOwnerEksodaByMonth(
     // D5: display-only — true when this line is a vacant unit's share routed to
     // the owner (source 'vacant'/'repair-vacant'), so the tooltip can mark it
     // ΚΕΝΟ. Does NOT affect any money computation.
-    vacant = false
+    vacant = false,
+    // Per-individual-owner € slices of THIS line's owed, so the dashboard can
+    // group ΑΝΑ ΙΔΙΟΚΤΗΤΗ by each real owner (not by the joined co-owner name).
+    // [] / undefined = single owner (use ownerName as the whole line's owner).
+    owners: Array<{ name: string; percentage: number; amount: number; isRest?: boolean }> = []
   ) => {
     if (!(owed > 0) && !(paid > 0)) return;
     const arr = detailByTerm.get(term) || [];
@@ -6288,8 +6292,26 @@ export async function computeOwnerEksodaByMonth(
       existing.paid = Math.round((existing.paid + paid) * 100) / 100;
       if (!existing.label && label) existing.label = label;
       if (vacant) existing.vacant = true;
+      // merge the per-owner slices too (same charge fragment → add each owner's €)
+      if (owners && owners.length) {
+        const ex = existing.owners || [];
+        for (const s of owners) {
+          const hit = ex.find((x) => x.name === s.name && !!x.isRest === !!s.isRest);
+          if (hit) hit.amount = Math.round((hit.amount + s.amount) * 100) / 100;
+          else ex.push({ ...s });
+        }
+        existing.owners = ex;
+      }
     } else {
-      arr.push({ ownerName: ownerName || null, category, label, owed, paid, vacant });
+      arr.push({
+        ownerName: ownerName || null,
+        category,
+        label,
+        owed,
+        paid,
+        vacant,
+        owners: owners && owners.length ? owners.map((s) => ({ ...s })) : undefined
+      });
     }
     detailByTerm.set(term, arr);
   };
@@ -6302,6 +6324,16 @@ export async function computeOwnerEksodaByMonth(
     const named = ((unit?.owners || []) as any[]).filter((o: any) => o && o.name);
     if (named.length === 0) return null;
     return named.map((o: any) => o.name).join(', ');
+  };
+  // Per-individual-owner € slices of a unit's `amount` (name/%/€ incl. a synthetic
+  // «λοιποί» rest slice for the un-named remainder). Feeds the dashboard's ΑΝΑ
+  // ΙΔΙΟΚΤΗΤΗ grouping so each owner is one row, not lumped under a joined name.
+  const unitOwnerSlices = (propertyId: any, amount: number) => {
+    if (!propertyId) return [];
+    const unit = (building.units || []).find(
+      (u: any) => String(u.propertyId) === String(propertyId)
+    );
+    return ownerSlicesOf(((unit?.owners || []) as any[]), amount);
   };
 
   // Building-level owner name for a building-WIDE liability (a repair
@@ -6325,6 +6357,37 @@ export async function computeOwnerEksodaByMonth(
     if (named.length === 0) return null;
     return named.map((o) => o.name).join(', ');
   })();
+  // Distinct building owners (deduped by owner key) — the owner SET for a
+  // building-wide liability, so its € can be sliced per individual owner.
+  const buildingOwnerSet = (() => {
+    const byKey = new Map<string, any>();
+    for (const u of (building.units || []) as any[]) {
+      for (const o of (u.owners || []) as any[]) {
+        const k = ownerKeyOf(o);
+        if (k && o && o.name && !byKey.has(k)) byKey.set(k, o);
+      }
+    }
+    return Array.from(byKey.values());
+  })();
+  // Building-wide (propertyId null) owner slices for the dashboard breakdown.
+  // A building-wide charge must NOT emit a ΛΟΙΠΟΙ remainder: the ledger reader
+  // deliberately keeps a building-wide part-owned charge WHOLE on the canonical
+  // owner (its slice %s are borrowed from a different unit — import-order-
+  // dependent, so the ledger refuses to split it; only per-unit rows get a
+  // ΛΟΙΠΟΙ rest). If the dashboard emitted a rest slice here it would show
+  // «Λοιποί» for a building-wide charge the ledger attributes wholly to the
+  // named owner → a 2× ledger↔dashboard disagreement (Step-7 surface-reconcile
+  // finding). Fold any rest slice back onto the largest named slice so the
+  // dashboard matches the ledger and Σ still equals the charge.
+  const buildingOwnerSlices = (amount: number) => {
+    const slices = ownerSlicesOf(buildingOwnerSet as any[], amount);
+    const named = slices.filter((s: any) => !s.isRest);
+    const rest = slices.find((s: any) => s.isRest && s.amount > 0.005);
+    if (!rest || named.length === 0) return named.length ? named : slices;
+    const largest = named.reduce((a: any, b: any) => (b.amount > a.amount ? b : a));
+    largest.amount = Math.round((largest.amount + rest.amount) * 100) / 100;
+    return named;
+  };
 
   const expenses = (building.expenses || []) as any[];
   const repairs = (building.repairs || []) as any[];
@@ -6495,7 +6558,10 @@ export async function computeOwnerEksodaByMonth(
       // row on an OWNER-OCCUPIED unit is the resident owner's own cost — not a
       // vacant-unit charge — so it must NOT carry the ΚΕΝΟ marker.
       (row.source === 'vacant' || row.source === 'repair-vacant') &&
-        !(row.propertyId && ownerOccupiedNow.has(String(row.propertyId)))
+        !(row.propertyId && ownerOccupiedNow.has(String(row.propertyId))),
+      row.propertyId
+        ? unitOwnerSlices(row.propertyId, amount)
+        : buildingOwnerSlices(amount)
     );
   }
 
@@ -6533,7 +6599,7 @@ export async function computeOwnerEksodaByMonth(
       if (ownerFixedMaterialised.has(ownerFixedKey(e._id, term))) continue; // per-unit
       const fixedAmt = Math.round(Number(e.ownerAmount) * 100) / 100;
       addOwed(term, fixedAmt);
-      addDetail(term, buildingOwnerName, e.type || 'other', e.name || '', fixedAmt, 0);
+      addDetail(term, buildingOwnerName, e.type || 'other', e.name || '', fixedAmt, 0, false, buildingOwnerSlices(fixedAmt));
     }
     // building-expense shares routed to the owner: a truly-EMPTY unit's share
     // when the expense opts in (chargeOwnerWhenVacant), AND an OWNER-OCCUPIED
@@ -6576,7 +6642,8 @@ export async function computeOwnerEksodaByMonth(
             e.name || '',
             shareR,
             0,
-            true // vacant-unit share routed to owner → ΚΕΝΟ
+            true, // vacant-unit share routed to owner → ΚΕΝΟ
+            unitOwnerSlices(unit.propertyId, shareR)
           );
         }
       }
@@ -6608,7 +6675,9 @@ export async function computeOwnerEksodaByMonth(
         'repair',
         repair.title || '',
         ownerPortionR,
-        0
+        0,
+        false,
+        buildingOwnerSlices(ownerPortionR)
       );
     }
 
@@ -6661,7 +6730,8 @@ export async function computeOwnerEksodaByMonth(
           0,
           // ΚΕΝΟ only for a truly-vacant unit; an owner-occupied unit's repair
           // share is the resident owner's cost, NOT a vacant-unit charge.
-          !isResidentUnit
+          !isResidentUnit,
+          unitOwnerSlices(unit.propertyId, shareR)
         );
       }
     }

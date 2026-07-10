@@ -26,6 +26,15 @@ export async function get(params) {
   if (!ownerKey || !realmId) {
     throw new Error('owner_statement requires ownerKey + realmId');
   }
+  // «Λοιποί ιδιοκτήτες» is a read-time placeholder for an un-named co-owner
+  // remainder — it is not a real recipient. A settlement statement (a legal/tax
+  // document) must not be addressed to it with a blank Α.Φ.Μ.; the landlord
+  // names the co-owner first, then issues that owner's statement.
+  if (OwnerStatement.isLoipoiKey(ownerKey)) {
+    throw new Error(
+      'owner_statement is not available for the «Λοιποί ιδιοκτήτες» placeholder — name the co-owner first'
+    );
+  }
 
   const realm = await Collections.Realm.findById(realmId).lean();
   if (!realm) throw new Error(`realm ${realmId} not found`);

@@ -375,6 +375,50 @@ export function _aggregateOwners(
     buildingOwnerKeys.set(bid, set);
   }
 
+  // ── ΛΟΙΠΟΙ (unnamed co-owner remainder) placeholder aggregates ───────────
+  // A co-ownership remainder that has no name/taxId in the data (a declared
+  // co-owner the landlord hasn't filled in yet) is a REAL owner liability that
+  // was previously DROPPED here — billed to nobody, so the ledger under-summed
+  // vs the dashboard total (which counts the whole row). Route each such rest
+  // slice to an INTERNAL placeholder owner «Λοιποί ιδιοκτήτες», keyed PER UNIT
+  // (loipoi:<propertyId>; a building-wide part-owned row → loipoi:b:<bid>) so it
+  // points at the exact apartment whose co-owner needs a name. ZERO stored
+  // state: when the landlord sets that owner's name+ΑΦΜ, ownerSlicesOf stops
+  // emitting a rest slice and the ΛΟΙΠΟΙ bucket shrinks/vanishes on the next
+  // read — no recompute needed. This is ADDITIVE: it never changes a NAMED
+  // owner's billed/paid; it only surfaces the euro that was already dropped.
+  const loipoiAggFor = (
+    buildingId: string,
+    buildingIdForAgg: string,
+    propertyId: string | null,
+    restSlice: { percentage: number }
+  ): OwnerAgg => {
+    const key = OwnerStatement.loipoiKey(buildingId, propertyId);
+    let agg = owners.get(key);
+    if (!agg) {
+      agg = {
+        ownerKey: key,
+        name: OwnerStatement.LOIPOI_LABEL,
+        taxId: '',
+        memberId: null,
+        percentage: restSlice.percentage,
+        // A per-unit ΛΟΙΠΟΙ key (loipoi:<propertyId>) represents exactly ONE
+        // unit's un-named remainder → unitCount 1, so the owner card reads
+        // "1 μονάδα · 1 κτίριο" instead of the confusing "0 units · 1 buildings".
+        unitCount: propertyId ? 1 : 0,
+        buildingIds: new Set<string>(),
+        charges: [],
+        totalAmount: 0,
+        totalPaid: 0,
+        totalOutstanding: 0,
+        alsoRents: false
+      };
+      owners.set(key, agg);
+    }
+    agg.buildingIds.add(buildingIdForAgg);
+    return agg;
+  };
+
   for (const b of buildings) {
     const bid = String(b._id);
     const bname = b.name || '';
@@ -643,6 +687,37 @@ export function _aggregateOwners(
         agg.totalOutstanding = _round(
           agg.totalOutstanding + ownCharge.outstanding
         );
+        // ΛΟΙΠΟΙ remainder: on a UNIT-resolved row where the identified owner
+        // covers < the whole charge (a sole 50%-owner unit), ownerSlicesOf
+        // appended a rest slice for the un-named co-owner. It was DROPPED — now
+        // route it to the per-unit «Λοιποί ιδιοκτήτες» placeholder as a real
+        // (unpaid) liability so ledger/statement/dashboard agree. paidAmount 0:
+        // the recorded καταβολή belongs to the NAMED owner (kept above); the
+        // remainder is a distinct unpaid share.
+        if (sliceFromUnit) {
+          const rest = slices.find((sl: any) => sl.isRest && sl.amount > 0.005);
+          if (rest) {
+            const lagg = loipoiAggFor(bid, bid, charge.propertyId, rest);
+            const restCharge: OwnerCharge = {
+              ...charge,
+              amount: _round(rest.amount),
+              paidAmount: 0,
+              outstanding: _round(rest.amount),
+              paid: false,
+              coOwnerCount: keys.length,
+              coOwnerNames: sortedKeys
+                .map((k) => owners.get(k)?.name)
+                .filter(Boolean) as string[],
+              coOwners: slices,
+              payments: []
+            };
+            lagg.charges.push(restCharge);
+            lagg.totalAmount = _round(lagg.totalAmount + restCharge.amount);
+            lagg.totalOutstanding = _round(
+              lagg.totalOutstanding + restCharge.outstanding
+            );
+          }
+        }
       } else {
         // Multi-owner proportional split: each owner gets their percentage
         // of amount AND paidAmount so the ledger reflects their own liability.
@@ -675,8 +750,44 @@ export function _aggregateOwners(
           // ownerKey (ownerSlicesOf populates it distinctly per owner). Step-7
           // BROKEN 2: name-match dropped/double-attributed a payment for two
           // same-name co-owners with distinct taxIds. The 'rest' carrier slice
-          // (ownerKey '') has no aggregate of its own — skip it; its amount is
-          // already absorbed into the named slices by ownerSlicesOf.
+          // (ownerKey '', isRest) is the un-named co-owner remainder — attribute
+          // it to the per-unit «Λοιποί ιδιοκτήτες» placeholder (a real unpaid
+          // liability) instead of dropping it, so this surface reconciles with
+          // the dashboard total. paid=0 (a recorded καταβολή is tagged to a
+          // NAMED owner and credited there; the rest share is unpaid).
+          if ((slice as any).isRest) {
+            // Gate on sliceFromUnit — IDENTICAL to the single-owner branch
+            // (Step-7 fact-check): only route a remainder to ΛΟΙΠΟΙ when the
+            // slice %s came from the UNIT's own owners[] (deterministic). A
+            // building-wide row (propertyId null) resolves slices from the
+            // dedup-by-key building owner set, whose stored % is import-order-
+            // dependent and borrowed from a DIFFERENT unit; splitting a residual
+            // by it would mis-attribute (the exact borrowed-% hazard the
+            // single-owner branch refuses). Building-wide rows keep the FULL
+            // amount on the canonical owner (unchanged pre-existing behaviour);
+            // their per-unit split is the deferred repair-writer pass.
+            const restAmt = sliceFromUnit ? _round(slice.amount) : 0;
+            if (restAmt > 0.005) {
+              const lagg = loipoiAggFor(bid, bid, charge.propertyId, slice);
+              const restCharge: OwnerCharge = {
+                ...charge,
+                amount: restAmt,
+                paidAmount: 0,
+                outstanding: restAmt,
+                paid: false,
+                coOwnerCount: keys.length,
+                coOwnerNames: sortedKeys
+                  .map((k) => owners.get(k)?.name)
+                  .filter(Boolean) as string[],
+                coOwners: slices,
+                payments: []
+              };
+              lagg.charges.push(restCharge);
+              lagg.totalAmount = _round(lagg.totalAmount + restAmt);
+              lagg.totalOutstanding = _round(lagg.totalOutstanding + restAmt);
+            }
+            continue;
+          }
           const sliceKey = slice.ownerKey || null;
           const agg = sliceKey ? owners.get(sliceKey) : null;
           if (!agg) continue;
@@ -938,23 +1049,31 @@ export async function one(req: Req, res: Res) {
     (buildings as any[]).map((b) => [String(b._id), b])
   );
   const paymentHistory: any[] = [];
-  for (const charge of agg.charges) {
-    const b = buildingById.get(charge.buildingId);
-    const row = (b?.ownerMonthlyExpenses || []).find(
-      (e: any) => String(e._id) === charge.ownerExpenseId
-    );
-    for (const p of row?.payments || []) {
-      paymentHistory.push({
-        ownerExpenseId: charge.ownerExpenseId,
-        buildingId: charge.buildingId,
-        buildingName: charge.buildingName,
-        term: charge.term,
-        date: p.date,
-        amount: _round(p.amount),
-        type: p.type,
-        reference: p.reference || '',
-        description: p.description || ''
-      });
+  // ΛΟΙΠΟΙ (un-named co-owner remainder) has NO καταβολές of its own — its
+  // charges reuse the shared unit row's ownerExpenseId, whose payments belong to
+  // the NAMED owner. Flattening row.payments here would surface the named
+  // owner's private payments on the placeholder's page (cross-attribution). The
+  // placeholder is unpaid by construction (restCharge.paidAmount 0), so its
+  // history is empty.
+  if (!OwnerStatement.isLoipoiKey(ownerKey)) {
+    for (const charge of agg.charges) {
+      const b = buildingById.get(charge.buildingId);
+      const row = (b?.ownerMonthlyExpenses || []).find(
+        (e: any) => String(e._id) === charge.ownerExpenseId
+      );
+      for (const p of row?.payments || []) {
+        paymentHistory.push({
+          ownerExpenseId: charge.ownerExpenseId,
+          buildingId: charge.buildingId,
+          buildingName: charge.buildingName,
+          term: charge.term,
+          date: p.date,
+          amount: _round(p.amount),
+          type: p.type,
+          reference: p.reference || '',
+          description: p.description || ''
+        });
+      }
     }
   }
   paymentHistory.sort(
@@ -1057,6 +1176,20 @@ export async function pay(req: Req, res: Res) {
   // on '%'-names). Verbatim.
   const ownerKey = req.params.ownerKey || '';
   if (!ownerKey) throw new ServiceError('ownerKey is required', 422);
+  // ΛΟΙΠΟΙ is a read-time PLACEHOLDER for an un-named co-owner remainder — it
+  // has NO persisted owner row of its own; its charges reuse the SHARED unit
+  // row's ownerExpenseId. Recording a payment "as ΛΟΙΠΟΙ" would tag money onto
+  // that shared row under a synthetic key that maps to no real owner, corrupting
+  // the named owners' attribution. The remainder is settled by NAMING the owner
+  // (add name+ΑΦΜ on the unit), which re-routes it to a real payable owner. So
+  // reject a payment against a placeholder outright (the UI also hides the pay
+  // button, but the API must not trust the client).
+  if (OwnerStatement.isLoipoiKey(ownerKey)) {
+    throw new ServiceError(
+      'Cannot record a payment for the «Λοιποί ιδιοκτήτες» placeholder — set the co-owner’s name and Α.Φ.Μ. on the unit first, then pay that owner.',
+      422
+    );
+  }
   const payment = req.body?.payment;
   if (!payment || typeof payment !== 'object') {
     throw new ServiceError('payment is required', 422);

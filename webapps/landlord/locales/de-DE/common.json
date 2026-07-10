@@ -1139,5 +1139,6 @@
   "Actual: collected/charged to date. Estimate: projection for remaining months.": "Actual: collected/charged to date. Estimate: projection for remaining months.",
   "Days": "Days",
   "Count": "Count",
-  "Debt": "Debt"
+  "Debt": "Debt",
+  "Net earnings": "Nettoeinnahmen"
 }

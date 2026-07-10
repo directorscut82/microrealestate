@@ -57,7 +57,10 @@ export function chargeLineLabel(t, charge) {
 export function buildingLineLabel(t, charge) {
   const typeKey = BUILDING_TYPE_LABEL_KEY[charge?.type] || 'Other';
   const typeLabel = t(typeKey);
-  const d = _trim(charge?.description);
+  // Strip the server's legacy English "Repair: <title>" prefix so a repair
+  // buildingCharge doesn't render «Επισκευή (Building - Repair: <title>)» — the
+  // type label already says «Επισκευή». Mirrors chargeLineLabel/ownerChargeLabel.
+  const d = _trim(charge?.description).replace(/^Repair:\s*/i, '');
   const b = _trim(charge?.buildingName);
   let paren = '';
   if (b && d) paren = ` (${b} - ${d})`;

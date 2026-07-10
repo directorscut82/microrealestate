@@ -289,6 +289,12 @@ function Overview() {
                 <th className="text-right font-medium pb-2">
                   {t('Income tax')}
                 </th>
+                {/* Καθαρά έσοδα = (owner's income) − income tax. Income-tax is not
+                    yet imported, so this renders «—» like the Φόρος column until
+                    the tax-return import feeds it. */}
+                <th className="text-right font-medium pb-2">
+                  {t('Net earnings')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -299,12 +305,13 @@ function Overview() {
                     <NumberFormat value={o.ownerExpenses} showZero debitColor />
                   </td>
                   <td className="py-2.5 text-right text-ink-muted">—</td>
+                  <td className="py-2.5 text-right text-ink-muted">—</td>
                 </tr>
               ))}
               {!(d.perOwner || []).length ? (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="py-3 text-center text-ink-muted text-label"
                   >
                     {t('No data')}
@@ -404,15 +411,24 @@ function Overview() {
             </div>
             <div>
               <GraphTitle>{t('Largest expenses')}</GraphTitle>
-              {(katanomes.byLabel || []).map((x) => (
-                <RankBar
-                  key={x.label}
-                  name={x.label}
-                  value={x.amount}
-                  max={catMax}
-                  color="var(--color-sea)"
-                />
-              ))}
+              {(katanomes.byLabel || []).map((x) => {
+                // Strip the server's legacy English "Repair: <title>" prefix and
+                // prepend the localized «Επισκευή», matching PropertyExpensesCard
+                // (_lineLabel) and the category donut — the raw prefix leaked
+                // English onto this otherwise-Greek surface.
+                const isRepair = /^Repair:\s*/i.test(x.label || '');
+                const stripped = (x.label || '').replace(/^Repair:\s*/i, '');
+                const name = isRepair ? `${t('Repair')} (${stripped})` : x.label;
+                return (
+                  <RankBar
+                    key={x.label}
+                    name={name}
+                    value={x.amount}
+                    max={catMax}
+                    color="var(--color-sea)"
+                  />
+                );
+              })}
             </div>
           </div>
         </div>

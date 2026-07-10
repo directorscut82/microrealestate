@@ -409,3 +409,77 @@ describe('occupiedPropertyTermKeys — shared occupancy key-set', () => {
     expect(st.totals.outstanding).toBeCloseTo(0, 2); // clamped, not negative
   });
 });
+
+// The statement PDF MUST reconcile with the on-screen ledger for the ΛΟΙΠΟΙ
+// placeholder too: a loipoi:<pid> key produces a statement of ONLY the un-named
+// remainder (unpaid), and a NAMED owner's statement is unchanged by the feature.
+describe('buildOwnerStatement — ΛΟΙΠΟΙ remainder', () => {
+  const beta = { name: 'ΒΗΤΑ', taxId: '111', percentage: 50 };
+  const buildings = () => [
+    {
+      _id: 'b1',
+      name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ',
+      expenses: [
+        {
+          _id: 'e1',
+          type: 'electricity_common',
+          isRecurring: true,
+          startTerm: 2026010100,
+          chargeOwnerWhenVacant: true
+        }
+      ],
+      units: [mkUnit('p1', [beta])], // sole 50% owner, co-owner absent
+      ownerMonthlyExpenses: [
+        {
+          _id: 'ome1',
+          expenseId: 'e1',
+          propertyId: 'p1',
+          term: 2026060100,
+          amount: 40,
+          source: 'vacant',
+          paid: false,
+          payments: []
+        }
+      ]
+    }
+  ];
+
+  it('a loipoi:<pid> statement contains only the remainder slice, unpaid', () => {
+    const st = buildOwnerStatement(buildings(), 'loipoi:p1', []);
+    expect(st.owner).toBeTruthy();
+    expect(st.owner.name).toBe('Λοιποί ιδιοκτήτες');
+    expect(st.owner.taxId).toBe(''); // no ΑΦΜ — synthetic identity
+    expect(st.charges).toHaveLength(1);
+    expect(st.charges[0].amount).toBeCloseTo(20, 2); // remainder 50% of €40
+    expect(st.charges[0].paidAmount).toBeCloseTo(0, 2);
+    expect(st.totals.amount).toBeCloseTo(20, 2);
+    expect(st.totals.outstanding).toBeCloseTo(20, 2);
+  });
+
+  it('the NAMED owner statement bills only her slice — unchanged by ΛΟΙΠΟΙ', () => {
+    const st = buildOwnerStatement(buildings(), ownerKeyOf(beta), []);
+    expect(st.charges).toHaveLength(1);
+    expect(st.charges[0].amount).toBeCloseTo(20, 2); // her 50% of €40
+    // named + ΛΟΙΠΟΙ = €40 = the full charge (conservation across statements).
+  });
+
+  it('a building-wide (propertyId null) charge yields NO loipoi:b statement', () => {
+    const b = buildings();
+    b[0].ownerMonthlyExpenses = [
+      {
+        _id: 'rw',
+        expenseId: 'r1',
+        propertyId: null,
+        term: 2026060100,
+        amount: 200,
+        source: 'repair',
+        paid: false,
+        payments: []
+      }
+    ];
+    b[0].repairs = [{ _id: 'r1' }];
+    const st = buildOwnerStatement(b, 'loipoi:b:b1', []);
+    // sliceFromUnit gate: building-wide rows never produce a ΛΟΙΠΟΙ remainder.
+    expect(st.charges).toHaveLength(0);
+  });
+});

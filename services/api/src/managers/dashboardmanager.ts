@@ -1,4 +1,4 @@
-import { Collections, logger } from '@microrealestate/common';
+import { Collections, logger, OwnerStatement } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import moment from 'moment';
 import { _isSettledByCarryForward } from './frontdata.js';
@@ -795,25 +795,42 @@ async function _expensesRollup(
     }
   }
 
-  const expenses = Object.values(byMonth).map((v: AnyRecord) => ({
-    month: v.month,
-    paid: _round(v.paid),
-    notPaid: _round(v.notPaid),
-    breakdown: (v.breakdown as AnyRecord[])
-      .map((d) => ({
-        ownerName: d.ownerName || null,
-        category: d.category,
-        label: d.label || '',
-        buildingName: d.buildingName || '',
-        owed: _round(d.owed),
-        paid: _round(d.paid),
-        // D5: vacant-unit share routed to owner → frontend marks it ΚΕΝΟ.
-        vacant: !!d.vacant
-      }))
-      .filter((d) => d.owed > 0 || d.paid > 0)
-      // largest owed first so the most significant lines lead the tooltip.
-      .sort((a, b2) => b2.owed - a.owed)
-  }));
+  const expenses = Object.values(byMonth)
+    // Chronological Jan→Dec. Object.values() key order is NOT reliable here: the
+    // MMYYYY keys with no leading zero (102026/112026/122026) are integer-like and
+    // JS hoists them ahead of the leading-zero string keys (012026…092026), so the
+    // raw order came out Oct,Nov,Dec,Jan,… — the chart rendered months out of order.
+    // Sort explicitly by term, exactly like `revenues` does (this file, _computeRevenues).
+    .sort((v1: AnyRecord, v2: AnyRecord) => {
+      // sortable YYYYMM from the MMYYYY key
+      const k = (m: string) => Number(String(m).slice(2) + String(m).slice(0, 2));
+      return k(v1.month) - k(v2.month);
+    })
+    .map((v: AnyRecord) => ({
+      month: v.month,
+      paid: _round(v.paid),
+      notPaid: _round(v.notPaid),
+      breakdown: (v.breakdown as AnyRecord[])
+        .map((d) => ({
+          ownerName: d.ownerName || null,
+          category: d.category,
+          label: d.label || '',
+          buildingName: d.buildingName || '',
+          owed: _round(d.owed),
+          paid: _round(d.paid),
+          // D5: vacant-unit share routed to owner → frontend marks it ΚΕΝΟ.
+          vacant: !!d.vacant,
+          // Per-individual-owner € slices (name/%/€ incl. the synthetic «λοιποί»
+          // remainder). WITHOUT this passthrough the overview's byOwnerRaw read
+          // of `ln.owners` was always undefined → it fell back to keying by the
+          // JOINED co-owner name (the ΑΝΑ ΙΔΙΟΚΤΗΤΗ "one owner per row" fix + the
+          // ΛΟΙΠΟΙ naming were dead paths on the dashboard). Preserve the slices.
+          owners: Array.isArray(d.owners) ? d.owners : undefined
+        }))
+        .filter((d) => d.owed > 0 || d.paid > 0)
+        // largest owed first so the most significant lines lead the tooltip.
+        .sort((a, b2) => b2.owed - a.owed)
+    }));
 
   return {
     totalYearExpenses: _round(totalYearExpenses),
@@ -1054,6 +1071,10 @@ export async function overview(req: Req, res: Res) {
   // the total. buildingName is NOT keyed here (Step-7 D4: two buildings can
   // share a name); per-building εκσοδα is computed per-_id below instead.
   const UNASSIGNED_OWNER = t_unassignedOwnerLabel();
+  // «Λοιποί ιδιοκτήτες» — the shared label for the un-named co-owner remainder
+  // (same string as the owner-ledger placeholder, common/ownerstatement.
+  // LOIPOI_LABEL) so ΑΝΑ ΙΔΙΟΚΤΗΤΗ names it identically to the owner list.
+  const LOIPOI_OWNER = OwnerStatement.LOIPOI_LABEL;
   const byCategoryRaw = new Map<string, number>();
   const byLabelRaw = new Map<string, number>();
   const byOwnerRaw = new Map<string, number>();
@@ -1064,8 +1085,26 @@ export async function overview(req: Req, res: Res) {
       byCategoryRaw.set(ln.category, (byCategoryRaw.get(ln.category) || 0) + owed);
       const lbl = ln.label || ln.category;
       byLabelRaw.set(lbl, (byLabelRaw.get(lbl) || 0) + owed);
-      const owner = ln.ownerName || UNASSIGNED_OWNER;
-      byOwnerRaw.set(owner, (byOwnerRaw.get(owner) || 0) + owed);
+      // ΑΝΑ ΙΔΙΟΚΤΗΤΗ must be per INDIVIDUAL owner (one row each), not per joined
+      // co-owner name. A co-owned line carries `owners[]` slices (name/%/€ incl. a
+      // synthetic «λοιποί» remainder); accumulate each owner's own € slice so the
+      // same owner never appears in two rows. Fall back to the whole line's
+      // ownerName only when there are no slices (single-owner line).
+      const slices = Array.isArray(ln.owners) ? ln.owners : [];
+      if (slices.length) {
+        for (const s of slices) {
+          // An un-named co-owner remainder (isRest) is a real «Λοιποί
+          // ιδιοκτήτες» liability, NOT «Αδιάθετο» — matching the owner ledger,
+          // which routes the same rest slice to the ΛΟΙΠΟΙ placeholder. This is
+          // what makes ΑΝΑ ΙΔΙΟΚΤΗΤΗ reconcile with the eksoda total (the
+          // remainder was counted in the total here but dropped by the ledger).
+          const nm = s?.isRest ? LOIPOI_OWNER : s?.name || UNASSIGNED_OWNER;
+          byOwnerRaw.set(nm, (byOwnerRaw.get(nm) || 0) + (Number(s?.amount) || 0));
+        }
+      } else {
+        const owner = ln.ownerName || UNASSIGNED_OWNER;
+        byOwnerRaw.set(owner, (byOwnerRaw.get(owner) || 0) + owed);
+      }
     }
   }
 

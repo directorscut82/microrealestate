@@ -130,6 +130,11 @@ function OwnerDetail() {
   const pct = total > 0 ? Math.round((paid / total) * 100) : 0;
   const charges = owner?.charges || [];
   const history = owner?.paymentHistory || [];
+  // «Λοιποί ιδιοκτήτες» is a read-only placeholder for an un-named co-owner
+  // remainder — it has no real owner row, so it is NOT payable (the server also
+  // rejects a payment for it). Hide the pay affordance; the remainder is settled
+  // by naming the co-owner (add name+ΑΦΜ on the unit), not by paying ΛΟΙΠΟΙ.
+  const isLoipoi = String(ownerKey).startsWith('loipoi:');
 
   return (
     <Page loading={isLoading} dataCy="ownerDetailPage">
@@ -165,14 +170,16 @@ function OwnerDetail() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                onClick={() => setPayOpen(true)}
-                className="gap-2"
-                disabled={Number(owner.totalOutstanding) <= 0.005}
-              >
-                <LuWallet className="size-4" />
-                {t('Record an owner payment')}
-              </Button>
+              {!isLoipoi && (
+                <Button
+                  onClick={() => setPayOpen(true)}
+                  className="gap-2"
+                  disabled={Number(owner.totalOutstanding) <= 0.005}
+                >
+                  <LuWallet className="size-4" />
+                  {t('Record an owner payment')}
+                </Button>
+              )}
             </div>
           </div>
 
@@ -406,7 +413,9 @@ function OwnerDetail() {
 
           {/* Ακίνητα — MOVED BEFORE Χρεώσεις, now renders BEFORE payments */}
 
-          <OwnerPaymentDialog open={payOpen} setOpen={setPayOpen} owner={owner} />
+          {!isLoipoi && (
+            <OwnerPaymentDialog open={payOpen} setOpen={setPayOpen} owner={owner} />
+          )}
         </div>
       )}
     </Page>

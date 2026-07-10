@@ -187,7 +187,12 @@ export default function OwnerStatements({ data, onDownloadStatement, onCSVClick 
           >
             <div className="flex justify-between text-xl px-2">
               <div>{owner.name || t('Owner')}</div>
-              <ReceiptMonthPicker onPick={onDownloadStatement(owner)} t={t} />
+              {/* «Λοιποί ιδιοκτήτες» is a placeholder, not a real recipient — no
+                  settlement statement is issued for it (the server rejects it);
+                  name the co-owner first. */}
+              {!String(owner.ownerKey).startsWith('loipoi:') && (
+                <ReceiptMonthPicker onPick={onDownloadStatement(owner)} t={t} />
+              )}
             </div>
             <div className="text-muted-foreground mb-2">
               {[
