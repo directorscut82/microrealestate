@@ -684,13 +684,21 @@ async function ownerSettlementsAsCsv(req: Req, res: Res) {
       // term YYYYMM..; month index 0-11. Year already scoped by _aggregateOwners.
       const mi = Math.floor((Number(c.term) % 1000000) / 10000) - 1;
       if (mi < 0 || mi > 11) continue;
-      const paid = (c.payments || []).reduce(
-        (s: number, p: AnyRecord) => s + (Number(p.amount) || 0),
-        0
-      );
-      paidByMonth[mi] = _round(paidByMonth[mi] + paid);
+      // Use the charge's SETTLED paidAmount (from _aggregateOwners), NOT a raw
+      // re-sum of payments[]. A tile-flagged cashless row (flag=settled) has
+      // paidAmount == its billed amount but EMPTY payments[]; re-summing
+      // payments[] would show €0 in the month cell while the total (agg.totalPaid,
+      // which includes the lift) showed the full amount → the sheet's Σ(monthly
+      // Payment columns) ≠ Total payments, an unreconcilable gap (flag-lift Step-7
+      // MEDIUM). Reading paidAmount makes the month cells AND the total both
+      // reflect settlement, so the export self-reconciles (Σ months === total).
+      paidByMonth[mi] = _round(paidByMonth[mi] + (Number(c.paidAmount) || 0));
       owedByMonth[mi] = _round(owedByMonth[mi] + (Number(c.outstanding) || 0));
     }
+    // Total = Σ of the month cells so the sheet always reconciles column-to-total
+    // (mirrors the rent twin settlementsAsCsv, which also derives totalPaid from
+    // paidByMonth rather than agg.totalPaid).
+    const totalPaid = _round(paidByMonth.reduce((s, v) => s + v, 0));
     return {
       name: _sanitizeCsvText(agg.name || ''),
       taxId: _sanitizeCsvText(agg.taxId || ''),
@@ -698,7 +706,7 @@ async function ownerSettlementsAsCsv(req: Req, res: Res) {
       buildings: agg.buildingIds ? agg.buildingIds.size : 0,
       paidByMonth,
       owedByMonth,
-      totalPaid: _round(Number(agg.totalPaid) || 0),
+      totalPaid,
       totalOwed: _round(Number(agg.totalOutstanding) || 0)
     };
   });

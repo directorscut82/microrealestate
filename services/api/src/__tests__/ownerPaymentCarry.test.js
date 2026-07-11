@@ -140,6 +140,31 @@ const paymentsTotal = (row) =>
     (s, p) => s + (Number(p && p.amount) || 0),
     0
   );
+// Inject a recorded owner-portion καταβολή of `amount` across a repair's
+// source:'repair' owner-portion rows. The owner-portion is now materialised
+// PER-UNIT (multiple {source:'repair', propertyId} rows) instead of one
+// building-wide lump, so tests that used to do `.find(r=>r.source==='repair'
+// && !r.propertyId).payments=[...]` must spread the injected payment across the
+// per-unit rows (largest-share first, remainder on the last). Preserves the
+// tests' INTENT ("the owner paid €X toward this repair") independent of row
+// shape. `ownerKey` optionally tags the payment (multi-owner attribution).
+const payRepairOwnerPortion = (building, expenseId, amount, ownerKey = null) => {
+  const rows = building.ownerMonthlyExpenses
+    .filter((r) => r.source === 'repair' && String(r.expenseId) === String(expenseId))
+    .sort((a, b) => (Number(b.amount) || 0) - (Number(a.amount) || 0));
+  let left = Math.round(Number(amount) * 100) / 100;
+  for (let i = 0; i < rows.length && left > 0.005; i++) {
+    const cap = i === rows.length - 1 ? left : Math.min(left, Number(rows[i].amount) || 0);
+    const give = Math.round(cap * 100) / 100;
+    if (give <= 0.005) continue;
+    rows[i].payments = [
+      ...(rows[i].payments || []),
+      { ...recordedPayment(give), ...(ownerKey ? { ownerKey } : {}) }
+    ];
+    left = Math.round((left - give) * 100) / 100;
+  }
+  return rows;
+};
 const cashFor = (building, expenseId) =>
   building.ownerMonthlyExpenses
     .filter((r) => String(r.expenseId) === String(expenseId))
@@ -474,9 +499,8 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
     };
     building.repairs = [repair];
     await _distributeRepairCharge(building, repair, 'r1');
-    building.ownerMonthlyExpenses.find(
-      (r) => r.source === 'repair' && String(r.expenseId) === 'rep5'
-    ).payments = [recordedPayment(200)];
+    // €200 owner-portion paid, now spread across the 5 per-unit rows (€40 each).
+    payRepairOwnerPortion(building, 'rep5', 200);
     repair.chargeableTo = 'tenants';
     repair.tenantSharePercentage = 100;
     await _distributeRepairCharge(building, repair, 'r1');
@@ -721,12 +745,11 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
     };
     building.repairs = [repair];
     await _distributeRepairCharge(building, repair, 'r1');
-    // building-wide owner-portion 'repair' row (propertyId null), pay €200.
-    const ownerRow = building.ownerMonthlyExpenses.find(
-      (r) => r.source === 'repair' && !r.propertyId && String(r.expenseId) === 'repMix'
-    );
-    expect(ownerRow).toBeTruthy();
-    ownerRow.payments = [recordedPayment(200)];
+    // owner-portion €200 paid — now materialised on p1's per-unit 'repair' row
+    // (p1 holds all 1000‰; p2 has 0‰ so no row). Inject across the repair's
+    // owner-portion rows (intent: the owner paid €200 toward this repair).
+    const ownerRows = payRepairOwnerPortion(building, 'repMix', 200);
+    expect(ownerRows.length).toBeGreaterThan(0);
     // reclassify to tenants → p1 vacant → its share routes to a repair-vacant
     // row; the building-wide €200 must migrate onto it (subset coverage).
     repair.chargeableTo = 'tenants';
@@ -981,11 +1004,17 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
     };
     building.repairs = [repair];
     await _distributeRepairCharge(building, repair, 'r1');
-    const ownerRow = building.ownerMonthlyExpenses.find(
-      (r) => r.source === 'repair' && !r.propertyId && String(r.expenseId) === 'repMixR12'
+    // owner-portion €600 now materialised per-unit: p1(A)=€300, p2(B)=€300.
+    // Owner A pays THEIR portion → p1's row, tagged with A's ownerKey. (The
+    // per-unit split makes cross-owner isolation structural; the tag lets the
+    // pool re-attribute A's cash only to A's rows.)
+    const aRow = building.ownerMonthlyExpenses.find(
+      (r) => r.source === 'repair' && String(r.propertyId) === 'p1' && String(r.expenseId) === 'repMixR12'
     );
-    expect(ownerRow).toBeTruthy();
-    ownerRow.payments = [recordedPayment(Number(ownerRow.amount))];
+    expect(aRow).toBeTruthy();
+    aRow.payments = [
+      { ...recordedPayment(Number(aRow.amount)), ownerKey: 'n:aaa_owner|111' }
+    ];
     // reclassify to 100% tenant → ownerPortion 0, no owner-portion row rebuilt.
     repair.chargeableTo = 'tenants';
     repair.tenantSharePercentage = 100;
@@ -1298,6 +1327,615 @@ describe('C2 _distributeRepairCharge — owner repair payments survive', () => {
       // portion + €60 preserved as a credit (the Αχρέωτα-bound share). NOT dropped.
       expect(cashFor2(building, 'repF4')).toBe(100);
     });
+  });
+});
+
+// ── Repair OWNER-PORTION is materialised PER-UNIT (Level 1: split ownerPortion
+// ── across managed units by the repair's allocationMethod), sliced per-owner by
+// ── % on read (Level 2: ownerSlicesOf + ΛΟΙΠΟΙ). END-TO-END through the real
+// ── writer + real ledger + real dashboard reader. Reproduces the 3 live
+// ── building-wide-repair shapes (ΑΓ.ΟΔΟΣ ΕΨΙΛΟΝ single-owner-part, ΟΔΟΣ ΖΗΤΑ
+// ── multi sole-owned, ΟΔΟΣ ΗΤΑ multi co-owned) that were billed whole-to-one or
+// ── equal-split before. Payments carry per-owner ownerKey tags → each owner's
+// ── καταβολή re-attributes to their OWN unit rows.
+describe('repair owner-portion per-unit split + per-owner attribution (end-to-end)', () => {
+  const AG = () => ({
+    _id: 'b_ag',
+    realmId: 'r1',
+    save: async function () { return this; },
+    toObject: function () { return this; },
+    name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28',
+    // 11 units all owned by ΒΗΤΑ; 4 at 50% (co-owner absent), 7 at 100%.
+    // thousandths mirror the live data so the split matches €421.75 / €78.25.
+    units: [
+      mkUnit('a1', { generalThousandths: 13, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a2', { generalThousandths: 8, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a3', { generalThousandths: 7, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a4', { generalThousandths: 16, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a5', { generalThousandths: 30, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a6', { generalThousandths: 36, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a7', { generalThousandths: 36, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a8', { generalThousandths: 242, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a9', { generalThousandths: 155, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a10', { generalThousandths: 228, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a11', { generalThousandths: 229, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' })
+    ],
+    expenses: [],
+    repairs: [],
+    ownerMonthlyExpenses: omeArray([])
+  });
+
+  it('ΑΓ.ΟΔΟΣ ΕΨΙΛΟΝ: €500 owners-repair splits per-unit; ledger bills ΒΗΤΑ €421.75, ΛΟΙΠΟΙ €78.25 (Σ 500)', async () => {
+    TENANTS = [];
+    const T = term(6, 2026);
+    const building = AG();
+    const repair = { _id: 'agRoof', title: 'Στέγη', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 500, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    await _distributeRepairCharge(building, repair, 'r1');
+    const rows = building.ownerMonthlyExpenses.filter((r) => r.source === 'repair' && Number(r.term) === T);
+    expect(rows.length).toBe(11); // per-unit, not one lump
+    expect(rows.every((r) => !!r.propertyId)).toBe(true);
+    expect(rows.reduce((s, r) => s + r.amount, 0)).toBeCloseTo(500, 2); // conservation
+    const plain = JSON.parse(JSON.stringify(building));
+    const map = _aggregateOwners([plain], new Set());
+    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' })));
+    expect(beta.totalAmount).toBeCloseTo(421.75, 1); // her thousandths-weighted share, NOT €500
+    const loipoi = [...map.values()].filter((a) => String(a.ownerKey).startsWith('loipoi:'));
+    const loipoiTotal = loipoi.reduce((s, a) => s + a.totalAmount, 0);
+    expect(loipoiTotal).toBeCloseTo(78.25, 1); // the absent co-owner's remainder
+    expect(beta.totalAmount + loipoiTotal).toBeCloseTo(500, 1); // Σ conserved across owners
+  });
+
+  it('MIGRATION F1: an existing building-wide __owner__ lump (tagged €500 paid) migrated to per-unit must NOT strand as a disconnected credit / phantom outstanding', async () => {
+    // Reviewer CRITICAL: the real migration starts from a PRE-EXISTING lump
+    // (propertyId:null, source:'repair', payments tagged). Re-running the writer
+    // strips it → captures €500 into bucket '__owner__' → rebuilds per-unit.
+    // Pass-2 must re-attribute the €500 onto ΒΗΤΑ's per-unit rows; if it
+    // strands as a building-wide credit, her ledger shows phantom outstanding.
+    TENANTS = [];
+    const T = term(6, 2026);
+    const building = AG();
+    const repair = { _id: 'agRoof', title: 'Στέγη', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 500, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    // SEED the OLD building-wide lump exactly as it exists in live data pre-migration:
+    building.ownerMonthlyExpenses.push({
+      expenseId: 'agRoof', term: T, amount: 500, source: 'repair', propertyId: null,
+      description: 'Repair: Στέγη', paid: true, paidDate: new Date('2026-06-06'),
+      payments: [
+        { amount: 331.68, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }) },
+        { amount: 168.32, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }) }
+      ]
+    });
+    // MIGRATE: one writer run.
+    await _distributeRepairCharge(building, repair, 'r1');
+    const plain = JSON.parse(JSON.stringify(building));
+    const map = _aggregateOwners([plain], new Set());
+    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' })));
+    // Her €500 payment must be on HER per-unit rows: paid ~€421.75 (her share),
+    // outstanding €0 (she fully paid). NOT phantom-outstanding with a floating credit.
+    expect(beta.totalAmount).toBeCloseTo(421.75, 1);
+    expect(beta.totalOutstanding).toBeCloseTo(0, 1); // she paid her whole share
+    expect(cashFor(building, 'agRoof')).toBeCloseTo(500, 1); // no money lost
+  });
+
+  it('ΑΓ.ΟΔΟΣ ΕΨΙΛΟΝ: ΒΗΤΑ paid the full €500 (tagged) → her share settled + €78.25 preserved as credit (money conserved, no drop)', async () => {
+    TENANTS = [];
+    const T = term(6, 2026);
+    const building = AG();
+    const repair = { _id: 'agRoof', title: 'Στέγη', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 500, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    await _distributeRepairCharge(building, repair, 'r1');
+    // She paid €500 total, tagged to her key, spread across her per-unit rows.
+    payRepairOwnerPortion(building, 'agRoof', 500, ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }));
+    // Re-run (innocuous edit) — payments must survive; her €421.75 liability
+    // settles and the €78.25 beyond it is PRESERVED (no tenant re-bill → not a
+    // droppable overpay; recorded money must survive).
+    await _distributeRepairCharge(building, repair, 'r1');
+    expect(cashFor(building, 'agRoof')).toBeCloseTo(500, 1); // full recorded money survives
+  });
+
+  it('ΟΔΟΣ ΖΗΤΑ: €300 owners-repair, 3 sole-owned units → split by thousandths (127.50/94.20/78.30), NOT equal', async () => {
+    TENANTS = [];
+    const T = term(6, 2026);
+    const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const building = {
+      _id: 'b_sp', realmId: 'r1', save: async function () { return this; }, toObject: function () { return this; }, name: 'ΟΔΟΣ ΖΗΤΑ 9',
+      units: [
+        mkUnit('s1', { generalThousandths: 372, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s2', { generalThousandths: 53, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s3', { generalThousandths: 207, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s4', { generalThousandths: 107, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s5', { generalThousandths: 261, owners: [I], occupancyType: 'vacant' })
+      ],
+      expenses: [], repairs: [], ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'spRoof', title: 'Στέγη', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 300, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    await _distributeRepairCharge(building, repair, 'r1');
+    const plain = JSON.parse(JSON.stringify(building));
+    const map = _aggregateOwners([plain], new Set());
+    const amt = (o) => _serializeOwnerSummary(map.get(ownerKeyOf(o))).totalAmount;
+    expect(amt(A)).toBeCloseTo(127.5, 1); // (372+53)/1000 × 300
+    expect(amt(G)).toBeCloseTo(94.2, 1); // (207+107)/1000 × 300
+    expect(amt(I)).toBeCloseTo(78.3, 1); // 261/1000 × 300
+    expect(amt(A) + amt(G) + amt(I)).toBeCloseTo(300, 1);
+    // CALC-BASIS regression guard (Step-7 no-regression review, HIGH): the
+    // per-unit repair row's basis must be the PER-UNIT division (thousandths),
+    // NOT a false "cost 300 × owner 100% = 300" that contradicts the ~€111.60
+    // row amount on the PDF/panel. Each repair charge's basis.share must equal
+    // its own amount (self-consistent equation).
+    const st = buildOwnerStatement([plain], ownerKeyOf(I), []);
+    const repCharge = st.charges.find((c) => c.source === 'repair');
+    expect(repCharge).toBeTruthy();
+    expect(repCharge.basis).toBeTruthy();
+    expect(repCharge.basis.kind).toBe('thousandths'); // NOT 'repair_split'
+    // the equation's RHS (share) equals the billed per-unit amount, not €300.
+    expect(repCharge.basis.share).toBeCloseTo(repCharge.amount, 1);
+    expect(repCharge.basis.share).toBeLessThan(300);
+  });
+
+  it('ΟΔΟΣ ΖΗΤΑ: tagged payments (ΚΑΠΠΑ €100, ΓΕΩΡΓΙΟΣ €74, ΒΗΤΑ €100) attribute to each owner OWN units, no cross-credit', async () => {
+    TENANTS = [];
+    const T = term(6, 2026);
+    const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const building = {
+      _id: 'b_sp2', realmId: 'r1', save: async function () { return this; }, toObject: function () { return this; }, name: 'ΟΔΟΣ ΖΗΤΑ 9',
+      units: [
+        mkUnit('s1', { generalThousandths: 372, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s2', { generalThousandths: 53, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s3', { generalThousandths: 207, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s4', { generalThousandths: 107, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s5', { generalThousandths: 261, owners: [I], occupancyType: 'vacant' })
+      ],
+      expenses: [], repairs: [], ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'spRoof', title: 'Στέγη', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 300, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    await _distributeRepairCharge(building, repair, 'r1');
+    // Each owner pays onto THEIR OWN unit rows (tagged).
+    const payOnUnits = (pids, total, key) => {
+      const rows = building.ownerMonthlyExpenses.filter((r) => r.source === 'repair' && pids.includes(String(r.propertyId)));
+      let left = total;
+      for (let i = 0; i < rows.length && left > 0.005; i++) {
+        const give = i === rows.length - 1 ? left : Math.min(left, rows[i].amount);
+        rows[i].payments = [...(rows[i].payments || []), { ...recordedPayment(give), ownerKey: key }];
+        left = Math.round((left - give) * 100) / 100;
+      }
+    };
+    payOnUnits(['s1', 's2'], 100, ownerKeyOf(A));
+    payOnUnits(['s3', 's4'], 74, ownerKeyOf(G));
+    payOnUnits(['s5'], 100, ownerKeyOf(I));
+    const plain = JSON.parse(JSON.stringify(building));
+    const map = _aggregateOwners([plain], new Set());
+    const s = (o) => _serializeOwnerSummary(map.get(ownerKeyOf(o)));
+    expect(s(A).totalPaid).toBeCloseTo(100, 1);
+    expect(s(G).totalPaid).toBeCloseTo(74, 1);
+    expect(s(I).totalPaid).toBeCloseTo(100, 1); // ΒΗΤΑ overpaid her €78.30 → €100 recorded, outstanding floors at 0
+    // no cross-credit: each owner's paid is exactly what they paid, none leaked.
+    expect(s(A).totalPaid + s(G).totalPaid + s(I).totalPaid).toBeCloseTo(274, 1);
+  });
+
+  it('MIGRATION F1-multi: ΟΔΟΣ ΖΗΤΑ building-wide lump (€274 tagged across 3 DISTINCT owners) migrates onto each owner OWN per-unit rows — no stranded credit, no cross-owner leak', async () => {
+    // Reviewer CRITICAL: 3 distinct NAMED owners → the old bucket-only Pass-2
+    // (canonical != each unit owner) stranded €146.50 as a floating credit.
+    // The tag-aware Pass-0 must route each owner's tagged payment onto THEIR
+    // own per-unit rows.
+    TENANTS = [];
+    const T = term(6, 2026);
+    const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const building = {
+      _id: 'b_sp_mig', realmId: 'r1', name: 'ΟΔΟΣ ΖΗΤΑ 9',
+      save: async function () { return this; }, toObject: function () { return this; },
+      units: [
+        mkUnit('s1', { generalThousandths: 372, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s2', { generalThousandths: 53, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s3', { generalThousandths: 207, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s4', { generalThousandths: 107, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s5', { generalThousandths: 261, owners: [I], occupancyType: 'vacant' })
+      ],
+      expenses: [], contractors: [], repairs: [],
+      ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'spR', title: 'Roof', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 300, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    // SEED the pre-migration building-wide lump with the 3 owners' TAGGED payments.
+    building.ownerMonthlyExpenses.push({
+      expenseId: 'spR', term: T, amount: 300, source: 'repair', propertyId: null,
+      description: 'Repair: Roof', paid: false,
+      payments: [
+        { amount: 100, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf(A) },
+        { amount: 74, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf(G) },
+        { amount: 100, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf(I) }
+      ]
+    });
+    // MIGRATE.
+    await _distributeRepairCharge(building, repair, 'r1');
+    // No stranded building-wide credit.
+    const bwCredit = building.ownerMonthlyExpenses.find((r) => r.source === 'credit' && !r.propertyId);
+    expect(bwCredit).toBeFalsy();
+    const plain = JSON.parse(JSON.stringify(building));
+    const map = _aggregateOwners([plain], new Set());
+    const s = (o) => _serializeOwnerSummary(map.get(ownerKeyOf(o)));
+    // Each owner's tagged payment lands on THEIR own per-unit rows.
+    expect(s(A).totalAmount).toBeCloseTo(127.5, 1);
+    expect(s(A).totalPaid).toBeCloseTo(100, 1); // A paid €100 of their €127.50
+    expect(s(G).totalAmount).toBeCloseTo(94.2, 1);
+    expect(s(G).totalPaid).toBeCloseTo(74, 1);
+    expect(s(I).totalAmount).toBeCloseTo(78.3, 1);
+    // I paid €100 but owes only €78.30. The €21.70 overpay is preserved as a
+    // per-unit source:'credit' row scoped to HER OWN unit (s5), tagged with her
+    // ownerKey — NOT leaked to ΚΑΠΠΑ (the fixed cross-owner leak) and NOT
+    // dropped. So the money stays ATTRIBUTED TO HER: totalPaid = €78.30 liability
+    // + €21.70 credit = €100, outstanding floors at 0 (matches the reader's
+    // documented overpay handling + F1 single-owner's preserved-credit model).
+    expect(s(I).totalPaid).toBeCloseTo(100, 1);
+    expect(s(I).totalOutstanding).toBeCloseTo(0, 1);
+    // The €21.70 overpay lives on a per-unit credit on one of I's OWN units.
+    const iCredit = building.ownerMonthlyExpenses.find(
+      (r) => r.source === 'credit' && r.propertyId === 's5'
+    );
+    expect(iCredit).toBeTruthy();
+    expect((iCredit.payments || []).reduce((x, p) => x + p.amount, 0)).toBeCloseTo(21.7, 1);
+    expect((iCredit.payments || [])[0].ownerKey).toBe(ownerKeyOf(I));
+    // total recorded money conserved (€274 in, nothing lost).
+    expect(cashFor(building, 'spR')).toBeCloseTo(274, 1);
+  });
+
+  it('MIGRATION IDEMPOTENCY: re-running the writer a SECOND time over already-per-unit rows + a surviving overpay credit reproduces the SAME per-owner paid/owed (no duplicate/lost overpay)', async () => {
+    // The real migration re-runs _distributeRepairCharge over every existing
+    // repair once. But a later innocuous edit (or an accidental re-run) fires it
+    // again. Run-twice MUST equal run-once per owner. PRIME SUSPECT: the Pass-0
+    // overpay 'credit' row is NOT re-captured by isRepairOwnerRow (source
+    // 'repair'/'repair-vacant' only), so on run 2 it survives untouched while the
+    // liability rows are re-captured+re-placed. Verify the €21.70 overpay is NOT
+    // duplicated (survived credit + a NEW Pass-0 credit) nor lost.
+    TENANTS = [];
+    const T = term(6, 2026);
+    const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const mkBuilding = () => ({
+      _id: 'b_sp_idem', realmId: 'r1', name: 'ΟΔΟΣ ΖΗΤΑ 9',
+      save: async function () { return this; }, toObject: function () { return this; },
+      units: [
+        mkUnit('s1', { generalThousandths: 372, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s2', { generalThousandths: 53, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('s3', { generalThousandths: 207, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s4', { generalThousandths: 107, owners: [G], occupancyType: 'vacant' }),
+        mkUnit('s5', { generalThousandths: 261, owners: [I], occupancyType: 'vacant' })
+      ],
+      expenses: [], contractors: [], repairs: [],
+      ownerMonthlyExpenses: omeArray([])
+    });
+    const seedLump = (building) => building.ownerMonthlyExpenses.push({
+      expenseId: 'spR', term: T, amount: 300, source: 'repair', propertyId: null,
+      description: 'Repair: Roof', paid: false,
+      payments: [
+        { amount: 100, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf(A) },
+        { amount: 74, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf(G) },
+        { amount: 100, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf(I) }
+      ]
+    });
+    const repair = { _id: 'spR', title: 'Roof', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 300, chargeTerm: T, status: 'completed' };
+
+    // Run ONCE.
+    const b1 = mkBuilding(); b1.repairs = [repair]; seedLump(b1);
+    await _distributeRepairCharge(b1, repair, 'r1');
+    const m1 = _aggregateOwners([JSON.parse(JSON.stringify(b1))], new Set());
+    const s1 = (o) => _serializeOwnerSummary(m1.get(ownerKeyOf(o)));
+
+    // Run TWICE (migrate, then re-run the writer on the now-per-unit result).
+    const b2 = mkBuilding(); b2.repairs = [repair]; seedLump(b2);
+    await _distributeRepairCharge(b2, repair, 'r1');
+    await _distributeRepairCharge(b2, repair, 'r1');
+    const m2 = _aggregateOwners([JSON.parse(JSON.stringify(b2))], new Set());
+    const s2 = (o) => _serializeOwnerSummary(m2.get(ownerKeyOf(o)));
+
+    // Run-twice === run-once, per owner, on every figure.
+    for (const o of [A, G, I]) {
+      expect(s2(o).totalAmount).toBeCloseTo(s1(o).totalAmount, 1);
+      expect(s2(o).totalPaid).toBeCloseTo(s1(o).totalPaid, 1);
+      expect(s2(o).totalOutstanding).toBeCloseTo(s1(o).totalOutstanding, 1);
+    }
+    // I's €21.70 overpay is present EXACTLY ONCE after two runs (not doubled to €43.40).
+    expect(s2(I).totalPaid).toBeCloseTo(100, 1);
+    const iCredits = b2.ownerMonthlyExpenses.filter((r) => r.source === 'credit' && r.propertyId === 's5');
+    const iCreditCash = iCredits.reduce((x, r) => x + (r.payments || []).reduce((y, p) => y + p.amount, 0), 0);
+    expect(iCreditCash).toBeCloseTo(21.7, 1);
+    // total recorded money still €274 after TWO runs.
+    expect(cashFor(b2, 'spR')).toBeCloseTo(274, 1);
+  });
+
+  it('MIGRATION FLAG: a building-wide lump marked PAID via the tile (paid:true, empty payments) keeps its settlement after per-unit migration (no phantom debt)', async () => {
+    // Step-7 migration reviewer, HIGH: the "owner expenses paid" tile sets
+    // paid:true with EMPTY payments on the building-wide '__owner__' lump. On
+    // migration the exact-amount flag re-apply found no matching per-unit row →
+    // the settlement was destroyed → the owner showed the FULL amount as
+    // outstanding on ledger/dashboard/statement. The fix spreads the flag across
+    // the rebuilt per-unit rows.
+    TENANTS = [];
+    const T = term(6, 2026);
+    const building = AG();
+    const repair = { _id: 'agRoof', title: 'Στέγη', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 500, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    // SEED the pre-migration lump FLAGGED paid (tile), NO cash payments.
+    building.ownerMonthlyExpenses.push({
+      expenseId: 'agRoof', term: T, amount: 500, source: 'repair', propertyId: null,
+      description: 'Repair: Στέγη', paid: true, paidDate: new Date('2026-06-06'),
+      payments: []
+    });
+    await _distributeRepairCharge(building, repair, 'r1');
+    // Every rebuilt per-unit owner-portion row is marked paid (settlement carried).
+    const rows = building.ownerMonthlyExpenses.filter((r) => r.source === 'repair' && Number(r.term) === T);
+    expect(rows.length).toBe(11);
+    expect(rows.every((r) => r.paid === true)).toBe(true);
+    // Dashboard (where the tile-flag is honoured — the surface the phantom debt
+    // appeared on): owed === paid (net 0), NOT phantom €500 outstanding. This is
+    // the exact regression the migration reviewer measured (owed 500 → paid 0).
+    const { owedByTerm, paidByTerm } = await computeOwnerEksodaByMonth('r1', building, 2026);
+    expect(owedByTerm.get(T) || 0).toBeCloseTo(500, 1);
+    expect(paidByTerm.get(T) || 0).toBeCloseTo(500, 1);
+    // FLAG = SETTLED EVERYWHERE (user decision, Step-7 reader-consistency HIGH):
+    // the owner LEDGER must now ALSO honour the bare tile-flag as fully-paid, so
+    // it agrees with the dashboard (previously the ledger ignored row.paid and
+    // dunned the full €500). ΒΗΤΑ's outstanding for the repair is 0.
+    const map = _aggregateOwners([JSON.parse(JSON.stringify(building))], new Set());
+    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' })));
+    expect(beta.totalOutstanding).toBeCloseTo(0, 1);
+    // and the legal owner-statement PDF agrees (all three surfaces settled).
+    const st = buildOwnerStatement([JSON.parse(JSON.stringify(building))], ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }), []);
+    expect(st.totals.outstanding).toBeCloseTo(0, 1);
+    expect(st.totals.paid).toBeCloseTo(st.totals.amount, 1);
+  });
+
+  it('FLAG-LIFT SAFETY: a CO-OWNED row one owner fully paid in CASH (paid===true via recompute) is NOT flag-lifted — the non-payer is NOT credited the payer cash (ΟΔΟΣ ΗΤΑ leak guard)', async () => {
+    // Regression the flag=settled change introduced (caught by the real-data
+    // dry-run, NOT jest): flagLifted keyed on row.paid===true alone lifted a
+    // co-owned row that ONE owner cash-paid (recomputeOwnerExpensePaid sets
+    // paid=true), crediting the NON-paying co-owner €69 of the payer's cash
+    // (ΛΑΜΔΑ→ΚΑΠΠΑ). Fix: gate on paidAmount<=0.005 (a real tile-flag is
+    // cashless). This guards it.
+    const A = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 50 };
+    const Z = { memberId: 'mZ', name: 'ΛΑΜΔΑ', taxId: '099887766', percentage: 50 };
+    const building = {
+      _id: 'b_flagcash', realmId: 'r1', name: 'FLAG-CASH',
+      save: async function () { return this; }, toObject: function () { return this; },
+      units: [mkUnit('u1', { generalThousandths: 1000, owners: [A, Z], occupancyType: 'vacant' })],
+      expenses: [], contractors: [],
+      repairs: [{ _id: 'rc', title: 'Roof', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 100, chargeTerm: term(6, 2026), status: 'completed' }],
+      ownerMonthlyExpenses: omeArray([])
+    };
+    // Per-unit owner row €100 co-owned A/Z 50/50; ΛΑΜΔΑ paid the FULL €100 in cash
+    // (tagged to her). recomputeOwnerExpensePaid will set paid=true.
+    building.ownerMonthlyExpenses.push({
+      expenseId: 'rc', term: term(6, 2026), amount: 100, source: 'repair', propertyId: 'u1',
+      description: 'Repair: Roof', paid: true, paidDate: new Date('2026-06-06'),
+      payments: [{ ...recordedPayment(100), ownerKey: ownerKeyOf(Z) }]
+    });
+    const map = _aggregateOwners([JSON.parse(JSON.stringify(building))], new Set());
+    // ΛΑΜΔΑ paid her €50 slice (and €50 overpay); ΚΑΠΠΑ paid €0, owes €50 — the
+    // cash is NOT lifted onto him.
+    const z = _serializeOwnerSummary(map.get(ownerKeyOf(Z)));
+    const aAgg = map.get(ownerKeyOf(A));
+    const a = aAgg ? _serializeOwnerSummary(aAgg) : { totalPaid: 0, totalOutstanding: 0 };
+    expect(a.totalPaid).toBeCloseTo(0, 1); // NOT credited ΛΑΜΔΑ's cash
+    expect(a.totalOutstanding).toBeCloseTo(50, 1); // still owes his own slice
+    expect(z.totalPaid).toBeCloseTo(100, 1); // her full cash stays hers
+  });
+
+  it('PASS-0 DROP: a TAGGED owner overpay whose unit became OCCUPIED (share re-billed to tenant) DROPS, is NOT preserved as a credit (no owner-credit + tenant-rent double count)', async () => {
+    // Step-7 conservation + no-regression reviewers (2 independent) confirmed,
+    // and the real-data dry-run reproduced (Βουλιαγμένης 30 "preserved 70",
+    // Λεωφ. Αλεξάνδρας 35 "preserved 76"): Pass-0 preserved a re-billed
+    // occupied-overpay as a source:'credit' row, defeating droppableByProp +
+    // the preserveOverpayAsCredit=false (manual-edit) contract. The re-billed
+    // euro then funded the repair TWICE (owner credit AND tenant rent). The fix
+    // makes Pass-0 obey the same drop-vs-preserve rule the untagged leftover
+    // tail uses. This test is the guard.
+    const A = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const T = CURRENT_TERM;
+    // 2 units, both owned 100% by A. Repair billed to TENANTS (share 100%),
+    // chargeOwnerWhenVacant TRUE → while vacant the whole cost is owner-billed
+    // per unit (repair-vacant). A pre-pays €200 (€100/unit, tagged).
+    const building = {
+      _id: 'b_p0drop', realmId: 'r1', name: 'P0-DROP',
+      save: async function () { return this; }, toObject: function () { return this; },
+      units: [
+        mkUnit('u1', { generalThousandths: 500, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('u2', { generalThousandths: 500, owners: [A], occupancyType: 'vacant' })
+      ],
+      expenses: [], contractors: [], repairs: [],
+      ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'rDrop', title: 'Roof', chargeableTo: 'tenants', tenantSharePercentage: 100, allocationMethod: 'equal', chargeOwnerWhenVacant: true, actualCost: 200, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    TENANTS = [];
+    // First distribution: both vacant → two repair-vacant rows €100 each.
+    await _distributeRepairCharge(building, repair, 'r1');
+    const rvRows = building.ownerMonthlyExpenses.filter((r) => r.source === 'repair-vacant');
+    expect(rvRows.length).toBe(2);
+    // A pays €100 on each, tagged to her.
+    for (const r of rvRows) {
+      r.payments = [{ ...recordedPayment(100), ownerKey: ownerKeyOf(A) }];
+    }
+    expect(cashFor(building, 'rDrop')).toBeCloseTo(200, 1);
+
+    // Now u1 becomes OCCUPIED; landlord re-fires the writer via a manual edit
+    // (preserveOverpayAsCredit defaults false). u1's share is re-billed to the
+    // tenant (monthlyCharge); A's €100 for u1 is a genuine overpay that must DROP.
+    TENANTS = [
+      { _id: 't1', beginDate: '2020-01-01', endDate: '2030-01-01',
+        properties: [{ propertyId: 'u1', entryDate: '2020-01-01' }] }
+    ];
+    await _distributeRepairCharge(building, repair, 'r1');
+
+    // u1's €100 was re-billed to the tenant → its monthlyCharge exists.
+    const u1 = building.units.find((u) => u.propertyId === 'u1');
+    const u1Charge = (u1.monthlyCharges || []).find((c) => String(c.repairId) === 'rDrop');
+    expect(u1Charge).toBeTruthy();
+    expect(u1Charge.amount).toBeCloseTo(100, 1);
+
+    // THE GUARD: A's owner-side recorded cash for this repair is now €100 (the u2
+    // repair-vacant share she still owns), NOT €200. The €100 for the now-tenant-
+    // billed u1 was DROPPED — NOT resurrected as a source:'credit' row.
+    expect(cashFor(building, 'rDrop')).toBeCloseTo(100, 1);
+    const anyCredit = building.ownerMonthlyExpenses.filter((r) => r.source === 'credit');
+    const creditCash = anyCredit.reduce((x, r) => x + (r.payments || []).reduce((y, p) => y + p.amount, 0), 0);
+    expect(creditCash).toBeCloseTo(0, 1); // NO preserved credit — the overpay dropped
+    // And the ledger shows A paid €100 (the u2 share), owing €0 there.
+    const map = _aggregateOwners([JSON.parse(JSON.stringify(building))], new Set());
+    expect(_serializeOwnerSummary(map.get(ownerKeyOf(A))).totalPaid).toBeCloseTo(100, 1);
+  });
+
+  it('PASS-0 CO-OWNER DROP-BUDGET: a co-owned rebilled unit + one co-owner with GENUINE surplus elsewhere — each co-owner drops ONLY their own rebill share, surplus preserved to the right owner (no €50 cross-owner double-count)', async () => {
+    // Step-7 conservation reviewer, HIGH (regression the FIRST droppable fix
+    // introduced): Pass-0 summed the FULL droppableByProp of every bucket an
+    // owner paid into. A CO-OWNED rebilled unit's droppable is the WHOLE unit's
+    // rebill, shared by its payers — so owner A drained co-owner B's share of
+    // u1's drop budget, DESTROYING A's genuine surplus on u2 AND leaving B's real
+    // rebill overpay to be PRESERVED (a €50 owner-credit + tenant-rent double
+    // count — the b6165824 class). Fix: cap each bucket's drop contribution at
+    // min(bucket droppable, THIS owner's tagged stake in that bucket). The
+    // pristine per-bucket code handled it correctly; this guards the fix.
+    const A = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 50 };
+    const A2 = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const B = { memberId: 'mB', name: 'ΒΑΣΙΛΗΣ', taxId: '077889900', percentage: 50 };
+    const T = CURRENT_TERM;
+    // u1 co-owned A+B (surface 100), u2 A-alone (surface 30). Repair by_surface,
+    // cost €130, chargeableTo tenants 100% + chargeOwnerWhenVacant. u1 rebills
+    // €100 (occupied), u2 owner-billed €30 (vacant). A prepaid €100 on u2 (a €70
+    // genuine surplus — liability shrank / overpaid), A+B each €50 on u1.
+    const building = {
+      _id: 'b_p0co', realmId: 'r1', name: 'P0-COOWNER',
+      save: async function () { return this; }, toObject: function () { return this; },
+      units: [
+        mkUnit('u1', { surface: 100, generalThousandths: 0, owners: [A, B], occupancyType: 'vacant' }),
+        mkUnit('u2', { surface: 30, generalThousandths: 0, owners: [A2], occupancyType: 'vacant' })
+      ],
+      expenses: [], contractors: [], repairs: [],
+      ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'rCo', title: 'Roof', chargeableTo: 'tenants', tenantSharePercentage: 100, allocationMethod: 'by_surface', chargeOwnerWhenVacant: true, actualCost: 130, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    TENANTS = [];
+    await _distributeRepairCharge(building, repair, 'r1');
+    // Seed the pre-state payments: u1 row = A€50 + B€50 (tagged); u2 row = A€100
+    // tagged (A overpaid the €30 liability by €70 — genuine refundable surplus).
+    const u1row = building.ownerMonthlyExpenses.find((r) => r.source === 'repair-vacant' && r.propertyId === 'u1');
+    const u2row = building.ownerMonthlyExpenses.find((r) => r.source === 'repair-vacant' && r.propertyId === 'u2');
+    expect(u1row && u2row).toBeTruthy();
+    u1row.payments = [
+      { ...recordedPayment(50), ownerKey: ownerKeyOf(A) },
+      { ...recordedPayment(50), ownerKey: ownerKeyOf(B) }
+    ];
+    u2row.payments = [{ ...recordedPayment(100), ownerKey: ownerKeyOf(A2) }];
+    expect(cashFor(building, 'rCo')).toBeCloseTo(200, 1);
+
+    // u1 becomes OCCUPIED → its €100 share rebills to the tenant. Manual edit
+    // (preserveOverpayAsCredit defaults false) → rebill overpays must DROP.
+    TENANTS = [
+      { _id: 't1', beginDate: '2020-01-01', endDate: '2030-01-01',
+        properties: [{ propertyId: 'u1', entryDate: '2020-01-01' }] }
+    ];
+    await _distributeRepairCharge(building, repair, 'rCo');
+
+    // CORRECT (pristine) outcome: u1's €100 rebill (A€50 + B€50) DROPS; A's €70
+    // genuine u2 surplus is PRESERVED as A's tagged credit. NOT: A loses €50 of
+    // surplus while B's €50 rebill is preserved (the buggy cross-owner split).
+    const credits = building.ownerMonthlyExpenses.filter((r) => r.source === 'credit');
+    const creditCash = credits.reduce((x, r) => x + (r.payments || []).reduce((y, p) => y + p.amount, 0), 0);
+    expect(creditCash).toBeCloseTo(70, 1); // ONLY A's genuine €70 surplus preserved
+    // every preserved credit euro is tagged to A (NOT B — B's €50 was a rebill, dropped)
+    expect(credits.every((r) => (r.payments || []).every((p) => p.ownerKey === ownerKeyOf(A2)))).toBe(true);
+    // recorded cash for the repair = A's €30 on-row + €70 credit = €100 (B's €50 + A's €50 u1-rebill dropped)
+    expect(cashFor(building, 'rCo')).toBeCloseTo(100, 1);
+    // ledger: A paid €100 (30 on u2 + 70 credit); B paid €0 (rebill dropped, no phantom credit)
+    const map = _aggregateOwners([JSON.parse(JSON.stringify(building))], new Set());
+    expect(_serializeOwnerSummary(map.get(ownerKeyOf(A2))).totalPaid).toBeCloseTo(100, 1);
+    const bAgg = map.get(ownerKeyOf(B));
+    expect(bAgg ? _serializeOwnerSummary(bAgg).totalPaid : 0).toBeCloseTo(0, 1);
+  });
+
+  it('PASS-0 PRESERVE (auto tenancy path): the SAME occupied-overpay is PRESERVED as a tag-scoped credit when preserveOverpayAsCredit=true (tenant charge is unpaid → owner cash must survive)', async () => {
+    // The inverse of the drop test: on an AUTOMATIC tenancy flip
+    // (redistributeRepairsForProperties → preserveOverpayAsCredit=true), the new
+    // tenant charge is UNPAID, so A's recorded €100 is genuine surplus that must
+    // survive as a refundable credit — NOT drop. Pass-0 must honour the flag.
+    const A = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
+    const T = CURRENT_TERM;
+    const building = {
+      _id: 'b_p0pres', realmId: 'r1', name: 'P0-PRESERVE',
+      save: async function () { return this; }, toObject: function () { return this; },
+      units: [
+        mkUnit('u1', { generalThousandths: 500, owners: [A], occupancyType: 'vacant' }),
+        mkUnit('u2', { generalThousandths: 500, owners: [A], occupancyType: 'vacant' })
+      ],
+      expenses: [], contractors: [], repairs: [],
+      ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'rPres', title: 'Roof', chargeableTo: 'tenants', tenantSharePercentage: 100, allocationMethod: 'equal', chargeOwnerWhenVacant: true, actualCost: 200, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    TENANTS = [];
+    await _distributeRepairCharge(building, repair, 'r1');
+    for (const r of building.ownerMonthlyExpenses.filter((r) => r.source === 'repair-vacant')) {
+      r.payments = [{ ...recordedPayment(100), ownerKey: ownerKeyOf(A) }];
+    }
+    TENANTS = [
+      { _id: 't1', beginDate: '2020-01-01', endDate: '2030-01-01',
+        properties: [{ propertyId: 'u1', entryDate: '2020-01-01' }] }
+    ];
+    // AUTO path: preserveOverpayAsCredit = true (4th arg).
+    await _distributeRepairCharge(building, repair, 'r1', true);
+    // A's €100 for u1 SURVIVES as a tag-scoped credit (not dropped): total cash €200.
+    expect(cashFor(building, 'rPres')).toBeCloseTo(200, 1);
+    const credits = building.ownerMonthlyExpenses.filter((r) => r.source === 'credit');
+    const creditCash = credits.reduce((x, r) => x + (r.payments || []).reduce((y, p) => y + p.amount, 0), 0);
+    expect(creditCash).toBeCloseTo(100, 1);
+    // the credit is tagged to A (attributed to her, not leaked).
+    expect(credits.every((r) => (r.payments || []).every((p) => p.ownerKey === ownerKeyOf(A)))).toBe(true);
+  });
+
+  it('ΟΔΟΣ ΗΤΑ: €400 owners-repair, every unit co-owned ΚΑΠΠΑ/ΛΑΜΔΑ 50/50 → each owner €200; ΛΑΜΔΑ tagged €200 settles her, ΚΑΠΠΑ owes €200', async () => {
+    TENANTS = [];
+    const T = term(6, 2026);
+    const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 50 };
+    const Z = { name: 'ΔΟΚΙΜΗ ΛΑΜΔΑ', taxId: '021301485', percentage: 50 };
+    const building = {
+      _id: 'b_ka', realmId: 'r1', save: async function () { return this; }, toObject: function () { return this; }, name: 'ΟΔΟΣ ΗΤΑ 24',
+      units: [
+        mkUnit('k1', { generalThousandths: 135, owners: [A, Z], occupancyType: 'vacant' }),
+        mkUnit('k2', { generalThousandths: 211, owners: [A, Z], occupancyType: 'vacant' }),
+        mkUnit('k3', { generalThousandths: 211, owners: [A, Z], occupancyType: 'vacant' }),
+        mkUnit('k4', { generalThousandths: 301, owners: [A, Z], occupancyType: 'vacant' }),
+        mkUnit('k5', { generalThousandths: 142, owners: [A, Z], occupancyType: 'vacant' })
+      ],
+      expenses: [], repairs: [], ownerMonthlyExpenses: omeArray([])
+    };
+    const repair = { _id: 'kaLift', title: 'Ασανσέρ', chargeableTo: 'owners', tenantSharePercentage: 0, allocationMethod: 'general_thousandths', chargeOwnerWhenVacant: false, actualCost: 400, chargeTerm: T, status: 'completed' };
+    building.repairs = [repair];
+    await _distributeRepairCharge(building, repair, 'r1');
+    // ΛΑΜΔΑ paid €200 (tagged) across her slices of each unit.
+    for (const row of building.ownerMonthlyExpenses.filter((r) => r.source === 'repair')) {
+      // her 50% slice of each per-unit row
+      const her = Math.round(row.amount * 0.5 * 100) / 100;
+      row.payments = [...(row.payments || []), { ...recordedPayment(her), ownerKey: ownerKeyOf(Z) }];
+    }
+    const plain = JSON.parse(JSON.stringify(building));
+    const map = _aggregateOwners([plain], new Set());
+    const sA = _serializeOwnerSummary(map.get(ownerKeyOf(A)));
+    const sZ = _serializeOwnerSummary(map.get(ownerKeyOf(Z)));
+    expect(sA.totalAmount).toBeCloseTo(200, 1);
+    expect(sZ.totalAmount).toBeCloseTo(200, 1);
+    expect(sZ.totalPaid).toBeCloseTo(200, 1); // ΛΑΜΔΑ settled
+    expect(sZ.totalOutstanding).toBeCloseTo(0, 1);
+    expect(sA.totalPaid).toBeCloseTo(0, 1); // ΚΑΠΠΑ paid nothing → still owes €200
+    expect(sA.totalOutstanding).toBeCloseTo(200, 1);
   });
 });
 

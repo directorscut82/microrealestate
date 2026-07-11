@@ -474,6 +474,25 @@ export function _aggregateOwners(
       const paidAmount = _round(
         payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
       );
+      // TILE-FLAG "settled everywhere" (Step-7 reader-consistency HIGH + user
+      // decision): a bare paid:true flag (set via setOwnerExpensePaid or the
+      // migration flag-carry — paid:true with NO cash) means the WHOLE row is
+      // settled. The dashboard already honours it (Math.max(fromPayments,
+      // fromFlag)); the ledger + legal PDF must MIRROR it so all three surfaces
+      // agree. When flagLifted, every derived line (named slices + ΛΟΙΠΟΙ rest) is
+      // lifted to its OWN billed amount → Σ per-owner paid === row amount.
+      //   GATE on paidAmount<=0.005 — NOT merely row.paid===true. A CO-OWNED row
+      // that ONE owner fully paid in CASH has paid===true set by
+      // recomputeOwnerExpensePaid; lifting it would credit the NON-paying co-owner
+      // with the payer's cash (ΟΔΟΣ ΗΤΑ: ΛΑΜΔΑ's cash leaked €69 onto ΚΑΠΠΑ — a
+      // dry-run PAID breach). A genuine tile-flag carries NO cash, so restricting
+      // to cashless rows both handles the tile/migration case AND makes a
+      // cross-owner cash leak impossible (there is no cash on the row to move).
+      // Excludes 'credit' rows (amount 0 — their payments ARE the value).
+      const flagLifted =
+        row.paid === true &&
+        paidAmount <= 0.005 &&
+        (row.source || 'expense') !== 'credit';
       // C2: per-owner paid attribution. A building-wide co-owned charge's
       // payments[] is shared; without this, the multi-owner re-split below
       // credited one owner's καταβολή to a co-owner. Sum each payment under its
@@ -655,9 +674,14 @@ export function _aggregateOwners(
         // recorded paid visible (outstanding floors at 0 below — an overpayment
         // shows owed<paid, never negative), mirroring the multi-owner overpay
         // handling. A 'credit' row (amount 0) likewise keeps its full payment.
-        const paidShare = useTaggedPaidForSlices
+        const paidShareRaw = useTaggedPaidForSlices
           ? _round(taggedPaidByKey.get(sortedKeys[0]) || 0)
           : _round(paidAmount);
+        // flag-lifted → this owner's slice is fully settled (max of recorded cash
+        // and the billed slice), mirroring the dashboard's fromFlag.
+        const paidShare = flagLifted
+          ? _round(Math.max(paidShareRaw, billed))
+          : paidShareRaw;
         if (keys.length > 1) {
           charge.coOwnerCount = keys.length;
           charge.coOwnerNames = sortedKeys
@@ -698,12 +722,16 @@ export function _aggregateOwners(
           const rest = slices.find((sl: any) => sl.isRest && sl.amount > 0.005);
           if (rest) {
             const lagg = loipoiAggFor(bid, bid, charge.propertyId, rest);
+            // flag-lifted → the un-named co-owner's remainder is settled too
+            // (the whole row is flagged paid), so ΛΟΙΠΟΙ shows paid, outstanding
+            // 0 — else the tile-tick would leave the ΛΟΙΠΟΙ portion dunned.
+            const restPaid = flagLifted ? _round(rest.amount) : 0;
             const restCharge: OwnerCharge = {
               ...charge,
               amount: _round(rest.amount),
-              paidAmount: 0,
-              outstanding: _round(rest.amount),
-              paid: false,
+              paidAmount: restPaid,
+              outstanding: Math.max(0, _round(rest.amount - restPaid)),
+              paid: flagLifted,
               coOwnerCount: keys.length,
               coOwnerNames: sortedKeys
                 .map((k) => owners.get(k)?.name)
@@ -713,6 +741,7 @@ export function _aggregateOwners(
             };
             lagg.charges.push(restCharge);
             lagg.totalAmount = _round(lagg.totalAmount + restCharge.amount);
+            lagg.totalPaid = _round(lagg.totalPaid + restCharge.paidAmount);
             lagg.totalOutstanding = _round(
               lagg.totalOutstanding + restCharge.outstanding
             );
@@ -769,12 +798,14 @@ export function _aggregateOwners(
             const restAmt = sliceFromUnit ? _round(slice.amount) : 0;
             if (restAmt > 0.005) {
               const lagg = loipoiAggFor(bid, bid, charge.propertyId, slice);
+              // flag-lifted → the un-named remainder is settled too.
+              const restPaid = flagLifted ? restAmt : 0;
               const restCharge: OwnerCharge = {
                 ...charge,
                 amount: restAmt,
-                paidAmount: 0,
-                outstanding: restAmt,
-                paid: false,
+                paidAmount: restPaid,
+                outstanding: Math.max(0, _round(restAmt - restPaid)),
+                paid: flagLifted,
                 coOwnerCount: keys.length,
                 coOwnerNames: sortedKeys
                   .map((k) => owners.get(k)?.name)
@@ -784,7 +815,10 @@ export function _aggregateOwners(
               };
               lagg.charges.push(restCharge);
               lagg.totalAmount = _round(lagg.totalAmount + restAmt);
-              lagg.totalOutstanding = _round(lagg.totalOutstanding + restAmt);
+              lagg.totalPaid = _round(lagg.totalPaid + restPaid);
+              lagg.totalOutstanding = _round(
+                lagg.totalOutstanding + restCharge.outstanding
+              );
             }
             continue;
           }
@@ -810,13 +844,18 @@ export function _aggregateOwners(
           //  2. credit row (amount 0): carrier-corrected ownerSlicesOf split.
           //  3. legacy fallback: proportional paidAmount × (slice share) — for
           //     pre-C2 untagged rows where we cannot know who paid.
-          const slicePaid = useTaggedPaidForSlices
+          const slicePaidRaw = useTaggedPaidForSlices
             ? _round(taggedPaidByKey.get(sliceKey || '') || 0)
             : charge.amount > 0
               ? _round(paidAmount * (sliceAmount / charge.amount))
               : charge.source === 'credit'
                 ? creditPaidByKey.get(sliceKey || '') || 0
                 : 0;
+          // flag-lifted → this co-owner's slice is settled (max of recorded and
+          // its billed amount), mirroring the dashboard's fromFlag.
+          const slicePaid = flagLifted
+            ? _round(Math.max(slicePaidRaw, sliceAmount))
+            : slicePaidRaw;
           const sliceOutstanding = Math.max(0, _round(sliceAmount - slicePaid));
           // Apportion slicePaid across this owner's payment shares so the grid
           // (Σ payment shares) reconciles EXACTLY with slicePaid / the header.

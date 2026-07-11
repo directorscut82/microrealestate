@@ -215,6 +215,18 @@ export function shareBasis(
   }
 }
 
+// A unit with exactly ONE owner at (effectively) 100% — the only case where a
+// charge's stored amount IS the whole per-unit figure (so it can be used as the
+// basis equation's RHS). A co-owned or sole-partial unit's charge carries a
+// SLICE, for which the equation must keep the full-per-unit ratio + a co-owner
+// suffix, never the sliced amount.
+function _isSingleFullOwner(unit: any): boolean {
+  const owners = ((unit && unit.owners) || []) as any[];
+  if (owners.length !== 1) return false;
+  const pct = Number(owners[0]?.percentage);
+  return !Number.isFinite(pct) || pct >= 99.995;
+}
+
 // Tenant share % of a repair (mirrors 1_base.repairTenantSharePercentage).
 function _repairTenantPct(repair: any): number {
   if (!repair) return 0;
@@ -246,11 +258,24 @@ function _ownerAmountBasis(
   building: any,
   unit: any,
   method: string,
-  total: number
+  total: number,
+  // The ACTUAL stored per-unit amount (charge.amount) when the caller has it.
+  // The writer (_allocateOwnerAmountPerUnit) snaps the lex-max carrier unit to
+  // absorb the rounding residual, so a unit's stored amount can differ from the
+  // pure (part/whole)×total ratio by a cent on the carrier. When provided, use
+  // it as `share` so the PDF basis line's RHS EQUALS the amount column and the
+  // on-screen ΧΡΕΩΣΕΙΣ panel (which already passes rowAmount) — no €0.01 drift,
+  // no "= 43,23 €" under a 43,24 € row (Step-7 reader-consistency LOW). Omitted
+  // → fall back to the pure ratio (unchanged for callers without the amount).
+  actualShare?: number
 ): ShareBasis {
   const fmt = (n: number) => _round(n);
   const managed = (building.units || []).filter((u: any) => u.propertyId);
   const m = method === 'fixed' ? 'equal' : method || 'equal';
+  const pick = (ratio: number) =>
+    actualShare != null && Number.isFinite(actualShare)
+      ? fmt(actualShare)
+      : fmt(ratio);
   if (m === 'by_surface') {
     const whole = managed.reduce(
       (s: number, u: any) => s + (Number(u.surface) || 0),
@@ -262,7 +287,7 @@ function _ownerAmountBasis(
       part: fmt(part),
       whole: fmt(whole),
       total: fmt(total),
-      share: whole > 0 ? fmt((part / whole) * total) : 0
+      share: pick(whole > 0 ? (part / whole) * total : 0)
     };
   }
   if (
@@ -286,7 +311,7 @@ function _ownerAmountBasis(
       part: fmt(part),
       whole: fmt(whole),
       total: fmt(total),
-      share: whole > 0 ? fmt((part / whole) * total) : 0
+      share: pick(whole > 0 ? (part / whole) * total : 0)
     };
   }
   const count = managed.length;
@@ -294,7 +319,7 @@ function _ownerAmountBasis(
     kind: 'equal',
     count,
     total: fmt(total),
-    share: count > 0 ? fmt(total / count) : 0
+    share: pick(count > 0 ? total / count : 0)
   };
 }
 
@@ -341,7 +366,11 @@ export function ownerChargeBasis(building: any, charge: any): ShareBasis | null 
         building,
         unit,
         exp?.allocationMethod || 'equal',
-        ownerTotal
+        ownerTotal,
+        // Same rule as the repair branch: use the stored per-unit amount as the
+        // RHS only for a single-100%-owner unit (charge.amount is the whole
+        // per-unit figure), else keep the pure ratio (charge.amount is a slice).
+        _isSingleFullOwner(unit) ? charge.amount : undefined
       );
     }
     return null;
@@ -358,12 +387,38 @@ export function ownerChargeBasis(building: any, charge: any): ShareBasis | null 
 
   if (source === 'repair') {
     const ownerPct = 100 - tenantPct;
-    // RHS computed from the LHS (cost × owner%), NOT the co-owner slice.
+    const ownerPortion = _round(cost * (ownerPct / 100));
+    // The repair owner-portion is now materialised PER-UNIT (each row is one
+    // unit's slice of the owner portion, split by the repair's allocationMethod),
+    // exactly like owner-fixed. So when this charge is unit-scoped, the basis
+    // must show the PER-UNIT division ("owner portion X € ÷ <method> → this
+    // unit's Y €") — NOT the whole "cost × owner% = full portion", which would
+    // print a FALSE equation contradicting the per-unit row amount (owner
+    // statement PDF + ΧΡΕΩΣΕΙΣ panel; adversarial no-regression review). Delegate
+    // to the SAME per-unit builder owner-fixed uses so the two never drift.
+    if (charge.propertyId && unit && managed.length > 1) {
+      return _ownerAmountBasis(
+        building,
+        unit,
+        rep.allocationMethod || 'general_thousandths',
+        ownerPortion,
+        // Use the STORED per-unit amount as the RHS only when it IS the whole
+        // per-unit figure — a unit with a single 100% owner (charge.amount ===
+        // row.amount). Then the PDF equation matches the on-screen panel and the
+        // amount column exactly, killing the carrier-snap €0.01 drift. For a
+        // co-owned / sole-partial unit charge.amount is a SLICE, so we keep the
+        // pure-ratio full-per-unit figure (the co-owner suffix bridges to the
+        // slice) — never print a sliced RHS under a full-per-unit equation.
+        _isSingleFullOwner(unit) ? charge.amount : undefined
+      );
+    }
+    // Building-wide fallback lump (custom_* / single unit) — the row IS the whole
+    // owner portion, so the cost × owner% equation is self-consistent.
     return {
       kind: 'repair_split',
       total: _round(cost),
       ownerPct,
-      result: _round(cost * (ownerPct / 100))
+      result: ownerPortion
     };
   }
   if (source === 'repair-vacant') {

@@ -3672,11 +3672,28 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
         if (!(cost > 0)) return null;
         const tenantPct = repairTenantSharePercentage(rep);
         if (e.source === 'repair') {
-          // Building-wide owner portion = cost × (100 − tenantPct)%.
+          const ownerPct = 100 - tenantPct;
+          const ownerPortion = Math.round(cost * (ownerPct / 100) * 100) / 100;
+          // The repair owner-portion is now materialised PER-UNIT (each row is
+          // this unit's slice of the owner portion, split by the repair's
+          // allocationMethod), exactly like owner-fixed. When unit-scoped, show
+          // the PER-UNIT division ("owner portion X € ÷ <method> → this unit's
+          // Y €") via the SAME builder owner-fixed uses — NOT "cost × owner% =
+          // full portion", which would print a FALSE equation contradicting the
+          // per-unit row amount (mirrors sharebasis.ownerChargeBasis; Step-7
+          // no-regression review). A building-wide fallback lump keeps the
+          // self-consistent cost × owner% line.
+          const muRep = ((hydrated as any).units || []).filter(
+            (u: any) => u.propertyId
+          );
+          if (e.propertyId && unit && muRep.length > 1) {
+            const method = (rep as any).allocationMethod || 'general_thousandths';
+            return _ownerAmountBasis(unit, method, ownerPortion, rowAmount);
+          }
           return {
             kind: 'repair_split',
             total: Math.round(cost * 100) / 100,
-            ownerPct: 100 - tenantPct,
+            ownerPct,
             result: rowAmount
           };
         }
@@ -4678,6 +4695,11 @@ function _applyRepairPaymentPool(
   repairIdStr: string,
   term: number,
   paidByProp: Map<string, number>,
+  // Captured payment OBJECTS per bucket (with ownerKey tags). Consumed only by
+  // the tag-aware Pass-0 below to route a TAGGED payment to the per-unit row
+  // whose owner matches its tag — the '__owner__'→per-unit crossing the
+  // bucket-keyed passes cannot make for a multi-named-owner building.
+  paymentsByProp: Map<string, any[]>,
   flagByProp: Map<string, { amount: number; date: any }>,
   mkPoolPayment: (amount: number) => any,
   // Per-bucket DROPPABLE € budget: the portion of each bucket's unabsorbable
@@ -4709,23 +4731,192 @@ function _applyRepairPaymentPool(
   const keyOf = (row: any) =>
     row.propertyId ? String(row.propertyId) : OWNER_KEY;
 
-  // Re-apply recorded καταβολές PER PROPERTY: each rebuilt row draws from its
-  // OWN unit's captured pool first (exact owner attribution — a flat pool
-  // attributed one owner's payment to another's row in a multi-vacant building,
-  // Step-7-r7). Cap each row's fill at its amount. A bare manual paid flag
-  // (setOwnerExpensePaid: paid:true, empty payments) for that same property is
-  // applied to ONE matching unpaid row when no cash covers it.
   const remainingByProp = new Map<string, number>();
   for (const [k, v] of paidByProp) remainingByProp.set(k, _round(v));
 
-  // Pass 1: fill each row from its OWN property bucket, capped at amount.
+  // ── Pass 0 — TAG-AWARE placement (the '__owner__'→per-unit crossing) ───────
+  // A captured payment carrying an ownerKey tag is placed onto the per-unit rows
+  // whose unit is owned by THAT tagged owner, capped at the row amount, FIFO.
+  // This is what carries a MULTI-NAMED-OWNER building-wide lump's tagged
+  // καταβολές onto the rebuilt per-unit rows on migration — the bucket-keyed
+  // Pass-1/Pass-2 below cannot, because '__owner__' resolves only to the single
+  // canonical owner and sameAttributedOwner bails when a unit has a different
+  // owner (ΟΔΟΣ ΖΗΤΑ €274 across 3 owners stranded as a floating credit —
+  // adversarial migration finding). Whatever a tagged payment places here is
+  // decremented from remainingByProp so Pass-1/Pass-2 only see the UNTAGGED
+  // remainder — so single-owner / legacy-untagged behaviour is byte-identical.
+  // ownerKeyOf is the SAME identity pay() stamped the tag with, so an exact
+  // ownerKey match is authoritative; a payment whose tag matches no current unit
+  // owner is left for the bucket-keyed passes (lossless fallback).
+  const _placedByBucket = new Map<string, number>(); // extra € consumed by Pass-0, per source bucket
+  let _passZeroDropped = 0; // € Pass-0 DROPPED as a re-billed occupied-overpay (double-count avoidance)
+  {
+    // rows a given ownerKey tag owns a slice of (exact ownerKeyOf match on the
+    // unit's owners), pre-indexed. Building-wide rows (propertyId null) are never
+    // Pass-0 targets — they resolve to no single unit owner.
+    const rowsForTag = new Map<string, any[]>();
+    for (const row of liveRows) {
+      if (!row.propertyId) continue;
+      const unit = (building.units || []).find(
+        (u: any) => String(u.propertyId) === String(row.propertyId)
+      );
+      for (const o of (unit?.owners || []) as any[]) {
+        const key = ownerKeyOf(o);
+        if (!key) continue;
+        const l = rowsForTag.get(key) || [];
+        l.push(row);
+        rowsForTag.set(key, l);
+      }
+    }
+    // Aggregate the TAGGED payments PER OWNER (across every source bucket), so
+    // an owner who paid into two buckets is placed/overpay-resolved as ONE
+    // person. Keying only per-bucket was wrong: an owner's u1 payment lands on
+    // an u2 row (FIFO across their rows), so the overpay surfaced under bucket
+    // u2 (droppable 0) while the re-bill drop budget sat under bucket u1
+    // (droppable 100) → the drop never fired (the PASS-0 DROP test). Untagged
+    // payments and tags that match NO current owner row are NOT aggregated here
+    // — they fall through to the bucket-keyed Pass-1/Pass-2 losslessly.
+    const paidByTag = new Map<string, number>();
+    const bucketsByTag = new Map<string, Map<string, number>>();
+    for (const [bucket, pays] of paymentsByProp) {
+      for (const p of pays) {
+        const tag = p.ownerKey ? String(p.ownerKey) : null;
+        if (!tag) continue; // untagged → bucket-keyed passes handle it
+        if (!rowsForTag.has(tag)) continue; // tag maps to no current owner row → fallback
+        paidByTag.set(tag, _round((paidByTag.get(tag) || 0) + p.amount));
+        const bm = bucketsByTag.get(tag) || new Map<string, number>();
+        bm.set(bucket, _round((bm.get(bucket) || 0) + p.amount));
+        bucketsByTag.set(tag, bm);
+      }
+    }
+    for (const [tag, totalPaid] of paidByTag) {
+      const targets = rowsForTag.get(tag)!;
+      let toPlace = _round(totalPaid);
+      for (const row of targets) {
+        if (toPlace <= 0.005) break;
+        const rowAmount = Number(row.amount) || 0;
+        // `already` = the row's CURRENT payments only. Pass-0 pushes each
+        // placement into row.payments immediately, so this sum reflects every
+        // prior Pass-0 fill (this owner's earlier rows AND a co-owner tag that
+        // already filled the same shared row). Do NOT add a separate tally: that
+        // double-counted each fill, made a filled row read 2× full, and stranded
+        // the tail as a phantom credit (the F1 €30.18 regression).
+        const already = (
+          Array.isArray(row.payments) ? row.payments : []
+        ).reduce((s: number, x: any) => s + (Number(x && x.amount) || 0), 0);
+        const room = _round(rowAmount - already);
+        if (room <= 0.005) continue;
+        const apply = Math.min(room, toPlace);
+        row.payments = [
+          ...(Array.isArray(row.payments) ? row.payments : []),
+          { ...mkPoolPayment(apply), ownerKey: tag }
+        ];
+        recomputeOwnerExpensePaid(row);
+        toPlace = _round(toPlace - apply);
+      }
+      // Whatever this owner couldn't place (they paid MORE than their current
+      // per-unit liability) is THEIR OWN overpay. It must NOT flow to the
+      // owner-blind Pass-1/Pass-2 (which would credit it to a DIFFERENT owner —
+      // the €21.70 ΒΗΤΑ→ΚΑΠΠΑ leak). But it must ALSO obey the SAME
+      // drop-vs-preserve rule the untagged leftover tail uses (below): if this
+      // owner's share was RE-BILLED to a now-OCCUPIED tenant this run, the
+      // overpay is a genuine double-count (owner credit AND tenant rent) and must
+      // DROP, not preserve — the b6165824-class regression the conservation +
+      // no-regression Step-7 passes BOTH caught, reproduced on real data
+      // (Βουλιαγμένης 30 "preserved 70", Λεωφ. Αλεξάνδρας 35 "preserved 76" on a
+      // chargeOwnerWhenVacant/occupancy flip). preserveOverpayAsCredit
+      // (tenancy-triggered) forces preserve (dropBudget 0); otherwise the drop
+      // budget is the SUM of droppable across EVERY bucket THIS owner paid into
+      // (their re-billed shares, wherever they sat). Drop up to that; preserve
+      // the rest as a TAG-SCOPED per-unit credit so it stays THIS owner's money.
+      // Decrement each bucket's droppable by what we consume so the tail never
+      // double-drops the same budget.
+      const bm = bucketsByTag.get(tag)!;
+      if (toPlace > 0.005) {
+        let dropBudget = 0;
+        if (!preserveOverpayAsCredit) {
+          // An owner may drop from a bucket only the LESSER of (that bucket's
+          // re-bill droppable) and (THIS owner's own tagged contribution to that
+          // bucket, bm.get(bkt)). A CO-OWNED bucket's droppable is the WHOLE
+          // unit's re-billed share, split among its payers by contribution —
+          // summing the full bucket droppable per owner let the first owner
+          // drain a co-owner's share, destroying that owner's genuine surplus in
+          // ANOTHER bucket AND leaving the co-owner's real re-bill overpay to be
+          // preserved (a €50 owner-credit + tenant-rent double-count; conservation
+          // Step-7 HIGH — the pristine code dropped/preserved per bucket so it
+          // never crossed owners). Cap per bucket by the owner's own stake.
+          for (const [bkt, paidIntoBkt] of bm)
+            dropBudget = _round(
+              dropBudget +
+                Math.min(droppableByProp.get(bkt) || 0, paidIntoBkt)
+            );
+        }
+        const toDrop = Math.min(_round(toPlace), _round(dropBudget));
+        const toPreserve = _round(toPlace - toDrop);
+        if (toDrop > 0.005) {
+          // consume the drop budget across the owner's buckets, each capped at
+          // the SAME min(bucket droppable, owner's stake) so a co-owner's share
+          // stays in droppableByProp for the tail/co-owner to drop.
+          let d = toDrop;
+          for (const [bkt, paidIntoBkt] of bm) {
+            if (d <= 0.005) break;
+            const avail = Math.min(droppableByProp.get(bkt) || 0, paidIntoBkt);
+            const take = Math.min(avail, d);
+            if (take > 0.005) {
+              droppableByProp.set(
+                bkt,
+                _round((droppableByProp.get(bkt) || 0) - take)
+              );
+              d = _round(d - take);
+            }
+          }
+          _passZeroDropped = _round(_passZeroDropped + toDrop);
+        }
+        if (toPreserve > 0.005) {
+          omeArr.push({
+            expenseId: repairIdStr,
+            term,
+            amount: 0,
+            propertyId: String(targets[0].propertyId),
+            source: 'credit',
+            description: 'Repair credit (κατάλοιπο καταβολής): ' + repairIdStr,
+            payments: [{ ...mkPoolPayment(toPreserve), ownerKey: tag }],
+            paid: true,
+            paidDate: new Date()
+          });
+        }
+      }
+      // Pass-0 fully handled this owner's ENTIRE tagged amount (placed on rows +
+      // dropped + preserved). Remove ALL of it from each source bucket so the
+      // bucket-keyed Pass-1/Pass-2 see only the genuinely untagged remainder and
+      // never re-distribute a tagged euro to a different owner.
+      for (const [bkt, amt] of bm)
+        _placedByBucket.set(bkt, _round((_placedByBucket.get(bkt) || 0) + amt));
+    }
+    // Decrement each bucket's remaining by everything Pass-0 consumed (placed on
+    // rows + dropped + preserved as a per-owner credit), so the bucket-keyed
+    // passes only distribute the genuinely UNTAGGED remainder.
+    for (const [bucket, consumed] of _placedByBucket) {
+      remainingByProp.set(bucket, _round((remainingByProp.get(bucket) || 0) - consumed));
+    }
+  }
+
+  // Pass 1: fill each row from its OWN property bucket, capped at the row's FREE
+  // room (amount minus what Pass-0 already placed) so a row Pass-0 partially
+  // filled is never overfilled. `already` is 0 for a freshly-rebuilt row that
+  // Pass-0 skipped → behaviour byte-identical to the pristine pool there.
   for (const row of liveRows) {
     const k = keyOf(row);
     const rem = remainingByProp.get(k) || 0;
     if (rem <= 0.005) continue;
     const rowAmount = Number(row.amount) || 0;
     if (rowAmount <= 0.005) continue;
-    const apply = Math.min(rowAmount, rem);
+    const already = (
+      Array.isArray(row.payments) ? row.payments : []
+    ).reduce((s: number, p: any) => s + (Number(p && p.amount) || 0), 0);
+    const room = _round(rowAmount - already);
+    if (room <= 0.005) continue;
+    const apply = Math.min(room, rem);
     row.payments = [
       ...(Array.isArray(row.payments) ? row.payments : []),
       mkPoolPayment(apply)
@@ -4839,6 +5030,7 @@ function _applyRepairPaymentPool(
   // Bare manual paid flags: per property, consume onto ONE matching unpaid row.
   for (const [k, flag] of flagByProp) {
     if (!flag || flag.amount <= 0.005) continue;
+    let matchedExact = false;
     for (const row of liveRows) {
       if (keyOf(row) !== k) continue;
       const hasCash =
@@ -4848,7 +5040,37 @@ function _applyRepairPaymentPool(
       if (Math.abs((Number(row.amount) || 0) - flag.amount) <= 0.005) {
         row.paid = true;
         row.paidDate = flag.date || new Date();
+        matchedExact = true;
         break; // one flag → one row
+      }
+    }
+    // MIGRATION FIX (Step-7 migration reviewer, HIGH): a building-wide
+    // '__owner__' repair lump the landlord marked settled via the "owner
+    // expenses paid" tile (setOwnerExpensePaid → paid:true, empty payments) is
+    // captured here under key '__owner__' with amount == the lump total. After
+    // the per-unit rebuild there is NO '__owner__' row and no single per-unit
+    // row equals the lump total, so the exact-match above finds nothing and the
+    // recorded settlement is DESTROYED (owner shows phantom fully-outstanding on
+    // ledger/dashboard/statement). Mirror the owner-fixed legacyManualPaid carry:
+    // spread the "paid" marking across the rebuilt per-unit owner-portion rows
+    // (source:'repair', canonical-owner-attributed like the '__owner__' bucket),
+    // up to the flagged total, marking each unpaid cashless row paid. Only for
+    // the building-wide sentinel; a real propertyId flag keeps the 1-row rule.
+    if (!matchedExact && k === OWNER_KEY) {
+      let budget = _round(flag.amount);
+      for (const row of liveRows) {
+        if (budget <= 0.005) break;
+        if (!row.propertyId) continue; // per-unit rebuilt rows only
+        if (row.source !== 'repair') continue; // owner-portion (not repair-vacant)
+        const hasCash =
+          Array.isArray(row.payments) &&
+          row.payments.some((p: any) => Number(p && p.amount) > 0);
+        if (hasCash || row.paid === true) continue;
+        const amt = Number(row.amount) || 0;
+        if (amt <= 0.005) continue;
+        row.paid = true;
+        row.paidDate = flag.date || new Date();
+        budget = _round(budget - amt);
       }
     }
   }
@@ -4913,6 +5135,9 @@ function _applyRepairPaymentPool(
     }
     if (toDrop > 0.005) dropped = _round(dropped + toDrop);
   }
+  // Fold in any re-billed occupied-overpay Pass-0 dropped (same policy, earlier
+  // stage) so the drop log reflects the TOTAL dropped this run.
+  if (_passZeroDropped > 0.005) dropped = _round(dropped + _passZeroDropped);
   if (preserved > 0.005) {
     logger.info(
       `repair ${repairIdStr} term ${term}: preserved ${preserved} of recorded owner καταβολή as a source:'credit' remnant (liability removed/shrunk by un-cancel or chargeOwnerWhenVacant flip — recorded money must survive).`
@@ -5149,6 +5374,14 @@ export async function _distributeRepairCharge(
     (e.source === 'repair' || e.source === 'repair-vacant') &&
     e.expenseId &&
     String(e.expenseId) === repairIdStr;
+  // Captured payment OBJECTS per bucket, preserving each payment's ownerKey tag.
+  // Consumed ONLY by the tag-aware Pass-0 in _applyRepairPaymentPool, which
+  // re-attributes a TAGGED payment to the per-unit row whose owner matches its
+  // tag BEFORE the (unchanged) bucket-keyed passes run on the untagged remainder.
+  // This is what carries a multi-owner building-wide lump's tagged καταβολές onto
+  // the per-unit rows on migration (ΟΔΟΣ ΖΗΤΑ €274 across 3 owners) — the
+  // '__owner__'→per-unit crossing the old bucket-only Pass-2 could not make.
+  const paymentsByProp = new Map<string, any[]>();
   for (const e of ((building as any).ownerMonthlyExpenses || []) as any[]) {
     if (isRepairOwnerRow(e)) {
       const k = propKeyOf(e);
@@ -5158,6 +5391,16 @@ export async function _distributeRepairCharge(
         if (amt > 0) {
           rowPaidSum += amt;
           paidByProp.set(k, _round((paidByProp.get(k) || 0) + amt));
+          const lst = paymentsByProp.get(k) || [];
+          lst.push({
+            date: p.date,
+            amount: _round(amt),
+            type: p.type || 'transfer',
+            reference: p.reference || '',
+            description: p.description || '',
+            ownerKey: p.ownerKey || null
+          });
+          paymentsByProp.set(k, lst);
           if (!paymentTemplate) paymentTemplate = p;
         }
       }
@@ -5195,18 +5438,68 @@ export async function _distributeRepairCharge(
     (building as any).ownerMonthlyExpenses.pull(e._id);
   }
 
-  // Rebuild the owner-portion liability row (zero payments; pool applied below).
+  // Rebuild the owner-portion liability rows (zero payments; pool applied below).
+  // PER-UNIT now (each row carries a propertyId), mirroring the owner-fixed
+  // materialiser (_allocateOwnerAmountPerUnit at ~2694). Was ONE building-wide
+  // lump (propertyId null) → the reader could only bill it whole-to-canonical-
+  // owner (single-owner building) OR split by a BORROWED, import-order-dependent
+  // building-owner % (multi-owner, via ownerSlicesOf on the dedup set) — neither
+  // is the correct per-unit-per-owner attribution (ΔΟΚΙΜΗ ΒΗΤΑ billed the
+  // FULL €500 on units she owns 50% of; ΟΔΟΣ ΖΗΤΑ split EQUAL 3-way instead of
+  // by thousandths). Splitting per-unit by the repair's OWN allocationMethod
+  // (general_thousandths/equal/surface/…) gives each unit its € share; the
+  // reader's ownerSlicesOf then does the per-owner-%-with-ΛΟΙΠΟΙ split for free
+  // (the Level-2 the ΛΟΙΠΟΙ reader pass added). The owner amount is an owner-only
+  // euro figure that must CONSERVE across managed units, so we use the owner
+  // allocator (managed-denominator, carrier-remainder), NOT the tenant engine
+  // (which leaks a vacant/unmanaged unit's thousandths share). Repairs have no
+  // customAllocations field (only building expenses do); for custom_* methods
+  // the allocator returns [] → we fall back to ONE building-wide lump (unchanged
+  // old behaviour) so nothing is lost. A repair's affectedUnitIds restriction is
+  // already applied to the TENANT side below; the owner-portion denominator is
+  // the full managed set (the owner-portion is the cost minus the tenant share,
+  // spread over the portfolio like owner-fixed) — matches the reader's building-
+  // owner attribution it replaces.
   if (ownerPortion > 0) {
     const arr = (building as any).ownerMonthlyExpenses;
-    arr.push({
-      expenseId: repairIdStr,
-      term,
-      amount: Math.round(ownerPortion * 100) / 100,
-      source: 'repair',
-      description:
-        'Repair: ' + (repair.title || repair.description || 'untitled'),
-      payments: []
-    });
+    const desc =
+      'Repair: ' + (repair.title || repair.description || 'untitled');
+    // No-_tenantGroups plain snapshot for the owner allocator (per-managed-unit,
+    // NOT per-tenant-party). Mirrors saveMonthlyStatement's buildingPlainNoGroups.
+    const plainNoGroups = building.toObject ? building.toObject() : building;
+    const perUnit = _allocateOwnerAmountPerUnit(
+      plainNoGroups,
+      ownerPortion,
+      repair.allocationMethod || 'general_thousandths',
+      term
+      // customAllocations intentionally omitted — repairs have none; custom_*
+      // methods therefore return [] and hit the building-wide fallback below.
+    );
+    if (perUnit.length > 0) {
+      for (const pu of perUnit) {
+        arr.push({
+          expenseId: repairIdStr,
+          term,
+          amount: pu.share,
+          propertyId: pu.propertyId,
+          source: 'repair',
+          description: desc,
+          payments: []
+        });
+      }
+    } else {
+      // Fallback: no per-unit allocation possible (no managed units, or a
+      // custom_* method with no repair customAllocations) → keep the legacy
+      // building-wide lump so the owner-portion is never dropped.
+      arr.push({
+        expenseId: repairIdStr,
+        term,
+        amount: Math.round(ownerPortion * 100) / 100,
+        source: 'repair',
+        description: desc,
+        payments: []
+      });
+    }
   }
 
   // If 100% owner-funded, there is no tenant-side / vacant distribution; apply
@@ -5231,6 +5524,7 @@ export async function _distributeRepairCharge(
       repairIdStr,
       term,
       paidByProp,
+      paymentsByProp,
       flagByProp,
       mkPoolPayment,
       droppableByProp,
@@ -5441,6 +5735,7 @@ export async function _distributeRepairCharge(
     repairIdStr,
     term,
     paidByProp,
+    paymentsByProp,
     flagByProp,
     mkPoolPayment,
     droppableByProp,
@@ -6416,6 +6711,18 @@ export async function computeOwnerEksodaByMonth(
   const ownerFixedMaterialised = new Set<string>();
   const ownerFixedKey = (expenseId: any, term: number) =>
     `${String(expenseId)}|${term}`;
+  // The repair OWNER-PORTION (source:'repair') is now materialised PER-UNIT too
+  // (each row carries a propertyId), so its rows land in `covered` under
+  // covKey(repairId|propertyId|term) — NOT the building-wide covKey(repairId|''|
+  // term) the repair owner-portion gap-fill checks. Without this the gap-fill
+  // re-adds the FULL owner-portion on top of the per-unit rows (owed doubled —
+  // the €200→€400 reader double-count). Track per-(repairId, term) so the
+  // gap-fill skips a repair whose owner-portion is already materialised,
+  // regardless of how many per-unit rows it produced. (Mirrors
+  // ownerFixedMaterialised; repair-vacant rows still use the shared `covered`.)
+  const repairOwnerPortionMaterialised = new Set<string>();
+  const repairOwnerKey = (expenseId: any, term: number) =>
+    `${String(expenseId)}|${term}`;
 
   // STALE-VACANT GUARD (mirrors getBuildingExpenseBreakdown's read-time guard,
   // 2335-2361). The vacant/repair-vacant recompute only re-derives the CURRENT
@@ -6515,6 +6822,15 @@ export async function computeOwnerEksodaByMonth(
       ownerFixedMaterialised.add(ownerFixedKey(row.expenseId, term));
     } else {
       covered.add(covKey(row.expenseId, row.propertyId, term));
+      // A per-unit owner-portion repair row (source:'repair' WITH a propertyId)
+      // marks the repair's owner-portion as materialised, so the building-wide
+      // gap-fill below (which checks covKey(repairId|''|term)) doesn't re-add it.
+      // A building-wide 'repair' row (propertyId null — the legacy lump / custom_*
+      // fallback) already sets covKey(repairId|''|term) via the line above, so it
+      // is covered the old way; only the NEW per-unit shape needs this.
+      if (row.source === 'repair' && row.propertyId) {
+        repairOwnerPortionMaterialised.add(repairOwnerKey(row.expenseId, term));
+      }
     }
     // Materialised row → owed AND paid. The PAID figure MUST match the ledger
     // (_aggregateOwners) and the legal PDF (buildOwnerStatement), which both
@@ -6665,8 +6981,14 @@ export async function computeOwnerEksodaByMonth(
     const sharePercentage = repairTenantSharePercentage(repair);
     const ownerPortion =
       repair.chargeableTo === 'owners' ? cost : cost * (1 - sharePercentage / 100);
-    // owner-portion (source:'repair', no propertyId) — skip if materialised.
-    if (!covered.has(covKey(repairIdStr, null, term))) {
+    // owner-portion (source:'repair') — skip if materialised, checking BOTH the
+    // legacy building-wide cov-key AND the per-unit materialised set (the
+    // owner-portion is now materialised per-unit; else the full amount is
+    // re-added on top of the per-unit rows — the €200→€400 double-count).
+    if (
+      !covered.has(covKey(repairIdStr, null, term)) &&
+      !repairOwnerPortionMaterialised.has(repairOwnerKey(repairIdStr, term))
+    ) {
       const ownerPortionR = Math.round(ownerPortion * 100) / 100;
       addOwed(term, ownerPortionR);
       addDetail(

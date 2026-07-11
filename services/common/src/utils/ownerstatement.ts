@@ -595,6 +595,17 @@ export function buildOwnerStatement(
         payments.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0)
       );
       const src = row.source || 'expense';
+      // TILE-FLAG "settled everywhere" (mirror _aggregateOwners + dashboard): a
+      // bare paid:true flag with NO cash settles the WHOLE row. Every derived
+      // line (named slice + ΛΟΙΠΟΙ rest) is lifted to its own billed amount so the
+      // legal PDF agrees with the ledger and dashboard. GATE on paidAmount<=0.005
+      // (NOT merely row.paid): a co-owned row one owner paid in CASH has
+      // paid===true via recomputeOwnerExpensePaid; lifting it would credit the
+      // non-payer with the payer's cash (the ΟΔΟΣ ΗΤΑ leak). A real tile-flag is
+      // cashless, so this both covers it AND cannot move cash between owners.
+      // Excludes 'credit' rows.
+      const flagLifted =
+        row.paid === true && paidAmount <= 0.005 && src !== 'credit';
       const expenseType =
         src === 'repair' || src === 'repair-vacant'
           ? 'repair'
@@ -634,15 +645,16 @@ export function buildOwnerStatement(
         const rest = slices.find((sl: any) => sl.isRest && sl.amount > 0.005);
         if (!rest) continue;
         const restAmt = _round(rest.amount);
+        const restPaid = flagLifted ? restAmt : 0;
         charges.push({
           buildingId: bid,
           buildingName: bname,
           expenseId: String(row.expenseId),
           term,
           amount: restAmt,
-          paidAmount: 0,
-          outstanding: restAmt,
-          paid: false,
+          paidAmount: restPaid,
+          outstanding: Math.max(0, _round(restAmt - restPaid)),
+          paid: flagLifted,
           source: src,
           expenseType,
           description: String(row.description || '').replace(/^Repair:\s*/i, ''),
@@ -726,17 +738,22 @@ export function buildOwnerStatement(
               : 0;
         }
       }
+      // flag-lifted → this owner's slice is settled (max of recorded cash and its
+      // billed amount), mirroring _aggregateOwners + the dashboard's fromFlag.
+      const paidShareEff = flagLifted
+        ? _round(Math.max(paidShare, billed))
+        : paidShare;
       charges.push({
         buildingId: bid,
         buildingName: bname,
         expenseId: String(row.expenseId),
         term,
         amount: billed,
-        paidAmount: paidShare,
+        paidAmount: paidShareEff,
         // CLAMP outstanding to ≥0 so an over-paid row never prints a negative
         // outstanding on the legal owner statement (Step-7 r2/r5).
-        outstanding: Math.max(0, _round(billed - paidShare)),
-        paid: billed > 0 && paidShare >= billed - 0.005,
+        outstanding: Math.max(0, _round(billed - paidShareEff)),
+        paid: billed > 0 && paidShareEff >= billed - 0.005,
         source: src,
         expenseType,
         description: String(row.description || '').replace(/^Repair:\s*/i, ''),
