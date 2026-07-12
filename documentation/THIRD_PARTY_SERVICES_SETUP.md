@@ -91,6 +91,33 @@ Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. Δ
 
 > Read this if the DB was wiped, a realm/account was deleted, or you're standing up a fresh instance. Order matters. Secrets live in `.secrets/` (gitignored) — this doc references them by filename, never by value.
 
+## Who does the back-fill — AGENT-AUTONOMOUS by default
+
+**An agent can restore all of this WITHOUT the user entering anything, PROVIDED two conditions hold:**
+1. the `.secrets/` files still exist (they hold every credential value), AND
+2. `CIPHER_KEY` is unchanged (see below).
+
+The agent reads each value from `.secrets/` and writes it either by **calling the API** (preferred — no browser needed) or by driving the UI with Playwright. Both run `Crypto.encrypt`, so the stored secret is valid.
+
+**The agent CANNOT self-serve only these (require the user + Google/provider login):**
+- Regenerating a Gmail **App Password** or the OAuth **Client ID/secret/refresh token** — only if `.secrets/` is LOST. If `.secrets/` survives, no regeneration needed; the agent just re-enters the existing values. (Refresh token is permanent since the app is Published — see §Mail reading.)
+- Creating a Backblaze/SMS account from scratch.
+
+So: **secrets present → fully agent-autonomous. Secrets lost → user regenerates at Google/provider, then agent enters them.**
+
+### Agent method (API, no browser) — the fast path
+
+Sign in, then `PATCH /api/v2/realms` with the realm `_id` + a `thirdParties` block; the api encrypts on write. Read the values from the `.secrets/` files named in each step below. Example shape (values from `.secrets/gmail-send-*` and `.secrets/gmail-oauth-*`):
+```
+PATCH /api/v2/realms   (Authorization: Bearer <token>, organizationid: <realmId>)
+{ "_id": "<realmId>",
+  "thirdParties": {
+    "gmail":       { "selected": true, "email": "…", "appPassword": "…", "appPasswordUpdated": true, "fromEmail": "…", "replyToEmail": "…" },
+    "mailReaders": [ { "provider":"gmail", "email":"…", "clientId":"…", "clientSecret":"…", "clientSecretUpdated": true, "refreshToken":"…", "refreshTokenUpdated": true, "label":"" } ]
+  } }
+```
+The `*Updated: true` flags tell realmmanager to encrypt the supplied value (omit/false → it preserves the previously-stored encrypted value). Then run the §Step 4 verify. (UI back-fill in §Step 3 is the equivalent manual path.)
+
 ## CRITICAL: the encryption key must not change
 
 Every third-party secret (`gmail.appPassword`, `mailReaders[].clientSecret/refreshToken`, `smtp.password`, `mailgun.apiKey`, `b2.*`, `smsGateway.password`) is **AES-256-GCM encrypted with `CIPHER_KEY`**. On NAS that key is in `docker-compose.nas.yml` (local-only, NOT committed) under each service's env.
