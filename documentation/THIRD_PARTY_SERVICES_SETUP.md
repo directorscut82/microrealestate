@@ -32,18 +32,29 @@ Section: **«Ανάγνωση email (αυτόματος εντοπισμός λ�
 
 Per mailbox, 5 fields: `Email`, `Label (optional)`, `Client ID`, `Client secret`, `Refresh token`. `clientSecret`/`refreshToken` are encrypted at rest; matched to the prior reader by `email` on re-save so untouched secrets survive.
 
-### How to generate Client ID / Client secret / Refresh token (one-time, free, per Google account)
+### How to generate Client ID / Client secret / Refresh token (one-time, FREE, per Google account)
 
-**Client ID + Client secret** — at console.cloud.google.com:
-1. Create a project (top bar → New Project).
-2. **APIs & Services → Library** → search **Gmail API** → **Enable**.
-3. **APIs & Services → OAuth consent screen** → **External** → app name + your email; under **Test users** add your own Gmail (this avoids Google's verification review since it's just you).
-4. **APIs & Services → Credentials → Create Credentials → OAuth client ID → type "Desktop app"** → copy the **Client ID** + **Client secret**.
+**Cost:** all steps are free — no billing account or card required. Gmail API's free quota (≈1B units/day) is far beyond reading one inbox.
+
+**IMPORTANT (2025 rebrand):** Google renamed **"APIs & Services → OAuth consent screen"** to **"Google Auth platform"**. If the old paths aren't there, that's why. Verified against Google's live docs (developers.google.com/workspace/guides/configure-oauth-consent and .../create-credentials, 2025). The Cloud Console **search bar** is the reliable navigator — type "Gmail API", "Google Auth platform", or "Clients".
+
+At console.cloud.google.com (create/select a project first, top bar → project picker → New Project):
+
+1. **Enable the API:** menu → **APIs & Services → Library** → search **Gmail API** → **Enable**.
+2. **Configure Google Auth platform:** menu → **Google Auth platform → Branding** → if "not configured yet", **Get Started** →
+   - **Branding / App Information:** App name + User support email → **Next**.
+   - **Audience:** choose **External** (Internal is only offered on a paid Google **Workspace** domain; a personal @gmail.com must use External) → **Next**.
+   - **Contact Information:** your email → **Next** → **Finish** → agree → **Create**.
+3. **Add yourself as a test user:** **Google Auth platform → Audience → Test users → Add users** → your Gmail → **Save**. (Skips Google's verification review for personal use.)
+4. **Add the read scope:** **Google Auth platform → Data Access → Add or Remove Scopes** → add `https://www.googleapis.com/auth/gmail.readonly` → **Update/Save**.
+5. **Create the OAuth client:** **Google Auth platform → Clients → Create Client** → Application type **Desktop app** → name it → **Create**. It appears under **OAuth 2.0 Client IDs**; open it (or the download icon) → copy **Client ID** + **Client secret**.
 
 **Refresh token** — consent once with that client:
 - developers.google.com/oauthplayground → gear (top-right) → tick **"Use your own OAuth credentials"** → paste Client ID + secret → left panel select scope `https://www.googleapis.com/auth/gmail.readonly` → **Authorize APIs** → sign in as that Gmail, Allow → **"Exchange authorization code for tokens"** → copy the **Refresh token**.
 
 Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. ΔΕΗ), cannot send/delete. Repeat per mailbox.
+
+**7-day token caveat (personal Gmail):** while the app stays in **"Testing"** status, refresh tokens can expire after 7 days. To make it permanent, **Google Auth platform → Audience → Publish app** (still External; no verification review needed for your own use with a read-only + few users). Workspace-domain (Internal) apps don't have this quirk.
 
 > **NOTE (status):** the UI + storage schema for mail-readers exists; the actual inbox-polling/bill-detection worker is NOT yet implemented — the fields capture the credentials so the feature can be built against them. Near-real-time delivery would use Gmail push (watch → Pub/Sub) rather than polling.
 
