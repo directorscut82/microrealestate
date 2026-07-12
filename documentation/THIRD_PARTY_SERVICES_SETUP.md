@@ -15,12 +15,13 @@ Section: **«Υπηρεσία αποστολής email»**. Toggle on, choose Gm
 
 Reader code: `services/emailer/src/emailengine.ts` (`_selectEmailDeliveryService` reads `realm.thirdParties.{gmail,smtp,mailgun}`; decrypts the secret; `gmail`/`smtp` → nodemailer SMTP, `mailgun` → mailgun transport).
 
-## 2. Storage (Backblaze B2) — PERSISTS generated PDFs
+## 2. Storage (Backblaze B2) — PERSISTS uploaded file-documents
 
 Section: **«Backblaze B2 Cloud Storage»**. 4 fields: `KeyId`, `ApplicationKey`, `Bucket`, `Bucket endpoint`.
 
-- **This is what actually SAVES the generated PDFs.** `services/pdfgenerator/src/utils/s3.ts` uploads to B2 only when b2 is configured; without it, PDFs are generated on the fly and **not stored**.
-- Generate: backblaze.com → B2 Cloud Storage (free tier 10 GB) → create a **bucket** → **App Keys → Add a New Application Key** (scoped to that bucket) → gives **keyID + applicationKey** (shown once). Endpoint is the S3-compatible host shown on the bucket, e.g. `s3.eu-central-003.backblazeb2.com`.
+- **This is what actually SAVES uploaded file-documents** (signed leases, payment proofs, scanned bills — anything the landlord attaches via `POST /api/v2/documents/upload`). `services/pdfgenerator/src/routes/documents.ts` gates upload/download/delete on `s3.isEnabled(realm.thirdParties.b2)`: configured → B2, not configured → local disk under `UPLOADS_DIRECTORY`. (Note: on-the-fly *rendered* receipt/rentcall PDFs are generated per request; it's these attached files that B2 persists.)
+- Generate: backblaze.com → B2 Cloud Storage (free tier 10 GB, effectively free at this volume) → create a **bucket** (Private) → **App Keys → Add a New Application Key** scoped to that bucket, **Read and Write** (do NOT use the all-powerful Master key) → gives **keyID + applicationKey** (shown once — copy immediately). Endpoint is the S3-compatible host shown on the bucket page, e.g. `s3.eu-central-003.backblazeb2.com`.
+- Verify a key BEFORE trusting the UI "saved" toast: a real S3 put/get/delete round-trip (boto3 or aws-sdk against the endpoint) is the only proof the key + bucket + endpoint agree. Then upload a real file via `POST /api/v2/documents/upload` (multipart: `folder`, `fileName`, `file`) → a `201` with a Backblaze `versionId` means the app writes to B2 end-to-end.
 
 ## 3. SMS gateway (optional)
 
@@ -82,6 +83,8 @@ Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. Δ
 **Already-generated creds (local, gitignored — never commit):**
 - `.secrets/gmail-oauth-e2elandlord82` — e2elandlord82@gmail.com READER creds (project `microrealestate-502214`, Web OAuth client, refresh token verified working + app Published so it's permanent). Enter these 5 values in Settings → Mail reading, or read them for any future inbox-poller.
 - `.secrets/gmail-send-e2elandlord82` — e2elandlord82@gmail.com SENDING creds (Gmail App Password + from/reply-to). Verified: a real SMTP send succeeded (`250 OK`).
+- `.secrets/sms-gateway-sms-gate-app` — SMS-Gate for Android (sms-gate.app) device creds, BOTH modes (Local LAN + Cloud relay). NAS uses **Cloud** (`https://api.sms-gate.app`, user `LAGOWP`). Verified: a real SMS sent through the app (`POST /api/v2/emails/sms`) reached the phone, state `Delivered`. The realm `smsGateway.url` is the BASE url only — the emailer appends `/3rdparty/v1/messages`.
+- `.secrets/b2-microrealestate` — Backblaze B2 storage (bucket `MicroRealEstateDocuments`, endpoint `s3.eu-central-003.backblazeb2.com`, bucket-scoped Read+Write key). Verified: real S3 round-trip + a real app upload (`201` + Backblaze `versionId`).
 - `.secrets/landlord-account`, `.secrets/comprehensive-test-account` — realm admin logins.
 - `.secrets/portainer-token` — NAS Portainer API (deploy/inspect).
 
