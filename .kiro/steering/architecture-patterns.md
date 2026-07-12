@@ -160,11 +160,11 @@ TypeScript services build chain: types → common → service (in that order).
 - **Per-payment field validation** in PATCH `/rents/payment/:id/:term`: each entry of `paymentData.payments[]` is validated for `amount, type, reference, description, allocation, date` (existing) and `promo / extracharge / notepromo / noteextracharge` (round-3j fields). Number caps at 10M, string caps at 1000 chars — matches the rent-level guards. `Schema.Types.Mixed` storage offers no persistence-layer enforcement, so the API is the single validation layer.
 - **Backdate guard** in PATCH `/rents/payment/:id/:term`: payment dates < the rent term's first day are rejected (422) so a misclick on the wrong month's rents page can't silently record against the wrong term. Mirrored client-side in `PaymentTabs.js` for early UX surface.
 
-### CORS allowlist gotcha — `DOMAIN_URL` strips the port
+### CORS allowlist — how the origin regex is built
 
-The gateway's `configureCORS()` (in `services/gateway/src/index.ts`) builds its allowlist regex from `APP_DOMAIN` first, falling back to `DOMAIN_URL` parsed via `URLUtils.destructUrl()`. The fallback path silently drops the port: `destructUrl('http://localhost:8080').domain === 'localhost'`, so the resulting regex `^https?://(.*\.)?localhost$` rejects browser origins like `http://localhost:8080` with HTTP 500 and the log line `CORS blocked origin: http://localhost:8080`. The signin POST never reaches the authenticator.
+The gateway's `configureCORS()` (in `services/gateway/src/index.ts`) builds its allowlist from two sources (as of `9e44d57c`): the comma-separated `APP_DOMAIN` list **plus** `new URL(config.DOMAIN_URL).host` — which **preserves the port**. Each host is regex-escaped and turned into an exact-match origin regex `^https?://<host>$` (no subdomain-capture group). `URLUtils.destructUrl()` is only reached in the `catch` fallback for a malformed `DOMAIN_URL`.
 
-**Fix for any non-default port:** set `APP_DOMAIN` to the full `host:port` string (e.g., `APP_DOMAIN=localhost:8080`). `APP_DOMAIN` is used as-is in the regex — no parsing — and supports comma-separated lists for multi-origin deploys (LAN + Tailscale).
+**For any non-default port:** set `APP_DOMAIN` to the full `host:port` string (e.g., `APP_DOMAIN=localhost:8080`). It's used as-is in the regex and supports comma-separated lists for multi-origin deploys (LAN + Tailscale). (Historically `destructUrl()` stripped the port on the fallback path, causing `CORS blocked origin: http://localhost:8080` 500s; that was fixed in `59e37bda` — `destructUrl` now returns `url.host` with the port.)
 
 **Required plumbing:** `docker-compose.microservices.base.yml` must export `- APP_DOMAIN` in the gateway service environment. This was missing for a long time even though the gateway code referenced it; fixed in commit `e77d3e3`. NAS deployment uses a standalone `docker-compose.nas.yml` and was never affected.
 

@@ -1,3 +1,8 @@
+> **ARCHIVED (2026-07-13) — frozen, do NOT execute.** Every item in this plan
+> (the DEFERRED §5 uncollected-payments work, the OD/OS/CS/D/B/A/E surfaces, and
+> the "do-not-deploy freeze") has since been implemented and deployed to `nas`.
+> Kept only as a historical record of the plan; it is NOT a live change list.
+
 # Fix Plan — UI Consistency Across Expense/Charge Panels
 
 ## STATUS (2026-06-21) — shipped to NAS + Playwright-verified

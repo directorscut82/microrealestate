@@ -51,7 +51,7 @@ e2e-playwright/
     └── 48_building_expense_panel, 49_vacant_owner_money, 50_owner_expenses_paid_tile   # building-domain money (June 2026)
 ```
 
-There are **38 non-scratch numbered specs** (00..50 with gaps) as of June 2026.
+There are **~46 non-scratch numbered specs** (00..63 with gaps; 63 git-tracked `.spec.ts`, ~140 on disk incl. untracked scratch) as of July 2026. Re-check with `git ls-files 'e2e-playwright/tests/*.spec.ts'`.
 Scratch/work-in-progress specs are named `_*.spec.ts` (gitignored). `08_email_dedup`
 was attempted and dropped — the email dedup gate requires a fully-leased tenant +
 configured SMTP, not worth the seed scaffolding yet.
@@ -378,9 +378,10 @@ CI would require either:
 - A Tailscale-connected runner, or
 - Exposing the NAS gateway publicly behind auth (not recommended).
 
-This is deferred. The suite is now at 38 non-scratch specs (past the
-~50-spec threshold once cited as the CI-worthiness bar is in sight), but the
-LAN-access constraint, not spec count, is the blocker.
+This is deferred. The suite is now at ~46 non-scratch numbered specs (00–63
+with gaps; 63 git-tracked, ~140 on disk incl. scratch) — well past the
+~50-spec CI-worthiness bar once cited — but the LAN-access constraint, not
+spec count, is the blocker.
 
 ## Why Playwright?
 

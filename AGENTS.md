@@ -98,9 +98,18 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Run that to confirm NAS is on the commit you pushed BEFORE running tests.
 
-### Current state (July 1, 2026)
+### Current state (July 13, 2026)
 
-- **Production NAS revision**: `f2486244` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/el/signin` → 200; 10/10 containers running. jest: **644 passed / 0 failed** (node@20). The money-UI + PDF-breakdown bundle (see "Recent shipped work — July 1" below) is live.
+- **Production NAS revision**: `4847faf3` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/el/signin` → 200; 10/10 containers running. jest: **~628 passed / 0 failed** (node@20, 47 suite files).
+- **Recent shipped work (July 1–13 2026) — third-party services stood up + verified end-to-end, plus a 4th notification channel:**
+  - **All external services LIVE on NAS**, each proven end-to-end (not just "saved"): **Email** (Gmail SMTP, real `250 OK`), **SMS** (sms-gate.app **Cloud** mode — real message `Delivered` via `POST /api/v2/emails/sms`), **Backblaze B2** (bucket `MicroRealEstateDocuments` — real app upload `201`+`versionId` via `POST /api/v2/documents/upload`), **mail-reader OAuth** (Gmail API refresh token → access_token `200`, app Published so permanent). Config is in `realm.thirdParties`, all secrets AES-256-GCM encrypted at rest; live creds in `.secrets/`. Runbook: `documentation/THIRD_PARTY_SERVICES_SETUP.md` (incl. a disaster-recovery back-fill section — agent-autonomous if `.secrets/` + `CIPHER_KEY` intact).
+  - **Telegram notification channel (`4847faf3`)** — the 4th delivery channel (bot **@MicroRealEstateBot**), mirroring the smsGateway channel across all 9 surfaces (schema/types/realmmanager encrypt+redact/emailer `sendTelegram`+`/emailer/telegram`/api `sendTelegramNotification`+`/emails/telegram`/store `canSendTelegram`/Settings form/`/rents` banner/i18n×6). `botToken` encrypted at rest. Scope: admin/self-notifications to `adminChatId` + plumbing; per-tenant delivery + automated triggers are future. Real `sendMessage` verified delivered. See [[project_telegram_notification_channel]].
+  - **i18n fix (`abdfaa82`):** "SMS Country Code" was raw English in all 6 locales → translated.
+  - **thirdParties providers now:** gmail, smtp, mailgun, b2, smsGateway, **telegram**, mailReaders[].
+
+### Milestone — July 1, 2026 (`f2486244`)
+
+- **Production NAS revision at that point**: `f2486244` (`nas`). jest: **644 passed / 0 failed** (node@20). The money-UI + PDF-breakdown bundle (see "Recent shipped work — July 1" below) was live.
 - **Earlier milestone — audit-2026-06 campaign** (was `ae31de3b`): 33 findings fixed across 4 batches (3bd3ee52 → c0a1772d → 51eda92a → ae31de3b), 15 Step-7 self-bugs caught. jest at that point: 609 passed / 0 failed.
 - **Jest now requires node@20.** `services/api` is `type: module`; the system node drifted to v25 which breaks the suite (`ERR_REQUIRE_ESM` on the winston mock). node@20 lives at `/usr/local/opt/node@20/bin/node`. Run the suite as:
   ```bash
@@ -165,7 +174,7 @@ microrealestate/
 │   │   ├── src/managers/       # Data access layer (includes greekleaseparser, pdfimportmanager)
 │   │   └── src/routes.ts       # All API route definitions
 │   ├── tenantapi/       # Tenant read-only API (:8250)
-│   ├── emailer/         # Email via Gmail/Mailgun/SMTP (:8400)
+│   ├── emailer/         # Multi-channel notifications: Email (Gmail/Mailgun/SMTP), SMS (sms-gate.app), Telegram (:8400)
 │   ├── pdfgenerator/    # PDF generation via Puppeteer (:8300)
 │   └── resetservice/    # DB reset + seed (DEV/CI only, :8900)
 ├── webapps/

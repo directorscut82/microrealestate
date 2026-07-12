@@ -8,9 +8,9 @@ tracks every shortcut so they can be reversed and the underlying issues fixed.
 fixes + temporary debt for NAS deploy)").
 
 **Priority:** Originally "fix all items before merging any new feature work" —
-that precondition has since been overtaken by events (NAS shipped long ago; HEAD
-is `4a55ddc4` with ~170 commits of feature work merged). Treat this as a standing
-cleanup backlog, not a merge gate. Note: `yarn lint` currently passes clean, and
+that precondition has since been overtaken by events (NAS shipped long ago; the
+`nas` branch is now hundreds of commits of feature work past that point). Treat
+this as a standing cleanup backlog, not a merge gate. Note: `yarn lint` currently passes clean, and
 the non-test `any` count has GROWN (now ~611, bulk in `services/api`), not
 shrunk, since this doc was written — re-enabling `no-explicit-any` is a larger
 job than the 383-figure snapshot below implies.

@@ -1,3 +1,13 @@
+> **ARCHIVED (2026-07-13) — frozen, do NOT execute.** The "locked" design in
+> this doc (a per-owner `isResident` boolean, a multi-resident «μένει εδώ»
+> picker J7, and the Tier-2 occupant-pool→resident-owners split J11–J19) was
+> **abandoned**. No `isResident` field exists on `UnitOwnerSchema`. A different
+> model shipped: owner-occupied units use `occupancyType='owner_occupied'` and
+> route the building-expense share to the resident owner via the
+> `owner-resident` `OwnerMonthlyExpense` source (see the owner-billing work on
+> `nas`). Following this plan would add schema fields that do not exist. Kept
+> only as a record of the road not taken.
+
 # Occupancy / ιδιοκατοίκηση — Job List with Verifiable Acceptance Tests
 
 > All 7 bugs independently re-confirmed (refute-by-default, file:line) this session.

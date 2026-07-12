@@ -23,7 +23,7 @@ inclusion: always
 
 - Express 4.21 — HTTP framework (configured via `@microrealestate/common` Service class)
 - Mongoose 6.13 — MongoDB ODM (collections defined in `services/common/src/collections/`)
-- MongoDB 7 — primary database
+- MongoDB 4.4 — primary database (pinned in every compose file; legacy `mongo` shell, not `mongosh`)
 - Redis 7.4 — session/token storage (used by authenticator)
 - JSON Web Tokens (jsonwebtoken 9.0) — authentication
 - bcrypt — password hashing
@@ -35,6 +35,7 @@ inclusion: always
 - EJS + Handlebars — email and PDF templating
 - nodemailer — email sending (Gmail, SMTP)
 - nodemailer-mailgun-transport — Mailgun integration
+- The **emailer service is multi-channel** (not email-only): email (Gmail/SMTP/Mailgun via nodemailer), SMS (`services/emailer/src/sms.ts` → sms-gate.app), and Telegram (`services/emailer/src/telegram.ts` → Telegram Bot API). All channel configs + secrets live in `realm.thirdParties` (also holds B2 storage + multiple Gmail-API mail-reader configs), AES-256-GCM encrypted at rest.
 - multer — file upload handling (pdfgenerator, api PDF import)
 - pdfjs-dist 4.0 — PDF text extraction for lease import (api service)
 - express-mongo-sanitize — NoSQL injection prevention
@@ -94,7 +95,7 @@ inclusion: always
   - ⚠️ Runs ONLY under **node@20** (system node drifted to v25 and breaks the suite; node@20 at `/usr/local/opt/node@20/bin/node`). `services/api` is `type: module`, so the winston/express-winston/jsonwebtoken mocks are `.cjs` and `jest.mock` suites import `jest` from `@jest/globals`. See `documentation/E2E_TESTING.md` / test-running-guide.
   - Frontend: a handful of test files (ErrorBoundary, token refresh, payment double-submit, fetch errors)
 - Playwright 1.60 — end-to-end tests, NAS-targeted
-  - 38 non-scratch specs (numbered 00..50 with gaps), `e2e-playwright/` workspace
+  - ~46 non-scratch numbered specs (00..63 with gaps; 63 git-tracked `.spec.ts`, ~140 on disk incl. untracked scratch), `e2e-playwright/` workspace (as of July 2026 — re-check with `git ls-files 'e2e-playwright/tests/*.spec.ts'`)
   - Replaced the 68-spec Cypress 14 suite in May 2026 — see `documentation/E2E_TESTING.md`
 - supertest — HTTP assertion testing (api service unit tests)
 

@@ -30,7 +30,7 @@ graph TB
         AUTH["Authenticator :8000<br/>JWT + bcrypt"]
         API["API :8200<br/>Landlord REST API"]
         TAPI["Tenant API :8250<br/>Tenant REST API"]
-        EMAIL["Emailer :8400<br/>Gmail / Mailgun / SMTP"]
+        EMAIL["Emailer :8400<br/>Email (Gmail/Mailgun/SMTP)<br/>SMS (sms-gate.app) · Telegram"]
         PDF["PDFGenerator :8300<br/>Puppeteer + EJS"]
         RESET["ResetService :8900<br/>(DEV/CI only)"]
     end
@@ -144,7 +144,7 @@ sequenceDiagram
     GW-->>B: response
 
     Note over B,R: Tenant Sign-In Flow
-    B->>GW: POST /tenantapi/signin
+    B->>GW: POST /api/v2/authenticator/tenant/signin
     GW->>AUTH: proxy to authenticator
     AUTH->>AUTH: generate magic link / OTP
     AUTH->>GW: call emailer

@@ -1,38 +1,41 @@
 # Dev and Deploy Workflow
 
-This project uses a **two-branch strategy** to keep local development and
-production deployment cleanly separated.
+**`nas` is the working trunk for this fork.** All active development lives on
+`nas`; `master` has not advanced since June 2026 and lags `nas` by hundreds of
+commits. Do all work directly on `nas`.
 
 ## Branches at a glance
 
 | Branch | Purpose | Who pulls it |
 |--------|---------|--------------|
-| `master` | Day-to-day development. Behaves like upstream. | You, locally via `yarn dev`. CI builds `:latest` but nothing deploys it. |
-| `nas` | Production layer for the Synology NAS. Adds multi-origin support and the NAS-specific stack. | Portainer on the NAS (pulls `:nas` images). |
+| `nas` | The fork's trunk. All feature work + the NAS production stack. | You, locally via `yarn dev`. NAS CI builds `:nas` images; Portainer on the NAS pulls them. |
+| `master` | **Frozen** at `231aff39` (2026-06-07). Kept only as the upstream-shaped baseline; do NOT develop here. | CI builds `:latest` but nothing deploys it. |
 
-The `nas` branch is a thin layer on top of `master`. Only 3 source files are
-modified there:
-- `services/gateway/src/index.ts` — multi-origin CORS
-- `services/authenticator/src/index.ts` — host-only cookies (no `domain` attr)
-- `webapps/landlord/src/utils/fetch.js` — use `window.location.origin` as
-  API base URL on the client
+> Historically `nas` began as a thin CORS/cookie/fetch layer over `master`
+> (multi-origin CORS in `services/gateway/src/index.ts`, host-only cookies in
+> `services/authenticator/src/index.ts`, `window.location.origin` API base in
+> `webapps/landlord/src/utils/fetch.js`). That model no longer reflects reality:
+> `nas` is ~327 commits and ~130 source files ahead of `master` (owner-debt
+> ledger, repair per-unit allocation, third-party services, Telegram, etc. all
+> live only on `nas`). Those three original files are now even identical between
+> the branches.
 
-Plus:
-- `.github/workflows/nas-ci.yml` — CI that builds `:nas` and `:nas-<sha>` images
+The NAS pipeline:
+- `.github/workflows/nas-ci.yml` — CI that builds `:nas` and `:nas-<sha>` images on push to `nas`
 - `scripts/deploy-nas.sh` + `scripts/validate-nas-deploy.sh` — the deploy tool
 
 ## Daily dev workflow
 
-Nothing changes. Work on `master` as before.
+Work on `nas` (the trunk).
 
 ```bash
-git checkout master
+git checkout nas
 # edit files
 yarn dev                  # starts the full dev stack via Finch
 # app at http://localhost:8080/landlord
 ```
 
-Commit, push to master, move on.
+Commit, push to `nas`; NAS CI builds the `:nas` images the deploy pulls.
 
 ## Deploying to the NAS
 
@@ -116,7 +119,7 @@ A few env vars caused us pain over time and are worth calling out:
 |-----|---------|-------|
 | `APP_DOMAIN` | Host (and optional `:port`) seen by the browser. Used by the gateway to compute allowed CORS origins and by the authenticator to scope cookies. | Now defaulted in `base.env` to `localhost:8080`. Pass it explicitly in production compose so it includes the public hostname (and Tailscale IP if applicable). |
 | `AUTHENTICATOR_APPCREDZ_TOKEN_SECRET` | JWT secret for application credential tokens (M2M / API access). Distinct from access/refresh/reset secrets. | Now persisted by the CLI's `writeDotEnv()` (it used to be silently dropped between runs, which caused signed app tokens to be rejected after every config rewrite). Default placeholder added to `base.env`. |
-| `RESETSERVICE` OTP behaviour | The reset service no longer returns the OTP in its HTTP response — it logs it and emails it like the production flow. E2E/test code that scraped OTPs from the response must read them from logs or from the test mailbox instead. | Behaviour change only affects test/dev environments — `resetservice` is never deployed to the NAS. |
+| `RESETSERVICE` OTP behaviour | `POST /reset/otp` returns the OTP in its HTTP response (`{ success, otp, email }`) **only** when `NODE_ENV` is `development` or `test` (`services/resetservice/src/routes.ts:291-297`); in any other env it returns just `{ success: true }`. So E2E/test code may scrape the OTP from the response in dev/test. | `resetservice` is never deployed to the NAS. Matches `documentation/FINCH_SETUP.md`. |
 
 ## Rolling back a bad deploy
 

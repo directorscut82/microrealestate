@@ -271,7 +271,7 @@ cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/je
 
 (The `test` npm script is `node --experimental-vm-modules ../../node_modules/jest/bin/jest.js`, so `yarn workspace @microrealestate/api test` works too — but only under node@20.)
 
-Per-service jest, no Docker. Full suite: **431 passed, 15 skipped, 1 skipped suite** (e9parser, /tmp fixtures absent), 0 failed.
+Per-service jest, no Docker. Full suite (as of July 2026): **~628 passing across 47 `services/api` test files**, 0 failed (plus the e9parser suite skipped when /tmp fixtures are absent). Grew 431 (May) → 609 (June) → ~628 (July). Re-run to get the live count; treat older figures (431, 609, 644) as point-in-time snapshots, not the current baseline.
 
 **Jest mock infra (don't regress this):** the winston / express-winston / jsonwebtoken mocks are `.cjs` (`services/api/src/__mocks__/*.cjs`) mapped via `moduleNameMapper` — a `.js` mock is loaded as ESM under `type: module` and the real CJS express-winston cannot `require()` it. `jest.mock`-using suites need `import { jest } from '@jest/globals'` (jest is not an ambient global under ESM). Factory-mock suites (`realmmanager.test.js`, `propertymanager.classifyExpense.test.js`) use `jest.unstable_mockModule` + dynamic `import()` inside `beforeAll`. ESM test files use `import.meta.url`, not `__dirname`.
 
@@ -398,9 +398,11 @@ relevant probe first):**
   `useSyncExternalStore`)** — current shape (subscribe + notify, plain
   classes) is a deliberate replacement for MobX. Don't reintroduce
   `mobx` or `mobx-react-lite`.
-- **`destructUrl()` port-stripping** — known limitation tracked under
-  Phase 5.5. The `APP_DOMAIN=host:port` workaround is the documented
-  escape hatch; CORS regex builder consumes `APP_DOMAIN` verbatim.
+- **`destructUrl()` port handling** — FIXED (`59e37bda`, May 2026):
+  `services/common/src/utils/url.ts` returns `domain = url.host`
+  (including the port), and `configureCORS()` derives the allowed origin
+  from `new URL(DOMAIN_URL).host`. `APP_DOMAIN=host:port` (comma-separated)
+  is the multi-origin allowlist for NAS deploys, not a bug workaround.
 - **Dashboard pie tooltip layout** — kept as 3-column table per round-3o
   decision. Pie segments themselves still use the `paidRatio` estimate
   (per explicit instruction). Don't change segment math without

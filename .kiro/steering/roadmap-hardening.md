@@ -273,13 +273,11 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
 ### 5.3 API documentation — NOT STARTED
 - **Tool:** OpenAPI/Swagger
 
-### 5.4 Finch support in CLI — NOT STARTED
-- **Problem:** CLI's `findCRI()` only detects docker/docker-compose/podman
+### 5.4 Finch support in CLI — ✅ COMPLETE (Mar 2026, `a6f8cf92`)
+`findCRI()` in `cli/src/utils.js` falls through to `['finch', 'compose']` when finch is on PATH (after docker-compose / docker / podman-compose / podman).
 
-### 5.5 `destructUrl()` should preserve the port — NOT STARTED
-- **Problem:** `services/common/src/utils/url.ts:destructUrl()` returns `domain = url.hostname` (port goes into a separate `port` field). Callers that build CORS regexes or domain strings — primarily `services/gateway/src/index.ts:configureCORS()` — silently drop the port, so `DOMAIN_URL=http://localhost:8080` produces an allowlist that rejects `http://localhost:8080`.
-- **Workaround in place:** Set `APP_DOMAIN=localhost:8080` (or whatever `host:port`) in `.env`. `APP_DOMAIN` is used verbatim and is the documented escape hatch for any non-default port.
-- **Proposed fix:** Make `destructUrl()` return `domain = url.host` (which includes the port) when a port is present, OR have `configureCORS()` build the regex from `host` not `domain`. ~5 lines, but touches shared utility code used by other services — verify no caller relies on port-less `domain` first.
+### 5.5 `destructUrl()` should preserve the port — ✅ COMPLETE (May 2026, `59e37bda`)
+`services/common/src/utils/url.ts` now returns `domain = url.host` (includes the port) and appends `:${url.port}` in the subdomain branch. `services/gateway/src/index.ts:configureCORS()` additionally builds the CORS origin from `new URL(DOMAIN_URL).host` directly. `APP_DOMAIN=host:port` remains as the explicit multi-origin allowlist (LAN + Tailscale), not a workaround for a bug.
 
 ---
 
