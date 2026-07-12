@@ -302,12 +302,50 @@ span.error {
 .page.owner-statement {
   height: auto;
   min-height: 297mm;
-  padding-bottom: 15mm;
+  padding: 10mm 10mm 15mm 10mm;
+}
+/* Convert the whole owner-statement to NORMAL FLOW so nothing overlaps and the
+ * item list paginates. The base template positions the header blocks
+ * (logo/recipient/title/reference/date) ABSOLUTELY at fixed top:10–115mm on a
+ * clipped 297mm page; combined with an absolute .items that grows, a long
+ * statement overlapped BOTH the footer (items→footer) and, once .items flowed,
+ * the header (header→items). Flowing every block removes all overlap
+ * deterministically: header blocks stack, then the item table, then the footer,
+ * and Puppeteer paginates the tall body across A4 pages. Two-column header
+ * blocks (.customer/.today/.title were left:105mm) stack single-column here —
+ * acceptable for the statement, whose priority is a correct, non-overlapping
+ * itemised legal document, not the invoice's compact one-page header. */
+.page.owner-statement .logo,
+.page.owner-statement .customer,
+.page.owner-statement .today,
+.page.owner-statement .title,
+.page.owner-statement .reference,
+.page.owner-statement .items,
+.page.owner-statement .footer {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: auto;
+  margin: 0;
+}
+.page.owner-statement .logo {
+  margin-bottom: 4mm;
+}
+.page.owner-statement .customer,
+.page.owner-statement .today {
+  margin-bottom: 3mm;
+}
+.page.owner-statement .title {
+  margin: 4mm 0;
+  position: static;
+}
+.page.owner-statement .reference {
+  margin-bottom: 6mm;
 }
 .page.owner-statement .items {
-  position: static;
-  margin: 120mm 10mm 0 10mm;
-  width: auto;
+  margin-top: 4mm;
 }
 .page.owner-statement .items table {
   page-break-inside: auto;
@@ -316,8 +354,7 @@ span.error {
   page-break-inside: avoid;
 }
 .page.owner-statement .footer {
-  position: static;
-  margin: 12mm 10mm 0 10mm;
+  margin-top: 12mm;
   page-break-inside: avoid;
 }
 @page {
