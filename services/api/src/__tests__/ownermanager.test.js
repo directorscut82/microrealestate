@@ -358,7 +358,10 @@ describe('ΛΟΙΠΟΙ un-named co-owner remainder placeholder', () => {
     const map = _aggregateOwners([buildingPerUnit()], new Set());
     const loipoi = map.get('loipoi:pA');
     expect(loipoi).toBeTruthy();
-    expect(loipoi.name).toBe('Λοιποί ιδιοκτήτες');
+    // The per-unit ΛΟΙΠΟΙ placeholder name carries its building + floor context
+    // so multiple un-named-remainder rows are DISTINGUISHABLE in the UI (user
+    // report: 4 identical «Λοιποί ιδιοκτήτες» rows with no building/unit hint).
+    expect(loipoi.name).toBe('Λοιποί ιδιοκτήτες — AG ODOS EPSILON, Ισόγειο');
     // Unit A's €50 split: Beta 50% = €25, remainder 50% = €25 → ΛΟΙΠΟΙ.
     expect(loipoi.totalAmount).toBeCloseTo(25, 2);
     expect(loipoi.totalOutstanding).toBeCloseTo(25, 2);

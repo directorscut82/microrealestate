@@ -1284,5 +1284,8 @@
   "Days": "Ημέρες",
   "Count": "Πλήθος",
   "Debt": "Οφειλή",
-  "Net earnings": "Καθαρά έσοδα"
+  "Net earnings": "Καθαρά έσοδα",
+  "Name the co-owner": "Ονομάστε τον συνιδιοκτήτη",
+  "this unit": "αυτή τη μονάδα",
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Αυτό είναι το μερίδιο του ανώνυμου συνιδιοκτήτη της {{unit}}. Καταχωρίστε τον πραγματικό ιδιοκτήτη προσθέτοντας το όνομα και το Α.Φ.Μ. του στη μονάδα· το υπόλοιπο θα μεταφερθεί αυτόματα σε αυτόν."
 }

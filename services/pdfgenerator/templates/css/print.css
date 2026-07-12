@@ -284,6 +284,42 @@ span.error {
 .text-right {
   text-align: right;
 }
+/* ── Owner statement: flow + paginate a long item list ────────────────────
+ * The base .page model is a fixed 297mm clip with .items (position:absolute;
+ * top:120mm) growing downward and .footer (position:absolute; bottom:10mm)
+ * pinned to the same page bottom. A long owner statement (many per-unit charge
+ * lines across co-owners) overflows .items past 297mm and COLLIDES with the
+ * fixed footer (and gets clipped — no pagination). Scoped ONLY to
+ * .page.owner-statement so the tenant invoice/receipt (also .page.invoice)
+ * keeps its tuned single-page absolute layout untouched.
+ *
+ * Fix: let the owner-statement page grow (height:auto) so nothing is clipped;
+ * keep the fixed header zone (logo/recipient/title/reference live at absolute
+ * top:10–115mm and stay on page 1), but let .items flow in normal document
+ * flow below that zone (margin-top reserves it) and let .footer flow AFTER the
+ * table instead of pinning to the page bottom. Puppeteer then paginates the tall
+ * body across A4 pages; break-inside rules keep rows/footer from splitting. */
+.page.owner-statement {
+  height: auto;
+  min-height: 297mm;
+  padding-bottom: 15mm;
+}
+.page.owner-statement .items {
+  position: static;
+  margin: 120mm 10mm 0 10mm;
+  width: auto;
+}
+.page.owner-statement .items table {
+  page-break-inside: auto;
+}
+.page.owner-statement .items tr {
+  page-break-inside: avoid;
+}
+.page.owner-statement .footer {
+  position: static;
+  margin: 12mm 10mm 0 10mm;
+  page-break-inside: avoid;
+}
 @page {
   size: A4 portrait;
   margin: 0;

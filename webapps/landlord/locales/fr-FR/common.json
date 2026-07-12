@@ -1140,5 +1140,8 @@
   "Days": "Days",
   "Count": "Count",
   "Debt": "Debt",
-  "Net earnings": "Revenus nets"
+  "Net earnings": "Revenus nets",
+  "Name the co-owner": "Nommer le copropriétaire",
+  "this unit": "ce lot",
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Il s'agit de la part du copropriétaire non nommé de {{unit}}. Enregistrez le véritable propriétaire en ajoutant son nom et son numéro fiscal sur le lot ; ce solde lui sera alors transféré automatiquement."
 }

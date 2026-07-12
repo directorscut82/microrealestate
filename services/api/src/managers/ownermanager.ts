@@ -281,10 +281,34 @@ type OwnerAgg = {
 export function _aggregateOwners(
   buildings: any[],
   occupiedKeys?: Set<string>,
-  year?: number
+  year?: number,
+  // Realm (optional) — only used to localize the ΛΟΙΠΟΙ placeholder's
+  // building/floor context suffix. Absent → Greek default (every co-owner realm
+  // is Greek; matches the existing hardcoded «Λοιποί ιδιοκτήτες» label). Additive
+  // so the other call sites are unaffected.
+  realm?: any
 ): Map<string, OwnerAgg> {
   const owners = new Map<string, OwnerAgg>();
   const occSet = occupiedKeys || new Set<string>();
+  // Localised floor label for the ΛΟΙΠΟΙ context suffix (mirrors
+  // buildingmanager._floorLabel; small table, no full i18n stack server-side).
+  const _floorLbl = (floor: number | null | undefined): string | null => {
+    if (floor == null) return null;
+    const locale = (realm && realm.locale) || 'el';
+    const TABLE: Record<string, { ground: string; basement: string; floor: string }> = {
+      el: { ground: 'Ισόγειο', basement: 'Υπόγειο', floor: 'Όροφος' },
+      en: { ground: 'Ground floor', basement: 'Basement', floor: 'Floor' },
+      'fr-FR': { ground: 'Rez-de-chaussée', basement: 'Sous-sol', floor: 'Étage' },
+      'de-DE': { ground: 'Erdgeschoss', basement: 'Keller', floor: 'Etage' },
+      'pt-BR': { ground: 'Térreo', basement: 'Porão', floor: 'Andar' },
+      'es-CO': { ground: 'Planta baja', basement: 'Sótano', floor: 'Piso' }
+    };
+    const tbl = TABLE[locale] || TABLE.el;
+    const n = Number(floor);
+    if (n < 0) return tbl.basement;
+    if (n === 0) return tbl.ground;
+    return `${tbl.floor} ${n}`;
+  };
 
   // First pass: every unit's owners → owner identity + unit count.
   // propertyId → ownerKeys, so we can attribute propertyId-scoped charges.
@@ -391,14 +415,26 @@ export function _aggregateOwners(
     buildingId: string,
     buildingIdForAgg: string,
     propertyId: string | null,
-    restSlice: { percentage: number }
+    restSlice: { percentage: number },
+    // Context so the placeholder row is DISTINGUISHABLE: there is one ΛΟΙΠΟΙ
+    // entry PER UNIT (loipoi:<propertyId>), so a landlord with un-named co-owners
+    // on several units would otherwise see multiple identical «Λοιποί ιδιοκτήτες»
+    // rows with no way to tell which building/unit each belongs to (user report).
+    // Append «— <building>, <floor>» so each row names its own unit. Building-wide
+    // remainders (propertyId null) get just the building name.
+    buildingName?: string,
+    unit?: any
   ): OwnerAgg => {
     const key = OwnerStatement.loipoiKey(buildingId, propertyId);
     let agg = owners.get(key);
     if (!agg) {
+      const floorLabel = unit ? _floorLbl(unit.floor) : null;
+      const ctx = [buildingName, floorLabel].filter(Boolean).join(', ');
       agg = {
         ownerKey: key,
-        name: OwnerStatement.LOIPOI_LABEL,
+        name: ctx
+          ? `${OwnerStatement.LOIPOI_LABEL} — ${ctx}`
+          : OwnerStatement.LOIPOI_LABEL,
         taxId: '',
         memberId: null,
         percentage: restSlice.percentage,
@@ -721,7 +757,16 @@ export function _aggregateOwners(
         if (sliceFromUnit) {
           const rest = slices.find((sl: any) => sl.isRest && sl.amount > 0.005);
           if (rest) {
-            const lagg = loipoiAggFor(bid, bid, charge.propertyId, rest);
+            const lagg = loipoiAggFor(
+              bid,
+              bid,
+              charge.propertyId,
+              rest,
+              bname,
+              charge.propertyId
+                ? unitByPropId.get(String(charge.propertyId))
+                : null
+            );
             // flag-lifted → the un-named co-owner's remainder is settled too
             // (the whole row is flagged paid), so ΛΟΙΠΟΙ shows paid, outstanding
             // 0 — else the tile-tick would leave the ΛΟΙΠΟΙ portion dunned.
@@ -797,7 +842,16 @@ export function _aggregateOwners(
             // their per-unit split is the deferred repair-writer pass.
             const restAmt = sliceFromUnit ? _round(slice.amount) : 0;
             if (restAmt > 0.005) {
-              const lagg = loipoiAggFor(bid, bid, charge.propertyId, slice);
+              const lagg = loipoiAggFor(
+                bid,
+                bid,
+                charge.propertyId,
+                slice,
+                bname,
+                charge.propertyId
+                  ? unitByPropId.get(String(charge.propertyId))
+                  : null
+              );
               // flag-lifted → the un-named remainder is settled too.
               const restPaid = flagLifted ? restAmt : 0;
               const restCharge: OwnerCharge = {
@@ -1050,7 +1104,8 @@ export async function all(req: Req, res: Res) {
   const owners = _aggregateOwners(
     buildings as any[],
     occupiedKeys,
-    Number.isFinite(year) ? year : undefined
+    Number.isFinite(year) ? year : undefined,
+    realm
   );
   await _markAlsoRents(String(realm!._id), owners);
   const list = Array.from(owners.values())
@@ -1158,11 +1213,42 @@ export async function one(req: Req, res: Res) {
     };
   });
 
+  // For a «Λοιποί ιδιοκτήτες» placeholder, expose the exact unit to edit so the
+  // detail page can DEEP-LINK to "name the co-owner" (the only way to settle a
+  // ΛΟΙΠΟΙ remainder). The key is loipoi:<propertyId>; resolve its building from
+  // the placeholder's own charges (all share one propertyId/building). Without
+  // this the user hits a dead-end: a placeholder owing money, no pay button, and
+  // no path to the unit editor (user report — days lost hunting for it).
+  let loipoiTarget: {
+    buildingId: string;
+    propertyId: string;
+    buildingName: string;
+    unitFloor: number | null;
+  } | null = null;
+  if (OwnerStatement.isLoipoiKey(ownerKey)) {
+    const pid = String(ownerKey).replace(/^loipoi:/, '').replace(/^b:/, '');
+    for (const b of buildings as any[]) {
+      const u = (b.units || []).find(
+        (x: any) => String(x.propertyId) === pid
+      );
+      if (u) {
+        loipoiTarget = {
+          buildingId: String(b._id),
+          propertyId: pid,
+          buildingName: b.name || '',
+          unitFloor: u.floor ?? null
+        };
+        break;
+      }
+    }
+  }
+
   return res.json({
     ...(_serializeOwnerSummary(agg) as any),
     charges: agg.charges.sort((a, b) => a.term - b.term),
     paymentHistory,
-    ownedProperties
+    ownedProperties,
+    ...(loipoiTarget ? { loipoiTarget } : {})
   });
 }
 

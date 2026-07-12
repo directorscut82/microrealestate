@@ -180,8 +180,51 @@ function OwnerDetail() {
                   {t('Record an owner payment')}
                 </Button>
               )}
+              {/* ΛΟΙΠΟΙ is not payable — it is settled by NAMING the co-owner on
+                  the unit. Give the landlord a direct path there instead of a
+                  dead-end (previously no button, no hint where to go). */}
+              {isLoipoi && owner.loipoiTarget && (
+                <Button
+                  onClick={() =>
+                    router.push(
+                      `/${router.query.organization}/buildings/${owner.loipoiTarget.buildingId}?tab=units`
+                    )
+                  }
+                  className="gap-2"
+                >
+                  <LuBuilding2 className="size-4" />
+                  {t('Name the co-owner')}
+                </Button>
+              )}
             </div>
           </div>
+
+          {/* ΛΟΙΠΟΙ explainer: tell the landlord WHAT this placeholder is and
+              HOW to resolve it (name the co-owner) — the row is otherwise a
+              confusing unpayable balance with no path forward. */}
+          {isLoipoi && (
+            <Card className="p-4 border-sea/30 bg-sea/5">
+              <p className="text-body text-ink">
+                {t(
+                  'This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.',
+                  {
+                    unit: owner.loipoiTarget
+                      ? [
+                          owner.loipoiTarget.buildingName,
+                          owner.loipoiTarget.unitFloor === 0
+                            ? t('Ground floor')
+                            : typeof owner.loipoiTarget.unitFloor === 'number'
+                              ? `${t('Floor')} ${owner.loipoiTarget.unitFloor}`
+                              : null
+                        ]
+                          .filter(Boolean)
+                          .join(', ')
+                      : t('this unit')
+                  }
+                )}
+              </p>
+            </Card>
+          )}
 
           {/* Paid vs total — thin two-tone bar (not the fat near-black blob). */}
           {total > 0 && (

@@ -1140,5 +1140,8 @@
   "Days": "Days",
   "Count": "Count",
   "Debt": "Debt",
-  "Net earnings": "Rendimento líquido"
+  "Net earnings": "Rendimento líquido",
+  "Name the co-owner": "Nomear o coproprietário",
+  "this unit": "esta unidade",
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Esta é a parte do coproprietário não identificado de {{unit}}. Registre o proprietário real adicionando o nome e o NIF dele na unidade; este saldo passa então automaticamente para esse proprietário."
 }

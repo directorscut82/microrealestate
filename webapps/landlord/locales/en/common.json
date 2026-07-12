@@ -1264,5 +1264,8 @@
   "Days": "Days",
   "Count": "Count",
   "Debt": "Debt",
-  "Net earnings": "Net earnings"
+  "Net earnings": "Net earnings",
+  "Name the co-owner": "Name the co-owner",
+  "this unit": "this unit",
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically."
 }

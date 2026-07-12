@@ -1140,5 +1140,8 @@
   "Days": "Days",
   "Count": "Count",
   "Debt": "Debt",
-  "Net earnings": "Nettoeinnahmen"
+  "Net earnings": "Nettoeinnahmen",
+  "Name the co-owner": "Miteigentümer benennen",
+  "this unit": "diese Einheit",
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Dies ist der Anteil des nicht benannten Miteigentümers von {{unit}}. Erfassen Sie den echten Eigentümer, indem Sie seinen Namen und seine Steuernummer zur Einheit hinzufügen; dieser Saldo wird dann automatisch auf ihn übertragen."
 }

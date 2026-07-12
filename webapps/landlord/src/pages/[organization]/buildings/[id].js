@@ -156,7 +156,20 @@ function Building() {
       dataCy="buildingPage"
     >
       <PresenceBanner viewers={viewers} />
-      <Tabs defaultValue="overview" className="w-full">
+      {/* Honor ?tab= so other surfaces can deep-link to a specific tab (e.g. the
+          «Λοιποί ιδιοκτήτες» owner page linking to this building's Units tab so
+          the landlord can name the un-named co-owner). Falls back to overview. */}
+      <Tabs
+        defaultValue={
+          typeof router.query.tab === 'string' &&
+          ['overview', 'units', 'expenses', 'contractors', 'settings'].includes(
+            router.query.tab
+          )
+            ? router.query.tab
+            : 'overview'
+        }
+        className="w-full"
+      >
         <TabsList className="flex justify-start overflow-x-auto overflow-y-hidden">
           <TabsTrigger value="overview" className="w-1/5" data-cy="overviewTab">
             {t('Overview')}
