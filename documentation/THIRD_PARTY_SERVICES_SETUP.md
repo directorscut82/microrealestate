@@ -80,5 +80,63 @@ Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. Δ
 | Mail reader (per mailbox) | email, clientId, clientSecret, refreshToken | Google Cloud + OAuth playground (above) |
 
 **Already-generated creds (local, gitignored — never commit):**
-- `.secrets/gmail-oauth-e2elandlord82` — e2elandlord82@gmail.com reader creds (project `microrealestate-502214`, Web OAuth client, refresh token verified working + app Published so it's permanent). Enter these 5 values in Settings → Mail reading, or read them for any future inbox-poller.
-- Other secrets alongside it: `.secrets/portainer-token`, `.secrets/landlord-account`, `.secrets/comprehensive-test-account`.
+- `.secrets/gmail-oauth-e2elandlord82` — e2elandlord82@gmail.com READER creds (project `microrealestate-502214`, Web OAuth client, refresh token verified working + app Published so it's permanent). Enter these 5 values in Settings → Mail reading, or read them for any future inbox-poller.
+- `.secrets/gmail-send-e2elandlord82` — e2elandlord82@gmail.com SENDING creds (Gmail App Password + from/reply-to). Verified: a real SMTP send succeeded (`250 OK`).
+- `.secrets/landlord-account`, `.secrets/comprehensive-test-account` — realm admin logins.
+- `.secrets/portainer-token` — NAS Portainer API (deploy/inspect).
+
+---
+
+# DISASTER RECOVERY — back-fill everything after a reset
+
+> Read this if the DB was wiped, a realm/account was deleted, or you're standing up a fresh instance. Order matters. Secrets live in `.secrets/` (gitignored) — this doc references them by filename, never by value.
+
+## CRITICAL: the encryption key must not change
+
+Every third-party secret (`gmail.appPassword`, `mailReaders[].clientSecret/refreshToken`, `smtp.password`, `mailgun.apiKey`, `b2.*`, `smsGateway.password`) is **AES-256-GCM encrypted with `CIPHER_KEY`**. On NAS that key is in `docker-compose.nas.yml` (local-only, NOT committed) under each service's env.
+
+- **If `CIPHER_KEY` stays the same:** existing encrypted secrets in mongo keep decrypting; nothing to redo.
+- **If `CIPHER_KEY` changes / is regenerated:** ALL previously-stored secrets become undecryptable garbage. You must re-enter every third-party secret via the UI (which re-encrypts with the new key). So: **do not regenerate `CIPHER_KEY` unless you intend to re-enter all secrets.**
+- **Consequence for back-fill:** third-party secrets can ONLY be restored through the **UI or the `PATCH /api/v2/realms` API** (both run `Crypto.encrypt`). A raw `mongo` insert of plaintext will store an unencrypted string that `decrypt()` then throws on → email/reading silently fails. NEVER seed thirdParties secrets by direct mongo write.
+
+## Step 1 — Account (login) restoration
+
+Accounts (`accounts` collection) hold a **bcrypt** password hash, not plaintext.
+- **Normal path:** sign up via the UI/authenticator (`POST /api/v2/authenticator/landlord/signup`) with the email+password from `.secrets/landlord-account` (or `comprehensive-test-account`). This creates the account + bcrypt hash correctly.
+- **If the account row is missing/corrupt:** reset the hash directly. `mre-mongo-1` is mongo 4.4 (`mongo` shell). Generate the hash inside a node container: `bcrypt.hash('<password from .secrets>', 10)`, then `db.accounts.updateOne({email:'...'},{ $set:{ password:'<hash>' }})`. (See the CLAUDE.md "signin 500" triage — this is the documented bcrypt path.)
+
+Known accounts (passwords in `.secrets/`): `e2elandlord82@gmail.com` → `.secrets/landlord-account`; `seed@example.com` → `.secrets/comprehensive-test-account`.
+
+## Step 2 — Realm restoration
+
+A realm is created via the UI (first-run onboarding) or `POST /api/v2/realms` as the signed-in account. Landlord realm should be **name `landlord`, locale `el`, currency `EUR`**, member `e2elandlord82@gmail.com` (administrator). If the realm exists but is empty of buildings/tenants (the usual "reset" state), skip this — just re-add data.
+
+## Step 3 — Third-party services (UI back-fill) — the whole point of this doc
+
+Sign in as the realm admin → **Ρυθμίσεις → Πάροχοι τρίτων** and re-enter, reading values from `.secrets/`:
+
+1. **Email delivery → Gmail** (from `.secrets/gmail-send-e2elandlord82`): toggle on, pick Gmail, `Email` = EMAIL, `Κωδικός εφαρμογής` = APP_PASSWORD, `Από Email` = FROM_EMAIL, `Απάντηση σε email` = REPLY_TO_EMAIL. Save.
+2. **Backblaze B2** (if configured; from a `.secrets/b2-*` file when created): keyId / applicationKey / bucket / endpoint. **This is what persists generated PDFs** — without it PDFs are not saved to cloud.
+3. **SMS Gateway** — only if you use SMS (from a `.secrets/sms-*` file).
+4. **Ανάγνωση email (mail readers)** (from `.secrets/gmail-oauth-e2elandlord82`): toggle on, Γραμματοκιβώτιο 1 → Email = EMAIL, Client ID = CLIENT_ID, Client secret = CLIENT_SECRET, Refresh token = REFRESH_TOKEN, Label optional. «+ Προσθήκη γραμματοκιβωτίου» for more mailboxes. Save.
+
+## Step 4 — Verify (don't trust "saved")
+
+- **Config persisted:** query mongo (values stay masked/encrypted) — `db.realms.findOne({_id:ObjectId('<realmId>')},{thirdParties:1})` → `gmail.selected:true`, `gmail.appPassword` set, `mailReaders[0].{clientId,clientSecret,refreshToken}` set.
+- **Sending actually works:** raw SMTP test with nodemailer using EMAIL+APP_PASSWORD (`service:'gmail'`) → `transport.verify()` + `sendMail` should return `250 OK`. (This is the real end-to-end check; a saved config that fails auth is common with a wrong/expired App Password or 2FA off.)
+- **Reading creds valid:** `POST https://oauth2.googleapis.com/token` with `client_id/client_secret/refresh_token/grant_type=refresh_token` → 200 + `access_token` means the refresh token is live.
+
+## Step 5 — Data back-fill (buildings/tenants/etc.)
+
+App data is NOT encrypted and can be seeded either via the app UI or, for bulk/malformed-legacy fixtures, direct `mongo` insert into `buildings`/`occupants`/`properties`/`leases` (keyed by `realmId` as a **string**, not ObjectId — see the reset scripts). The comprehensive-test realm has a seeder: `scripts/seed-comprehensive.py` (creds in `.secrets/comprehensive-test-account`).
+
+## Quick reference — what lives where
+
+| Thing | Where | Notes |
+|---|---|---|
+| Realm/account logins | `.secrets/landlord-account`, `.secrets/comprehensive-test-account` | plaintext, local only |
+| Gmail send | `.secrets/gmail-send-e2elandlord82` | App Password |
+| Gmail read (OAuth) | `.secrets/gmail-oauth-e2elandlord82` | client id/secret/refresh token |
+| NAS Portainer token | `.secrets/portainer-token` | deploy/inspect |
+| `CIPHER_KEY` (encrypts all thirdParties secrets) | `docker-compose.nas.yml` (local, uncommitted) | do NOT change without re-entering all secrets |
+| Third-party secrets (encrypted) | mongo `realms.thirdParties` | via UI/API only, never raw insert |
