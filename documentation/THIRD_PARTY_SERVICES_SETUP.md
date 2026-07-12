@@ -47,14 +47,16 @@ At console.cloud.google.com (create/select a project first, top bar → project 
    - **Contact Information:** your email → **Next** → **Finish** → agree → **Create**.
 3. **Add yourself as a test user:** **Google Auth platform → Audience → Test users → Add users** → your Gmail → **Save**. (Skips Google's verification review for personal use.)
 4. **Add the read scope:** **Google Auth platform → Data Access → Add or Remove Scopes** → add `https://www.googleapis.com/auth/gmail.readonly` → **Update/Save**.
-5. **Create the OAuth client:** **Google Auth platform → Clients → Create Client** → Application type **Desktop app** → name it → **Create**. It appears under **OAuth 2.0 Client IDs**; open it (or the download icon) → copy **Client ID** + **Client secret**.
+5. **Create the OAuth client — MUST be "Web application", NOT "Desktop app"** (a Desktop client only allows `http://localhost` redirects → the OAuth Playground fails with `Error 400: redirect_uri_mismatch`). **Google Auth platform → Clients → Create Client** → Application type **Web application** → name it → under **Authorized redirect URIs → Add URI** paste exactly `https://developers.google.com/oauthplayground` (leave "Authorized JavaScript origins" empty) → **Create** → copy **Client ID** + **Client secret**.
 
 **Refresh token** — consent once with that client:
-- developers.google.com/oauthplayground → gear (top-right) → tick **"Use your own OAuth credentials"** → paste Client ID + secret → left panel select scope `https://www.googleapis.com/auth/gmail.readonly` → **Authorize APIs** → sign in as that Gmail, Allow → **"Exchange authorization code for tokens"** → copy the **Refresh token**.
+- developers.google.com/oauthplayground → gear (top-right) → tick **"Use your own OAuth credentials"** → paste the Web client's Client ID + secret → Step 1: left panel select scope `https://www.googleapis.com/auth/gmail.readonly` → **Authorize APIs** → sign in as that Gmail, Allow → Step 2: **"Exchange authorization code for tokens"** → copy the **Refresh token**. (Step 3 "Configure request" is an optional test — skip it.)
 
-Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. ΔΕΗ), cannot send/delete. Repeat per mailbox.
+Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. ΔΕΗ), cannot send/delete. Repeat per mailbox. To verify a saved refresh token works, `POST https://oauth2.googleapis.com/token` with `client_id/client_secret/refresh_token/grant_type=refresh_token` → a 200 with `access_token` means it's good.
 
-**7-day token caveat (personal Gmail):** while the app stays in **"Testing"** status, refresh tokens can expire after 7 days. To make it permanent, **Google Auth platform → Audience → Publish app** (still External; no verification review needed for your own use with a read-only + few users). Workspace-domain (Internal) apps don't have this quirk.
+**Token longevity — two DIFFERENT limits, don't confuse them:**
+- *Playground 24h revocation:* only applies if you used the Playground's OWN credentials. If you ticked "Use your own OAuth credentials" (as above), this does NOT apply.
+- *Testing-mode 7-day expiry:* while the app is in **"Testing"** status, the refresh token expires after ~7 days. Fix: **Google Auth platform → Audience → Publish app** → confirm "push to production". The warning "Your app will be available to any user with a Google Account" is benign here — the app is unlisted and only usable by whoever holds the (secret) Client ID+secret; publishing just removes the 7-day expiry. A sensitive scope (`gmail.readonly`) would show external users an "unverified app" screen, but for your own single account you click through it, no verification submission needed. Publishing does NOT invalidate an already-working refresh token (verified). Internal/Workspace apps have neither limit.
 
 > **NOTE (status):** the UI + storage schema for mail-readers exists; the actual inbox-polling/bill-detection worker is NOT yet implemented — the fields capture the credentials so the feature can be built against them. Near-real-time delivery would use Gmail push (watch → Pub/Sub) rather than polling.
 
@@ -76,3 +78,7 @@ Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. Δ
 | Backblaze B2 | keyId, applicationKey, bucket, endpoint | backblaze.com B2 |
 | SMS | url, username, password, countryCode | SMS gateway provider |
 | Mail reader (per mailbox) | email, clientId, clientSecret, refreshToken | Google Cloud + OAuth playground (above) |
+
+**Already-generated creds (local, gitignored — never commit):**
+- `.secrets/gmail-oauth-e2elandlord82` — e2elandlord82@gmail.com reader creds (project `microrealestate-502214`, Web OAuth client, refresh token verified working + app Published so it's permanent). Enter these 5 values in Settings → Mail reading, or read them for any future inbox-poller.
+- Other secrets alongside it: `.secrets/portainer-token`, `.secrets/landlord-account`, `.secrets/comprehensive-test-account`.
