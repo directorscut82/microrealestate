@@ -134,6 +134,9 @@ function _escapeSecrets(realm: AnyRecord): AnyRecord {
   if (realm.thirdParties?.smsGateway?.password) {
     realm.thirdParties.smsGateway.password = SECRET_PLACEHOLDER;
   }
+  if (realm.thirdParties?.telegram?.botToken) {
+    realm.thirdParties.telegram.botToken = SECRET_PLACEHOLDER;
+  }
   for (const reader of (realm.thirdParties?.mailReaders || [])) {
     if (reader.clientSecret) reader.clientSecret = SECRET_PLACEHOLDER;
     if (reader.refreshToken) reader.refreshToken = SECRET_PLACEHOLDER;
@@ -221,6 +224,12 @@ export async function add(req: Req, res: Res) {
   if (newRealm.thirdParties?.smsGateway?.password) {
     newRealm.thirdParties.smsGateway.password = Crypto.encrypt(
       newRealm.thirdParties.smsGateway.password
+    );
+  }
+
+  if (newRealm.thirdParties?.telegram?.botToken) {
+    newRealm.thirdParties.telegram.botToken = Crypto.encrypt(
+      newRealm.thirdParties.telegram.botToken
     );
   }
 
@@ -316,7 +325,14 @@ export async function update(req: Req, res: Res) {
   // `thirdParties.smsGateway.selected = "true"` (string) or {$ne:false} would
   // be persisted verbatim and downstream `if (selected)` checks would behave
   // unexpectedly across services that read this config.
-  const PROVIDERS = ['gmail', 'smtp', 'mailgun', 'b2', 'smsGateway'] as const;
+  const PROVIDERS = [
+    'gmail',
+    'smtp',
+    'mailgun',
+    'b2',
+    'smsGateway',
+    'telegram'
+  ] as const;
   for (const p of PROVIDERS) {
     const sel = req.body.thirdParties?.[p]?.selected;
     if (sel !== undefined && typeof sel !== 'boolean') {
@@ -440,6 +456,19 @@ export async function update(req: Req, res: Res) {
       );
     } else {
       updatedRealm.thirdParties.smsGateway.password = previousSmsPassword;
+    }
+  }
+
+  if (req.body.thirdParties?.telegram) {
+    const botTokenUpdated = !!req.body.thirdParties.telegram.botTokenUpdated;
+    const previousBotToken = previousRealm.thirdParties?.telegram?.botToken;
+    if (botTokenUpdated || !previousBotToken) {
+      updatedRealm.thirdParties.telegram.botToken = req.body.thirdParties
+        .telegram.botToken
+        ? Crypto.encrypt(req.body.thirdParties.telegram.botToken)
+        : '';
+    } else {
+      updatedRealm.thirdParties.telegram.botToken = previousBotToken;
     }
   }
 

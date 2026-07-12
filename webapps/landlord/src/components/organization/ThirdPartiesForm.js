@@ -54,6 +54,9 @@ const schema = z.object({
     .regex(/^\+\d{1,4}$/)
     .or(z.literal(''))
     .optional(),
+  telegramActive: z.boolean(),
+  telegramBotToken: z.string().optional(),
+  telegramAdminChatId: z.string().optional(),
   mailReadersActive: z.boolean(),
   mailReaders: z
     .array(
@@ -142,6 +145,10 @@ export default function ThirdPartiesForm({ organization }) {
       smsUsername: organization.thirdParties?.smsGateway?.username || '',
       smsPassword: organization.thirdParties?.smsGateway?.password || '',
       smsCountryCode: organization.thirdParties?.smsGateway?.countryCode || '',
+      telegramActive: !!organization.thirdParties?.telegram?.selected,
+      telegramBotToken: organization.thirdParties?.telegram?.botToken || '',
+      telegramAdminChatId:
+        organization.thirdParties?.telegram?.adminChatId || '',
       mailReadersActive: (organization.thirdParties?.mailReaders || []).length > 0,
       mailReaders: (organization.thirdParties?.mailReaders || []).map((r) => ({
         provider: r.provider || 'gmail',
@@ -167,6 +174,7 @@ export default function ThirdPartiesForm({ organization }) {
   const smtpAuth = watch('smtp_authentication');
   const b2Active = watch('b2Active');
   const smsActive = watch('smsActive');
+  const telegramActive = watch('telegramActive');
   const mailReadersActive = watch('mailReadersActive');
 
   const onSubmit = useCallback(
@@ -229,6 +237,17 @@ export default function ThirdPartiesForm({ organization }) {
         };
       } else {
         formData.thirdParties.smsGateway = null;
+      }
+      if (values.telegramActive) {
+        formData.thirdParties.telegram = {
+          selected: true,
+          botToken: values.telegramBotToken,
+          botTokenUpdated:
+            values.telegramBotToken !== initialValues.telegramBotToken,
+          adminChatId: values.telegramAdminChatId
+        };
+      } else {
+        formData.thirdParties.telegram = null;
       }
       if (values.mailReadersActive) {
         formData.thirdParties.mailReaders = (values.mailReaders || [])
@@ -345,6 +364,27 @@ export default function ThirdPartiesForm({ organization }) {
             <div className="space-y-2 mt-2"><Label htmlFor="smsUsername">{t('Username')}</Label><Input id="smsUsername" {...register('smsUsername')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="smsPassword">{t('Password')}</Label><Input id="smsPassword" type="password" {...register('smsPassword')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="smsCountryCode">{t('SMS Country Code')}</Label><Input id="smsCountryCode" placeholder="+30" {...register('smsCountryCode')} /></div>
+          </>
+        ) : null}
+      </SectionWithSwitch>
+      <SectionWithSwitch
+        label={t('Telegram notifications')}
+        description={t('Send push notifications through a Telegram bot (e.g. alert yourself about overdue rents). Needs a bot token and a chat id.')}
+        switchChecked={telegramActive}
+        onSwitchChange={(v) => setValue('telegramActive', v)}
+      >
+        {telegramActive ? (
+          <>
+            <Link
+              href="https://core.telegram.org/bots/features#botfather"
+              target="_blank"
+              rel="noreferrer"
+              className="my-2"
+            >
+              {t('How to create a Telegram bot token (message @BotFather)')}
+            </Link>
+            <div className="space-y-2 mt-2"><Label htmlFor="telegramBotToken">{t('Bot token')}</Label><Input id="telegramBotToken" type="password" autoComplete="off" placeholder="123456:ABC-DEF..." {...register('telegramBotToken')} /></div>
+            <div className="space-y-2 mt-2"><Label htmlFor="telegramAdminChatId">{t('Admin chat ID')}</Label><Input id="telegramAdminChatId" autoComplete="off" {...register('telegramAdminChatId')} /></div>
           </>
         ) : null}
       </SectionWithSwitch>

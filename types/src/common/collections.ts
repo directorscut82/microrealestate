@@ -124,6 +124,14 @@ export namespace CollectionTypes {
         password: string;
         countryCode?: string;
       };
+      // Telegram bot channel (push notifications). botToken is encrypted at
+      // rest. adminChatId is the chat the bot messages for admin/self
+      // notifications. Optional — legacy realms predate it.
+      telegram?: {
+        selected: boolean;
+        botToken: string;
+        adminChatId: string;
+      };
       // Inbox readers (multiple mailboxes) for auto-detecting incoming bills.
       // Separate from the single SENDING provider above. clientSecret +
       // refreshToken are encrypted at rest.

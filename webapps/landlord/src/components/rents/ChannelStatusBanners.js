@@ -16,7 +16,7 @@ import useTranslation from 'next-translate/useTranslation';
  * for the current realm:
  *   - Email   (Gmail / SMTP / Mailgun)        — olive when ready, amber when missing
  *   - SMS     (smsGateway via sms-gate.app)   — olive when ready, amber when missing
- *   - Messengers (WhatsApp/Telegram/etc.)     — slate; not implemented yet
+ *   - Messengers (Telegram)                   — olive when configured, else slate
  *
  * Each banner is dismissable for the rest of the session, scoped to the
  * current realm so dismissals don't leak across organizations.
@@ -94,6 +94,7 @@ export default function ChannelStatusBanners() {
   const emailProvider = store.organization.emailProviderName;
   const canSendEmails = store.organization.canSendEmails;
   const canSendSms = store.organization.canSendSms;
+  const canSendTelegram = store.organization.canSendTelegram;
 
   const banners = useMemo(() => {
     const items = [];
@@ -126,11 +127,13 @@ export default function ChannelStatusBanners() {
     if (!dismissed.messengers) {
       items.push({
         key: 'messengers',
-        state: 'unavailable',
+        state: canSendTelegram ? 'ready' : 'unavailable',
         icon: LuMessageCircle,
-        message: t(
-          'Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet'
-        )
+        message: canSendTelegram
+          ? t('Telegram: configured — push notifications can be sent')
+          : t(
+              'Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services'
+            )
       });
     }
     return items;
@@ -140,6 +143,7 @@ export default function ChannelStatusBanners() {
     dismissed.messengers,
     canSendEmails,
     canSendSms,
+    canSendTelegram,
     emailProvider,
     t
   ]);

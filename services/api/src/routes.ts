@@ -502,6 +502,10 @@ export default function routes(): express.Router {
     '/sms',
     Middlewares.asyncWrapper(emailManager.sendSmsOnly as any)
   );
+  emailRouter.post(
+    '/telegram',
+    Middlewares.asyncWrapper(emailManager.sendTelegramNotification as any)
+  );
   router.use('/emails', emailRouter);
 
   // Presence awareness — shows who else is viewing the same record

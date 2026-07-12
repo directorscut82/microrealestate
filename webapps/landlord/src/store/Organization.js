@@ -45,6 +45,13 @@ export default class Organization {
     return !!this.selected?.thirdParties?.smsGateway?.selected;
   }
 
+  // Telegram bot channel (push/admin notifications). Backed by
+  // `thirdParties.telegram.selected`, set via the same Settings →
+  // Third-party services form.
+  get canSendTelegram() {
+    return !!this.selected?.thirdParties?.telegram?.selected;
+  }
+
   get canUploadDocumentsInCloud() {
     return !!this.selected?.thirdParties?.b2;
   }

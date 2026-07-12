@@ -156,6 +156,41 @@ export async function sendSmsOnly(req: Req, res: Res) {
   }
 }
 
+// Send a Telegram notification for the current realm. With no chatId the
+// emailer falls back to the realm's configured adminChatId (admin/self
+// notifications — "ping me about stuff"). Proxies to the emailer, which
+// holds the (encrypted) bot token, mirroring _sendSms.
+export async function sendTelegramNotification(req: Req, res: Res) {
+  const { text, chatId } = req.body;
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    throw new ServiceError('text is required', 422);
+  }
+  const { EMAILER_URL } = Service.getInstance().envConfig.getValues();
+  try {
+    const response = await axios.post(
+      `${EMAILER_URL}/telegram`,
+      { text, ...(chatId ? { chatId } : {}) },
+      {
+        headers: {
+          authorization: req.headers.authorization,
+          organizationid:
+            req.headers.organizationid || String(req.realm!._id),
+          'Accept-Language': req.headers['accept-language']
+        }
+      }
+    );
+    logger.info('Telegram notification sent');
+    res.json(response.data);
+  } catch (error: any) {
+    const errorMessage = error.response?.data?.message || error.message;
+    const upstream = error?.response?.status;
+    if (Number.isFinite(upstream) && upstream >= 400 && upstream < 500) {
+      throw new ServiceError(errorMessage, upstream);
+    }
+    throw new ServiceError(`Telegram send failed: ${errorMessage}`, 500);
+  }
+}
+
 export async function send(req: Req, res: Res) {
   const realm = req.realm;
   const { document, tenantIds, terms, year, month, force } = req.body;

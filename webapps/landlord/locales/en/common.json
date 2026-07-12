@@ -1277,5 +1277,12 @@
   "Client ID": "Client ID",
   "Client secret": "Client secret",
   "Refresh token": "Refresh token",
-  "Add mailbox": "Add mailbox"
+  "Add mailbox": "Add mailbox",
+  "Telegram notifications": "Telegram notifications",
+  "Send push notifications through a Telegram bot (e.g. alert yourself about overdue rents). Needs a bot token and a chat id.": "Send push notifications through a Telegram bot (e.g. alert yourself about overdue rents). Needs a bot token and a chat id.",
+  "How to create a Telegram bot token (message @BotFather)": "How to create a Telegram bot token (message @BotFather)",
+  "Bot token": "Bot token",
+  "Admin chat ID": "Admin chat ID",
+  "Telegram: configured — push notifications can be sent": "Telegram: configured — push notifications can be sent",
+  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services"
 }

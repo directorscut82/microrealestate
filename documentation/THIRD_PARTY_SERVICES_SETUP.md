@@ -27,7 +27,21 @@ Section: **«Backblaze B2 Cloud Storage»**. 4 fields: `KeyId`, `ApplicationKey`
 
 Section: **«SMS Gateway»**. Fields: `Server URL`, `Username`, `Password`, `SMS Country Code` (e.g. `+30`). Generic HTTP SMS gateway.
 
-## 4. Mail reading (auto-detect incoming bills) — MULTIPLE mailboxes
+## 4. Telegram notifications (push / admin self-notify) — chosen messenger
+
+Section: **«Ειδοποιήσεις Telegram»**. 2 fields: `Bot token`, `Admin chat ID`. `botToken` is encrypted at rest (realmmanager, `botTokenUpdated` flag — same preserve-on-resave pattern as the SMS password). The app posts to `https://api.telegram.org/bot<token>/sendMessage`; reader/sender code: `services/emailer/src/telegram.ts` (`sendTelegram`), api proxy `emailmanager.sendTelegramNotification` → `POST /api/v2/emails/telegram`.
+
+**Why Telegram** (not WhatsApp/Viber/Signal): free, no business verification, setup is two pasted values. WhatsApp needs a Meta Business account + verified templates; Viber a partner account; Signal has no bot API (self-host signal-cli).
+
+**Generate (2 steps, ~30s, FREE):**
+1. In Telegram, search **@BotFather** (blue ✓) → `/newbot` → name + a username ending in `bot` → he replies with a **bot token** (`123456:ABC-…`).
+2. Open your new bot and **send it any message** (bots can't message you until you message them first). Then the **chat id** is fetched from `https://api.telegram.org/bot<token>/getUpdates` → `result[].message.chat.id`.
+
+**Scope today:** admin/self-notifications to `adminChatId` (the plumbing + the `/rents` "Telegram: configured" banner). Per-tenant delivery (storing each tenant's chat id) and automated triggers (overdue-rent alerts) are future extensions — the channel and the send path exist; nothing schedules them yet.
+
+**Verify:** `curl -s "https://api.telegram.org/bot<token>/getMe"` → `ok:true` proves the token; a real `sendMessage` to the chat id (200 `ok:true`) proves the whole loop.
+
+## 5. Mail reading (auto-detect incoming bills) — MULTIPLE mailboxes
 
 Section: **«Ανάγνωση email (αυτόματος εντοπισμός λογαριασμών)»**. A repeatable list — **«+ Προσθήκη γραμματοκιβωτίου»** adds another account. This is for READING an inbox (e.g. auto-detecting ΔΕΗ/utility bills → run through the bill parser → notify in-app). Separate from §1 (sending). Uses the **Gmail API (read-only)**, so it needs OAuth credentials, NOT an App Password.
 
@@ -78,6 +92,7 @@ Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. Δ
 | Mailgun | apiKey, domain | Mailgun dashboard |
 | Backblaze B2 | keyId, applicationKey, bucket, endpoint | backblaze.com B2 |
 | SMS | url, username, password, countryCode | SMS gateway provider |
+| Telegram | botToken, adminChatId | @BotFather + getUpdates (above) |
 | Mail reader (per mailbox) | email, clientId, clientSecret, refreshToken | Google Cloud + OAuth playground (above) |
 
 **Already-generated creds (local, gitignored — never commit):**
@@ -85,6 +100,7 @@ Scope `gmail.readonly` = read-only (list/read messages, filter by sender e.g. Δ
 - `.secrets/gmail-send-e2elandlord82` — e2elandlord82@gmail.com SENDING creds (Gmail App Password + from/reply-to). Verified: a real SMTP send succeeded (`250 OK`).
 - `.secrets/sms-gateway-sms-gate-app` — SMS-Gate for Android (sms-gate.app) device creds, BOTH modes (Local LAN + Cloud relay). NAS uses **Cloud** (`https://api.sms-gate.app`, user `LAGOWP`). Verified: a real SMS sent through the app (`POST /api/v2/emails/sms`) reached the phone, state `Delivered`. The realm `smsGateway.url` is the BASE url only — the emailer appends `/3rdparty/v1/messages`.
 - `.secrets/b2-microrealestate` — Backblaze B2 storage (bucket `MicroRealEstateDocuments`, endpoint `s3.eu-central-003.backblazeb2.com`, bucket-scoped Read+Write key). Verified: real S3 round-trip + a real app upload (`201` + Backblaze `versionId`).
+- `.secrets/telegram-microrealestate-bot` — Telegram bot **@MicroRealEstateBot** (`botToken` + `adminChatId`). Verified: a real `sendMessage` reached the phone (`ok:true`). Enter both in Settings → Ειδοποιήσεις Telegram.
 - `.secrets/landlord-account`, `.secrets/comprehensive-test-account` — realm admin logins.
 - `.secrets/portainer-token` — NAS Portainer API (deploy/inspect).
 
@@ -123,7 +139,7 @@ The `*Updated: true` flags tell realmmanager to encrypt the supplied value (omit
 
 ## CRITICAL: the encryption key must not change
 
-Every third-party secret (`gmail.appPassword`, `mailReaders[].clientSecret/refreshToken`, `smtp.password`, `mailgun.apiKey`, `b2.*`, `smsGateway.password`) is **AES-256-GCM encrypted with `CIPHER_KEY`**. On NAS that key is in `docker-compose.nas.yml` (local-only, NOT committed) under each service's env.
+Every third-party secret (`gmail.appPassword`, `mailReaders[].clientSecret/refreshToken`, `smtp.password`, `mailgun.apiKey`, `b2.*`, `smsGateway.password`, `telegram.botToken`) is **AES-256-GCM encrypted with `CIPHER_KEY`**. On NAS that key is in `docker-compose.nas.yml` (local-only, NOT committed) under each service's env.
 
 - **If `CIPHER_KEY` stays the same:** existing encrypted secrets in mongo keep decrypting; nothing to redo.
 - **If `CIPHER_KEY` changes / is regenerated:** ALL previously-stored secrets become undecryptable garbage. You must re-enter every third-party secret via the UI (which re-encrypts with the new key). So: **do not regenerate `CIPHER_KEY` unless you intend to re-enter all secrets.**
@@ -146,9 +162,10 @@ A realm is created via the UI (first-run onboarding) or `POST /api/v2/realms` as
 Sign in as the realm admin → **Ρυθμίσεις → Πάροχοι τρίτων** and re-enter, reading values from `.secrets/`:
 
 1. **Email delivery → Gmail** (from `.secrets/gmail-send-e2elandlord82`): toggle on, pick Gmail, `Email` = EMAIL, `Κωδικός εφαρμογής` = APP_PASSWORD, `Από Email` = FROM_EMAIL, `Απάντηση σε email` = REPLY_TO_EMAIL. Save.
-2. **Backblaze B2** (if configured; from a `.secrets/b2-*` file when created): keyId / applicationKey / bucket / endpoint. **This is what persists generated PDFs** — without it PDFs are not saved to cloud.
-3. **SMS Gateway** — only if you use SMS (from a `.secrets/sms-*` file).
-4. **Ανάγνωση email (mail readers)** (from `.secrets/gmail-oauth-e2elandlord82`): toggle on, Γραμματοκιβώτιο 1 → Email = EMAIL, Client ID = CLIENT_ID, Client secret = CLIENT_SECRET, Refresh token = REFRESH_TOKEN, Label optional. «+ Προσθήκη γραμματοκιβωτίου» for more mailboxes. Save.
+2. **Backblaze B2** (from `.secrets/b2-microrealestate`): keyId / applicationKey / bucket / endpoint. **This is what persists uploaded file-documents** — without it uploads fall back to local disk.
+3. **SMS Gateway** (from `.secrets/sms-gateway-sms-gate-app`): url (BASE only) / username / password / countryCode. NAS uses the Cloud creds.
+4. **Ειδοποιήσεις Telegram** (from `.secrets/telegram-microrealestate-bot`): toggle on, `Bot token` = BOT_TOKEN, `Admin chat ID` = ADMIN_CHAT_ID. Save.
+5. **Ανάγνωση email (mail readers)** (from `.secrets/gmail-oauth-e2elandlord82`): toggle on, Γραμματοκιβώτιο 1 → Email = EMAIL, Client ID = CLIENT_ID, Client secret = CLIENT_SECRET, Refresh token = REFRESH_TOKEN, Label optional. «+ Προσθήκη γραμματοκιβωτίου» for more mailboxes. Save.
 
 ## Step 4 — Verify (don't trust "saved")
 

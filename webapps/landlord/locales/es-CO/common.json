@@ -1153,5 +1153,12 @@
   "Client ID": "Client ID",
   "Client secret": "Client secret",
   "Refresh token": "Refresh token",
-  "Add mailbox": "Agregar buzón"
+  "Add mailbox": "Agregar buzón",
+  "Telegram notifications": "Notificaciones de Telegram",
+  "Send push notifications through a Telegram bot (e.g. alert yourself about overdue rents). Needs a bot token and a chat id.": "Envíe notificaciones push a través de un bot de Telegram (p. ej. para alertarse sobre alquileres vencidos). Requiere un token de bot y un chat id.",
+  "How to create a Telegram bot token (message @BotFather)": "Cómo crear un token de bot de Telegram (envíe un mensaje a @BotFather)",
+  "Bot token": "Token del bot",
+  "Admin chat ID": "Chat ID del administrador",
+  "Telegram: configured — push notifications can be sent": "Telegram: configurado — se pueden enviar notificaciones",
+  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Mensajería (WhatsApp, Telegram, Viber, Signal): no configurado — configure Telegram en Ajustes → Servicios de terceros"
 }

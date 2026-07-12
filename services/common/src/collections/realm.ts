@@ -126,6 +126,18 @@ const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
       username: String,
       password: String,
       countryCode: String // e.g., '+30', '+1'
+    },
+    // Telegram bot channel — for push notifications (initially admin/self
+    // notifications to `adminChatId`; per-tenant delivery is a future
+    // extension). Config is a bot token (from @BotFather) + the chat id the
+    // bot should message. `botToken` is encrypted at rest (realmmanager), like
+    // every other third-party secret. Chosen over WhatsApp/Viber/Signal
+    // because it needs no business verification and the whole setup is two
+    // pasted values.
+    telegram: {
+      selected: Boolean,
+      botToken: String,
+      adminChatId: String
     }
   },
   locale: String,

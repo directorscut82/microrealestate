@@ -1,5 +1,6 @@
 import * as Emailer from './emailer.js';
 import { sendSms } from './sms.js';
+import { sendTelegram } from './telegram.js';
 import {
   logger,
   Middlewares,
@@ -102,6 +103,22 @@ export default function routes(): express.Router {
       const result = await sendSms(realmId, phoneNumber, text);
       if (!result) {
         throw new ServiceError('SMS gateway not configured', 503);
+      }
+      res.json(result);
+    })
+  );
+
+  apiRouter.post(
+    '/emailer/telegram',
+    Middlewares.asyncWrapper(async (req: Request, res: Response) => {
+      const { text, chatId } = req.body;
+      if (!text) {
+        throw new ServiceError('text is required', 422);
+      }
+      const realmId = String((req as any).realm?._id || req.headers.organizationid);
+      const result = await sendTelegram(realmId, text, chatId);
+      if (!result) {
+        throw new ServiceError('Telegram not configured', 503);
       }
       res.json(result);
     })
