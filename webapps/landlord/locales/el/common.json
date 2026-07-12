@@ -1287,5 +1287,15 @@
   "Net earnings": "Καθαρά έσοδα",
   "Name the co-owner": "Ονομάστε τον συνιδιοκτήτη",
   "this unit": "αυτή τη μονάδα",
-  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Αυτό είναι το μερίδιο του ανώνυμου συνιδιοκτήτη της {{unit}}. Καταχωρίστε τον πραγματικό ιδιοκτήτη προσθέτοντας το όνομα και το Α.Φ.Μ. του στη μονάδα· το υπόλοιπο θα μεταφερθεί αυτόματα σε αυτόν."
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Αυτό είναι το μερίδιο του ανώνυμου συνιδιοκτήτη της {{unit}}. Καταχωρίστε τον πραγματικό ιδιοκτήτη προσθέτοντας το όνομα και το Α.Φ.Μ. του στη μονάδα· το υπόλοιπο θα μεταφερθεί αυτόματα σε αυτόν.",
+  "Mail reading (auto-detect bills)": "Ανάγνωση email (αυτόματος εντοπισμός λογαριασμών)",
+  "Read one or more mailboxes to auto-detect incoming utility bills (e.g. ΔΕΗ) and notify you in the app. Uses the Gmail API (read-only).": "Διαβάστε ένα ή περισσότερα γραμματοκιβώτια για αυτόματο εντοπισμό εισερχόμενων λογαριασμών (π.χ. ΔΕΗ) και ειδοποίηση στην εφαρμογή. Χρησιμοποιεί το Gmail API (μόνο ανάγνωση).",
+  "How to create the Client ID, Client secret and Refresh token (Google Cloud + OAuth)": "Πώς να δημιουργήσετε Client ID, Client secret και Refresh token (Google Cloud + OAuth)",
+  "Mailbox {{n}}": "Γραμματοκιβώτιο {{n}}",
+  "Label (optional)": "Ετικέτα (προαιρετικό)",
+  "e.g. Bills inbox": "π.χ. Εισερχόμενα λογαριασμών",
+  "Client ID": "Client ID",
+  "Client secret": "Client secret",
+  "Refresh token": "Refresh token",
+  "Add mailbox": "Προσθήκη γραμματοκιβωτίου"
 }

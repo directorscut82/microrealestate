@@ -1,7 +1,7 @@
 import { mergeOrganization, updateStoreOrganization } from './utils';
 import { QueryKeys, updateOrganization } from '../../utils/restcalls';
 import { useCallback, useContext, useMemo } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -53,6 +53,19 @@ const schema = z.object({
     .string()
     .regex(/^\+\d{1,4}$/)
     .or(z.literal(''))
+    .optional(),
+  mailReadersActive: z.boolean(),
+  mailReaders: z
+    .array(
+      z.object({
+        provider: z.string().optional(),
+        email: z.string().trim().email().or(z.literal('')).optional(),
+        clientId: z.string().optional(),
+        clientSecret: z.string().optional(),
+        refreshToken: z.string().optional(),
+        label: z.string().optional()
+      })
+    )
     .optional()
 });
 
@@ -128,21 +141,33 @@ export default function ThirdPartiesForm({ organization }) {
       smsUrl: organization.thirdParties?.smsGateway?.url || '',
       smsUsername: organization.thirdParties?.smsGateway?.username || '',
       smsPassword: organization.thirdParties?.smsGateway?.password || '',
-      smsCountryCode: organization.thirdParties?.smsGateway?.countryCode || ''
+      smsCountryCode: organization.thirdParties?.smsGateway?.countryCode || '',
+      mailReadersActive: (organization.thirdParties?.mailReaders || []).length > 0,
+      mailReaders: (organization.thirdParties?.mailReaders || []).map((r) => ({
+        provider: r.provider || 'gmail',
+        email: r.email || '',
+        clientId: r.clientId || '',
+        clientSecret: r.clientSecret || '',
+        refreshToken: r.refreshToken || '',
+        label: r.label || ''
+      }))
     };
   }, [organization]);
 
-  const { register, handleSubmit, watch, setValue, formState: { isSubmitting } } = useForm({
+  const { register, handleSubmit, watch, setValue, control, formState: { isSubmitting } } = useForm({
     resolver: zodResolver(schema),
     defaultValues: initialValues,
     values: initialValues
   });
+  const { fields: readerFields, append: appendReader, remove: removeReader } =
+    useFieldArray({ control, name: 'mailReaders' });
 
   const emailActive = watch('emailDeliveryServiceActive');
   const emailService = watch('emailDeliveryServiceName');
   const smtpAuth = watch('smtp_authentication');
   const b2Active = watch('b2Active');
   const smsActive = watch('smsActive');
+  const mailReadersActive = watch('mailReadersActive');
 
   const onSubmit = useCallback(
     async (values) => {
@@ -204,6 +229,25 @@ export default function ThirdPartiesForm({ organization }) {
         };
       } else {
         formData.thirdParties.smsGateway = null;
+      }
+      if (values.mailReadersActive) {
+        formData.thirdParties.mailReaders = (values.mailReaders || [])
+          .filter((r) => (r.email || '').trim())
+          .map((r, i) => {
+            const prev = initialValues.mailReaders?.[i] || {};
+            return {
+              provider: r.provider || 'gmail',
+              email: r.email,
+              clientId: r.clientId,
+              clientSecret: r.clientSecret,
+              refreshToken: r.refreshToken,
+              label: r.label || '',
+              clientSecretUpdated: r.clientSecret !== prev.clientSecret,
+              refreshTokenUpdated: r.refreshToken !== prev.refreshToken
+            };
+          });
+      } else {
+        formData.thirdParties.mailReaders = [];
       }
       await mutateAsync(mergeOrganization(organization, formData));
     },
@@ -302,6 +346,77 @@ export default function ThirdPartiesForm({ organization }) {
             <div className="space-y-2 mt-2"><Label htmlFor="smsPassword">{t('Password')}</Label><Input id="smsPassword" type="password" {...register('smsPassword')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="smsCountryCode">{t('SMS Country Code')}</Label><Input id="smsCountryCode" placeholder="+30" {...register('smsCountryCode')} /></div>
           </>
+        ) : null}
+      </SectionWithSwitch>
+      <SectionWithSwitch
+        label={t('Mail reading (auto-detect bills)')}
+        description={t('Read one or more mailboxes to auto-detect incoming utility bills (e.g. ΔΕΗ) and notify you in the app. Uses the Gmail API (read-only).')}
+        switchChecked={mailReadersActive}
+        onSwitchChange={(v) => {
+          setValue('mailReadersActive', v);
+          if (v && readerFields.length === 0) {
+            appendReader({ provider: 'gmail', email: '', clientId: '', clientSecret: '', refreshToken: '', label: '' });
+          }
+        }}
+      >
+        {mailReadersActive ? (
+          <div className="space-y-4">
+            <Link
+              href="https://console.cloud.google.com/apis/credentials"
+              target="_blank"
+              rel="noreferrer"
+              className="my-2"
+            >
+              {t('How to create the Client ID, Client secret and Refresh token (Google Cloud + OAuth)')}
+            </Link>
+            {readerFields.map((field, idx) => (
+              <div key={field.id} className="rounded-lg border border-border p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">
+                    {t('Mailbox {{n}}', { n: idx + 1 })}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeReader(idx)}
+                  >
+                    {t('Remove')}
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor={`mailReaders.${idx}.email`}>{t('Email')}</Label>
+                    <Input id={`mailReaders.${idx}.email`} type="email" placeholder="name@gmail.com" {...register(`mailReaders.${idx}.email`)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`mailReaders.${idx}.label`}>{t('Label (optional)')}</Label>
+                    <Input id={`mailReaders.${idx}.label`} placeholder={t('e.g. Bills inbox')} {...register(`mailReaders.${idx}.label`)} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`mailReaders.${idx}.clientId`}>{t('Client ID')}</Label>
+                  <Input id={`mailReaders.${idx}.clientId`} autoComplete="off" {...register(`mailReaders.${idx}.clientId`)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`mailReaders.${idx}.clientSecret`}>{t('Client secret')}</Label>
+                  <Input id={`mailReaders.${idx}.clientSecret`} type="password" autoComplete="off" {...register(`mailReaders.${idx}.clientSecret`)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`mailReaders.${idx}.refreshToken`}>{t('Refresh token')}</Label>
+                  <Input id={`mailReaders.${idx}.refreshToken`} type="password" autoComplete="off" {...register(`mailReaders.${idx}.refreshToken`)} />
+                </div>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => appendReader({ provider: 'gmail', email: '', clientId: '', clientSecret: '', refreshToken: '', label: '' })}
+            >
+              + {t('Add mailbox')}
+            </Button>
+          </div>
         ) : null}
       </SectionWithSwitch>
       <Button type="submit" disabled={isSubmitting} data-cy="submit">

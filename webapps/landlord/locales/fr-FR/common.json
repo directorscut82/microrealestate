@@ -1143,5 +1143,15 @@
   "Net earnings": "Revenus nets",
   "Name the co-owner": "Nommer le copropriétaire",
   "this unit": "ce lot",
-  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Il s'agit de la part du copropriétaire non nommé de {{unit}}. Enregistrez le véritable propriétaire en ajoutant son nom et son numéro fiscal sur le lot ; ce solde lui sera alors transféré automatiquement."
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Il s'agit de la part du copropriétaire non nommé de {{unit}}. Enregistrez le véritable propriétaire en ajoutant son nom et son numéro fiscal sur le lot ; ce solde lui sera alors transféré automatiquement.",
+  "Mail reading (auto-detect bills)": "Lecture des e-mails (détection automatique des factures)",
+  "Read one or more mailboxes to auto-detect incoming utility bills (e.g. ΔΕΗ) and notify you in the app. Uses the Gmail API (read-only).": "Lisez une ou plusieurs boîtes mail pour détecter automatiquement les factures entrantes (p. ex. ΔΕΗ) et vous notifier dans l'application. Utilise l'API Gmail (lecture seule).",
+  "How to create the Client ID, Client secret and Refresh token (Google Cloud + OAuth)": "Comment créer le Client ID, le Client secret et le Refresh token (Google Cloud + OAuth)",
+  "Mailbox {{n}}": "Boîte mail {{n}}",
+  "Label (optional)": "Libellé (facultatif)",
+  "e.g. Bills inbox": "p. ex. Boîte factures",
+  "Client ID": "Client ID",
+  "Client secret": "Client secret",
+  "Refresh token": "Refresh token",
+  "Add mailbox": "Ajouter une boîte mail"
 }

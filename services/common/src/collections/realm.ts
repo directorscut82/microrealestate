@@ -78,6 +78,24 @@ const RealmSchema = new mongoose.Schema<CollectionTypes.Realm>({
       fromEmail: String,
       replyToEmail: String
     },
+    // Inbox READERS (separate from the single SENDING provider above): a LIST of
+    // mailboxes the app can read to auto-detect incoming bills (ΔΕΗ/utility) and
+    // notify the landlord. Multiple accounts supported (user requirement). Each
+    // uses the Gmail API (OAuth2) — client id/secret + a refresh token obtained
+    // once from a Google Cloud project (Gmail API enabled) + consent flow.
+    // clientSecret + refreshToken are encrypted at rest (realmmanager), like
+    // every other third-party secret. `provider` is future-proofing (only
+    // 'gmail' today).
+    mailReaders: [
+      {
+        provider: { type: String, default: 'gmail' },
+        email: String,
+        clientId: String,
+        clientSecret: String,
+        refreshToken: String,
+        label: String
+      }
+    ],
     smtp: {
       selected: Boolean,
       server: String,

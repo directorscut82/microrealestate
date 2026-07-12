@@ -124,6 +124,17 @@ export namespace CollectionTypes {
         password: string;
         countryCode?: string;
       };
+      // Inbox readers (multiple mailboxes) for auto-detecting incoming bills.
+      // Separate from the single SENDING provider above. clientSecret +
+      // refreshToken are encrypted at rest.
+      mailReaders?: {
+        provider: string;
+        email: string;
+        clientId: string;
+        clientSecret: string;
+        refreshToken: string;
+        label?: string;
+      }[];
     };
     locale: Locale;
     currency: string;

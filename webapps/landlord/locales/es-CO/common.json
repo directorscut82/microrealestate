@@ -1143,5 +1143,15 @@
   "Net earnings": "Ingresos netos",
   "Name the co-owner": "Nombrar al copropietario",
   "this unit": "esta unidad",
-  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Esta es la parte del copropietario sin nombre de {{unit}}. Registre al propietario real agregando su nombre y su NIF en la unidad; este saldo pasará entonces automáticamente a ese propietario."
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "Esta es la parte del copropietario sin nombre de {{unit}}. Registre al propietario real agregando su nombre y su NIF en la unidad; este saldo pasará entonces automáticamente a ese propietario.",
+  "Mail reading (auto-detect bills)": "Lectura de correo (detección automática de facturas)",
+  "Read one or more mailboxes to auto-detect incoming utility bills (e.g. ΔΕΗ) and notify you in the app. Uses the Gmail API (read-only).": "Lea uno o más buzones para detectar automáticamente facturas entrantes (p. ej. ΔΕΗ) y notificarle en la aplicación. Usa la API de Gmail (solo lectura).",
+  "How to create the Client ID, Client secret and Refresh token (Google Cloud + OAuth)": "Cómo crear el Client ID, Client secret y Refresh token (Google Cloud + OAuth)",
+  "Mailbox {{n}}": "Buzón {{n}}",
+  "Label (optional)": "Etiqueta (opcional)",
+  "e.g. Bills inbox": "p. ej. Bandeja de facturas",
+  "Client ID": "Client ID",
+  "Client secret": "Client secret",
+  "Refresh token": "Refresh token",
+  "Add mailbox": "Agregar buzón"
 }

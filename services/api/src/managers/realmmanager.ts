@@ -134,6 +134,10 @@ function _escapeSecrets(realm: AnyRecord): AnyRecord {
   if (realm.thirdParties?.smsGateway?.password) {
     realm.thirdParties.smsGateway.password = SECRET_PLACEHOLDER;
   }
+  for (const reader of (realm.thirdParties?.mailReaders || [])) {
+    if (reader.clientSecret) reader.clientSecret = SECRET_PLACEHOLDER;
+    if (reader.refreshToken) reader.refreshToken = SECRET_PLACEHOLDER;
+  }
   for (const app of (realm.applications || [])) {
     app.clientSecret = SECRET_PLACEHOLDER;
   }
@@ -218,6 +222,15 @@ export async function add(req: Req, res: Res) {
     newRealm.thirdParties.smsGateway.password = Crypto.encrypt(
       newRealm.thirdParties.smsGateway.password
     );
+  }
+
+  for (const reader of (newRealm.thirdParties?.mailReaders || [])) {
+    if (reader.clientSecret) {
+      reader.clientSecret = Crypto.encrypt(reader.clientSecret);
+    }
+    if (reader.refreshToken) {
+      reader.refreshToken = Crypto.encrypt(reader.refreshToken);
+    }
   }
 
   res.json(_escapeSecrets(await newRealm.save()));
@@ -428,6 +441,44 @@ export async function update(req: Req, res: Res) {
     } else {
       updatedRealm.thirdParties.smsGateway.password = previousSmsPassword;
     }
+  }
+
+  // Mail readers (inbox auto-detect). Encrypt clientSecret/refreshToken when the
+  // client flags them updated (or no prior value); otherwise carry the prior
+  // encrypted value forward by matching the previous reader on email. Same
+  // secret-preservation pattern as gmail/smtp/mailgun/b2/sms above so re-saving
+  // the form (which sends masked placeholders) never double-encrypts or wipes a
+  // secret the user did not retype.
+  if (req.body.thirdParties?.mailReaders) {
+    const prevReaders = previousRealm.thirdParties?.mailReaders || [];
+    const prevByEmail = new Map(
+      prevReaders.map((r: AnyRecord) => [String(r.email || ''), r])
+    );
+    updatedRealm.thirdParties.mailReaders = (
+      req.body.thirdParties.mailReaders || []
+    ).map((reader: AnyRecord) => {
+      const prev: AnyRecord = (prevByEmail.get(String(reader.email || '')) ||
+        {}) as AnyRecord;
+      const out: AnyRecord = {
+        provider: reader.provider || 'gmail',
+        email: reader.email,
+        clientId: reader.clientId,
+        label: reader.label || ''
+      };
+      out.clientSecret =
+        reader.clientSecretUpdated || !prev.clientSecret
+          ? reader.clientSecret
+            ? Crypto.encrypt(reader.clientSecret)
+            : ''
+          : prev.clientSecret;
+      out.refreshToken =
+        reader.refreshTokenUpdated || !prev.refreshToken
+          ? reader.refreshToken
+            ? Crypto.encrypt(reader.refreshToken)
+            : ''
+          : prev.refreshToken;
+      return out;
+    });
   }
 
   // Only fetch accounts that match realm member emails (not ALL accounts)

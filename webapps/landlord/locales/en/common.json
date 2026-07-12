@@ -1267,5 +1267,15 @@
   "Net earnings": "Net earnings",
   "Name the co-owner": "Name the co-owner",
   "this unit": "this unit",
-  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically."
+  "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.": "This is the un-named co-owner share of {{unit}}. Record the real owner by adding their name and Α.Φ.Μ. on the unit; this balance then moves to that owner automatically.",
+  "Mail reading (auto-detect bills)": "Mail reading (auto-detect bills)",
+  "Read one or more mailboxes to auto-detect incoming utility bills (e.g. ΔΕΗ) and notify you in the app. Uses the Gmail API (read-only).": "Read one or more mailboxes to auto-detect incoming utility bills (e.g. ΔΕΗ) and notify you in the app. Uses the Gmail API (read-only).",
+  "How to create the Client ID, Client secret and Refresh token (Google Cloud + OAuth)": "How to create the Client ID, Client secret and Refresh token (Google Cloud + OAuth)",
+  "Mailbox {{n}}": "Mailbox {{n}}",
+  "Label (optional)": "Label (optional)",
+  "e.g. Bills inbox": "e.g. Bills inbox",
+  "Client ID": "Client ID",
+  "Client secret": "Client secret",
+  "Refresh token": "Refresh token",
+  "Add mailbox": "Add mailbox"
 }
