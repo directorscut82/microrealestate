@@ -685,7 +685,7 @@
   "Revenues": "Chiffre d'affaires",
   "Role": "Rôle",
   "Room": "Pièce",
-  "SMS Country Code": "SMS Country Code",
+  "SMS Country Code": "Indicatif pays SMS",
   "SMS Gateway": "Passerelle SMS",
   "SMS sending failed": "Échec envoi SMS",
   "SMS sent": "SMS envoyé",
