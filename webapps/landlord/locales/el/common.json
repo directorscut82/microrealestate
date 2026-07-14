@@ -523,7 +523,6 @@
   "Mark paid": "Σήμανση ως πληρωμένο",
   "Mark {{count}} past months as paid": "Σήμανση {{count}} προηγούμενων μηνών ως πληρωμένων",
   "Mark {{count}} past months as paid_one": "Σήμανση 1 προηγούμενου μήνα ως πληρωμένου",
-  "Maximum 10 files per import; only the first 10 will be kept": "Μέγιστο 10 αρχεία ανά εισαγωγή· θα διατηρηθούν μόνο τα πρώτα 10",
   "Menu": "Μενού",
   "Merge cells": "Συγχώνευση κελιών",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet": "Messengers (WhatsApp, Telegram, Viber, Signal): δεν έχουν υλοποιηθεί ακόμα",
@@ -1304,5 +1303,6 @@
   "Bot token": "Token bot",
   "Admin chat ID": "Chat ID διαχειριστή",
   "Telegram: configured — push notifications can be sent": "Telegram: ρυθμισμένο — μπορούν να αποσταλούν ειδοποιήσεις",
-  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Εφαρμογές μηνυμάτων (WhatsApp, Telegram, Viber, Signal): δεν έχουν ρυθμιστεί — ρυθμίστε το Telegram στις Ρυθμίσεις → Πάροχοι τρίτων"
+  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Εφαρμογές μηνυμάτων (WhatsApp, Telegram, Viber, Signal): δεν έχουν ρυθμιστεί — ρυθμίστε το Telegram στις Ρυθμίσεις → Πάροχοι τρίτων",
+  "Maximum 25 files per import; only the first 25 will be kept": "Μέγιστο 25 αρχεία ανά εισαγωγή· θα διατηρηθούν μόνο τα πρώτα 25"
 }

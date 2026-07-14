@@ -473,7 +473,6 @@
   "Mark a unit as owner-occupied to track owner expenses and exclude from occupancy rate.": "Markieren Sie eine Einheit als eigengenutzt, um Eigentümerausgaben zu erfassen und sie von der Belegungsquote auszuschließen.",
   "Mark {{count}} past months as paid": "{{count}} vergangene Monate als bezahlt markieren",
   "Mark {{count}} past months as paid_one": "1 vergangenen Monat als bezahlt markieren",
-  "Maximum 10 files per import; only the first 10 will be kept": "Maximal 10 Dateien pro Import; nur die ersten 10 werden behalten",
   "Menu": "Menü",
   "Merge cells": "Zellen verbinden",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet": "Messenger (WhatsApp, Telegram, Viber, Signal): noch nicht implementiert",
@@ -1160,5 +1159,6 @@
   "Bot token": "Bot-Token",
   "Admin chat ID": "Admin-Chat-ID",
   "Telegram: configured — push notifications can be sent": "Telegram: konfiguriert — Benachrichtigungen können gesendet werden",
-  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messenger (WhatsApp, Telegram, Viber, Signal): nicht konfiguriert — richten Sie Telegram unter Einstellungen → Drittanbieterdienste ein"
+  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messenger (WhatsApp, Telegram, Viber, Signal): nicht konfiguriert — richten Sie Telegram unter Einstellungen → Drittanbieterdienste ein",
+  "Maximum 25 files per import; only the first 25 will be kept": "Maximal 25 Dateien pro Import; nur die ersten 25 werden behalten"
 }

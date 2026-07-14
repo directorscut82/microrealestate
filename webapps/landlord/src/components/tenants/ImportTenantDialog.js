@@ -380,6 +380,19 @@ export default function ImportTenantDialog({ open, setOpen }) {
       // can't drop the others. `failures[]` is surfaced in the result toast.
       const failures = [];
 
+      // BUGFIX (import 422 "lease with name ... already exists", reported
+      // 2026-07): the auto-match effect only reuses leases that already exist
+      // in the query cache. Two PDFs in the SAME batch with the same month
+      // count (e.g. both 24) each found no pre-existing lease, so BOTH called
+      // createLease with the identical name "Lease 24 months" — the 2nd 422'd
+      // and that row died. Cache leases created (or matched) during THIS batch
+      // by name so the second row reuses the first row's lease instead of
+      // re-POSTing a duplicate. Seed it with the leases already on the realm.
+      const leaseByName = new Map();
+      for (const l of activeLeases) {
+        if (l?.name) leaseByName.set(l.name, l._id);
+      }
+
       for (let idx = 0; idx < parsedResults.length; idx++) {
         const parsed = parsedResults[idx];
         const matchInfo = matchInfos[idx];
@@ -411,13 +424,39 @@ export default function ImportTenantDialog({ open, setOpen }) {
         // 1. Resolve lease
         let leaseId = selectedLeaseIds[idx] || '';
         if (!leaseId) {
-          const newLease = await createLease({
-            name: t('Lease {{count}} months', { count: months }),
-            numberOfTerms: months,
-            timeRange: 'months',
-            active: true
-          });
-          leaseId = newLease._id;
+          const leaseName = t('Lease {{count}} months', { count: months });
+          // Reuse a lease of the same name created earlier in THIS batch (or
+          // already on the realm) instead of POSTing a duplicate that 422s.
+          leaseId = leaseByName.get(leaseName) || '';
+          if (!leaseId) {
+            try {
+              const newLease = await createLease({
+                name: leaseName,
+                numberOfTerms: months,
+                timeRange: 'months',
+                active: true
+              });
+              leaseId = newLease._id;
+            } catch (leaseErr) {
+              // Defensive: if the server reports the name already exists
+              // (concurrent/duplicate), refetch and reuse it rather than
+              // failing the row.
+              const msg =
+                leaseErr?.response?.data?.message || leaseErr?.message || '';
+              if (
+                leaseErr?.response?.status === 422 &&
+                /already exists/i.test(msg)
+              ) {
+                const fresh = await fetchLeases();
+                const found = (fresh || []).find((l) => l.name === leaseName);
+                if (!found) throw leaseErr;
+                leaseId = found._id;
+              } else {
+                throw leaseErr;
+              }
+            }
+          }
+          leaseByName.set(leaseName, leaseId);
         }
 
         // 2. Resolve properties (P2.9 / N1)
@@ -1121,19 +1160,18 @@ export default function ImportTenantDialog({ open, setOpen }) {
               multiple
               files={files}
               onFilesChange={(newFiles) => {
-                // P1.6 / N2: cap to 10 files — the server-side
-                // uploadRateLimit middleware (services/api/src/routes.ts)
-                // is hard-set to 10/min/user, so anything beyond 10 is
-                // guaranteed to 429 and force a 1-minute backoff. Better
-                // to surface the limit in-band before parse than to let
-                // the user queue 30 files and hit a wall halfway through.
-                if (newFiles.length > 10) {
+                // Cap to 25 files. The server uploadRateLimit
+                // (services/api/src/routes.ts) is 60 uploads/min/user and each
+                // imported PDF fires 2 uploads (parse + confirm), so 25 files =
+                // 50 uploads stays under the 60/min budget with headroom. (The
+                // old cap was 10, mirroring a since-raised 10/min server limit.)
+                if (newFiles.length > 25) {
                   toast.warning(
                     t(
-                      'Maximum 10 files per import; only the first 10 will be kept'
+                      'Maximum 25 files per import; only the first 25 will be kept'
                     )
                   );
-                  setFiles(newFiles.slice(0, 10));
+                  setFiles(newFiles.slice(0, 25));
                 } else {
                   setFiles(newFiles);
                 }

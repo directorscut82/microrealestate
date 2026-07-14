@@ -500,7 +500,6 @@
   "Mark paid": "Mark paid",
   "Mark {{count}} past months as paid": "Mark {{count}} past months as paid",
   "Mark {{count}} past months as paid_one": "Mark 1 past month as paid",
-  "Maximum 10 files per import; only the first 10 will be kept": "Maximum 10 files per import; only the first 10 will be kept",
   "Menu": "Menu",
   "Merge cells": "Merge cells",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet": "Messengers (WhatsApp, Telegram, Viber, Signal): not implemented yet",
@@ -1284,5 +1283,6 @@
   "Bot token": "Bot token",
   "Admin chat ID": "Admin chat ID",
   "Telegram: configured — push notifications can be sent": "Telegram: configured — push notifications can be sent",
-  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services"
+  "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services",
+  "Maximum 25 files per import; only the first 25 will be kept": "Maximum 25 files per import; only the first 25 will be kept"
 }

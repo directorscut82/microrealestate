@@ -381,19 +381,18 @@ export default function ImportE9Dialog({ open, setOpen }) {
               multiple
               files={files}
               onFilesChange={(newFiles) => {
-                // T2.P1.5: cap at 10 to mirror ImportTenantDialog. The
-                // server-side uploadRateLimit middleware
-                // (services/api/src/routes.ts:21) is hard-set to 10/min/user
-                // and parse+confirm both upload, so anything beyond 10 is
-                // guaranteed to 429 mid-batch. Surface the cap before parse
-                // rather than letting the user queue 30 files and hit a wall.
-                if (newFiles.length > 10) {
+                // Cap at 25 to mirror ImportTenantDialog. The server-side
+                // uploadRateLimit middleware (services/api/src/routes.ts) is
+                // 60 uploads/min/user and parse+confirm both upload, so 25
+                // files = 50 uploads stays under budget. (Was 10, mirroring a
+                // since-raised 10/min server limit.)
+                if (newFiles.length > 25) {
                   toast.warning(
                     t(
-                      'Maximum 10 files per import; only the first 10 will be kept'
+                      'Maximum 25 files per import; only the first 25 will be kept'
                     )
                   );
-                  setFiles(newFiles.slice(0, 10));
+                  setFiles(newFiles.slice(0, 25));
                 } else {
                   setFiles(newFiles);
                 }
