@@ -1070,7 +1070,6 @@
   "{{existing}} of {{total}} units already exist": "{{existing}} von {{total}} Einheiten existieren bereits",
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} bis {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
-  "{{name}} - {{status}}": "{{name}} - {{status}}",
   "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
   "Expiring leases": "Auslaufende Mietverträge",
   "Lease expires on {{date}}": "Mietvertrag läuft am {{date}} ab",
@@ -1160,5 +1159,8 @@
   "Admin chat ID": "Admin-Chat-ID",
   "Telegram: configured — push notifications can be sent": "Telegram: konfiguriert — Benachrichtigungen können gesendet werden",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messenger (WhatsApp, Telegram, Viber, Signal): nicht konfiguriert — richten Sie Telegram unter Einstellungen → Drittanbieterdienste ein",
-  "Maximum 25 files per import; only the first 25 will be kept": "Maximal 25 Dateien pro Import; nur die ersten 25 werden behalten"
+  "Maximum 25 files per import; only the first 25 will be kept": "Maximal 25 Dateien pro Import; nur die ersten 25 werden behalten",
+  "Select all": "Alle auswählen",
+  "{{count}} tenants without email/SMS": "{{count}} Mieter ohne E-Mail/SMS",
+  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}"
 }

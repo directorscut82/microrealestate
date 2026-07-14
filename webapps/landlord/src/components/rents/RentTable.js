@@ -569,6 +569,17 @@ function RentTable({ rents = [], selected, setSelected }) {
     }, []).length;
   }, [rents]);
 
+  // Count tenants unreachable by email AND by SMS — they can't receive any
+  // batch notification, which is why their row checkbox is disabled. Surfaced
+  // next to the "select all" control so the disabled rows are explained rather
+  // than looking broken. hasContactPhones is set server-side (frontdata) to
+  // mirror emailmanager._sendSms's phone sources.
+  const noContactNum = useMemo(() => {
+    return rents.filter(
+      ({ occupant }) => !occupant?.hasContactEmails && !occupant?.hasContactPhones
+    ).length;
+  }, [rents]);
+
   const onSelectAllClick = useCallback(
     (checked) => {
       let rentSelected = [];
@@ -652,16 +663,37 @@ function RentTable({ rents = [], selected, setSelected }) {
         <Card className="p-6">
           {store.organization.canSendEmails ? (
             <div className="space-y-2">
-              <Checkbox
-                checked={
-                  selected.length > 0 && selected.length < selectableRentNum
-                    ? 'intermediate'
-                    : selected.length === selectableRentNum
-                }
-                disabled={!store.organization.canSendEmails}
-                onCheckedChange={onSelectAllClick}
-                aria-labelledby={t('select all rents')}
-              />
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="select-all-rents"
+                  checked={
+                    selectableRentNum > 0 && selected.length === selectableRentNum
+                      ? true
+                      : selected.length > 0
+                        ? 'intermediate'
+                        : false
+                  }
+                  disabled={
+                    !store.organization.canSendEmails || selectableRentNum === 0
+                  }
+                  onCheckedChange={onSelectAllClick}
+                  aria-labelledby="select-all-rents-label"
+                />
+                <label
+                  id="select-all-rents-label"
+                  htmlFor="select-all-rents"
+                  className="text-sm font-medium cursor-pointer select-none"
+                >
+                  {t('Select all')}
+                </label>
+                {noContactNum > 0 ? (
+                  <span className="text-xs text-muted-foreground">
+                    {t('{{count}} tenants without email/SMS', {
+                      count: noContactNum
+                    })}
+                  </span>
+                ) : null}
+              </div>
               <Separator className="my-1" />
             </div>
           ) : null}

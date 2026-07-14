@@ -444,6 +444,8 @@ export namespace CollectionTypes {
     // response shape is type-checked end-to-end.
     contactEmails?: string[];
     hasContactEmails?: boolean;
+    contactPhones?: string[];
+    hasContactPhones?: boolean;
     status?: 'inprogress' | 'stopped';
     terminated?: boolean;
     lease?: Lease;

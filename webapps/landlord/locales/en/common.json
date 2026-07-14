@@ -1186,7 +1186,6 @@
   "{{existing}} of {{total}} units already exist": "{{existing}} of {{total}} units already exist",
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} to {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
-  "{{name}} - {{status}}": "{{name}} - {{status}}",
   "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
   "{{part}} m² ÷ {{whole}} m² × {{total}} € = {{share}} €": "{{part}} m² ÷ {{whole}} m² × {{total}} € = {{share}} €",
   "{{part}}m² of {{whole}}m²": "{{part}}m² of {{whole}}m²",
@@ -1284,5 +1283,8 @@
   "Admin chat ID": "Admin chat ID",
   "Telegram: configured — push notifications can be sent": "Telegram: configured — push notifications can be sent",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services",
-  "Maximum 25 files per import; only the first 25 will be kept": "Maximum 25 files per import; only the first 25 will be kept"
+  "Maximum 25 files per import; only the first 25 will be kept": "Maximum 25 files per import; only the first 25 will be kept",
+  "Select all": "Select all",
+  "{{count}} tenants without email/SMS": "{{count}} tenants without email/SMS",
+  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}"
 }

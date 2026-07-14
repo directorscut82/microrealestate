@@ -1207,7 +1207,6 @@
   "{{existing}} of {{total}} units already exist": "{{existing}} από {{total}} μονάδες υπάρχουν ήδη",
   "{{month}} {{startDay}} to {{endDay}}": "{{month}} {{startDay}} έως {{endDay}}",
   "{{month}} {{year}}": "{{month}} {{year}}",
-  "{{name}} - {{status}}": "{{name}} - {{status}}",
   "{{numberOfTerms}} {{timeRange}}": "{{numberOfTerms}} {{timeRange}}",
   "{{part}} m² ÷ {{whole}} m² × {{total}} € = {{share}} €": "{{part}} τ.μ. ÷ {{whole}} τ.μ. × {{total}} € = {{share}} €",
   "{{part}}m² of {{whole}}m²": "{{part}}τ.μ. από {{whole}}τ.μ.",
@@ -1304,5 +1303,8 @@
   "Admin chat ID": "Chat ID διαχειριστή",
   "Telegram: configured — push notifications can be sent": "Telegram: ρυθμισμένο — μπορούν να αποσταλούν ειδοποιήσεις",
   "Messengers (WhatsApp, Telegram, Viber, Signal): not configured — set up Telegram in Settings → Third-party services": "Εφαρμογές μηνυμάτων (WhatsApp, Telegram, Viber, Signal): δεν έχουν ρυθμιστεί — ρυθμίστε το Telegram στις Ρυθμίσεις → Πάροχοι τρίτων",
-  "Maximum 25 files per import; only the first 25 will be kept": "Μέγιστο 25 αρχεία ανά εισαγωγή· θα διατηρηθούν μόνο τα πρώτα 25"
+  "Maximum 25 files per import; only the first 25 will be kept": "Μέγιστο 25 αρχεία ανά εισαγωγή· θα διατηρηθούν μόνο τα πρώτα 25",
+  "Select all": "Επιλογή όλων",
+  "{{count}} tenants without email/SMS": "{{count}} ενοικιαστές χωρίς email/SMS",
+  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}"
 }

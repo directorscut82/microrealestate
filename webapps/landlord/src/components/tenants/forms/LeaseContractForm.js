@@ -336,10 +336,14 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
     const currentProps = tenant?.properties?.map(({ propertyId }) => propertyId) || [];
     return [
       { id: '', label: '', value: '' },
-      ...propertyItems.map(({ _id, name, status, occupantLabel }) => ({
+      ...propertyItems.map(({ _id, name, status, occupantLabel, atakNumber }) => ({
         id: _id, value: _id,
-        label: t('{{name}} - {{status}}', {
+        // Include ΑΤΑΚ so same-floor apartments with near-identical names are
+        // distinguishable in the picker (a wrong pick attaches the property to
+        // the wrong renter). Legacy properties without an ΑΤΑΚ omit the segment.
+        label: t('{{name}}{{atak}} - {{status}}', {
           name,
+          atak: atakNumber ? ` · ${t('ATAK')} ${atakNumber}` : '',
           status: status === 'occupied'
             ? !currentProps.includes(_id) ? t('occupied by {{tenantName}}', { tenantName: occupantLabel }) : t('occupied by current tenant')
             : t('vacant')

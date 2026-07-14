@@ -442,6 +442,19 @@ export function toOccupantData(inputOccupant: AnyRecord): AnyRecord {
 
   occupant.hasContactEmails = occupant.contactEmails.length > 0;
 
+  // SMS reachability, mirroring emailmanager._sendSms's phone sources exactly:
+  // the tenant's own `phone` plus each contact's phone1/phone2. Surfaced so the
+  // rents list can show how many tenants can't receive an SMS (parity with
+  // hasContactEmails) without shipping raw phone numbers to the client.
+  occupant.contactPhones = [
+    ...(occupant.phone ? [occupant.phone] : []),
+    ...((occupant.contacts || []) as { phone1?: string; phone2?: string }[]).flatMap(
+      ({ phone1, phone2 }) => [phone1, phone2]
+    )
+  ].filter(Boolean);
+
+  occupant.hasContactPhones = occupant.contactPhones.length > 0;
+
   occupant.status = 'inprogress';
   occupant.terminated = false;
   const currentDate = moment.utc();
