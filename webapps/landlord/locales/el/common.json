@@ -1306,5 +1306,11 @@
   "Maximum 25 files per import; only the first 25 will be kept": "Μέγιστο 25 αρχεία ανά εισαγωγή· θα διατηρηθούν μόνο τα πρώτα 25",
   "Select all": "Επιλογή όλων",
   "{{count}} tenants without email/SMS": "{{count}} ενοικιαστές χωρίς email/SMS",
-  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}"
+  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}",
+  "No property assigned": "Δεν έχει οριστεί ακίνητο",
+  "No lease assigned": "Δεν έχει οριστεί μίσθωση",
+  "Missing lease start date": "Λείπει ημερομηνία έναρξης μίσθωσης",
+  "Missing lease end date": "Λείπει ημερομηνία λήξης μίσθωσης",
+  "Rent is 0 € — billing will not start": "Ενοίκιο 0 € — η χρέωση δεν θα ξεκινήσει",
+  "Missing property entry/exit date": "Λείπει ημερομηνία εισόδου/εξόδου ακινήτου"
 }

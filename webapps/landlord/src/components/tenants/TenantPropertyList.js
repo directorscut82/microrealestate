@@ -38,43 +38,62 @@ function Address({ address }) {
   );
 }
 
+function BillingWarning({ messages, className }) {
+  if (!messages.length) return null;
+  return (
+    <div
+      role="status"
+      className={cn(
+        'flex items-start gap-2 px-2.5 py-1.5 border rounded-md text-xs',
+        'bg-oxide-tint text-oxide border-oxide/40',
+        className
+      )}
+    >
+      <LuAlertTriangle
+        className="size-3.5 shrink-0 mt-0.5"
+        aria-hidden="true"
+      />
+      <span className="leading-snug">{messages.join(' · ')}</span>
+    </div>
+  );
+}
+
 export default function TenantPropertyList({ tenant, className }) {
   const { t } = useTranslation('common');
+
+  const warnings = [];
   if (!tenant.properties?.length) {
-    // T1.7: Surface a warning in the address slot when the tenant has no
-    // property assigned. Without a property+lease the rent pipeline produces
-    // no rent records, so the user must finish setup before billing starts.
-    // Uses the oxide warning token (the system's single warning color); raw
-    // tailwind amber is off-palette.
-    return (
-      <div
-        role="status"
-        className={cn(
-          'flex items-start gap-2 px-2.5 py-1.5 border rounded-md text-xs',
-          'bg-oxide-tint text-oxide border-oxide/40',
-          className
-        )}
-      >
-        <LuAlertTriangle
-          className="size-3.5 shrink-0 mt-0.5"
-          aria-hidden="true"
-        />
-        <span className="leading-snug">
-          {t(
-            'No property assigned. Set a property/lease for rent billing to start.'
-          )}
-        </span>
-      </div>
-    );
+    warnings.push(t('No property assigned'));
   }
-  // Wave-26 round-3b: removed the outer bordered container. Multiple
-  // properties are separated only by a subtle bottom-divider on each row
-  // except the last, so the block reads as a flat list. Smaller icon, less
-  // vertical padding to make the section feel tighter against the
-  // contract/progress block above (which TenantListItem now spaces with
-  // `mt-2` instead of `mt-6`).
+  if (!tenant.leaseId && !tenant.lease) {
+    warnings.push(t('No lease assigned'));
+  }
+  if (!tenant.beginDate) {
+    warnings.push(t('Missing lease start date'));
+  }
+  if (!tenant.endDate) {
+    warnings.push(t('Missing lease end date'));
+  }
+  if (tenant.properties?.length) {
+    const noRent = tenant.properties.filter((p) => !p.rent && p.rent !== undefined);
+    if (noRent.length) {
+      warnings.push(t('Rent is 0 € — billing will not start'));
+    }
+    const noDates = tenant.properties.filter((p) => !p.entryDate || !p.exitDate);
+    if (noDates.length) {
+      warnings.push(t('Missing property entry/exit date'));
+    }
+  }
+
+  if (!tenant.properties?.length) {
+    return <BillingWarning messages={warnings} className={className} />;
+  }
+
   return (
     <div className={cn('flex flex-col', className)}>
+      {warnings.length > 0 && (
+        <BillingWarning messages={warnings} className="mb-1.5" />
+      )}
       {tenant.properties.map(({ property }, idx) => (
         <div
           key={property._id}

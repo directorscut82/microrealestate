@@ -1286,5 +1286,11 @@
   "Maximum 25 files per import; only the first 25 will be kept": "Maximum 25 files per import; only the first 25 will be kept",
   "Select all": "Select all",
   "{{count}} tenants without email/SMS": "{{count}} tenants without email/SMS",
-  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}"
+  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}",
+  "No property assigned": "No property assigned",
+  "No lease assigned": "No lease assigned",
+  "Missing lease start date": "Missing lease start date",
+  "Missing lease end date": "Missing lease end date",
+  "Rent is 0 € — billing will not start": "Rent is 0 € — billing will not start",
+  "Missing property entry/exit date": "Missing property entry/exit date"
 }

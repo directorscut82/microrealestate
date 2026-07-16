@@ -1162,5 +1162,11 @@
   "Maximum 25 files per import; only the first 25 will be kept": "Máximo 25 archivos por importación; solo se conservarán los primeros 25",
   "Select all": "Seleccionar todo",
   "{{count}} tenants without email/SMS": "{{count}} inquilinos sin email/SMS",
-  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}"
+  "{{name}}{{atak}} - {{status}}": "{{name}}{{atak}} - {{status}}",
+  "No property assigned": "Ninguna propiedad asignada",
+  "No lease assigned": "Ningún contrato asignado",
+  "Missing lease start date": "Falta fecha de inicio del contrato",
+  "Missing lease end date": "Falta fecha de fin del contrato",
+  "Rent is 0 € — billing will not start": "Alquiler 0 € — la facturación no se iniciará",
+  "Missing property entry/exit date": "Falta fecha de entrada/salida del inmueble"
 }
