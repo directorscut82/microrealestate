@@ -1,0 +1,22 @@
+<%- include('../__content_parts/text/header.ejs') %>
+
+<%- include('../__content_parts/text/greetings.ejs') %>
+
+<%- _.t('Please find in attachment your owner expense statement of {{term}}.', { term: _.formatTerm(String(period).split(',')[0].padEnd(10, '0'), String(period).length <= 4 ? 'years' : 'months') }) %>
+
+<% if (charges && charges.length) { %>
+<% charges.forEach(function(item) { %>
+<%= item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
+<% }); %>
+<%- _.t('Total') %>: <%- _.formatNumber(totals.amount, 'currency') %>
+<% if (totals.paid) { %>
+<%- _.t('Already paid') %>: <%- _.formatNumber(totals.paid, 'currency') %>
+<%- _.t('Outstanding') %>: <%- _.formatNumber(totals.outstanding, 'currency') %>
+<% } %>
+<% } %>
+
+<%- _.t('We are at your service for any further information you may need.') %>
+
+<%- include('../__content_parts/text/signature.ejs') %>
+
+<%- include('../__content_parts/text/landlordcontact.ejs') %>

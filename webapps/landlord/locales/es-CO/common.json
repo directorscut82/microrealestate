@@ -1176,5 +1176,11 @@
   "No energy certificates expiring in the next {{n}} days": "Ningún certificado energético vence en los próximos {{n}} días",
   "Issued": "Emitido",
   "Expires": "Vence",
-  "Open property": "Abrir inmueble"
+  "Open property": "Abrir inmueble",
+  "No contact info": "Sin contacto",
+  "Send statement by email": "Enviar estado por correo",
+  "Send the owner expense statement by email to": "Enviar el estado de gastos por correo a",
+  "Owner statements sent": "Estados enviados",
+  "{{count}} owner statements could not be sent": "{{count}} estados no pudieron enviarse",
+  "{{count}} SMS could not be sent": "{{count}} SMS no pudieron enviarse"
 }

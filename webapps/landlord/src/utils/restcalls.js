@@ -268,6 +268,16 @@ export async function sendRentSms(payload) {
   return response.data;
 }
 
+export async function sendOwnerStatements(payload) {
+  const response = await apiFetcher().post('/emails/owners', payload);
+  return response.data;
+}
+
+export async function sendOwnerSms(payload) {
+  const response = await apiFetcher().post('/emails/owners/sms', payload);
+  return response.data;
+}
+
 export async function payRent({ term, payment }) {
   const response = await apiFetcher().patch(
     `/rents/payment/${payment._id}/${term}`,

@@ -76,5 +76,10 @@
   "Previous balance": "Saldo anterior",
   "Additional costs": "Costos adicionales",
   "The amount is due before the end of the month.": "El monto debe pagarse antes del fin de mes.",
-  "Please contact the property manager or landlord regarding rent payment.": "Comuníquese con el administrador o propietario sobre el pago del alquiler."
+  "Please contact the property manager or landlord regarding rent payment.": "Comuníquese con el administrador o propietario sobre el pago del alquiler.",
+  "Owner expense statement": "Estado de gastos del propietario",
+  "Owner expense statement of {{term}}": "Estado de gastos del propietario {{term}}",
+  "Please find in attachment your owner expense statement of {{term}}.": "Adjunto encontrará su estado de gastos {{term}}.",
+  "Already paid": "Ya pagado",
+  "Outstanding": "Pendiente"
 }

@@ -70,7 +70,16 @@ const unitSchema = z.object({
       z.object({
         name: z.string().trim().min(1, 'Name is required').max(120),
         taxId: z.string().trim().max(20).optional().or(z.literal('')),
-        percentage: z.coerce.number().min(0).max(100)
+        percentage: z.coerce.number().min(0).max(100),
+        phone: z.string().trim().max(30).optional().or(z.literal('')),
+        email: z
+          .string()
+          .trim()
+          .email()
+          .max(120)
+          .optional()
+          .or(z.literal('')),
+        iban: z.string().trim().max(40).optional().or(z.literal(''))
       })
     )
     .optional()
@@ -166,7 +175,10 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
             percentage:
               o.percentage === undefined || o.percentage === null
                 ? 100
-                : o.percentage
+                : o.percentage,
+            phone: o.phone || '',
+            email: o.email || '',
+            iban: o.iban || ''
           }))
         }
       : undefined
@@ -397,42 +409,74 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                 </p>
               )}
               {ownerFields.map((field, idx) => (
-                <div key={field.id} className="flex items-start gap-2">
-                  <div className="flex-1 space-y-1">
+                <div
+                  key={field.id}
+                  className="space-y-2 rounded-md border border-border p-3"
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Input
+                        placeholder={t('Owner name')}
+                        {...register(`owners.${idx}.name`)}
+                      />
+                      {errors.owners?.[idx]?.name && (
+                        <p className="text-sm text-destructive">
+                          {errors.owners[idx].name.message}
+                        </p>
+                      )}
+                    </div>
                     <Input
-                      placeholder={t('Owner name')}
-                      {...register(`owners.${idx}.name`)}
+                      className="w-32"
+                      placeholder={t('Tax ID')}
+                      {...register(`owners.${idx}.taxId`)}
                     />
-                    {errors.owners?.[idx]?.name && (
-                      <p className="text-sm text-destructive">
-                        {errors.owners[idx].name.message}
-                      </p>
-                    )}
+                    <div className="w-20">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="100"
+                        placeholder="%"
+                        {...register(`owners.${idx}.percentage`)}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeOwner(idx)}
+                      aria-label={t('Remove')}
+                    >
+                      ✕
+                    </Button>
                   </div>
-                  <Input
-                    className="w-32"
-                    placeholder={t('Tax ID')}
-                    {...register(`owners.${idx}.taxId`)}
-                  />
-                  <div className="w-20">
+                  {/* Contact row — powers owner notifications (email/SMS with
+                      the owner-statement PDF) + IBAN for payment instructions. */}
+                  <div className="flex items-start gap-2">
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      placeholder="%"
-                      {...register(`owners.${idx}.percentage`)}
+                      className="w-40"
+                      type="tel"
+                      placeholder={t('Phone')}
+                      {...register(`owners.${idx}.phone`)}
+                    />
+                    <div className="flex-1 space-y-1">
+                      <Input
+                        type="email"
+                        placeholder={t('Email')}
+                        {...register(`owners.${idx}.email`)}
+                      />
+                      {errors.owners?.[idx]?.email && (
+                        <p className="text-sm text-destructive">
+                          {t('Invalid email')}
+                        </p>
+                      )}
+                    </div>
+                    <Input
+                      className="w-56"
+                      placeholder="IBAN"
+                      {...register(`owners.${idx}.iban`)}
                     />
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeOwner(idx)}
-                    aria-label={t('Remove')}
-                  >
-                    ✕
-                  </Button>
                 </div>
               ))}
               <Button
@@ -440,7 +484,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                 variant="outline"
                 size="sm"
                 onClick={() =>
-                  appendOwner({ name: '', taxId: '', percentage: 0 })
+                  appendOwner({ name: '', taxId: '', percentage: 0, phone: '', email: '', iban: '' })
                 }
               >
                 + {t('Add co-owner')}

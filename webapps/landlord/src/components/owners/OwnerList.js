@@ -6,8 +6,9 @@ import {
   TableHeader,
   TableRow
 } from '../ui/table';
+import { LuHome, LuMail, LuPhone } from 'react-icons/lu';
 import { Badge } from '../ui/badge';
-import { LuHome } from 'react-icons/lu';
+import { Checkbox } from '../ui/checkbox';
 import NumberFormat from '../NumberFormat';
 import { useRouter } from 'next/router';
 import useFormatNumber from '../../hooks/useFormatNumber';
@@ -18,12 +19,30 @@ import useTranslation from 'next-translate/useTranslation';
 // inline-wrapping money and em-dash '—' zero values. Paid/total share one
 // right-aligned mono column with showZero so a zero-paid owner reads '0,00 €',
 // not a dash.
-export default function OwnerList({ owners = [] }) {
+//
+// Selection (optional): when `selected`/`setSelected` are provided a leading
+// checkbox column appears for the notification batch-send. Only owners with
+// an email or phone are selectable; ΛΟΙΠΟΙ placeholders (loipoi: keys) never
+// are — they have no identity to notify.
+export default function OwnerList({ owners = [], selected, setSelected }) {
   const { t } = useTranslation('common');
   const router = useRouter();
   const formatNumber = useFormatNumber();
 
   if (!owners.length) return null;
+
+  const selectable = !!setSelected;
+  const isSelectable = (o) =>
+    !String(o.ownerKey || '').startsWith('loipoi:') && (o.hasEmail || o.hasPhone);
+
+  const toggle = (owner) => (checked) => {
+    if (!setSelected) return;
+    setSelected((prev) =>
+      checked
+        ? [...prev, owner.ownerKey]
+        : prev.filter((k) => k !== owner.ownerKey)
+    );
+  };
 
   const open = (key) =>
     router.push(
@@ -35,7 +54,9 @@ export default function OwnerList({ owners = [] }) {
       <Table>
         <TableHeader>
           <TableRow>
+            {selectable && <TableHead className="w-8" />}
             <TableHead>{t('Owner')}</TableHead>
+            <TableHead>{t('Contact')}</TableHead>
             <TableHead className="text-right">{t('Units')}</TableHead>
             <TableHead className="text-right">
               {t('Owner expenses paid')}
@@ -60,6 +81,19 @@ export default function OwnerList({ owners = [] }) {
                 data-cy="openResourceButton"
                 onClick={() => open(owner.ownerKey)}
               >
+                {selectable && (
+                  <TableCell
+                    className="w-8"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={(selected || []).includes(owner.ownerKey)}
+                      disabled={!isSelectable(owner)}
+                      onCheckedChange={toggle(owner)}
+                      aria-labelledby={owner.name}
+                    />
+                  </TableCell>
+                )}
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-ink truncate">
@@ -81,6 +115,40 @@ export default function OwnerList({ owners = [] }) {
                     <div className="font-mono tabular-nums text-label text-ink-muted">
                       {t('Tax ID')}: {owner.taxId}
                     </div>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {owner.phone || owner.email ? (
+                    <div className="space-y-0.5 text-label text-ink-soft">
+                      {owner.phone && (
+                        <div className="flex items-center gap-1.5">
+                          <LuPhone
+                            className="size-3 shrink-0 text-ink-muted"
+                            aria-hidden="true"
+                          />
+                          <span className="font-mono tabular-nums">
+                            {owner.phone}
+                          </span>
+                        </div>
+                      )}
+                      {owner.email && (
+                        <div className="flex items-center gap-1.5">
+                          <LuMail
+                            className="size-3 shrink-0 text-ink-muted"
+                            aria-hidden="true"
+                          />
+                          <span className="truncate max-w-52">
+                            {owner.email}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-label text-ink-muted">
+                      {String(owner.ownerKey || '').startsWith('loipoi:')
+                        ? '—'
+                        : t('No contact info')}
+                    </span>
                   )}
                 </TableCell>
                 <TableCell numeric className="text-ink-soft">

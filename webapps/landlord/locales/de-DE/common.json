@@ -1176,5 +1176,11 @@
   "No energy certificates expiring in the next {{n}} days": "Keine Energieausweise laufen in den nächsten {{n}} Tagen ab",
   "Issued": "Ausgestellt",
   "Expires": "Läuft ab",
-  "Open property": "Immobilie öffnen"
+  "Open property": "Immobilie öffnen",
+  "No contact info": "Keine Kontaktdaten",
+  "Send statement by email": "Abrechnung per E-Mail senden",
+  "Send the owner expense statement by email to": "Kostenabrechnung per E-Mail senden an",
+  "Owner statements sent": "Abrechnungen gesendet",
+  "{{count}} owner statements could not be sent": "{{count}} Abrechnungen konnten nicht gesendet werden",
+  "{{count}} SMS could not be sent": "{{count}} SMS konnten nicht gesendet werden"
 }

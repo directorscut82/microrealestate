@@ -2069,12 +2069,29 @@ function _validateUnitOwners(rawOwners: any): any[] | undefined {
     }
     sum += pct;
     const taxId = String(o?.taxId || '').trim();
+    // Contact fields — needed for owner notifications (email/SMS with the
+    // owner-statement PDF). Light format validation; empty = absent.
+    const phone = String(o?.phone || '').trim();
+    const email = String(o?.email || '').trim().toLowerCase();
+    const iban = String(o?.iban || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new ServiceError(`owner #${i + 1}: invalid email`, 422);
+    }
+    if (phone && !/^[+\d][\d\s\-()]{4,24}$/.test(phone)) {
+      throw new ServiceError(`owner #${i + 1}: invalid phone`, 422);
+    }
+    if (iban && !/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) {
+      throw new ServiceError(`owner #${i + 1}: invalid IBAN`, 422);
+    }
     return {
       type: o?.type === 'member' ? 'member' : 'external',
       name,
       percentage: pct,
       ...(taxId ? { taxId } : {}),
-      ...(o?.memberId ? { memberId: String(o.memberId) } : {})
+      ...(o?.memberId ? { memberId: String(o.memberId) } : {}),
+      ...(phone ? { phone } : {}),
+      ...(email ? { email } : {}),
+      ...(iban ? { iban } : {})
     };
   });
   // Allow a tiny rounding slack over 100.

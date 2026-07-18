@@ -261,6 +261,10 @@ type OwnerAgg = {
   totalOutstanding: number;
   // does this owner ALSO rent a unit (for the occupancy pill)?
   alsoRents: boolean;
+  // contact info from units[].owners[] (first non-empty wins across units) —
+  // powers the owners-page notification send (email/SMS).
+  phone: string;
+  email: string;
 };
 
 // Map a propertyId → the ownerKey(s) of its unit's owners, across all
@@ -347,7 +351,9 @@ export function _aggregateOwners(
             totalAmount: 0,
             totalPaid: 0,
             totalOutstanding: 0,
-            alsoRents: false
+            alsoRents: false,
+            phone: o.phone || '',
+            email: o.email || ''
           });
         }
         const agg = owners.get(key)!;
@@ -356,6 +362,8 @@ export function _aggregateOwners(
         // fill in name/taxId if a later unit has richer data
         if (!agg.name && o.name) agg.name = o.name;
         if (!agg.taxId && o.taxId) agg.taxId = o.taxId;
+        if (!agg.phone && o.phone) agg.phone = o.phone;
+        if (!agg.email && o.email) agg.email = o.email;
         // a fractional percentage anywhere is a useful display hint
         if (
           agg.percentage === undefined &&
@@ -447,7 +455,9 @@ export function _aggregateOwners(
         totalAmount: 0,
         totalPaid: 0,
         totalOutstanding: 0,
-        alsoRents: false
+        alsoRents: false,
+        phone: '',
+        email: ''
       };
       owners.set(key, agg);
     }
@@ -1082,6 +1092,10 @@ export function _serializeOwnerSummary(agg: OwnerAgg) {
     totalPaid: _round(agg.totalPaid),
     totalOutstanding: _round(agg.totalOutstanding),
     alsoRents: agg.alsoRents,
+    phone: agg.phone || '',
+    email: agg.email || '',
+    hasEmail: !!agg.email,
+    hasPhone: !!agg.phone,
     settlements
   };
 }

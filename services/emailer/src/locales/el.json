@@ -76,5 +76,10 @@
   "Previous balance": "Προηγούμενο υπόλοιπο",
   "Additional costs": "Πρόσθετες χρεώσεις",
   "The amount is due before the end of the month.": "Το ποσό οφείλει να καταβληθεί πριν από το τέλος του μήνα.",
-  "Please contact the property manager or landlord regarding rent payment.": "Παρακαλούμε επικοινωνήστε με τον διαχειριστή ή τον ιδιοκτήτη για την εξόφληση του ενοικίου."
+  "Please contact the property manager or landlord regarding rent payment.": "Παρακαλούμε επικοινωνήστε με τον διαχειριστή ή τον ιδιοκτήτη για την εξόφληση του ενοικίου.",
+  "Owner expense statement": "Εκκαθαριστικό εξόδων ιδιοκτήτη",
+  "Owner expense statement of {{term}}": "Εκκαθαριστικό εξόδων ιδιοκτήτη {{term}}",
+  "Please find in attachment your owner expense statement of {{term}}.": "Παρακαλούμε βρείτε συνημμένο το εκκαθαριστικό εξόδων ιδιοκτήτη {{term}}.",
+  "Already paid": "Ήδη καταβλημένα",
+  "Outstanding": "Υπόλοιπο οφειλής"
 }

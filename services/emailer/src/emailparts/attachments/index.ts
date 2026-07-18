@@ -10,14 +10,16 @@ export async function build(
   templateName: string,
   recordId: string,
   params: Record<string, any>,
-  { tenant }: { tenant: any }
+  emailData: { tenant?: any; owner?: any }
 ) {
+  const { tenant } = emailData;
   if (
     ![
       'invoice',
       'rentcall',
       'rentcall_last_reminder',
-      'rentcall_reminder'
+      'rentcall_reminder',
+      'owner_statement'
     ].includes(templateName)
   ) {
     return {
@@ -26,9 +28,12 @@ export async function build(
   }
 
   i18n.setLocale(locale);
-  const billingRef = `${moment(params.term, 'YYYYMMDDHH')
-    .locale(locale)
-    .format('MM_YY')}_${tenant.reference}`;
+  // tenant is absent for owner_statement (owner-keyed data shape).
+  const billingRef = tenant
+    ? `${moment(params.term, 'YYYYMMDDHH')
+        .locale(locale)
+        .format('MM_YY')}_${tenant.reference}`
+    : String(params.term || '');
   // tenant.name is user-controlled and previously flowed straight into
   // a filesystem path. Inputs like `<script>`, `..`, or `/` either
   // crashed the FS write or escaped the temp dir. Defense in depth:
@@ -46,11 +51,20 @@ export async function build(
       .replace(/[^A-Za-z0-9._\-Ͱ-Ͽἀ-῿\s]/g, '_')
       .replace(/\s+/g, '_')
       .slice(0, 100);
-  const filename = `${sanitize(i18n.__(templateName))}-${sanitize(tenant.name)}-${sanitize(billingRef)}.pdf`;
+  // owner_statement: recordId is the ownerKey (not a tenantId) and the PDF
+  // lives at the dedicated /documents/owner-statement/:ownerKey/:term route.
+  // Name the file from the OWNER; there is no tenant in this data shape.
+  const entityName =
+    templateName === 'owner_statement'
+      ? emailData.owner?.name || 'owner'
+      : tenant.name;
+  const entityRef =
+    templateName === 'owner_statement' ? String(params.term || '') : billingRef;
+  const filename = `${sanitize(i18n.__(templateName))}-${sanitize(entityName)}-${sanitize(entityRef)}.pdf`;
   const filePath = await fetchPDF(
     authorizationHeader,
     organizationId,
-    templateName,
+    templateName === 'owner_statement' ? 'owner-statement' : templateName,
     recordId,
     params,
     filename

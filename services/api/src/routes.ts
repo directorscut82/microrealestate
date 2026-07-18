@@ -506,6 +506,14 @@ export default function routes(): express.Router {
     '/telegram',
     Middlewares.asyncWrapper(emailManager.sendTelegramNotification as any)
   );
+  emailRouter.post(
+    '/owners',
+    Middlewares.asyncWrapper(emailManager.sendOwnerStatements as any)
+  );
+  emailRouter.post(
+    '/owners/sms',
+    Middlewares.asyncWrapper(emailManager.sendOwnerSms as any)
+  );
   router.use('/emails', emailRouter);
 
   // Presence awareness — shows who else is viewing the same record

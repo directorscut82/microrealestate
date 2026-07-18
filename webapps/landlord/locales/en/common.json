@@ -1300,5 +1300,11 @@
   "No energy certificates expiring in the next {{n}} days": "No energy certificates expiring in the next {{n}} days",
   "Issued": "Issued",
   "Expires": "Expires",
-  "Open property": "Open property"
+  "Open property": "Open property",
+  "No contact info": "No contact info",
+  "Send statement by email": "Send statement by email",
+  "Send the owner expense statement by email to": "Send the owner expense statement by email to",
+  "Owner statements sent": "Owner statements sent",
+  "{{count}} owner statements could not be sent": "{{count}} owner statements could not be sent",
+  "{{count}} SMS could not be sent": "{{count}} SMS could not be sent"
 }

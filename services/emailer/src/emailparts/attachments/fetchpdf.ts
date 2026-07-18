@@ -13,7 +13,10 @@ export default async function (
 ): Promise<string> {
   const { PDFGENERATOR_URL, TEMPORARY_DIRECTORY } =
     Service.getInstance().envConfig.getValues();
-  const uri = `${PDFGENERATOR_URL}/documents/${templateName}/${recordId}/${params.term}`;
+  // encodeURIComponent: recordId can be an ownerKey ("n:name|taxid") whose
+  // '|' and ':' are invalid raw path chars. ObjectIds are unaffected. The
+  // pdfgenerator route decodes the param exactly once (Express default).
+  const uri = `${PDFGENERATOR_URL}/documents/${templateName}/${encodeURIComponent(recordId)}/${params.term}`;
   const fileDir = path.join(TEMPORARY_DIRECTORY as string, templateName);
   if (!fs.existsSync(fileDir)) {
     fs.mkdirSync(fileDir, { recursive: true });

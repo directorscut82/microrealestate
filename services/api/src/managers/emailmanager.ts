@@ -1,4 +1,10 @@
-import { Collections, logger, Service, ServiceError } from '@microrealestate/common';
+import {
+  Collections,
+  logger,
+  OwnerStatement,
+  Service,
+  ServiceError
+} from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import axios from 'axios';
 import moment from 'moment';
@@ -199,6 +205,197 @@ export async function sendSmsOnly(req: Req, res: Res) {
       return `${s.name}${gt ? ' (' + gt + '€)' : ''}`;
     });
     _echoToTelegram(req, `📱 SMS ${termDate.format('MM/YYYY')} → ${lines.join(', ')}`);
+  }
+}
+
+// POST /emails/owners — batch-send owner expense statements (email with the
+// owner-statement PDF attached). Body: { ownerKeys: string[], term: string }.
+// Reuses the whole tenant-send skeleton: same emailer proxy, same 60-min
+// dedupe (Email.recordId stores the ownerKey), same 200/207/500 shape, same
+// Telegram admin echo with the PDF attached.
+export async function sendOwnerStatements(req: Req, res: Res) {
+  const realm = req.realm;
+  const { ownerKeys, term, force } = req.body;
+  if (!Array.isArray(ownerKeys) || !ownerKeys.length) {
+    throw new ServiceError('ownerKeys required', 422);
+  }
+  if (!term || !/^(\d{4}(\d{6})?)(,\d{4}(\d{6})?){0,11}$/.test(String(term))) {
+    throw new ServiceError('term must be YYYY or YYYYMMDDHH (comma list)', 422);
+  }
+  const { EMAILER_URL } = Service.getInstance().envConfig.getValues();
+
+  // 60-minute double-send guard, keyed (ownerKey, owner_statement, term).
+  const recentlySent = new Set<string>();
+  if (!force) {
+    const sixtyMinAgo = moment.utc().subtract(60, 'minutes').toDate();
+    const sent: AnyRecord[] = await Collections.Email.find({
+      realmId: String(realm!._id),
+      recordId: { $in: ownerKeys },
+      templateName: 'owner_statement',
+      sentDate: { $gte: sixtyMinAgo }
+    }).lean();
+    for (const r of sent) {
+      recentlySent.add(`${String(r.recordId)}|${String(r.params?.term)}`);
+    }
+  }
+
+  const statusList: AnyRecord[] = await Promise.all(
+    (ownerKeys as string[]).map(async (ownerKey) => {
+      if (recentlySent.has(`${ownerKey}|${term}`)) {
+        return { ownerKey, skipped: true, reason: 'recently sent' };
+      }
+      try {
+        const response = await axios.post(
+          EMAILER_URL as string,
+          {
+            templateName: 'owner_statement',
+            recordId: ownerKey,
+            params: { term: String(term) }
+          },
+          {
+            headers: {
+              authorization: req.headers.authorization,
+              organizationid:
+                req.headers.organizationid || String(req.realm!._id),
+              'Accept-Language': req.headers['accept-language']
+            }
+          }
+        );
+        return { ownerKey, status: response.data };
+      } catch (error: any) {
+        const msg = error.response?.data?.message || error.message;
+        logger.error(`owner statement send failed (${ownerKey}): ${msg}`);
+        return { ownerKey, error: msg };
+      }
+    })
+  );
+
+  const hasError = statusList.some((s) => !!s.error);
+  const allFailed =
+    statusList.length > 0 && statusList.every((s) => !!s.error || s.skipped);
+  if (allFailed && hasError) {
+    res.status(500).json(statusList);
+  } else if (hasError) {
+    res.status(207).json(statusList);
+  } else {
+    res.json(statusList);
+  }
+
+  // Telegram admin echo with the SAME owner-statement PDF attached.
+  for (const s of statusList) {
+    if (s.error || s.skipped) continue;
+    _echoToTelegram(req, `📧 Εκκαθαριστικό ιδιοκτήτη → ${s.ownerKey}`, {
+      templateName: 'owner-statement',
+      recordId: String(s.ownerKey),
+      term: String(term)
+    });
+  }
+}
+
+// POST /emails/owners/sms — SMS the owner their statement summary. Body:
+// { ownerKeys: string[], term: string }. Text mirrors the tenant SMS format:
+// «Εκκαθαριστικό MM/YYYY - name (Κοινόχρηστα: X, Επισκευές: Y, ΣΥΝΟΛΟ: Z)».
+export async function sendOwnerSms(req: Req, res: Res) {
+  const realm = req.realm;
+  const { ownerKeys, term } = req.body;
+  if (!Array.isArray(ownerKeys) || !ownerKeys.length) {
+    throw new ServiceError('ownerKeys required', 422);
+  }
+  if (!term || !/^(\d{4}(\d{6})?)(,\d{4}(\d{6})?){0,11}$/.test(String(term))) {
+    throw new ServiceError('term must be YYYY or YYYYMMDDHH (comma list)', 422);
+  }
+  const { EMAILER_URL } = Service.getInstance().envConfig.getValues();
+
+  const buildings: AnyRecord[] = await Collections.Building.find({
+    realmId: String(realm!._id)
+  }).lean();
+
+  const fmt = (n: number) =>
+    n.toLocaleString('el-GR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }) + '€';
+  const termLabel = /^\d{4}$/.test(String(term))
+    ? String(term)
+    : moment.utc(String(term).split(',')[0], 'YYYYMMDDHH').format('MM/YYYY');
+
+  const statusList: AnyRecord[] = await Promise.all(
+    (ownerKeys as string[]).map(async (ownerKey) => {
+      try {
+        if (OwnerStatement.isLoipoiKey(ownerKey)) {
+          return { ownerKey, error: 'placeholder owner cannot be notified' };
+        }
+        // Expand year-prefix terms exactly like the statement builders do.
+        const all = OwnerStatement.buildOwnerStatement(buildings, ownerKey, []);
+        const subTerms = String(term).split(',').filter(Boolean);
+        const allTerms = [
+          ...new Set(all.charges.map((c: AnyRecord) => c.term))
+        ];
+        const terms = allTerms.filter((t: any) =>
+          subTerms.some((st) => String(t).startsWith(st))
+        );
+        const statement = OwnerStatement.buildOwnerStatement(
+          buildings,
+          ownerKey,
+          terms as number[]
+        );
+        if (!statement.owner) {
+          return { ownerKey, error: 'owner not found' };
+        }
+        const phone = String(statement.owner.phone || '').trim();
+        if (!phone) {
+          return { ownerKey, error: 'no phone number' };
+        }
+        const repairs = statement.charges.filter(
+          (c: AnyRecord) => c.source === 'repair' || c.source === 'repair-vacant'
+        );
+        const repairSum = repairs.reduce(
+          (s: number, c: AnyRecord) => s + (Number(c.amount) || 0),
+          0
+        );
+        const koinoSum = (Number(statement.totals.amount) || 0) - repairSum;
+        const parts: string[] = [];
+        if (koinoSum > 0.005) parts.push(`Κοινόχρηστα: ${fmt(koinoSum)}`);
+        if (repairSum > 0.005) parts.push(`Επισκευές: ${fmt(repairSum)}`);
+        const breakdown =
+          parts.length > 1
+            ? ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(statement.totals.amount)})`
+            : ` (${fmt(statement.totals.amount)})`;
+        const text = `Εκκαθαριστικό ${termLabel} - ${statement.owner.name}${breakdown}`;
+
+        const response = await axios.post(
+          `${EMAILER_URL}/sms`,
+          { phoneNumber: phone, text },
+          {
+            headers: {
+              authorization: req.headers.authorization,
+              organizationid:
+                req.headers.organizationid || String(req.realm!._id),
+              'Accept-Language': req.headers['accept-language']
+            }
+          }
+        );
+        logger.info(`owner SMS sent (${ownerKey})`);
+        return { ownerKey, name: statement.owner.name, status: response.data };
+      } catch (error: any) {
+        const msg = error.response?.data?.message || error.message;
+        logger.error(`owner SMS failed (${ownerKey}): ${msg}`);
+        return { ownerKey, error: msg };
+      }
+    })
+  );
+
+  const hasError = statusList.some((s) => !!s.error);
+  if (hasError) {
+    res.status(207).json(statusList);
+  } else {
+    res.json(statusList);
+  }
+
+  const sent = statusList.filter((s) => !s.error);
+  if (sent.length) {
+    const names = sent.map((s: AnyRecord) => s.name || s.ownerKey).join(', ');
+    _echoToTelegram(req, `📱 SMS εκκαθαριστικού ${termLabel} → ${names}`);
   }
 }
 

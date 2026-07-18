@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <%- include('../__content_parts/html/htmlhead.ejs') %>
+  <body>
+    <div class="email-body">
+      <div class="email-container">
+        <div class="bar"></div>
+        <div class="content">
+          <div class="header">
+            <div class="logo"><%= landlord.name %></div>
+          </div>
+          <div class="title"><%- _.t('Owner expense statement') %></div>
+          <p><%- include('../__content_parts/html/greetings.ejs') %></p>
+          <p>
+            <%- _.t('Please find in attachment your owner expense statement of {{term}}.', { term: _.formatTerm(String(period).split(',')[0].padEnd(10, '0'), String(period).length <= 4 ? 'years' : 'months') }) %>
+          </p>
+          <% if (charges && charges.length) { %>
+          <table style="border-collapse:collapse;width:100%;margin:10px 0;">
+            <% charges.forEach(function(item) { %>
+            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%= item.description %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(item.amount, 'currency') %></td></tr>
+            <% }); %>
+            <tr><td style="padding:4px 8px;font-weight:bold;"><strong><%- _.t('Total') %></strong></td><td style="padding:4px 8px;text-align:right;font-weight:bold;"><strong><%- _.formatNumber(totals.amount, 'currency') %></strong></td></tr>
+            <% if (totals.paid) { %>
+            <tr><td style="padding:4px 8px;"><%- _.t('Already paid') %></td><td style="padding:4px 8px;text-align:right;"><%- _.formatNumber(totals.paid, 'currency') %></td></tr>
+            <tr><td style="padding:4px 8px;font-weight:bold;"><strong><%- _.t('Outstanding') %></strong></td><td style="padding:4px 8px;text-align:right;font-weight:bold;"><strong><%- _.formatNumber(totals.outstanding, 'currency') %></strong></td></tr>
+            <% } %>
+          </table>
+          <% } %>
+          <p>
+            <%- _.t('We are at your service for any further information you may need.') %>
+          </p>
+          <%- include('../__content_parts/html/signature.ejs') %>
+        </div>
+      </div>
+      <%- include('../__content_parts/html/landlordcontact.ejs') %>
+    </div>
+  </body>
+</html>

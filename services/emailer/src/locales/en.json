@@ -76,5 +76,10 @@
   "Previous balance": "Previous balance",
   "Additional costs": "Additional costs",
   "The amount is due before the end of the month.": "The amount is due before the end of the month.",
-  "Please contact the property manager or landlord regarding rent payment.": "Please contact the property manager or landlord regarding rent payment."
+  "Please contact the property manager or landlord regarding rent payment.": "Please contact the property manager or landlord regarding rent payment.",
+  "Owner expense statement": "Owner expense statement",
+  "Owner expense statement of {{term}}": "Owner expense statement of {{term}}",
+  "Please find in attachment your owner expense statement of {{term}}.": "Please find in attachment your owner expense statement of {{term}}.",
+  "Already paid": "Already paid",
+  "Outstanding": "Outstanding"
 }

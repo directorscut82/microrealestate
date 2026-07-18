@@ -1320,5 +1320,11 @@
   "No energy certificates expiring in the next {{n}} days": "Κανένα ενεργειακό πιστοποιητικό δεν λήγει τις επόμενες {{n}} ημέρες",
   "Issued": "Έκδοση",
   "Expires": "Λήξη",
-  "Open property": "Άνοιγμα ακινήτου"
+  "Open property": "Άνοιγμα ακινήτου",
+  "No contact info": "Χωρίς στοιχεία επικοινωνίας",
+  "Send statement by email": "Αποστολή εκκαθαριστικού με email",
+  "Send the owner expense statement by email to": "Αποστολή του εκκαθαριστικού εξόδων με email σε",
+  "Owner statements sent": "Τα εκκαθαριστικά στάλθηκαν",
+  "{{count}} owner statements could not be sent": "{{count}} εκκαθαριστικά δεν στάλθηκαν",
+  "{{count}} SMS could not be sent": "{{count}} SMS δεν στάλθηκαν"
 }
