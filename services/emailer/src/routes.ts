@@ -1,6 +1,7 @@
 import * as Emailer from './emailer.js';
 import { sendSms } from './sms.js';
-import { sendTelegram } from './telegram.js';
+import { sendTelegram, sendTelegramDocument } from './telegram.js';
+import fetchPDF from './emailparts/attachments/fetchpdf.js';
 import {
   logger,
   Middlewares,
@@ -111,11 +112,32 @@ export default function routes(): express.Router {
   apiRouter.post(
     '/emailer/telegram',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
-      const { text, chatId } = req.body;
+      const { text, chatId, attachment } = req.body;
       if (!text) {
         throw new ServiceError('text is required', 422);
       }
       const realmId = String((req as any).realm?._id || req.headers.organizationid);
+      // Optional PDF attachment: { templateName, recordId, term } — fetch the
+      // same rendered PDF the email attaches (reuses fetchpdf) and deliver it
+      // as a Telegram document with `text` as the caption.
+      if (attachment?.templateName && attachment?.recordId && attachment?.term) {
+        const filename = `${String(attachment.templateName)}-${String(
+          attachment.recordId
+        )}-${String(attachment.term)}.pdf`.replace(/[^A-Za-z0-9._-]/g, '_');
+        const filePath = await fetchPDF(
+          req.headers.authorization,
+          realmId,
+          String(attachment.templateName),
+          String(attachment.recordId),
+          { term: attachment.term },
+          filename
+        );
+        const result = await sendTelegramDocument(realmId, text, filePath, chatId);
+        if (!result) {
+          throw new ServiceError('Telegram not configured', 503);
+        }
+        return res.json(result);
+      }
       const result = await sendTelegram(realmId, text, chatId);
       if (!result) {
         throw new ServiceError('Telegram not configured', 503);

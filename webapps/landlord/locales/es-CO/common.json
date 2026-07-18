@@ -1169,5 +1169,6 @@
   "Missing lease end date": "Falta fecha de fin del contrato",
   "Rent is 0 € — billing will not start": "Alquiler 0 € — la facturación no se iniciará",
   "Missing property entry/exit date": "Falta fecha de entrada/salida del inmueble",
-  "Payment notice": "Aviso de pago"
+  "Payment notice": "Aviso de pago",
+  "EYDAP Number": "Número EYDAP (agua)"
 }

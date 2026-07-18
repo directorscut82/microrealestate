@@ -74,5 +74,7 @@
   "Discount": "Remise",
   "VAT": "TVA",
   "Previous balance": "Solde précédent",
-  "Additional costs": "Frais supplémentaires"
+  "Additional costs": "Frais supplémentaires",
+  "The amount is due before the end of the month.": "Le montant est dû avant la fin du mois.",
+  "Please contact the property manager or landlord regarding rent payment.": "Veuillez contacter le gestionnaire ou le propriétaire concernant le paiement du loyer."
 }

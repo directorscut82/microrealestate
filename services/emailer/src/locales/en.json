@@ -74,5 +74,7 @@
   "Discount": "Discount",
   "VAT": "VAT",
   "Previous balance": "Previous balance",
-  "Additional costs": "Additional costs"
+  "Additional costs": "Additional costs",
+  "The amount is due before the end of the month.": "The amount is due before the end of the month.",
+  "Please contact the property manager or landlord regarding rent payment.": "Please contact the property manager or landlord regarding rent payment."
 }

@@ -1,5 +1,7 @@
 import { Collections, Crypto, logger } from '@microrealestate/common';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 
 interface TelegramConfig {
   botToken: string;
@@ -56,4 +58,50 @@ export async function sendTelegram(
     logger.error(`Telegram to ${target} failed: ${msg}`);
     throw new Error(`Telegram failed: ${msg}`);
   }
+}
+
+/**
+ * Send a document (PDF) to Telegram via sendDocument with `caption` as the
+ * message text. Same config/fallback contract as sendTelegram. Uses the
+ * native fetch/FormData/Blob of Node 20 — multipart upload, no extra deps.
+ */
+export async function sendTelegramDocument(
+  realmId: string,
+  caption: string,
+  filePath: string,
+  chatId?: string
+): Promise<{ messageId: number } | null> {
+  const config = await getConfig(realmId);
+  if (!config) {
+    logger.warn('Telegram not configured, skipping document notification');
+    return null;
+  }
+  const target = (chatId || config.adminChatId || '').trim();
+  if (!target) {
+    logger.warn('Telegram: no chat id (neither explicit nor adminChatId)');
+    return null;
+  }
+
+  const form = new FormData();
+  form.append('chat_id', target);
+  // Telegram caption hard limit is 1024 chars.
+  form.append('caption', caption.slice(0, 1024));
+  form.append(
+    'document',
+    new Blob([fs.readFileSync(filePath)], { type: 'application/pdf' }),
+    path.basename(filePath)
+  );
+
+  const resp = await fetch(
+    `https://api.telegram.org/bot${config.botToken}/sendDocument`,
+    { method: 'POST', body: form }
+  );
+  const data: any = await resp.json();
+  if (!data?.ok) {
+    const msg = data?.description || `HTTP ${resp.status}`;
+    logger.error(`Telegram document to ${target} failed: ${msg}`);
+    throw new Error(`Telegram failed: ${msg}`);
+  }
+  logger.info(`Telegram document sent to ${target}: ${data.result?.message_id}`);
+  return { messageId: data.result?.message_id };
 }

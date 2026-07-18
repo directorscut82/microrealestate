@@ -625,6 +625,7 @@ export function toProperty(
     atakNumber: inputProperty.atakNumber,
     buildingId: inputProperty.buildingId || null,
     dehNumber: inputProperty.dehNumber,
+    eydapNumber: inputProperty.eydapNumber,
     energyCertificate: inputProperty.energyCertificate,
     beginDate: '',
     endDate: '',

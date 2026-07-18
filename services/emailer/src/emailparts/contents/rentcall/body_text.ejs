@@ -28,7 +28,7 @@
 <% } %>
 <%- _.t('Total') %>: <%- _.formatNumber(rent.total.grandTotal, 'currency') %>
 <% } %>
-<%- _.t('Please send us your payment before {{date}}.', { date: _.formatDate(dueDate, 'LL') }) %>
+<%- _.t('The amount is due before the end of the month.') %>
 <%- include('../__content_parts/text/paymentmethods.ejs') %>
 <%- _.t('We are at your service for any further information you may need.') %>
 <%- include('../__content_parts/text/signature.ejs') %>

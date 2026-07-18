@@ -50,7 +50,7 @@
           </table>
           <% } %>
           <p>
-            <%- _.t('Please send us your payment before <strong>{{date}}</strong>.', { date: _.formatDate(dueDate, 'LL') }) %>
+            <%- _.t('The amount is due before the end of the month.') %>
           </p>
           <%- include('../__content_parts/html/paymentmethods.ejs') %>         
           <p>

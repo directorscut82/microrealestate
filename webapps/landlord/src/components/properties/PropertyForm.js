@@ -32,6 +32,7 @@ const schema = z.object({
   digicode: z.string().trim().max(60).optional(),
   atakNumber: z.string().trim().max(60).optional(),
   dehNumber: z.string().trim().max(60).optional(),
+  eydapNumber: z.string().trim().max(60).optional(),
   energyClass: z.string().trim().max(60).optional(),
   energyCertNumber: z.string().trim().max(60).optional(),
   // Wave-24 A16: schema persists these fields but the UI never rendered
@@ -87,6 +88,7 @@ const PropertyForm = ({ property, onSubmit }) => {
       digicode: property?.digicode || '',
       atakNumber: property?.atakNumber || '',
       dehNumber: property?.dehNumber || '',
+      eydapNumber: property?.eydapNumber || '',
       energyClass: property?.energyCertificate?.energyClass || '',
       energyCertNumber: property?.energyCertificate?.number || '',
       energyCertIssueDate: property?.energyCertificate?.issueDate
@@ -141,6 +143,7 @@ const PropertyForm = ({ property, onSubmit }) => {
         energyCertInspectorNumber,
         atakNumber,
         dehNumber,
+        eydapNumber,
         ...rest
       } = data;
       const hasEnergyData =
@@ -152,6 +155,7 @@ const PropertyForm = ({ property, onSubmit }) => {
         ...rest,
         atakNumber,
         dehNumber,
+        eydapNumber,
         energyCertificate: hasEnergyData
           ? {
               ...(property?.energyCertificate || {}),
@@ -239,6 +243,10 @@ const PropertyForm = ({ property, onSubmit }) => {
           <Field>
             <Label htmlFor="dehNumber">{t('DEH Number')}</Label>
             <Input id="dehNumber" {...register('dehNumber')} />
+          </Field>
+          <Field>
+            <Label htmlFor="eydapNumber">{t('EYDAP Number')}</Label>
+            <Input id="eydapNumber" {...register('eydapNumber')} />
           </Field>
         </Row>
         <Row>

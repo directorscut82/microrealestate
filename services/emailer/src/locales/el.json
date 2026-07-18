@@ -74,5 +74,7 @@
   "Discount": "Έκπτωση",
   "VAT": "ΦΠΑ",
   "Previous balance": "Προηγούμενο υπόλοιπο",
-  "Additional costs": "Πρόσθετες χρεώσεις"
+  "Additional costs": "Πρόσθετες χρεώσεις",
+  "The amount is due before the end of the month.": "Το ποσό οφείλει να καταβληθεί πριν από το τέλος του μήνα.",
+  "Please contact the property manager or landlord regarding rent payment.": "Παρακαλούμε επικοινωνήστε με τον διαχειριστή ή τον ιδιοκτήτη για την εξόφληση του ενοικίου."
 }

@@ -1,16 +1,23 @@
+<%# Mirror the PDF partial: only render a method when its data exists; when
+    NOTHING is configured, render a single "contact the manager" line. %>
+<% var hasBank = landlord.hasBankInfo && landlord.bankInfo.iban;
+   var hasCash = landlord.hasContact && (landlord.contacts[0].phone1 || landlord.contacts[0].email);
+   var hasCheque = landlord.hasAddress && landlord.addresses[0].street1;
+   var hasAny = hasBank || hasCash || hasCheque;
+-%>
+<% if (hasAny) { -%>
 <%- _.t('Payment modalities:') %>
 
-<% if (landlord.hasBankInfo) { -%>
+<% if (hasBank) { -%>
 <%- _.t('By bank transfer') %>
-<%- _.t('Bank details') %>
 <%- landlord.bankInfo.name %>
 <%- _.t('IBAN: {{iban}}', { iban: landlord.bankInfo.iban }) %>
-<% } -%>
 
+<% } -%>
+<% if (hasCheque) { -%>
 <%- _.t('By check') %>
 <%- _.t('Write your check to the order of {{name}} and send it to the following address:', { name: landlord.name }) %>
 <%- landlord.name %>
-<% if (landlord.hasAddress) { -%>
 <%- landlord.addresses[0].street1 %>
 <% if (landlord.addresses[0].street2) { -%>
 <%- landlord.addresses[0].street2 %>
@@ -22,13 +29,23 @@
 <% if (landlord.addresses[0].country) { -%>
 <%- landlord.addresses[0].country %>
 <% } -%>
-<% } -%>
 
-<% if (landlord.hasContact) { -%>
+<% } -%>
+<% if (hasCash) { -%>
 <%- _.t('By cash') %>
+<% if (landlord.contacts[0].name) { -%>
 <%- _.t('Contact: {{name}}', { name: landlord.contacts[0].name }) %>
+<% } -%>
+<% if (landlord.contacts[0].phone1 || landlord.contacts[0].phone2) { -%>
 <%- _.t('Phone: {{phones}}', { phones: (landlord.contacts[0].phone1 || '') + (landlord.contacts[0].phone2 ? (' / ' + landlord.contacts[0].phone2) : '')}) %>
+<% } -%>
+<% if (landlord.contacts[0].email) { -%>
 <%- _.t('Email: {{email}}', { email: landlord.contacts[0].email }) %>
 <% } -%>
 
+<% } -%>
+<% } else { -%>
+<%- _.t('Please contact the property manager or landlord regarding rent payment.') %>
+
+<% } -%>
 <%- _.t('If you have already paid this amount, we thank you and invite you to ignore this message.') %>

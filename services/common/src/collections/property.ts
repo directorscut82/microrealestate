@@ -31,6 +31,8 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
   // are queryable without re-parsing the PDF.
   kaek: String,
   dehNumber: String,
+  // Water supply number (ΕΥΔΑΠ) — exact sibling of dehNumber (ΔΕΗ).
+  eydapNumber: String,
   buildingId: String,
   electricitySupplyNumber: String,
   energyCertificate: {

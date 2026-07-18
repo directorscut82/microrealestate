@@ -100,7 +100,7 @@ async function _sendSms(
     if (balance > 0) parts.push(`Υπόλοιπο: ${fmt(balance)}`);
 
     if (parts.length > 1) {
-      amountPart = ` (${parts.join(', ')} = ${fmt(grandTotal)})`;
+      amountPart = ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(grandTotal)})`;
     } else {
       amountPart = ` (${fmt(grandTotal)})`;
     }
@@ -239,13 +239,19 @@ export async function sendTelegramNotification(req: Req, res: Res) {
 
 // Fire-and-forget Telegram echo to the admin (best-effort, never blocks the
 // primary send response). Called after email/SMS batches so the landlord sees
-// a summary in their bot chat without refreshing the app.
-function _echoToTelegram(req: Req, text: string) {
+// a summary in their bot chat without refreshing the app. Optional
+// `attachment` ({templateName, recordId, term}) makes the emailer fetch the
+// same rendered PDF the email attaches and deliver it as a Telegram document.
+function _echoToTelegram(
+  req: Req,
+  text: string,
+  attachment?: { templateName: string; recordId: string; term: number | string }
+) {
   const { EMAILER_URL } = Service.getInstance().envConfig.getValues();
   axios
     .post(
       `${EMAILER_URL}/telegram`,
-      { text },
+      { text, ...(attachment ? { attachment } : {}) },
       {
         headers: {
           authorization: req.headers.authorization,
@@ -372,13 +378,24 @@ export async function send(req: Req, res: Res) {
     res.json(statusList);
   }
 
-  // Telegram admin echo (fire-and-forget after response)
+  // Telegram admin echo (fire-and-forget after response). Attach the same
+  // rendered PDF the email carried — one echo per tenant so each PDF lands
+  // in the admin chat exactly like it landed in the tenant's inbox.
   const sent = statusList.filter((s) => !s.error && !s.skipped);
   if (sent.length) {
-    const termDate = moment.utc(String(sent[0].term), 'YYYYMMDDHH');
     const label = req.body.document === 'invoice' ? 'Τιμολόγιο' : 'Ειδοποίηση πληρωμής';
-    const names = sent.map((s: AnyRecord) => s.name).join(', ');
-    _echoToTelegram(req, `📧 ${label} ${termDate.format('MM/YYYY')} → ${names} (${sent.length} email)`);
+    for (const s of sent as AnyRecord[]) {
+      const termDate = moment.utc(String(s.term), 'YYYYMMDDHH');
+      _echoToTelegram(
+        req,
+        `📧 ${label} ${termDate.format('MM/YYYY')} → ${s.name}`,
+        {
+          templateName: String(req.body.document || 'rentcall'),
+          recordId: String(s.tenantId),
+          term: s.term
+        }
+      );
+    }
   }
   const failed = statusList.filter((s) => s.error);
   if (failed.length) {

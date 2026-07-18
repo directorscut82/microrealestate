@@ -211,6 +211,8 @@ export namespace CollectionTypes {
     // identifier carried alongside ATAK on Greek properties.
     kaek?: string;
     dehNumber?: string;
+    // Water supply number (ΕΥΔΑΠ) — sibling of dehNumber (ΔΕΗ).
+    eydapNumber?: string;
     buildingId?: string | Building;
     electricitySupplyNumber?: string;
     energyCertificate?: {
