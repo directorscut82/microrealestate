@@ -1338,5 +1338,7 @@
   "Imported lease PDF": "Εισηγμένο PDF μισθωτηρίου",
   "Imported E9 PDF": "Εισηγμένο PDF Ε9",
   "Rename": "Μετονομασία",
-  "Download": "Λήψη"
+  "Download": "Λήψη",
+  "Files": "Αρχεία",
+  "All uploaded files, grouped by tenant, building and owner": "Όλα τα μεταφορτωμένα αρχεία, ομαδοποιημένα ανά ενοικιαστή, κτίριο και ιδιοκτήτη"
 }

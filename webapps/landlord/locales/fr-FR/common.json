@@ -1194,5 +1194,7 @@
   "Imported lease PDF": "PDF de bail importé",
   "Imported E9 PDF": "PDF E9 importé",
   "Rename": "Renommer",
-  "Download": "Télécharger"
+  "Download": "Télécharger",
+  "Files": "Fichiers",
+  "All uploaded files, grouped by tenant, building and owner": "Tous les fichiers téléversés, groupés par locataire, bâtiment et propriétaire"
 }

@@ -1194,5 +1194,7 @@
   "Imported lease PDF": "Importiertes Mietvertrag-PDF",
   "Imported E9 PDF": "Importiertes E9-PDF",
   "Rename": "Umbenennen",
-  "Download": "Herunterladen"
+  "Download": "Herunterladen",
+  "Files": "Dateien",
+  "All uploaded files, grouped by tenant, building and owner": "Alle hochgeladenen Dateien, gruppiert nach Mieter, Gebäude und Eigentümer"
 }

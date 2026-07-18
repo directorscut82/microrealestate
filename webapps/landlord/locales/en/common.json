@@ -1318,5 +1318,7 @@
   "Imported lease PDF": "Imported lease PDF",
   "Imported E9 PDF": "Imported E9 PDF",
   "Rename": "Rename",
-  "Download": "Download"
+  "Download": "Download",
+  "Files": "Files",
+  "All uploaded files, grouped by tenant, building and owner": "All uploaded files, grouped by tenant, building and owner"
 }

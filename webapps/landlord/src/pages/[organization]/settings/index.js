@@ -91,6 +91,13 @@ function Settings() {
                 )}
             />
             <SettingLink
+              href="/settings/files"
+              title={t('Files')}
+              description={t(
+                'All uploaded files, grouped by tenant, building and owner'
+              )}
+            />
+            <SettingLink
               href="/settings/database"
               title={t('Database')}
               description={t('Save and restore your application data')}
