@@ -1342,5 +1342,7 @@
   "Files": "Αρχεία",
   "All uploaded files, grouped by tenant, building and owner": "Όλα τα μεταφορτωμένα αρχεία, ομαδοποιημένα ανά ενοικιαστή, κτίριο και ιδιοκτήτη",
   "Owner expense statement": "Εκκαθαριστικό εξόδων ιδιοκτήτη",
-  "Copy my details": "Αντιγραφή των στοιχείων μου"
+  "Copy my details": "Αντιγραφή των στοιχείων μου",
+  "Has outstanding": "Με οφειλή",
+  "Error fetching owners": "Σφάλμα φόρτωσης ιδιοκτητών"
 }

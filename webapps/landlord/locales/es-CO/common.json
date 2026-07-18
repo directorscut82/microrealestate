@@ -1198,5 +1198,7 @@
   "Files": "Archivos",
   "All uploaded files, grouped by tenant, building and owner": "Todos los archivos subidos, agrupados por inquilino, edificio y propietario",
   "Owner expense statement": "Estado de gastos del propietario",
-  "Copy my details": "Copiar mis datos"
+  "Copy my details": "Copiar mis datos",
+  "Has outstanding": "Con pendiente",
+  "Error fetching owners": "Error al cargar propietarios"
 }

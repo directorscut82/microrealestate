@@ -1198,5 +1198,7 @@
   "Files": "Fichiers",
   "All uploaded files, grouped by tenant, building and owner": "Tous les fichiers téléversés, groupés par locataire, bâtiment et propriétaire",
   "Owner expense statement": "Relevé de charges du propriétaire",
-  "Copy my details": "Copier mes coordonnées"
+  "Copy my details": "Copier mes coordonnées",
+  "Has outstanding": "Avec impayé",
+  "Error fetching owners": "Erreur de chargement des propriétaires"
 }
