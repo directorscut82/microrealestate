@@ -142,7 +142,7 @@ function OwnerDetail() {
       {owner && (
         <div className="space-y-6">
           {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-2">
             <div className="flex items-center gap-3">
               <Button variant="ghost" size="icon" onClick={back} aria-label={t('Back')}>
                 <LuArrowLeft className="size-5" />
@@ -199,6 +199,25 @@ function OwnerDetail() {
               )}
             </div>
           </div>
+
+          {/* Contact info — read from the API (phone/email from units[].owners[]).
+              Editable on the unit co-owner editor (building → units tab). */}
+          {!isLoipoi && (owner.phone || owner.email) && (
+            <Card className="px-5 py-3">
+              <div className="flex items-center gap-6 text-sm text-ink-soft">
+                {owner.phone && (
+                  <span className="flex items-center gap-1.5">
+                    📞 {owner.phone}
+                  </span>
+                )}
+                {owner.email && (
+                  <span className="flex items-center gap-1.5">
+                    ✉ {owner.email}
+                  </span>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* ΛΟΙΠΟΙ explainer: tell the landlord WHAT this placeholder is and
               HOW to resolve it (name the co-owner) — the row is otherwise a
@@ -457,12 +476,12 @@ function OwnerDetail() {
 
           {/* Ακίνητα — MOVED BEFORE Χρεώσεις, now renders BEFORE payments */}
 
-          {/* Έγγραφα — per-owner uploads (ταυτότητες, εξουσιοδοτήσεις,
-              συμφωνητικά). Placeholder ΛΟΙΠΟΙ rows have no identity → no docs. */}
+          {/* Έγγραφα — compact inline section (not a full-blown Card tile). */}
           {!isLoipoi && (
             <DocumentsPanel
               entity={{ ownerKey }}
               folder={`owners/${owner?.name || ownerKey}`}
+              className="border-0 shadow-none p-0"
             />
           )}
 

@@ -150,16 +150,17 @@ function Owners() {
         filterFn={_filterData}
         renderActions={() =>
           canSendEmails || canSendSms ? (
-            <div className="flex flex-col md:flex-row gap-2">
+            <div className="flex flex-col">
               {canSendEmails ? (
                 <Button
                   variant="secondary"
                   disabled={!emailable.length || emailMutation.isLoading}
                   onClick={() => setOpenConfirmEmail(true)}
                 >
-                  <LuSend className="mr-1.5 size-4" />
-                  {t('Send statement by email')}
-                  {emailable.length ? ` (${emailable.length})` : ''}
+                  <LuSend className="mr-2" />
+                  {emailMutation.isLoading
+                    ? t('Sending...')
+                    : t('Send by email')}
                 </Button>
               ) : null}
               {canSendSms ? (
@@ -168,9 +169,8 @@ function Owners() {
                   disabled={!smsable.length || smsMutation.isLoading}
                   onClick={handleSendSms}
                 >
-                  <LuMessageSquare className="mr-1.5 size-4" />
-                  {t('Send SMS')}
-                  {smsable.length ? ` (${smsable.length})` : ''}
+                  <LuMessageSquare className="mr-2" />
+                  {smsMutation.isLoading ? t('Sending...') : t('Send SMS')}
                 </Button>
               ) : null}
             </div>
