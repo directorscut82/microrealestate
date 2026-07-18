@@ -341,6 +341,85 @@ export default function (): Router {
     })
   );
 
+  // Machine-to-machine token exchange: an application created in Settings →
+  // Access («Εφαρμογές») presents its clientId + clientSecret and receives a
+  // short-lived access token carrying an `application` principal — the shape
+  // needsAccessToken/checkOrganization already understand. This was the
+  // missing half of the appcredz feature: credentials could be created but
+  // no endpoint existed to use them.
+  landlordRouter.post(
+    '/apptoken',
+    authRateLimit,
+    Middlewares.asyncWrapper(async (req: Request, res: Response) => {
+      const { APPCREDZ_TOKEN_SECRET, ACCESS_TOKEN_SECRET } =
+        Service.getInstance().envConfig.getValues();
+      const { clientId, clientSecret } = req.body || {};
+      if (
+        typeof clientId !== 'string' ||
+        typeof clientSecret !== 'string' ||
+        !clientId.trim() ||
+        !clientSecret.trim()
+      ) {
+        throw new ServiceError('missing fields', 422);
+      }
+
+      // 1. The clientSecret is itself a JWT signed with APPCREDZ_TOKEN_SECRET
+      //    carrying {organizationId, jti: clientId, exp}. Verify signature +
+      //    expiry + that it belongs to the presented clientId.
+      let decodedSecret: Record<string, any>;
+      try {
+        decodedSecret = jwt.verify(clientSecret, APPCREDZ_TOKEN_SECRET!, {
+          algorithms: ['HS256']
+        }) as Record<string, any>;
+      } catch {
+        throw new ServiceError('invalid credentials', 401);
+      }
+      if (decodedSecret.jti !== clientId) {
+        throw new ServiceError('invalid credentials', 401);
+      }
+
+      // 2. The realm stores the application with a bcrypt HASH of the secret
+      //    (realm pre-save hook). Confirm the app still exists on the realm
+      //    (i.e. wasn't revoked) and the secret matches the stored hash.
+      const realm = await Collections.Realm.findOne({
+        _id: decodedSecret.organizationId,
+        applications: { $elemMatch: { clientId } }
+      }).lean();
+      const app: any = (realm as any)?.applications?.find(
+        (a: any) => a.clientId === clientId
+      );
+      if (!app) {
+        throw new ServiceError('invalid credentials', 401);
+      }
+      const secretMatches = await bcrypt.compare(
+        clientSecret,
+        app.clientSecret || ''
+      );
+      if (!secretMatches) {
+        throw new ServiceError('invalid credentials', 401);
+      }
+      if (app.expiryDate && new Date(app.expiryDate) < new Date()) {
+        throw new ServiceError('credentials expired', 401);
+      }
+
+      // 3. Issue a short-lived access token with the `application` principal
+      //    shape the shared middleware resolves (role comes from the realm's
+      //    applications[] entry at request time, so a role change or app
+      //    deletion takes effect immediately).
+      const accessToken = jwt.sign(
+        { application: { clientId } },
+        ACCESS_TOKEN_SECRET!,
+        { algorithm: 'HS256', expiresIn: '5m' }
+      );
+      res.json({
+        accessToken,
+        tokenType: 'Bearer',
+        expiresIn: 300,
+        organizationId: String((realm as any)._id)
+      });
+    })
+  );
+
   landlordRouter.post(
     '/refreshtoken',
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
