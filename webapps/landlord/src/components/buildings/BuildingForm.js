@@ -279,7 +279,7 @@ export default function BuildingForm({ building, onSubmit }) {
             setValue('manager.taxId', org?.companyInfo?.vatNumber || '');
           }}
         >
-          {t('Copy from landlord')}
+          {t('Copy my details')}
         </Button>
         <div className="sm:flex sm:gap-2">
           <div className="space-y-2 flex-1">
