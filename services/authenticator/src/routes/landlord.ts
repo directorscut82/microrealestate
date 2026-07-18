@@ -30,15 +30,15 @@ const _generateTokens = async (dbAccount: Record<string, any>): Promise<{ refres
   // shifting in a future major version.
   const refreshToken = jwt.sign({ account }, REFRESH_TOKEN_SECRET!, {
     algorithm: 'HS256',
-    expiresIn: PRODUCTION ? '600s' : '12h'
+    expiresIn: PRODUCTION ? '3600s' : '12h'
   });
   const accessToken = jwt.sign({ account }, ACCESS_TOKEN_SECRET!, {
     algorithm: 'HS256',
-    expiresIn: '5m'
+    expiresIn: '15m'
   });
 
   await Service.getInstance().redisClient!.set(refreshToken, accessToken, {
-    EX: PRODUCTION ? 600 : 43200
+    EX: PRODUCTION ? 3600 : 43200
   });
 
   return { refreshToken, accessToken };

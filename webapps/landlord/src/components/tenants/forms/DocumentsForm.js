@@ -51,13 +51,29 @@ export default function DocumentsForm({ tenant, onSubmit, readOnly }) {
         </div>
       ) : null}
 
-      <Section label={t('Required documents')}>
-        <UploadFileList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} mb={4} />
-      </Section>
-
-      <Section label={t('Documents from templates')}>
-        <TenantDocumentList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} />
-      </Section>
+      {/* Template-slot sections (Απαιτούμενα + Δημιουργία) hidden unless
+          the realm actually has fileDescriptor / text templates linked to
+          this tenant's lease — otherwise they render as confusing empty
+          Chrome with no affordance. The generic DocumentsPanel above is the
+          real upload surface. */}
+      {templates.some(
+        (tpl) =>
+          tpl.type === 'fileDescriptor' &&
+          tpl.linkedResourceIds?.includes(tenant?.leaseId)
+      ) && (
+        <Section label={t('Required documents')}>
+          <UploadFileList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} mb={4} />
+        </Section>
+      )}
+      {templates.some(
+        (tpl) =>
+          tpl.type === 'text' &&
+          tpl.linkedResourceIds?.includes(tenant?.leaseId)
+      ) && (
+        <Section label={t('Documents from templates')}>
+          <TenantDocumentList tenant={tenant} templates={templates} documents={documents} disabled={readOnly} />
+        </Section>
+      )}
 
       {!readOnly && (
         <Button onClick={handleNext} data-cy="submit">
