@@ -1340,5 +1340,7 @@
   "Rename": "Μετονομασία",
   "Download": "Λήψη",
   "Files": "Αρχεία",
-  "All uploaded files, grouped by tenant, building and owner": "Όλα τα μεταφορτωμένα αρχεία, ομαδοποιημένα ανά ενοικιαστή, κτίριο και ιδιοκτήτη"
+  "All uploaded files, grouped by tenant, building and owner": "Όλα τα μεταφορτωμένα αρχεία, ομαδοποιημένα ανά ενοικιαστή, κτίριο και ιδιοκτήτη",
+  "Owner expense statement": "Εκκαθαριστικό εξόδων ιδιοκτήτη",
+  "Copy from landlord": "Αντιγραφή από στοιχεία ιδιοκτήτη"
 }

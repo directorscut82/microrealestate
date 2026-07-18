@@ -1196,5 +1196,7 @@
   "Rename": "Renomear",
   "Download": "Baixar",
   "Files": "Arquivos",
-  "All uploaded files, grouped by tenant, building and owner": "Todos os arquivos enviados, agrupados por inquilino, edifício e proprietário"
+  "All uploaded files, grouped by tenant, building and owner": "Todos os arquivos enviados, agrupados por inquilino, edifício e proprietário",
+  "Owner expense statement": "Demonstrativo de despesas do proprietário",
+  "Copy from landlord": "Copiar do proprietário"
 }

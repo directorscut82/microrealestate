@@ -265,6 +265,7 @@ type OwnerAgg = {
   // powers the owners-page notification send (email/SMS).
   phone: string;
   email: string;
+  iban: string;
 };
 
 // Map a propertyId → the ownerKey(s) of its unit's owners, across all
@@ -353,7 +354,8 @@ export function _aggregateOwners(
             totalOutstanding: 0,
             alsoRents: false,
             phone: o.phone || '',
-            email: o.email || ''
+            email: o.email || '',
+            iban: o.iban || ''
           });
         }
         const agg = owners.get(key)!;
@@ -364,6 +366,7 @@ export function _aggregateOwners(
         if (!agg.taxId && o.taxId) agg.taxId = o.taxId;
         if (!agg.phone && o.phone) agg.phone = o.phone;
         if (!agg.email && o.email) agg.email = o.email;
+        if (!agg.iban && o.iban) agg.iban = o.iban;
         // a fractional percentage anywhere is a useful display hint
         if (
           agg.percentage === undefined &&
@@ -457,7 +460,8 @@ export function _aggregateOwners(
         totalOutstanding: 0,
         alsoRents: false,
         phone: '',
-        email: ''
+        email: '',
+        iban: ''
       };
       owners.set(key, agg);
     }
@@ -1094,6 +1098,7 @@ export function _serializeOwnerSummary(agg: OwnerAgg) {
     alsoRents: agg.alsoRents,
     phone: agg.phone || '',
     email: agg.email || '',
+    iban: agg.iban || '',
     hasEmail: !!agg.email,
     hasPhone: !!agg.phone,
     settlements
@@ -1541,4 +1546,64 @@ export async function pay(req: Req, res: Res) {
       ? { ..._serializeOwnerSummary(updated), allocatedTotal }
       : { ownerKey, allocatedTotal }
   );
+}
+
+// PATCH /owners/:ownerKey/contact — update the owner's contact info
+// (phone/email/iban) on EVERY unit-owner entry matching the canonical key
+// across the realm's buildings. Owners are embedded in units[].owners[]
+// (no owner collection), so the same person on 3 units gets all 3 entries
+// updated — _aggregateOwners then reads a consistent value. Name/ΑΦΜ are NOT
+// editable here: they ARE the identity key (changing them re-keys the owner;
+// that flow stays on the unit co-owner editor).
+export async function updateContact(req: Req, res: Res) {
+  const realm = req.realm;
+  const ownerKey = req.params.ownerKey || '';
+  if (!ownerKey) throw new ServiceError('ownerKey is required', 422);
+  if (OwnerStatement.isLoipoiKey(ownerKey)) {
+    throw new ServiceError(
+      'Cannot set contact info on the «Λοιποί ιδιοκτήτες» placeholder — name the co-owner first.',
+      422
+    );
+  }
+
+  const phone = String(req.body?.phone || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const iban = String(req.body?.iban || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new ServiceError('invalid email', 422);
+  }
+  if (phone && !/^[+\d][\d\s\-()]{4,24}$/.test(phone)) {
+    throw new ServiceError('invalid phone', 422);
+  }
+  if (iban && !/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) {
+    throw new ServiceError('invalid IBAN', 422);
+  }
+
+  const buildings = await Collections.Building.find({ realmId: realm!._id });
+  let touched = 0;
+  for (const b of buildings as any[]) {
+    let dirty = false;
+    for (const u of b.units || []) {
+      for (const o of u.owners || []) {
+        if (OwnerStatement.ownerKeyOf(o) !== ownerKey) continue;
+        // Empty string = clear the field; omit = leave unchanged.
+        if (req.body.phone !== undefined) o.phone = phone;
+        if (req.body.email !== undefined) o.email = email;
+        if (req.body.iban !== undefined) o.iban = iban;
+        dirty = true;
+        touched++;
+      }
+    }
+    if (dirty) {
+      b.markModified('units');
+      await b.save();
+    }
+  }
+  if (!touched) {
+    throw new ServiceError('owner not found', 404);
+  }
+  res.json({ ownerKey, updatedEntries: touched, phone, email, iban });
 }

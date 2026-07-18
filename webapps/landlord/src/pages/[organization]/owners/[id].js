@@ -7,6 +7,7 @@ import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import ErrorPage from 'next/error';
 import { LuArrowLeft, LuBuilding2, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
+import OwnerContactCard from '../../../components/owners/OwnerContactCard';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
 import Page from '../../../components/Page';
 import { ownerChargeLabel } from '../../../utils/lineLabels';
@@ -200,24 +201,10 @@ function OwnerDetail() {
             </div>
           </div>
 
-          {/* Contact info — read from the API (phone/email from units[].owners[]).
-              Editable on the unit co-owner editor (building → units tab). */}
-          {!isLoipoi && (owner.phone || owner.email) && (
-            <Card className="px-5 py-3">
-              <div className="flex items-center gap-6 text-sm text-ink-soft">
-                {owner.phone && (
-                  <span className="flex items-center gap-1.5">
-                    📞 {owner.phone}
-                  </span>
-                )}
-                {owner.email && (
-                  <span className="flex items-center gap-1.5">
-                    ✉ {owner.email}
-                  </span>
-                )}
-              </div>
-            </Card>
-          )}
+          {/* Στοιχεία επικοινωνίας — editable INLINE (phone/email/IBAN saved
+              to every unit-owner entry of this ownerKey). ΑΦΜ is read-only:
+              it IS part of the owner's identity key. */}
+          {!isLoipoi && <OwnerContactCard owner={owner} ownerKey={ownerKey} />}
 
           {/* ΛΟΙΠΟΙ explainer: tell the landlord WHAT this placeholder is and
               HOW to resolve it (name the co-owner) — the row is otherwise a

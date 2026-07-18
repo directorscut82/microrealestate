@@ -1196,5 +1196,7 @@
   "Rename": "Umbenennen",
   "Download": "Herunterladen",
   "Files": "Dateien",
-  "All uploaded files, grouped by tenant, building and owner": "Alle hochgeladenen Dateien, gruppiert nach Mieter, Gebäude und Eigentümer"
+  "All uploaded files, grouped by tenant, building and owner": "Alle hochgeladenen Dateien, gruppiert nach Mieter, Gebäude und Eigentümer",
+  "Owner expense statement": "Eigentümer-Kostenabrechnung",
+  "Copy from landlord": "Vom Vermieter übernehmen"
 }

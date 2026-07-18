@@ -65,9 +65,16 @@ function Section({ label, children }) {
 
 // Two-column field row on md+ viewports. Greek labels need more room
 // than English so we never go to 3- or 4-col grids; long forms simply
-// scroll instead.
+// scroll instead. items-end: when one label wraps to two lines (e.g.
+// «Ημερομηνία έκδοσης πιστοποιητικού ενεργειακής απόδοσης») and its
+// neighbor doesn't, the INPUTS stay on one shared baseline instead of the
+// shorter field floating up mid-row.
 function Row({ children }) {
-  return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+      {children}
+    </div>
+  );
 }
 
 function Field({ children }) {

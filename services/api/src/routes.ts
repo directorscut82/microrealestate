@@ -421,6 +421,10 @@ export default function routes(): express.Router {
     '/:ownerKey',
     Middlewares.asyncWrapper(ownerManager.one as any)
   );
+  ownersRouter.patch(
+    '/:ownerKey/contact',
+    Middlewares.asyncWrapper(ownerManager.updateContact as any)
+  );
   ownersRouter.post(
     '/:ownerKey/payment',
     Middlewares.asyncWrapper(ownerManager.pay as any)

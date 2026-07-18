@@ -11,8 +11,9 @@ import { Label } from '../ui/label';
 import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
+import { StoreContext } from '../../store';
 import { useForm } from 'react-hook-form';
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -71,6 +72,7 @@ const heatingTypes = [
 
 export default function BuildingForm({ building, onSubmit }) {
   const { t } = useTranslation('common');
+  const store = useContext(StoreContext);
 
   const initialValues = useMemo(
     () => ({
@@ -256,6 +258,29 @@ export default function BuildingForm({ building, onSubmit }) {
       </Section>
 
       <Section label={t('Building Manager')}>
+        {/* Pre-fill the manager from the realm's landlord contact (Settings →
+            Landlord) — the common case where the landlord manages the
+            building themselves. One click instead of retyping. */}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mb-3"
+          onClick={() => {
+            const org = store?.organization?.selected;
+            const contact = org?.contacts?.[0] || {};
+            setValue(
+              'manager.name',
+              contact.name || (org?.isCompany ? org?.companyInfo?.legalRepresentative : org?.name) || ''
+            );
+            setValue('manager.company', org?.isCompany ? org?.companyInfo?.name || org?.name || '' : '');
+            setValue('manager.phone', contact.phone1 || contact.phone2 || '');
+            setValue('manager.email', contact.email || '');
+            setValue('manager.taxId', org?.companyInfo?.vatNumber || '');
+          }}
+        >
+          {t('Copy from landlord')}
+        </Button>
         <div className="sm:flex sm:gap-2">
           <div className="space-y-2 flex-1">
             <Label htmlFor="manager.name">{t('Name')}</Label>

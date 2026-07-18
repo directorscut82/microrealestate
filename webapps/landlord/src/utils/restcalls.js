@@ -278,6 +278,14 @@ export async function sendOwnerSms(payload) {
   return response.data;
 }
 
+export async function updateOwnerContact({ ownerKey, ...contact }) {
+  const response = await apiFetcher().patch(
+    `/owners/${encodeURIComponent(ownerKey)}/contact`,
+    contact
+  );
+  return response.data;
+}
+
 export async function payRent({ term, payment }) {
   const response = await apiFetcher().patch(
     `/rents/payment/${payment._id}/${term}`,

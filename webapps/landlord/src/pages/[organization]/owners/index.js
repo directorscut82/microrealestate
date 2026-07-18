@@ -4,11 +4,22 @@ import {
   sendOwnerSms,
   sendOwnerStatements
 } from '../../../utils/restcalls';
-import { LuMessageSquare, LuSend } from 'react-icons/lu';
+import {
+  LuChevronDown,
+  LuMessageSquare,
+  LuRotateCw,
+  LuSend
+} from 'react-icons/lu';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from '../../../components/ui/popover';
 import { useCallback, useContext, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../../components/ui/button';
 import ConfirmDialog from '../../../components/ConfirmDialog';
+import { GrDocumentPdf } from 'react-icons/gr';
 import { List } from '../../../components/ResourceList';
 import moment from 'moment';
 import OwnerList from '../../../components/owners/OwnerList';
@@ -149,28 +160,45 @@ function Owners() {
         ]}
         filterFn={_filterData}
         renderActions={() =>
-          canSendEmails || canSendSms ? (
+          emailMutation.isLoading || smsMutation.isLoading ? (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <LuRotateCw className="animate-spin size-4" />
+              {t('Sending...')}
+            </div>
+          ) : canSendEmails || canSendSms ? (
             <div className="flex flex-col">
               {canSendEmails ? (
-                <Button
-                  variant="secondary"
-                  disabled={!emailable.length || emailMutation.isLoading}
-                  onClick={() => setOpenConfirmEmail(true)}
-                >
-                  <LuSend className="mr-2" />
-                  {emailMutation.isLoading
-                    ? t('Sending...')
-                    : t('Send by email')}
-                </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="secondary" disabled={!emailable.length}>
+                      <LuSend className="mr-2" />
+                      {t('Send by email')}
+                      <LuChevronDown className="ml-1" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="p-0.5 m-0 w-auto">
+                    <div className="flex flex-col">
+                      <Button
+                        variant="ghost"
+                        onClick={() => setOpenConfirmEmail(true)}
+                        disabled={!emailable.length}
+                        className="justify-start w-full rounded-none"
+                      >
+                        <GrDocumentPdf className="mr-2" />{' '}
+                        {t('Owner expense statement')}
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               ) : null}
               {canSendSms ? (
                 <Button
                   variant="secondary"
-                  disabled={!smsable.length || smsMutation.isLoading}
+                  disabled={!smsable.length}
                   onClick={handleSendSms}
                 >
                   <LuMessageSquare className="mr-2" />
-                  {smsMutation.isLoading ? t('Sending...') : t('Send SMS')}
+                  {t('Send SMS')}
                 </Button>
               ) : null}
             </div>
