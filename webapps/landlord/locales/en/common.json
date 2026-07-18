@@ -1294,5 +1294,11 @@
   "Rent is 0 € — billing will not start": "Rent is 0 € — billing will not start",
   "Missing property entry/exit date": "Missing property entry/exit date",
   "Payment notice": "Payment notice",
-  "EYDAP Number": "EYDAP Number"
+  "EYDAP Number": "EYDAP Number",
+  "Expiring energy certificates": "Expiring energy certificates",
+  "Properties whose energy certificate (issue + 5 years) expires within the next {{n}} days": "Properties whose energy certificate (issue + 5 years) expires within the next {{n}} days",
+  "No energy certificates expiring in the next {{n}} days": "No energy certificates expiring in the next {{n}} days",
+  "Issued": "Issued",
+  "Expires": "Expires",
+  "Open property": "Open property"
 }

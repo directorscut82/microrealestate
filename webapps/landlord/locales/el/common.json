@@ -1314,5 +1314,11 @@
   "Rent is 0 € — billing will not start": "Ενοίκιο 0 € — η χρέωση δεν θα ξεκινήσει",
   "Missing property entry/exit date": "Λείπει ημερομηνία εισόδου/εξόδου ακινήτου",
   "Payment notice": "Ειδοποίηση πληρωμής",
-  "EYDAP Number": "Αριθμός Παροχής ΕΥΔΑΠ"
+  "EYDAP Number": "Αριθμός Παροχής ΕΥΔΑΠ",
+  "Expiring energy certificates": "Ενεργειακά πιστοποιητικά που λήγουν",
+  "Properties whose energy certificate (issue + 5 years) expires within the next {{n}} days": "Ακίνητα των οποίων το ενεργειακό πιστοποιητικό (έκδοση + 5 έτη) λήγει εντός των επόμενων {{n}} ημερών",
+  "No energy certificates expiring in the next {{n}} days": "Κανένα ενεργειακό πιστοποιητικό δεν λήγει τις επόμενες {{n}} ημέρες",
+  "Issued": "Έκδοση",
+  "Expires": "Λήξη",
+  "Open property": "Άνοιγμα ακινήτου"
 }

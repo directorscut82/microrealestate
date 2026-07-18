@@ -240,6 +240,8 @@ const PropertyForm = ({ property, onSubmit }) => {
             <Label htmlFor="atakNumber">{t('ATAK Number')}</Label>
             <Input id="atakNumber" {...register('atakNumber')} />
           </Field>
+        </Row>
+        <Row>
           <Field>
             <Label htmlFor="dehNumber">{t('DEH Number')}</Label>
             <Input id="dehNumber" {...register('dehNumber')} />

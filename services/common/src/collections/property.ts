@@ -40,7 +40,16 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
     number: String,
     issueDate: Date,
     energyClass: String,
-    inspectorNumber: String
+    inspectorNumber: String,
+    // Expiry notices already sent (windows in days before issue+5y), same
+    // per-window debounce pattern as tenant.expiryNoticesSent.
+    expiryNoticesSent: [
+      {
+        _id: false,
+        window: Number,
+        sentAt: Date
+      }
+    ]
   }
 });
 

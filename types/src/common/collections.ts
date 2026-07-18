@@ -220,6 +220,8 @@ export namespace CollectionTypes {
       issueDate: Date;
       energyClass: string;
       inspectorNumber: string;
+      // Expiry-notice debounce entries (windows in days before issue+5y).
+      expiryNoticesSent?: { window: number; sentAt: Date }[];
     };
   };
 

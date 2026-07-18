@@ -1170,5 +1170,11 @@
   "Rent is 0 € — billing will not start": "Aluguel 0 € — a cobrança não será iniciada",
   "Missing property entry/exit date": "Data de entrada/saída do imóvel ausente",
   "Payment notice": "Aviso de pagamento",
-  "EYDAP Number": "Número EYDAP (água)"
+  "EYDAP Number": "Número EYDAP (água)",
+  "Expiring energy certificates": "Certificados energéticos a vencer",
+  "Properties whose energy certificate (issue + 5 years) expires within the next {{n}} days": "Imóveis cujo certificado energético (emissão + 5 anos) vence nos próximos {{n}} dias",
+  "No energy certificates expiring in the next {{n}} days": "Nenhum certificado energético vence nos próximos {{n}} dias",
+  "Issued": "Emitido",
+  "Expires": "Vence",
+  "Open property": "Abrir imóvel"
 }

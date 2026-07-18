@@ -695,12 +695,59 @@ export async function all(req: Req, res: Res) {
       }
     : overview;
 
+  // Upcoming expiries — computed live from data already loaded (leases) plus
+  // one indexed property query (energy certs). Mirrors the scanner's windows:
+  // leases within 30 days, energy certificates (ΠΕΑ, issue+5y) within 60.
+  const leaseHorizon = moment.utc(now).add(30, 'days').endOf('day');
+  const expiringLeases = allTenants
+    .filter((t: AnyRecord) => {
+      if (t.terminationDate) return false;
+      if (!t.endDate) return false;
+      const end = moment.utc(t.endDate);
+      return end.isSameOrAfter(now, 'day') && end.isSameOrBefore(leaseHorizon);
+    })
+    .map((t: AnyRecord) => ({
+      tenantId: String(t._id),
+      name: t.name,
+      endDate: t.endDate,
+      daysLeft: moment.utc(t.endDate).startOf('day').diff(moment.utc(now).startOf('day'), 'days')
+    }))
+    .sort((a: AnyRecord, b: AnyRecord) => a.daysLeft - b.daysLeft);
+
+  const CERT_YEARS = 5;
+  const certIssueStart = moment.utc(now).subtract(CERT_YEARS, 'years').startOf('day').toDate();
+  const certIssueEnd = moment.utc(now).subtract(CERT_YEARS, 'years').add(60, 'days').endOf('day').toDate();
+  const certProps: AnyRecord[] = await Collections.Property.find(
+    {
+      realmId,
+      'energyCertificate.issueDate': { $gte: certIssueStart, $lte: certIssueEnd }
+    },
+    { name: 1, energyCertificate: 1 }
+  ).lean();
+  const expiringEnergyCerts = certProps
+    .map((p: AnyRecord) => {
+      const expiresAt = moment.utc(p.energyCertificate.issueDate).add(CERT_YEARS, 'years');
+      return {
+        propertyId: String(p._id),
+        name: p.name,
+        issueDate: p.energyCertificate.issueDate,
+        expiresAt: expiresAt.toDate(),
+        daysLeft: expiresAt.startOf('day').diff(moment.utc(now).startOf('day'), 'days')
+      };
+    })
+    .filter((c: AnyRecord) => c.daysLeft >= 0)
+    .sort((a: AnyRecord, b: AnyRecord) => a.daysLeft - b.daysLeft);
+
   res.json({
     overview: overviewWithExpenses,
     topUnpaid,
     revenues,
     expenses: expensesRollup.expenses,
-    pendingBills
+    pendingBills,
+    expiries: {
+      leases: expiringLeases,
+      energyCertificates: expiringEnergyCerts
+    }
   });
 }
 

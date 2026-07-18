@@ -6,6 +6,7 @@ import {
   QueryKeys
 } from '../../utils/restcalls';
 import dynamic from 'next/dynamic';
+import ExpiringEnergyCertsTile from '../../components/dashboard/ExpiringEnergyCertsTile';
 import ExpiringLeasesTile from '../../components/dashboard/ExpiringLeasesTile';
 import GeneralFigures from '../../components/dashboard/GeneralFigures';
 import Page from '../../components/Page';
@@ -115,6 +116,10 @@ function Dashboard() {
               dashboardData={dashboardData}
             />
             <ExpiringLeasesTile className="md:col-span-5" />
+            <ExpiringEnergyCertsTile
+              className="md:col-span-5"
+              dashboardData={dashboardData}
+            />
           </div>
         )}
       </div>

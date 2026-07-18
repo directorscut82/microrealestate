@@ -37,6 +37,44 @@ function _windowDebounceCutoff(
 
 const TEMPLATE_NAME = 'lease_expiry_notice';
 
+// Energy-certificate validity (Greek ΠΕΑ): 10 years legally, but the user
+// tracks renewal at 5 years after issue. Notify windows are longer than the
+// lease ones — booking an energy inspector needs lead time.
+export const ENERGY_CERT_VALIDITY_YEARS = 5;
+export const ENERGY_CERT_DAY_WINDOWS: number[] = [60, 30, 7];
+
+// POST a Telegram admin notification through the emailer (which holds the
+// encrypted bot token). Auth uses the same short-lived service token as the
+// email path. Best-effort: failures log and never abort the scan.
+async function _notifyTelegram(
+  emailerUrl: string,
+  mintToken: (role: ConnectionRole, realmId: string) => Promise<string>,
+  realmId: string,
+  text: string
+): Promise<void> {
+  try {
+    const serviceToken = await mintToken('administrator', realmId);
+    await axios.post(
+      `${emailerUrl}/telegram`,
+      { text },
+      {
+        headers: {
+          authorization: `Bearer ${serviceToken}`,
+          organizationid: realmId
+        },
+        timeout: 15_000
+      }
+    );
+  } catch (err: any) {
+    // 503 = Telegram not configured for this realm — normal, stay quiet.
+    if (err?.response?.status !== 503) {
+      logger.warn(
+        `expiry-scanner telegram notify failed (non-blocking): ${err?.message || err}`
+      );
+    }
+  }
+}
+
 export interface ExpiryScanDeps {
   emailerUrl: string;
   // Hooks let the test suite drive the scanner without touching mongo /
@@ -221,6 +259,15 @@ export async function checkExpiringLeases(
       logger.info(
         `lease-expiry-notice sent to tenant ${tenant._id} (expires in ${daysUntil}d)`
       );
+      // Telegram admin ping — piggybacks on the SAME per-window debounce as
+      // the email (we only reach here when the window fired), so no extra
+      // timers or state. Best-effort.
+      await _notifyTelegram(
+        emailerUrl,
+        mintToken,
+        String(tenant.realmId),
+        `⏳ Μίσθωση λήγει σε ${daysUntil} ημέρ${daysUntil === 1 ? 'α' : 'ες'}: ${tenant.name} (${moment.utc(tenant.endDate).format('DD/MM/YYYY')})`
+      );
     } catch (err: any) {
       // J1C-004: distinguish a structural skip ("no registered realm
       // members" — admin hasn't invited anyone) from a real failure.
@@ -250,6 +297,115 @@ export async function checkExpiringLeases(
         `lease-expiry-notice failed for tenant ${tenant._id}: ${
           err?.message || err
         }`
+      );
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Energy-certificate (ΠΕΑ) expiry scan: a certificate expires
+ * ENERGY_CERT_VALIDITY_YEARS after its issueDate. Telegram-only admin
+ * notification at the ENERGY_CERT_DAY_WINDOWS marks, with the same
+ * per-window debounce persisted on property.energyCertificate
+ * .expiryNoticesSent[]. Runs inside the SAME once-per-UTC-day cron body as
+ * the lease scan — no additional timers.
+ */
+export async function checkExpiringEnergyCerts(
+  deps: Partial<ExpiryScanDeps> = {}
+): Promise<ScanResult> {
+  const now = deps.now ? deps.now() : new Date();
+  const result: ScanResult = { scanned: 0, sent: 0, skipped: 0, errors: 0 };
+
+  const horizon = Math.max(...ENERGY_CERT_DAY_WINDOWS);
+  // A cert expiring within `horizon` days was issued within
+  // (5y - horizon .. 5y) days ago. Filter in mongo to that issue range so we
+  // never scan the whole collection.
+  const issueStart = moment
+    .utc(now)
+    .subtract(ENERGY_CERT_VALIDITY_YEARS, 'years')
+    .startOf('day')
+    .toDate();
+  const issueEnd = moment
+    .utc(now)
+    .subtract(ENERGY_CERT_VALIDITY_YEARS, 'years')
+    .add(horizon, 'days')
+    .endOf('day')
+    .toDate();
+
+  const emailerUrl =
+    deps.emailerUrl ||
+    (Service.getInstance().envConfig.getValues().EMAILER_URL as string);
+  const mintToken =
+    deps.mintToken ||
+    ((role: ConnectionRole, realmId: string) =>
+      Service.getInstance().createServiceToken(role, realmId));
+
+  const properties: any[] = await Collections.Property.find({
+    'energyCertificate.issueDate': { $gte: issueStart, $lte: issueEnd }
+  }).lean();
+  result.scanned = properties.length;
+
+  for (const property of properties) {
+    const cert = property.energyCertificate;
+    if (!cert?.issueDate) {
+      result.skipped++;
+      continue;
+    }
+    const expiresAt = moment
+      .utc(cert.issueDate)
+      .add(ENERGY_CERT_VALIDITY_YEARS, 'years')
+      .toDate();
+    const daysUntil = _daysUntil(now, expiresAt);
+    if (!ENERGY_CERT_DAY_WINDOWS.includes(daysUntil)) {
+      result.skipped++;
+      continue;
+    }
+    const windowCutoff = _windowDebounceCutoff(now, daysUntil);
+    const alreadySent = (cert.expiryNoticesSent || []).find(
+      (e: any) =>
+        Number(e?.window) === daysUntil &&
+        e?.sentAt &&
+        new Date(e.sentAt) >= windowCutoff
+    );
+    if (alreadySent) {
+      result.skipped++;
+      continue;
+    }
+
+    try {
+      await _notifyTelegram(
+        emailerUrl,
+        mintToken,
+        String(property.realmId),
+        `📜 Ενεργειακό πιστοποιητικό λήγει σε ${daysUntil} ημέρ${
+          daysUntil === 1 ? 'α' : 'ες'
+        }: ${property.name} (έκδοση ${moment
+          .utc(cert.issueDate)
+          .format('DD/MM/YYYY')}, λήξη ${moment
+          .utc(expiresAt)
+          .format('DD/MM/YYYY')})`
+      );
+      await Collections.Property.updateOne(
+        { _id: property._id },
+        {
+          $push: {
+            'energyCertificate.expiryNoticesSent': {
+              window: daysUntil,
+              sentAt: now
+            }
+          }
+        }
+      );
+      result.sent++;
+      logger.info(
+        `energy-cert-expiry notice sent for property ${property._id} (expires in ${daysUntil}d)`
+      );
+    } catch (err: any) {
+      result.errors++;
+      logger.error(
+        `energy-cert-expiry failed for property ${property._id}: ${err?.message || err}`
       );
     }
   }
@@ -293,6 +449,18 @@ export async function runOncePerUtcDay(
     logger.info(
       `lease-expiry-scanner: scanned=${r.scanned} sent=${r.sent} skipped=${r.skipped} errors=${r.errors}`
     );
+    // Energy-certificate scan shares the same daily slot. Its errors are its
+    // own — a cert-scan failure must not mark the lease scan as failed.
+    try {
+      const c = await checkExpiringEnergyCerts(deps);
+      logger.info(
+        `energy-cert-scanner: scanned=${c.scanned} sent=${c.sent} skipped=${c.skipped} errors=${c.errors}`
+      );
+    } catch (err: any) {
+      logger.error(
+        `energy-cert-scanner: top-level failure: ${err?.message || err}`
+      );
+    }
     return r;
   } catch (err: any) {
     logger.error(
