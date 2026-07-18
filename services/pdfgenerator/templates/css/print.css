@@ -126,15 +126,12 @@ span.error {
 }
 .title {
   position: absolute;
-  top: 94.7mm;
+  top: 80mm;
   left: 105mm;
   color: #333;
   font-weight: bold;
   font-size: 14pt;
   letter-spacing: 2pt;
-}
-.title .invoice {
-  top: 100mm;
 }
 .limit {
   position: absolute;
@@ -168,34 +165,40 @@ span.error {
   text-align: right;
   white-space: nowrap;
 }
+/* Header identification band — one shared 80mm axis.
+ * Left column (10mm): label-over-value stacks, left-aligned, natural wrap.
+ * Right column (105mm): document title with the issue date directly under
+ * it. Replaces three fragments that floated at three different heights
+ * (reference table at 80mm, date at 80mm/right, title alone at 94.7mm). */
 .reference {
   position: absolute;
   top: 80mm;
   left: 10mm;
+  width: 88mm;
 }
-.reference table {
-  width: 200pt;
-  font-size: 9pt;
+.reference .ref-row {
+  margin-bottom: 3.2mm;
 }
-.reference td {
-  padding: 2pt;
-  text-align: right;
+.reference .ref-label {
+  /* No text-transform: CSS uppercasing keeps the tonos on Greek capitals
+   * («ΑΠΌΔΕΙΞΗΣ») which is typographically wrong. Sentence-case labels
+   * distinguished by size/color/spacing instead. */
+  font-size: 7.5pt;
+  color: #555;
+  letter-spacing: 0.6pt;
+  margin-bottom: 0.8mm;
 }
-.reference td.label {
-  text-align: left;
-  font-size: 9pt;
-  white-space: nowrap;
-}
-.reference table td,
-.reference table th {
-  padding: 2pt;
-  margin: 0;
+.reference .ref-value {
+  font-size: 10pt;
+  color: #111;
+  line-height: 1.35;
 }
 .today {
   position: absolute;
-  top: 80mm;
+  top: 88.5mm;
   left: 105mm;
   font: 10pt 'Tahoma';
+  color: #555;
   text-align: left;
 }
 .items {

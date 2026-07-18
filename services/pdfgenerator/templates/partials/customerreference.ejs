@@ -1,18 +1,19 @@
+<%# Label-over-value stacks (same mini-label idiom as the ΙΔΙΟΚΤΗΤΗΣ /
+    ΕΝΟΙΚΙΑΣΤΗΣ headings) — replaces the old 200pt label|right-aligned-value
+    table whose values floated far from their labels and wrapped ragged. %>
 <div class="reference">
-    <table>
-        <tr>
-            <td class="label"><%=_.t(typeof labelKey !== 'undefined' ? labelKey : 'Billing reference')%></td>
-            <td><%= rent.billingReference %></td>
-        </tr>
-        <tr>
-            <td class="label"><%=_.t('Rental period')%></td>
-            <td><%= _.formatTerm(rent.period, tenant.contract.lease.timeRange) %></td>
-        </tr>
-        <% if (rent.propertyAddress) { %>
-            <tr>
-                <td class="label"><%=_.t('Property address')%></td>
-                <td><%= rent.propertyAddress %></td>
-            </tr>
-        <% } %>
-    </table>
+    <div class="ref-row">
+        <div class="ref-label"><%=_.t(typeof labelKey !== 'undefined' ? labelKey : 'Billing reference')%></div>
+        <div class="ref-value"><%= rent.billingReference %></div>
+    </div>
+    <div class="ref-row">
+        <div class="ref-label"><%=_.t('Rental period')%></div>
+        <div class="ref-value"><%= _.formatTerm(rent.period, tenant.contract.lease.timeRange) %></div>
+    </div>
+    <% if (rent.propertyAddress) { %>
+        <div class="ref-row">
+            <div class="ref-label"><%=_.t('Property address')%></div>
+            <div class="ref-value"><%= rent.propertyAddress %></div>
+        </div>
+    <% } %>
 </div>
