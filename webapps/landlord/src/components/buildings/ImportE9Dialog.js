@@ -1,4 +1,5 @@
-import { importBuildingPdf, QueryKeys } from '../../utils/restcalls';
+import { createDocument, importBuildingPdf, QueryKeys } from '../../utils/restcalls';
+import { uploadDocument } from '../../utils/fetch';
 import {
   LuAlertTriangle,
   LuBuilding2,
@@ -284,6 +285,31 @@ export default function ImportE9Dialog({ open, setOpen }) {
           createdCount += Number(result?.createdCount) || 0;
           updatedCount += Number(result?.updatedCount) || 0;
           unitsAddedTotal += Number(result?.unitsAddedTotal) || 0;
+          // Persist the ORIGINAL E9 PDF to the (first) imported building's
+          // documents (B2 + Document record). Best-effort — a storage
+          // failure never fails the import.
+          const firstBuilding = result?.buildings?.[0];
+          if (firstBuilding?._id) {
+            try {
+              const uploadResp = await uploadDocument({
+                endpoint: '/documents/upload',
+                documentName: (file.name || 'E9').replace(/\.pdf$/i, ''),
+                file,
+                folder: `buildings/${firstBuilding.name || firstBuilding._id}`
+              });
+              await createDocument({
+                buildingId: firstBuilding._id,
+                type: 'file',
+                name: file.name || 'E9.pdf',
+                description: t('Imported E9 PDF'),
+                mimeType: 'application/pdf',
+                url: uploadResp.data.key,
+                versionId: uploadResp.data.versionId
+              });
+            } catch (persistErr) {
+              console.error('E9 PDF persist failed (non-blocking)', persistErr);
+            }
+          }
         } catch (err) {
           if (
             controller.signal.aborted ||

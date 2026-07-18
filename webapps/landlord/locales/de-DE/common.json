@@ -1182,5 +1182,17 @@
   "Send the owner expense statement by email to": "Kostenabrechnung per E-Mail senden an",
   "Owner statements sent": "Abrechnungen gesendet",
   "{{count}} owner statements could not be sent": "{{count}} Abrechnungen konnten nicht gesendet werden",
-  "{{count}} SMS could not be sent": "{{count}} SMS konnten nicht gesendet werden"
+  "{{count}} SMS could not be sent": "{{count}} SMS konnten nicht gesendet werden",
+  "Upload document": "Dokument hochladen",
+  "Uploading...": "Wird hochgeladen...",
+  "Document uploaded": "Dokument hochgeladen",
+  "Document deleted": "Dokument gelöscht",
+  "No documents uploaded yet": "Noch keine Dokumente hochgeladen",
+  "Configure the cloud storage (Backblaze B2) in Settings to upload documents": "Konfigurieren Sie den Cloud-Speicher (Backblaze B2) in den Einstellungen",
+  "Documents about this building (permits, invoices, certificates)": "Dokumente zum Gebäude (Genehmigungen, Rechnungen, Zertifikate)",
+  "Required documents": "Erforderliche Dokumente",
+  "Imported lease PDF": "Importiertes Mietvertrag-PDF",
+  "Imported E9 PDF": "Importiertes E9-PDF",
+  "Rename": "Umbenennen",
+  "Download": "Herunterladen"
 }

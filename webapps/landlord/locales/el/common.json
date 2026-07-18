@@ -1326,5 +1326,17 @@
   "Send the owner expense statement by email to": "Αποστολή του εκκαθαριστικού εξόδων με email σε",
   "Owner statements sent": "Τα εκκαθαριστικά στάλθηκαν",
   "{{count}} owner statements could not be sent": "{{count}} εκκαθαριστικά δεν στάλθηκαν",
-  "{{count}} SMS could not be sent": "{{count}} SMS δεν στάλθηκαν"
+  "{{count}} SMS could not be sent": "{{count}} SMS δεν στάλθηκαν",
+  "Upload document": "Μεταφόρτωση εγγράφου",
+  "Uploading...": "Μεταφόρτωση...",
+  "Document uploaded": "Το έγγραφο μεταφορτώθηκε",
+  "Document deleted": "Το έγγραφο διαγράφηκε",
+  "No documents uploaded yet": "Δεν έχουν μεταφορτωθεί έγγραφα",
+  "Configure the cloud storage (Backblaze B2) in Settings to upload documents": "Ρυθμίστε την αποθήκευση cloud (Backblaze B2) στις Ρυθμίσεις για να μεταφορτώσετε έγγραφα",
+  "Documents about this building (permits, invoices, certificates)": "Έγγραφα του κτιρίου (άδειες, τιμολόγια, πιστοποιητικά)",
+  "Required documents": "Απαιτούμενα έγγραφα",
+  "Imported lease PDF": "Εισηγμένο PDF μισθωτηρίου",
+  "Imported E9 PDF": "Εισηγμένο PDF Ε9",
+  "Rename": "Μετονομασία",
+  "Download": "Λήψη"
 }

@@ -14,6 +14,7 @@ import {
 import { useCallback, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import BuildingForm from '../../../components/buildings/BuildingForm';
+import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import BuildingDashboard from '../../../components/buildings/BuildingDashboard';
 import { Card } from '../../../components/ui/card';
 import ConfirmDialog from '../../../components/ConfirmDialog';
@@ -162,7 +163,7 @@ function Building() {
       <Tabs
         defaultValue={
           typeof router.query.tab === 'string' &&
-          ['overview', 'units', 'expenses', 'contractors', 'settings'].includes(
+          ['overview', 'units', 'expenses', 'contractors', 'documents', 'settings'].includes(
             router.query.tab
           )
             ? router.query.tab
@@ -171,23 +172,30 @@ function Building() {
         className="w-full"
       >
         <TabsList className="flex justify-start overflow-x-auto overflow-y-hidden">
-          <TabsTrigger value="overview" className="w-1/5" data-cy="overviewTab">
+          <TabsTrigger value="overview" className="w-1/6" data-cy="overviewTab">
             {t('Overview')}
           </TabsTrigger>
-          <TabsTrigger value="units" className="w-1/5" data-cy="unitsTab">
+          <TabsTrigger value="units" className="w-1/6" data-cy="unitsTab">
             {t('Units')}
           </TabsTrigger>
-          <TabsTrigger value="expenses" className="w-1/5" data-cy="expensesTab">
+          <TabsTrigger value="expenses" className="w-1/6" data-cy="expensesTab">
             {t('Expenses')}
           </TabsTrigger>
           <TabsTrigger
             value="contractors"
-            className="w-1/5"
+            className="w-1/6"
             data-cy="contractorsTab"
           >
             {t('Contractors')}
           </TabsTrigger>
-          <TabsTrigger value="settings" className="w-1/5" data-cy="settingsTab">
+          <TabsTrigger
+            value="documents"
+            className="w-1/6"
+            data-cy="documentsTab"
+          >
+            {t('Documents')}
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="w-1/6" data-cy="settingsTab">
             {t('Information')}
           </TabsTrigger>
         </TabsList>
@@ -230,6 +238,13 @@ function Building() {
           <Card className="p-6">
             <ContractorList building={building} />
           </Card>
+        </TabsContent>
+        <TabsContent value="documents">
+          <DocumentsPanel
+            entity={{ buildingId: building?._id }}
+            folder={`buildings/${building?.name || building?._id || ''}`}
+            description={t('Documents about this building (permits, invoices, certificates)')}
+          />
         </TabsContent>
         <TabsContent value="settings">
           <Card className="p-6">

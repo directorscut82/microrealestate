@@ -73,6 +73,36 @@ export function uploadFile(
   );
 }
 
+/**
+ * List every stored version of a single key. B2 buckets keep all versions by
+ * default, so a version-less delete only writes a delete marker — callers
+ * that want a REAL delete enumerate versions first and pass them to
+ * deleteFiles. Exact-key match only.
+ */
+export function listFileVersions(
+  b2Config: B2Config,
+  url: string
+): Promise<{ url: string; versionId?: string }[]> {
+  const s3 = _initS3(b2Config);
+  return new Promise((resolve, reject) => {
+    s3.listObjectVersions(
+      { Bucket: b2Config.bucket, Prefix: url },
+      (err, data) => {
+        if (err) {
+          return reject(err);
+        }
+        const versions = [
+          ...(data.Versions || []),
+          ...(data.DeleteMarkers || [])
+        ]
+          .filter((v) => v.Key === url)
+          .map((v) => ({ url, versionId: v.VersionId }));
+        resolve(versions);
+      }
+    );
+  });
+}
+
 export function deleteFiles(
   b2Config: B2Config,
   urlsIds: { url: string; versionId?: string }[]

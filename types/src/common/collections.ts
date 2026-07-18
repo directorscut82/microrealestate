@@ -151,8 +151,13 @@ export namespace CollectionTypes {
   export type Document = {
     _id: string;
     realmId: string;
-    tenantId: string;
-    leaseId: string;
+    // Exactly ONE of tenantId / buildingId / ownerKey identifies the entity
+    // the document belongs to (route-enforced). tenantId+leaseId were
+    // historically required (tenant docs); building/owner docs set neither.
+    tenantId?: string;
+    leaseId?: string;
+    buildingId?: string;
+    ownerKey?: string;
     templateId?: string;
     type: 'text' | 'file' | 'fileDescriptor';
     name: string;

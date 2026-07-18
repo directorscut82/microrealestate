@@ -1182,5 +1182,17 @@
   "Send the owner expense statement by email to": "Envoyer le relevé de charges par email à",
   "Owner statements sent": "Relevés envoyés",
   "{{count}} owner statements could not be sent": "{{count}} relevés n'ont pas pu être envoyés",
-  "{{count}} SMS could not be sent": "{{count}} SMS n'ont pas pu être envoyés"
+  "{{count}} SMS could not be sent": "{{count}} SMS n'ont pas pu être envoyés",
+  "Upload document": "Téléverser un document",
+  "Uploading...": "Téléversement...",
+  "Document uploaded": "Document téléversé",
+  "Document deleted": "Document supprimé",
+  "No documents uploaded yet": "Aucun document téléversé",
+  "Configure the cloud storage (Backblaze B2) in Settings to upload documents": "Configurez le stockage cloud (Backblaze B2) dans Paramètres pour téléverser",
+  "Documents about this building (permits, invoices, certificates)": "Documents du bâtiment (permis, factures, certificats)",
+  "Required documents": "Documents requis",
+  "Imported lease PDF": "PDF de bail importé",
+  "Imported E9 PDF": "PDF E9 importé",
+  "Rename": "Renommer",
+  "Download": "Télécharger"
 }

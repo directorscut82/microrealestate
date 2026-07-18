@@ -317,9 +317,32 @@ export async function deleteDocumentByKey(key) {
   );
 }
 
-export async function fetchDocuments() {
-  const response = await apiFetcher().get('/documents');
+export async function fetchDocuments(entityFilter) {
+  // entityFilter (optional): { tenantId } | { buildingId } | { ownerKey } —
+  // scopes the list to one entity's documents server-side.
+  const params = new URLSearchParams();
+  if (entityFilter?.tenantId) params.set('tenantId', entityFilter.tenantId);
+  if (entityFilter?.buildingId)
+    params.set('buildingId', entityFilter.buildingId);
+  if (entityFilter?.ownerKey) params.set('ownerKey', entityFilter.ownerKey);
+  const qs = params.toString();
+  const response = await apiFetcher().get(`/documents${qs ? `?${qs}` : ''}`);
   return response.data;
+}
+
+export async function createDocument(document) {
+  const response = await apiFetcher().post('/documents', document);
+  return response.data;
+}
+
+export async function updateDocument(document) {
+  const response = await apiFetcher().patch('/documents', document);
+  return response.data;
+}
+
+export async function deleteDocuments(ids) {
+  if (!ids?.length) return;
+  await apiFetcher().delete(`/documents/${ids.join(',')}`);
 }
 
 export async function fetchBuildings() {

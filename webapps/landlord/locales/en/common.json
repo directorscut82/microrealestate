@@ -1306,5 +1306,17 @@
   "Send the owner expense statement by email to": "Send the owner expense statement by email to",
   "Owner statements sent": "Owner statements sent",
   "{{count}} owner statements could not be sent": "{{count}} owner statements could not be sent",
-  "{{count}} SMS could not be sent": "{{count}} SMS could not be sent"
+  "{{count}} SMS could not be sent": "{{count}} SMS could not be sent",
+  "Upload document": "Upload document",
+  "Uploading...": "Uploading...",
+  "Document uploaded": "Document uploaded",
+  "Document deleted": "Document deleted",
+  "No documents uploaded yet": "No documents uploaded yet",
+  "Configure the cloud storage (Backblaze B2) in Settings to upload documents": "Configure the cloud storage (Backblaze B2) in Settings to upload documents",
+  "Documents about this building (permits, invoices, certificates)": "Documents about this building (permits, invoices, certificates)",
+  "Required documents": "Required documents",
+  "Imported lease PDF": "Imported lease PDF",
+  "Imported E9 PDF": "Imported E9 PDF",
+  "Rename": "Rename",
+  "Download": "Download"
 }

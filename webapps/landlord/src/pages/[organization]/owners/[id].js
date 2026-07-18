@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
+import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import ErrorPage from 'next/error';
 import { LuArrowLeft, LuBuilding2, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
@@ -455,6 +456,15 @@ function OwnerDetail() {
           )}
 
           {/* Ακίνητα — MOVED BEFORE Χρεώσεις, now renders BEFORE payments */}
+
+          {/* Έγγραφα — per-owner uploads (ταυτότητες, εξουσιοδοτήσεις,
+              συμφωνητικά). Placeholder ΛΟΙΠΟΙ rows have no identity → no docs. */}
+          {!isLoipoi && (
+            <DocumentsPanel
+              entity={{ ownerKey }}
+              folder={`owners/${owner?.name || ownerKey}`}
+            />
+          )}
 
           {!isLoipoi && (
             <OwnerPaymentDialog open={payOpen} setOpen={setPayOpen} owner={owner} />

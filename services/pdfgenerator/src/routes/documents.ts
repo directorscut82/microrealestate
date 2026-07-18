@@ -5,6 +5,7 @@ import {
   Format,
   logger,
   Middlewares,
+  OwnerStatement,
   Service,
   ServiceError
 } from '@microrealestate/common';
@@ -446,9 +447,16 @@ export default function () {
         throw new ServiceError('organization not resolved', 400);
       }
 
-      const documentsFound = await Collections.Document.find({
-        realmId: organizationId
-      });
+      // Optional per-entity filters (?tenantId= / ?buildingId= / ?ownerKey=)
+      // so the tenant/building/owner document panels fetch only their own
+      // rows. No filter → the whole realm (legacy behavior).
+      const filter: Record<string, any> = { realmId: organizationId };
+      if (req.query.tenantId) filter.tenantId = String(req.query.tenantId);
+      if (req.query.buildingId)
+        filter.buildingId = String(req.query.buildingId);
+      if (req.query.ownerKey) filter.ownerKey = String(req.query.ownerKey);
+
+      const documentsFound = await Collections.Document.find(filter);
       if (!documentsFound) {
         throw new ServiceError('document not found', 404);
       }
@@ -593,10 +601,19 @@ export default function () {
           }`
         );
       }
-      // S3/B2 best-effort cleanup
+      // S3/B2 best-effort cleanup. The B2 bucket keeps ALL versions; a
+      // version-less delete only writes a delete marker and the old bytes
+      // linger forever. Enumerate the key's versions and delete each one.
       if (s3.isEnabled(realm?.thirdParties?.b2)) {
         try {
-          await s3.deleteFiles(realm.thirdParties.b2, [{ url: rawKey }]);
+          const versions = await s3.listFileVersions(
+            realm.thirdParties.b2,
+            rawKey
+          );
+          await s3.deleteFiles(
+            realm.thirdParties.b2,
+            versions.length ? versions : [{ url: rawKey }]
+          );
         } catch (err) {
           logger.warn(
             `delete /by-key: s3 remove failed for ${rawKey}: ${
@@ -806,42 +823,88 @@ export default function () {
     Middlewares.asyncWrapper(async (req, res) => {
       const dataSet = req.body || {};
 
-      if (!dataSet.tenantId) {
-        logger.error('missing tenant Id to generate document');
+      // Entity resolution: a document belongs to exactly ONE of tenant /
+      // building / owner. Tenant docs keep requiring leaseId (unchanged
+      // legacy contract); building/owner docs carry neither.
+      const entityCount = [
+        dataSet.tenantId,
+        dataSet.buildingId,
+        dataSet.ownerKey
+      ].filter(Boolean).length;
+      if (entityCount !== 1) {
+        logger.error('document requires exactly one of tenantId/buildingId/ownerKey');
         throw new ServiceError('missing fields', 422);
       }
-
-      if (!dataSet.leaseId) {
+      if (dataSet.tenantId && !dataSet.leaseId) {
         logger.error('missing lease Id to generate document');
         throw new ServiceError('missing fields', 422);
       }
 
-      // Cross-realm guard: tenantId / leaseId came from the request body
-      // and must be confirmed to belong to the authenticated realm. Without
-      // this an attacker could mint a document referencing a tenant from
+      // Cross-realm guard: the entity ids came from the request body and
+      // must be confirmed to belong to the authenticated realm. Without
+      // this an attacker could mint a document referencing an entity from
       // a different realm — the create succeeds because realmId on the
       // doc itself is set from req.realm but the relationship rows would
-      // dangle. Confirm both ids resolve under the current realm.
+      // dangle.
       const realmId = (req as any).realm._id;
-      const _tenantExists = await Collections.Tenant.exists({
-        _id: dataSet.tenantId,
-        realmId
-      });
-      if (!_tenantExists) {
-        throw new ServiceError(
-          'tenant not found in this organization',
-          404
-        );
+      if (dataSet.tenantId) {
+        const _tenantExists = await Collections.Tenant.exists({
+          _id: dataSet.tenantId,
+          realmId
+        });
+        if (!_tenantExists) {
+          throw new ServiceError(
+            'tenant not found in this organization',
+            404
+          );
+        }
+        const _leaseExists = await Collections.Lease.exists({
+          _id: dataSet.leaseId,
+          realmId
+        });
+        if (!_leaseExists) {
+          throw new ServiceError(
+            'lease not found in this organization',
+            404
+          );
+        }
       }
-      const _leaseExists = await Collections.Lease.exists({
-        _id: dataSet.leaseId,
-        realmId
-      });
-      if (!_leaseExists) {
-        throw new ServiceError(
-          'lease not found in this organization',
-          404
+      if (dataSet.buildingId) {
+        const _buildingExists = await Collections.Building.exists({
+          _id: dataSet.buildingId,
+          realmId
+        });
+        if (!_buildingExists) {
+          throw new ServiceError(
+            'building not found in this organization',
+            404
+          );
+        }
+      }
+      if (dataSet.ownerKey) {
+        // Owners are embedded in buildings — verify the key resolves to at
+        // least one unit owner in this realm (same canonical key the owners
+        // pages use). Loipoi placeholders are not real entities.
+        if (String(dataSet.ownerKey).startsWith('loipoi:')) {
+          throw new ServiceError('cannot attach documents to a placeholder owner', 422);
+        }
+        const buildings: any[] = await Collections.Building.find(
+          { realmId },
+          { 'units.owners': 1 }
+        ).lean();
+        const found = buildings.some((b: any) =>
+          (b.units || []).some((u: any) =>
+            (u.owners || []).some(
+              (o: any) => OwnerStatement.ownerKeyOf(o) === dataSet.ownerKey
+            )
+          )
         );
+        if (!found) {
+          throw new ServiceError(
+            'owner not found in this organization',
+            404
+          );
+        }
       }
 
       let template: any;
@@ -866,8 +929,11 @@ export default function () {
 
       const documentToCreate: any = {
         realmId: (req as any).realm._id,
-        tenantId: dataSet.tenantId,
-        leaseId: dataSet.leaseId,
+        ...(dataSet.tenantId
+          ? { tenantId: dataSet.tenantId, leaseId: dataSet.leaseId }
+          : {}),
+        ...(dataSet.buildingId ? { buildingId: dataSet.buildingId } : {}),
+        ...(dataSet.ownerKey ? { ownerKey: dataSet.ownerKey } : {}),
         templateId: dataSet.templateId,
         type: dataSet.type || template.type,
         name: dataSet.name || template.name,
@@ -930,14 +996,22 @@ export default function () {
       if (!stored) {
         throw new ServiceError('document not found', 404);
       }
-      if ((stored as any).type !== 'text') {
+      // 'text' documents accept full content edits; 'file' documents accept
+      // METADATA-only edits (rename/description — the stored bytes and key
+      // are immutable). Everything else stays 405.
+      const storedType = (stored as any).type;
+      if (storedType !== 'text' && storedType !== 'file') {
         throw new ServiceError('document cannot be modified', 405);
       }
 
       // Allowlist editable fields explicitly. Spreading the entire body let
       // a client overwrite realmId, type, tenantId, etc.
+      const editable =
+        storedType === 'text'
+          ? (['name', 'description', 'contents', 'html'] as const)
+          : (['name', 'description'] as const);
       const update: Record<string, unknown> = {};
-      for (const field of ['name', 'description', 'contents', 'html'] as const) {
+      for (const field of editable) {
         if (Object.prototype.hasOwnProperty.call(incoming, field)) {
           update[field] = incoming[field];
         }

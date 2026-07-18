@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
+  createDocument,
   createLease,
   createProperty,
   createTenant,
@@ -16,7 +17,8 @@ import {
   updateTenant
 } from '../../utils/restcalls';
 import {
-  apiFetcher
+  apiFetcher,
+  uploadDocument
 } from '../../utils/fetch';
 import {
   Select,
@@ -284,7 +286,10 @@ export default function ImportTenantDialog({ open, setOpen }) {
     for (const file of files) {
       try {
         const result = await importTenantPdf(file);
-        results.push({ ...result, _fileName: file.name });
+        // _file: kept so the confirm step can persist the ORIGINAL lease PDF
+        // to the tenant's documents (B2) — before this, all imported PDFs
+        // were parsed in memory and discarded.
+        results.push({ ...result, _fileName: file.name, _file: file });
       } catch (err) {
         if (err?.response?.status === 429) {
           rateLimited = true;
@@ -991,6 +996,33 @@ export default function ImportTenantDialog({ open, setOpen }) {
         }
 
         created.push(tenant);
+
+        // Persist the ORIGINAL imported lease PDF to the tenant's documents
+        // (B2 via /documents/upload + a Document record). Best-effort: a
+        // storage failure must never fail the import itself.
+        if (parsed._file && tenant?._id && leaseId) {
+          try {
+            const uploadResp = await uploadDocument({
+              endpoint: '/documents/upload',
+              documentName: (parsed._fileName || 'lease').replace(/\.pdf$/i, ''),
+              file: parsed._file,
+              folder: `${tenant.name || tenant._id}/contract_scanned_documents`
+            });
+            await createDocument({
+              tenantId: tenant._id,
+              leaseId,
+              type: 'file',
+              name: parsed._fileName || 'lease.pdf',
+              description: t('Imported lease PDF'),
+              mimeType: 'application/pdf',
+              url: uploadResp.data.key,
+              versionId: uploadResp.data.versionId
+            });
+          } catch (persistErr) {
+            console.error('lease PDF persist failed (non-blocking)', persistErr);
+          }
+        }
+
         // GAP A: the tenant WAS created but one or more of its declared
         // properties were dropped as already-occupied — surface that so the
         // operator knows the tenant has fewer units than the PDF declared.
