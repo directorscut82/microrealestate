@@ -82,5 +82,7 @@
   "Please find in attachment your owner expense statement of {{term}}.": "Anbei finden Sie Ihre Kostenabrechnung {{term}}.",
   "Already paid": "Bereits bezahlt",
   "Outstanding": "Ausstehend",
-  "owner_statement": "Abrechnung"
+  "owner_statement": "Abrechnung",
+  "Owner payment notice of {{term}}": "Zahlungsaufforderung Eigentümer {{term}}",
+  "owner_rentcall": "Zahlungsaufforderung"
 }

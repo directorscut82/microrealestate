@@ -216,6 +216,12 @@ export async function sendSmsOnly(req: Req, res: Res) {
 export async function sendOwnerStatements(req: Req, res: Res) {
   const realm = req.realm;
   const { ownerKeys, term, force } = req.body;
+  // Two documents, mirroring the tenant popover: «Ειδοποίηση πληρωμής»
+  // (owner_rentcall) and «Εκκαθαριστικό» (owner_statement). Same PDF
+  // attachment (the owner statement IS the owner's document); the email
+  // wording differs (due-date + payment methods vs neutral statement).
+  const document =
+    req.body.document === 'owner_rentcall' ? 'owner_rentcall' : 'owner_statement';
   if (!Array.isArray(ownerKeys) || !ownerKeys.length) {
     throw new ServiceError('ownerKeys required', 422);
   }
@@ -231,7 +237,7 @@ export async function sendOwnerStatements(req: Req, res: Res) {
     const sent: AnyRecord[] = await Collections.Email.find({
       realmId: String(realm!._id),
       recordId: { $in: ownerKeys },
-      templateName: 'owner_statement',
+      templateName: document,
       sentDate: { $gte: sixtyMinAgo }
     }).lean();
     for (const r of sent) {
@@ -248,7 +254,7 @@ export async function sendOwnerStatements(req: Req, res: Res) {
         const response = await axios.post(
           EMAILER_URL as string,
           {
-            templateName: 'owner_statement',
+            templateName: document,
             recordId: ownerKey,
             params: { term: String(term) }
           },
@@ -282,9 +288,11 @@ export async function sendOwnerStatements(req: Req, res: Res) {
   }
 
   // Telegram admin echo with the SAME owner-statement PDF attached.
+  const echoLabel =
+    document === 'owner_rentcall' ? 'Ειδοποίηση πληρωμής ιδιοκτήτη' : 'Εκκαθαριστικό ιδιοκτήτη';
   for (const s of statusList) {
     if (s.error || s.skipped) continue;
-    _echoToTelegram(req, `📧 Εκκαθαριστικό ιδιοκτήτη → ${s.ownerKey}`, {
+    _echoToTelegram(req, `📧 ${echoLabel} → ${s.ownerKey}`, {
       templateName: 'owner-statement',
       recordId: String(s.ownerKey),
       term: String(term)
@@ -361,7 +369,7 @@ export async function sendOwnerSms(req: Req, res: Res) {
           parts.length > 1
             ? ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(statement.totals.amount)})`
             : ` (${fmt(statement.totals.amount)})`;
-        const text = `Εκκαθαριστικό ${termLabel} - ${statement.owner.name}${breakdown}`;
+        const text = `Ειδοποίηση πληρωμής ${termLabel} - ${statement.owner.name}${breakdown}`;
 
         const response = await axios.post(
           `${EMAILER_URL}/sms`,
@@ -395,7 +403,7 @@ export async function sendOwnerSms(req: Req, res: Res) {
   const sent = statusList.filter((s) => !s.error);
   if (sent.length) {
     const names = sent.map((s: AnyRecord) => s.name || s.ownerKey).join(', ');
-    _echoToTelegram(req, `📱 SMS εκκαθαριστικού ${termLabel} → ${names}`);
+    _echoToTelegram(req, `📱 SMS ${termLabel} → ${names}`);
   }
 }
 

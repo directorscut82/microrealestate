@@ -82,5 +82,7 @@
   "Please find in attachment your owner expense statement of {{term}}.": "Adjunto encontrará su estado de gastos {{term}}.",
   "Already paid": "Ya pagado",
   "Outstanding": "Pendiente",
-  "owner_statement": "Estado"
+  "owner_statement": "Estado",
+  "Owner payment notice of {{term}}": "Aviso de pago del propietario {{term}}",
+  "owner_rentcall": "Aviso_de_pago"
 }

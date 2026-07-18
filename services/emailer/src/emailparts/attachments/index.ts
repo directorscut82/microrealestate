@@ -19,7 +19,8 @@ export async function build(
       'rentcall',
       'rentcall_last_reminder',
       'rentcall_reminder',
-      'owner_statement'
+      'owner_statement',
+      'owner_rentcall'
     ].includes(templateName)
   ) {
     return {
@@ -54,17 +55,15 @@ export async function build(
   // owner_statement: recordId is the ownerKey (not a tenantId) and the PDF
   // lives at the dedicated /documents/owner-statement/:ownerKey/:term route.
   // Name the file from the OWNER; there is no tenant in this data shape.
-  const entityName =
-    templateName === 'owner_statement'
-      ? emailData.owner?.name || 'owner'
-      : tenant.name;
-  const entityRef =
-    templateName === 'owner_statement' ? String(params.term || '') : billingRef;
+  const isOwnerTpl =
+    templateName === 'owner_statement' || templateName === 'owner_rentcall';
+  const entityName = isOwnerTpl ? emailData.owner?.name || 'owner' : tenant.name;
+  const entityRef = isOwnerTpl ? String(params.term || '') : billingRef;
   const filename = `${sanitize(i18n.__(templateName))}-${sanitize(entityName)}-${sanitize(entityRef)}.pdf`;
   const filePath = await fetchPDF(
     authorizationHeader,
     organizationId,
-    templateName === 'owner_statement' ? 'owner-statement' : templateName,
+    isOwnerTpl ? 'owner-statement' : templateName,
     recordId,
     params,
     filename

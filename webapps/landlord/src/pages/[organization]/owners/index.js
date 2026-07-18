@@ -56,6 +56,7 @@ function Owners() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState([]);
   const [openConfirmEmail, setOpenConfirmEmail] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState('owner_rentcall');
 
   const { data, isError, isLoading } = useQuery({
     queryKey: [QueryKeys.OWNERS],
@@ -120,9 +121,10 @@ function Owners() {
   const handleSendEmails = useCallback(() => {
     emailMutation.mutate({
       ownerKeys: emailable.map((o) => o.ownerKey),
-      term
+      term,
+      document: selectedDocument
     });
-  }, [emailMutation, emailable, term]);
+  }, [emailMutation, emailable, term, selectedDocument]);
 
   const handleSendSms = useCallback(() => {
     smsMutation.mutate({
@@ -141,7 +143,12 @@ function Owners() {
   return (
     <Page loading={isLoading} dataCy="ownersPage">
       <ConfirmDialog
-        title={t('Send the owner expense statement by email to')}
+        title={t('Are you sure to send "{{docName}}"?', {
+          docName:
+            selectedDocument === 'owner_rentcall'
+              ? t('Payment notice')
+              : t('Owner expense statement')
+        })}
         open={openConfirmEmail}
         setOpen={setOpenConfirmEmail}
         data={emailable.map((o) => o.name).join(', ')}
@@ -180,7 +187,21 @@ function Owners() {
                     <div className="flex flex-col">
                       <Button
                         variant="ghost"
-                        onClick={() => setOpenConfirmEmail(true)}
+                        onClick={() => {
+                          setSelectedDocument('owner_rentcall');
+                          setOpenConfirmEmail(true);
+                        }}
+                        disabled={!emailable.length}
+                        className="justify-start w-full rounded-none"
+                      >
+                        <GrDocumentPdf className="mr-2" /> {t('Payment notice')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedDocument('owner_statement');
+                          setOpenConfirmEmail(true);
+                        }}
                         disabled={!emailable.length}
                         className="justify-start w-full rounded-none"
                       >

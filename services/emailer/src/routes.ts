@@ -29,7 +29,8 @@ async function _send(req: Request, res: Response): Promise<void> {
         'rentcall_last_reminder',
         'rentcall_reminder',
         'lease_expiry_notice',
-        'owner_statement'
+        'owner_statement',
+        'owner_rentcall'
       ];
       break;
   }
