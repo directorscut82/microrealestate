@@ -357,6 +357,63 @@ span.error {
   margin-top: 12mm;
   page-break-inside: avoid;
 }
+/* ─── Rentcall: flow layout (same technique as owner-statement) ───
+ * The generic .page keeps all blocks absolute-positioned at fixed mm. That
+ * leaves a huge gap between the short header and the items, and nails
+ * paymentinfo at a fixed 230mm which overlaps/clips on long or short
+ * content. Scope to .page.rentcall and flow everything, keeping the header
+ * zone in normal order. Puppeteer paginates across A4 if items are long. */
+.page.rentcall {
+  height: auto;
+  min-height: 297mm;
+  padding: 10mm;
+}
+.page.rentcall .logo,
+.page.rentcall .customer,
+.page.rentcall .today,
+.page.rentcall .title,
+.page.rentcall .reference,
+.page.rentcall .limit,
+.page.rentcall .items,
+.page.rentcall .paymentinfo,
+.page.rentcall .footer {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  width: auto;
+  margin: 0;
+}
+.page.rentcall .customer {
+  margin-bottom: 6mm;
+}
+.page.rentcall .reference {
+  margin-bottom: 4mm;
+}
+.page.rentcall .title {
+  margin: 6mm 0 3mm 0;
+  text-align: center;
+}
+.page.rentcall .limit {
+  margin-bottom: 5mm;
+}
+.page.rentcall .items {
+  margin-bottom: 8mm;
+}
+.page.rentcall .items table {
+  width: 100%;
+}
+.page.rentcall .paymentinfo {
+  font-size: 10pt;
+  margin-top: 8mm;
+  page-break-inside: avoid;
+}
+.page.rentcall .footer {
+  margin-top: 10mm;
+  page-break-inside: avoid;
+}
+
 @page {
   size: A4 portrait;
   margin: 0;

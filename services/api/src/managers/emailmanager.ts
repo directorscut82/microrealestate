@@ -74,13 +74,43 @@ async function _sendSms(
 
   const termDate = moment.utc(String(term), 'YYYYMMDDHH');
   const monthYear = termDate.format('MM/YYYY');
+
+  // Build an amount breakdown from the tenant's rent for this term.
+  const rentRecord = (tenant.rents || []).find(
+    (r: AnyRecord) => Number(r.term) === Number(term)
+  );
+  const grandTotal = rentRecord?.total?.grandTotal ?? 0;
+  const fmt = (n: number) =>
+    n.toLocaleString('el-GR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + '€';
+
+  let amountPart = '';
+  if (rentRecord) {
+    const parts: string[] = [];
+    const rentAmount = rentRecord.total?.preTaxAmount ?? 0;
+    const buildingCharges = (rentRecord.buildingCharges || []) as AnyRecord[];
+    const repairs = buildingCharges.filter((c: AnyRecord) => c.type === 'repair');
+    const koinoxrhsta = buildingCharges.filter((c: AnyRecord) => c.type !== 'repair');
+    const koinoSum = koinoxrhsta.reduce((s: number, c: AnyRecord) => s + (c.amount || 0), 0);
+    const repairSum = repairs.reduce((s: number, c: AnyRecord) => s + (c.amount || 0), 0);
+    const balance = rentRecord.total?.balance ?? 0;
+
+    if (rentAmount) parts.push(`Ενοίκιο: ${fmt(rentAmount)}`);
+    if (koinoSum) parts.push(`Κοινόχρ: ${fmt(koinoSum)}`);
+    if (repairSum) parts.push(`Επισκευή: ${fmt(repairSum)}`);
+    if (balance > 0) parts.push(`Υπόλοιπο: ${fmt(balance)}`);
+
+    if (parts.length > 1) {
+      amountPart = ` (${parts.join(', ')} = ${fmt(grandTotal)})`;
+    } else {
+      amountPart = ` (${fmt(grandTotal)})`;
+    }
+  }
+
   const textMap: Record<string, string> = {
-    rentcall: `Υπενθύμιση ενοικίου ${monthYear} - ${tenant.name}`,
-    rentcall_reminder: `Υπενθύμιση: Εκκρεμεί ενοίκιο ${monthYear} - ${tenant.name}`,
-    rentcall_last_reminder: `Τελευταία υπενθύμιση: Εκκρεμεί ενοίκιο ${monthYear} - ${tenant.name}`,
-    invoice: `Απόδειξη ενοικίου ${monthYear} - ${tenant.name}`
+    rentcall: `Ειδοποίηση πληρωμής ${monthYear} - ${tenant.name}${amountPart}`,
+    invoice: `Απόδειξη πληρωμής ${monthYear} - ${tenant.name}`
   };
-  const text = textMap[document] || `Ειδοποίηση ενοικίου ${monthYear}`;
+  const text = textMap[document] || `Ειδοποίηση πληρωμής ${monthYear} - ${tenant.name}${amountPart}`;
 
   const results = await Promise.all(
     uniquePhones.map(async (phone) => {
@@ -154,6 +184,22 @@ export async function sendSmsOnly(req: Req, res: Res) {
   } else {
     res.json(statusList);
   }
+
+  // Telegram admin echo — forward the SMS text content
+  const smsSent = statusList.filter(
+    (s) => s.smsResults && s.smsResults.some((r: AnyRecord) => !r.error)
+  );
+  if (smsSent.length) {
+    const termDate = moment.utc(String(smsSent[0].term), 'YYYYMMDDHH');
+    const lines = smsSent.map((s: AnyRecord) => {
+      const rent = (
+        (s as any)._rentRecord || (tenants.find((t: AnyRecord) => String(t._id) === s.tenantId) as any)?.rents?.find((r: AnyRecord) => Number(r.term) === s.term)
+      );
+      const gt = rent?.total?.grandTotal ?? '';
+      return `${s.name}${gt ? ' (' + gt + '€)' : ''}`;
+    });
+    _echoToTelegram(req, `📱 SMS ${termDate.format('MM/YYYY')} → ${lines.join(', ')}`);
+  }
 }
 
 // Send a Telegram notification for the current realm. With no chatId the
@@ -189,6 +235,29 @@ export async function sendTelegramNotification(req: Req, res: Res) {
     }
     throw new ServiceError(`Telegram send failed: ${errorMessage}`, 500);
   }
+}
+
+// Fire-and-forget Telegram echo to the admin (best-effort, never blocks the
+// primary send response). Called after email/SMS batches so the landlord sees
+// a summary in their bot chat without refreshing the app.
+function _echoToTelegram(req: Req, text: string) {
+  const { EMAILER_URL } = Service.getInstance().envConfig.getValues();
+  axios
+    .post(
+      `${EMAILER_URL}/telegram`,
+      { text },
+      {
+        headers: {
+          authorization: req.headers.authorization,
+          organizationid:
+            req.headers.organizationid || String(req.realm!._id),
+          'Accept-Language': req.headers['accept-language']
+        }
+      }
+    )
+    .catch((err: any) => {
+      logger.warn(`Telegram echo failed (non-blocking): ${err.message}`);
+    });
 }
 
 export async function send(req: Req, res: Res) {
@@ -301,5 +370,19 @@ export async function send(req: Req, res: Res) {
     res.status(207).json(statusList);
   } else {
     res.json(statusList);
+  }
+
+  // Telegram admin echo (fire-and-forget after response)
+  const sent = statusList.filter((s) => !s.error && !s.skipped);
+  if (sent.length) {
+    const termDate = moment.utc(String(sent[0].term), 'YYYYMMDDHH');
+    const label = req.body.document === 'invoice' ? 'Τιμολόγιο' : 'Ειδοποίηση πληρωμής';
+    const names = sent.map((s: AnyRecord) => s.name).join(', ');
+    _echoToTelegram(req, `📧 ${label} ${termDate.format('MM/YYYY')} → ${names} (${sent.length} email)`);
+  }
+  const failed = statusList.filter((s) => s.error);
+  if (failed.length) {
+    const names = failed.map((s: AnyRecord) => s.name).join(', ');
+    _echoToTelegram(req, `❌ Email αποτυχία → ${names}`);
   }
 }

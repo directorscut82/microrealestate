@@ -79,5 +79,7 @@
   "unit percentage {{part}}% × cost {{total}} € = {{share}} €": "unit percentage {{part}}% × cost {{total}} € = {{share}} €",
   "custom percentage share: {{share}} €": "custom percentage share: {{share}} €",
   "cost {{total}} € × owner share {{pct}}% = {{share}} €": "cost {{total}} € × owner share {{pct}}% = {{share}} €",
-  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €"
+  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €",
+  "The total amount of {{amount}} must be paid before the end of the month.": "The total amount of {{amount}} must be paid before the end of the month.",
+  "Please contact the property manager or landlord regarding rent payment.": "Please contact the property manager or landlord regarding rent payment."
 }

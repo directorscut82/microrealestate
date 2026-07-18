@@ -1168,5 +1168,6 @@
   "Missing lease start date": "Mietbeginn fehlt",
   "Missing lease end date": "Mietende fehlt",
   "Rent is 0 € — billing will not start": "Miete 0 € — Abrechnung startet nicht",
-  "Missing property entry/exit date": "Ein-/Auszugsdatum fehlt"
+  "Missing property entry/exit date": "Ein-/Auszugsdatum fehlt",
+  "Payment notice": "Zahlungsaufforderung"
 }

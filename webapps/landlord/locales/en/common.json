@@ -1292,5 +1292,6 @@
   "Missing lease start date": "Missing lease start date",
   "Missing lease end date": "Missing lease end date",
   "Rent is 0 € — billing will not start": "Rent is 0 € — billing will not start",
-  "Missing property entry/exit date": "Missing property entry/exit date"
+  "Missing property entry/exit date": "Missing property entry/exit date",
+  "Payment notice": "Payment notice"
 }

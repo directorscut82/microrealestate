@@ -4,7 +4,7 @@
 
 	<body>
 		<% tenant.rents.forEach(function(rent) { %>
-			<div class="page">
+			<div class="page rentcall">
 				<%- include('partials/header.ejs') %>
 
 					<%- include('partials/customeraddress.ejs') %>
@@ -18,9 +18,8 @@
 								</div>
 
 								<div class="limit">
-									<%=_.t('The total amount of {{amount}} has to be paid on {{date}}.', { amount:
-										_.formatNumber(rent.total.grandTotal, 'currency' ), date:
-										_.formatDate(rent.dueDate, 'LL' ) }) %>
+									<%=_.t('The total amount of {{amount}} must be paid before the end of the month.', { amount:
+										_.formatNumber(rent.total.grandTotal, 'currency' ) }) %>
 								</div>
 
 								<div class="items">

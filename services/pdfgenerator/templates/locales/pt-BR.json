@@ -76,5 +76,7 @@
   "unit percentage {{part}}% × cost {{total}} € = {{share}} €": "unit percentage {{part}}% × cost {{total}} € = {{share}} €",
   "custom percentage share: {{share}} €": "custom percentage share: {{share}} €",
   "cost {{total}} € × owner share {{pct}}% = {{share}} €": "cost {{total}} € × owner share {{pct}}% = {{share}} €",
-  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €"
+  "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €",
+  "The total amount of {{amount}} must be paid before the end of the month.": "O valor total de {{amount}} deve ser pago antes do final do mês.",
+  "Please contact the property manager or landlord regarding rent payment.": "Entre em contato com o administrador ou proprietário sobre o pagamento do aluguel."
 }

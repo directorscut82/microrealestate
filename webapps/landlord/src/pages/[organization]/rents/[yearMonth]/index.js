@@ -180,34 +180,19 @@ function Actions({ values, yearMonth, onDone }) {
               <div className="flex flex-col">
                 <Button
                   variant="ghost"
-                  onClick={handleAction('invoice')}
-                  disabled={disabled}
-                  className="justify-start w-full rounded-none"
-                >
-                  <GrDocumentPdf className="mr-2" /> {t('Invoice')}
-                </Button>
-                <Button
-                  variant="ghost"
                   onClick={handleAction('rentcall')}
                   disabled={disabled}
                   className="justify-start w-full rounded-none"
                 >
-                  <GrDocumentPdf className="mr-2" /> {t('First payment notice')}
+                  <GrDocumentPdf className="mr-2" /> {t('Payment notice')}
                 </Button>
                 <Button
                   variant="ghost"
-                  onClick={handleAction('rentcall_reminder')}
-                  className="justify-start w-full rounded-none text-warning"
+                  onClick={handleAction('invoice')}
+                  disabled={disabled || !values.some((r) => Number(r.payment) > 0)}
+                  className="justify-start w-full rounded-none"
                 >
-                  <GrDocumentPdf className="mr-2 " />{' '}
-                  {t('Second payment notice')}
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={handleAction('rentcall_last_reminder')}
-                  className="justify-start w-full rounded-none text-destructive"
-                >
-                  <GrDocumentPdf className="mr-2" /> {t('Last payment notice')}
+                  <GrDocumentPdf className="mr-2" /> {t('Invoice')}
                 </Button>
               </div>
             </PopoverContent>

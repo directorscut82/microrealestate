@@ -1312,5 +1312,6 @@
   "Missing lease start date": "Λείπει ημερομηνία έναρξης μίσθωσης",
   "Missing lease end date": "Λείπει ημερομηνία λήξης μίσθωσης",
   "Rent is 0 € — billing will not start": "Ενοίκιο 0 € — η χρέωση δεν θα ξεκινήσει",
-  "Missing property entry/exit date": "Λείπει ημερομηνία εισόδου/εξόδου ακινήτου"
+  "Missing property entry/exit date": "Λείπει ημερομηνία εισόδου/εξόδου ακινήτου",
+  "Payment notice": "Ειδοποίηση πληρωμής"
 }

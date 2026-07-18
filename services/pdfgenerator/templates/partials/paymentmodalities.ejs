@@ -1,19 +1,27 @@
+<% var hasBank = landlord.hasBankInfo && landlord.bankInfo.iban;
+   var hasCash = landlord.hasContact && (landlord.contacts[0].phone1 || landlord.contacts[0].email);
+   var hasCheque = landlord.hasAddress && landlord.addresses[0].street1;
+   var hasAny = hasBank || hasCash || hasCheque;
+%>
 <div class="paymentinfo">
+<% if (hasAny) { %>
 	<strong><%= _.t('PAYMENT METHODS') %></strong>
     <div class="columns">
         <div>
-            <% if (landlord.hasBankInfo) { %>
-            ­<br><u><%= _.t('By bank transfer') %></u>
-            <br><%= _.t('Our bank information') %>
+            <% if (hasBank) { %>
+            <br><u><%= _.t('By bank transfer') %></u>
             <br><%= landlord.bankInfo.name %>
             <br><%= _.t('IBAN') %> <%= landlord.bankInfo.iban %>
-            <br> &nbsp;
+            <br>&nbsp;
             <% } %>
+            <% if (hasCash) { %>
             <br><u><%= _.t('By cash') %></u>
-            <br><%= _.t('Contact: {{name}}', { name: landlord.hasContact ? landlord.contacts[0].name : ''}) %>
-            <br><%= _.t('Phone: {{phone}}', { phone: landlord.hasContact ? landlord.contacts[0].phone1 : '' }) %><%= landlord.hasContact && landlord.contacts[0].phone2 ? ' - '+landlord.contacts[0].phone2:'' %>
-            <br><%= _.t('Email: {{email}}', { email: landlord.hasContact ? landlord.contacts[0].email : '' })  %>
+            <% if (landlord.contacts[0].name) { %><br><%= _.t('Contact: {{name}}', { name: landlord.contacts[0].name }) %><% } %>
+            <% if (landlord.contacts[0].phone1) { %><br><%= _.t('Phone: {{phone}}', { phone: landlord.contacts[0].phone1 }) %><%= landlord.contacts[0].phone2 ? ' - '+landlord.contacts[0].phone2 : '' %><% } %>
+            <% if (landlord.contacts[0].email) { %><br><%= _.t('Email: {{email}}', { email: landlord.contacts[0].email }) %><% } %>
+            <% } %>
         </div>
+        <% if (hasCheque) { %>
         <div>
             <br><u><%= _.t('By bank cheque') %></u>
             <% if (landlord.isCompany) { %>
@@ -26,19 +34,15 @@
                     name: landlord.name
                 })%>
             <% } %>
-            <% if (landlord.hasAddress) { -%>
-                <br><%= landlord.addresses[0].street1 %>
-                <% if (landlord.addresses[0].street2) { %>
-                    <br><%= landlord.addresses[0].street2 %>
-                <% } %>
-                <br><%= landlord.addresses[0].zipCode %> <%= landlord.addresses[0].city %>
-                <% if (landlord.addresses[0].state) { %>
-                    <br><%= landlord.addresses[0].state %>
-                <% } %>
-                <% if (landlord.addresses[0].country) { %>
-                    <br><%= landlord.addresses[0].country %>
-                <% } %>
-            <% } -%>
+            <br><%= landlord.addresses[0].street1 %>
+            <% if (landlord.addresses[0].street2) { %><br><%= landlord.addresses[0].street2 %><% } %>
+            <br><%= landlord.addresses[0].zipCode %> <%= landlord.addresses[0].city %>
+            <% if (landlord.addresses[0].state) { %><br><%= landlord.addresses[0].state %><% } %>
+            <% if (landlord.addresses[0].country) { %><br><%= landlord.addresses[0].country %><% } %>
         </div>
+        <% } %>
     </div>
+<% } else { %>
+    <p><%= _.t('Please contact the property manager or landlord regarding rent payment.') %></p>
+<% } %>
 </div>
