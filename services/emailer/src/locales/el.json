@@ -81,5 +81,6 @@
   "Owner expense statement of {{term}}": "Εκκαθαριστικό εξόδων ιδιοκτήτη {{term}}",
   "Please find in attachment your owner expense statement of {{term}}.": "Παρακαλούμε βρείτε συνημμένο το εκκαθαριστικό εξόδων ιδιοκτήτη {{term}}.",
   "Already paid": "Ήδη καταβλημένα",
-  "Outstanding": "Υπόλοιπο οφειλής"
+  "Outstanding": "Υπόλοιπο οφειλής",
+  "owner_statement": "Εκκαθαριστικό"
 }

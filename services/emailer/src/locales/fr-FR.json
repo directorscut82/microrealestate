@@ -81,5 +81,6 @@
   "Owner expense statement of {{term}}": "Relevé de charges du propriétaire {{term}}",
   "Please find in attachment your owner expense statement of {{term}}.": "Veuillez trouver ci-joint votre relevé de charges {{term}}.",
   "Already paid": "Déjà payé",
-  "Outstanding": "Restant dû"
+  "Outstanding": "Restant dû",
+  "owner_statement": "Relevé"
 }

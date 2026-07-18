@@ -81,5 +81,6 @@
   "Owner expense statement of {{term}}": "Owner expense statement of {{term}}",
   "Please find in attachment your owner expense statement of {{term}}.": "Please find in attachment your owner expense statement of {{term}}.",
   "Already paid": "Already paid",
-  "Outstanding": "Outstanding"
+  "Outstanding": "Outstanding",
+  "owner_statement": "Statement"
 }

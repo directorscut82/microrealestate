@@ -1,8 +1,16 @@
-<%- include('../__content_parts/text/header.ejs') %>
+<%# No shared header.ejs here — it dereferences tenant.* unconditionally and
+    this data shape has an OWNER, not a tenant. Inline the landlord + owner
+    address block instead. %>
+<%- landlord.name %>
+
+                                              <%- owner.name %>
+<% if (owner.taxId) { -%>
+                                              <%- owner.taxId %>
+<% } -%>
 
 <%- include('../__content_parts/text/greetings.ejs') %>
 
-<%- _.t('Please find in attachment your owner expense statement of {{term}}.', { term: _.formatTerm(String(period).split(',')[0].padEnd(10, '0'), String(period).length <= 4 ? 'years' : 'months') }) %>
+<%- _.t('Please find in attachment your owner expense statement of {{term}}.', { term: _.formatTerm((function(p){ var s=String(p).split(',')[0]; return s.length===4 ? s+'010100' : s; })(period), String(period).split(',')[0].length===4 ? 'years' : 'months') }) %>
 
 <% if (charges && charges.length) { %>
 <% charges.forEach(function(item) { %>

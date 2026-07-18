@@ -1,1 +1,1 @@
-<%- _.t('Owner expense statement of {{term}}', { term: _.formatTerm(String(period).split(',')[0].padEnd(10, '0'), String(period).length <= 4 ? 'years' : 'months') }) %>
+<%- _.t('Owner expense statement of {{term}}', { term: _.formatTerm((function(p){ var s=String(p).split(',')[0]; return s.length===4 ? s+'010100' : s; })(period), String(period).split(',')[0].length===4 ? 'years' : 'months') }) %>
