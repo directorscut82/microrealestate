@@ -266,11 +266,17 @@ export function checkOrganization() {
 
     switch (req.user.type) {
       case 'user':
-        // for the current user, add all subscribed organizations in request object
+        // for the current user, add all subscribed organizations in request object.
+        // Sort by _id (creation order) — WITHOUT an explicit sort Mongo returns
+        // natural (physical) order, which changes when a document is deleted and
+        // re-inserted. A database RESTORE does exactly that, which moved the
+        // user's original realm to the end and made the frontend's items[0]
+        // auto-select a DIFFERENT organization after login (live incident,
+        // July 2026: landed in a stale test realm after a restore round-trip).
         req.realms = (
           await Realm.find<MongooseDocument<CollectionTypes.Realm>>({
             members: { $elemMatch: { email: req.user.email } }
-          })
+          }).sort({ _id: 1 })
         )
           .map((realm) => realm.toObject())
           .map((realm) => {
