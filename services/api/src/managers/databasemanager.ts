@@ -1,4 +1,5 @@
 import * as Express from 'express';
+import axios from 'axios';
 import { Types as MongooseTypes } from 'mongoose';
 import { ObjectId } from 'mongodb';
 import {
@@ -228,10 +229,40 @@ async function restore(
 
   logger.info(`Database restored from backup dated ${payload.exportDate}`);
 
+  // Storage reconcile (best-effort): the restore only rewrote MONGO. Files
+  // uploaded AFTER the backup date are now orphaned in B2 (bytes with no
+  // record), and records resurrected for since-deleted files point at
+  // nothing. Ask the pdfgenerator (which owns B2 access) to diff + clean,
+  // and surface its report to the caller. A reconcile failure must never
+  // fail the restore itself.
+  let storageReconcile: Record<string, any> = { enabled: false };
+  try {
+    const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
+    const reconcileResp = await axios.post(
+      `${PDFGENERATOR_URL}/documents/reconcile-storage`,
+      {},
+      {
+        headers: {
+          authorization: (req.headers as any).authorization,
+          organizationid:
+            (req.headers as any).organizationid || realmIdStr
+        },
+        timeout: 120_000
+      }
+    );
+    storageReconcile = reconcileResp.data;
+  } catch (err: any) {
+    logger.warn(
+      `restore: storage reconcile failed (non-blocking): ${err?.message || err}`
+    );
+    storageReconcile = { enabled: true, error: 'reconcile failed' };
+  }
+
   res.json({
     status: 'restored',
     exportDate: payload.exportDate,
-    results
+    results,
+    storageReconcile
   });
 }
 

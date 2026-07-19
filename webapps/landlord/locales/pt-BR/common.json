@@ -1200,5 +1200,7 @@
   "Owner expense statement": "Demonstrativo de despesas do proprietário",
   "Copy my details": "Copiar meus dados",
   "Has outstanding": "Com pendência",
-  "Error fetching owners": "Erro ao carregar proprietários"
+  "Error fetching owners": "Erro ao carregar proprietários",
+  "{{count}} orphaned files removed from cloud storage": "{{count}} arquivos órfãos removidos do armazenamento em nuvem",
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} documento(s) referenciam arquivos que não existem mais no armazenamento em nuvem"
 }

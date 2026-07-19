@@ -1344,5 +1344,7 @@
   "Owner expense statement": "Εκκαθαριστικό εξόδων ιδιοκτήτη",
   "Copy my details": "Αντιγραφή των στοιχείων μου",
   "Has outstanding": "Με οφειλή",
-  "Error fetching owners": "Σφάλμα φόρτωσης ιδιοκτητών"
+  "Error fetching owners": "Σφάλμα φόρτωσης ιδιοκτητών",
+  "{{count}} orphaned files removed from cloud storage": "{{count}} ορφανά αρχεία αφαιρέθηκαν από το cloud",
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} έγγραφα αναφέρονται σε αρχεία που δεν υπάρχουν πλέον στο cloud"
 }

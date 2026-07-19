@@ -74,6 +74,39 @@ export function uploadFile(
 }
 
 /**
+ * List every live object key under a prefix (paginated; delete markers and
+ * old versions excluded — this is "what exists now"). Used by the
+ * storage-reconcile pass to diff B2 contents against Document records.
+ */
+export async function listKeys(
+  b2Config: B2Config,
+  prefix: string
+): Promise<string[]> {
+  const s3 = _initS3(b2Config);
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const page: AWS.S3.ListObjectsV2Output = await new Promise(
+      (resolve, reject) => {
+        s3.listObjectsV2(
+          {
+            Bucket: b2Config.bucket,
+            Prefix: prefix,
+            ...(token ? { ContinuationToken: token } : {})
+          },
+          (err, data) => (err ? reject(err) : resolve(data))
+        );
+      }
+    );
+    for (const o of page.Contents || []) {
+      if (o.Key) keys.push(o.Key);
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return keys;
+}
+
+/**
  * List every stored version of a single key. B2 buckets keep all versions by
  * default, so a version-less delete only writes a delete marker — callers
  * that want a REAL delete enumerate versions first and pass them to

@@ -465,6 +465,92 @@ export default function () {
     })
   );
 
+  // Storage reconcile: diff the realm's B2 objects against every stored key
+  // reference (Document.url + building repairs' invoiceDocumentId) and
+  // delete orphaned objects / report records whose bytes are missing. Called
+  // by the api's database-restore (best-effort) and available standalone.
+  // Restore only rewrites MONGO — after restoring an older backup, files
+  // uploaded after that backup become invisible orphans in B2, and records
+  // resurrected for since-deleted files point at nothing. This closes both.
+  documentsApi.post(
+    '/reconcile-storage',
+    Middlewares.asyncWrapper(async (req, res) => {
+      const realm = (req as any).realm;
+      if (!realm?._id) {
+        throw new ServiceError('organization not resolved', 400);
+      }
+      const b2Config = realm.thirdParties?.b2;
+      if (!s3.isEnabled(b2Config)) {
+        return res.json({
+          enabled: false,
+          orphansDeleted: [],
+          missingFiles: []
+        });
+      }
+
+      // 1. Every key the DATABASE believes exists for this realm.
+      const referenced = new Set<string>();
+      const docs: any[] = await Collections.Document.find(
+        { realmId: realm._id, type: 'file', url: { $exists: true, $ne: '' } },
+        { url: 1, name: 1 }
+      ).lean();
+      for (const d of docs) referenced.add(String(d.url));
+      // Repair invoices store a raw key on the building, not a Document row.
+      const buildings: any[] = await Collections.Building.find(
+        { realmId: realm._id },
+        { 'repairs.invoiceDocumentId': 1 }
+      ).lean();
+      for (const b of buildings) {
+        for (const r of b.repairs || []) {
+          if (r.invoiceDocumentId) referenced.add(String(r.invoiceDocumentId));
+        }
+      }
+
+      // 2. Every key B2 actually holds under this realm's prefix.
+      const prefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
+      const liveKeys = await s3.listKeys(b2Config, prefix);
+
+      // 3a. Orphans: in B2, not referenced → delete (all versions).
+      const dryRun = req.body?.dryRun === true;
+      const orphans = liveKeys.filter((k) => !referenced.has(k));
+      const orphansDeleted: string[] = [];
+      for (const key of orphans) {
+        if (!dryRun) {
+          try {
+            const versions = await s3.listFileVersions(b2Config, key);
+            await s3.deleteFiles(
+              b2Config,
+              versions.length ? versions : [{ url: key }]
+            );
+          } catch (err) {
+            logger.warn(
+              `reconcile: failed to delete orphan ${key}: ${(err as Error)?.message || err}`
+            );
+            continue;
+          }
+        }
+        orphansDeleted.push(key);
+      }
+
+      // 3b. Missing: referenced by a record, absent from B2 → report only
+      // (we cannot invent bytes; the operator decides what to do).
+      const liveSet = new Set(liveKeys);
+      const missingFiles = docs
+        .filter((d) => !liveSet.has(String(d.url)))
+        .map((d) => ({ documentId: String(d._id), name: d.name, url: d.url }));
+
+      logger.info(
+        `reconcile-storage (${realm._id}): ${orphansDeleted.length} orphan(s) ${dryRun ? 'found (dry-run)' : 'deleted'}, ${missingFiles.length} record(s) missing bytes`
+      );
+      return res.json({
+        enabled: true,
+        dryRun,
+        orphansDeleted,
+        missingFiles
+      });
+    })
+  );
+
   // Direct-key download: returns the file persisted at the given storage
   // key. Used by repair-invoice retrieval (RepairList stores the upload's
   // returned key as `repair.invoiceDocumentId` and does NOT open a

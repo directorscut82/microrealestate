@@ -1324,5 +1324,7 @@
   "Owner expense statement": "Owner expense statement",
   "Copy my details": "Copy my details",
   "Has outstanding": "Has outstanding",
-  "Error fetching owners": "Error fetching owners"
+  "Error fetching owners": "Error fetching owners",
+  "{{count}} orphaned files removed from cloud storage": "{{count}} orphaned files removed from cloud storage",
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} document(s) reference files that no longer exist in cloud storage"
 }

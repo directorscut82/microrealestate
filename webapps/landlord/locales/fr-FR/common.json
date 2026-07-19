@@ -1200,5 +1200,7 @@
   "Owner expense statement": "Relevé de charges du propriétaire",
   "Copy my details": "Copier mes coordonnées",
   "Has outstanding": "Avec impayé",
-  "Error fetching owners": "Erreur de chargement des propriétaires"
+  "Error fetching owners": "Erreur de chargement des propriétaires",
+  "{{count}} orphaned files removed from cloud storage": "{{count}} fichiers orphelins supprimés du cloud",
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} document(s) référencent des fichiers qui n'existent plus dans le cloud"
 }

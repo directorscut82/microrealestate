@@ -94,6 +94,21 @@ function DatabaseSettings() {
           date: new Date(result.exportDate).toLocaleString()
         })
       );
+      const recon = result.storageReconcile;
+      if (recon?.orphansDeleted?.length) {
+        toast.info(
+          t('{{count}} orphaned files removed from cloud storage', {
+            count: recon.orphansDeleted.length
+          })
+        );
+      }
+      if (recon?.missingFiles?.length) {
+        toast.warning(
+          t('{{count}} document(s) reference files that no longer exist in cloud storage', {
+            count: recon.missingFiles.length
+          })
+        );
+      }
 
       setTimeout(() => {
         window.location.reload();

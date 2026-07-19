@@ -1200,5 +1200,7 @@
   "Owner expense statement": "Eigentümer-Kostenabrechnung",
   "Copy my details": "Meine Daten übernehmen",
   "Has outstanding": "Mit Rückstand",
-  "Error fetching owners": "Fehler beim Laden der Eigentümer"
+  "Error fetching owners": "Fehler beim Laden der Eigentümer",
+  "{{count}} orphaned files removed from cloud storage": "{{count}} verwaiste Dateien aus dem Cloud-Speicher entfernt",
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} Dokument(e) verweisen auf Dateien, die nicht mehr im Cloud-Speicher existieren"
 }
