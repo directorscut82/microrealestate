@@ -96,9 +96,39 @@ export async function setupOrganizationsInStore(selectedOrgName, storeArg) {
         );
       }
     } else {
-      selectedOrganization = store.organization.items[0];
+      // Bare entry (no org in the URL): prefer the LAST-USED organization
+      // (remembered per browser below) so a multi-org landlord lands where
+      // they actually work. Falls back to the first (oldest-created) org when
+      // nothing is remembered, the remembered org no longer exists, or this
+      // account lost access to it. localStorage can throw in private mode —
+      // never let the fallback path break sign-in.
+      let lastUsed = null;
+      try {
+        if (typeof window !== 'undefined') {
+          lastUsed = window.localStorage.getItem('mre.lastOrganizationId');
+        }
+      } catch {
+        lastUsed = null;
+      }
+      selectedOrganization =
+        (lastUsed &&
+          store.organization.items.find(({ _id }) => _id === lastUsed)) ||
+        store.organization.items[0];
     }
     store.organization.setSelected(selectedOrganization, store.user);
     setOrganizationId(store.organization.selected._id);
+    // Remember the selection for the next bare sign-in. Written on EVERY
+    // selection (URL-driven or fallback) so switching orgs — which navigates
+    // to /<locale>/<orgName>/dashboard and reloads — updates the memory too.
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          'mre.lastOrganizationId',
+          store.organization.selected._id
+        );
+      }
+    } catch {
+      // private mode / quota — memory is a nicety, never an error.
+    }
   }
 }
