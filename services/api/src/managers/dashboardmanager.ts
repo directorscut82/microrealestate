@@ -579,6 +579,9 @@ export async function all(req: Req, res: Res) {
         beginDate: 1,
         terminationDate: 1,
         endDate: 1,
+        // N3: needed so the expiring-leases tile can exclude archived tenants
+        // to match the scanner (which never notifies archived tenants).
+        archived: 1,
         'properties.propertyId': 1,
         rents: {
           $filter: {
@@ -701,6 +704,11 @@ export async function all(req: Req, res: Res) {
   const leaseHorizon = moment.utc(now).add(30, 'days').endOf('day');
   const expiringLeases = allTenants
     .filter((t: AnyRecord) => {
+      // N3 (audit-2026-07): match the lease-expiry SCANNER, which excludes
+      // archived tenants (buildExpiringFilter: archived $ne true). Without this
+      // the dashboard tile lists a tenant that will never receive the notice —
+      // the two surfaces disagreed. archived is projected below.
+      if (t.archived) return false;
       if (t.terminationDate) return false;
       if (!t.endDate) return false;
       const end = moment.utc(t.endDate);
@@ -715,8 +723,26 @@ export async function all(req: Req, res: Res) {
     .sort((a: AnyRecord, b: AnyRecord) => a.daysLeft - b.daysLeft);
 
   const CERT_YEARS = 5;
-  const certIssueStart = moment.utc(now).subtract(CERT_YEARS, 'years').startOf('day').toDate();
-  const certIssueEnd = moment.utc(now).subtract(CERT_YEARS, 'years').add(60, 'days').endOf('day').toDate();
+  const CERT_HORIZON_DAYS = 60;
+  // audit-2026-07: widen the mongo pre-filter by a few days on both ends so a
+  // leap-year non-commuting date shift (subtract(5y).add(60d) vs the true
+  // add(60d).subtract(5y)) can't drop an edge cert; the exact daysLeft bounds
+  // below are authoritative. Also clamp the DISPLAY to [0, horizon] so the tile
+  // never shows daysLeft:61 under a "within 60 days" header (the old
+  // filter(daysLeft>=0) had no upper bound).
+  const CERT_FILTER_SLACK_DAYS = 3;
+  const certIssueStart = moment
+    .utc(now)
+    .subtract(CERT_YEARS, 'years')
+    .subtract(CERT_FILTER_SLACK_DAYS, 'days')
+    .startOf('day')
+    .toDate();
+  const certIssueEnd = moment
+    .utc(now)
+    .subtract(CERT_YEARS, 'years')
+    .add(CERT_HORIZON_DAYS + CERT_FILTER_SLACK_DAYS, 'days')
+    .endOf('day')
+    .toDate();
   const certProps: AnyRecord[] = await Collections.Property.find(
     {
       realmId,
@@ -735,7 +761,7 @@ export async function all(req: Req, res: Res) {
         daysLeft: expiresAt.startOf('day').diff(moment.utc(now).startOf('day'), 'days')
       };
     })
-    .filter((c: AnyRecord) => c.daysLeft >= 0)
+    .filter((c: AnyRecord) => c.daysLeft >= 0 && c.daysLeft <= CERT_HORIZON_DAYS)
     .sort((a: AnyRecord, b: AnyRecord) => a.daysLeft - b.daysLeft);
 
   res.json({

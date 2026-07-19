@@ -250,10 +250,23 @@ export default function ThirdPartiesForm({ organization }) {
         formData.thirdParties.telegram = null;
       }
       if (values.mailReadersActive) {
+        // A1 (audit-2026-07): match each row to its PREVIOUS state by EMAIL,
+        // not by array index. The `.filter()` above drops empty-email rows, so
+        // an index into the unfiltered initialValues points at the wrong reader
+        // once any earlier reader is removed — misfiring clientSecretUpdated and
+        // making the backend encrypt the literal '**********' placeholder,
+        // silently corrupting a surviving reader's secret. The backend already
+        // keys previous state by email (realmmanager `prevByEmail`); mirror it.
+        const prevByEmail = new Map(
+          (initialValues.mailReaders || []).map((r) => [
+            String(r.email || '').trim(),
+            r
+          ])
+        );
         formData.thirdParties.mailReaders = (values.mailReaders || [])
           .filter((r) => (r.email || '').trim())
-          .map((r, i) => {
-            const prev = initialValues.mailReaders?.[i] || {};
+          .map((r) => {
+            const prev = prevByEmail.get(String(r.email || '').trim()) || {};
             return {
               provider: r.provider || 'gmail',
               email: r.email,

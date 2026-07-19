@@ -79,7 +79,22 @@ export default function TenantPropertyList({ tenant, className }) {
     if (noRent.length) {
       warnings.push(t('Rent is 0 € — billing will not start'));
     }
-    const noDates = tenant.properties.filter((p) => !p.entryDate || !p.exitDate);
+    // F4 (audit-2026-07): per-property entry/exit dates are OPTIONAL — the rent
+    // engine (occupantmanager) falls back to the lease begin/end when they are
+    // absent (from = max(tenant.beginDate, property.entryDate)). A healthy
+    // tenant whose occupancy spans the whole lease simply has no separate
+    // dates, so warning on `!p.entryDate` fired on every normal tenant. Fall
+    // back to the lease dates the same way the engine does. Note: after
+    // frontdata serialization tenant.beginDate/endDate are formatted strings
+    // (never falsy — even a null serializes to "Invalid date"), so in practice
+    // this predicate only fires when a property genuinely has neither its own
+    // date nor a lease date object; the create API requires lease dates, so a
+    // real tenant never trips it. The point of the change is to stop the
+    // false positive, not to be the missing-date detector.
+    const noDates = tenant.properties.filter(
+      (p) =>
+        !(p.entryDate || tenant.beginDate) || !(p.exitDate || tenant.endDate)
+    );
     if (noDates.length) {
       warnings.push(t('Missing property entry/exit date'));
     }

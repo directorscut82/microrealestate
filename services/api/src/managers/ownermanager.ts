@@ -1599,7 +1599,21 @@ export async function updateContact(req: Req, res: Res) {
     }
     if (dirty) {
       b.markModified('units');
-      await b.save();
+      // O5 (audit-2026-07): guard the save with the same VersionError→409 the
+      // pay() path uses (codebase standard). A concurrent recompute that bumps
+      // the building's __v between the find above and this save would otherwise
+      // surface as a raw 500 instead of a retryable 409.
+      try {
+        await b.save();
+      } catch (err: any) {
+        if (err && err.name === 'VersionError') {
+          throw new ServiceError(
+            'Building was modified concurrently while saving the owner contact. Please retry.',
+            409
+          );
+        }
+        throw err;
+      }
     }
   }
   if (!touched) {

@@ -167,7 +167,7 @@ function Owners() {
         ]}
         filterFn={_filterData}
         renderActions={() =>
-          emailMutation.isLoading || smsMutation.isLoading ? (
+          emailMutation.isPending || smsMutation.isPending ? (
             <div className="flex items-center gap-1 text-muted-foreground">
               <LuRotateCw className="animate-spin size-4" />
               {t('Sending...')}

@@ -232,6 +232,7 @@
   "Database": "Datenbank",
   "Database backup downloaded successfully": "Datenbanksicherung erfolgreich heruntergeladen",
   "Database restored successfully from backup dated {{date}}": "Datenbank erfolgreich aus Sicherung vom {{date}} wiederhergestellt",
+  "Restore completed with errors in: {{collections}}. Review and retry.": "Wiederherstellung mit Fehlern abgeschlossen in: {{collections}}. Bitte prüfen und erneut versuchen.",
   "Date": "Datum",
   "Date required when amount > 0": "Datum erforderlich, wenn Betrag > 0",
   "Debit balance": "Saldo",
@@ -688,6 +689,8 @@
   "SMS Gateway": "SMS Gateway",
   "SMS sending failed": "SMS-Versand fehlgeschlagen",
   "SMS sent": "SMS gesendet",
+  "Email sent": "E-Mail gesendet",
+  "Email failed for {{count}} recipient(s): {{names}}": "E-Mail an {{count}} Empfänger fehlgeschlagen: {{names}}",
   "SMS: configured (sms-gate.app) — text messages can be sent": "SMS: konfiguriert (sms-gate.app) — Textnachrichten können gesendet werden",
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS: nicht konfiguriert — richten Sie ihn in Einstellungen → Drittanbieter ein, um SMS-Versand zu aktivieren",
   "Save": "Speichern",
@@ -1201,6 +1204,6 @@
   "Copy my details": "Meine Daten übernehmen",
   "Has outstanding": "Mit Rückstand",
   "Error fetching owners": "Fehler beim Laden der Eigentümer",
-  "{{count}} orphaned files removed from cloud storage": "{{count}} verwaiste Dateien aus dem Cloud-Speicher entfernt",
+  "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "{{count}} nicht referenzierte Dateien im Cloud-Speicher gefunden (in Dokumente prüfen; nichts wurde gelöscht)",
   "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} Dokument(e) verweisen auf Dateien, die nicht mehr im Cloud-Speicher existieren"
 }

@@ -989,7 +989,16 @@ export default function ImportTenantDialog({ open, setOpen }) {
                     payments: [{ amount, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
                   }
                 );
-              } catch { /* skip if term doesn't exist */ }
+              } catch (err) {
+                // F8 (audit-2026-07): a term with no rent record is expected
+                // (skip it), but a real settlement failure must not vanish
+                // silently — the operator has no other signal the past-paid
+                // marking didn't land. Log it (still non-fatal to the import).
+                console.warn(
+                  `import: mark-past-paid failed for ${tenant._id} term ${term}:`,
+                  err?.response?.data?.message || err?.message || err
+                );
+              }
             }
             termDate.add(1, 'month');
           }

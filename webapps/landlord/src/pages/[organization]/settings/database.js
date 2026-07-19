@@ -89,17 +89,40 @@ function DatabaseSettings() {
       }
 
       const result = await restoreDatabase(data);
-      toast.success(
-        t('Database restored successfully from backup dated {{date}}', {
-          date: new Date(result.exportDate).toLocaleString()
-        })
-      );
-      const recon = result.storageReconcile;
-      if (recon?.orphansDeleted?.length) {
-        toast.info(
-          t('{{count}} orphaned files removed from cloud storage', {
-            count: recon.orphansDeleted.length
+      if (result.status === 'restored_with_errors') {
+        // D6 (audit-2026-07): a partial restore must warn loudly, not show a
+        // green success — some collections did not fully reinsert.
+        toast.error(
+          t('Restore completed with errors in: {{collections}}. Review and retry.', {
+            collections: (result.failedCollections || []).join(', ')
           })
+        );
+      } else {
+        toast.success(
+          t('Database restored successfully from backup dated {{date}}', {
+            date: new Date(result.exportDate).toLocaleString()
+          })
+        );
+      }
+      const recon = result.storageReconcile;
+      // D1/D3 (audit-2026-07): restore runs the reconcile in DRY-RUN — it never
+      // deletes. Report ALL unreferenced files as FOUND: orphansDeleted holds
+      // the ones old enough to classify, orphansSkippedRecent holds recent ones
+      // the TOCTOU guard protected — both are files in cloud storage no longer
+      // referenced by the restored data, so the operator can review and clean
+      // them up deliberately rather than have a restore silently destroy files
+      // uploaded since the backup.
+      const foundCount =
+        (recon?.orphansDeleted?.length || 0) +
+        (recon?.orphansSkippedRecent?.length || 0);
+      if (foundCount) {
+        toast.info(
+          t(
+            '{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)',
+            {
+              count: foundCount
+            }
+          )
         );
       }
       if (recon?.missingFiles?.length) {

@@ -232,6 +232,7 @@
   "Database": "Base de données",
   "Database backup downloaded successfully": "Sauvegarde de la base de données téléchargée avec succès",
   "Database restored successfully from backup dated {{date}}": "Base de données restaurée avec succès depuis la sauvegarde du {{date}}",
+  "Restore completed with errors in: {{collections}}. Review and retry.": "Restauration terminée avec des erreurs dans : {{collections}}. Vérifiez et réessayez.",
   "Date": "Date",
   "Date required when amount > 0": "Date requise lorsque le montant > 0",
   "Debit balance": "Solde en débit",
@@ -688,6 +689,8 @@
   "SMS Gateway": "Passerelle SMS",
   "SMS sending failed": "Échec envoi SMS",
   "SMS sent": "SMS envoyé",
+  "Email sent": "E-mail envoyé",
+  "Email failed for {{count}} recipient(s): {{names}}": "Échec de l'e-mail pour {{count}} destinataire(s) : {{names}}",
   "SMS: configured (sms-gate.app) — text messages can be sent": "SMS : configuré (sms-gate.app) — les SMS peuvent être envoyés",
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS : non configuré — paramétrez-le dans Réglages → Services tiers pour activer l'envoi de SMS",
   "Save": "Enregistrer",
@@ -1201,6 +1204,6 @@
   "Copy my details": "Copier mes coordonnées",
   "Has outstanding": "Avec impayé",
   "Error fetching owners": "Erreur de chargement des propriétaires",
-  "{{count}} orphaned files removed from cloud storage": "{{count}} fichiers orphelins supprimés du cloud",
+  "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "{{count}} fichiers non référencés trouvés dans le cloud (à vérifier dans Documents ; rien n'a été supprimé)",
   "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} document(s) référencent des fichiers qui n'existent plus dans le cloud"
 }

@@ -145,6 +145,17 @@ Every third-party secret (`gmail.appPassword`, `mailReaders[].clientSecret/refre
 - **If `CIPHER_KEY` changes / is regenerated:** ALL previously-stored secrets become undecryptable garbage. You must re-enter every third-party secret via the UI (which re-encrypts with the new key). So: **do not regenerate `CIPHER_KEY` unless you intend to re-enter all secrets.**
 - **Consequence for back-fill:** third-party secrets can ONLY be restored through the **UI or the `PATCH /api/v2/realms` API** (both run `Crypto.encrypt`). A raw `mongo` insert of plaintext will store an unencrypted string that `decrypt()` then throws on → email/reading silently fails. NEVER seed thirdParties secrets by direct mongo write.
 
+## Settings → Database backup/restore — what it does and doesn't cover
+
+The JSON backup (`Settings → Database → Save backup`, `GET /api/v2/database/backup`) exports ALL 10 per-realm collections: realms, leases, occupants, properties, buildings, templates, documents, emails, bills. Embedded money data (tenant `rents[]`, building `ownerMonthlyExpenses[]`, `uncollectedPayments[]`, repairs, units) rides inside occupants/buildings — nothing money-related is lost. Verified July 2026.
+
+- **Third-party secrets ARE in the backup** — inside the realm doc as AES-256-GCM **ciphertext**. Restoring on the SAME deployment (same `CIPHER_KEY`): everything works, nothing to re-enter. Restoring on a rebuilt deployment with a NEW `CIPHER_KEY`: the settings restore but decrypt to garbage → re-enter from `.secrets/` per Step 3 above. **Back up `docker-compose.nas.yml` (holds CIPHER_KEY) alongside the JSON backup to avoid this entirely.**
+- **`accounts` is intentionally NOT in the backup** (global collection, no realmId). On a fresh instance restore the login first (Step 1 above), then restore the JSON.
+- **Uploaded file BYTES are NOT in the backup** — only the Document records (name, B2 key, versionId). The bytes live in B2 under stable keys, so a same-bucket restore re-links them.
+- **Restore reconciles B2 in DRY-RUN** (July 2026, `e6db7700`, hardened by audit-2026-07 D1): after the mongo wipe-and-insert it calls `POST /api/v2/documents/reconcile-storage` with `{"dryRun":true}`, which diffs B2 objects under the realm prefix against `Document.url` + repair `invoiceDocumentId` + Bill URLs and **reports** unreferenced files and missing bytes — it **never deletes anything automatically** (restoring an older backup makes every file uploaded since then "unreferenced"; auto-deleting them would be permanent data loss). The Settings UI toasts both counts. Actual cleanup is a deliberate, admin-only call: `POST /documents/reconcile-storage {}` (no dryRun) — administrator role required, objects modified in the last 10 minutes are never deleted (in-flight-upload guard).
+- Renames are safe across backups: rename only changes `Document.name` (the B2 key is immutable), so a restore reverts the label at most, never breaks the download.
+- Redis (sessions/OTP) is not backed up — by design; users just sign in again.
+
 ## Step 1 — Account (login) restoration
 
 Accounts (`accounts` collection) hold a **bcrypt** password hash, not plaintext.

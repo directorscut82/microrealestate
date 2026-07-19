@@ -67,6 +67,18 @@ PropertySchema.index(
     }
   }
 );
+// N5 (audit-2026-07): the energy-certificate expiry scanner queries
+// { 'energyCertificate.issueDate': { $gte, $lte } } across ALL realms once per
+// UTC day. Without this index that is a full collection scan. Partial so only
+// properties that actually carry a certificate are indexed.
+PropertySchema.index(
+  { 'energyCertificate.issueDate': 1 },
+  {
+    partialFilterExpression: {
+      'energyCertificate.issueDate': { $exists: true }
+    }
+  }
+);
 
 export default mongoose.model<CollectionTypes.Property>(
   'Property',

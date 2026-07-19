@@ -242,6 +242,7 @@
   "Database": "Database",
   "Database backup downloaded successfully": "Database backup downloaded successfully",
   "Database restored successfully from backup dated {{date}}": "Database restored successfully from backup dated {{date}}",
+  "Restore completed with errors in: {{collections}}. Review and retry.": "Restore completed with errors in: {{collections}}. Review and retry.",
   "Date": "Date",
   "Date required when amount > 0": "Date required when amount > 0",
   "Debit balance": "Debit balance",
@@ -771,6 +772,8 @@
   "SMS Gateway": "SMS Gateway",
   "SMS sending failed": "SMS sending failed",
   "SMS sent": "SMS sent",
+  "Email sent": "Email sent",
+  "Email failed for {{count}} recipient(s): {{names}}": "Email failed for {{count}} recipient(s): {{names}}",
   "SMS: configured (sms-gate.app) — text messages can be sent": "SMS: configured (sms-gate.app) — text messages can be sent",
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending",
   "Save": "Save",
@@ -1325,6 +1328,6 @@
   "Copy my details": "Copy my details",
   "Has outstanding": "Has outstanding",
   "Error fetching owners": "Error fetching owners",
-  "{{count}} orphaned files removed from cloud storage": "{{count}} orphaned files removed from cloud storage",
+  "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)",
   "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} document(s) reference files that no longer exist in cloud storage"
 }

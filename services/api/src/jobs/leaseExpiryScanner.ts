@@ -43,15 +43,27 @@ const TEMPLATE_NAME = 'lease_expiry_notice';
 export const ENERGY_CERT_VALIDITY_YEARS = 5;
 export const ENERGY_CERT_DAY_WINDOWS: number[] = [60, 30, 7];
 
+// Outcome of a Telegram admin notification. The lease path ignores this (the
+// email is its channel of record; the Telegram ping is a best-effort extra).
+// The energy-cert path is Telegram-ONLY, so it must know whether the message
+// actually went out before it records the per-window debounce (N1).
+interface TelegramNotifyResult {
+  delivered: boolean;
+  // 503 → Telegram not configured for this realm. A permanent-until-admin-acts
+  // condition, distinct from a transient delivery failure.
+  notConfigured: boolean;
+}
+
 // POST a Telegram admin notification through the emailer (which holds the
 // encrypted bot token). Auth uses the same short-lived service token as the
-// email path. Best-effort: failures log and never abort the scan.
+// email path. Never throws (never aborts the scan) — it reports the outcome
+// so the caller decides whether the notice counts as sent.
 async function _notifyTelegram(
   emailerUrl: string,
   mintToken: (role: ConnectionRole, realmId: string) => Promise<string>,
   realmId: string,
   text: string
-): Promise<void> {
+): Promise<TelegramNotifyResult> {
   try {
     const serviceToken = await mintToken('administrator', realmId);
     await axios.post(
@@ -65,13 +77,16 @@ async function _notifyTelegram(
         timeout: 15_000
       }
     );
+    return { delivered: true, notConfigured: false };
   } catch (err: any) {
     // 503 = Telegram not configured for this realm — normal, stay quiet.
-    if (err?.response?.status !== 503) {
-      logger.warn(
-        `expiry-scanner telegram notify failed (non-blocking): ${err?.message || err}`
-      );
+    if (err?.response?.status === 503) {
+      return { delivered: false, notConfigured: true };
     }
+    logger.warn(
+      `expiry-scanner telegram notify failed (non-blocking): ${err?.message || err}`
+    );
+    return { delivered: false, notConfigured: false };
   }
 }
 
@@ -319,18 +334,30 @@ export async function checkExpiringEnergyCerts(
   const result: ScanResult = { scanned: 0, sent: 0, skipped: 0, errors: 0 };
 
   const horizon = Math.max(...ENERGY_CERT_DAY_WINDOWS);
-  // A cert expiring within `horizon` days was issued within
-  // (5y - horizon .. 5y) days ago. Filter in mongo to that issue range so we
-  // never scan the whole collection.
+  // A cert expiring within `horizon` days was issued within (5y - horizon .. 5y)
+  // days ago. Filter in mongo to that issue range so we never scan the whole
+  // collection. This is only a COARSE pre-filter — the authoritative match is
+  // the exact `ENERGY_CERT_DAY_WINDOWS.includes(daysUntil)` check per property
+  // below, so the filter merely needs to be a SUPERSET.
+  //
+  // Leap-year correctness (audit-2026-07): the needed upper bound is
+  // (now + horizon days − 5y), but `subtract(5y).add(horizon d)` and
+  // `add(horizon d).subtract(5y)` don't commute across a Feb-29 boundary — they
+  // can differ by a calendar day, which silently dropped an edge cert from the
+  // scan for ANY window (not just 60). Add a few days of slack on BOTH ends so
+  // no real match can fall outside the pre-filter; the exact per-property check
+  // still prevents any false notice from the wider net.
+  const FILTER_SLACK_DAYS = 3;
   const issueStart = moment
     .utc(now)
     .subtract(ENERGY_CERT_VALIDITY_YEARS, 'years')
+    .subtract(FILTER_SLACK_DAYS, 'days')
     .startOf('day')
     .toDate();
   const issueEnd = moment
     .utc(now)
     .subtract(ENERGY_CERT_VALIDITY_YEARS, 'years')
-    .add(horizon, 'days')
+    .add(horizon + FILTER_SLACK_DAYS, 'days')
     .endOf('day')
     .toDate();
 
@@ -375,7 +402,7 @@ export async function checkExpiringEnergyCerts(
     }
 
     try {
-      await _notifyTelegram(
+      const notify = await _notifyTelegram(
         emailerUrl,
         mintToken,
         String(property.realmId),
@@ -387,6 +414,48 @@ export async function checkExpiringEnergyCerts(
           .utc(expiresAt)
           .format('DD/MM/YYYY')})`
       );
+
+      // N1 (audit-2026-07): Telegram is the ONLY channel for cert notices, so
+      // the per-window debounce must record only when the message actually
+      // went out — otherwise one transient blip permanently suppresses the
+      // 60/30/7 warning and a certificate can lapse silently. This mirrors the
+      // lease path, which gates markSent on a successful postEmail.
+      if (!notify.delivered) {
+        if (notify.notConfigured) {
+          // No Telegram configured for this realm — a structural skip. Mark
+          // the window so we stop retrying every cron tick; it won't change
+          // without admin action (same rule as the lease no-recipient skip).
+          await Collections.Property.updateOne(
+            { _id: property._id },
+            {
+              $push: {
+                'energyCertificate.expiryNoticesSent': {
+                  window: daysUntil,
+                  sentAt: now
+                }
+              }
+            }
+          );
+          result.skipped++;
+          logger.warn(
+            `energy-cert-expiry: realm ${property.realmId} has no Telegram configured — marked window ${daysUntil} as sent to avoid retry loop`
+          );
+        } else {
+          // Transient delivery failure — do NOT mark this window sent. Windows
+          // are exact-day matches ([60,30,7]), so the NEXT daily scan (day-59
+          // etc.) won't re-fire this same window; recovery happens only if the
+          // scan re-runs on the SAME UTC day (e.g. a deploy/restart resets the
+          // once-per-day guard). Leaving it unmarked is still strictly better
+          // than the old code, which recorded a phantom "sent" on failure and
+          // could never recover. The next distinct window (30/7) fires cleanly.
+          result.errors++;
+          logger.error(
+            `energy-cert-expiry telegram delivery failed for property ${property._id} (window ${daysUntil}) — window left unmarked`
+          );
+        }
+        continue;
+      }
+
       await Collections.Property.updateOne(
         { _id: property._id },
         {

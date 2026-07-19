@@ -12,7 +12,7 @@
           <div class="title"><%- _.t('Payment notice') %></div>
           <p><%- include('../__content_parts/html/greetings.ejs') %></p>
           <p>
-            <%- _.t('Please find in attachment your owner expense statement of {{term}}.', { term: _.formatTerm((function(p){ var s=String(p).split(',')[0]; return s.length===4 ? s+'010100' : s; })(period), String(period).split(',')[0].length===4 ? 'years' : 'months') }) %>
+            <%- _.t('Please find in attachment your owner expense statement of {{term}}.', { term: _.formatPeriod(period) }) %>
           </p>
           <% if (charges && charges.length) { %>
           <table style="border-collapse:collapse;width:100%;margin:10px 0;">

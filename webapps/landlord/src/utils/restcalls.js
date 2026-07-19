@@ -260,7 +260,12 @@ export async function deleteLease(ids) {
 }
 
 export async function sendRentEmails(payload) {
-  await apiFetcher().post('/emails', payload);
+  // Return the per-tenant status list. The api answers HTTP 207 (Multi-Status)
+  // on a PARTIAL batch — some tenants delivered, others bounced — and axios does
+  // NOT throw on 207, so the caller must inspect this list to surface failures
+  // instead of assuming a resolved promise means every email was delivered.
+  const response = await apiFetcher().post('/emails', payload);
+  return response.data;
 }
 
 export async function sendRentSms(payload) {

@@ -670,7 +670,7 @@ function RentTable({ rents = [], selected, setSelected }) {
                     selectableRentNum > 0 && selected.length === selectableRentNum
                       ? true
                       : selected.length > 0
-                        ? 'intermediate'
+                        ? 'indeterminate'
                         : false
                   }
                   disabled={

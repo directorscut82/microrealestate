@@ -479,6 +479,14 @@ export default function () {
       if (!realm?._id) {
         throw new ServiceError('organization not resolved', 400);
       }
+      // D2 (audit-2026-07): this endpoint version-DELETES B2 objects. It must
+      // be administrator-only — a `renter` (read-only for money) or `tenant`
+      // must never be able to destroy a realm's stored files. The restore
+      // path (the primary caller) is itself admin-gated and forwards the
+      // administrator's own token, so the legitimate flow is unaffected.
+      if ((req as any).user?.role !== 'administrator') {
+        throw new ServiceError('Administrator access required', 403);
+      }
       const b2Config = realm.thirdParties?.b2;
       if (!s3.isEnabled(b2Config)) {
         return res.json({
@@ -506,15 +514,64 @@ export default function () {
         }
       }
 
-      // 2. Every key B2 actually holds under this realm's prefix.
+      // D7 (audit-2026-07): the Bill schema carries three file-URL fields
+      // (pdfUrl / paymentProofUrl / irisCodeUrl). They are data-URIs today
+      // ("move to B2 later" TODO), so they will never match a B2 key — but the
+      // MOMENT bill PDFs move to B2, a reconcile that did not know about them
+      // would classify every bill file as an orphan and delete it. Reference
+      // them now so this is future-proof. (Data-URIs simply don't collide with
+      // the realm's `<name>-<id>/…` key prefix, so adding them is a no-op until
+      // then.) Keep this in sync with any new B2-backed URL field on any model.
+      const bills: any[] = await Collections.Bill.find(
+        { realmId: realm._id },
+        { pdfUrl: 1, paymentProofUrl: 1, irisCodeUrl: 1 }
+      ).lean();
+      for (const bill of bills) {
+        for (const u of [bill.pdfUrl, bill.paymentProofUrl, bill.irisCodeUrl]) {
+          if (u) referenced.add(String(u));
+        }
+      }
+
+      // 2. Every object B2 actually holds under this realm's prefix (with its
+      // last-modified time — see the D3 age guard below).
       const prefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
-      const liveKeys = await s3.listKeys(b2Config, prefix);
+      const liveObjects = await s3.listObjects(b2Config, prefix);
+      const liveKeys = liveObjects.map((o) => o.key);
 
       // 3a. Orphans: in B2, not referenced → delete (all versions).
       const dryRun = req.body?.dryRun === true;
+      // D3 (audit-2026-07): TOCTOU guard. An upload writes its bytes to B2 a
+      // moment before POST /documents creates the matching Document row. A
+      // reconcile that runs inside that window (or during a multi-file bulk
+      // import) would see the fresh bytes as an orphan and delete them, then
+      // the create points at dead bytes. Never delete an object modified
+      // within this safety margin — a genuinely orphaned file is still an
+      // orphan on the next run, but an in-flight upload is protected.
+      const RECENT_UPLOAD_GRACE_MS = 10 * 60 * 1000; // 10 minutes
+      const nowMs = Date.now();
+      const lastModifiedByKey = new Map(
+        liveObjects.map((o) => [o.key, o.lastModified])
+      );
       const orphans = liveKeys.filter((k) => !referenced.has(k));
       const orphansDeleted: string[] = [];
+      const orphansSkippedRecent: string[] = [];
       for (const key of orphans) {
+        const lm = lastModifiedByKey.get(key);
+        // D3 (audit-2026-07): fail CLOSED. Protect an object from deletion when
+        // it is recent OR when we cannot determine its age. AWS/B2 always
+        // return LastModified, but a non-conformant S3 backend might omit it —
+        // in that case treat the object as too-risky-to-delete rather than
+        // fail-open (which would re-expose the in-flight-upload TOCTOU).
+        const ageMs = lm ? nowMs - new Date(lm).getTime() : null;
+        const isRecent = ageMs === null || ageMs < RECENT_UPLOAD_GRACE_MS;
+        if (isRecent) {
+          // Too fresh (or undateable) to safely classify as an orphan — could
+          // be an in-flight upload whose Document row has not been written yet.
+          // Report it so a real orphan isn't silently ignored forever, but
+          // never delete it.
+          orphansSkippedRecent.push(key);
+          continue;
+        }
         if (!dryRun) {
           try {
             const versions = await s3.listFileVersions(b2Config, key);
@@ -540,12 +597,13 @@ export default function () {
         .map((d) => ({ documentId: String(d._id), name: d.name, url: d.url }));
 
       logger.info(
-        `reconcile-storage (${realm._id}): ${orphansDeleted.length} orphan(s) ${dryRun ? 'found (dry-run)' : 'deleted'}, ${missingFiles.length} record(s) missing bytes`
+        `reconcile-storage (${realm._id}): ${orphansDeleted.length} orphan(s) ${dryRun ? 'found (dry-run)' : 'deleted'}, ${orphansSkippedRecent.length} skipped (too recent), ${missingFiles.length} record(s) missing bytes`
       );
       return res.json({
         enabled: true,
         dryRun,
         orphansDeleted,
+        orphansSkippedRecent,
         missingFiles
       });
     })

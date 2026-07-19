@@ -232,6 +232,7 @@
   "Database": "Banco de dados",
   "Database backup downloaded successfully": "Backup do banco de dados baixado com sucesso",
   "Database restored successfully from backup dated {{date}}": "Banco de dados restaurado com sucesso a partir do backup de {{date}}",
+  "Restore completed with errors in: {{collections}}. Review and retry.": "Restauração concluída com erros em: {{collections}}. Revise e tente novamente.",
   "Date": "Data",
   "Date required when amount > 0": "Data obrigatória quando o valor > 0",
   "Debit balance": "Saldo de débito",
@@ -688,6 +689,8 @@
   "SMS Gateway": "SMS Gateway",
   "SMS sending failed": "Falha no envio de SMS",
   "SMS sent": "SMS enviado",
+  "Email sent": "E-mail enviado",
+  "Email failed for {{count}} recipient(s): {{names}}": "Falha no e-mail para {{count}} destinatário(s): {{names}}",
   "SMS: configured (sms-gate.app) — text messages can be sent": "SMS: configurado (sms-gate.app) — mensagens de texto podem ser enviadas",
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS: não configurado — configure em Configurações → Serviços de terceiros para habilitar o envio de SMS",
   "Save": "Salvar",
@@ -1201,6 +1204,6 @@
   "Copy my details": "Copiar meus dados",
   "Has outstanding": "Com pendência",
   "Error fetching owners": "Erro ao carregar proprietários",
-  "{{count}} orphaned files removed from cloud storage": "{{count}} arquivos órfãos removidos do armazenamento em nuvem",
+  "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "{{count}} arquivos sem referência encontrados no armazenamento em nuvem (verifique em Documentos; nada foi excluído)",
   "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} documento(s) referenciam arquivos que não existem mais no armazenamento em nuvem"
 }

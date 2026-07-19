@@ -482,10 +482,18 @@ export function buildOwnerStatement(
   buildings: any[],
   ownerKey: string,
   terms: number[],
-  occupiedKeys?: Set<string>
+  occupiedKeys?: Set<string>,
+  // emptyTermsMeans: 'all' (default) — an empty terms[] matches EVERY term.
+  // This is what the year-prefix-discovery first pass needs. But a caller
+  // that requested a SPECIFIC month which then filtered to zero charges must
+  // pass 'none' so the statement is empty, NOT the owner's entire history
+  // (audit-2026-07 O1: a July notice to an owner with no July charge silently
+  // rendered all-history while the subject still said "07/2026").
+  emptyTermsMeans: 'all' | 'none' = 'all'
 ): OwnerStatementData {
   const termSet = new Set((terms || []).map((t) => Number(t)));
-  const wantTerm = (t: number) => termSet.size === 0 || termSet.has(Number(t));
+  const wantTerm = (t: number) =>
+    (termSet.size === 0 && emptyTermsMeans === 'all') || termSet.has(Number(t));
   const occSet = occupiedKeys || new Set<string>();
 
   // Resolve the owner's identity + contact from the matching unit owner
@@ -514,15 +522,34 @@ export function buildOwnerStatement(
         keys.push(k);
         bset.add(k);
         if (!bOwnersByKey.has(k)) bOwnersByKey.set(k, o);
-        if (k === ownerKey && !ownerIdentity) {
-          ownerIdentity = {
-            ownerKey,
-            name: String(o.name || '').trim(),
-            taxId: String(o.taxId || '').trim(),
-            iban: String(o.iban || '').trim(),
-            phone: String(o.phone || '').trim(),
-            email: String(o.email || '').trim()
-          };
+        if (k === ownerKey) {
+          // O8 (audit-2026-07): mirror _aggregateOwners — take the first match
+          // for identity, then UPGRADE any empty contact/identity field from a
+          // later unit's owner subdoc (first-non-empty). The same owner can
+          // hold units where only one carries phone/email/iban; locking the
+          // contact from the first (possibly empty) subdoc made the owners
+          // page show hasEmail:true while the send 422'd "missing recipient".
+          if (!ownerIdentity) {
+            ownerIdentity = {
+              ownerKey,
+              name: String(o.name || '').trim(),
+              taxId: String(o.taxId || '').trim(),
+              iban: String(o.iban || '').trim(),
+              phone: String(o.phone || '').trim(),
+              email: String(o.email || '').trim()
+            };
+          } else {
+            if (!ownerIdentity.name && o.name)
+              ownerIdentity.name = String(o.name).trim();
+            if (!ownerIdentity.taxId && o.taxId)
+              ownerIdentity.taxId = String(o.taxId).trim();
+            if (!ownerIdentity.iban && o.iban)
+              ownerIdentity.iban = String(o.iban).trim();
+            if (!ownerIdentity.phone && o.phone)
+              ownerIdentity.phone = String(o.phone).trim();
+            if (!ownerIdentity.email && o.email)
+              ownerIdentity.email = String(o.email).trim();
+          }
         }
       }
       if (pid && keys.length) {

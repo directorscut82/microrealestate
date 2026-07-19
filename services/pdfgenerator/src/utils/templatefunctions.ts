@@ -55,6 +55,16 @@ export default function ({ locale, currency }: { locale: string; currency: strin
       }
 
       if (timeRange === 'months') {
+        // Greek grammar: after a noun («απόδειξη ...», «εκκαθαριστικό ...») the
+        // month must be GENITIVE («Ιουλίου 2026»), not nominative («Ιούλιος
+        // 2026»). moment's el locale only emits the genitive when a day-of-month
+        // token precedes MMMM, so format one and strip it. This mirrors the
+        // emailer's formatTerm so an email and its ATTACHED PDF agree (they
+        // previously said «Ιουλίου» vs «Ιούλιος» for the same term).
+        if (locale === 'el' || locale.startsWith('el-')) {
+          const genitiveMonth = term.format('D MMMM').replace(/^\d+\s/, '');
+          return `${genitiveMonth} ${term.format('YYYY')}`;
+        }
         return term.format('MMMM YYYY');
       }
 

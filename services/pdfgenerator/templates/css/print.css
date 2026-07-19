@@ -416,6 +416,20 @@ span.error {
   margin-top: 10mm;
   page-break-inside: avoid;
 }
+/* P1 (audit-2026-07): the reminder rubber-stamp is a decorative diagonal
+ * watermark. In the base (absolute) layout it sat in the top-LEFT gap under the
+ * logo; once the reminder body flows (class="page rentcall"), that gap fills
+ * with the flowed tenant/reference block and the stamp overprinted the tenant's
+ * name/ΑΦΜ (rendered + confirmed). Re-anchor it to the top-RIGHT corner, which
+ * in flow mode is reliably empty (every header line is left-aligned and
+ * narrow). Kept prominent + diagonal; rotate around the top-right origin so it
+ * never swings back over the left column. Verified against a rendered PDF. */
+.page.rentcall .rubber-stamp {
+  top: 14mm;
+  right: 14mm;
+  left: auto;
+  transform-origin: top right;
+}
 
 @page {
   size: A4 portrait;

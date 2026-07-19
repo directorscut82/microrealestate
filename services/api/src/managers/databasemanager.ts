@@ -152,7 +152,7 @@ async function restore(
 
   const results: Record<
     string,
-    { deleted: number; inserted: number; skipped?: number }
+    { deleted: number; inserted: number; skipped?: number; error?: string }
   > = {};
 
   // DRY-RUN VALIDATION: walk the entire payload BEFORE deleting anything.
@@ -201,8 +201,6 @@ async function restore(
     const realmObjectId = new MongooseTypes.ObjectId(realmIdStr);
     const deleteFilter =
       collName === 'realms' ? { _id: realmObjectId } : { realmId };
-    const deleteResult = await collection.deleteMany(deleteFilter);
-    const deleted = deleteResult.deletedCount || 0;
 
     // Only accept docs whose realmId matches the caller's realm. A backup
     // from another realm or an injected payload must not cross over.
@@ -218,16 +216,59 @@ async function restore(
     });
     const skipped = deserialized.length - matching.length;
 
+    // D6 (audit-2026-07): NAS mongo is a standalone 4.4 (no multi-document
+    // transactions), so we cannot wrap the whole restore in one atomic unit.
+    // Make each collection self-contained instead: wipe + reinsert inside a
+    // per-collection try/catch with insertMany({ordered:false}) so a single
+    // schema-invalid or duplicate-key legacy doc does not (a) abort the rest
+    // of THIS collection or (b) leave later collections wiped-but-empty. Any
+    // failure is recorded per collection and surfaced to the operator instead
+    // of throwing mid-loop and leaving a torn, half-restored realm.
+    let deleted = 0;
     let inserted = 0;
-    if (matching.length > 0) {
-      const insertResult = await collection.insertMany(matching);
-      inserted = insertResult.insertedCount || 0;
+    let collError: string | undefined;
+    try {
+      const deleteResult = await collection.deleteMany(deleteFilter);
+      deleted = deleteResult.deletedCount || 0;
+
+      if (matching.length > 0) {
+        try {
+          const insertResult = await collection.insertMany(matching, {
+            ordered: false
+          });
+          inserted = insertResult.insertedCount || 0;
+        } catch (insErr: any) {
+          // ordered:false keeps inserting past a bad doc; the driver still
+          // throws a BulkWriteError carrying the count that DID land.
+          inserted =
+            insErr?.result?.nInserted ??
+            insErr?.result?.insertedCount ??
+            insErr?.insertedCount ??
+            0;
+          collError = `partial insert: ${insErr?.message || insErr}`;
+          logger.error(
+            `restore: ${collName} inserted ${inserted}/${matching.length} — ${collError}`
+          );
+        }
+      }
+    } catch (err: any) {
+      collError = String(err?.message || err);
+      logger.error(`restore: ${collName} failed — ${collError}`);
     }
 
-    results[collName] = { deleted, inserted, skipped };
+    results[collName] = { deleted, inserted, skipped, ...(collError ? { error: collError } : {}) };
   }
 
-  logger.info(`Database restored from backup dated ${payload.exportDate}`);
+  const failedCollections = Object.entries(results)
+    .filter(([, r]) => r.error)
+    .map(([name]) => name);
+  if (failedCollections.length) {
+    logger.error(
+      `Database restore completed WITH ERRORS in: ${failedCollections.join(', ')} (backup dated ${payload.exportDate})`
+    );
+  } else {
+    logger.info(`Database restored from backup dated ${payload.exportDate}`);
+  }
 
   // Storage reconcile (best-effort): the restore only rewrote MONGO. Files
   // uploaded AFTER the backup date are now orphaned in B2 (bytes with no
@@ -238,9 +279,15 @@ async function restore(
   let storageReconcile: Record<string, any> = { enabled: false };
   try {
     const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
+    // D1 (audit-2026-07): restore must NEVER auto-delete B2 files. Restoring
+    // an OLDER backup makes every file uploaded since then "unreferenced";
+    // an auto-delete would permanently destroy them (and the empty-array
+    // backup edge would nuke the whole realm's files). Run reconcile in
+    // DRY-RUN — report orphaned/missing files to the operator, delete nothing.
+    // Actual cleanup is an explicit, separate, admin-confirmed action.
     const reconcileResp = await axios.post(
       `${PDFGENERATOR_URL}/documents/reconcile-storage`,
-      {},
+      { dryRun: true },
       {
         headers: {
           authorization: (req.headers as any).authorization,
@@ -259,8 +306,12 @@ async function restore(
   }
 
   res.json({
-    status: 'restored',
+    // D6 (audit-2026-07): a partial restore must not masquerade as a clean
+    // one. Report which collections failed so the operator knows to re-run
+    // rather than trust a torn realm.
+    status: failedCollections.length ? 'restored_with_errors' : 'restored',
     exportDate: payload.exportDate,
+    failedCollections,
     results,
     storageReconcile
   });

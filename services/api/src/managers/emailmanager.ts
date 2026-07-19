@@ -36,13 +36,20 @@ async function _sendEmail(req: Req, message: AnyRecord): Promise<AnyRecord[]> {
     logger.debug(`data sent: ${JSON.stringify(postData)}`);
     logger.debug(`response: ${JSON.stringify(response.data)}`);
 
+    // X1 (audit-2026-07): the emailer responds 200 with a PER-RECIPIENT
+    // embedded failure ({status:{id:null,error}}) when the provider rejects
+    // (Promise.allSettled). Surface it as a real `error` so callers/UI can't
+    // report a bounced notice/invoice as delivered.
     return response.data.map(
       ({ templateName, recordId, params, email, status }: AnyRecord) => ({
         document: templateName,
         tenantId: recordId,
         term: params.term,
         email,
-        status
+        status,
+        ...(status && status.error
+          ? { error: { status: 500, message: String(status.error) } }
+          : {})
       })
     );
   } catch (error: any) {
@@ -104,6 +111,17 @@ async function _sendSms(
     if (koinoSum) parts.push(`Κοινόχρ: ${fmt(koinoSum)}`);
     if (repairSum) parts.push(`Επισκευή: ${fmt(repairSum)}`);
     if (balance > 0) parts.push(`Υπόλοιπο: ${fmt(balance)}`);
+
+    // N4 (audit-2026-07): grandTotal = preTaxAmount + charges + buildingCharges
+    // + debts − discount + vat + balance (businesslogic 7_total). The parts
+    // above only cover rent + building charges + balance, so a VAT tenant (or
+    // one with property charges/debts/discounts) had parts that didn't sum to
+    // the printed ΣΥΝΟΛΟ. Fold everything not itemised above into one «Άλλα»
+    // remainder computed as (grandTotal − shown parts) so the breakdown always
+    // reconciles to the total, whatever the tax/charge mix.
+    const shownSum = rentAmount + koinoSum + repairSum + (balance > 0 ? balance : 0);
+    const other = Math.round((grandTotal - shownSum) * 100) / 100;
+    if (Math.abs(other) > 0.005) parts.push(`Άλλα: ${fmt(other)}`);
 
     if (parts.length > 1) {
       amountPart = ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(grandTotal)})`;
@@ -238,7 +256,10 @@ export async function sendOwnerStatements(req: Req, res: Res) {
       realmId: String(realm!._id),
       recordId: { $in: ownerKeys },
       templateName: document,
-      sentDate: { $gte: sixtyMinAgo }
+      sentDate: { $gte: sixtyMinAgo },
+      // X1: FAILED sends must not dedupe-block the retry — only rows that
+      // actually went out count as "recently sent".
+      status: { $ne: 'failed' }
     }).lean();
     for (const r of sent) {
       recentlySent.add(`${String(r.recordId)}|${String(r.params?.term)}`);
@@ -267,6 +288,22 @@ export async function sendOwnerStatements(req: Req, res: Res) {
             }
           }
         );
+        // X1: the emailer 200s even when the provider rejected a recipient —
+        // the failure is EMBEDDED per-recipient as status:{id:null,error}.
+        // Detect it so a bounced statement is never reported as sent.
+        const rows: AnyRecord[] = Array.isArray(response.data)
+          ? response.data
+          : [];
+        const embeddedError = rows.find(
+          (r: AnyRecord) => r?.status?.error || (r?.status && r.status.id === null)
+        );
+        if (embeddedError) {
+          const msg = String(
+            embeddedError.status?.error || 'delivery failed'
+          );
+          logger.error(`owner statement send failed (${ownerKey}): ${msg}`);
+          return { ownerKey, error: msg };
+        }
         return { ownerKey, status: response.data };
       } catch (error: any) {
         const msg = error.response?.data?.message || error.message;
@@ -318,6 +355,29 @@ export async function sendOwnerSms(req: Req, res: Res) {
     realmId: String(realm!._id)
   }).lean();
 
+  // O2: the SMS total must apply the SAME occupancy staleness guard the email
+  // + PDF builders use, or a vacant/owner-resident row for a term a tenant now
+  // occupies double-counts the tenant's rent into the owner's SMS ΣΥΝΟΛΟ.
+  const unitPropIds: string[] = [];
+  for (const b of buildings) {
+    for (const u of b.units || []) {
+      if (u.propertyId) unitPropIds.push(String(u.propertyId));
+    }
+  }
+  const occTenants: AnyRecord[] = unitPropIds.length
+    ? await Collections.Tenant.find(
+        { realmId: String(realm!._id), 'properties.propertyId': { $in: unitPropIds } },
+        {
+          beginDate: 1,
+          endDate: 1,
+          terminationDate: 1,
+          'properties.propertyId': 1,
+          'properties.entryDate': 1,
+          'properties.exitDate': 1
+        }
+      ).lean()
+    : [];
+
   const fmt = (n: number) =>
     n.toLocaleString('el-GR', {
       minimumFractionDigits: 0,
@@ -342,13 +402,24 @@ export async function sendOwnerSms(req: Req, res: Res) {
         const terms = allTerms.filter((t: any) =>
           subTerms.some((st) => String(t).startsWith(st))
         );
+        const occupiedKeys = OwnerStatement.occupiedPropertyTermKeys(
+          occTenants,
+          terms as number[]
+        );
         const statement = OwnerStatement.buildOwnerStatement(
           buildings,
           ownerKey,
-          terms as number[]
+          terms as number[],
+          occupiedKeys,
+          // O1: specific term filtered to zero → empty, not all-history.
+          subTerms.length ? 'none' : 'all'
         );
         if (!statement.owner) {
           return { ownerKey, error: 'owner not found' };
+        }
+        // O1: don't SMS a total for a period the owner has no charges in.
+        if (subTerms.length && statement.charges.length === 0) {
+          return { ownerKey, error: 'no charges for the requested period' };
         }
         const phone = String(statement.owner.phone || '').trim();
         if (!phone) {
@@ -362,14 +433,31 @@ export async function sendOwnerSms(req: Req, res: Res) {
           0
         );
         const koinoSum = (Number(statement.totals.amount) || 0) - repairSum;
+        const outstanding = Number(statement.totals.outstanding) || 0;
+        const grossAmount = Number(statement.totals.amount) || 0;
+        // Κοινόχρηστα + Επισκευές already sum to the gross ΣΥΝΟΛΟ (koinoSum is
+        // defined as totals.amount − repairSum), so these two are the summing
+        // parts.
         const parts: string[] = [];
         if (koinoSum > 0.005) parts.push(`Κοινόχρηστα: ${fmt(koinoSum)}`);
         if (repairSum > 0.005) parts.push(`Επισκευές: ${fmt(repairSum)}`);
         const breakdown =
           parts.length > 1
-            ? ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(statement.totals.amount)})`
-            : ` (${fmt(statement.totals.amount)})`;
-        const text = `Ειδοποίηση πληρωμής ${termLabel} - ${statement.owner.name}${breakdown}`;
+            ? ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(grossAmount)})`
+            : ` (${fmt(grossAmount)})`;
+        // O9 (audit-2026-07): a payment notice must show what is still OWED.
+        // Outstanding is a DIFFERENT basis than the gross parts above (it nets
+        // out prior payments), so it must NOT sit inside the summing
+        // parenthetical — that read as if it should add to the total. When the
+        // owner has already part-paid, append it as a separate, clearly-labelled
+        // clause AFTER the gross breakdown so a partially-paid owner isn't
+        // dunned for the full amount while their emailed statement shows the
+        // smaller balance.
+        const owedClause =
+          outstanding > 0.005 && outstanding < grossAmount - 0.005
+            ? ` — Οφειλόμενο υπόλοιπο: ${fmt(outstanding)}`
+            : '';
+        const text = `Ειδοποίηση πληρωμής ${termLabel} - ${statement.owner.name}${breakdown}${owedClause}`;
 
         const response = await axios.post(
           `${EMAILER_URL}/sms`,
@@ -506,7 +594,13 @@ export async function send(req: Req, res: Res) {
       realmId: String(realm!._id),
       recordId: { $in: tenantIds },
       templateName: document,
-      sentDate: { $gte: sixtyMinAgo }
+      sentDate: { $gte: sixtyMinAgo },
+      // X1 (audit-2026-07): a bounced send persists a status:'failed' Email
+      // audit row. Without this filter that row dedupe-blocks the retry for
+      // 60 minutes, so a bounced notice can never be resent (and the earlier
+      // failure was itself reported as delivered). Only SUCCESSFUL sends
+      // should suppress a resend. Mirrors the owner-statement dedupe.
+      status: { $ne: 'failed' }
     })
       .lean();
     for (const r of sentRecords as AnyRecord[]) {
@@ -544,12 +638,25 @@ export async function send(req: Req, res: Res) {
           document,
           term
         });
+        // X1 (audit-2026-07): _sendEmail returns an ARRAY (one row per emailer
+        // recipient). Spreading it into this object literal produces numeric
+        // keys ({0:{…}}), so a per-recipient embedded error (the emailer's
+        // 200-with-{status:{id:null,error}} bounce) would land at row['0'].error
+        // — invisible to the batch classifier (hasError/allFailed) and the
+        // Telegram echo below, which read row.error. A bounced notice would be
+        // reported DELIVERED. Lift any embedded error to the TOP level so the
+        // classifier sees it. (The spread is left intact to preserve the
+        // existing per-tenant status shape the frontend already consumes.)
+        const embeddedError = Array.isArray(emailStatus)
+          ? emailStatus.find((e: AnyRecord) => e?.error)?.error
+          : (emailStatus as AnyRecord)?.error;
         return {
           name: tenant.name,
           tenantId,
           document,
           term,
-          ...emailStatus
+          ...emailStatus,
+          ...(embeddedError ? { error: embeddedError } : {})
         };
       } catch (error: any) {
         logger.error(error);

@@ -494,18 +494,31 @@ export async function update(req: Req, res: Res) {
         clientId: reader.clientId,
         label: reader.label || ''
       };
-      out.clientSecret =
-        reader.clientSecretUpdated || !prev.clientSecret
-          ? reader.clientSecret
-            ? Crypto.encrypt(reader.clientSecret)
-            : ''
-          : prev.clientSecret;
-      out.refreshToken =
-        reader.refreshTokenUpdated || !prev.refreshToken
-          ? reader.refreshToken
-            ? Crypto.encrypt(reader.refreshToken)
-            : ''
-          : prev.refreshToken;
+      // audit-2026-07: NEVER encrypt the literal mask placeholder. If the user
+      // edits a reader's EMAIL but leaves the masked secret, the email-keyed
+      // `prev` lookup misses → the *Updated flag path would encrypt
+      // '**********' and destroy the real secret. Guard on the value itself so
+      // no flag/index/email-match combination can corrupt a secret the user
+      // did not actually retype: a placeholder means "keep the prior value".
+      const keepSecret = (
+        incoming: string,
+        updated: boolean,
+        prevVal: string
+      ): string => {
+        if (incoming === SECRET_PLACEHOLDER) return prevVal || '';
+        if (updated || !prevVal) return incoming ? Crypto.encrypt(incoming) : '';
+        return prevVal;
+      };
+      out.clientSecret = keepSecret(
+        reader.clientSecret,
+        !!reader.clientSecretUpdated,
+        prev.clientSecret
+      );
+      out.refreshToken = keepSecret(
+        reader.refreshToken,
+        !!reader.refreshTokenUpdated,
+        prev.refreshToken
+      );
       return out;
     });
   }

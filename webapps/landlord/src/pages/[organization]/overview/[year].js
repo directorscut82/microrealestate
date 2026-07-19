@@ -8,10 +8,11 @@ import {
   XAxis
 } from 'recharts';
 import { fetchOverview, QueryKeys } from '../../../utils/restcalls';
+import { BUILDING_TYPE_LABEL_KEY } from '../../../utils/lineLabels';
 import { ChartContainer } from '../../../components/ui/chart';
 import NumberFormat from '../../../components/NumberFormat';
 import Page from '../../../components/Page';
-import { LuArrowLeft, LuArrowRight, LuDownload, LuUpload } from 'react-icons/lu';
+import { LuArrowLeft, LuArrowRight } from 'react-icons/lu';
 import { Button } from '../../../components/ui/button';
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -185,14 +186,11 @@ function Overview() {
       <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
         <h1 className="font-display text-display">{t('Overview')}</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2">
-            <LuDownload className="size-4 opacity-70" />
-            {t('Export to Excel')}
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2">
-            <LuUpload className="size-4 opacity-70" />
-            {t('Import tax return')}
-          </Button>
+          {/* F3 (audit-2026-07): removed a dead «Export to Excel» button that
+              had no onClick and no backing endpoint (the Overview has no xlsx
+              export; only the Accounting page does). A control that does
+              nothing when clicked is a broken promise — reinstate it here only
+              alongside a real /overview/:year export route. */}
           <div className="flex items-center gap-1 ml-1">
             <Button
               variant="outline"
@@ -318,6 +316,47 @@ function Overview() {
                   </td>
                 </tr>
               ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {/* PER BUILDING — rows link to the building page */}
+        <div className="rounded-2xl border border-stone-line bg-bone p-6">
+          <SectionLabel>{t('Per building')}</SectionLabel>
+          <table className="w-full text-body">
+            <thead>
+              <tr className="text-label uppercase tracking-wide text-ink-muted">
+                <th className="text-left font-medium pb-2">{t('Building')}</th>
+                <th className="text-right font-medium pb-2">{t('Income')}</th>
+                <th className="text-right font-medium pb-2">
+                  {t('Owner expenses')}
+                </th>
+                <th className="text-right font-medium pb-2">{t('Net profit')}</th>
+                <th className="w-6" />
+              </tr>
+            </thead>
+            <tbody>
+              {(d.perBuilding || []).map((b) => (
+                <tr
+                  key={b.buildingId}
+                  className="border-t border-stone-line cursor-pointer hover:bg-cream"
+                  onClick={() =>
+                    router.push(`/${org}/buildings/${b.buildingId}`)
+                  }
+                >
+                  <td className="py-2.5">{b.name}</td>
+                  <td className="py-2.5 text-right">
+                    <NumberFormat value={b.collected} showZero />
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <NumberFormat value={b.ownerExpenses} showZero debitColor />
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <NumberFormat value={b.net} showZero withColor />
+                  </td>
+                  <td className="py-2.5 text-right text-ink-muted">›</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -505,46 +544,6 @@ function Overview() {
           </div>
         </div>
 
-        {/* PER BUILDING — rows link to the building page */}
-        <div className="rounded-2xl border border-stone-line bg-bone p-6">
-          <SectionLabel>{t('Per building')}</SectionLabel>
-          <table className="w-full text-body">
-            <thead>
-              <tr className="text-label uppercase tracking-wide text-ink-muted">
-                <th className="text-left font-medium pb-2">{t('Building')}</th>
-                <th className="text-right font-medium pb-2">{t('Income')}</th>
-                <th className="text-right font-medium pb-2">
-                  {t('Owner expenses')}
-                </th>
-                <th className="text-right font-medium pb-2">{t('Net profit')}</th>
-                <th className="w-6" />
-              </tr>
-            </thead>
-            <tbody>
-              {(d.perBuilding || []).map((b) => (
-                <tr
-                  key={b.buildingId}
-                  className="border-t border-stone-line cursor-pointer hover:bg-cream"
-                  onClick={() =>
-                    router.push(`/${org}/buildings/${b.buildingId}`)
-                  }
-                >
-                  <td className="py-2.5">{b.name}</td>
-                  <td className="py-2.5 text-right">
-                    <NumberFormat value={b.collected} showZero />
-                  </td>
-                  <td className="py-2.5 text-right">
-                    <NumberFormat value={b.ownerExpenses} showZero debitColor />
-                  </td>
-                  <td className="py-2.5 text-right">
-                    <NumberFormat value={b.net} showZero withColor />
-                  </td>
-                  <td className="py-2.5 text-right text-ink-muted">›</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </div>
     </Page>
   );
@@ -598,26 +597,14 @@ function MiniTable({ title, rows, totalLabel, totalValue }) {
   );
 }
 
-// The server breakdown category comes back as the persisted expense type-key or
-// a category string; map to the shared building-expense label key so the
-// donut/table read the SAME Greek as every other surface. Unknown → passthrough.
+// The server breakdown category comes back as the persisted expense type-key
+// or 'repair'; map to the shared building-expense label key so the donut/table
+// read the SAME Greek as every other surface. Unknown → passthrough.
+// F5 (audit-2026-07): use the single source of truth (lineLabels.
+// BUILDING_TYPE_LABEL_KEY) instead of a 4th inline copy of the map that would
+// silently drift from the expense table / PDF / dashboard chart.
 function _categoryLabelKey(cat) {
-  const MAP = {
-    heating: 'Heating',
-    elevator: 'Elevator',
-    cleaning: 'Cleaning',
-    water_common: 'Water Common',
-    electricity_common: 'Electricity Common',
-    insurance: 'Insurance',
-    management_fee: 'Management Fee',
-    garden: 'Garden',
-    repairs_fund: 'Repairs Fund',
-    pest_control: 'Pest Control',
-    other: 'Other',
-    repair: 'Repair',
-    repairs: 'Repairs'
-  };
-  return MAP[cat] || cat;
+  return BUILDING_TYPE_LABEL_KEY[cat] || cat;
 }
 
 export default withAuthentication(Overview);

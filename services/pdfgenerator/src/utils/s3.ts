@@ -82,8 +82,23 @@ export async function listKeys(
   b2Config: B2Config,
   prefix: string
 ): Promise<string[]> {
+  const objs = await listObjects(b2Config, prefix);
+  return objs.map((o) => o.key);
+}
+
+/**
+ * Like listKeys but also returns each object's last-modified time. The
+ * storage reconcile uses this to skip deleting objects that were written very
+ * recently — an in-flight upload lands its bytes in B2 a moment before its
+ * Document row is created, so a reconcile racing that window would otherwise
+ * classify the fresh bytes as an orphan and delete them (D3 TOCTOU).
+ */
+export async function listObjects(
+  b2Config: B2Config,
+  prefix: string
+): Promise<{ key: string; lastModified?: Date }[]> {
   const s3 = _initS3(b2Config);
-  const keys: string[] = [];
+  const objs: { key: string; lastModified?: Date }[] = [];
   let token: string | undefined;
   do {
     const page: AWS.S3.ListObjectsV2Output = await new Promise(
@@ -99,11 +114,11 @@ export async function listKeys(
       }
     );
     for (const o of page.Contents || []) {
-      if (o.Key) keys.push(o.Key);
+      if (o.Key) objs.push({ key: o.Key, lastModified: o.LastModified });
     }
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
-  return keys;
+  return objs;
 }
 
 /**

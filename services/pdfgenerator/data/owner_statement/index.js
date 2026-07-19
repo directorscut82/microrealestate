@@ -93,7 +93,9 @@ export async function get(params) {
     buildings,
     ownerKey,
     terms,
-    occupiedKeys
+    occupiedKeys,
+    // O1: specific term filtered to zero → empty, not all-history.
+    subTerms.length ? 'none' : 'all'
   );
   if (!statement.owner) {
     throw new Error(`owner ${ownerKey} not found in realm ${realmId}`);

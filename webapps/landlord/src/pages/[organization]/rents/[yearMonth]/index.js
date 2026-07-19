@@ -149,11 +149,31 @@ function Actions({ values, yearMonth, onDone }) {
 
   const handleConfirm = useCallback(async () => {
     try {
-      await sendMutation.mutateAsync({
+      const statusList = await sendMutation.mutateAsync({
         document: selectedDocumentName,
         tenantIds: values.map((r) => r._id),
         terms: values.map((r) => r.term)
       });
+      // The api returns HTTP 207 (not a throw) when only SOME tenants failed —
+      // axios resolves it, so without inspecting the per-tenant status list the
+      // UI would show a silent success while emails bounced. Count the failures
+      // and warn by name; only show plain success when every send landed.
+      const rows = Array.isArray(statusList) ? statusList : [];
+      const failed = rows.filter((s) => s && s.error);
+      if (failed.length) {
+        const names = failed
+          .map((s) => s.name || s.tenantId)
+          .filter(Boolean)
+          .join(', ');
+        toast.error(
+          t('Email failed for {{count}} recipient(s): {{names}}', {
+            count: failed.length,
+            names
+          })
+        );
+      } else {
+        toast.success(t('Email sent'));
+      }
     } catch {
       toast.error(t('Email delivery service cannot send emails'));
     }

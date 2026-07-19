@@ -871,6 +871,18 @@ export async function add(req: Req, res: Res) {
     repairs,
     notes
   } = req.body;
+  // O10 (audit-2026-07): bulk building-create persisted units[].owners[]
+  // verbatim, bypassing the same _validateUnitOwners guard that addUnit /
+  // updateUnit enforce — so malformed email/IBAN and a >100% owner sum could
+  // enter via this one path. Validate + normalise each unit's owners here too
+  // (same rule, one validator), so no create path is a back door.
+  const validatedUnits = (units || []).map((u: any) => {
+    if (u && u.owners !== undefined) {
+      const validatedOwners = _validateUnitOwners(u.owners);
+      return { ...u, owners: validatedOwners };
+    }
+    return u;
+  });
   const building = new Collections.Building({
     name,
     description,
@@ -885,7 +897,7 @@ export async function add(req: Req, res: Res) {
     heatingType,
     manager,
     bankInfo,
-    units: units || [],
+    units: validatedUnits,
     expenses: expenses || [],
     contractors: contractors || [],
     repairs: repairs || [],

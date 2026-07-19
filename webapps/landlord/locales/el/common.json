@@ -265,6 +265,7 @@
   "Database": "Βάση δεδομένων",
   "Database backup downloaded successfully": "Το αντίγραφο ασφαλείας της βάσης δεδομένων κατέβηκε με επιτυχία",
   "Database restored successfully from backup dated {{date}}": "Η βάση δεδομένων επαναφέρθηκε με επιτυχία από αντίγραφο ασφαλείας της {{date}}",
+  "Restore completed with errors in: {{collections}}. Review and retry.": "Η επαναφορά ολοκληρώθηκε με σφάλματα στα: {{collections}}. Ελέγξτε και δοκιμάστε ξανά.",
   "Date": "Ημερομηνία",
   "Date required when amount > 0": "Η ημερομηνία είναι υποχρεωτική όταν το ποσό > 0",
   "Debit balance": "Χρεωστικό υπόλοιπο",
@@ -790,6 +791,8 @@
   "SMS Gateway": "SMS Gateway",
   "SMS sending failed": "Αποτυχία αποστολής SMS",
   "SMS sent": "Το SMS στάλθηκε",
+  "Email sent": "Το email στάλθηκε",
+  "Email failed for {{count}} recipient(s): {{names}}": "Απέτυχε η αποστολή email σε {{count}} παραλήπτες: {{names}}",
   "SMS: configured (sms-gate.app) — text messages can be sent": "SMS: ρυθμισμένο (sms-gate.app) — μπορούν να αποσταλούν μηνύματα",
   "SMS: not configured — set it up in Settings → Third-party services to enable SMS sending": "SMS: μη ρυθμισμένο — ρυθμίστε το από Ρυθμίσεις → Υπηρεσίες τρίτων για αποστολή SMS",
   "Save": "Αποθήκευση",
@@ -1345,6 +1348,6 @@
   "Copy my details": "Αντιγραφή των στοιχείων μου",
   "Has outstanding": "Με οφειλή",
   "Error fetching owners": "Σφάλμα φόρτωσης ιδιοκτητών",
-  "{{count}} orphaned files removed from cloud storage": "{{count}} ορφανά αρχεία αφαιρέθηκαν από το cloud",
+  "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "Βρέθηκαν {{count}} αρχεία στο cloud που δεν αντιστοιχούν πλέον σε έγγραφα (δείτε τα στα Έγγραφα· δεν διαγράφηκε τίποτα)",
   "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} έγγραφα αναφέρονται σε αρχεία που δεν υπάρχουν πλέον στο cloud"
 }

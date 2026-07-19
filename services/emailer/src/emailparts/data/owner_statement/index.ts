@@ -62,14 +62,26 @@ export async function get(ownerKey: string, params: Record<string, any>) {
     terms
   );
 
+  // O1: when a specific term was requested but filtered to zero charges,
+  // emptyTermsMeans:'none' keeps the statement empty (not all-history). When
+  // no term was requested at all, terms == every term, so this never triggers.
   const statement = OwnerStatement.buildOwnerStatement(
     buildings,
     ownerKey,
     terms,
-    occupiedKeys
+    occupiedKeys,
+    subTerms.length ? 'none' : 'all'
   );
   if (!statement.owner) {
     throw new Error(`owner ${ownerKey} not found in realm ${realmId}`);
+  }
+  // O1: a specific-month request with no charges is now a legitimately empty
+  // statement (not all-history). Refuse to send an empty notice rather than
+  // email an owner a €0 / blank statement for a month they owe nothing.
+  if (subTerms.length && statement.charges.length === 0) {
+    throw new Error(
+      `no owner charges for ${ownerKey} in the requested period`
+    );
   }
 
   const landlord: any = { ...realm };

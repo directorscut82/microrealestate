@@ -18,6 +18,11 @@ import tenantRouter from './tenant.js';
 //   (c) Per-IP keys lock out shared-NAT users for one bad actor's mistakes.
 //       For email-bearing payloads we key by lower-cased email instead, so
 //       the limit is per-account, not per-IP.
+//   (d) M2M app-token exchange (/apptoken, audit-2026-07) carries no email —
+//       it carries a `clientId`. Behind the gateway every request shares one
+//       remoteAddress, so an IP key gave ALL M2M auth a single global 20/min
+//       bucket (20 bad attempts DoS every app). Key by clientId instead, so
+//       the limit is per-application, mirroring the per-account email key.
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 60_000; // 1 minute
 const RATE_MAX_ATTEMPTS = 20; // bumped from 10 — was too tight for parallel legit users
@@ -26,7 +31,9 @@ export function authRateLimit(req: Request, res: Response, next: NextFunction) {
   const key =
     req.body?.email && typeof req.body.email === 'string'
       ? `email:${req.body.email.toLowerCase()}`
-      : `ip:${req.socket.remoteAddress || 'unknown'}`;
+      : req.body?.clientId && typeof req.body.clientId === 'string'
+        ? `client:${req.body.clientId}`
+        : `ip:${req.socket.remoteAddress || 'unknown'}`;
   const now = Date.now();
   const entry = rateLimitMap.get(key);
 

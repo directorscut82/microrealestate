@@ -77,12 +77,12 @@ export default function OwnerContactCard({ owner, ownerKey }) {
         <div className="mt-4">
           <Button
             size="sm"
-            disabled={mutation.isLoading}
+            disabled={mutation.isPending}
             onClick={() =>
               mutation.mutate({ ownerKey, phone, email, iban })
             }
           >
-            {mutation.isLoading ? t('Saving') : t('Save')}
+            {mutation.isPending ? t('Saving') : t('Save')}
           </Button>
         </div>
       )}
