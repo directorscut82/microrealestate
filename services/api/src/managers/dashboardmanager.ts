@@ -1143,7 +1143,7 @@ export async function overview(req: Req, res: Res) {
       });
     }
   }
-  const _projNow = moment.utc();
+  const _projNow = { year: now.year(), month: now.month() + 1 };
   let projIncomeTotal = 0;
   let projIncomeProjected = 0;
   let projOwnerExpTotal = 0;

@@ -10,7 +10,9 @@
  *   the existing client code is the reference implementation and will be replaced
  *   by consuming the server payload once this ships).
  */
-import moment from 'moment';
+// IMPORTANT: `common` has NO moment dependency (see ownerstatement.ts /
+// sharebasis.ts). All date math here is moment-free — DD/MM/YYYY strings are
+// parsed to {month, year} and compared as year*100+month integers.
 
 // ── Types (loose — accepts lean docs and frontdata shapes alike) ──────────
 
@@ -85,6 +87,18 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// moment-free: parse a strict DD/MM/YYYY string → { month (1..12), year } or null.
+function parseDMY(s?: string): { month: number; year: number } | null {
+  if (!s || typeof s !== 'string') return null;
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s.trim());
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { month, year };
+}
+
 function monthsInYear(
   startMonth: number,
   startYear: number,
@@ -135,20 +149,26 @@ function isExpenseActiveForTerm(e: ExpenseLike, currentTerm: number): boolean {
  * @param tenantsByPropertyId - Map<propertyId, { rent, expenses, beginDate, endDate }>
  *   (from the allTenants query + frontdata shape — each active tenant's property info)
  * @param year - fiscal year (e.g. 2026)
- * @param now - moment instance for "today" (pass explicitly for testability)
+ * @param nowYm - "today" as {year, month} (pass explicitly for testability).
+ *   Defaults to the real UTC now via native Date.
  */
 export function computeBuildingProjection(
   building: BuildingLike,
   tenantsByPropertyId: Map<string, TenantPropertyLike>,
   year: number,
-  now?: moment.Moment
+  nowYm?: { year: number; month: number }
 ): BuildingProjectionResult {
-  const _now = now || moment.utc();
-  const currentTerm = Number(
-    _now.clone().startOf('month').format('YYYYMMDDHH')
-  );
+  const _d = new Date();
+  const _now = nowYm || {
+    year: _d.getUTCFullYear(),
+    month: _d.getUTCMonth() + 1
+  };
+  // currentTerm as YYYYMMDDHH (day=01, hour=00) matching the app convention.
+  const currentTerm = _now.year * 1000000 + _now.month * 10000 + 100;
   const currentYear = year;
-  const currentMonthIdx = _now.year() === year ? _now.month() + 1 : 12;
+  const currentMonthIdx = _now.year === year ? _now.month : 12;
+  // year*100+month integer for the current month (for expense-window compares).
+  const nowYmInt = _now.year * 100 + _now.month;
 
   // ── Income projection ───────────────────────────────────────────────────
   // Rent × lease-active-months-in-year + δαπάνες-επί-ενοικίου windowed.
@@ -156,16 +176,12 @@ export function computeBuildingProjection(
   let annualRentExpenses = 0;
 
   const _leaseActiveMonths = (info: TenantPropertyLike): number => {
-    const b = info.beginDate
-      ? moment.utc(info.beginDate, 'DD/MM/YYYY', true)
-      : null;
-    const e = info.endDate
-      ? moment.utc(info.endDate, 'DD/MM/YYYY', true)
-      : null;
-    const startMonth = b && b.isValid() ? b.month() + 1 : 1;
-    const startYear = b && b.isValid() ? b.year() : currentYear;
-    const endMonth = e && e.isValid() ? e.month() + 1 : 12;
-    const endYear = e && e.isValid() ? e.year() : currentYear;
+    const b = parseDMY(info.beginDate);
+    const e = parseDMY(info.endDate);
+    const startMonth = b ? b.month : 1;
+    const startYear = b ? b.year : currentYear;
+    const endMonth = e ? e.month : 12;
+    const endYear = e ? e.year : currentYear;
     return monthsInYear(startMonth, startYear, endMonth, endYear, currentYear);
   };
 
@@ -175,16 +191,13 @@ export function computeBuildingProjection(
     (Array.isArray(expenses) ? expenses : [])
       .filter((ex) => {
         if (!ex?.beginDate && !ex?.endDate) return true;
-        const begin = ex.beginDate
-          ? moment.utc(ex.beginDate, 'DD/MM/YYYY', true)
-          : null;
-        const end = ex.endDate
-          ? moment.utc(ex.endDate, 'DD/MM/YYYY', true)
-          : null;
-        if (begin && !begin.isValid()) return true;
-        if (end && !end.isValid()) return true;
-        if (begin && _now.isBefore(begin, 'month')) return false;
-        if (end && _now.isAfter(end, 'month')) return false;
+        const begin = parseDMY(ex.beginDate);
+        const end = parseDMY(ex.endDate);
+        // Unparseable dates → treat as always-active (match moment .isValid() branch)
+        if (ex.beginDate && !begin) return true;
+        if (ex.endDate && !end) return true;
+        if (begin && nowYmInt < begin.year * 100 + begin.month) return false;
+        if (end && nowYmInt > end.year * 100 + end.month) return false;
         return true;
       })
       .reduce((s, ex) => s + (Number(ex.amount) || 0), 0);
@@ -220,11 +233,9 @@ export function computeBuildingProjection(
     const exp = _monthlyPropExpenses(tenantInfo.expenses);
     const totalMonths = _leaseActiveMonths(tenantInfo);
     // Active months elapsed so far (Jan..currentMonth, clamped to lease window)
-    const b = tenantInfo.beginDate
-      ? moment.utc(tenantInfo.beginDate, 'DD/MM/YYYY', true)
-      : null;
-    const startMonth = b && b.isValid() ? b.month() + 1 : 1;
-    const startYear = b && b.isValid() ? b.year() : currentYear;
+    const b = parseDMY(tenantInfo.beginDate);
+    const startMonth = b ? b.month : 1;
+    const startYear = b ? b.year : currentYear;
     const fromMonth = startYear < currentYear ? 1 : startMonth;
     const elapsedTo = Math.min(currentMonthIdx, fromMonth + totalMonths - 1);
     const elapsed = Math.max(0, elapsedTo - fromMonth + 1);
