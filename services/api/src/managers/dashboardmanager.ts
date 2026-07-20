@@ -1179,7 +1179,12 @@ export async function overview(req: Req, res: Res) {
   let projIncomeProjected = 0;
   let projOwnerExpTotal = 0;
   let projOwnerExpProjected = 0;
-  const projByBuildingId = new Map<string, { incomeProj: number; expProj: number }>();
+  // Store the REMAINING-months estimate per building (NOT annualIncome, the
+  // full-year billed figure). The per-building parenthesis must read
+  // «collected + remaining estimate» to reconcile with the ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ total
+  // and the ΑΝΑ ΙΔΙΟΚΤΗΤΗ table, all of which use collected+remaining, not
+  // full-year-billed (which double-counts already-collected arrears).
+  const projByBuildingId = new Map<string, { incomeRemaining: number; expRemaining: number }>();
   for (const b of buildings) {
     const r = BuildingProjection.computeBuildingProjection(
       b as any,
@@ -1192,8 +1197,8 @@ export async function overview(req: Req, res: Res) {
     projOwnerExpTotal += r.annualOwnerExpenses;
     projOwnerExpProjected += r.annualOwnerExpensesProjected;
     projByBuildingId.set(String(b._id), {
-      incomeProj: _round(r.annualIncome),
-      expProj: _round(r.annualOwnerExpenses)
+      incomeRemaining: _round(r.annualIncomeProjected),
+      expRemaining: _round(r.annualOwnerExpensesProjected)
     });
   }
   projIncomeTotal = _round(projIncomeTotal);
@@ -1294,16 +1299,20 @@ export async function overview(req: Req, res: Res) {
   const perBuilding = buildings.map((b) => {
     const inc = incomeByBuilding.get(String(b._id)) || { collected: 0, owed: 0 };
     const eks = ownerEksodaByBuildingId.get(String(b._id)) || 0;
-    const proj = projByBuildingId.get(String(b._id)) || { incomeProj: 0, expProj: 0 };
+    const proj = projByBuildingId.get(String(b._id)) || { incomeRemaining: 0, expRemaining: 0 };
+    // Projection = collected-to-date + estimate for the remaining months
+    // (same basis as ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ + ΑΝΑ ΙΔΙΟΚΤΗΤΗ, so all three reconcile).
+    const collectedProjected = _round(inc.collected + proj.incomeRemaining);
+    const ownerExpensesProjected = _round(_round(eks) + proj.expRemaining);
     return {
       buildingId: String(b._id),
       name: b.name || '',
       collected: inc.collected,
-      collectedProjected: proj.incomeProj,
+      collectedProjected,
       ownerExpenses: _round(eks),
-      ownerExpensesProjected: proj.expProj,
+      ownerExpensesProjected,
       net: _round(inc.collected - eks),
-      netProjected: _round(proj.incomeProj - proj.expProj)
+      netProjected: _round(collectedProjected - ownerExpensesProjected)
     };
   });
   if (standalone.collected > 0 || standalone.owed > 0) {
