@@ -1015,6 +1015,11 @@ export async function overview(req: Req, res: Res) {
         terminationDate: 1,
         endDate: 1,
         'properties.propertyId': 1,
+        // rent + expenses per property are needed by computeBuildingProjection
+        // (the annual actual-vs-estimate projection). Without them every unit
+        // reads rent=0 → projection columns render 0.
+        'properties.rent': 1,
+        'properties.expenses': 1,
         rents: {
           $filter: {
             input: '$rents',
@@ -1127,6 +1132,28 @@ export async function overview(req: Req, res: Res) {
   // ── Annual projection (per-building, summed realm-wide) ──
   // Build the tenantsByPropertyId map from the already-fetched allTenants.
   // Each tenant may occupy multiple properties; each property gets a slot.
+  // computeBuildingProjection expects DD/MM/YYYY strings; mongo stores lease +
+  // expense dates as Date objects (or already-formatted strings on some rows),
+  // so normalize every date field to DD/MM/YYYY UTC before handing them over.
+  const _toDMY = (v: unknown): string => {
+    if (!v) return '';
+    if (v instanceof Date) {
+      const dd = String(v.getUTCDate()).padStart(2, '0');
+      const mm = String(v.getUTCMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${v.getUTCFullYear()}`;
+    }
+    if (typeof v === 'string') {
+      // already DD/MM/YYYY?
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return v;
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) {
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        return `${dd}/${mm}/${d.getUTCFullYear()}`;
+      }
+    }
+    return '';
+  };
   const _tenantsByPropertyId = new Map<string, {
     rent: number;
     expenses: Array<{ amount?: number; beginDate?: string; endDate?: string }>;
@@ -1137,9 +1164,13 @@ export async function overview(req: Req, res: Res) {
     for (const tp of (t as any).properties || []) {
       _tenantsByPropertyId.set(String(tp.propertyId), {
         rent: Number(tp.rent) || 0,
-        expenses: tp.expenses || [],
-        beginDate: (t as any).beginDate || '',
-        endDate: (t as any).terminationDate || (t as any).endDate || ''
+        expenses: (tp.expenses || []).map((ex: AnyRecord) => ({
+          amount: Number(ex.amount) || 0,
+          beginDate: _toDMY(ex.beginDate),
+          endDate: _toDMY(ex.endDate)
+        })),
+        beginDate: _toDMY((t as any).beginDate),
+        endDate: _toDMY((t as any).terminationDate || (t as any).endDate)
       });
     }
   }
