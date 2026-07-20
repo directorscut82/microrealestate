@@ -11,3 +11,4 @@ export { default as ServiceError } from './utils/serviceerror.js';
 export * as Pagination from './utils/pagination.js';
 export * as OwnerStatement from './utils/ownerstatement.js';
 export * as ShareBasis from './utils/sharebasis.js';
+export * as BuildingProjection from './utils/buildingprojection.js';

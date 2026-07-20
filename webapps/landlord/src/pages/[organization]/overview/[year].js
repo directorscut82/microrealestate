@@ -144,7 +144,8 @@ function Overview() {
   });
 
   const d = data || {};
-  const totals = d.totals || { income: 0, ownerExpenses: 0, net: 0 };
+  const totals = d.totals || { income: 0, ownerExpenses: 0, net: 0, projection: {} };
+  const proj = totals.projection || {};
   const katanomes = d.katanomes || {};
 
   // month bars for the cash-flow chart (paid vs owed), Greek initials.
@@ -221,41 +222,20 @@ function Overview() {
           <SectionLabel>
             {t('Annual projection')} {year}
           </SectionLabel>
-          <ProjRow
-            label={t('Income')}
-            value={totals.income}
-            valueClass="text-ink"
-          />
-          <ProjRow
-            label={t('Owner expenses')}
-            value={totals.ownerExpenses}
-            valueClass="text-oxide"
-            negative
-          />
-          <div className="border-t border-stone-line mt-2 pt-3">
-            <ProjRow
-              label={t('Net profit')}
-              value={totals.net}
-              valueClass="text-olive"
-              bold
-            />
-          </div>
-          <p className="text-label text-ink-muted mt-3 max-w-2xl">
-            {t(
-              'Actual: collected/charged to date. Estimate: projection for remaining months.'
-            )}
-          </p>
+          <ProjectionTable totals={totals} proj={proj} year={year} t={t} />
         </div>
 
         {/* ANALYSIS — income + owner-expense side by side */}
         <div className="rounded-2xl border border-stone-line bg-bone p-6">
-          <SectionLabel>{t('Income & expense analysis')}</SectionLabel>
+          <SectionLabel>
+            {t('Income & expense analysis')} ({t('up to')} {_todayFormatted()})
+          </SectionLabel>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-4">
             <MiniTable
               title={t('Income')}
               rows={[
-                { k: t('Rents'), v: totals.income },
-                { k: t('Charges on rent short'), v: 0 }
+                { k: t('Rents'), v: (totals.income || 0) - (totals.chargesOnRent || 0) },
+                { k: t('Charges on rent short'), v: totals.chargesOnRent || 0 }
               ]}
               totalLabel={t('Income')}
               totalValue={totals.income}
@@ -272,26 +252,34 @@ function Overview() {
               t={t}
             />
           </div>
+          <div className="border-t border-stone-line mt-4 pt-3 flex items-baseline justify-between">
+            <span className="text-title text-ink font-medium">{t('Difference')}</span>
+            <span className="font-mono tabular-nums font-semibold text-olive">
+              <NumberFormat value={(totals.income || 0) - (totals.ownerExpenses || 0)} showZero />
+            </span>
+          </div>
         </div>
 
-        {/* PER OWNER */}
+        {/* PER OWNER — amounts to date (projection in parentheses) */}
         <div className="rounded-2xl border border-stone-line bg-bone p-6">
-          <SectionLabel>{t('Per owner')}</SectionLabel>
+          <SectionLabel>
+            {t('Per owner')} — {t('up to')} {_todayFormatted()} ({t('year projection in parens')})
+          </SectionLabel>
           <table className="w-full text-body">
             <thead>
               <tr className="text-label uppercase tracking-wide text-ink-muted">
                 <th className="text-left font-medium pb-2">{t('Owner')}</th>
                 <th className="text-right font-medium pb-2">
-                  {t('Owner expenses')}
+                  {t('Rents')} ({t('projection')})
                 </th>
                 <th className="text-right font-medium pb-2">
-                  {t('Income tax')}
+                  {t('Owner expenses')} ({t('projection')})
                 </th>
-                {/* Καθαρά έσοδα = (owner's income) − income tax. Income-tax is not
-                    yet imported, so this renders «—» like the Φόρος column until
-                    the tax-return import feeds it. */}
                 <th className="text-right font-medium pb-2">
-                  {t('Net earnings')}
+                  {t('Income tax')} ({t('projection')})
+                </th>
+                <th className="text-right font-medium pb-2">
+                  {t('Net earnings')} ({t('projection')})
                 </th>
               </tr>
             </thead>
@@ -299,17 +287,40 @@ function Overview() {
               {(d.perOwner || []).map((o) => (
                 <tr key={o.ownerName} className="border-t border-stone-line">
                   <td className="py-2.5">{o.ownerName}</td>
-                  <td className="py-2.5 text-right">
-                    <NumberFormat value={o.ownerExpenses} showZero debitColor />
+                  <td className="py-2.5 text-right font-mono tabular-nums">
+                    <NumberFormat value={o.income} showZero />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={o.incomeProjected} showZero />)
+                    </span>
                   </td>
-                  <td className="py-2.5 text-right text-ink-muted">—</td>
-                  <td className="py-2.5 text-right text-ink-muted">—</td>
+                  <td className="py-2.5 text-right font-mono tabular-nums">
+                    <NumberFormat value={o.ownerExpenses} showZero />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={o.ownerExpensesProjected} showZero />)
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-right font-mono tabular-nums">
+                    <NumberFormat value={o.tax} showZero />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={o.taxProjected} showZero />)
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-right font-mono tabular-nums font-semibold">
+                    <NumberFormat value={o.net} showZero withColor />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={o.netProjected} showZero />)
+                    </span>
+                  </td>
                 </tr>
               ))}
               {!(d.perOwner || []).length ? (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="py-3 text-center text-ink-muted text-label"
                   >
                     {t('No data')}
@@ -318,20 +329,29 @@ function Overview() {
               ) : null}
             </tbody>
           </table>
+          <p className="text-label text-ink-muted mt-3">
+            {t('Tax is computed on rents only (95% × art. 40 brackets), excluding charges on rent.')}
+          </p>
         </div>
 
         {/* PER BUILDING — rows link to the building page */}
         <div className="rounded-2xl border border-stone-line bg-bone p-6">
-          <SectionLabel>{t('Per building')}</SectionLabel>
+          <SectionLabel>
+            {t('Per building')} — {t('up to')} {_todayFormatted()} ({t('year projection in parens')})
+          </SectionLabel>
           <table className="w-full text-body">
             <thead>
               <tr className="text-label uppercase tracking-wide text-ink-muted">
                 <th className="text-left font-medium pb-2">{t('Building')}</th>
-                <th className="text-right font-medium pb-2">{t('Income')}</th>
                 <th className="text-right font-medium pb-2">
-                  {t('Owner expenses')}
+                  {t('Income')} ({t('projection')})
                 </th>
-                <th className="text-right font-medium pb-2">{t('Net profit')}</th>
+                <th className="text-right font-medium pb-2">
+                  {t('Owner expenses')} ({t('projection')})
+                </th>
+                <th className="text-right font-medium pb-2">
+                  {t('Net profit')} ({t('projection')})
+                </th>
                 <th className="w-6" />
               </tr>
             </thead>
@@ -345,14 +365,26 @@ function Overview() {
                   }
                 >
                   <td className="py-2.5">{b.name}</td>
-                  <td className="py-2.5 text-right">
+                  <td className="py-2.5 text-right font-mono tabular-nums">
                     <NumberFormat value={b.collected} showZero />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={b.collectedProjected} showZero />)
+                    </span>
                   </td>
-                  <td className="py-2.5 text-right">
-                    <NumberFormat value={b.ownerExpenses} showZero debitColor />
+                  <td className="py-2.5 text-right font-mono tabular-nums">
+                    <NumberFormat value={b.ownerExpenses} showZero />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={b.ownerExpensesProjected} showZero />)
+                    </span>
                   </td>
-                  <td className="py-2.5 text-right">
+                  <td className="py-2.5 text-right font-mono tabular-nums">
                     <NumberFormat value={b.net} showZero withColor />
+                    {' '}
+                    <span className="text-ink-muted">
+                      (<NumberFormat value={b.netProjected} showZero />)
+                    </span>
                   </td>
                   <td className="py-2.5 text-right text-ink-muted">›</td>
                 </tr>
@@ -549,22 +581,107 @@ function Overview() {
   );
 }
 
-// projection headline row: label · big mono value (colored by role)
-function ProjRow({ label, value, valueClass, negative, bold }) {
+// Today formatted as DD/MM/YYYY for the analysis section header.
+function _todayFormatted() {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+// Greek accusative month names for the «έως Ιούλιο» column header.
+const MONTH_ACC = [
+  'Ιανουάριο',
+  'Φεβρουάριο',
+  'Μάρτιο',
+  'Απρίλιο',
+  'Μάιο',
+  'Ιούνιο',
+  'Ιούλιο',
+  'Αύγουστο',
+  'Σεπτέμβριο',
+  'Οκτώβριο',
+  'Νοέμβριο',
+  'Δεκέμβριο'
+];
+
+function ProjectionTable({ totals, proj, year, t }) {
+  const now = new Date();
+  const isCurrentYear = now.getFullYear() === year;
+  const monthLabel = isCurrentYear
+    ? MONTH_ACC[now.getMonth()]
+    : MONTH_ACC[11];
+  const incEst = proj.incomeEstimate || 0;
+  const expEst = proj.ownerExpensesEstimate || 0;
+  const netEst = incEst - expEst;
+  const incTotal = totals.income + incEst;
+  const expTotal = totals.ownerExpenses + expEst;
+  const netTotal = totals.net + netEst;
+
+  const rows = [
+    {
+      label: t('Income'),
+      actual: totals.income,
+      est: incEst,
+      total: incTotal,
+      cls: 'text-ink'
+    },
+    {
+      label: t('Owner expenses'),
+      actual: totals.ownerExpenses,
+      est: expEst,
+      total: expTotal,
+      cls: 'text-oxide',
+      neg: true
+    }
+  ];
+
   return (
-    <div className="flex items-baseline gap-4 mb-1">
-      <span
-        className={`flex-1 ${bold ? 'text-title text-ink font-medium' : 'text-body text-ink-soft'}`}
-      >
-        {label}
-      </span>
-      <span
-        className={`font-mono tabular-nums whitespace-nowrap text-right ${valueClass} ${bold ? 'text-headline font-semibold' : 'text-headline'}`}
-      >
-        {negative ? '−' : ''}
-        <NumberFormat value={value} showZero abs={negative} />
-      </span>
-    </div>
+    <table className="w-full text-body">
+      <thead>
+        <tr className="text-label text-ink-muted">
+          <th className="text-left font-medium pb-2" />
+          <th className="text-right font-medium pb-2 whitespace-nowrap">
+            (έως {monthLabel})
+          </th>
+          <th className="text-right font-medium pb-2 whitespace-nowrap">
+            (εκτίμηση υπόλοιπων μηνών)
+          </th>
+          <th className="text-right font-medium pb-2">{t('Total')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.label}>
+            <td className="py-1.5 text-ink-soft">{r.label}</td>
+            <td className={`py-1.5 text-right font-mono tabular-nums ${r.cls}`}>
+              {r.neg ? '−' : ''}
+              <NumberFormat value={r.actual} showZero abs={r.neg} />
+            </td>
+            <td className={`py-1.5 text-right font-mono tabular-nums ${r.cls}`}>
+              {r.neg ? '−' : ''}
+              <NumberFormat value={r.est} showZero abs={r.neg} />
+            </td>
+            <td className={`py-1.5 text-right font-mono tabular-nums font-semibold ${r.cls}`}>
+              {r.neg ? '−' : ''}
+              <NumberFormat value={r.total} showZero abs={r.neg} />
+            </td>
+          </tr>
+        ))}
+        <tr className="border-t border-stone-line font-semibold">
+          <td className="py-2 text-ink">{t('Net profit')}</td>
+          <td className="py-2 text-right font-mono tabular-nums text-olive">
+            <NumberFormat value={totals.net} showZero />
+          </td>
+          <td className="py-2 text-right font-mono tabular-nums text-olive">
+            <NumberFormat value={netEst} showZero />
+          </td>
+          <td className="py-2 text-right font-mono tabular-nums font-semibold text-olive">
+            <NumberFormat value={netTotal} showZero />
+          </td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 

@@ -218,29 +218,6 @@ function BarRow({
 // One eksoda-composition cell (the mockup's `.comp .cell`): quiet cream tile,
 // a 2-line label, a mono value under it. NOT a hero metric and NOT an
 // identical-grid card — it's a labelled figure in a flow grid.
-function CompCell({ label, value, owner, note }) {
-  return (
-    <div
-      className={cn(
-        'rounded-sm border bg-cream px-3 py-2.5',
-        owner ? 'border-oxide/40' : 'border-stone-line'
-      )}
-    >
-      <div className="text-label text-ink-muted leading-tight min-h-[2.4em] normal-case tracking-normal">
-        {label}
-      </div>
-      <div className="font-mono tabular-nums text-body text-ink mt-1">
-        {value}
-      </div>
-      {/* Optional sub-line: the actual-vs-projected split for κυμαινόμενα. */}
-      {note ? (
-        <div className="text-[10.5px] text-ink-muted leading-tight mt-1">
-          {note}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 // A unit-count cell for the Μονάδες summary (mockup `.ucard`): serif number
 // over a small label, centered. Tonal, bordered, no shadow — distinct from the
@@ -264,6 +241,214 @@ function UnitCountCell({ n, label, tone }) {
       <div className="text-label text-ink-muted mt-1 normal-case tracking-normal">
         {label}
       </div>
+    </div>
+  );
+}
+
+function BuildingProjectionTable({ finance, t }) {
+  const [expanded, setExpanded] = useState({});
+  const toggle = (key) =>
+    setExpanded((s) => ({ ...s, [key]: !s[key] }));
+
+  const now = new Date();
+  const MONTH_GEN = [
+    'Ιανουαρίου', 'Φεβρουαρίου', 'Μαρτίου', 'Απριλίου', 'Μαΐου', 'Ιουνίου',
+    'Ιουλίου', 'Αυγούστου', 'Σεπτεμβρίου', 'Οκτωβρίου', 'Νοεμβρίου', 'Δεκεμβρίου'
+  ];
+  const monthLabel = MONTH_GEN[now.getMonth()];
+
+  const incomeTotal = finance.annualEsoda;
+  const rentActual = finance.annualRentOnly;
+  const chargesActual = finance.annualRentExpenses;
+
+  const expTotal = finance.ownerBorneTotal;
+  const fixedVal = finance.fixedOwnerProrated;
+  const varVal = finance.variableYtdEksoda + finance.variableProjectedEksoda;
+  const varActual = finance.variableYtdEksoda;
+  const varEst = finance.variableProjectedEksoda;
+  const oneTimeVal = finance.oneTimeEksoda;
+  const repairVal = finance.repairEksoda;
+  const vacantVal = finance.vacantOwnerResidentEksoda;
+  const ownerResVal = finance.ownerResidentEksoda;
+  const vacantShareVal = finance.vacantShareEksoda;
+
+  const HeadRow = ({ label, actual, est, total, cls, neg }) => (
+    <tr className="font-medium">
+      <td className={`py-2 ${cls || 'text-ink'}`}>{label}</td>
+      <td className={`py-2 text-right font-mono tabular-nums ${cls || 'text-ink'}`}>
+        {neg ? '−' : ''}<NumberFormat value={actual} showZero abs={neg} />
+      </td>
+      <td className={`py-2 text-right font-mono tabular-nums ${cls || 'text-ink'}`}>
+        {neg ? '−' : ''}<NumberFormat value={est} showZero abs={neg} />
+      </td>
+      <td className={`py-2 text-right font-mono tabular-nums font-semibold ${cls || 'text-ink'}`}>
+        {neg ? '−' : ''}<NumberFormat value={total} showZero abs={neg} />
+      </td>
+    </tr>
+  );
+
+  const SubRow = ({ label, actual, est, total, expandKey, children }) => {
+    const isOpen = expanded[expandKey];
+    const hasChildren = children && (Array.isArray(children) ? children.length > 0 : true);
+    return (
+      <>
+        <tr
+          className={cn('text-ink-soft', hasChildren && 'cursor-pointer hover:bg-cream')}
+          onClick={hasChildren ? () => toggle(expandKey) : undefined}
+        >
+          <td className="py-1.5 pl-4">
+            {hasChildren && <span className="mr-1.5 text-ink-muted">{isOpen ? '▾' : '▸'}</span>}
+            {label}
+          </td>
+          <td className="py-1.5 text-right font-mono tabular-nums">
+            <NumberFormat value={actual} showZero />
+          </td>
+          <td className="py-1.5 text-right font-mono tabular-nums">
+            <NumberFormat value={est} showZero />
+          </td>
+          <td className="py-1.5 text-right font-mono tabular-nums">
+            <NumberFormat value={total} showZero />
+          </td>
+        </tr>
+        {isOpen && children}
+      </>
+    );
+  };
+
+  const DetailRow = ({ label, value }) => (
+    <tr className="text-label text-ink-muted">
+      <td className="py-0.5 pl-10">{label}</td>
+      <td colSpan={3} className="py-0.5 text-right font-mono tabular-nums">
+        {value}
+      </td>
+    </tr>
+  );
+
+  return (
+    <div className="mt-3">
+      <table className="w-full text-body">
+        <thead>
+          <tr className="text-label text-ink-muted">
+            <th className="text-left font-medium pb-2" />
+            <th className="text-right font-medium pb-2 whitespace-nowrap">
+              ({t('up to')} {monthLabel})
+            </th>
+            <th className="text-right font-medium pb-2 whitespace-nowrap">
+              ({t('Projected short')})
+            </th>
+            <th className="text-right font-medium pb-2">{t('Total')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <HeadRow
+            label={t('Income')}
+            actual={incomeTotal}
+            est={0}
+            total={incomeTotal}
+          />
+          <SubRow
+            label={t('Rents')}
+            actual={rentActual}
+            est={0}
+            total={rentActual}
+            expandKey="rents"
+          />
+          <SubRow
+            label={t('Charges on rent short')}
+            actual={chargesActual}
+            est={0}
+            total={chargesActual}
+            expandKey="charges"
+          />
+
+          <tr><td colSpan={4} className="border-t border-stone-line" /></tr>
+
+          <HeadRow
+            label={t('Owner expenses')}
+            actual={expTotal - varEst}
+            est={varEst}
+            total={expTotal}
+            cls="text-oxide"
+            neg
+          />
+          <SubRow
+            label={t('Fixed recurring short')}
+            actual={fixedVal}
+            est={0}
+            total={fixedVal}
+            expandKey="fixed"
+          >
+            {finance.recurringMonthlyEksoda > 0 ? (
+              <DetailRow
+                label={`${t('per month × N months', { n: Math.round(fixedVal / finance.recurringMonthlyEksoda) })}`}
+                value={<NumberFormat value={finance.recurringMonthlyEksoda} showZero />}
+              />
+            ) : null}
+          </SubRow>
+          <SubRow
+            label={t('Variable short')}
+            actual={varActual}
+            est={varEst}
+            total={varVal}
+            expandKey="variable"
+          >
+            {varEst > 0 ? (
+              <DetailRow
+                label={`${t('Actual short')} + ${t('Projected short')}`}
+                value={<><NumberFormat value={varActual} showZero /> + <NumberFormat value={varEst} showZero /></>}
+              />
+            ) : null}
+          </SubRow>
+          <SubRow
+            label={t('One-time')}
+            actual={oneTimeVal}
+            est={0}
+            total={oneTimeVal}
+            expandKey="onetime"
+          />
+          <SubRow
+            label={t('Tenant repairs')}
+            actual={repairVal}
+            est={0}
+            total={repairVal}
+            expandKey="repairs"
+          />
+          {vacantVal > 0 && (
+            <SubRow
+              label={t('Vacant / owner-occupied unit shares')}
+              actual={vacantVal}
+              est={0}
+              total={vacantVal}
+              expandKey="vacant"
+            >
+              {ownerResVal > 0 && (
+                <DetailRow label={t('Owner occupied')} value={<NumberFormat value={ownerResVal} showZero />} />
+              )}
+              {vacantShareVal > 0 && (
+                <DetailRow label={t('Vacant units')} value={<NumberFormat value={vacantShareVal} showZero />} />
+              )}
+            </SubRow>
+          )}
+
+          <tr><td colSpan={4} className="border-t border-stone-line" /></tr>
+
+          <tr className="font-semibold">
+            <td className="py-2 text-ink">{t('Net')}</td>
+            <td className={cn('py-2 text-right font-mono tabular-nums', finance.net > 0 ? 'text-olive' : finance.net < 0 ? 'text-oxide' : 'text-ink-muted')}>
+              <NumberFormat value={finance.net} showZero />
+            </td>
+            <td className="py-2 text-right font-mono tabular-nums text-ink-muted">
+              <NumberFormat value={0} showZero />
+            </td>
+            <td className={cn('py-2 text-right font-mono tabular-nums font-semibold', finance.net > 0 ? 'text-olive' : finance.net < 0 ? 'text-oxide' : 'text-ink-muted')}>
+              <NumberFormat value={finance.net} showZero />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="text-label text-ink-muted mt-3">
+        {t('New or changed expenses, repairs or rents in individual months will change the annual projection.')}
+      </p>
     </div>
   );
 }
@@ -1024,214 +1209,14 @@ export default function BuildingDashboard({ building }) {
 
   return (
     <div className="space-y-4">
-      {/* CARD 1 — Ετήσια προβολή (annual projection). Mockup `.proj-grid`: a
-          vertical key→value list (label left, value right) so the three figures
-          share ONE aligned value column at ONE size — they cannot misalign or
-          differ in size the way a 3-column side-by-side header did. Καθαρό sits
-          below a divider. Matches documentation/mockups/building-overview-redesign.html. */}
+      {/* CARD 1 — Ετήσια προβολή (annual projection). 3-column table
+          (ΕΩΣ μήνα / ΕΚΤΙΜΗΣΗ / ΣΥΝΟΛΟ) with collapsible sub-rows per category.
+          Same rhythm as the realm-wide Επισκόπηση ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ table. */}
       <Card className="p-5">
         <SectionLabel>
           {t('Annual projection')} {new Date().getFullYear()}
         </SectionLabel>
-        {/* Each figure carries its OWN inline breakdown to its RIGHT (user
-            request): Income → ενοίκια + δαπάνες επί ενοικίου; Έξοδα ιδιοκτήτη →
-            its 3 projected components on one line. All component figures are
-            projected across active months, so the Έξοδα inline parts sum EXACTLY
-            to the headline (now the correct 307,44, not the old 201,24 that
-            counted the vacant/owner-resident shares for only 1 materialised
-            month). Zero-value parts are dropped so the line stays clean. */}
-        <div className="mt-3 space-y-1.5">
-          {/* Income row + inline breakdown */}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-            <span className="text-body text-ink-soft w-32 shrink-0">
-              {t('Income')}
-            </span>
-            <span className="font-mono tabular-nums text-headline text-ink w-32 text-right shrink-0">
-              <NumberFormat value={finance.annualEsoda} showZero />
-            </span>
-            <span className="text-label text-ink-muted">
-              {[
-                finance.annualRentOnly > 0 && (
-                  <NumberFormat key="r" value={finance.annualRentOnly} showZero />
-                ),
-                finance.annualRentExpenses > 0 && (
-                  <NumberFormat
-                    key="e"
-                    value={finance.annualRentExpenses}
-                    showZero
-                  />
-                )
-              ]
-                .filter(Boolean)
-                .reduce((acc, node, i) => {
-                  const label =
-                    i === 0 ? t('Rents') : t('Charges on rent short');
-                  return acc.length
-                    ? [...acc, <span key={`s${i}`}> + </span>, <span key={`l${i}`}>{label} {node}</span>]
-                    : [<span key={`l${i}`}>{label} {node}</span>];
-                }, [])}
-            </span>
-          </div>
-          {/* Owner expenses row + inline breakdown */}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-            <span className="text-body text-ink-soft w-32 shrink-0">
-              {t('Owner expenses')}
-            </span>
-            <span className="font-mono tabular-nums text-headline text-oxide w-32 text-right shrink-0">
-              {'−'}
-              <NumberFormat value={finance.ownerBorneTotal} showZero />
-            </span>
-            <span className="text-label text-ink-muted">
-              {/* Fixed owner portion shows the AMOUNT alone (no label — it is
-                  self-evident and «Σταθερό μερίδιο» read as meaningless Greek,
-                  per user). The occupancy shares keep their meaningful labels. */}
-              {[
-                ['', finance.fixedOwnerProrated],
-                [t('Owner occupied'), finance.ownerResidentEksoda],
-                [t('Vacant units'), finance.vacantShareEksoda],
-                [t('Other'), finance.recordedOwnerEksoda]
-              ]
-                .filter(([, v]) => Number(v) > 0)
-                .map(([label, v], i, arr) => (
-                  <span key={label || 'fixed'}>
-                    {label ? `${label} ` : ''}
-                    <span className="font-mono tabular-nums">
-                      <NumberFormat value={v} showZero />
-                    </span>
-                    {i < arr.length - 1 ? ' + ' : ''}
-                  </span>
-                ))}
-            </span>
-          </div>
-          {/* Net row (no divider hairline — removed per user) */}
-          <div className="flex flex-wrap items-baseline gap-x-3">
-            <span className="text-title text-ink w-32 shrink-0">{t('Net')}</span>
-            <span
-              className={cn(
-                'font-mono tabular-nums text-headline w-32 text-right shrink-0',
-                finance.net > 0 && 'text-olive',
-                finance.net < 0 && 'text-oxide',
-                finance.net === 0 && 'text-ink-muted'
-              )}
-            >
-              <NumberFormat value={finance.net} showZero />
-            </span>
-          </div>
-          <p className="text-label text-ink-muted pt-2">
-            {t(
-              'New or changed expenses, repairs or rents in individual months will change the annual projection.'
-            )}
-          </p>
-        </div>
-
-        {(finance.annualEksoda > 0 || finance.variableYtdEksoda > 0) && (
-          /* H3: surface the who-pays breakdown when EITHER annualEksoda or the
-             variable YTD is > 0 (a variable-only building has annualEksoda 0). */
-          <div className="mt-4 pt-4 border-t border-stone-line">
-            <SectionLabel className="mb-2.5">
-              {t('Building expense breakdown')}
-            </SectionLabel>
-
-            {/* ΕΝΟΙΚΙΑΣΤΕΣ — pass-through; not subtracted from Net. */}
-            <div className="mb-3">
-              <div className="text-label text-olive font-medium mb-1.5 normal-case tracking-normal">
-                {t('TENANTS')}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                <CompCell
-                  label={t('Fixed recurring short')}
-                  value={
-                    <NumberFormat
-                      value={finance.recurringAnnualEksoda}
-                      showZero
-                    />
-                  }
-                  note={
-                    finance.recurringMonthlyEksoda > 0 ? (
-                      <>
-                        <NumberFormat
-                          value={finance.recurringMonthlyEksoda}
-                          showZero
-                        />
-                        {t('per month × N months', {
-                          n: Math.round(
-                            finance.recurringAnnualEksoda /
-                              finance.recurringMonthlyEksoda
-                          )
-                        })}
-                      </>
-                    ) : null
-                  }
-                />
-                <CompCell
-                  label={t('Variable short')}
-                  value={
-                    <NumberFormat
-                      value={
-                        finance.variableYtdEksoda +
-                        finance.variableProjectedEksoda
-                      }
-                      showZero
-                    />
-                  }
-                  note={
-                    finance.variableProjectedEksoda > 0 ? (
-                      <>
-                        <NumberFormat value={finance.variableYtdEksoda} showZero />{' '}
-                        {t('Actual short')} +{' '}
-                        <NumberFormat
-                          value={finance.variableProjectedEksoda}
-                          showZero
-                        />{' '}
-                        {t('Projected short')}
-                      </>
-                    ) : null
-                  }
-                />
-                <CompCell
-                  label={t('One-time')}
-                  value={<NumberFormat value={finance.oneTimeEksoda} showZero />}
-                />
-                <CompCell
-                  label={t('Tenant repairs')}
-                  value={<NumberFormat value={finance.repairEksoda} showZero />}
-                />
-              </div>
-            </div>
-
-            {/* ΙΔΙΟΚΤΗΤΕΣ — the only part subtracted from Net. */}
-            <div>
-              <div className="text-label text-oxide font-medium mb-1.5 normal-case tracking-normal">
-                {t('OWNERS')}
-              </div>
-              {/* Owner cells: flex with capped width so a lone cell doesn't
-                  stretch across 4 empty columns (mockup .comp.one). */}
-              <div className="flex flex-wrap gap-2.5">
-                <div className="w-full sm:w-[240px]">
-                  <CompCell
-                    owner
-                    label={t('Owner expenses')}
-                    value={<NumberFormat value={finance.ownerEksoda} showZero />}
-                  />
-                </div>
-                {finance.vacantOwnerResidentEksoda > 0 && (
-                  <div className="w-full sm:w-[240px]">
-                    <CompCell
-                      owner
-                      label={t('Vacant / owner-occupied unit shares')}
-                      value={
-                        <NumberFormat
-                          value={finance.vacantOwnerResidentEksoda}
-                          showZero
-                        />
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <BuildingProjectionTable finance={finance} t={t} />
       </Card>
 
       {/* CARD 2 — ΑΠΟ ΑΡΧΗΣ ΕΤΟΥΣ: this year's actuals, both bars in ONE card

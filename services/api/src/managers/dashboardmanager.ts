@@ -1,4 +1,4 @@
-import { Collections, logger, OwnerStatement } from '@microrealestate/common';
+import { BuildingProjection, Collections, logger, OwnerStatement } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import moment from 'moment';
 import { _isSettledByCarryForward } from './frontdata.js';
@@ -1056,6 +1056,7 @@ export async function overview(req: Req, res: Res) {
   // number, reconciles by construction.
   let incomeCollected = 0;
   let incomeOwed = 0;
+  let chargesOnRentCollected = 0;
   // Per-MONTH-NUMBER (1..12) collected income for the cash-flow chart. Keyed by
   // the integer month so the client can render Jan→Dec in order (the MMYYYY
   // string keys sort integer-first: "10.."/"11.."/"12.." jump ahead of
@@ -1081,6 +1082,11 @@ export async function overview(req: Req, res: Res) {
       const balance = Number(rent?.total?.balance) || 0;
       const monthDue = Math.max(0, grand - Math.max(0, balance));
       collected += payment;
+      const termCharges = (rent.charges || []).reduce(
+        (s: number, c: AnyRecord) => s + (Number(c?.amount) || 0),
+        0
+      );
+      chargesOnRentCollected += termCharges;
       const monthOwed = Math.max(0, monthDue - payment);
       owed += monthOwed;
       const termMonth = Math.floor(Number(rent.term || 0) / 10000) % 100;
@@ -1117,6 +1123,52 @@ export async function overview(req: Req, res: Res) {
   }
   incomeCollected = _round(incomeCollected);
   incomeOwed = _round(incomeOwed);
+
+  // ── Annual projection (per-building, summed realm-wide) ──
+  // Build the tenantsByPropertyId map from the already-fetched allTenants.
+  // Each tenant may occupy multiple properties; each property gets a slot.
+  const _tenantsByPropertyId = new Map<string, {
+    rent: number;
+    expenses: Array<{ amount?: number; beginDate?: string; endDate?: string }>;
+    beginDate: string;
+    endDate: string;
+  }>();
+  for (const t of allTenants) {
+    for (const tp of (t as any).properties || []) {
+      _tenantsByPropertyId.set(String(tp.propertyId), {
+        rent: Number(tp.rent) || 0,
+        expenses: tp.expenses || [],
+        beginDate: (t as any).beginDate || '',
+        endDate: (t as any).terminationDate || (t as any).endDate || ''
+      });
+    }
+  }
+  const _projNow = moment.utc();
+  let projIncomeTotal = 0;
+  let projIncomeProjected = 0;
+  let projOwnerExpTotal = 0;
+  let projOwnerExpProjected = 0;
+  const projByBuildingId = new Map<string, { incomeProj: number; expProj: number }>();
+  for (const b of buildings) {
+    const r = BuildingProjection.computeBuildingProjection(
+      b as any,
+      _tenantsByPropertyId,
+      year,
+      _projNow
+    );
+    projIncomeTotal += r.annualIncome;
+    projIncomeProjected += r.annualIncomeProjected;
+    projOwnerExpTotal += r.annualOwnerExpenses;
+    projOwnerExpProjected += r.annualOwnerExpensesProjected;
+    projByBuildingId.set(String(b._id), {
+      incomeProj: _round(r.annualIncome),
+      expProj: _round(r.annualOwnerExpenses)
+    });
+  }
+  projIncomeTotal = _round(projIncomeTotal);
+  projIncomeProjected = _round(projIncomeProjected);
+  projOwnerExpTotal = _round(projOwnerExpTotal);
+  projOwnerExpProjected = _round(projOwnerExpProjected);
 
   // ── Owner εκσοδα rollup: reuse _expensesRollup (identical to the dashboard).
   //    Its expenses[].breakdown[] carries per-(ownerName, category, label,
@@ -1211,12 +1263,16 @@ export async function overview(req: Req, res: Res) {
   const perBuilding = buildings.map((b) => {
     const inc = incomeByBuilding.get(String(b._id)) || { collected: 0, owed: 0 };
     const eks = ownerEksodaByBuildingId.get(String(b._id)) || 0;
+    const proj = projByBuildingId.get(String(b._id)) || { incomeProj: 0, expProj: 0 };
     return {
       buildingId: String(b._id),
       name: b.name || '',
       collected: inc.collected,
+      collectedProjected: proj.incomeProj,
       ownerExpenses: _round(eks),
-      net: _round(inc.collected - eks)
+      ownerExpensesProjected: proj.expProj,
+      net: _round(inc.collected - eks),
+      netProjected: _round(proj.incomeProj - proj.expProj)
     };
   });
   if (standalone.collected > 0 || standalone.owed > 0) {
@@ -1224,21 +1280,145 @@ export async function overview(req: Req, res: Res) {
       buildingId: '',
       name: t_standaloneLabel(),
       collected: standalone.collected,
+      collectedProjected: standalone.collected,
       ownerExpenses: 0,
-      net: standalone.collected
+      ownerExpensesProjected: 0,
+      net: standalone.collected,
+      netProjected: standalone.collected
     });
   }
 
-  // ── Per-owner rows: owner εκσοδα + tax placeholder (null until φόρος import).
-  //    Income-per-owner needs owner→unit→tenant attribution not in this payload
-  //    — a documented follow-up; the column is intentionally absent for now. ──
-  const perOwner = Array.from(byOwnerRaw.entries())
-    .map(([ownerName, eks]) => ({
-      ownerName,
-      ownerExpenses: _round(eks),
-      tax: null as number | null
-    }))
-    .sort((a, b) => b.ownerExpenses - a.ownerExpenses);
+  // ── Per-owner income attribution: tenant payment → property → unit → owners.
+  //    Split each tenant's payment proportionally across their properties (by
+  //    each property's share of grandTotal), then per unit-owner by %.
+  //    BaseRent-only (excl. δαπάνες) tracked separately for the tax calc. ──
+  const propIdToOwners = new Map<string, Array<{ name: string; percentage: number }>>();
+  for (const b of buildings) {
+    for (const u of (b.units || []) as AnyRecord[]) {
+      const pid = String(u.propertyId || '');
+      if (!pid) continue;
+      const owners = (u.owners || []).map((o: AnyRecord) => ({
+        name: String(o.name || ''),
+        percentage: Math.min(100, Math.max(0, Number(o.percentage) || 0))
+      }));
+      if (owners.length) propIdToOwners.set(pid, owners);
+    }
+  }
+
+  const incomeByOwner = new Map<string, number>();
+  const baseRentByOwner = new Map<string, number>();
+
+  for (const t of allTenants) {
+    const tenantProps = t.properties || [];
+    for (const rent of t.rents || []) {
+      if (Math.floor(Number(rent.term || 0) / 1000000) !== year) continue;
+      const payment = Number(rent?.total?.payment) || 0;
+      if (payment <= 0) continue;
+
+      // Per-property share of this term's billed total (for proportional split).
+      // 1_base.ts pushes charges[] per-property in the same order as the
+      // tenant.properties[] array — one slice of charges per property, sized by
+      // the number of expenses on that property. Track offset as we iterate.
+      const preTaxArr = rent.preTaxAmounts || [];
+      const chargesArr = rent.charges || [];
+      const perPropBill: Array<{ propertyId: string; baseRent: number; total: number }> = [];
+      let billSum = 0;
+      let chargeOffset = 0;
+      for (let i = 0; i < tenantProps.length; i++) {
+        const pid = String(tenantProps[i]?.propertyId || '');
+        const base = Number(preTaxArr[i]?.amount) || 0;
+        const propExpCount = (tenantProps[i]?.expenses || []).length;
+        let chargeSum = 0;
+        for (let ci = chargeOffset; ci < chargeOffset + propExpCount && ci < chargesArr.length; ci++) {
+          chargeSum += Number(chargesArr[ci]?.amount) || 0;
+        }
+        chargeOffset += propExpCount;
+        const total = base + chargeSum;
+        perPropBill.push({ propertyId: pid, baseRent: base, total });
+        billSum += total;
+      }
+      if (billSum <= 0) continue;
+
+      // Distribute the payment proportionally, then split per owner
+      for (const pp of perPropBill) {
+        const propShare = payment * (pp.total / billSum);
+        const baseRentShare = payment * (pp.baseRent / billSum);
+        const owners = propIdToOwners.get(pp.propertyId);
+        if (!owners || !owners.length) {
+          // Standalone property (no building unit) — attribute to «αδιάθετο»
+          const key = UNASSIGNED_OWNER;
+          incomeByOwner.set(key, (incomeByOwner.get(key) || 0) + propShare);
+          baseRentByOwner.set(key, (baseRentByOwner.get(key) || 0) + baseRentShare);
+          continue;
+        }
+        const pctSum = owners.reduce((s, o) => s + o.percentage, 0) || 100;
+        for (const o of owners) {
+          const frac = o.percentage / pctSum;
+          const ownerInc = propShare * frac;
+          const ownerBase = baseRentShare * frac;
+          const nm = o.name || UNASSIGNED_OWNER;
+          incomeByOwner.set(nm, (incomeByOwner.get(nm) || 0) + ownerInc);
+          baseRentByOwner.set(nm, (baseRentByOwner.get(nm) || 0) + ownerBase);
+        }
+      }
+    }
+  }
+
+  // ── Tax computation per owner (art. 40 par. 4 ΚΦΕ, year-keyed). ──
+  function _rentalIncomeTax(grossBaseRent: number, fiscalYear: number): number {
+    const taxable = grossBaseRent * 0.95; // 5% deemed deduction
+    if (fiscalYear >= 2026) {
+      // N.5246/2025: 15% ≤12k, 25% ≤24k, 35% ≤36k, 45% above
+      if (taxable <= 12000) return _round(taxable * 0.15);
+      if (taxable <= 24000) return _round(1800 + (taxable - 12000) * 0.25);
+      if (taxable <= 36000) return _round(1800 + 3000 + (taxable - 24000) * 0.35);
+      return _round(1800 + 3000 + 4200 + (taxable - 36000) * 0.45);
+    }
+    // ≤2025: 15% ≤12k, 35% ≤35k, 45% above
+    if (taxable <= 12000) return _round(taxable * 0.15);
+    if (taxable <= 35000) return _round(1800 + (taxable - 12000) * 0.35);
+    return _round(1800 + 8050 + (taxable - 35000) * 0.45);
+  }
+
+  // ── Per-owner income projection (from buildingprojection results). ──
+  //    projIncomeTotal/projIncomeProjected are realm-wide. To split per-owner
+  //    we prorate by each owner's share of actual income (same attribution
+  //    logic). For owners with zero actuals, projection = 0 (no lease active).
+  const totalActualIncome = [...incomeByOwner.values()].reduce((s, v) => s + v, 0) || 1;
+
+  // ── Assemble perOwner with all columns ──
+  const allOwnerNames = new Set([...byOwnerRaw.keys(), ...incomeByOwner.keys()]);
+  const perOwner = [...allOwnerNames]
+    .map((ownerName) => {
+      const income = _round(incomeByOwner.get(ownerName) || 0);
+      const baseRent = baseRentByOwner.get(ownerName) || 0;
+      const ownerExpenses = _round(byOwnerRaw.get(ownerName) || 0);
+      const tax = _rentalIncomeTax(baseRent, year);
+      const net = _round(income - ownerExpenses - tax);
+      // Projection: prorate the realm-wide projected figures by this owner's
+      // share of actual income.
+      const incFrac = income / totalActualIncome;
+      const incomeProjected = _round(projIncomeProjected * incFrac);
+      const expFrac = ownerExpenses / (expensesRollup.totalYearExpenses || 1);
+      const ownerExpensesProjected = _round(projOwnerExpProjected * expFrac);
+      const baseRentProjected = baseRent + (projIncomeProjected * incFrac * (baseRent / (income || 1)));
+      const taxProjected = _rentalIncomeTax(baseRentProjected, year);
+      const netProjected = _round(
+        (income + incomeProjected) - (ownerExpenses + ownerExpensesProjected) - taxProjected
+      );
+      return {
+        ownerName,
+        income,
+        incomeProjected: _round(income + incomeProjected),
+        ownerExpenses,
+        ownerExpensesProjected: _round(ownerExpenses + ownerExpensesProjected),
+        tax,
+        taxProjected,
+        net,
+        netProjected
+      };
+    })
+    .sort((a, b) => b.income - a.income);
 
   const toSortedArr = (m: Map<string, number>) =>
     Array.from(m.entries())
@@ -1254,9 +1434,16 @@ export async function overview(req: Req, res: Res) {
     totals: {
       income: incomeCollected,
       incomeOwed,
+      chargesOnRent: _round(chargesOnRentCollected),
       ownerExpenses: _round(expensesRollup.totalYearExpenses),
       ownerExpensesPaid: _round(expensesRollup.totalYearPaid),
-      net: _round(incomeCollected - expensesRollup.totalYearExpenses)
+      net: _round(incomeCollected - expensesRollup.totalYearExpenses),
+      projection: {
+        income: projIncomeTotal,
+        incomeEstimate: projIncomeProjected,
+        ownerExpenses: projOwnerExpTotal,
+        ownerExpensesEstimate: projOwnerExpProjected
+      }
     },
     // Ordered Jan→Dec (month 1..12). Parses each MMYYYY key's leading MM so the
     // client renders in calendar order regardless of object-key iteration order
