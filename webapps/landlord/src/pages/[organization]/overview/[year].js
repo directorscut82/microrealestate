@@ -86,7 +86,12 @@ const DONUT_COLORS = [
   'var(--color-olive)',
   'var(--color-oxide)',
   'var(--color-bark)',
-  'var(--color-ink-muted)'
+  'oklch(55% 0.08 280)',
+  'oklch(50% 0.10 60)',
+  'oklch(45% 0.06 180)',
+  'oklch(58% 0.09 330)',
+  'oklch(52% 0.07 100)',
+  'oklch(48% 0.05 210)'
 ];
 
 // SVG donut from category slices (avoids pulling a second chart lib shape).
@@ -464,6 +469,11 @@ function Overview() {
                         currency: 'EUR'
                       }).format(v)
                     }
+                    labelFormatter={(l) => l}
+                    wrapperStyle={{ fontSize: 11, opacity: 0.92 }}
+                    contentStyle={{ background: 'var(--color-cream)', border: '1px solid var(--color-stone-line)', borderRadius: 6, padding: '4px 8px' }}
+                    offset={20}
+                    position={{ y: -10 }}
                   />
                   <Legend
                     wrapperStyle={{ fontSize: 11 }}
