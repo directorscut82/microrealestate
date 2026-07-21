@@ -234,8 +234,8 @@ function Overview() {
             <MiniTable
               title={t('Income')}
               rows={[
-                { k: t('Rents'), v: (totals.income || 0) - (totals.chargesOnRent || 0) },
-                { k: t('Charges on rent short'), v: totals.chargesOnRent || 0 }
+                { k: t('Rents'), v: totals.income || 0 },
+                { k: t('Charges on rent short'), v: 0 }
               ]}
               totalLabel={t('Income')}
               totalValue={totals.income}
@@ -611,7 +611,10 @@ function ProjectionTable({ totals, proj, year, t }) {
   const monthLabel = isCurrentYear
     ? MONTH_ACC[now.getMonth()]
     : MONTH_ACC[11];
-  const incEst = proj.incomeEstimate || 0;
+  // incomeEstimate = remaining future months; incomeOwed = past-due arrears.
+  // Full-year projection = collected + owed + remaining (all three disjoint).
+  const incOwed = totals.incomeOwed || 0;
+  const incEst = (proj.incomeEstimate || 0) + incOwed;
   const expEst = proj.ownerExpensesEstimate || 0;
   const netEst = incEst - expEst;
   const incTotal = totals.income + incEst;

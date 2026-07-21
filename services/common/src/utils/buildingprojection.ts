@@ -254,14 +254,28 @@ export function computeBuildingProjection(
       isExpenseActiveForTerm(e, currentTerm)
   );
 
-  // Fixed owner portion: expenses with trackOwnerExpense + ownerAmount > 0
-  let fixedOwnerProrated = 0;
+  // Fixed owner portion: expenses with trackOwnerExpense + ownerAmount > 0.
+  // Split into elapsed (Jan..currentMonth) and remaining (currentMonth+1..Dec),
+  // same pattern as income, so projection = actual + remaining for fixed too.
+  let fixedOwnerElapsed = 0;
+  let fixedOwnerRemaining = 0;
   for (const e of _recurringFixed) {
     if (e.trackOwnerExpense && Number(e.ownerAmount) > 0) {
-      fixedOwnerProrated +=
-        Number(e.ownerAmount) * expenseActiveMonths(e, currentYear);
+      const ownerAmt = Number(e.ownerAmount);
+      const activeMonths = expenseActiveMonths(e, currentYear);
+      // Elapsed months for this expense (clamped to its active window + current month)
+      const st = Number(e.startTerm) || 0;
+      const startMonth = st ? Math.floor((st % 1000000) / 10000) : 1;
+      const startYear = st ? Math.floor(st / 1000000) : currentYear;
+      const fromMonth = startYear < currentYear ? 1 : startMonth;
+      const elapsedTo = Math.min(currentMonthIdx, fromMonth + activeMonths - 1);
+      const elapsed = Math.max(0, elapsedTo - fromMonth + 1);
+      const remaining = Math.max(0, activeMonths - elapsed);
+      fixedOwnerElapsed += ownerAmt * elapsed;
+      fixedOwnerRemaining += ownerAmt * remaining;
     }
   }
+  const fixedOwnerProrated = fixedOwnerElapsed + fixedOwnerRemaining;
 
   // Variable owner expenses (κυμαινόμενα): actuals + 3-month-avg × remaining
   let variableOwnerYtd = 0;
@@ -324,8 +338,10 @@ export function computeBuildingProjection(
   const annualOwnerExpenses = round2(
     fixedOwnerProrated + variableOwnerYtd + variableOwnerProjected + vacantOwnerResidentEksoda
   );
-  // The projected portion (future months only):
-  const annualOwnerExpensesProjected = round2(variableOwnerProjected);
+  // The projected portion (future months only): fixed remaining + variable projected.
+  const annualOwnerExpensesProjected = round2(
+    fixedOwnerRemaining + variableOwnerProjected
+  );
 
   return {
     annualIncome,

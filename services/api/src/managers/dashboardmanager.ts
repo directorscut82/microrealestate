@@ -1175,15 +1175,8 @@ export async function overview(req: Req, res: Res) {
     }
   }
   const _projNow = { year: now.year(), month: now.month() + 1 };
-  let projIncomeTotal = 0;
   let projIncomeProjected = 0;
-  let projOwnerExpTotal = 0;
   let projOwnerExpProjected = 0;
-  // Store the REMAINING-months estimate per building (NOT annualIncome, the
-  // full-year billed figure). The per-building parenthesis must read
-  // «collected + remaining estimate» to reconcile with the ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ total
-  // and the ΑΝΑ ΙΔΙΟΚΤΗΤΗ table, all of which use collected+remaining, not
-  // full-year-billed (which double-counts already-collected arrears).
   const projByBuildingId = new Map<string, { incomeRemaining: number; expRemaining: number }>();
   for (const b of buildings) {
     const r = BuildingProjection.computeBuildingProjection(
@@ -1192,18 +1185,14 @@ export async function overview(req: Req, res: Res) {
       year,
       _projNow
     );
-    projIncomeTotal += r.annualIncome;
     projIncomeProjected += r.annualIncomeProjected;
-    projOwnerExpTotal += r.annualOwnerExpenses;
     projOwnerExpProjected += r.annualOwnerExpensesProjected;
     projByBuildingId.set(String(b._id), {
       incomeRemaining: _round(r.annualIncomeProjected),
       expRemaining: _round(r.annualOwnerExpensesProjected)
     });
   }
-  projIncomeTotal = _round(projIncomeTotal);
   projIncomeProjected = _round(projIncomeProjected);
-  projOwnerExpTotal = _round(projOwnerExpTotal);
   projOwnerExpProjected = _round(projOwnerExpProjected);
 
   // ── Owner εκσοδα rollup: reuse _expensesRollup (identical to the dashboard).
@@ -1302,7 +1291,11 @@ export async function overview(req: Req, res: Res) {
     const proj = projByBuildingId.get(String(b._id)) || { incomeRemaining: 0, expRemaining: 0 };
     // Projection = collected-to-date + estimate for the remaining months
     // (same basis as ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ + ΑΝΑ ΙΔΙΟΚΤΗΤΗ, so all three reconcile).
-    const collectedProjected = _round(inc.collected + proj.incomeRemaining);
+    // Full-year projection = collected + owed (arrears) + remaining-months estimate.
+    // collected + owed are disjoint by construction (owed = monthDue − payment),
+    // so this never double-counts. Dropping owed would leak arrears from the
+    // projection (agent-3 review: CHECK 4 FAIL).
+    const collectedProjected = _round(inc.collected + inc.owed + proj.incomeRemaining);
     const ownerExpensesProjected = _round(_round(eks) + proj.expRemaining);
     return {
       buildingId: String(b._id),
@@ -1346,6 +1339,7 @@ export async function overview(req: Req, res: Res) {
   }
 
   const incomeByOwner = new Map<string, number>();
+  const owedByOwner = new Map<string, number>();
   const baseRentByOwner = new Map<string, number>();
 
   for (const t of allTenants) {
@@ -1353,7 +1347,13 @@ export async function overview(req: Req, res: Res) {
     for (const rent of t.rents || []) {
       if (Math.floor(Number(rent.term || 0) / 1000000) !== year) continue;
       const payment = Number(rent?.total?.payment) || 0;
-      if (payment <= 0) continue;
+      const grand = Number(rent?.total?.grandTotal) || 0;
+      const balance = Number(rent?.total?.balance) || 0;
+      const monthDue = Math.max(0, grand - Math.max(0, balance));
+      const monthOwed = Math.max(0, monthDue - payment);
+
+      // Skip terms with zero billed (no money flows either direction)
+      if (payment <= 0 && monthOwed <= 0) continue;
 
       // Per-property share of this term's billed total (for proportional split).
       // 1_base.ts pushes charges[] per-property in the same order as the
@@ -1379,26 +1379,27 @@ export async function overview(req: Req, res: Res) {
       }
       if (billSum <= 0) continue;
 
-      // Distribute the payment proportionally, then split per owner
+      // Distribute the payment AND owed proportionally, then split per owner
       for (const pp of perPropBill) {
-        const propShare = payment * (pp.total / billSum);
-        const baseRentShare = payment * (pp.baseRent / billSum);
+        const propFrac = pp.total / billSum;
+        const propPayment = payment * propFrac;
+        const propOwed = monthOwed * propFrac;
+        const baseRentShare = payment > 0 ? payment * (pp.baseRent / billSum) : 0;
         const owners = propIdToOwners.get(pp.propertyId);
         if (!owners || !owners.length) {
-          // Standalone property (no building unit) — attribute to «αδιάθετο»
           const key = UNASSIGNED_OWNER;
-          incomeByOwner.set(key, (incomeByOwner.get(key) || 0) + propShare);
+          incomeByOwner.set(key, (incomeByOwner.get(key) || 0) + propPayment);
+          owedByOwner.set(key, (owedByOwner.get(key) || 0) + propOwed);
           baseRentByOwner.set(key, (baseRentByOwner.get(key) || 0) + baseRentShare);
           continue;
         }
         const pctSum = owners.reduce((s, o) => s + o.percentage, 0) || 100;
         for (const o of owners) {
           const frac = o.percentage / pctSum;
-          const ownerInc = propShare * frac;
-          const ownerBase = baseRentShare * frac;
           const nm = o.name || UNASSIGNED_OWNER;
-          incomeByOwner.set(nm, (incomeByOwner.get(nm) || 0) + ownerInc);
-          baseRentByOwner.set(nm, (baseRentByOwner.get(nm) || 0) + ownerBase);
+          incomeByOwner.set(nm, (incomeByOwner.get(nm) || 0) + propPayment * frac);
+          owedByOwner.set(nm, (owedByOwner.get(nm) || 0) + propOwed * frac);
+          baseRentByOwner.set(nm, (baseRentByOwner.get(nm) || 0) + baseRentShare * frac);
         }
       }
     }
@@ -1427,29 +1428,33 @@ export async function overview(req: Req, res: Res) {
   const totalActualIncome = [...incomeByOwner.values()].reduce((s, v) => s + v, 0) || 1;
 
   // ── Assemble perOwner with all columns ──
-  const allOwnerNames = new Set([...byOwnerRaw.keys(), ...incomeByOwner.keys()]);
+  const allOwnerNames = new Set([...byOwnerRaw.keys(), ...incomeByOwner.keys(), ...owedByOwner.keys()]);
   const perOwner = [...allOwnerNames]
     .map((ownerName) => {
       const income = _round(incomeByOwner.get(ownerName) || 0);
+      const owed = _round(owedByOwner.get(ownerName) || 0);
       const baseRent = baseRentByOwner.get(ownerName) || 0;
       const ownerExpenses = _round(byOwnerRaw.get(ownerName) || 0);
       const tax = _rentalIncomeTax(baseRent, year);
       const net = _round(income - ownerExpenses - tax);
-      // Projection: prorate the realm-wide projected figures by this owner's
-      // share of actual income.
+      // Projection = collected + owed + remaining (full year):
       const incFrac = income / totalActualIncome;
-      const incomeProjected = _round(projIncomeProjected * incFrac);
+      const remaining = _round(projIncomeProjected * incFrac);
+      const incomeProjectedTotal = _round(income + owed + remaining);
       const expFrac = ownerExpenses / (expensesRollup.totalYearExpenses || 1);
       const ownerExpensesProjected = _round(projOwnerExpProjected * expFrac);
-      const baseRentProjected = baseRent + (projIncomeProjected * incFrac * (baseRent / (income || 1)));
+      // Tax projection uses the full-year expected base rent:
+      const baseRentProjected = baseRent > 0
+        ? baseRent * (incomeProjectedTotal / (income || 1))
+        : 0;
       const taxProjected = _rentalIncomeTax(baseRentProjected, year);
       const netProjected = _round(
-        (income + incomeProjected) - (ownerExpenses + ownerExpensesProjected) - taxProjected
+        incomeProjectedTotal - _round(ownerExpenses + ownerExpensesProjected) - taxProjected
       );
       return {
         ownerName,
         income,
-        incomeProjected: _round(income + incomeProjected),
+        incomeProjected: incomeProjectedTotal,
         ownerExpenses,
         ownerExpensesProjected: _round(ownerExpenses + ownerExpensesProjected),
         tax,
@@ -1479,9 +1484,7 @@ export async function overview(req: Req, res: Res) {
       ownerExpensesPaid: _round(expensesRollup.totalYearPaid),
       net: _round(incomeCollected - expensesRollup.totalYearExpenses),
       projection: {
-        income: projIncomeTotal,
         incomeEstimate: projIncomeProjected,
-        ownerExpenses: projOwnerExpTotal,
         ownerExpensesEstimate: projOwnerExpProjected
       }
     },

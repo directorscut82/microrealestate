@@ -262,15 +262,13 @@ function BuildingProjectionTable({ finance, t }) {
   const chargesActual = finance.annualRentExpenses;
 
   const expTotal = finance.ownerBorneTotal;
+  // Owner-borne sub-rows (children of expTotal — these MUST sum to expTotal):
   const fixedVal = finance.fixedOwnerProrated;
-  const varVal = finance.variableYtdEksoda + finance.variableProjectedEksoda;
-  const varActual = finance.variableYtdEksoda;
-  const varEst = finance.variableProjectedEksoda;
-  const oneTimeVal = finance.oneTimeEksoda;
-  const repairVal = finance.repairEksoda;
+  const recordedVal = finance.recordedOwnerEksoda;
   const vacantVal = finance.vacantOwnerResidentEksoda;
-  const ownerResVal = finance.ownerResidentEksoda;
-  const vacantShareVal = finance.vacantShareEksoda;
+  // Sanity: fixedVal + recordedVal + vacantVal should = ownerBorneTotal
+  // (ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated; bornTotal = ownerEksoda + vacant)
+
 
   const HeadRow = ({ label, actual, est, total, cls, neg }) => (
     <tr className="font-medium">
@@ -365,54 +363,37 @@ function BuildingProjectionTable({ finance, t }) {
 
           <HeadRow
             label={t('Owner expenses')}
-            actual={expTotal - varEst}
-            est={varEst}
+            actual={expTotal}
+            est={0}
             total={expTotal}
             cls="text-oxide"
             neg
           />
-          <SubRow
-            label={t('Fixed recurring short')}
-            actual={fixedVal}
-            est={0}
-            total={fixedVal}
-            expandKey="fixed"
-          >
-            {finance.recurringMonthlyEksoda > 0 ? (
-              <DetailRow
-                label={`${t('per month × N months', { n: Math.round(fixedVal / finance.recurringMonthlyEksoda) })}`}
-                value={<NumberFormat value={finance.recurringMonthlyEksoda} showZero />}
-              />
-            ) : null}
-          </SubRow>
-          <SubRow
-            label={t('Variable short')}
-            actual={varActual}
-            est={varEst}
-            total={varVal}
-            expandKey="variable"
-          >
-            {varEst > 0 ? (
-              <DetailRow
-                label={`${t('Actual short')} + ${t('Projected short')}`}
-                value={<><NumberFormat value={varActual} showZero /> + <NumberFormat value={varEst} showZero /></>}
-              />
-            ) : null}
-          </SubRow>
-          <SubRow
-            label={t('One-time')}
-            actual={oneTimeVal}
-            est={0}
-            total={oneTimeVal}
-            expandKey="onetime"
-          />
-          <SubRow
-            label={t('Tenant repairs')}
-            actual={repairVal}
-            est={0}
-            total={repairVal}
-            expandKey="repairs"
-          />
+          {fixedVal > 0 && (
+            <SubRow
+              label={t('Fixed recurring short')}
+              actual={fixedVal}
+              est={0}
+              total={fixedVal}
+              expandKey="fixed"
+            >
+              {finance.recurringMonthlyEksoda > 0 ? (
+                <DetailRow
+                  label={`${t('per month × N months', { n: Math.round(fixedVal / finance.recurringMonthlyEksoda) })}`}
+                  value={<NumberFormat value={finance.recurringMonthlyEksoda} showZero />}
+                />
+              ) : null}
+            </SubRow>
+          )}
+          {recordedVal > 0 && (
+            <SubRow
+              label={t('Other')}
+              actual={recordedVal}
+              est={0}
+              total={recordedVal}
+              expandKey="recorded"
+            />
+          )}
           {vacantVal > 0 && (
             <SubRow
               label={t('Vacant / owner-occupied unit shares')}
@@ -421,11 +402,11 @@ function BuildingProjectionTable({ finance, t }) {
               total={vacantVal}
               expandKey="vacant"
             >
-              {ownerResVal > 0 && (
-                <DetailRow label={t('Owner occupied')} value={<NumberFormat value={ownerResVal} showZero />} />
+              {finance.ownerResidentEksoda > 0 && (
+                <DetailRow label={t('Owner occupied')} value={<NumberFormat value={finance.ownerResidentEksoda} showZero />} />
               )}
-              {vacantShareVal > 0 && (
-                <DetailRow label={t('Vacant units')} value={<NumberFormat value={vacantShareVal} showZero />} />
+              {finance.vacantShareEksoda > 0 && (
+                <DetailRow label={t('Vacant units')} value={<NumberFormat value={finance.vacantShareEksoda} showZero />} />
               )}
             </SubRow>
           )}
