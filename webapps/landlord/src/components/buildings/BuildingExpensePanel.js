@@ -618,7 +618,6 @@ export default function BuildingExpensePanel({ building }) {
           breakdown={breakdown}
           building={building}
           term={selectedTerm}
-          onTermChange={setSelectedTerm}
           t={t}
         />
       </div>
@@ -989,7 +988,7 @@ function truncateAtak(atak) {
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
 
-function ChargeBreakdown({ breakdown, building, term, onTermChange, t }) {
+function ChargeBreakdown({ breakdown, building, term, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
   // Vacant-units-billed-to-owner section is COLLAPSED by default: in a building
   // with many identical vacant units it was a wall of repeated rows (the user's
@@ -1121,51 +1120,9 @@ function ChargeBreakdown({ breakdown, building, term, onTermChange, t }) {
     // touches both edges. (The user's "the two areas are not clearly
     // separated" complaint.)
     <div className="-mx-6 -mb-6 mt-8 rounded-b-lg bg-cream px-6 pb-6 pt-5">
-      {/* ZONE B title + month navigation (same arrow pattern as the rents page
-          year/month picker). The ΧΡΕΩΣΕΙΣ are per-month; these arrows let the
-          landlord navigate directly without scrolling back to the calendar. */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="font-display text-headline">{t('Charges')}</div>
-        {onTermChange && (
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => {
-                const m = Math.floor((term % 1000000) / 10000);
-                const y = Math.floor(term / 1000000);
-                const prev = m === 1
-                  ? (y - 1) * 1000000 + 12 * 10000 + 100
-                  : y * 1000000 + (m - 1) * 10000 + 100;
-                onTermChange(prev);
-              }}
-              aria-label={t('Previous month')}
-            >
-              <LuChevronLeft className="size-4" />
-            </Button>
-            <span className="text-sm font-mono tabular-nums px-2">
-              {String(Math.floor((term % 1000000) / 10000)).padStart(2, '0')}/{Math.floor(term / 1000000)}
-            </span>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => {
-                const m = Math.floor((term % 1000000) / 10000);
-                const y = Math.floor(term / 1000000);
-                const next = m === 12
-                  ? (y + 1) * 1000000 + 1 * 10000 + 100
-                  : y * 1000000 + (m + 1) * 10000 + 100;
-                onTermChange(next);
-              }}
-              aria-label={t('Next month')}
-            >
-              <LuChevronRight className="size-4" />
-            </Button>
-          </div>
-        )}
-      </div>
+      {/* ZONE B title — serif display register, same weight as the ZONE A
+          "Μηνιαία Καταχώρηση" title, so the two zones read as peers. */}
+      <div className="font-display text-headline mb-4">{t('Charges')}</div>
       {/* The table sits on a BONE field (lighter than the cream zone band) so the
           cream-toned alternate unit blocks are VISIBLE against it. Rounded +
           hairline-bordered so the grid reads as one clean object on the band. */}

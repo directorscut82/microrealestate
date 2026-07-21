@@ -5,7 +5,7 @@ import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import ErrorPage from 'next/error';
-import { LuArrowLeft, LuBuilding2, LuHome, LuWallet } from 'react-icons/lu';
+import { LuArrowLeft, LuBuilding2, LuChevronLeft, LuChevronRight, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
 import OwnerContactCard from '../../../components/owners/OwnerContactCard';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
@@ -106,6 +106,12 @@ function OwnerDetail() {
     Array.isArray(router.query.id) ? router.query.id[0] : router.query.id || ''
   );
   const [payOpen, setPayOpen] = useState(false);
+  // Month filter for the ΧΡΕΩΣΕΙΣ section (term as YYYYMMDDHH).
+  // Default to current month.
+  const [chargeTerm, setChargeTerm] = useState(() => {
+    const d = new Date();
+    return (d.getFullYear() * 1000000) + ((d.getMonth() + 1) * 10000) + 100;
+  });
 
   const { data: owner, isLoading, isError } = useQuery({
     queryKey: [QueryKeys.OWNERS, ownerKey],
@@ -315,16 +321,61 @@ function OwnerDetail() {
               ONCE in the group header (user decision 2026-06-20); each line is
               labeled by its unit scope (Ολόκληρο κτίριο / floor / ΚΕΝΟ). */}
           <Card className="p-5">
-            <div className="text-label text-ink-muted uppercase tracking-wide mb-3">
-              {t('Charges')}
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-label text-ink-muted uppercase tracking-wide">
+                {t('Charges')}
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => {
+                    const m = Math.floor((chargeTerm % 1000000) / 10000);
+                    const y = Math.floor(chargeTerm / 1000000);
+                    setChargeTerm(
+                      m === 1
+                        ? (y - 1) * 1000000 + 12 * 10000 + 100
+                        : y * 1000000 + (m - 1) * 10000 + 100
+                    );
+                  }}
+                  aria-label={t('Previous month')}
+                >
+                  <LuChevronLeft className="size-4" />
+                </Button>
+                <span className="text-sm font-mono tabular-nums px-2">
+                  {String(Math.floor((chargeTerm % 1000000) / 10000)).padStart(2, '0')}/{Math.floor(chargeTerm / 1000000)}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => {
+                    const m = Math.floor((chargeTerm % 1000000) / 10000);
+                    const y = Math.floor(chargeTerm / 1000000);
+                    setChargeTerm(
+                      m === 12
+                        ? (y + 1) * 1000000 + 1 * 10000 + 100
+                        : y * 1000000 + (m + 1) * 10000 + 100
+                    );
+                  }}
+                  aria-label={t('Next month')}
+                >
+                  <LuChevronRight className="size-4" />
+                </Button>
+              </div>
             </div>
-            {charges.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {t('No expenses for this period')}
-              </p>
-            ) : (
+            {(() => {
+              const filtered = charges.filter(
+                (c) => Number(c.term) === chargeTerm
+              );
+              return filtered.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {t('No expenses for this period')}
+                </p>
+              ) : (
               <div className="space-y-4">
-                {_groupCharges(charges).map((g) => (
+                {_groupCharges(filtered).map((g) => (
                   <div key={g.key}>
                     {/* group header: month · building, then the co-owner split
                         ONCE underneath (not per line) */}
@@ -432,7 +483,8 @@ function OwnerDetail() {
                   </div>
                 ))}
               </div>
-            )}
+              );
+            })()}
           </Card>
 
           {/* Payment history */}
