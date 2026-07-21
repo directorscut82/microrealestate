@@ -151,9 +151,8 @@ function Overview() {
   const proj = totals.projection || {};
   const katanomes = d.katanomes || {};
 
-  // month bars for the cash-flow chart (paid vs owed), Greek initials.
   const monthNames = useMemo(
-    () => ['Ι', 'Φ', 'Μ', 'Α', 'Μ', 'Ι', 'Ι', 'Α', 'Σ', 'Ο', 'Ν', 'Δ'],
+    () => ['Ιαν', 'Φεβ', 'Μαρ', 'Απρ', 'Μαϊ', 'Ιουν', 'Ιουλ', 'Αυγ', 'Σεπ', 'Οκτ', 'Νοε', 'Δεκ'],
     []
   );
   const cashflow = useMemo(() => {
@@ -420,6 +419,10 @@ function Overview() {
                       }).format(v)
                     }
                     labelFormatter={(l) => l}
+                    wrapperStyle={{ fontSize: 11, opacity: 0.92 }}
+                    contentStyle={{ background: 'var(--color-cream)', border: '1px solid var(--color-stone-line)', borderRadius: 6, padding: '4px 8px' }}
+                    offset={20}
+                    position={{ y: -10 }}
                   />
                   <Legend
                     wrapperStyle={{ fontSize: 11 }}
