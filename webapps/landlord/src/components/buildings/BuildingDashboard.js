@@ -262,12 +262,8 @@ function BuildingProjectionTable({ finance, t }) {
   const chargesActual = finance.annualRentExpenses;
 
   const expTotal = finance.ownerBorneTotal;
-  // Owner-borne sub-rows (children of expTotal — these MUST sum to expTotal):
-  const fixedVal = finance.fixedOwnerProrated;
   const recordedVal = finance.recordedOwnerEksoda;
   const vacantVal = finance.vacantOwnerResidentEksoda;
-  // Sanity: fixedVal + recordedVal + vacantVal should = ownerBorneTotal
-  // (ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated; bornTotal = ownerEksoda + vacant)
 
 
   const HeadRow = ({ label, actual, est, total, cls, neg }) => (
@@ -369,22 +365,21 @@ function BuildingProjectionTable({ finance, t }) {
             cls="text-oxide"
             neg
           />
-          {fixedVal > 0 && (
+          {(finance.fixedOwnerDetail || []).map((exp, i) => (
             <SubRow
-              label={t('Fixed recurring short')}
-              actual={fixedVal}
+              key={`fixed-${i}`}
+              label={exp.name}
+              actual={exp.annual}
               est={0}
-              total={fixedVal}
-              expandKey="fixed"
+              total={exp.annual}
+              expandKey={`fixed-${i}`}
             >
-              {finance.recurringMonthlyEksoda > 0 ? (
-                <DetailRow
-                  label={`${t('per month × N months', { n: Math.round(fixedVal / finance.recurringMonthlyEksoda) })}`}
-                  value={<NumberFormat value={finance.recurringMonthlyEksoda} showZero />}
-                />
-              ) : null}
+              <DetailRow
+                label={`${exp.monthly} €/${t('month')} × ${exp.months} ${t('months')}`}
+                value={<NumberFormat value={exp.annual} showZero />}
+              />
             </SubRow>
-          )}
+          ))}
           {recordedVal > 0 && (
             <SubRow
               label={t('Other')}
@@ -935,18 +930,23 @@ export default function BuildingDashboard({ building }) {
     // starting in July must contribute 6 months × ownerAmount, not 12 ×.
     // Same for an expense ending mid-year — only the months that fall
     // inside [Jan 1 of currentYear .. Dec 31 of currentYear] count.
-    const fixedOwnerProrated = (building?.expenses || [])
-      .filter(
-        (e) =>
-          e.trackOwnerExpense &&
-          (e.isRecurring ?? e.recurring) &&
-          Number(e.ownerAmount) > 0 &&
-          isExpenseActiveForTerm(e, currentTerm)
-      )
-      .reduce(
-        (sum, e) => sum + (Number(e.ownerAmount) || 0) * _expenseActiveMonths(e),
-        0
-      );
+    const _fixedOwnerExpenses = (building?.expenses || []).filter(
+      (e) =>
+        e.trackOwnerExpense &&
+        (e.isRecurring ?? e.recurring) &&
+        Number(e.ownerAmount) > 0 &&
+        isExpenseActiveForTerm(e, currentTerm)
+    );
+    const fixedOwnerProrated = _fixedOwnerExpenses.reduce(
+      (sum, e) => sum + (Number(e.ownerAmount) || 0) * _expenseActiveMonths(e),
+      0
+    );
+    const fixedOwnerDetail = _fixedOwnerExpenses.map((e) => ({
+      name: e.name || '',
+      monthly: Number(e.ownerAmount) || 0,
+      months: _expenseActiveMonths(e),
+      annual: (Number(e.ownerAmount) || 0) * _expenseActiveMonths(e)
+    }));
     const ownerEksoda = recordedOwnerEksoda + fixedOwnerProrated;
 
     // Owner-side paid vs unpaid (current calendar year). Drives the progress
@@ -1162,6 +1162,7 @@ export default function BuildingDashboard({ building }) {
       //     (variable owner amounts + owner-portion of repairs), surfaced as a
       //     separate «Λοιπά» line so the three cells still sum to ownerBorneTotal.
       fixedOwnerProrated,
+      fixedOwnerDetail,
       recordedOwnerEksoda,
       ownerResidentEksoda,
       vacantShareEksoda,

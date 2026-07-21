@@ -558,54 +558,54 @@ export default function BuildingExpensePanel({ building }) {
         <div className="space-y-1">
           {tenantRows.length > 0 && (
             <>
-              {/* Section subtotal: the LARGE/BOLD figure (the number to land on);
-                  per-expense line amounts below are smaller + muted. */}
-              <div className="flex items-baseline justify-between mb-1.5">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="flex items-baseline justify-between mb-2 mt-1">
+                <span className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
                   {t('Tenants')}
                 </span>
                 <span className="w-28 text-right text-base font-semibold text-ink tabular-nums">
                   <NumberFormat value={tenantTotal} />
                 </span>
               </div>
-              {tenantRows.map((row) => (
-                <ExpenseRow
-                  key={`t-${row.expenseId}`}
-                  row={row}
-                  value={drafts[`tenant:${row.expenseId}`]}
-                  onChange={(id, v) => handleDraftChange(id, v, false)}
-                  onSave={handleSaveRow}
-                  saving={saving}
-                  t={t}
-                />
-              ))}
+              <div className="pl-4 space-y-0.5">
+                {tenantRows.map((row) => (
+                  <ExpenseRow
+                    key={`t-${row.expenseId}`}
+                    row={row}
+                    value={drafts[`tenant:${row.expenseId}`]}
+                    onChange={(id, v) => handleDraftChange(id, v, false)}
+                    onSave={handleSaveRow}
+                    saving={saving}
+                    t={t}
+                  />
+                ))}
+              </div>
             </>
           )}
 
           {ownerRows.length > 0 && (
             <>
-              {/* Larger whitespace between the ΕΝΟΙΚΙΑΣΤΕΣ and ΙΔΙΟΚΤΗΤΕΣ blocks
-                  so the two groups read as distinct (user request). */}
-              {tenantRows.length > 0 && <div className="mt-6" />}
-              <div className="flex items-baseline justify-between mb-1.5">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {tenantRows.length > 0 && <div className="mt-8" />}
+              <div className="flex items-baseline justify-between mb-2 mt-1">
+                <span className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
                   {t('Owners')}
                 </span>
                 <span className="w-28 text-right text-base font-semibold text-ink tabular-nums">
                   <NumberFormat value={ownerTotal} />
                 </span>
               </div>
-              {ownerRows.map((row) => (
-                <ExpenseRow
-                  key={`o-${row.expenseId}`}
-                  row={row}
-                  value={drafts[`owner:${row.expenseId}`]}
-                  onChange={(id, v) => handleDraftChange(id, v, true)}
-                  onSave={handleSaveRow}
-                  saving={saving}
-                  t={t}
-                />
-              ))}
+              <div className="pl-4 space-y-0.5">
+                {ownerRows.map((row) => (
+                  <ExpenseRow
+                    key={`o-${row.expenseId}`}
+                    row={row}
+                    value={drafts[`owner:${row.expenseId}`]}
+                    onChange={(id, v) => handleDraftChange(id, v, true)}
+                    onSave={handleSaveRow}
+                    saving={saving}
+                    t={t}
+                  />
+                ))}
+              </div>
             </>
           )}
         </div>
@@ -618,6 +618,7 @@ export default function BuildingExpensePanel({ building }) {
           breakdown={breakdown}
           building={building}
           term={selectedTerm}
+          onTermChange={setSelectedTerm}
           t={t}
         />
       </div>
@@ -988,7 +989,7 @@ function truncateAtak(atak) {
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
 
-function ChargeBreakdown({ breakdown, building, term, t }) {
+function ChargeBreakdown({ breakdown, building, term, onTermChange, t }) {
   const [showUncollected, setShowUncollected] = useState(false);
   // Vacant-units-billed-to-owner section is COLLAPSED by default: in a building
   // with many identical vacant units it was a wall of repeated rows (the user's
@@ -1120,9 +1121,51 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
     // touches both edges. (The user's "the two areas are not clearly
     // separated" complaint.)
     <div className="-mx-6 -mb-6 mt-8 rounded-b-lg bg-cream px-6 pb-6 pt-5">
-      {/* ZONE B title — serif display register, same weight as the ZONE A
-          "Μηνιαία Καταχώρηση" title, so the two zones read as peers. */}
-      <div className="font-display text-headline mb-4">{t('Charges')}</div>
+      {/* ZONE B title + month navigation (same arrow pattern as the rents page
+          year/month picker). The ΧΡΕΩΣΕΙΣ are per-month; these arrows let the
+          landlord navigate directly without scrolling back to the calendar. */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="font-display text-headline">{t('Charges')}</div>
+        {onTermChange && (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => {
+                const m = Math.floor((term % 1000000) / 10000);
+                const y = Math.floor(term / 1000000);
+                const prev = m === 1
+                  ? (y - 1) * 1000000 + 12 * 10000 + 100
+                  : y * 1000000 + (m - 1) * 10000 + 100;
+                onTermChange(prev);
+              }}
+              aria-label={t('Previous month')}
+            >
+              <LuChevronLeft className="size-4" />
+            </Button>
+            <span className="text-sm font-mono tabular-nums px-2">
+              {String(Math.floor((term % 1000000) / 10000)).padStart(2, '0')}/{Math.floor(term / 1000000)}
+            </span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => {
+                const m = Math.floor((term % 1000000) / 10000);
+                const y = Math.floor(term / 1000000);
+                const next = m === 12
+                  ? (y + 1) * 1000000 + 1 * 10000 + 100
+                  : y * 1000000 + (m + 1) * 10000 + 100;
+                onTermChange(next);
+              }}
+              aria-label={t('Next month')}
+            >
+              <LuChevronRight className="size-4" />
+            </Button>
+          </div>
+        )}
+      </div>
       {/* The table sits on a BONE field (lighter than the cream zone band) so the
           cream-toned alternate unit blocks are VISIBLE against it. Rounded +
           hairline-bordered so the grid reads as one clean object on the band. */}

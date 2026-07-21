@@ -2,10 +2,13 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ReferenceLine,
-  XAxis
+  Tooltip,
+  XAxis,
+  YAxis
 } from 'recharts';
 import { fetchOverview, QueryKeys } from '../../../utils/restcalls';
 import { BUILDING_TYPE_LABEL_KEY } from '../../../utils/lineLabels';
@@ -408,15 +411,31 @@ function Overview() {
                     axisLine={false}
                     fontSize={10}
                   />
-                  {/* Grouped (not stacked): income vs expense side by side per
-                      month — a real cash-flow, olive in / oxide out. */}
+                  <YAxis hide />
+                  <Tooltip
+                    formatter={(v) =>
+                      new Intl.NumberFormat('el-GR', {
+                        style: 'currency',
+                        currency: 'EUR'
+                      }).format(v)
+                    }
+                    labelFormatter={(l) => l}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: 11 }}
+                    formatter={(v) =>
+                      v === 'income' ? t('Income') : t('Owner expenses')
+                    }
+                  />
                   <Bar
                     dataKey="income"
+                    name="income"
                     fill="var(--color-olive)"
                     radius={[2, 2, 0, 0]}
                   />
                   <Bar
                     dataKey="expense"
+                    name="expense"
                     fill="var(--color-oxide)"
                     radius={[2, 2, 0, 0]}
                   />
@@ -433,6 +452,21 @@ function Overview() {
                     tickLine={false}
                     axisLine={false}
                     fontSize={10}
+                  />
+                  <YAxis hide />
+                  <Tooltip
+                    formatter={(v) =>
+                      new Intl.NumberFormat('el-GR', {
+                        style: 'currency',
+                        currency: 'EUR'
+                      }).format(v)
+                    }
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: 11 }}
+                    formatter={(v) =>
+                      v === 'income' ? t('Income') : t('Owner expenses')
+                    }
                   />
                   <Line
                     type="monotone"
