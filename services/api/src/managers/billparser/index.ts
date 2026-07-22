@@ -82,7 +82,29 @@ export async function generateIrisQr(
 }
 
 export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
-  const text = await extractTextFromPdf(buffer);
+  let text: string;
+
+  const isPdf =
+    buffer.length >= 4 &&
+    buffer.subarray(0, 4).toString('ascii') === '%PDF';
+
+  if (isPdf) {
+    text = await extractTextFromPdf(buffer);
+    // Scanned PDF (image-only, no text layer) — guide the user to upload as
+    // image. A future Slice 1b can extract the embedded image; for now, the
+    // primary path is direct image upload (CamScanner/Telegram photos).
+    if (text.replace(/\s/g, '').length < 50) {
+      return {
+        success: false,
+        error:
+          'Σαρωμένο PDF χωρίς κείμενο — ανεβάστε ως εικόνα (JPG/PNG)'
+      };
+    }
+  } else {
+    // Image file (JPEG/PNG/WEBP) — OCR in-process via paddleocr + WASM.
+    const { ocrImage } = await import('./ocr.js');
+    text = await ocrImage(buffer);
+  }
 
   const provider = detectProvider(text);
   if (!provider) {

@@ -1205,5 +1205,7 @@
   "Has outstanding": "Con pendiente",
   "Error fetching owners": "Error al cargar propietarios",
   "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "{{count}} archivos sin referencia encontrados en el almacenamiento en la nube (revíselos en Documentos; no se eliminó nada)",
-  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} documento(s) referencian archivos que ya no existen en el almacenamiento en la nube"
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} documento(s) referencian archivos que ya no existen en el almacenamiento en la nube",
+  "Drop PDF or photos here or click to browse": "Suelte PDF o fotos aquí o haga clic para explorar",
+  "Up to 20 files — PDF, JPG, PNG or WEBP (DEH, EYDAP, DEYA bills, scanned or photographed)": "Hasta 20 archivos — PDF, JPG, PNG o WEBP (facturas DEH, EYDAP, DEYA, escaneadas o fotografiadas)"
 }

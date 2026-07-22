@@ -102,18 +102,31 @@ describe('DEH Bill Parser', () => {
 
     it('should extract consumption period', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
-      expect(result.bill?.periodStart).toEqual(new Date(2026, 1, 25));
-      expect(result.bill?.periodEnd).toEqual(new Date(2026, 2, 23));
+      expect(result.bill?.periodStart).toEqual(new Date(Date.UTC(2026, 1, 25)));
+      expect(result.bill?.periodEnd).toEqual(new Date(Date.UTC(2026, 2, 23)));
     });
 
     it('should extract issue date', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
-      expect(result.bill?.issueDate).toEqual(new Date(2026, 2, 27));
+      expect(result.bill?.issueDate).toEqual(new Date(Date.UTC(2026, 2, 27)));
     });
 
     it('should extract due date', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
-      expect(result.bill?.dueDate).toEqual(new Date(2026, 3, 22));
+      expect(result.bill?.dueDate).toEqual(new Date(Date.UTC(2026, 3, 22)));
+    });
+
+    it('should parse dates in UTC (regression: term must not land on wrong month)', () => {
+      // C4 regression guard: parseGreekDate must use Date.UTC, not local time.
+      // On Athens summer (UTC+3), a local Date for 01/08/2026 becomes
+      // 2026-07-31T21:00Z, whose getUTCMonth() is JULY not AUGUST — landing the
+      // bill on the wrong month. Assert the UTC hour is 0 so the date is anchored
+      // to UTC midnight regardless of the machine's timezone.
+      const result = parseDehBill(DEH_BILL_TEXT);
+      expect(result.bill?.periodStart.getUTCHours()).toBe(0);
+      expect(result.bill?.periodStart.getUTCDate()).toBe(25);
+      expect(result.bill?.periodStart.getUTCMonth()).toBe(1); // February
+      expect(result.bill?.periodEnd.getUTCMonth()).toBe(2); // March
     });
 
     it('should extract RF code', () => {

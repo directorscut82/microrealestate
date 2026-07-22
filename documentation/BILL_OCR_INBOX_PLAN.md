@@ -1,0 +1,617 @@
+# Design — Bill OCR Import + Telegram Inbox
+
+> Status: DRAFT v3.1 — from code reads + empirical testing, adversarially verified.
+> Architecture (OCR-in-api WASM, sharp build, memory, threads, saveMonthlyStatement bridge)
+> is MEASURED on the real NAS. Remaining unverified items are flagged inline as UNVERIFIED.
+> Every fact cites its source file:line or test run.
+>
+> **BRANCHING — do NOT build on `nas` directly.** Cut a feature branch off `nas`
+> (e.g. `feat/bill-ocr-import`) and do all work there. This change touches money-
+> critical paths (the saveMonthlyStatement bridge, RF/QR extraction, expense
+> creation) and is expected to churn through regressions before it stabilises —
+> keep `nas` (production) clean. Merge back only after each slice's full pre-merge
+> gate (§9) is green on the live NAS. Never push regressions to `nas`.
+>
+> **REVIEWING THE BRANCH (it is NOT auto-live).** CI builds images ONLY on push to
+> `nas` (`nas-ci.yml:9`), and `deploy:nas` targets the single production stack — so
+> a feature branch produces no images and has no live URL by default. Review it via:
+>   1. **UI — local dev server against NAS data** (the `ui-review-do-not-skip.md`
+>      method; setup is in `stash@{0}` "local-dev LOCAL_UI_PROXY rewrite"): `yarn dev`
+>      on port 8180 runs the BRANCH frontend with hot reload, proxying API/data to the
+>      real NAS (read-only, env-gated, cannot write/break prod). Real Greek data,
+>      seconds per change. GAP: backend is still NAS's `:nas` api, so branch BACKEND
+>      changes (OCR route, parser, bridge) are NOT exercised here.
+>   2. **Backend + full flow — local finch stack with a COPY of the real NAS DB**
+>      (`FINCH_SETUP.md`): `finch compose up` builds ALL services from branch source and
+>      runs the whole app locally. The only way to exercise the OCR/parser/bridge
+>      end-to-end before merge; where the new E2E specs + manual OCR testing run.
+>      **Seed it with your real data, not stubs:** NAS + local both run `mongo:4.4`
+>      (verified), and the repo already has `mongodump --gzip --archive` (`dbbackup.js`).
+>      One-time: `mongodump` the NAS `mredb` (~1MB, 10 collections — tiny) → `mongorestore`
+>      into the local finch mongo. It's a COPY — the local DB is isolated; churn/break/wipe
+>      it freely, the NAS is never touched. GOTCHA: thirdParties tokens (gmail/smtp/b2/
+>      telegram) are `CIPHER_KEY`-encrypted (realmmanager.ts:195+); they decrypt-fail
+>      locally unless you also copy NAS `CIPHER_KEY`/`CIPHER_IV_KEY` into local `.env`.
+>      IRRELEVANT for OCR — bill parsing/expenses/bridge/rents touch no encrypted fields.
+>   3. **Live NAS branch URL (heaviest, only if needed):** add the branch to
+>      `nas-ci.yml` triggers (`:branch-<sha>` images) + a SECOND Portainer stack on a
+>      different port with a DB copy. Real work + more RAM on the 8.2GB box — reserve
+>      for stakeholder-style live review. Not recommended for normal iteration.
+> Recommended: (1) for UI mocks/surfaces, (2) for OCR backend. Merging to `nas` is the
+> ONLY thing that puts it on the real production URL — do that only when a slice is gated.
+
+---
+
+## 0. Requirements (from your messages across this conversation)
+
+1. Import a scanned image/photo of a λογαριασμός (not just digital PDFs).
+2. OCR it — RapidOCR/paddleocr.js won the benchmark.
+3. Confirm/amend dialog before saving.
+4. Handle "no δαπάνη" — let user create one in-flow.
+5. Handle "wrong building" — dropdowns.
+6. Route amount to tenant/owner correctly.
+7. Batch support.
+8. Provider templates with versioning (DEH, ΕΥΔΑΠ Αττικής, ΔΕΥΑ Τήνου, ΕΠΑ).
+9. Assertions (date/month/already-paid/duplicate/anomaly/RF checksum).
+10. Upload source to B2.
+11. Forward bill to Telegram bot → dashboard notification → confirm → disappear.
+12. Fine-tuning from amendments (answer: not runtime-feasible; see §7).
+
+---
+
+## 1. OCR Architecture (PROVEN — not proposed)
+
+### What was tested end-to-end
+
+| Stack | Result on real ΔΗΜΟΣ ΤΗΝΟΥ bill |
+|-------|--------------------------------|
+| `paddleocr` npm + `onnxruntime-web` WASM, Node.js | **7/7 critical fields** (amount, both RFs, account, due, period start/end) |
+| RapidOCR Python (ground truth) | 7/7, marginally cleaner on noisy duplicate fields |
+
+### Speed — MEASURED on the actual NAS (native x86, throwaway container, Test 3 + thread sweep)
+
+| numThreads | OCR time | speedup |
+|---|---|---|
+| 1 | 55.5s | 1.0× |
+| 2 | 32.3s | 1.7× |
+| **4** | **21.0s** | **2.6×** |
+
+**WASM multithreading WORKS in Node here** — this CONTRADICTS Microsoft's onnxruntime-web compatibility matrix ("Node.js single-threaded WASM only"). The threaded binaries (`ort-wasm-simd-threaded.*.wasm`) ship in the package and run fine under Node 20 in the Alpine container; `effective=4` confirmed the engine accepted the count, and all thread counts produced identical 112 lines (correctness intact). Verified by direct measurement, not docs.
+
+**DECISION: `ort.env.wasm.numThreads = 4` in the OCR module** → ~21s/bill (idle box), zero infra change. This makes the glibc-base and sidecar options (whose only benefit was multi-threaded inference) **UNNECESSARY** — WASM in-process delivers 2.6× here. 21s is within the "30s is fine" threshold. Batch (async/inbox): at the idle-box 21s that's ~7 min for 20 bills; under production contention (~2× not 2.6×, ~28s/bill — see caveat below) closer to ~9-10 min. Either way it's background work, not a blocking request.
+
+**Caveats (honest):** (1) the sweep had all 4 cores free — in production api shares 4 cores with 15 other containers, so real speedup under contention will be < 2.6× (conservatively ~2×). (2) Consider capping threads to leave headroom for concurrent api request handling (e.g. numThreads=2–3, not 4) so OCR doesn't monopolize the box during a bill run. Measure under real load before pinning the final value.
+
+### Correct parameter set (empirically determined, source-verified)
+
+```javascript
+// Detection: PP-OCRv6_det_small.onnx
+detection: {
+  channelOrder: 'bgr',              // official training: BGR (PP-OCRv5_mobile_det.yml)
+  mean: [123.675, 116.28, 103.53],  // ImageNet (NormalizeImage, predict_det.py)
+  stdDeviation: [1/(0.229*255), 1/(0.224*255), 1/(0.225*255)],
+  limitType: 'max',                 // utility.py default
+  maxSideLength: 960,               // utility.py default
+  boxScoreThreshold: 0.55,          // tuned from 0.6 for CamScanner scans
+  unclipRatio: 1.6,                 // tuned from 1.5
+}
+// Recognition: el_PP-OCRv5_rec_mobile.onnx
+recognition: {
+  // mean/std = [127.5]/[1/127.5] (uniform) → channel order IRRELEVANT
+  charactersDictionary: ['blank', ...greekChars, ' ']  // greekChars = 354 entries read from the rec model's ONNX `character` metadata key
+}
+// CLS angle classifier: DISABLED — garbles Greek (tested; model is Chinese-only)
+```
+
+### Why this runs in the existing Alpine containers (no Python sidecar) — ALL VERIFIED ON NAS
+
+- `onnxruntime-web` is pure WASM — no libc linkage, no native addon. **VERIFIED**: installed + ran in a throwaway container built FROM the real api Alpine image (`node:20.17-alpine3.20`), linux/amd64, on the NAS itself. Loaded and produced correct Greek. musl is not a factor.
+- **NAS arch = x86_64** (live Portainer `docker/info`: x86_64, 4 CPU, 8.2GB). `@img/sharp-linuxmusl-x64` is the correct prebuild.
+- **D5 — sharp multi-stage build: VERIFIED PASS.** Built the full api Dockerfile for linux/amd64 with sharp+onnxruntime-web+paddleocr in a throwaway git worktree (real repo untouched). The `deps` stage `yarn workspaces focus --production` resolved `@img/sharp-linuxmusl-x64` + `@img/sharp-libvips-linuxmusl-x64` as **prebuilt binaries — no source compile, no `vips-dev` needed**; all three `require()` cleanly in the final image. `apk add build-base python3` (already in the Dockerfile) is sufficient. Sharp is a package.json-only add.
+  - **NOTE (git history):** commit `8468bd06 "chore: remove unused sharp dependency (no native deps needed)"` deliberately removed sharp to keep api native-dep-free. Reintroducing it is safe (prebuild, no compile) but consciously reverses that decision — call it out in the PR.
+  - **NOTE (canvas):** the build logs `canvas@2.11.2 couldn't be built` — this is PRE-EXISTING and benign (optional transitive of `pdfjs-dist`, already fails the same way in current production, unused by OCR). Not introduced here.
+- Models: ~15MB total (7.5MB rec + 5MB det), committed to the repo (static inference weights, not secrets).
+- **MEMORY — MEASURED ON NAS (native x86, no emulation). DECISION: raise api limit to 1G.**
+  Per-stage RSS profile of a real ΔΗΜΟΣ ΤΗΝΟΥ OCR, in a throwaway container on the NAS:
+  | Stage | RSS |
+  |---|---|
+  | node + imports | 64 MB |
+  | ONNX sessions created | 239 MB (+175) |
+  | after recognize (PEAK) | **273 MB** |
+
+  Peak **273 MB** — comfortably under the current 500 MB limit. (Local Mac-under-QEMU inflated this to 429 MB; the native NAS figure is the real one.)
+  - The +175MB is onnxruntime-web materializing the two ONNX models into WASM sessions (one-time). RESIDENT once OCR has run → api's steady state after first OCR is ~239MB, not the ~100MB no-OCR idle.
+  - **Session MUST be a lazy singleton** — build `PaddleOcrService` once and reuse. Per-request `createInstance` re-pays the session cost and fragments. Warm singleton: each bill adds only ~34MB (image + inference scratch), freed between bills.
+  - **Batch is memory-safe:** `parseBills` loops `for...of` with `await` — strictly sequential on one warm session. 5 or 20 bills peak the SAME as 1 (~273MB); memory does NOT stack by batch size. (Batch's real constraint is TIME — see the speed table — → async/inbox processing; plus the multer buffer stack, see §2.1.)
+  - **DECISION: raise api's `deploy.resources.limits.memory` from 500M to 1G** in `docker-compose.microservices.prod.yml`. A limit is a CEILING not a reservation — idle api still uses ~100MB, post-OCR ~239MB; the 1G is headroom so an OCR spike + Mongo/Redis + concurrent request handling never approaches the cap. 273MB fits 500M for a single idle-box bill, but leaves little margin under production concurrency. NAS has 8.2GB; 1G for api is safe (idle usage is unchanged — the ceiling doesn't reserve RAM).
+
+### Where it lives: `services/api` (in-process, no cross-service call)
+
+NOT pdfgenerator — that was wrong. Reasons verified from code:
+
+1. **Memory:** pdfgenerator is capped at 500MB and already runs Puppeteer/Chromium (~200-400MB during PDF render) — adding the measured ~273MB OCR peak on top risks OOM there. api has NO heavy binary deps (confirmed: `package.json` has zero puppeteer/chromium/canvas/sharp), idles ~100MB, and (with the 1G limit) the measured 273MB OCR peak fits with headroom.
+2. **Ownership:** api already owns the entire bill pipeline (`parseBillPdf`, `parseBills`, `confirmBills`, providers, and the Telegram poller). OCR is an internal step of `parseBillPdf`, not a separate service's job.
+3. **No HTTP round-trip:** the earlier plan had api POST-ing to pdfgenerator then continuing its own pipeline. That's pointless complexity for a function call.
+4. **sharp does NOT exist in pdfgenerator** (checked `package.json` — deps are puppeteer, ejs, handlebars, multer, aws-sdk, no sharp). It must be added to whichever service does OCR. Adding to api: one line.
+
+New deps added to `services/api/package.json`:
+- `paddleocr` (PP-OCR pipeline: det preprocessing + CTC decode)
+- `onnxruntime-web` (WASM inference — no native addon, no libc dep, runs on Alpine musl)
+- `sharp` (image decode to raw RGBA — ships `@img/sharp-linuxmusl-x64` prebuilds)
+
+Models (~15MB): `services/api/models/PP-OCRv6_det_small.onnx` + `el_PP-OCRv5_rec_mobile.onnx` + `greek_dict.txt`. Committed to repo (they're static inference weights, not secrets).
+
+OCR is a module loaded lazily on first use (so it doesn't slow api boot or waste memory when not doing OCR): `services/api/src/managers/billparser/ocr.ts`.
+
+---
+
+## 2. API Changes (services/api)
+
+### 2.1 New multer instance for bills (C5)
+
+The existing `upload` multer + `verifyPdfContent` are shared with E9/AADE importer (`routes.ts:190,82`). Cannot loosen them.
+
+**Solution:** a SEPARATE multer instance + magic-byte check, wired only to `/bills/parse`:
+
+```typescript
+const uploadBill = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },  // 10MB (photos are bigger than PDFs)
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['application/pdf','image/jpeg','image/png','image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new ServiceError('Only PDF or image files allowed', 422));
+  }
+});
+
+function verifyBillContent(req, res, next) {
+  const files = req.file ? [req.file] : req.files || [];
+  for (const file of files) {
+    const h = file.buffer.slice(0, 12);   // D6: need 12 bytes — WEBP marker is at offset 8-11
+    const isPdf = h.toString('ascii',0,4) === '%PDF';
+    const isJpeg = h[0]===0xFF && h[1]===0xD8;
+    const isPng = h[0]===0x89 && h.toString('ascii',1,4)==='PNG';
+    const isWebp = h.toString('ascii',0,4)==='RIFF' && h.toString('ascii',8,12)==='WEBP';
+    if (!isPdf && !isJpeg && !isPng && !isWebp) {
+      return next(new ServiceError(`Invalid file: ${file.originalname}`, 422));
+    }
+  }
+  next();
+}
+```
+D6: the original `slice(0, 8)` made `isWebp` always false (start index 8 ≥ length 8 → empty string), so every WEBP the fileFilter admits would 422. `slice(0, 12)` fixes it.
+
+Wiring: `billsRouter.post('/parse', uploadRateLimit, uploadBill.array('bills', 20), verifyBillContent, ...)`.
+The E9 path (`occupantsRouter.post('/import-pdf', ...)`) continues using the old `upload` instance unchanged.
+
+**Multer buffer stack (the batch memory vector — referenced from §1).** `memoryStorage` + `array('bills', 20)` holds ALL uploaded files in RAM simultaneously before processing. This is SEPARATE from and ADDITIVE to the OCR ~273MB. Phone photos are ~0.2–2MB (the test bill was 212KB) → 20 × 2MB ≈ 40MB, trivial. But at the 10MB-per-file cap, a worst-case 20×10MB = 200MB burst lands ON TOP of OCR → could approach the (raised) 1G limit under concurrency. Unlike the OCR session, this DOES scale with batch size. Mitigation: keep the per-file cap modest (6MB is plenty for a bill photo) OR lower the batch cap. This is the only batch-memory concern; the OCR session itself does not stack (§1).
+
+### 2.1b Remove `hasAnyBillingId` precheck (blocker for fresh buildings)
+
+`parseBills` (billmanager.ts:75-85) rejects with 422 if NO expense in the entire realm has a `billingId`. This was a guard against pointless parsing when matching was impossible. But with the new "no match → create expense from OCR" flow, a fresh building with zero billingIds must still be parseable — the user creates the expense (with the parsed billingId) AFTER seeing the OCR result.
+
+**Fix:** Remove the precheck entirely. `findExpenseByBillingId` already returns `null` gracefully when nothing matches — the UI handles that case now instead of being blocked.
+
+### 2.1c BillImportDialog needs all buildings (not just the prop)
+
+Currently `BillImportDialog` receives a single `building` prop from `ExpenseList.js:1249`. But `findExpenseByBillingId` (billmanager.ts:31) searches ALL buildings in the realm — a parsed bill might match a DIFFERENT building than the one you're viewing. And the "no match" dropdown must list all buildings.
+
+**Fix:** The dialog must `useQuery([QueryKeys.BUILDINGS], fetchBuildings)` to load all realm buildings for the dropdown. The `building` prop becomes the pre-selected default in the dropdown, not the only option. The parse response already returns `match.buildingId` / `match.buildingName` cross-building — this just surfaces it in the UI.
+
+### 2.2 Modified `parseBillPdf` (billparser/index.ts)
+
+```typescript
+export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
+  let text: string;
+  const isPdf = buffer.slice(0,4).toString() === '%PDF';
+  if (isPdf) {
+    text = await extractTextFromPdf(buffer);  // existing pdfjs path
+    if (text.replace(/\s/g,'').length < 50) {
+      // Scanned PDF (image-only, no text layer). Slice 1: reject with guidance.
+      // Slice 1b: extract embedded image via pdfjs getOperatorList or unpdf.
+      return { success: false, error: 'Σαρωμένο PDF χωρίς κείμενο — ανεβάστε ως εικόνα (JPG/PNG)' };
+    }
+  } else {
+    // Image file (JPEG/PNG/WEBP) — OCR in-process
+    text = await ocrImage(buffer);  // local paddleocr + onnxruntime-web WASM
+  }
+  // rest of pipeline unchanged: detectProvider → parseDehBill / parseEydapBill / ...
+}
+```
+
+`ocrImage` is a function in `services/api/src/managers/billparser/ocr.ts` — in-process, no HTTP call. Lazy-loaded on first use so it doesn't inflate api's boot memory. Uses `sharp` to decode image → raw RGBA, then `paddleocr` PaddleOcrService for det+rec.
+
+**Scanned PDF handling (Slice 1b, follow-up):**
+- `sharp` cannot decode PDFs (verified: `sharp.format.pdf.input = false`).
+- `unpdf` (npm, v1.6.2) wraps pdfjs + canvas polyfill → renders pages to PNG buffer server-side. OR pdfjs `page.getOperatorList()` → extract embedded raw images without rendering. Either adds the scanned-PDF case.
+- For Slice 1, the primary path is **direct image upload** (CamScanner/Telegram photos are JPEG). The "upload as image" guidance message is temporary and honest, not a silent failure.
+
+### 2.3 Fix: return `paymentCode` to client (C1)
+
+Currently `parseBills` omits `paymentCode` from the response (`billmanager.ts:139-151`); the confirm step then stores `null`. Fix: include `paymentCode` in the `parsed` object so the confirm flow can pass it through.
+
+**How the QR works today (commit `2f79d56a`, verified):** the DEH bill's QR is rendered as a barcode FONT (not a bitmap), so decoding it from a digital PDF was impossible. Instead, the real QR was decoded ONCE from a bill image to learn its content = `RF_CODE + PAYMENT_CODE`, and the app now **regenerates** an identical QR with the `qrcode` package (`generateIrisQr`, `index.ts:63`). Verified: generated QR decodes to the same string as the bill's.
+
+**QR for ALL providers — generation is universal, content is per-provider.** The `qrcode` machinery is provider-agnostic; only the encoded *content string* differs. DEH = `RF + paymentCode`. For each new provider (ΔΕΥΑ Τήνου, ΕΥΔΑΠ, ΕΠΑ) we must **decode its printed QR ONCE** (from the real scanned image — decoding scanned-image pixels IS feasible, unlike the PDF-font case) to learn what its QR encodes, then generate the same. ΔΕΥΑ Τήνου has no DEH-style `paymentCode` token (verified: DEH regex `/(\d{6,12}),(\d{2})\s+(\d)/` matches nothing in the fixture) — its QR content is likely RF-based, but **the exact content must be learned by decoding its real QR**, not assumed. This is a per-provider parser step: extract whatever fields that provider's QR encodes, then `generateIrisQr`-style regenerate.
+- **UNVERIFIED / needs the real QR:** ΔΕΥΑ Τήνου + ΕΥΔΑΠ + ΕΠΑ QR content formats — decode one printed QR per provider to learn them. Blocks per-provider QR until the sample bills arrive.
+
+### 2.4 Fix: generate QR even when unmatched (C2)
+
+Currently `generateIrisQr` is only called inside `if (match)` (`billmanager.ts:111`). Move it outside so a QR is generated from the parsed payment fields regardless of expense match — the QR is about the payment reference, not the match. Each provider's parser supplies the content fields its QR needs (§2.3); generation then runs uniformly.
+
+### 2.5 Fix: dates in UTC (C4)
+
+`parseGreekDate` in `deh.ts:18` uses `new Date(year, month-1, day)` (LOCAL time). Replace with `new Date(Date.UTC(year, month-1, day))`. Same fix in all new provider parsers. This prevents the term-landing-on-wrong-month bug on Athens summer.
+
+### 2.6 `saveMonthlyStatement` bridge (C6 — the dangerous one)
+
+When the user toggles "Χρέωση ενοικιαστών" on confirm, the server must call `saveMonthlyStatement`. But that function is a **full-term replace** — it strips ALL monthlyCharges for the term and rebuilds from what you pass.
+
+**Solution:** `saveMonthlyStatement` is an express route handler (`(req, res)`, `buildingmanager.ts:2911`) — a 400-line function with owner-settlement carry-forward, orphan reattach, `_recomputeVacantOwnerCharges`, and `_recomputeTenantsForProperty`. Cannot be refactored without risk. Cannot be called as a function.
+
+Use the same pattern as the lease-expiry cron (`leaseExpiryScanner.ts:250-280`): **internal HTTP self-call with a minted service token.**
+
+```typescript
+// In confirmBills, when chargeThisMonth is true:
+// 1. Read building's existing expense entries for the term.
+//    saveMonthlyStatement expects ONE entry per expense with the FULL amount
+//    (it recomputes per-unit splits itself). So we read `inputAmount` from
+//    any unit's monthlyCharge for that term — `inputAmount` is the landlord-typed
+//    full figure preserved across recompute (written at buildingmanager.ts:3056,
+//    the field added in commit 22316220 to stop variable amounts eroding to zero).
+//    NOTE: the entry does NOT need `allocationMethod` — the engine's entry loop
+//    (buildingmanager.ts:3010-3013) falls back to `buildingExpense.allocationMethod`
+//    (then 'equal') when the entry omits it, and applies the fixed+amount-0→equal
+//    correction (~3016) itself. So omitting it is correct, not a bug.
+// D7 FIX: the per-term strip (buildingmanager.ts:~3005-3013) is SOURCE-BLIND — it
+// pulls EVERY monthlyCharge for the term (fixed AND variable). So the rebuild set
+// must contain ALL persisted expense charges for the term, not just variable ones.
+// Filtering `e.amount === 0` would drop fixed-amount charges → they get stripped and
+// never re-added → silent data loss. Gather from the persisted monthlyCharges directly,
+// grouped by expenseId, reading inputAmount (the full pre-split figure) or amount.
+const building = await Collections.Building.findOne({_id: buildingId, realmId}).lean();
+const byExpense = new Map(); // expenseId → full amount
+for (const unit of (building.units || [])) {
+  for (const c of (unit.monthlyCharges || [])) {
+    if (c.term !== term) continue;
+    const eid = String(c.expenseId);
+    // inputAmount is the landlord-typed full figure; for fixed expenses it equals amount.
+    // We take the FIRST unit's inputAmount per expense (it's the same building-wide figure).
+    if (!byExpense.has(eid)) {
+      byExpense.set(eid, { amount: c.inputAmount || c.amount, description: c.description });
+    }
+  }
+}
+const existingEntries = [...byExpense.entries()].map(([expenseId, v]) => ({
+  expenseId, amount: v.amount, description: v.description
+}));
+// 2. Merge (add/replace) the bill's expense into the set
+const billEntry = { expenseId, amount: totalAmount, description: expenseName };
+const merged = [...existingEntries.filter(e => e.expenseId !== expenseId), billEntry];
+// 3. Internal POST — same pattern as leaseExpiryScanner (line 250-280)
+const serviceToken = await Service.getInstance().createServiceToken('administrator', realmId);
+await axios.post(`http://localhost:${API_PORT}/buildings/${buildingId}/monthly-statement`, {
+  term, expenses: merged
+}, { headers: { authorization: `Bearer ${serviceToken}`, organizationid: realmId } });
+```
+
+**Why this is correct:** `saveMonthlyStatement` strips ALL monthlyCharges for the term then rebuilds from entries (buildingmanager.ts:~3005-3013 strip, ~3056 write). Each entry carries the FULL expense amount; the engine splits per-unit via `computeBuildingChargeForProperty`. By reading `inputAmount` from the persisted charges, we recover what the landlord originally typed, not the per-unit slice. Passing the full set (existing + new bill) ensures siblings aren't clobbered.
+
+This reuses the ENTIRE allocation/owner/vacant engine (all 400 lines) without touching it. The minted service token satisfies `needAccessToken` + `checkOrganization` middleware exactly as the lease-expiry cron does. `API_PORT` from `process.env.PORT` (same env var the service listens on, `docker-compose: PORT=$API_PORT`).
+
+---
+
+## 3. Provider Templates + Versioning
+
+### Structure: `services/api/src/managers/billparser/providers/`
+
+```
+providers/
+  deh/       v2024.ts (moved from current deh.ts), index.ts
+  eydap-attikis/  v2024.ts, index.ts
+  deuaTinou/ v2024.ts, index.ts   ← the bill we tested
+  epa/       v2024.ts, index.ts
+```
+
+Each version exports `{detect(text):boolean, parse(text):ParsedBill|null}`.
+Provider `index.ts` tries newest→oldest, returns first success.
+
+`detectProvider` in `billparser/index.ts` adds markers:
+```typescript
+{ provider:'deuaTinou', patterns:[/ΔΗΜΟΣ ΤΗΝΟΥ/i, /dimostinou\.gr/i, /ΥΠΗΡΕΣΙΑ ΥΔΡΕΥΣΗΣ[\s\S]*ΤΗΝΟ/i] }
+// NOTE: the 3rd marker MUST use [\s\S]* not .* — verified against the real fixture,
+// those two tokens are on SEPARATE OCR lines (same line-break trap as the field regexes).
+// The first two markers match on their own; this is defense-in-depth.
+```
+
+**CRITICAL — OCR output is LINE-BROKEN, not "label VALUE" on one line.** Each detected text box is its own line in the OCR output. Verified against `services/api/src/__tests__/fixtures/deuaTinou-ocr-sample.txt` by the adversarial pass: the label `ΠΛΗΡΩΤΕΟ ΠΟΣΟ:` and the amount, the label `ΑΡΙΘ. ΛΟΓΑΡΙΑΣΜΟΥ` and the account number, `ΗΜ. ΛΗΞΗΣ` and the due date are ALL on separate lines (the columnar bill layout flattens into label-lines then value-lines). Single-line regexes with `\s+` or `.*?` between label and value return `undefined`. Regexes MUST cross newlines with `[\s\S]*?`.
+
+The ΔΕΥΑ Τήνου parser regexes, corrected + re-verified against the real `services/api/src/__tests__/fixtures/deuaTinou-ocr-sample.txt`:
+- Amount: `/ΠΛΗΡΩΤΕΟ ΠΟΣΟ:[\s\S]*?([\d.]+,\d{2})\s*€/` (→ `15,67`) — verified matches
+- Account: `/ΑΡΙΘ\.\s*ΛΟΓΑΡΙΑΣΜΟΥ[\s\S]*?(\d{9,})/` (→ `999000328758`) — D2 fix, crosses lines. Fragile: grabs first 9+ digit run after label.
+- Period: `/ΑΠΟ:[\s\S]*?(\d{2}\/\d{2}\/\d{4})[\s\S]*?ΕΩΣ:[\s\S]*?(\d{2}\/\d{2}\/\d{4})/` — verified
+- Due: `/ΗΜ\.\s*ΛΗΞΗΣ[\s\S]*?(\d{2}\/\d{2}\/\d{4})/` (→ `23/07/2026`) — D3 fix, was `.*?` (fails on newline)
+
+### RF code selection — by LABEL, not by checksum (D1, the money-critical fix)
+
+The bill has TWO RF codes and BOTH pass mod-97:
+- `RF43…` = ΚΩΔΙΚΟΣ ΗΛΕΚΤΡΟΝΙΚΗΣ ΠΛΗΡΩΜΗΣ (**the payment code — this is what the IRIS QR needs**)
+- `RF95…` = ΚΩΔΙΚΟΣ ΑΝΑΘΕΣΗΣ ΠΑΓΙΑΣ ΕΝΤΟΛΗΣ (standing-order mandate — WRONG for a one-off payment)
+
+**"Take the first valid checksum" returns RF95 — the wrong one — routing the payment to the standing-order mandate.** Checksum cannot disambiguate (both valid). The RF MUST be selected by its label:
+
+```typescript
+// Anchor to the RF token itself (RF + 2 check digits + up to 21 base36 chars),
+// stopping at whitespace/line boundary so it doesn't swallow the next line's digits.
+// Then pick the one that follows the ΗΛΕΚΤΡΟΝΙΚΗΣ ΠΛΗΡΩΜΗΣ label.
+const RF_TOKEN = /RF\d{2}[\dA-Z\s]{0,30}/g;   // capture with embedded spaces (OCR groups digits)
+function extractPaymentRf(text: string): string | undefined {
+  // Find the payment-code label, take the FIRST valid RF token AFTER it
+  const anchor = text.search(/ΗΛΕΚΤΡΟΝΙΚΗΣ\s*ΠΛΗΡΩΜΗΣ/);
+  const scope = anchor >= 0 ? text.slice(anchor) : text;
+  for (const m of scope.matchAll(RF_TOKEN)) {
+    const cleaned = m[0].replace(/\s/g,'');
+    if (rfValid(cleaned)) return cleaned;
+  }
+  return undefined;
+}
+```
+
+RF mod-97 checksum (tested — VALID for clean RF43, INVALID for the dropped-zero corruption):
+```typescript
+function rfValid(rf: string): boolean {
+  const s = rf.replace(/\s/g,'').toUpperCase();
+  if (!/^RF\d{2}[0-9A-Z]+$/.test(s)) return false;
+  const rearr = s.slice(4) + s.slice(0,4);
+  let num = '';
+  for (const ch of rearr) num += /[0-9]/.test(ch) ? ch : String(ch.charCodeAt(0)-55);
+  let rem = 0;
+  for (const d of num) rem = (rem*10 + Number(d)) % 97;
+  return rem === 1;
+}
+```
+Checksum's role: reject OCR-corrupted instances (dropped digit), NOT choose between two valid codes — that's the label's job.
+
+### Refactor caveat (D9)
+
+Moving `deh.ts` → `providers/deh/v2024.ts`: `billparser/index.ts:3` imports it (prod, clean), BUT `services/api/src/__tests__/billparser.test.js:1` imports `../managers/billparser/deh.js` directly (20+ call sites). The refactor MUST update that test's import path OR leave a `deh.js` re-export shim, or the regression gate breaks.
+
+---
+
+## 4. FileDropZone Changes
+
+Four edits (identified by reading `file-drop-zone.js` line-by-line):
+
+1. **`handleDrop` filter** (line 42-43): replace `.endsWith('.pdf')` with extension check against the `accept` prop.
+2. **`accept` prop default**: stays `.pdf` (other callers unaffected); BillImportDialog passes `.pdf,.jpg,.jpeg,.png,.webp`.
+3. **Label strings** (lines 113-116): parameterize with a `dropLabel` prop or check accept to show "PDF / εικόνες" instead of "PDF files."
+4. **Icon**: optionally show `LuImage` alongside `LuFileUp` when images are accepted.
+
+---
+
+## 5. Confirm/Amend Surface (the "no match" flow)
+
+### What exists today (BillImportDialog.js)
+
+- Matched bills show a read-only `ResultCard` with parsed fields + QR + optional "replace existing" toggle.
+- Unmatched bills show a static amber warning: "No matching expense found. Add a Billing ID to an expense first." **Dead end — user must leave, fix the expense, come back.**
+- The confirm button only includes matched results (`results.filter(r => r.success && r.match)`, line 170).
+
+### What changes
+
+The "no match" state becomes **actionable in-dialog**:
+
+1. **Building dropdown** (all realm buildings) — pre-selected if the parse guessed one (e.g., from address matching in the OCR text).
+2. **Expense dropdown** (expenses on the selected building) — plus "➕ Δημιουργία νέας δαπάνης."
+3. Choosing "➕" opens the **existing ExpenseFormDialog** (currently inside `ExpenseList.js:315-918`, must be extracted to its own file for reuse) pre-filled:
+   - `name`: provider display name (e.g. "ΔΕΥΑ Τήνου — Ύδρευση")
+   - `type`: mapped from provider (DEH→electricity_common, ΕΥΔΑΠ/ΔΕΥΑ→water_common, ΕΠΑ→heating)
+   - `allocationMethod`: 'equal' (default for utilities)
+   - `billingId`: the parsed account number
+   - `amount`: 0 (variable/recurring)
+   - `isRecurring`: true
+   - `chargeOwnerWhenVacant`: true (utilities)
+4. Once building+expense are chosen, the result becomes **confirmable**.
+5. **All parsed fields are editable** (amount, period, RF, dates) — so the user can fix OCR errors before confirming.
+6. **"Χρέωση ενοικιαστών" toggle** — ON: after Bill doc is written, also call `saveMonthlyStatement` (§2.6). OFF: Bill record only (tracking).
+7. **Inline assertions** (§3 assertions) appear as colored badges on the ResultCard.
+
+### Extract ExpenseFormDialog (refactor — NOT friction-free, D13)
+
+Move `ExpenseFormDialog` into `components/buildings/ExpenseFormDialog.js`. `ExpenseList` imports it back. The add-vs-edit branch is `if (expense?._id) updateMutation else addMutation` at **`ExpenseList.js:582`** (D12 — not line ~920; 920 is the `ExpenseList` default export). A synthetic `expense` object WITHOUT `_id` → add mode → `addBuildingExpense`. Confirmed correct.
+
+**D13 — scope the move carefully:** the module-level constants `expenseTypes` (`ExpenseList.js:172`), `allocationMethods` (:186), `ALLOCATION_DESCRIPTIONS` (:198) are ALSO used by `ExpenseList`'s own table render (:1068/:1081/:1088). Moving them out WITH the dialog breaks the table. Keep them in a shared module (or in ExpenseList, imported by the dialog) — move only dialog-exclusive helpers. Guard the whole refactor with a jest/RTL smoke + a manual screenshot; it is NOT zero-risk.
+
+---
+
+## 6. Telegram Inbox + Notification Bell
+
+### 6.1 Inbound poller — `services/api/src/jobs/telegramInboxScanner.ts`
+
+Shares the STRUCTURAL pattern of `leaseExpiryScanner.ts` (interval + `.unref()` + re-entrancy guard + `start/stop` exports wired in `index.ts:34`), but NOT its cadence:
+- **D10:** `setInterval(60_000)` — 60s, NOT the scanner's hourly tick, and it must NOT copy the scanner's once-per-UTC-day short-circuit (`leaseExpiryScanner.ts:508`), which would poll once per day and defeat the inbox.
+- `startTelegramInboxCron()` exported, wired in `index.ts` alongside `startLeaseExpiryCron()`.
+- Reads `realm.thirdParties.telegram.botToken` via `Crypto.decrypt` from `@microrealestate/common` (confirmed exported + importable in api; emailer already uses it in `telegram.ts:1,18`).
+- `getUpdates?offset=<last+1>&allowed_updates=["message"]` — offset persisted in a `TelegramOffset` collection (single doc per realm).
+- For each `document`/`photo` message:
+  - Download file via `getFile` → `https://api.telegram.org/file/bot{token}/{path}`.
+  - Route to the extract-parse-assert pipeline (§2.2 + §3).
+  - Write an `InboxItem` doc (see below).
+- Maps `message.chat.id` → realm's `adminChatId` to determine which realm owns the message.
+- Single-replica assumption documented (api has no `replicas:` in prod compose).
+
+**D8 — new collections need full registration (not just a schema shape):**
+Both `TelegramOffset` and `InboxItem` must follow the codebase convention:
+1. Create `services/common/src/collections/telegramOffset.ts` + `inboxItem.ts`, each ending `export default mongoose.model<CollectionTypes.X>('X', Schema)` (cf. `bill.ts:45`).
+2. Export both from `services/common/src/collections/index.ts` (one export line each, cf. lines 3-12).
+3. Add `CollectionTypes.TelegramOffset` + `CollectionTypes.InboxItem` to `types/src/common/collections.ts`.
+
+### 6.2 InboxItem collection
+
+```typescript
+{
+  realmId: String,
+  source: { type: String, enum: ['telegram', 'upload'] },
+  status: { type: String, enum: ['pending', 'confirmed', 'dismissed'], default: 'pending' },
+  parsed: {
+    provider, billingId, totalAmount, periodStart, periodEnd,
+    issueDate, dueDate, rfCode, paymentCode, ocrText
+  },
+  suggestedMatch: { buildingId, buildingName, expenseId, expenseName } | null,
+  warnings: [{ level, code, message }],
+  ocrConfidence: Number,
+  sourceFileName: String,
+  telegramMessageId: Number,
+  telegramFileId: String,
+  irisCodeBase64: String,
+  createdDate: Date,   // convention: createdDate/updatedDate + manual new Date() — matches all 11 collections (bill.ts:33-34); NOT createdAt/Date.now (zero precedent in codebase)
+  updatedDate: Date
+}
+```
+Set `createdDate: new Date()` explicitly on insert (the codebase pattern — no schema `default`).
+Index: `{realmId, status}`. **D11 — TTL:** a native Mongo TTL index expires ALL docs regardless of status, so "30d on pending only" requires a `partialFilterExpression`. This would be the codebase's FIRST TTL index (grep: no `expireAfterSeconds`/`expires` precedent):
+```typescript
+InboxItemSchema.index({ createdDate: 1 }, {
+  expireAfterSeconds: 2592000,             // 30d
+  partialFilterExpression: { status: 'pending' }
+});
+```
+
+### 6.3 Inbox API routes
+
+- `GET /inbox` — returns pending InboxItems for the realm.
+- `POST /inbox/:id/confirm` — body: `{buildingId, expenseId, [amended fields], chargeThisMonth}`. Creates Bill + optionally `saveMonthlyStatement` → deletes InboxItem.
+- `POST /inbox/:id/dismiss` — deletes the InboxItem.
+- Add `INBOX: 'inbox'` to `QueryKeys`.
+
+### 6.4 Notification bell — `components/InboxBell.js` in Layout.js
+
+- Location: `Layout.js:38`, the `flex items-center` row, left of `<OrganizationMenu/>`.
+- `useQuery([QueryKeys.INBOX], fetchInbox, {refetchInterval: 60_000})` — matches poller cadence.
+- Bell icon + badge count (hidden at 0). Click → Popover.
+- Popover shows the same confirm/amend surface as §5 — one card per InboxItem. Confirm/dismiss removes the card (exit animation); invalidates `[INBOX]`+`[DASHBOARD]`+`[BUILDINGS]`+`[RENTS]`.
+
+---
+
+## 7. Assertions — `billparser/assertions.ts`
+
+Returns `[{level:'block'|'warn', code, message}]`:
+- `block` — RF mod-97 checksum INVALID (OCR digit slip — cannot generate correct QR).
+- `warn` — duplicate `{expenseId, term}` (existing Bill doc found). NOTE: this is a PRE-confirm warning only; the hard guard already exists — `confirmBills` returns 409 on the `{realmId,buildingId,expenseId,term}` unique index (billmanager.ts:340) and the parse step already surfaces `existingAmount` (billmanager.ts:132,160). The assertion just surfaces it earlier with a replace toggle; do NOT reimplement the block.
+- `warn` — due date in past ("Εκπρόθεσμος").
+- `warn` — amount > 2× or < 0.3× mean of last 4 Bills for same expense.
+- `warn` — period gap/overlap vs previous Bill for same expense.
+- `warn` — bill period maps to a past frozen rent term (charging rewrites history).
+- `warn` — expense soft-deleted (`endTerm < currentTerm`).
+
+---
+
+## 8. B2 Upload on Confirm
+
+**CORRECTION — the "reuse pdfgenerator's upload endpoint" idea does NOT work; that endpoint does not exist.** Verified:
+- `pdfgenerator`'s `uploadFile(b2Config, {file:{path}, fileName, url})` (`s3.ts:42`) is an INTERNAL function taking a **disk path**, called only inside pdfgenerator's own PDF-generation flow. There is NO generic "POST a file → B2" HTTP route.
+- The only api→pdfgenerator calls today are `DELETE /documents/:ids` (`occupantmanager.ts:1773`) and `/documents/reconcile-storage` — neither uploads a caller-supplied file. api never POSTs a file to pdfgenerator.
+
+So the bill source (a multer buffer in api's memory) cannot be handed to pdfgenerator for B2 upload without new plumbing. **Two real options:**
+- **(A) api uploads to B2 directly.** api already has `CIPHER_KEY`/`CIPHER_IV_KEY` (compose env) and reads `realm.thirdParties`, so it can decrypt the B2 creds and use the AWS SDK (already a dep tree member via other services) to `putObject` itself. Self-contained, no new pdfgenerator route.
+- **(B) add a new upload route to pdfgenerator** (`POST /documents/upload`, multer → `uploadFile`) and have api forward the buffer. More moving parts + an HTTP hop.
+
+DECISION: **(A)** — api uploads directly (fewer parts, no cross-service file transfer). On confirm, if `realm.thirdParties.b2?.selected`: upload source + QR PNG → set Bill's `pdfUrl`/`irisCodeUrl` to B2 URLs, clear inline `irisCodeBase64`. Else keep the current inline data-URI behavior (graceful, not a gate). **UNVERIFIED:** that the AWS SDK is reachable from api's dependency tree — confirm before building Slice 5 (api's `package.json` may need `aws-sdk` added, like pdfgenerator has it).
+
+---
+
+## 9. Testing (per CLAUDE.md "nothing is done until Playwright drives it on NAS")
+
+### Existing tests that must stay green (regression gate)
+- `billparser.test.js` (DEH unit, string fixtures)
+- `billparser-integration.test.js` (real PDF, skip-if-absent)
+- `buildingCharges*.test.js`, `expenseBreakdown.test.js` (allocation engine)
+- E2E: `48_building_expense_panel`, `50_owner_expenses_paid_tile`, `01_expense_edit`
+
+### New tests per slice
+
+**Slice 1 (image import + OCR):**
+- UNIT: each provider parser with real OCR text fixtures + UTC date assertions.
+- UNIT: RF mod-97 validator (valid + corrupted table).
+- INTEGRATION: image buffer → parseBillPdf → correct fields (with `ocrImage` stubbed to return captured OCR text, so the parser is tested without running WASM).
+- INTEGRATION: `ocrImage(buffer)` in-process (real image → real WASM inference → correct text).
+- E2E `62_bill_import_image.spec.ts`: upload real CamScanner image → ResultCard renders correct Greek fields.
+
+**Slice 2 (no-match + charge bridge):**
+- UNIT (CRITICAL C6): seed building with 2 existing variable charges, bridge a 3rd, assert ALL THREE in emitted payload.
+- INTEGRATION: confirm-with-charge → Bill doc + monthlyCharges written + term UTC-correct.
+- E2E `63_bill_confirm_creates_expense.spec.ts`: "no match" → pick building → "➕ Νέα δαπάνη" → verify pre-fill → confirm with charge → assert breakdown reflects the share.
+- E2E regression: confirm SECOND bill same term → first charge still present.
+
+**Slice 3 (providers):** per-provider unit from real OCR fixtures.
+
+**Slice 4 (Telegram inbox + bell):**
+- UNIT: `getUpdates` offset advance + routing logic with mocked Telegram API.
+- INTEGRATION: `GET /inbox`, `POST /inbox/:id/confirm`, `POST /inbox/:id/dismiss`.
+- E2E `64_inbox_bell.spec.ts`: seed InboxItem via mongoExec → bell badge shows '1' → confirm → badge disappears.
+- DOCUMENTED SEAM: real Telegram inbound manually verified once, not in automated suite.
+
+**Slice 5 (B2):** integration test with mocked S3 → `pdfUrl`/`irisCodeUrl` populated.
+
+### Pre-merge gate (every slice)
+1. Full jest green (node@20, ~644+ passed, 0 failed).
+2. `yarn workspace landlord build` (catches import errors dev-mode misses).
+3. Deploy to NAS, verify container revision via Portainer.
+4. New specs + shared expense specs green on live NAS.
+5. Manual Greek spot-check (`/landlord/el/`).
+
+---
+
+## 10. UI Approval Gate (steering Rule 6)
+
+> "ALWAYS show the proposed change as an ASCII or HTML render BEFORE writing code."
+> "Build it then show a screenshot" is the banned anti-pattern.
+
+Surfaces requiring approved mocks before code:
+
+| # | Surface | File(s) |
+|---|---------|---------|
+| U1 | FileDropZone updated labels + image accept | `file-drop-zone.js` |
+| U2 | ResultCard "no match" state (building/expense dropdowns, "➕ Νέα δαπάνη", editable fields, charge toggle, assertion badges) | `BillImportDialog.js` |
+| U3 | ExpenseFormDialog pre-filled from OCR (reused component, new context) | extracted `ExpenseFormDialog.js` |
+| U4 | Notification bell + badge in top bar | `Layout.js` + new `InboxBell.js` |
+| U5 | Bell popover (InboxItem cards, confirm/dismiss, disappear animation) | `InboxBell.js` |
+
+Process: ASCII/HTML mock → your approval → code the approved version → tests → Greek UI review fan-out.
+
+---
+
+## 11. Sequencing (independently shippable slices)
+
+1. **Slice 1: Image import + OCR** — api in-process OCR (paddleocr+WASM), api accepts images (new multer), FileDropZone accepts images, `hasAnyBillingId` precheck removed. Ship → you can drop a photo into "Εισαγωγή Λογαριασμού" and it parses.
+2. **Slice 2: No-match flow + charge bridge** — confirm/amend surface, ExpenseFormDialog extraction, `saveMonthlyStatement` bridge.
+3. **Slice 3: Providers** — ΔΕΥΑ Τήνου (have text), ΕΥΔΑΠ Αττικής (need sample), ΕΠΑ (need sample).
+4. **Slice 4: Telegram inbox + bell** — poller, InboxItem, bell UI.
+5. **Slice 5: B2 archival** — upload source + QR on confirm.
+
+---
+
+## 12. Fine-tuning (req #12) — honest answer
+
+PP-OCR ONNX models are inference-only. Fine-tuning requires PaddlePaddle training framework + labeled data + GPU. Not a runtime feature.
+
+**Practical substitute:** log every amendment `{provider, field, ocrValue, correctedValue}`. Three uses:
+1. Per-provider correction map (deterministic string fixes applied before showing user).
+2. Confidence gating: highlight fields with low confidence for mandatory eyeball.
+3. If ≥100 corrections accumulate for a field type, that's the training dataset for offline fine-tuning later.
+
+---
+
+## 13. Resolved decisions (from code)
+
+1. **Provider→type map** — matches the `BuildingExpenseSchema.type` enum (`building.ts:96`):
+   - DEH → `electricity_common`
+   - ΕΥΔΑΠ / ΔΕΥΑ → `water_common`
+   - ΕΠΑ → `heating`
+2. **`chargeOwnerWhenVacant` pre-fill** — `true` for utility types (electricity, water, heating). Schema default is `false` (`building.ts:143`), but a vacant unit's common utilities logically route to the owner. The toggle is visible in the confirm dialog — user overrides if wrong.
+3. **Past/frozen term** — **warn-and-allow.** `saveMonthlyStatement` accepts any term 2020–2099 (`buildingmanager.ts:2916`); the engine already preserves frozen+occupied tenant charges internally (`buildingmanager.ts:4643-4652`). The assertion shows "Εκπρόθεσμο" but does not block confirm.
+4. **Realm routing** — single-realm. One bot token, one `ADMIN_CHAT_ID` in `.secrets/`. Poller maps `message.chat.id === adminChatId` → that realm. No multi-realm problem exists.
+
+## 14. Remaining blocker
+
+Sample bills needed for providers #2 and #3 (ΕΥΔΑΠ Αττικής + ΕΠΑ) — parsers are written against real OCR text, not invented regexes. ΔΕΥΑ Τήνου is done (tested). Send to the bot or drop a file path.

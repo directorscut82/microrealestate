@@ -72,18 +72,11 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     throw new ServiceError('Δεν βρέθηκαν αρχεία PDF', 422);
   }
 
-  // Precheck: at least one expense across all buildings has a billingId
-  const buildings = await Collections.Building.find({ realmId }).lean();
-  const hasAnyBillingId = buildings.some((b: any) =>
-    (b.expenses || []).some((e: any) => e.billingId)
-  );
-  if (!hasAnyBillingId) {
-    throw new ServiceError(
-      'Δεν υπάρχει δαπάνη με αναγνωριστικό λογαριασμού. Προσθέστε αναγνωριστικό σε τουλάχιστον μία δαπάνη.',
-      422
-    );
-  }
-
+  // NOTE: the old "at least one expense in the realm has a billingId" precheck
+  // was removed (§2.1b) — with the new "no match → create expense from OCR"
+  // flow, a fresh building with zero billingIds must still be parseable.
+  // findExpenseByBillingId returns null gracefully when nothing matches; the
+  // UI handles that case instead of the parse being blocked up-front.
   const results = [];
 
   for (const file of files) {
@@ -106,17 +99,18 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       bill.billingIdNormalized
     );
 
-    // Generate IRIS QR from RF code + payment code (verified approach)
+    // Generate IRIS QR from RF code + payment code (verified approach).
+    // C2 fix: generate regardless of match — the QR is about the bill's
+    // payment reference, not the expense match. For providers without a
+    // paymentCode (e.g. ΔΕΥΑ Τήνου), generateIrisQr returns null gracefully.
     let irisCodeBase64: string | undefined;
-    if (match) {
-      try {
-        const qrBuffer = await generateIrisQr(bill.rfCode, bill.paymentCode);
-        if (qrBuffer) {
-          irisCodeBase64 = qrBuffer.toString('base64');
-        }
-      } catch (e) {
-        logger.debug(`QR generation failed for ${file.originalname}: ${e}`);
+    try {
+      const qrBuffer = await generateIrisQr(bill.rfCode, bill.paymentCode);
+      if (qrBuffer) {
+        irisCodeBase64 = qrBuffer.toString('base64');
       }
+    } catch (e) {
+      logger.debug(`QR generation failed for ${file.originalname}: ${e}`);
     }
 
     // Check for existing bill in same term+expense
@@ -146,6 +140,7 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         issueDate: bill.issueDate,
         dueDate: bill.dueDate,
         rfCode: bill.rfCode,
+        paymentCode: bill.paymentCode, // C1 fix: was omitted, confirm stores null
         irisCodeBase64,
         proposedTerm: computeDefaultTerm(bill.periodEnd)
       },

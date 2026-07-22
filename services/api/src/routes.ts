@@ -432,14 +432,56 @@ export default function routes(): express.Router {
   router.use('/owners', ownersRouter);
 
   // Bills
+  // Bill-specific multer: accepts PDF + images (separate from the E9/AADE
+  // `upload` instance which must stay PDF-only). 6MB per file is generous for
+  // phone photos (the tested bill was 212KB) while keeping the batch buffer
+  // stack bounded (20 × 6MB = 120MB worst-case on top of OCR's ~273MB peak).
+  const uploadBill = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 6 * 1024 * 1024 },
+    fileFilter: (_req: any, file: any, cb: any) => {
+      const allowed = [
+        'application/pdf',
+        'image/jpeg',
+        'image/png',
+        'image/webp'
+      ];
+      if (allowed.includes(file.mimetype)) cb(null, true);
+      else
+        cb(new ServiceError('Only PDF or image files allowed', 422));
+    }
+  });
+
+  function verifyBillContent(req: any, _res: any, next: any) {
+    const files = req.file ? [req.file] : req.files || [];
+    for (const file of files) {
+      const h = file.buffer.subarray(0, 12);
+      const isPdf = h.toString('ascii', 0, 4) === '%PDF';
+      const isJpeg = h[0] === 0xff && h[1] === 0xd8;
+      const isPng = h[0] === 0x89 && h.toString('ascii', 1, 4) === 'PNG';
+      const isWebp =
+        h.toString('ascii', 0, 4) === 'RIFF' &&
+        h.toString('ascii', 8, 12) === 'WEBP';
+      if (!isPdf && !isJpeg && !isPng && !isWebp) {
+        return next(
+          new ServiceError(
+            `Invalid file content: ${file.originalname || 'unknown'}`,
+            422
+          )
+        );
+      }
+    }
+    return next();
+  }
+
   const billsRouter = express.Router();
   billsRouter.get('/', Middlewares.asyncWrapper(billManager.list as any));
   billsRouter.get('/:id', Middlewares.asyncWrapper(billManager.one as any));
   billsRouter.post(
     '/parse',
     uploadRateLimit,
-    upload.array('bills', 5) as any,
-    verifyPdfContent,
+    uploadBill.array('bills', 20) as any,
+    verifyBillContent,
     Middlewares.asyncWrapper(billManager.parseBills as any)
   );
   billsRouter.post(

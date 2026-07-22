@@ -11,11 +11,13 @@ function parseGreekAmount(raw: string): number | null {
 }
 
 function parseGreekDate(raw: string): Date | null {
-  // DD/MM/YYYY format
+  // DD/MM/YYYY format — MUST use UTC to avoid the timezone bug (C4):
+  // Athens summer (UTC+3) + local Date → periodEnd 01/08 becomes July 31 21:00Z
+  // → computeDefaultTerm (which reads getUTCMonth) maps it to the WRONG month.
   const match = raw.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (!match) return null;
   const [, day, month, year] = match;
-  return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+  return new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
 }
 
 export function parseDehBill(text: string): BillParseResult {

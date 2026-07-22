@@ -9,7 +9,8 @@ export default function FileDropZone({
   files = [],
   onFilesChange,
   disabled = false,
-  description
+  description,
+  dropLabel
 }) {
   const { t } = useTranslation('common');
   const inputRef = useRef(null);
@@ -39,8 +40,15 @@ export default function FileDropZone({
       setIsDragging(false);
       if (disabled) return;
 
+      // Honor the `accept` prop's extension list instead of hardcoding .pdf,
+      // so callers that accept images (e.g. bill import) aren't silently
+      // filtered down to PDFs on drag-and-drop.
+      const acceptedExts = accept
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.startsWith('.'));
       const droppedFiles = Array.from(e.dataTransfer.files).filter((f) =>
-        f.name.toLowerCase().endsWith('.pdf')
+        acceptedExts.some((ext) => f.name.toLowerCase().endsWith(ext))
       );
       if (droppedFiles.length === 0) return;
 
@@ -50,7 +58,7 @@ export default function FileDropZone({
         onFilesChange([droppedFiles[0]]);
       }
     },
-    [disabled, files, multiple, onFilesChange]
+    [accept, disabled, files, multiple, onFilesChange]
   );
 
   const handleClick = useCallback(() => {
@@ -110,9 +118,11 @@ export default function FileDropZone({
           <LuFileUp className="size-10 text-muted-foreground" />
           <div className="space-y-1">
             <p className="text-sm font-medium">
-              {multiple
-                ? t('Drop PDF files here or click to browse')
-                : t('Drop a PDF file here or click to browse')}
+              {dropLabel
+                ? dropLabel
+                : multiple
+                  ? t('Drop PDF files here or click to browse')
+                  : t('Drop a PDF file here or click to browse')}
             </p>
             {description && (
               <p className="text-xs text-muted-foreground">{description}</p>

@@ -237,11 +237,15 @@ export default function BillImportDialog({ open, setOpen, building }) {
           {(state === 'idle' || state === 'loading') && (
             <FileDropZone
               multiple
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
               files={files}
               onFilesChange={setFiles}
               disabled={isLoading}
+              dropLabel={t(
+                'Drop PDF or photos here or click to browse'
+              )}
               description={t(
-                'Upload utility bill PDFs (DEH). Bills are matched to expenses by Billing ID.'
+                'Up to 20 files — PDF, JPG, PNG or WEBP (DEH, EYDAP, DEYA bills, scanned or photographed)'
               )}
             />
           )}

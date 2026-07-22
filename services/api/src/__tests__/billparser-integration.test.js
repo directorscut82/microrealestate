@@ -46,16 +46,16 @@ describeIfPdf('DEH Bill Parser - Real PDF Integration', () => {
   });
 
   it('should extract period: 25/02/2026 - 23/03/2026', () => {
-    expect(result.bill.periodStart).toEqual(new Date(2026, 1, 25));
-    expect(result.bill.periodEnd).toEqual(new Date(2026, 2, 23));
+    expect(result.bill.periodStart).toEqual(new Date(Date.UTC(2026, 1, 25)));
+    expect(result.bill.periodEnd).toEqual(new Date(Date.UTC(2026, 2, 23)));
   });
 
   it('should extract issue date: 27/03/2026', () => {
-    expect(result.bill.issueDate).toEqual(new Date(2026, 2, 27));
+    expect(result.bill.issueDate).toEqual(new Date(Date.UTC(2026, 2, 27)));
   });
 
   it('should extract due date: 22/04/2026', () => {
-    expect(result.bill.dueDate).toEqual(new Date(2026, 3, 22));
+    expect(result.bill.dueDate).toEqual(new Date(Date.UTC(2026, 3, 22)));
   });
 
   it('should extract RF code', () => {

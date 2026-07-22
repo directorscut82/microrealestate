@@ -1354,5 +1354,7 @@
   "Has outstanding": "Με οφειλή",
   "Error fetching owners": "Σφάλμα φόρτωσης ιδιοκτητών",
   "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "Βρέθηκαν {{count}} αρχεία στο cloud που δεν αντιστοιχούν πλέον σε έγγραφα (δείτε τα στα Έγγραφα· δεν διαγράφηκε τίποτα)",
-  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} έγγραφα αναφέρονται σε αρχεία που δεν υπάρχουν πλέον στο cloud"
+  "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} έγγραφα αναφέρονται σε αρχεία που δεν υπάρχουν πλέον στο cloud",
+  "Drop PDF or photos here or click to browse": "Σύρετε PDF ή φωτογραφίες εδώ ή κάντε κλικ για επιλογή",
+  "Up to 20 files — PDF, JPG, PNG or WEBP (DEH, EYDAP, DEYA bills, scanned or photographed)": "Έως 20 αρχεία — PDF, JPG, PNG ή WEBP (λογαριασμοί ΔΕΗ, ΕΥΔΑΠ, ΔΕΥΑ, σκαναρισμένοι ή φωτογραφημένοι)"
 }
