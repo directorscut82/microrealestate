@@ -128,4 +128,53 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
     const entries = buildStatementEntries({ units: [] }, 'solo', 42, 'Solo', TERM);
     expect(entries).toEqual([{ expenseId: 'solo', amount: 42, description: 'Solo' }]);
   });
+
+  // H1 — repair charges carry repairId + expenseId=null; they must be SKIPPED,
+  // never echoed as {expenseId:'null'} (which 422s saveMonthlyStatement).
+  it('H1: skips repair charges (expenseId null / repairId set)', () => {
+    const b = {
+      units: [
+        {
+          propertyId: 'p1',
+          monthlyCharges: [
+            { expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 },
+            { expenseId: null, repairId: 'r1', term: TERM, amount: 70, description: 'Επισκευή' }
+          ]
+        }
+      ]
+    };
+    const entries = buildStatementEntries(b, 'power', 35, 'Ρεύμα', TERM);
+    const ids = entries.map((e) => e.expenseId).sort();
+    expect(ids).toEqual(['power', 'water']); // repair (null/repairId) excluded
+    expect(entries.find((e) => e.expenseId === null)).toBeUndefined();
+    expect(entries.find((e) => e.expenseId === 'null')).toBeUndefined();
+  });
+
+  // M1 — a legacy sibling with NO inputAmount, materialised per-unit across N
+  // units, must reconstruct the FULL figure by summing shares — not fall back to
+  // one unit's per-unit slice (which would halve a 2-unit statement).
+  it('M1: legacy null-inputAmount sibling reconstructs full amount by summing shares', () => {
+    const b = {
+      units: [
+        { propertyId: 'p1', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25 }] },
+        { propertyId: 'p2', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25 }] }
+      ]
+    };
+    const entries = buildStatementEntries(b, 'power', 35, 'Ρεύμα', TERM);
+    const water = entries.find((e) => e.expenseId === 'water');
+    expect(water.amount).toBe(50); // 25+25 summed — NOT 25 (single-unit slice)
+  });
+
+  // M1 — inputAmount, when present, wins over the share-sum (the landlord-typed
+  // full figure is authoritative; don't double via summing per-unit rows).
+  it('M1: inputAmount wins over share-sum when present', () => {
+    const b = {
+      units: [
+        { propertyId: 'p1', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 }] },
+        { propertyId: 'p2', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 }] }
+      ]
+    };
+    const entries = buildStatementEntries(b, 'power', 35, 'Ρεύμα', TERM);
+    expect(entries.find((e) => e.expenseId === 'water').amount).toBe(50); // inputAmount, not 100
+  });
 });

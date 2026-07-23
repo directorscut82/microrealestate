@@ -39,8 +39,11 @@ const PROVIDER_TYPE = {
   epa: 'heating'
 };
 
-// A key that survives across the parse-result list (filename is unique per upload).
-const keyOf = (result) => result.filename;
+// H4: key per-result state by a stable synthetic uid, NOT filename. Two uploaded
+// files can share a name (the server keeps both), and a filename key made their
+// cards collide onto one state entry — assigning one drove the other, routing
+// both bills to the same expense. `_uid` is stamped on each result at parse time.
+const keyOf = (result) => result._uid;
 
 function ResultCard({
   result,
@@ -264,7 +267,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
   // Per-result manual assignment for unmatched bills: {filename: {buildingId, expenseId}}
   const [assignments, setAssignments] = useState({});
   // Inline "create expense" flow: which result triggered it + which building.
-  const [createFor, setCreateFor] = useState(null); // {filename, building} | null
+  const [createFor, setCreateFor] = useState(null); // {uid, building} | null
 
   // All realm buildings — a parsed bill may match a DIFFERENT building than the
   // one being viewed, and the no-match dropdown lists them all (§2.1c).
@@ -296,7 +299,10 @@ export default function BillImportDialog({ open, setOpen, building }) {
 
     try {
       const data = await parseBillPdfs(files);
-      setResults(data);
+      // H4: stamp a stable per-result uid so state maps don't collide on filename.
+      setResults(
+        (data || []).map((r, i) => ({ ...r, _uid: `${i}:${r.filename}` }))
+      );
       setState('preview');
     } catch (error) {
       console.error('Bill parse error:', error);
@@ -305,29 +311,29 @@ export default function BillImportDialog({ open, setOpen, building }) {
     }
   }, [files, t]);
 
-  const assignBuilding = useCallback((filename, buildingId) => {
+  const assignBuilding = useCallback((uid, buildingId) => {
     // changing the building clears any stale expense selection
     setAssignments((prev) => ({
       ...prev,
-      [filename]: { buildingId, expenseId: '' }
+      [uid]: { buildingId, expenseId: '' }
     }));
   }, []);
 
-  const assignExpense = useCallback((filename, expenseId) => {
+  const assignExpense = useCallback((uid, expenseId) => {
     setAssignments((prev) => ({
       ...prev,
-      [filename]: { ...(prev[filename] || {}), expenseId }
+      [uid]: { ...(prev[uid] || {}), expenseId }
     }));
   }, []);
 
-  const handleCreateExpense = useCallback((filename, selectedBuilding) => {
-    setCreateFor({ filename, building: selectedBuilding });
+  const handleCreateExpense = useCallback((uid, selectedBuilding) => {
+    setCreateFor({ uid, building: selectedBuilding });
   }, []);
 
   // The pre-filled synthetic expense (NO _id → add mode in ExpenseFormDialog).
   const createPrefill = useMemo(() => {
     if (!createFor) return null;
-    const result = results.find((r) => r.filename === createFor.filename);
+    const result = results.find((r) => r._uid === createFor.uid);
     const parsed = result?.parsed;
     return {
       name: parsed?.provider ? parsed.provider.toUpperCase() : '',
@@ -345,9 +351,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
   const handleExpenseCreated = useCallback(
     (updatedBuilding) => {
       if (!createFor || !updatedBuilding) return;
-      const parsed = results.find(
-        (r) => r.filename === createFor.filename
-      )?.parsed;
+      const parsed = results.find((r) => r._uid === createFor.uid)?.parsed;
       const expenses = updatedBuilding.expenses || [];
       const created =
         expenses.find(
@@ -360,7 +364,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       if (created) {
         setAssignments((prev) => ({
           ...prev,
-          [createFor.filename]: {
+          [createFor.uid]: {
             buildingId: String(updatedBuilding._id),
             expenseId: String(created._id)
           }
@@ -382,7 +386,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
           expenseId: result.match.expenseId
         };
       }
-      const a = assignments[result.filename];
+      const a = assignments[result._uid];
       return a?.buildingId && a?.expenseId ? a : null;
     },
     [assignments]
@@ -422,24 +426,50 @@ export default function BillImportDialog({ open, setOpen, building }) {
           rfCode: r.parsed.rfCode,
           paymentCode: r.parsed.paymentCode,
           irisCodeBase64: r.parsed.irisCodeBase64,
-          replaceExisting: !!replaceFlags[r.filename],
-          chargeThisMonth: !!chargeFlags[r.filename],
+          replaceExisting: !!replaceFlags[r._uid],
+          chargeThisMonth: !!chargeFlags[r._uid],
           expenseName
         };
       });
 
-      await confirmBills(billsToConfirm);
+      const savedBills = await confirmBills(billsToConfirm);
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
       queryClient.invalidateQueries({
         queryKey: [QueryKeys.BUILDINGS, building?._id]
       });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
-      toast.success(
-        t('{{count}} bill(s) imported successfully', {
-          count: billsToConfirm.length
-        })
-      );
+      // M3: any bill that also CHARGED tenants went through the same
+      // saveMonthlyStatement write as BuildingExpensePanel — mirror its full
+      // invalidation set so rent/owner/breakdown surfaces don't show stale
+      // figures until a manual refetch.
+      const anyCharged = billsToConfirm.some((b) => b.chargeThisMonth);
+      if (anyCharged) {
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
+        queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
+        queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+      }
+      // H2: a bill can be SAVED yet fail to charge (bridge error). The server
+      // flags those with chargeError — surface it instead of a blanket success.
+      const chargeFailures = Array.isArray(savedBills)
+        ? savedBills.filter((b) => b && b.chargeError)
+        : [];
+      if (chargeFailures.length > 0) {
+        toast.warning(
+          t(
+            '{{saved}} bill(s) saved, but {{failed}} could not charge tenants — charge them from the building statement',
+            { saved: billsToConfirm.length, failed: chargeFailures.length }
+          )
+        );
+      } else {
+        toast.success(
+          t('{{count}} bill(s) imported successfully', {
+            count: billsToConfirm.length
+          })
+        );
+      }
       handleClose();
     } catch (error) {
       console.error('Bill confirm error:', error);
@@ -458,17 +488,17 @@ export default function BillImportDialog({ open, setOpen, building }) {
     t
   ]);
 
-  const handleToggleReplace = useCallback((filename) => {
+  const handleToggleReplace = useCallback((uid) => {
     setReplaceFlags((prev) => ({
       ...prev,
-      [filename]: !prev[filename]
+      [uid]: !prev[uid]
     }));
   }, []);
 
-  const handleToggleCharge = useCallback((filename) => {
+  const handleToggleCharge = useCallback((uid) => {
     setChargeFlags((prev) => ({
       ...prev,
-      [filename]: !prev[filename]
+      [uid]: !prev[uid]
     }));
   }, []);
 
@@ -527,12 +557,12 @@ export default function BillImportDialog({ open, setOpen, building }) {
                   )}
                 </div>
 
-                {results.map((result, idx) => (
+                {results.map((result) => (
                   <ResultCard
-                    key={idx}
+                    key={result._uid}
                     result={result}
                     buildings={buildings}
-                    assignment={assignments[result.filename]}
+                    assignment={assignments[result._uid]}
                     onAssignBuilding={assignBuilding}
                     onAssignExpense={assignExpense}
                     onCreateExpense={handleCreateExpense}

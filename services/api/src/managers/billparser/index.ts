@@ -31,6 +31,11 @@ function detectProvider(text: string): Provider | null {
   return null;
 }
 
+// Page separator injected between PDF pages. Also stripped before the
+// scanned-PDF emptiness check (H3) so a multi-page image-only PDF isn't judged
+// "has text" purely because of N separators (~15 non-space chars each).
+export const PAGE_BREAK = '\n--- PAGE BREAK ---\n';
+
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   try {
     const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -41,8 +46,7 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
       fullText +=
-        content.items.map((item: any) => item.str).join(' ') +
-        '\n--- PAGE BREAK ---\n';
+        content.items.map((item: any) => item.str).join(' ') + PAGE_BREAK;
     }
     return fullText;
   } catch (err: any) {
@@ -94,14 +98,21 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
     // is exactly how many bills arrive). Rasterize each page to an image via
     // pdfium (pure WASM) and OCR every page, joining with the same PAGE BREAK
     // separator the digital multi-page path uses.
-    if (text.replace(/\s/g, '').length < 50) {
+    // H3: measure REAL text — strip the injected PAGE BREAK separators first, or
+    // an N-page image-only PDF reads as ~15N non-space chars of separator and
+    // wrongly skips OCR (a 4+-page scan cleared the old 50-char gate).
+    const realTextLen = text
+      .split(PAGE_BREAK)
+      .join('')
+      .replace(/\s/g, '').length;
+    if (realTextLen < 50) {
       const { rasterizePdfToImages, ocrImage } = await import('./ocr.js');
       const pages = await rasterizePdfToImages(buffer);
       const pageTexts: string[] = [];
       for (const png of pages) {
         pageTexts.push(await ocrImage(png));
       }
-      text = pageTexts.join('\n--- PAGE BREAK ---\n');
+      text = pageTexts.join(PAGE_BREAK);
     }
   } else {
     // Image file (JPEG/PNG/WEBP) — OCR in-process via paddleocr + WASM.

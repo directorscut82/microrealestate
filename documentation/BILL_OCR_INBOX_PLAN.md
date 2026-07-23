@@ -641,6 +641,38 @@ Process: ASCII/HTML mock → your approval → code the approved version → tes
 
 ---
 
+## 14b. DISCOVERED PRE-EXISTING BUG (out of this branch's scope) — saveMonthlyStatement clobbers repair charges
+
+Status: **CONFIRMED end-to-end with a REAL occupied tenancy + REAL API repair. Pre-existing;
+reproduces via the normal `/monthly-statement` endpoint with zero bill-OCR involvement.**
+
+CODE FACT: `saveMonthlyStatement`'s per-term strip (buildingmanager.ts:2997) is source-blind
+— `unit.monthlyCharges.filter(c => c.term === term)` pulls EVERY charge for the term, and
+repair tenant-shares ARE written to `unit.monthlyCharges` as `{term, repairId}` (:5700). The
+save tail re-fires `_recomputeVacantOwnerCharges` + `_recomputeTenantsForProperty` but NOT
+`redistributeRepairsForProperties`, so a stripped repair charge is never rebuilt.
+
+REPRO (local NAS-copy, real data — tenant `blah blah` occupying unit 5 of ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28,
+lease covers Nov 2026):
+- step 0: repair charges on term 2026-11 = **0**
+- step 1: `POST /buildings/:id/repairs` (€90, split, tenantShare 100, chargeTerm 2026-11) →
+  repair charges = **1** (real charge materialised on the occupied unit)
+- step 2: `POST /buildings/:id/monthly-statement` (Νερό, same term, HTTP 200) →
+  repair charges = **0** ← CLOBBERED, not rebuilt.
+This is the exact call the BuildingExpensePanel "save monthly statement" button makes. So
+**recording a monthly statement on a month that has a tenant-charged repair silently deletes
+the repair charge today**, entirely independent of the bill-OCR feature.
+
+(Earlier this doc said "suspected/retracted" after a synthetic-seed test created 0 charges —
+the miss was that a repair tenant-share only materialises on an OCCUPIED unit; with a real
+occupied tenancy it does, and the clobber reproduces. Now proven.)
+
+NOT this branch's to fix — it's shared core money code, and the rebuild
+(`redistributeRepairsForProperties`) has intricate freeze-guards (euro-vanish/double-count if
+re-fired wrong). Needs its own investigation + six-pass review. My H1 fix ensures the BRIDGE
+never sends malformed `expenseId:'null'`; on the repair-strip axis the bridge is exactly as
+(un)safe as the existing UI. FLAGGED as a discovered pre-existing production bug.
+
 ## 15. Slice 6 — Απόδειξη (payment receipt) OCR + suggested match
 
 > User requirement: "When I pay a bill I also need to match it with the απόδειξη.

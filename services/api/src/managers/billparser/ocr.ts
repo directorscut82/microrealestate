@@ -105,6 +105,12 @@ function getService() {
  * BGRA bitmap; sharp (musl prebuild) wraps it into a PNG for ocrImage.
  * scale 2 ≈ 144dpi — enough for the recognizer without exploding memory.
  */
+// Bills are ~1-4 pages. Cap rasterization so a pathological many-page PDF can't
+// pin a worker for minutes / spike memory (each page ≈ full-res RGBA + PNG, all
+// held until OCR). Excess pages are dropped with a WARNING (not silent) — a real
+// utility bill never exceeds this, and OCR beyond it wouldn't find bill fields.
+const MAX_PDF_PAGES = 10;
+
 export async function rasterizePdfToImages(buffer: Buffer): Promise<Buffer[]> {
   const { PDFiumLibrary } = await import('@hyzyla/pdfium');
   const { default: sharp } = await import('sharp');
@@ -113,7 +119,16 @@ export async function rasterizePdfToImages(buffer: Buffer): Promise<Buffer[]> {
     const doc = await lib.loadDocument(buffer);
     try {
       const pages: Buffer[] = [];
-      const n = doc.getPageCount();
+      const total = doc.getPageCount();
+      const n = Math.min(total, MAX_PDF_PAGES);
+      if (total > MAX_PDF_PAGES) {
+        logger.warn(
+          `Bill PDF has ${total} pages; OCR'ing only the first ${MAX_PDF_PAGES}`
+        );
+      }
+      // NOTE: @hyzyla/pdfium PDFiumPage exposes no destroy() (verified in its
+      // .d.ts — only Library/Document are disposable); page handles are released
+      // with doc.destroy() below. No per-page leak.
       for (let i = 0; i < n; i++) {
         const page = doc.getPage(i);
         const bitmap: any = await page.render({ scale: 2, render: 'bitmap' });

@@ -73,6 +73,7 @@
   },
   "packageManager": "yarn@3.3.0",
   "dependencies": {
+    "@hyzyla/pdfium": "^2.1.13",
     "@radix-ui/react-alert-dialog": "1.1.2"
   }
 }

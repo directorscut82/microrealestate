@@ -438,7 +438,10 @@ export default function routes(): express.Router {
   // stack bounded (20 × 6MB = 120MB worst-case on top of OCR's ~273MB peak).
   const uploadBill = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 6 * 1024 * 1024 },
+    // fileSize bounds memory (20×6MB max); files bounds the OCR fan-out (each
+    // file can be a multi-page scan → per-page rasterize+OCR). Per-page work is
+    // additionally capped in rasterizePdfToImages (MAX_PDF_PAGES).
+    limits: { fileSize: 6 * 1024 * 1024, files: 20 },
     fileFilter: (_req: any, file: any, cb: any) => {
       const allowed = [
         'application/pdf',

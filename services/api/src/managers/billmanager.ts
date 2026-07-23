@@ -45,26 +45,53 @@ export function buildStatementEntries(
   description: string,
   term: number
 ): { expenseId: string; amount: number; description: string }[] {
-  const byExpense = new Map<string, { amount: number; description: string }>();
+  // H1: monthlyCharges also carry REPAIR charges (repairId set, expenseId=null —
+  // building schema defaults expenseId to null). Those must NOT be echoed as
+  // expense entries: String(null)==='null' would send {expenseId:'null'} and
+  // saveMonthlyStatement 422s "Unknown expenseId". saveMonthlyStatement owns only
+  // source:'expense' rows; repair rows are rebuilt by their own recompute. Skip them.
+  const byExpense = new Map<
+    string,
+    { inputAmount: number | null; shareSum: number; description: string }
+  >();
   for (const unit of building.units || []) {
     for (const c of unit.monthlyCharges || []) {
       if (Number(c.term) !== Number(term)) continue;
+      if (!c.expenseId || (c as any).repairId) continue; // skip repair/null rows
       const eid = String(c.expenseId);
-      if (!byExpense.has(eid)) {
+      const prev = byExpense.get(eid);
+      if (prev) {
+        // M1: accumulate per-unit shares so a legacy row with no inputAmount can
+        // reconstruct the FULL figure by summing shares across units — never fall
+        // back to a single unit's per-unit slice (that halves the statement).
+        prev.shareSum += Number(c.amount) || 0;
+        if (prev.inputAmount == null && c.inputAmount != null) {
+          prev.inputAmount = Number(c.inputAmount);
+        }
+      } else {
         byExpense.set(eid, {
-          amount: c.inputAmount != null ? c.inputAmount : c.amount,
+          inputAmount: c.inputAmount != null ? Number(c.inputAmount) : null,
+          shareSum: Number(c.amount) || 0,
           description: c.description || ''
         });
       }
     }
   }
-  // Merge (add or replace) the bill's expense at its full amount.
-  byExpense.set(String(expenseId), { amount, description });
-  return [...byExpense.entries()].map(([eid, v]) => ({
+  const entries = [...byExpense.entries()].map(([eid, v]) => ({
     expenseId: eid,
-    amount: v.amount,
+    // Prefer the landlord-typed full figure (inputAmount); else the sum of
+    // per-unit shares reconstitutes the full statement amount for legacy rows.
+    amount: v.inputAmount != null ? v.inputAmount : v.shareSum,
     description: v.description
   }));
+  // Merge (add or replace) the bill's expense at its full amount.
+  const billIdx = entries.findIndex((e) => e.expenseId === String(expenseId));
+  if (billIdx >= 0) {
+    entries[billIdx] = { expenseId: String(expenseId), amount, description };
+  } else {
+    entries.push({ expenseId: String(expenseId), amount, description });
+  }
+  return entries;
 }
 
 async function bridgeChargeToStatement(
@@ -94,6 +121,9 @@ async function bridgeChargeToStatement(
   // Internal self-call to the monthly-statement route. api serves its routes
   // under the /api/v2 base (the gateway target API_URL is http://api:8200/api/v2),
   // so a bare /buildings/... 404s — verified. Hit our own port under /api/v2.
+  // NOTE: the '/api/v2' base below is a literal that must track the router mount
+  // (routes.ts). If the mount prefix ever changes, this self-call must change too;
+  // a shared API_SELF_BASE config would remove the coupling (future cleanup).
   const { PORT } = Service.getInstance().envConfig.getValues() as any;
   const port = PORT || process.env.PORT || 8200;
   const token = await Service.getInstance().createServiceToken(
@@ -312,6 +342,17 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       );
     }
 
+    // Validate term (YYYYMMDDHH) — it lands on the Bill doc AND, when charging,
+    // is passed to the monthly-statement bridge. saveMonthlyStatement enforces
+    // this same shape; validating here fails fast with a clear error instead of
+    // a swallowed bridge 422 or a malformed term on the stored Bill.
+    if (!term || !/^\d{10}$/.test(String(term))) {
+      throw new ServiceError(
+        `Invalid bill term (expected YYYYMMDDHH, got ${term})`,
+        422
+      );
+    }
+
     // Reject zero or negative totalAmount. A bill that costs nothing is
     // never a real bill — it's almost always OCR / parser failure or a
     // stale draft. Persisting zero/negative pollutes downstream
@@ -436,7 +477,9 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
     }
     // «Χρέωση ενοικιαστών» — bridge the amount into the tenant-charge engine.
     // Runs AFTER the Bill doc is saved so a bridge failure never blocks the
-    // tracking record. Best-effort: log + surface, but the Bill already exists.
+    // tracking record. Best-effort: the Bill exists regardless; the charge can
+    // be retried from the building's monthly statement.
+    let chargeError: string | undefined;
     if (chargeThisMonth) {
       try {
         await bridgeChargeToStatement(
@@ -448,18 +491,26 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           expenseName || provider || 'Bill'
         );
       } catch (err: any) {
+        const reason =
+          err?.response?.data?.message || err?.message || String(err);
         logger.error(
-          `bridgeChargeToStatement failed for bill ${bill._id}: ${
-            err?.message || err
-          }`
+          `bridgeChargeToStatement failed for bill ${bill._id}: ${reason}`
         );
-        // Do not throw — the Bill is saved; the charge can be retried from the
-        // building's monthly statement. Report it in the response instead.
-        (bill as any)._chargeError = true;
+        chargeError = reason;
       }
     }
 
-    saved.push(bill.toObject());
+    // H2: merge chargeError into the RETURNED object out-of-band. Setting it on
+    // the Mongoose doc then calling toObject() strips it (not a schema path), so
+    // the client would never learn the charge silently failed. Spread the object
+    // and add the flag after toObject().
+    saved.push(
+      chargeError
+        ? { ...bill.toObject(), chargeRequested: true, chargeError }
+        : chargeThisMonth
+          ? { ...bill.toObject(), chargeRequested: true, charged: true }
+          : bill.toObject()
+    );
   }
 
   res.json(saved);

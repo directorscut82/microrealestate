@@ -2993,9 +2993,17 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     if (!unit.propertyId) continue;
 
     if (expensesProvided) {
-      // Remove existing charges for this term
+      // Remove existing EXPENSE charges for this term, then re-add. This strip
+      // must be scoped to the rows this function OWNS (building-expense shares) —
+      // it must NOT pull REPAIR charges (they carry repairId and are owned/rebuilt
+      // by _distributeRepairCharge / redistributeRepairsForProperties, which this
+      // save does NOT re-fire). A source-blind strip silently deleted a term's
+      // tenant repair charges on every monthly-statement save (confirmed: a €90
+      // tenant repair on an occupied unit vanished when the month's statement was
+      // saved). Mirrors the owner-side strip below, which is already scoped to
+      // source:'expense'. Repair rows have repairId set; expense rows do not.
       const idsToRemove = unit.monthlyCharges
-        .filter((c: any) => c.term === Number(term))
+        .filter((c: any) => c.term === Number(term) && !(c as any).repairId)
         .map((c: any) => c._id);
       for (const chargeId of idsToRemove) {
         unit.monthlyCharges.pull(chargeId);
