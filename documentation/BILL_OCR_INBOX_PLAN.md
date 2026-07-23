@@ -397,30 +397,78 @@ Four edits (identified by reading `file-drop-zone.js` line-by-line):
 - Unmatched bills show a static amber warning: "No matching expense found. Add a Billing ID to an expense first." **Dead end — user must leave, fix the expense, come back.**
 - The confirm button only includes matched results (`results.filter(r => r.success && r.match)`, line 170).
 
-### What changes
+### Server match — exact billingId NOW; element-scoring DEFERRED to Slice 3 (verified rationale)
 
-The "no match" state becomes **actionable in-dialog**:
+VERIFIED: the only existing parser (DEH) emits `billingId, amount, periodStart/End, rfCode,
+paymentCode` — NO address/ΑΦΜ/name. `findExpenseByBillingId` matches exact normalized
+billingId, which works for DEH. **Multi-element scoring here would have almost nothing to
+score on until the Slice-3 provider parsers emit a richer element bag** — building it now =
+speculative code scoring on fields that don't exist. So:
+- **Now (Slice 2):** keep exact-billingId match (works); when it hits, PRE-SELECT that
+  building+expense in the confirm dropdowns. When it misses → the no-match flow below.
+- **Slice 3:** as each parser starts emitting address/ΑΦΜ/name, add scored pre-selection
+  (same element bag that feeds the receipt-match §15). Deferred, not dropped.
 
-1. **Building dropdown** (all realm buildings) — pre-selected if the parse guessed one (e.g., from address matching in the OCR text).
-2. **Expense dropdown** (expenses on the selected building) — plus "➕ Δημιουργία νέας δαπάνης."
-3. Choosing "➕" opens the **existing ExpenseFormDialog** (currently inside `ExpenseList.js:315-918`, must be extracted to its own file for reuse) pre-filled:
-   - `name`: provider display name (e.g. "ΔΕΥΑ Τήνου — Ύδρευση")
-   - `type`: mapped from provider (DEH→electricity_common, ΕΥΔΑΠ/ΔΕΥΑ→water_common, ΕΠΑ→heating)
-   - `allocationMethod`: 'equal' (default for utilities)
-   - `billingId`: the parsed account number
-   - `amount`: 0 (variable/recurring)
-   - `isRecurring`: true
-   - `chargeOwnerWhenVacant`: true (utilities)
-4. Once building+expense are chosen, the result becomes **confirmable**.
-5. **All parsed fields are editable** (amount, period, RF, dates) — so the user can fix OCR errors before confirming.
-6. **"Χρέωση ενοικιαστών" toggle** — ON: after Bill doc is written, also call `saveMonthlyStatement` (§2.6). OFF: Bill record only (tracking).
-7. **Inline assertions** (§3 assertions) appear as colored badges on the ResultCard.
+VERIFIED sequencing correction: `confirmBills` 404s if the `expenseId` doesn't exist on the
+building (billmanager.ts:219). So "persist an unmatched bill" is IMPOSSIBLE without first
+creating the expense. ⇒ the create-expense-inline flow is the ENABLER of the no-match path,
+not a separate later step. Slice 2's real deliverable is the no-match confirm flow itself.
 
-### Extract ExpenseFormDialog (refactor — NOT friction-free, D13)
+### What changes in the ResultCard (U2)
 
-Move `ExpenseFormDialog` into `components/buildings/ExpenseFormDialog.js`. `ExpenseList` imports it back. The add-vs-edit branch is `if (expense?._id) updateMutation else addMutation` at **`ExpenseList.js:582`** (D12 — not line ~920; 920 is the `ExpenseList` default export). A synthetic `expense` object WITHOUT `_id` → add mode → `addBuildingExpense`. Confirmed correct.
+1. **Building dropdown** — pre-selected to the matched/best-scored building; all realm
+   buildings selectable (dialog must load them — §2.1c).
+2. **Expense dropdown** — expenses on the selected building, best candidate pre-selected;
+   plus "➕ Δημιουργία νέας δαπάνης".
+3. **All parsed fields editable** (amount, period, dates; RF/IBAN checksum-flagged) so OCR
+   errors are fixed before confirm.
+4. **"Χρέωση ενοικιαστών" toggle** — ON: after the Bill doc is written, also run the
+   `saveMonthlyStatement` bridge (§2.6). OFF: Bill record only.
+5. **Inline assertions** (§7) as colored badges.
+6. Once building+expense are set, the card is confirmable.
 
-**D13 — scope the move carefully:** the module-level constants `expenseTypes` (`ExpenseList.js:172`), `allocationMethods` (:186), `ALLOCATION_DESCRIPTIONS` (:198) are ALSO used by `ExpenseList`'s own table render (:1068/:1081/:1088). Moving them out WITH the dialog breaks the table. Keep them in a shared module (or in ExpenseList, imported by the dialog) — move only dialog-exclusive helpers. Guard the whole refactor with a jest/RTL smoke + a manual screenshot; it is NOT zero-risk.
+### "➕ Νέα δαπάνη" — REUSE the existing ExpenseFormDialog VERBATIM (do NOT redraw it)
+
+Choosing "➕" opens the **actual `ExpenseFormDialog` component** (ExpenseList.js:315-918),
+**unchanged**, with ALL its existing controls — verified field set:
+`name, type (11-enum), amount, allocationMethod, single-unit picker, customAllocations
+table, isRecurring, startFromCurrentMonth, trackOwnerExpense, chargeOwnerWhenVacant,
+ownerAmount, notes, billingId`. **It is NOT a new/simplified form** — that would be slop
+and a maintenance fork. The only thing Slice 2 adds is opening it with a pre-filled
+`expense` prop (no `_id` → add mode → `addBuildingExpense`, branch at ExpenseList.js:582).
+Pre-filled SUGGESTIONS (user can change any): name=provider label, type=provider→type map,
+allocationMethod='equal', billingId=parsed, amount=0, isRecurring=true,
+chargeOwnerWhenVacant=true. Every OTHER control is exactly as the dialog renders today.
+
+### Extract ExpenseFormDialog for reuse (refactor — D13-safe)
+
+To open it from BillImportDialog it must be importable, so move `ExpenseFormDialog` into
+`components/buildings/ExpenseFormDialog.js` and have BOTH ExpenseList and BillImportDialog
+import it. This is a MOVE, not a rewrite — the component body is unchanged.
+**D13:** module-level consts `expenseTypes` (ExpenseList.js:172), `allocationMethods` (:186),
+`ALLOCATION_DESCRIPTIONS` (:198) are ALSO used by ExpenseList's table render (:1068/:1081/
+:1088) → put them in a shared module both import, don't move them INTO the dialog file.
+Guard with a jest/RTL smoke + manual screenshot (the extraction must render byte-identical
+to today's dialog before pre-fill is added).
+
+### Multi-page / multi-image documents (one bill = several pages)
+
+Verified state (Slice 2):
+- **Digital-PDF multi-page: WORKS** — `extractTextFromPdf` loops `numPages`, joins with
+  `--- PAGE BREAK ---` (index.ts:40).
+- **Single image (JPEG/PNG/WEBP): WORKS** — the primary path; how CamScanner/Telegram bills
+  actually arrive (verified: real bills were JPEGs). `ocrImage` handles it.
+- **Scanned/image-only PDF with N pages: DEFERRED (known follow-up), handled gracefully.**
+  VERIFIED IN-CONTAINER: `sharp`'s musl prebuild has NO PDF input support
+  (`sharp.format.pdf.input` false — libvips built without poppler), so it cannot rasterize
+  a PDF. Closing this needs a NEW PDF-rasterizer dependency (pdftoppm / mupdf / canvas)
+  whose Alpine-musl viability must be proven first — the same native-addon-on-musl risk
+  class as onnxruntime. Rather than add that risk at slice-tail for a narrow case, the code
+  already DETECTS the empty text layer and returns an honest guide message
+  («Σαρωμένο PDF χωρίς κείμενο — ανεβάστε ως εικόνα», index.ts:96) — not a silent failure.
+  FOLLOW-UP (own slice): prove a musl-safe PDF rasterizer, then rasterize each page →
+  `ocrImage` each → concat with `--- PAGE BREAK ---`. Multi-JPEG upload of one bill = same
+  join. NOT built now; documented so it isn't mistaken for done.
 
 ---
 
@@ -588,6 +636,170 @@ Process: ASCII/HTML mock → your approval → code the approved version → tes
 3. **Slice 3: Providers** — ΔΕΥΑ Τήνου (have text), ΕΥΔΑΠ Αττικής (need sample), ΕΠΑ (need sample).
 4. **Slice 4: Telegram inbox + bell** — poller, InboxItem, bell UI.
 5. **Slice 5: B2 archival** — upload source + QR on confirm.
+6. **Slice 6: Απόδειξη OCR + match-to-pending** — see §15.
+
+---
+
+## 15. Slice 6 — Απόδειξη (payment receipt) OCR + suggested match
+
+> User requirement: "When I pay a bill I also need to match it with the απόδειξη.
+> OCR the receipt, present a menu of PENDING pdfs (those with no matched receipt)
+> + the main elements it recognised, soft-suggest the match, save/move them
+> together in cloud storage. Keep two (or more, for installments) records. Don't
+> expect miracles — SUGGEST. The panel must look good, not AI slop."
+
+### What already exists (verified — build ON this, don't duplicate)
+- **"Αποδείξεις Πληρωμής" button already renders** next to "Εισαγωγή Λογαριασμού"
+  (`ExpenseList.js`) → opens `PaymentReceiptDialog`.
+- `POST /bills/payment-receipt` (`billmanager.parsePaymentReceipts`) already: extracts
+  RF codes from a receipt PDF via pdfjs, matches to `status:'pending'` Bills by RF, returns
+  `{billId, buildingName, expenseName, totalAmount, term}` per match.
+- `POST /bills/confirm-payment` (`confirmPayment`) already: sets matched Bills
+  `status:'paid'`, `paymentDate`, `paymentProofUrl`; accepts an array (bulk).
+- Bill schema already has `paymentProofUrl`, `paymentDate`, `status`.
+
+### What Slice 6 ADDS
+1. **Accept images** on the receipt path too (reuse Slice 1's `uploadBill` + `ocrImage`)
+   — receipts arrive as phone photos/CamScanner, not just digital PDFs.
+2. **OCR the receipt** and extract match keys BEYOND rfCode (verified against the real
+   invoice: names/addresses/amounts/dates OCR reliably; long digit strings need checks):
+   - amount (`Πληρωτέο`/total), date, RF code (checksum-validated), ΑΦΜ, IBAN
+     (mod-97-validated), supplier/customer name.
+3. **Suggested match, not auto** — score each PENDING bill (no matched receipt yet) against
+   the receipt's extracted keys: RF exact = strong; else amount±date proximity + name/ΑΦΜ
+   overlap = soft rank. Present the ranked list with the top candidate PRE-SELECTED
+   (soft-select), user confirms/changes. "Pending" = Bills `status:'pending'` (utility) AND
+   — once Slice 2 lands — any expense charge lacking a linked receipt.
+4. **Installments / multi-record** — one receipt may partially pay a bill, or one bill may
+   need N receipts. Keep EACH receipt as its own record linked to the bill; the bill is
+   "fully paid" only when Σ(receipts) ≥ totalAmount. New `receipts[]` subdoc on Bill (or a
+   Receipt collection) with `{amount, date, proofUrl, ocrText}` — NOT a single
+   `paymentProofUrl` overwrite (the current single-field can't hold installments).
+5. **Archive together in B2** (depends on Slice 5): store the bill source + each receipt
+   under a shared key prefix so they move/live together.
+
+### Core design: store ALL elements per bill, match receipt against them
+(This is the user's architecture — do NOT classify receipt *type* by OCR, which is
+unreliable. Instead: every imported bill persists its full extracted element set; an
+incoming receipt's elements are scored against those stored sets; the closest match wins.)
+
+**VERIFIED code facts this depends on:**
+- Bill schema has **NO raw-text / element field** (`bill.ts` — checked). MUST ADD one.
+- `ParsedBill` returns only 8 typed fields (`types.ts`) — **no ΑΦΜ / IBAN / name / raw
+  text**. The parser MUST additionally emit the raw OCR text + a normalized element bag.
+- **Only MATCHED bills get persisted** today (`BillImportDialog.js:170` `success && match`).
+  Receipt-matching needs a record for EVERY imported bill → **Slice 6 DEPENDS ON Slice 2**
+  (which persists unmatched bills via the create-expense flow). Without Slice 2 there is
+  nothing to match a receipt against. Hard dependency, not optional.
+- No fuzzy/scoring util exists in `services/` — new (small) code.
+
+**Schema addition — `Bill.matchKeys` (new subdoc) + `Bill.ocrText` (String):**
+```
+matchKeys: {
+  rfCodes: [String],        // all RF tokens found, checksum-validated
+  ibans:   [String],        // all IBANs found, mod-97-validated
+  amounts: [Number],        // all money figures (totalAmount + line totals)
+  afm:     [String],        // any ΑΦΜ / VAT numbers
+  dates:   [Date],          // issue/due/period + any date tokens
+  nameTokens: [String]      // normalized supplier/customer name words
+}
+ocrText: String             // full raw OCR (the fallback bag for anything unstructured)
+```
+Populated at bill-confirm from the parse output (parser extended to emit these, not just
+the 8 fields). This is "keep a record with all possible elements you found for each bill."
+
+### Match-scoring (deterministic, no ML — "suggest", closest match)
+When a receipt is OCR'd, extract the SAME element kinds, then score it against every
+candidate bill's `matchKeys`:
+```
+score(bill, receipt):
+  +100  rfCode ∈ bill.rfCodes        (checksum-valid — near-certain match)
+  + 60  any receipt.amount ≈ any bill.amount   (|Δ| < 0.01)
+  + 40  any receipt.iban ∈ bill.ibans          (checksum-valid)
+  + 25  receipt.date within [issueDate, dueDate + 10d]
+  + 20  receipt.afm ∈ bill.afm
+  + 15  nameToken overlap (Jaccard on normalized words)
+  → rank desc; pre-select top; show WHICH keys matched (not a fake %).
+```
+"Closest match" = highest score. RF or IBAN hit → confident; amount+date+name only →
+soft suggestion the user confirms. Candidate set = bills with unpaid/partial balance.
+
+**PRINCIPLE — every receipt matches on a DIFFERENT subset of elements; never require any
+specific field.** This is why it's additive scoring, not rule-matching. A utility receipt
+may carry an RF; a bank-transfer confirmation carries no RF but an IBAN + amount + invoice
+ref; a POS slip may have only amount + date. The scorer sums whatever overlaps and ranks —
+it must NEVER hard-require RF (or any single key), or whole classes of receipt score zero.
+Because receipts are often OCR'd (noisy), elements may be partial/corrupt — so:
+- score on the OCR'd elements that survived + checksum-validate RF/IBAN before trusting them
+  as strong keys (a checksum-failed IBAN scores 0 on the IBAN dimension, not a false +40);
+- a bill with more stored elements gives more surfaces to match — that's why §3 says each
+  parser should extract as MANY elements as it reliably can (feeds both match paths).
+
+**WORKED EXAMPLE (real, verified this session — bank-transfer receipt ↔ τιμολόγιο):**
+A ΕΘΝΙΚΗ ΤΡΑΠΕΖΑ transfer confirmation (digital PDF, clean text layer — no OCR needed)
+paid a Τιμολόγιο Πώλησης. It carries NO RF code, yet matches the invoice on THREE
+independent keys — proving the subset-scoring design:
+| Element | Τιμολόγιο (bill) | Απόδειξη (receipt) | dim |
+|---|---|---|---|
+| amount | 749,99 € | 749,99 € | +60 |
+| payee IBAN | GR3301109999990000000000001 | to-IBAN GR3301109999990000000000001 | +40 (mod-97 VALID) |
+| invoice # | 391 | «Τιμ Πωλ 391» | +20 |
+| supplier name | DOKIMASTIS | DOKIMASTIS KOSTAS MARIOS | +15 (variant) |
+→ confident top suggestion, RF never involved. A DIFFERENT receipt would score via a
+different subset (e.g. RF+amount, or amount+date only) — the ranker handles both.
+Note the payee IBAN here is the SAME one that passed mod-97 earlier while two others failed
+— checksum picks the trustworthy key out of noisy OCR.
+
+### UI (needs its own mock approval — steering Rule 6; must NOT be AI slop)
+- A two-pane confirm panel: LEFT = the OCR'd receipt's recognized fields (editable,
+  invalid IBAN/RF flagged); RIGHT = ranked list of pending bills with the suggested match
+  pre-selected + why (matched-on-RF / matched-on-amount+date). Confirm links them, sets
+  paid/partial, archives. **U6 — mock before code.** Follow DESIGN.md (no card grids, no
+  nested cards, `1.234,56 €`, tabular mono money, sea-accent ≤5%).
+
+### IBAN/RF fidelity — two-tier enhance (BOTH measured this session)
+
+Long digit strings (IBAN, RF, ΜΑΡΚ) are where OCR drops/merges digits, because on a
+full-page scan the detector shrinks the whole image to `maxSideLength` (960px) → an IBAN
+line is ~10px tall → the recognizer drops a digit. MEASURED on the real invoice: 2 of 3
+IBANs came out 26-digit (GR needs 27), and one that LOOKED exact to the eye failed mod-97.
+
+**Checksum first (the safety net):** validate every extracted IBAN (ISO 13616 mod-97) + RF
+(ISO 11649 mod-97). Never save unchecked. This deterministically flags the corrupt ones —
+it caught all 3 bad cases above, including the one I misjudged by eye.
+
+**Tier 1 — automatic re-crop retry (no user action, MEASURED to work):** when a field
+fails its checksum, re-OCR ONLY that field's detected bounding box from the ORIGINAL
+full-res upload, isolated (fills the frame → many more px/digit), then re-validate.
+TESTED: cropping the IBAN band out of the same image and re-OCRing it recovered BOTH
+broken IBANs → 1/3-valid became **3/3-valid, all checksum-confirmed**, with zero user
+involvement. Note: plain interpolated upscale of the FULL page did NOT help (control) —
+it's the ISOLATION (real px-per-digit after cropping), not upscaling, that works.
+
+**Tier 2 — "Θα στείλω άλλη φωτογραφία": synchronized re-capture over the Telegram bot.**
+When Tier 1 still fails the checksum, the OPEN dialog offers a button
+**«Θα στείλω άλλη φωτογραφία»** (+ the field also stays editable as a manual fallback).
+The bot is the camera; the desktop dialog synchronizes over it by polling:
+
+1. User clicks the button → dialog enters a WAITING state (spinner + "Στείλτε τη
+   φωτογραφία στο @MicroRealEstateBot…"). Server records the CURRENT Telegram
+   `getUpdates` offset for this realm's admin chat as the correlation anchor.
+2. User opens Telegram, snaps a zoomed close-up of just the failed line, sends to the bot.
+3. The Telegram poller (Slice 4 — this Tier depends on it) sees the NEXT photo from the
+   admin chat AFTER the recorded offset → that IS the retry (offset-correlated, no guessing
+   which photo).
+4. Server OCRs only that new image, extracts the target field(s), re-validates the checksum.
+5. Dialog is polling a retry endpoint (`GET /inbox/:id/retry-capture?since=<offset>`); on
+   success it updates the flagged field live (red → green) and leaves the waiting state.
+6. TIMEOUT: if no photo arrives within ~2 min, the waiting state ends with "Δεν ελήφθη
+   φωτογραφία — δοκιμάστε ξανά ή διορθώστε χειροκίνητα" and the field stays editable.
+
+Correctness anchors: correlation = offset-at-click (the next admin-chat photo, not any
+photo); the field is ALWAYS manually editable so the flow never dead-ends if the bot photo
+also fails; DEPENDS on the Slice-4 poller + single-realm adminChatId mapping.
+Tier 1 (server-side auto re-crop) still handles the common case invisibly with no user action.
+
+Direct file upload (sharper) > Telegram-recompressed also helps at the source.
 
 ---
 
