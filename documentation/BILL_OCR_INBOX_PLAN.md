@@ -458,17 +458,18 @@ Verified state (Slice 2):
   `--- PAGE BREAK ---` (index.ts:40).
 - **Single image (JPEG/PNG/WEBP): WORKS** — the primary path; how CamScanner/Telegram bills
   actually arrive (verified: real bills were JPEGs). `ocrImage` handles it.
-- **Scanned/image-only PDF with N pages: DEFERRED (known follow-up), handled gracefully.**
-  VERIFIED IN-CONTAINER: `sharp`'s musl prebuild has NO PDF input support
-  (`sharp.format.pdf.input` false — libvips built without poppler), so it cannot rasterize
-  a PDF. Closing this needs a NEW PDF-rasterizer dependency (pdftoppm / mupdf / canvas)
-  whose Alpine-musl viability must be proven first — the same native-addon-on-musl risk
-  class as onnxruntime. Rather than add that risk at slice-tail for a narrow case, the code
-  already DETECTS the empty text layer and returns an honest guide message
-  («Σαρωμένο PDF χωρίς κείμενο — ανεβάστε ως εικόνα», index.ts:96) — not a silent failure.
-  FOLLOW-UP (own slice): prove a musl-safe PDF rasterizer, then rasterize each page →
-  `ocrImage` each → concat with `--- PAGE BREAK ---`. Multi-JPEG upload of one bill = same
-  join. NOT built now; documented so it isn't mistaken for done.
+- **Scanned/image-only PDF with N pages: BUILT (Slice 2f).** CamScanner exports PDFs by
+  default — this is a PRIMARY path, not an edge case. Implementation: `parseBillPdf` detects
+  the empty text layer (<50 chars) → `rasterizePdfToImages` renders every page via
+  **`@hyzyla/pdfium` (PURE WASM, no native addon, no libc dep — same class as
+  onnxruntime-web, runs on the existing Alpine/musl image; VERIFIED in-container it
+  rasterizes a page → 854KB PNG)**. sharp wraps each pdfium BGRA bitmap → PNG → `ocrImage`,
+  page texts joined with `--- PAGE BREAK ---`. (`sharp` itself can't decode PDF — its musl
+  libvips lacks poppler — which is why pdfium does the rasterization.)
+- **PROD BUG FOUND + FIXED along the way:** the api Dockerfile copied `dist` + `scripts` but
+  NOT `services/api/models` — so the OCR path (Slice 1, already committed) would ENOENT on
+  the models in production. Added `COPY services/api/models` to the final stage. The models
+  are git-tracked (~17MB), so CI builds them in.
 
 ---
 
