@@ -275,7 +275,11 @@ function UnitAllocationRow({ unit, occupant, index, register, method, t }) {
   );
 }
 
-function ExpenseFormDialog({ open, setOpen, expense, building }) {
+// `onCreated(updatedBuilding)` is optional: when the dialog is reused from the
+// bill-import flow (add mode), it fires after a successful CREATE with the
+// server's updated building (which contains the new expense + its generated
+// _id) so the caller can auto-select it. ExpenseList does not pass it → no-op.
+function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
@@ -545,7 +549,13 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
         if (expense?._id) {
           await updateMutation.mutateAsync(payload);
         } else {
-          await addMutation.mutateAsync(payload);
+          const updatedBuilding = await addMutation.mutateAsync(payload);
+          // Bill-import reuse: hand the caller the updated building so it can
+          // locate the freshly-created expense (by name+billingId) and select
+          // it. No-op for the normal ExpenseList flow (onCreated undefined).
+          if (onCreated) {
+            onCreated(updatedBuilding);
+          }
         }
         handleClose();
       } catch (error) {
@@ -564,7 +574,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building }) {
         setIsLoading(false);
       }
     },
-    [expense, addMutation, updateMutation, handleClose, t]
+    [expense, addMutation, updateMutation, handleClose, onCreated, building, t]
   );
 
   const unitsWithProperty = units.filter((u) => u.propertyId);

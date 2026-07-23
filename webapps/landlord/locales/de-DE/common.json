@@ -1207,5 +1207,10 @@
   "{{count}} unreferenced files found in cloud storage (review in Documents; nothing was deleted)": "{{count}} nicht referenzierte Dateien im Cloud-Speicher gefunden (in Dokumente prüfen; nichts wurde gelöscht)",
   "{{count}} document(s) reference files that no longer exist in cloud storage": "{{count}} Dokument(e) verweisen auf Dateien, die nicht mehr im Cloud-Speicher existieren",
   "Drop PDF or photos here or click to browse": "PDF oder Fotos hier ablegen oder zum Durchsuchen klicken",
-  "Up to 20 files — PDF, JPG, PNG or WEBP (DEH, EYDAP, DEYA bills, scanned or photographed)": "Bis zu 20 Dateien — PDF, JPG, PNG oder WEBP (DEH-, EYDAP-, DEYA-Rechnungen, gescannt oder fotografiert)"
+  "Up to 20 files — PDF, JPG, PNG or WEBP (DEH, EYDAP, DEYA bills, scanned or photographed)": "Bis zu 20 Dateien — PDF, JPG, PNG oder WEBP (DEH-, EYDAP-, DEYA-Rechnungen, gescannt oder fotografiert)",
+  "Assign to": "Zuordnen zu",
+  "Select a building": "Gebäude auswählen",
+  "Select an expense": "Ausgabe auswählen",
+  "Create new expense": "Neue Ausgabe erstellen",
+  "need assignment": "Zuordnung erforderlich"
 }
