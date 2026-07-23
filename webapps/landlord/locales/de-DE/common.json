@@ -1212,5 +1212,6 @@
   "Select a building": "Gebäude auswählen",
   "Select an expense": "Ausgabe auswählen",
   "Create new expense": "Neue Ausgabe erstellen",
-  "need assignment": "Zuordnung erforderlich"
+  "need assignment": "Zuordnung erforderlich",
+  "Charge tenants this month": "Mieter diesen Monat belasten"
 }

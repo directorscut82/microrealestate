@@ -1,4 +1,4 @@
-import { Collections, logger, ServiceError } from '@microrealestate/common';
+import { Collections, logger, ServiceError, Service } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
   parseBillPdf,
@@ -6,6 +6,7 @@ import {
   normalizeBillingId
 } from './billparser/index.js';
 import { validateObjectId } from '../validators.js';
+import axios from 'axios';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -19,6 +20,97 @@ function computeDefaultTerm(periodEnd: Date): number {
   const year = periodEnd.getUTCFullYear();
   const month = periodEnd.getUTCMonth() + 1;
   return year * 1000000 + month * 10000 + 100;
+}
+
+/**
+ * Bridge a confirmed bill's amount into the tenant-charge engine by calling the
+ * existing saveMonthlyStatement route (which owns all allocation / owner /
+ * vacant logic). CRITICAL (C6/C7): saveMonthlyStatement STRIPS every
+ * monthlyCharge for the term and rebuilds from the entries passed — so we MUST
+ * resend ALL existing expense entries for the term, not just the bill's, or the
+ * month's other charges are silently wiped. We reuse the route (not the 400-line
+ * handler as a function) via an internal self-call with a minted service token,
+ * exactly as leaseExpiryScanner does for the emailer.
+ */
+// PURE + EXPORTED for unit testing (C6/C7 no-clobber guard). Gathers the FULL
+// set of expense entries for `term` from the building's persisted
+// monthlyCharges (grouped by expenseId, reading inputAmount — the landlord-typed
+// full figure preserved across recompute), then merges the new bill's expense.
+// saveMonthlyStatement STRIPS all term charges and rebuilds from what we pass,
+// so the returned set MUST contain every sibling or they are silently wiped.
+export function buildStatementEntries(
+  building: any,
+  expenseId: string,
+  amount: number,
+  description: string,
+  term: number
+): { expenseId: string; amount: number; description: string }[] {
+  const byExpense = new Map<string, { amount: number; description: string }>();
+  for (const unit of building.units || []) {
+    for (const c of unit.monthlyCharges || []) {
+      if (Number(c.term) !== Number(term)) continue;
+      const eid = String(c.expenseId);
+      if (!byExpense.has(eid)) {
+        byExpense.set(eid, {
+          amount: c.inputAmount != null ? c.inputAmount : c.amount,
+          description: c.description || ''
+        });
+      }
+    }
+  }
+  // Merge (add or replace) the bill's expense at its full amount.
+  byExpense.set(String(expenseId), { amount, description });
+  return [...byExpense.entries()].map(([eid, v]) => ({
+    expenseId: eid,
+    amount: v.amount,
+    description: v.description
+  }));
+}
+
+async function bridgeChargeToStatement(
+  realmId: string,
+  buildingId: string,
+  expenseId: string,
+  term: number,
+  amount: number,
+  description: string
+): Promise<void> {
+  const building: any = await Collections.Building.findOne({
+    _id: buildingId,
+    realmId
+  }).lean();
+  if (!building) {
+    throw new ServiceError(`Building ${buildingId} not found`, 404);
+  }
+
+  const expenses = buildStatementEntries(
+    building,
+    expenseId,
+    amount,
+    description,
+    term
+  );
+
+  // Internal self-call to the monthly-statement route. api serves its routes
+  // under the /api/v2 base (the gateway target API_URL is http://api:8200/api/v2),
+  // so a bare /buildings/... 404s — verified. Hit our own port under /api/v2.
+  const { PORT } = Service.getInstance().envConfig.getValues() as any;
+  const port = PORT || process.env.PORT || 8200;
+  const token = await Service.getInstance().createServiceToken(
+    'administrator',
+    realmId
+  );
+  await axios.post(
+    `http://localhost:${port}/api/v2/buildings/${buildingId}/monthly-statement`,
+    { term, expenses },
+    {
+      headers: {
+        authorization: `Bearer ${token}`,
+        organizationid: realmId
+      },
+      timeout: 30_000
+    }
+  );
 }
 
 async function findExpenseByBillingId(
@@ -192,7 +284,9 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       rfCode,
       paymentCode,
       irisCodeBase64,
-      replaceExisting
+      replaceExisting,
+      chargeThisMonth,
+      expenseName
     } = billData;
 
     // Verify building belongs to this realm
@@ -340,6 +434,31 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         throw err;
       }
     }
+    // «Χρέωση ενοικιαστών» — bridge the amount into the tenant-charge engine.
+    // Runs AFTER the Bill doc is saved so a bridge failure never blocks the
+    // tracking record. Best-effort: log + surface, but the Bill already exists.
+    if (chargeThisMonth) {
+      try {
+        await bridgeChargeToStatement(
+          realmId,
+          buildingId,
+          expenseId,
+          term,
+          Number(totalAmount),
+          expenseName || provider || 'Bill'
+        );
+      } catch (err: any) {
+        logger.error(
+          `bridgeChargeToStatement failed for bill ${bill._id}: ${
+            err?.message || err
+          }`
+        );
+        // Do not throw — the Bill is saved; the charge can be retried from the
+        // building's monthly statement. Report it in the response instead.
+        (bill as any)._chargeError = true;
+      }
+    }
+
     saved.push(bill.toObject());
   }
 

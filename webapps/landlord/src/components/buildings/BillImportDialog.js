@@ -23,8 +23,10 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
+import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
 import ResponsiveDialog from '../ResponsiveDialog';
+import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
@@ -48,7 +50,9 @@ function ResultCard({
   onAssignExpense,
   onCreateExpense,
   onToggleReplace,
-  replaceFlags
+  replaceFlags,
+  chargeFlags,
+  onToggleCharge
 }) {
   const { t } = useTranslation('common');
 
@@ -192,6 +196,24 @@ function ResultCard({
         </div>
       )}
 
+      {/* Once an expense is resolved (matched or assigned), offer to charge
+          tenants this month — this bridges the amount into the rent engine. */}
+      {expenseId && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 p-3">
+          <Label
+            htmlFor={`charge-${keyOf(result)}`}
+            className="text-sm cursor-pointer"
+          >
+            {t('Charge tenants this month')}
+          </Label>
+          <Switch
+            id={`charge-${keyOf(result)}`}
+            checked={!!chargeFlags[keyOf(result)]}
+            onCheckedChange={() => onToggleCharge(keyOf(result))}
+          />
+        </div>
+      )}
+
       {existingAmount !== undefined && (
         <div className="rounded-md bg-amber-50 border border-amber-200 p-3 dark:bg-amber-950/30 dark:border-amber-800">
           <div className="flex items-start gap-2">
@@ -237,6 +259,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [replaceFlags, setReplaceFlags] = useState({});
+  // Per-result «charge tenants this month» toggle: {filename: boolean}
+  const [chargeFlags, setChargeFlags] = useState({});
   // Per-result manual assignment for unmatched bills: {filename: {buildingId, expenseId}}
   const [assignments, setAssignments] = useState({});
   // Inline "create expense" flow: which result triggered it + which building.
@@ -256,6 +280,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       setFiles([]);
       setResults([]);
       setReplaceFlags({});
+      setChargeFlags({});
       setAssignments({});
       setCreateFor(null);
     }
@@ -373,22 +398,35 @@ export default function BillImportDialog({ open, setOpen, building }) {
     setState('confirming');
 
     try {
-      const billsToConfirm = confirmable.map(({ r, a }) => ({
-        buildingId: a.buildingId,
-        expenseId: a.expenseId,
-        provider: r.parsed.provider,
-        billingId: r.parsed.billingId,
-        totalAmount: r.parsed.totalAmount,
-        periodStart: r.parsed.periodStart,
-        periodEnd: r.parsed.periodEnd,
-        issueDate: r.parsed.issueDate,
-        dueDate: r.parsed.dueDate,
-        term: r.parsed.proposedTerm,
-        rfCode: r.parsed.rfCode,
-        paymentCode: r.parsed.paymentCode,
-        irisCodeBase64: r.parsed.irisCodeBase64,
-        replaceExisting: !!replaceFlags[r.filename]
-      }));
+      const billsToConfirm = confirmable.map(({ r, a }) => {
+        const b = buildings?.find(
+          (bld) => String(bld._id) === String(a.buildingId)
+        );
+        const expenseName =
+          r.match?.expenseName ||
+          (b?.expenses || []).find(
+            (e) => String(e._id) === String(a.expenseId)
+          )?.name ||
+          r.parsed.provider;
+        return {
+          buildingId: a.buildingId,
+          expenseId: a.expenseId,
+          provider: r.parsed.provider,
+          billingId: r.parsed.billingId,
+          totalAmount: r.parsed.totalAmount,
+          periodStart: r.parsed.periodStart,
+          periodEnd: r.parsed.periodEnd,
+          issueDate: r.parsed.issueDate,
+          dueDate: r.parsed.dueDate,
+          term: r.parsed.proposedTerm,
+          rfCode: r.parsed.rfCode,
+          paymentCode: r.parsed.paymentCode,
+          irisCodeBase64: r.parsed.irisCodeBase64,
+          replaceExisting: !!replaceFlags[r.filename],
+          chargeThisMonth: !!chargeFlags[r.filename],
+          expenseName
+        };
+      });
 
       await confirmBills(billsToConfirm);
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
@@ -412,6 +450,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
     results,
     resolvedAssignment,
     replaceFlags,
+    chargeFlags,
+    buildings,
     building,
     handleClose,
     queryClient,
@@ -420,6 +460,13 @@ export default function BillImportDialog({ open, setOpen, building }) {
 
   const handleToggleReplace = useCallback((filename) => {
     setReplaceFlags((prev) => ({
+      ...prev,
+      [filename]: !prev[filename]
+    }));
+  }, []);
+
+  const handleToggleCharge = useCallback((filename) => {
+    setChargeFlags((prev) => ({
       ...prev,
       [filename]: !prev[filename]
     }));
@@ -491,6 +538,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
                     onCreateExpense={handleCreateExpense}
                     onToggleReplace={handleToggleReplace}
                     replaceFlags={replaceFlags}
+                    chargeFlags={chargeFlags}
+                    onToggleCharge={handleToggleCharge}
                   />
                 ))}
               </div>

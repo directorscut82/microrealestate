@@ -1212,5 +1212,6 @@
   "Select a building": "Sélectionnez un immeuble",
   "Select an expense": "Sélectionnez une dépense",
   "Create new expense": "Créer une nouvelle dépense",
-  "need assignment": "à affecter"
+  "need assignment": "à affecter",
+  "Charge tenants this month": "Facturer les locataires ce mois-ci"
 }
