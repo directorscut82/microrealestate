@@ -28,6 +28,7 @@
   "author": "Camel Aissani",
   "license": "MIT",
   "dependencies": {
+    "@hyzyla/pdfium": "^2.1.13",
     "@microrealestate/common": "*",
     "axios": "1.8.4",
     "exceljs": "4.4.0",

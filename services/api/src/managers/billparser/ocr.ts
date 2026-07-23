@@ -99,6 +99,41 @@ function getService() {
 }
 
 /**
+ * Rasterize every page of a (scanned/image-only) PDF to PNG buffers, in-process,
+ * via @hyzyla/pdfium — PURE WASM, no native addon, no libc dep (same class as
+ * onnxruntime-web; runs on the existing Alpine/musl image). pdfium renders a
+ * BGRA bitmap; sharp (musl prebuild) wraps it into a PNG for ocrImage.
+ * scale 2 ≈ 144dpi — enough for the recognizer without exploding memory.
+ */
+export async function rasterizePdfToImages(buffer: Buffer): Promise<Buffer[]> {
+  const { PDFiumLibrary } = await import('@hyzyla/pdfium');
+  const { default: sharp } = await import('sharp');
+  const lib = await PDFiumLibrary.init();
+  try {
+    const doc = await lib.loadDocument(buffer);
+    try {
+      const pages: Buffer[] = [];
+      const n = doc.getPageCount();
+      for (let i = 0; i < n; i++) {
+        const page = doc.getPage(i);
+        const bitmap: any = await page.render({ scale: 2, render: 'bitmap' });
+        const png = await sharp(Buffer.from(bitmap.data), {
+          raw: { width: bitmap.width, height: bitmap.height, channels: 4 }
+        })
+          .png()
+          .toBuffer();
+        pages.push(png);
+      }
+      return pages;
+    } finally {
+      doc.destroy();
+    }
+  } finally {
+    lib.destroy();
+  }
+}
+
+/**
  * OCR an image buffer (JPEG/PNG/WEBP) and return the recognized text.
  * The first call initializes the ONNX sessions (~2s, ~175MB); subsequent
  * calls reuse the warm singleton.

@@ -41,6 +41,10 @@ WORKDIR /usr/app
 COPY --from=deps /usr/app ./
 COPY --from=build /usr/app/services/api/dist ./services/api/dist
 COPY services/api/scripts ./services/api/scripts
+# OCR inference models — read at runtime by dist/managers/billparser/ocr.js
+# (resolves ../../../models = services/api/models). Without this the bill-image
+# OCR path ENOENTs in production. ~18MB static weights, not secrets.
+COPY services/api/models ./services/api/models
 
 USER 1000
 ENTRYPOINT ["/sbin/tini", "--"]

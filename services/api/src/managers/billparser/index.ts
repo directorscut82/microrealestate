@@ -90,15 +90,18 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
 
   if (isPdf) {
     text = await extractTextFromPdf(buffer);
-    // Scanned PDF (image-only, no text layer) — guide the user to upload as
-    // image. A future Slice 1b can extract the embedded image; for now, the
-    // primary path is direct image upload (CamScanner/Telegram photos).
+    // Scanned / image-only PDF (no text layer — e.g. CamScanner export, which
+    // is exactly how many bills arrive). Rasterize each page to an image via
+    // pdfium (pure WASM) and OCR every page, joining with the same PAGE BREAK
+    // separator the digital multi-page path uses.
     if (text.replace(/\s/g, '').length < 50) {
-      return {
-        success: false,
-        error:
-          'Σαρωμένο PDF χωρίς κείμενο — ανεβάστε ως εικόνα (JPG/PNG)'
-      };
+      const { rasterizePdfToImages, ocrImage } = await import('./ocr.js');
+      const pages = await rasterizePdfToImages(buffer);
+      const pageTexts: string[] = [];
+      for (const png of pages) {
+        pageTexts.push(await ocrImage(png));
+      }
+      text = pageTexts.join('\n--- PAGE BREAK ---\n');
     }
   } else {
     // Image file (JPEG/PNG/WEBP) — OCR in-process via paddleocr + WASM.

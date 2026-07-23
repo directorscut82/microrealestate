@@ -1384,6 +1384,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hyzyla/pdfium@npm:^2.1.13":
+  version: 2.1.13
+  resolution: "@hyzyla/pdfium@npm:2.1.13"
+  checksum: f79b5804874607f661e4d72c3ef8d01c3f199cf84799193b6aacd2e1c25a7630c834e2da6d3bf335889be3b195076c1d7bf0985fca81f805127f412108d84e7e
+  languageName: node
+  linkType: hard
+
 "@img/colour@npm:^1.1.0":
   version: 1.1.0
   resolution: "@img/colour@npm:1.1.0"
@@ -2156,6 +2163,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@microrealestate/api@workspace:services/api"
   dependencies:
+    "@hyzyla/pdfium": ^2.1.13
     "@microrealestate/common": "*"
     "@microrealestate/types": "*"
     "@swc/core": ^1.15.21
@@ -13967,6 +13975,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "microrealestate@workspace:."
   dependencies:
+    "@hyzyla/pdfium": ^2.1.13
     "@radix-ui/react-alert-dialog": 1.1.2
     cross-env: 7.0.3
     husky: 9.1.7
