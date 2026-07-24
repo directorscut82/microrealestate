@@ -24,8 +24,12 @@ export function parseDehBill(text: string): BillParseResult {
   // Extract billing ID - handle both full and abbreviated forms:
   // "Αριθμός παροχής 9 99000935-03 2"
   // "Αρ. παροχής: 9 99000935-03 2"
+  // The value class is [\d \t-] (NOT \s): a DEH provision number is a single
+  // line of digits/spaces/hyphens. Allowing \s let it cross a newline on the
+  // OCR path (page text joined with \n), swallowing the next line's digits
+  // into the billing ID. Restrict to spaces/tabs so it stops at the line end.
   const billingIdMatch = text.match(
-    /(?:Αριθμός\s+παροχής|Αρ\.?\s*παροχής\s*:?)\s+([\d][\d\s-]+\d)/i
+    /(?:Αριθμός\s+παροχής|Αρ\.?\s*παροχής\s*:?)[ \t]+([\d][\d \t-]+\d)/i
   );
   if (!billingIdMatch) {
     return { success: false, error: 'Δεν βρέθηκε αριθμός παροχής' };

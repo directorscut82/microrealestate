@@ -1343,5 +1343,6 @@
   "Create new expense": "Create new expense",
   "need assignment": "need assignment",
   "Charge tenants this month": "Charge tenants this month",
-  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Bills saved. {{failed}} could not charge tenants — charge them from the building statement."
+  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.",
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid)."
 }

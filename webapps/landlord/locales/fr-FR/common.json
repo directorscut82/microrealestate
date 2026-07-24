@@ -1214,5 +1214,6 @@
   "Create new expense": "Créer une nouvelle dépense",
   "need assignment": "à affecter",
   "Charge tenants this month": "Facturer les locataires ce mois-ci",
-  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Factures enregistrées. {{failed}} n’ont pas pu facturer les locataires — facturez-les depuis le relevé mensuel."
+  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Factures enregistrées. {{failed}} n’ont pas pu facturer les locataires — facturez-les depuis le relevé mensuel.",
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} factures sur {{total}} enregistrées. {{failed}} n’ont pas pu être enregistrées (existent déjà ou invalides)."
 }

@@ -39,10 +39,7 @@ async function _createService() {
   const recBuf = readFileSync(
     path.join(MODELS_DIR, 'el_PP-OCRv5_rec_mobile.onnx')
   );
-  const rawDict = readFileSync(
-    path.join(MODELS_DIR, 'greek_dict.txt'),
-    'utf8'
-  )
+  const rawDict = readFileSync(path.join(MODELS_DIR, 'greek_dict.txt'), 'utf8')
     .split('\n')
     .filter((l) => l.length > 0);
   // CTC convention: [blank, ...354_dict_chars, space] = 356 classes
@@ -148,27 +145,71 @@ export async function rasterizePdfToImages(buffer: Buffer): Promise<Buffer[]> {
   }
 }
 
+// Memory bounds for the decode. The api container is capped at 384MB and the
+// warm OCR session is ~239MB resident, leaving ~145MB of headroom. A full-res
+// decode to raw RGBA is 4 bytes/px, so an uncapped image OOM-kills the whole
+// container: a 12MP phone photo = 46MB, a 48MP = 183MB, and a small
+// "pixel-bomb" PNG can claim hundreds of MP. So:
+//   1. reject anything above MAX_OCR_MEGAPIXELS via a header-only metadata read
+//      (no full decode happens for an oversized/malicious file → clean 422,
+//      never an OOM);
+//   2. downscale so the longest side is <= MAX_OCR_SIDE before handing raw
+//      pixels to the recognizer — bounds the RGBA buffer to ~2600²·4 ≈ 27MB
+//      regardless of input, and is still far more detail than the recognizer
+//      needs (detection internally caps at maxSideLength 960).
+const MAX_OCR_MEGAPIXELS = 30;
+const MAX_OCR_INPUT_PIXELS = MAX_OCR_MEGAPIXELS * 1_000_000;
+const MAX_OCR_SIDE = 2600;
+
+// Serialize OCR decode+inference. Concurrent uploads must NOT each hold a
+// full RGBA buffer + run inference simultaneously — that multiplies peak RSS
+// past the container cap. One image at a time keeps peak RSS at
+// session + single-image; the batch just takes longer, which is fine.
+let _ocrChain: Promise<unknown> = Promise.resolve();
+
 /**
  * OCR an image buffer (JPEG/PNG/WEBP) and return the recognized text.
  * The first call initializes the ONNX sessions (~2s, ~175MB); subsequent
- * calls reuse the warm singleton.
+ * calls reuse the warm singleton. Calls are serialized (see _ocrChain).
  */
 export async function ocrImage(buffer: Buffer): Promise<string> {
+  const run = _ocrChain.then(() => _ocrImageInner(buffer));
+  // Keep the chain alive even if this call rejects, so one bad image doesn't
+  // wedge every later call. Swallow only on the chain copy, not the returned one.
+  _ocrChain = run.catch(() => undefined);
+  return run;
+}
+
+async function _ocrImageInner(buffer: Buffer): Promise<string> {
   const { default: sharp } = await import('sharp');
   const { svc, Image } = await getService();
 
-  // Decode to raw RGBA (sharp ships musl prebuilds — verified on NAS).
-  const { data, info } = await sharp(buffer)
+  // Header-only read (no pixel decode) to reject oversized/pixel-bomb images
+  // BEFORE allocating any raw buffer. limitInputPixels:false here is safe — we
+  // are only reading the header, and we enforce our own tighter bound next.
+  const meta = await sharp(buffer, { limitInputPixels: false }).metadata();
+  const px = (meta.width || 0) * (meta.height || 0);
+  if (px > MAX_OCR_INPUT_PIXELS) {
+    throw new Error(
+      `Image too large to OCR (${meta.width}×${meta.height}, ${(px / 1e6).toFixed(0)}MP > ${MAX_OCR_MEGAPIXELS}MP cap). Downscale and retry.`
+    );
+  }
+
+  // Decode + downscale to raw RGBA. fit:'inside' + withoutEnlargement keeps
+  // small scans untouched; large photos shrink (JPEG shrinks on load, so the
+  // full-res buffer is never materialized). limitInputPixels is a backstop.
+  const { data, info } = await sharp(buffer, {
+    limitInputPixels: MAX_OCR_INPUT_PIXELS
+  })
+    .resize(MAX_OCR_SIDE, MAX_OCR_SIDE, {
+      fit: 'inside',
+      withoutEnlargement: true
+    })
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  const img = new Image(
-    info.width,
-    info.height,
-    4,
-    new Uint8Array(data)
-  );
+  const img = new Image(info.width, info.height, 4, new Uint8Array(data));
 
   const results = await svc.recognize(img);
   return results.map((r: any) => r.text || '').join('\n');

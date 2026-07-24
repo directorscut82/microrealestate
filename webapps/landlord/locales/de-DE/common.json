@@ -1214,5 +1214,6 @@
   "Create new expense": "Neue Ausgabe erstellen",
   "need assignment": "Zuordnung erforderlich",
   "Charge tenants this month": "Mieter diesen Monat belasten",
-  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Rechnungen gespeichert. {{failed}} konnten Mieter nicht belasten — belasten Sie sie über die Monatsabrechnung."
+  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Rechnungen gespeichert. {{failed}} konnten Mieter nicht belasten — belasten Sie sie über die Monatsabrechnung.",
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} von {{total}} Rechnungen gespeichert. {{failed}} konnten nicht gespeichert werden (bereits vorhanden oder ungültig)."
 }

@@ -19,118 +19,122 @@ import { Label } from '../ui/label';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
+import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
-const expenseSchema = z.object({
-  name: z.string().min(1).max(200),
-  type: z.string().min(1),
-  amount: z.coerce.number().min(0).max(10000000).optional().default(0),
-  allocationMethod: z.string().min(1),
-  isRecurring: z.boolean(),
-  trackOwnerExpense: z.boolean().optional().default(false),
-  ownerAmount: z.coerce.number().min(0).max(10000000).optional().default(0),
-  chargeOwnerWhenVacant: z.boolean().optional().default(false),
-  startFromCurrentMonth: z.boolean().optional().default(true),
-  notes: z.string().max(5000).optional(),
-  billingId: z.string().optional(),
-  customAllocations: z
-    .array(
-      z.object({
-        propertyId: z.string(),
-        value: z.coerce.number().min(0).default(0)
-      })
-    )
-    .optional()
-    .default([])
-}).superRefine((data, ctx) => {
-  if (!data.isRecurring && (!data.amount || data.amount <= 0)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Amount is required for non-recurring expenses',
-      path: ['amount']
-    });
-  }
-  if (
-    data.allocationMethod === 'custom_percentage' &&
-    data.customAllocations?.length
-  ) {
-    const sum = data.customAllocations.reduce(
-      (s, a) => s + (a.value || 0),
-      0
-    );
-    if (Math.abs(sum - 100) > 0.01) {
+const expenseSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    type: z.string().min(1),
+    amount: z.coerce.number().min(0).max(10000000).optional().default(0),
+    allocationMethod: z.string().min(1),
+    isRecurring: z.boolean(),
+    trackOwnerExpense: z.boolean().optional().default(false),
+    ownerAmount: z.coerce.number().min(0).max(10000000).optional().default(0),
+    chargeOwnerWhenVacant: z.boolean().optional().default(false),
+    startFromCurrentMonth: z.boolean().optional().default(true),
+    notes: z.string().max(5000).optional(),
+    billingId: z.string().optional(),
+    customAllocations: z
+      .array(
+        z.object({
+          propertyId: z.string(),
+          value: z.coerce.number().min(0).default(0)
+        })
+      )
+      .optional()
+      .default([])
+  })
+  .superRefine((data, ctx) => {
+    if (!data.isRecurring && (!data.amount || data.amount <= 0)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `Percentages must sum to 100% (currently ${sum.toFixed(1)}%)`,
+        message: 'Amount is required for non-recurring expenses',
+        path: ['amount']
+      });
+    }
+    if (
+      data.allocationMethod === 'custom_percentage' &&
+      data.customAllocations?.length
+    ) {
+      const sum = data.customAllocations.reduce(
+        (s, a) => s + (a.value || 0),
+        0
+      );
+      if (Math.abs(sum - 100) > 0.01) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Percentages must sum to 100% (currently ${sum.toFixed(1)}%)`,
+          path: ['customAllocations']
+        });
+      }
+    }
+    if (
+      data.allocationMethod === 'custom_ratio' &&
+      data.customAllocations?.length
+    ) {
+      const total = data.customAllocations.reduce(
+        (s, a) => s + (a.value || 0),
+        0
+      );
+      if (total <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'At least one unit must have a non-zero ratio',
+          path: ['customAllocations']
+        });
+      }
+    }
+    // 'fixed' bills each unit a predefined per-unit amount (the
+    // customAllocations values ARE euros, not %/ratio). A fixed expense with
+    // no allocations, or all-zero values, charges nobody — a 'σταθερό' with
+    // zero ποσό is meaningless. Require at least one positive per-unit amount.
+    if (data.allocationMethod === 'fixed') {
+      const total = (data.customAllocations || []).reduce(
+        (s, a) => s + (Number(a.value) || 0),
+        0
+      );
+      if (!(total > 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'Fixed allocation needs at least one unit with a non-zero amount',
+          path: ['customAllocations']
+        });
+      }
+    }
+    // F4-expense: single_unit MUST have a target unit picked. Without
+    // this guard the form passes zod with customAllocations=[] and the
+    // expense persists with nobody to bill. The pipeline at
+    // 1_base.ts:355-364 returns 0 share for every unit silently.
+    if (data.allocationMethod === 'single_unit') {
+      const target = data.customAllocations?.[0];
+      if (!target?.propertyId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Pick a unit to bill',
+          path: ['customAllocations']
+        });
+      }
+    }
+    // F6-expense: custom_percentage / custom_ratio with empty
+    // customAllocations should also fail validation (the existing checks
+    // gate on length > 0, so length=0 silently bypassed both branches).
+    if (
+      (data.allocationMethod === 'custom_percentage' ||
+        data.allocationMethod === 'custom_ratio') &&
+      !(data.customAllocations?.length > 0)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Custom allocations require at least one positive entry',
         path: ['customAllocations']
       });
     }
-  }
-  if (
-    data.allocationMethod === 'custom_ratio' &&
-    data.customAllocations?.length
-  ) {
-    const total = data.customAllocations.reduce(
-      (s, a) => s + (a.value || 0),
-      0
-    );
-    if (total <= 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'At least one unit must have a non-zero ratio',
-        path: ['customAllocations']
-      });
-    }
-  }
-  // 'fixed' bills each unit a predefined per-unit amount (the
-  // customAllocations values ARE euros, not %/ratio). A fixed expense with
-  // no allocations, or all-zero values, charges nobody — a 'σταθερό' with
-  // zero ποσό is meaningless. Require at least one positive per-unit amount.
-  if (data.allocationMethod === 'fixed') {
-    const total = (data.customAllocations || []).reduce(
-      (s, a) => s + (Number(a.value) || 0),
-      0
-    );
-    if (!(total > 0)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Fixed allocation needs at least one unit with a non-zero amount',
-        path: ['customAllocations']
-      });
-    }
-  }
-  // F4-expense: single_unit MUST have a target unit picked. Without
-  // this guard the form passes zod with customAllocations=[] and the
-  // expense persists with nobody to bill. The pipeline at
-  // 1_base.ts:355-364 returns 0 share for every unit silently.
-  if (data.allocationMethod === 'single_unit') {
-    const target = data.customAllocations?.[0];
-    if (!target?.propertyId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Pick a unit to bill',
-        path: ['customAllocations']
-      });
-    }
-  }
-  // F6-expense: custom_percentage / custom_ratio with empty
-  // customAllocations should also fail validation (the existing checks
-  // gate on length > 0, so length=0 silently bypassed both branches).
-  if (
-    (data.allocationMethod === 'custom_percentage' ||
-      data.allocationMethod === 'custom_ratio') &&
-    !(data.customAllocations?.length > 0)
-  ) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Custom allocations require at least one positive entry',
-      path: ['customAllocations']
-    });
-  }
-});
+  });
 
 const expenseTypes = [
   { id: 'heating', labelId: 'Heating' },
@@ -163,7 +167,8 @@ const ALLOCATION_DESCRIPTIONS = {
   by_surface: 'Split proportionally by unit surface area (m²)',
   general_thousandths: 'Split by general thousandths (‰) from E9',
   heating_thousandths: 'Split by heating thousandths (‰) from E9',
-  elevator_thousandths: 'Split by elevator thousandths (‰) — ground floor excluded',
+  elevator_thousandths:
+    'Split by elevator thousandths (‰) — ground floor excluded',
   fixed: 'Each unit pays a fixed predefined amount',
   custom_ratio: 'Split by custom ratio shares you defined per unit',
   custom_percentage: 'Each unit pays a custom percentage of the total',
@@ -171,16 +176,96 @@ const ALLOCATION_DESCRIPTIONS = {
 };
 
 const ALLOCATION_METHODS_BY_TYPE = {
-  heating: ['heating_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  elevator: ['elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  cleaning: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  water_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  electricity_common: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  insurance: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  management_fee: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  garden: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  repairs_fund: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
-  pest_control: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit']
+  heating: [
+    'heating_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  elevator: [
+    'elevator_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  cleaning: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  water_common: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  electricity_common: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  insurance: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  management_fee: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  garden: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  repairs_fund: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  pest_control: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ]
 };
 
 // κυμαινόμενο (variable monthly) expenses have amount=0 — the landlord types
@@ -238,9 +323,7 @@ function UnitAllocationRow({ unit, occupant, index, register, method, t }) {
         </div>
         <div className="text-xs mt-0.5">
           {occupant ? (
-            <span className="text-green-600">
-              ● {occupant.name}
-            </span>
+            <span className="text-green-600">● {occupant.name}</span>
           ) : (
             <span className="text-muted-foreground">○ {t('Vacant')}</span>
           )}
@@ -253,11 +336,7 @@ function UnitAllocationRow({ unit, occupant, index, register, method, t }) {
           min="0"
           className="h-8 text-sm"
           placeholder={
-            method === 'custom_percentage'
-              ? '%'
-              : method === 'fixed'
-                ? '€'
-                : ''
+            method === 'custom_percentage' ? '%' : method === 'fixed' ? '€' : ''
           }
           {...register(`customAllocations.${index}.value`, {
             valueAsNumber: true
@@ -388,9 +467,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
           chargeOwnerWhenVacant: expense.chargeOwnerWhenVacant ?? false,
           isRecurring: expense.isRecurring ?? true,
           startFromCurrentMonth: !expense.startTerm,
-          customAllocations: buildDefaultAllocations(
-            expense.customAllocations
-          )
+          customAllocations: buildDefaultAllocations(expense.customAllocations)
         }
       : undefined
   });
@@ -447,9 +524,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
     previousAllocationMethodRef.current = allocationMethod;
   }, [allocationMethod, setValue, buildDefaultAllocations]);
 
-  const needsAllocations = METHODS_NEEDING_ALLOCATIONS.includes(
-    allocationMethod
-  );
+  const needsAllocations =
+    METHODS_NEEDING_ALLOCATIONS.includes(allocationMethod);
   // single_unit is in METHODS_NEEDING_ALLOCATIONS (so the submit handler
   // preserves its customAllocations[0]), but it must NOT render the per-unit
   // «Κατανομές ανά Μονάδα» table — it has its OWN dedicated unit picker. When
@@ -459,7 +535,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   // target unit". Most visible on a 1-unit building where the collision is
   // guaranteed on index 0. The per-unit table is for custom_ratio / custom_%
   // / fixed ONLY.
-  const showAllocationTable = needsAllocations && allocationMethod !== 'single_unit';
+  const showAllocationTable =
+    needsAllocations && allocationMethod !== 'single_unit';
 
   // Reset form when dialog opens in "add" mode (no expense)
   // Handles case where dialog was closed via X button without calling reset()
@@ -565,7 +642,9 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
         // failure that reads like data loss.
         if (error?.response?.status === 409) {
           toast.error(
-            t('This expense was changed in another tab — please reopen and retry')
+            t(
+              'This expense was changed in another tab — please reopen and retry'
+            )
           );
         } else {
           toast.error(t('Something went wrong'));
@@ -584,14 +663,9 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
       open={open}
       setOpen={setOpen}
       isLoading={isLoading}
-      renderHeader={() =>
-        expense?._id ? t('Edit Expense') : t('Add Expense')
-      }
+      renderHeader={() => (expense?._id ? t('Edit Expense') : t('Add Expense'))}
       renderContent={() => (
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          autoComplete="off"
-        >
+        <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">{t('Name')}</Label>
@@ -663,74 +737,71 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
               )}
             </div>
 
-            {allocationMethod === 'single_unit' && unitsWithProperty.length > 0 && (
-              <div className="space-y-2">
-                <Label>{t('Pick the unit to bill')}</Label>
-                <Select
-                  value={
-                    watch('customAllocations')?.[0]?.propertyId || ''
-                  }
-                  onValueChange={(propertyId) => {
-                    setValue(
-                      'customAllocations',
-                      [{ propertyId, value: 100 }],
-                      { shouldDirty: true, shouldValidate: true }
-                    );
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue
-                      placeholder={t('Select a unit')}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {unitsWithProperty.map((u) => {
-                      const occ = occupantsByPropertyId[u.propertyId];
-                      // The property name already encodes the floor
-                      // ("ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο" / "- Όροφος 1"), so
-                      // appending t('Floor {{n}}') AND unitLabel repeated
-                      // the floor up to 3× ("Υπόγειο — Όροφος -1 — Όροφος
-                      // -1"). Only add a floor/unit suffix when the name
-                      // does NOT already carry one. ATAK is the real
-                      // tiebreaker for units sharing a floor.
-                      const propertyName =
-                        u.property?.name ||
-                        `${t('Unit')} ${u.unitLabel || u.floor || ''}`;
-                      const nameHasFloor =
-                        /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stockwerk/i.test(
-                          propertyName
-                        );
-                      const parts = [
-                        propertyName,
-                        !nameHasFloor && u.floor != null
-                          ? t('Floor {{n}}', { n: u.floor })
-                          : null,
-                        !nameHasFloor ? u.unitLabel : null,
-                        u.atakNumber ? `ATAK ${u.atakNumber}` : null,
-                        occ?.name ? `(${occ.name})` : `(${t('Vacant')})`
-                      ].filter(Boolean);
-                      return (
-                        <SelectItem key={u._id} value={u.propertyId}>
-                          {parts.join(' — ')}
-                        </SelectItem>
+            {allocationMethod === 'single_unit' &&
+              unitsWithProperty.length > 0 && (
+                <div className="space-y-2">
+                  <Label>{t('Pick the unit to bill')}</Label>
+                  <Select
+                    value={watch('customAllocations')?.[0]?.propertyId || ''}
+                    onValueChange={(propertyId) => {
+                      setValue(
+                        'customAllocations',
+                        [{ propertyId, value: 100 }],
+                        { shouldDirty: true, shouldValidate: true }
                       );
-                    })}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {t(
-                    'The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).'
-                  )}
-                </p>
-                {errors.customAllocations && (
-                  <p className="text-sm text-destructive">
-                    {errors.customAllocations.message ||
-                      errors.customAllocations.root?.message ||
-                      t('Pick a unit to bill')}
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={t('Select a unit')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {unitsWithProperty.map((u) => {
+                        const occ = occupantsByPropertyId[u.propertyId];
+                        // The property name already encodes the floor
+                        // ("ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο" / "- Όροφος 1"), so
+                        // appending t('Floor {{n}}') AND unitLabel repeated
+                        // the floor up to 3× ("Υπόγειο — Όροφος -1 — Όροφος
+                        // -1"). Only add a floor/unit suffix when the name
+                        // does NOT already carry one. ATAK is the real
+                        // tiebreaker for units sharing a floor.
+                        const propertyName =
+                          u.property?.name ||
+                          `${t('Unit')} ${u.unitLabel || u.floor || ''}`;
+                        const nameHasFloor =
+                          /Υπόγειο|Ισόγειο|Όροφος|Floor|Étage|Piso|Andar|Stockwerk/i.test(
+                            propertyName
+                          );
+                        const parts = [
+                          propertyName,
+                          !nameHasFloor && u.floor != null
+                            ? t('Floor {{n}}', { n: u.floor })
+                            : null,
+                          !nameHasFloor ? u.unitLabel : null,
+                          u.atakNumber ? `ATAK ${u.atakNumber}` : null,
+                          occ?.name ? `(${occ.name})` : `(${t('Vacant')})`
+                        ].filter(Boolean);
+                        return (
+                          <SelectItem key={u._id} value={u.propertyId}>
+                            {parts.join(' — ')}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      'The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).'
+                    )}
                   </p>
-                )}
-              </div>
-            )}
+                  {errors.customAllocations && (
+                    <p className="text-sm text-destructive">
+                      {errors.customAllocations.message ||
+                        errors.customAllocations.root?.message ||
+                        t('Pick a unit to bill')}
+                    </p>
+                  )}
+                </div>
+              )}
 
             {showAllocationTable && unitsWithProperty.length > 0 && (
               <div className="space-y-2">
@@ -792,7 +863,10 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                     setValue('startFromCurrentMonth', checked)
                   }
                 />
-                <Label htmlFor="startFromCurrentMonth" className="text-label text-ink-muted">
+                <Label
+                  htmlFor="startFromCurrentMonth"
+                  className="text-label text-ink-muted"
+                >
                   {t('Start billing from current month only')}
                 </Label>
               </div>
@@ -835,7 +909,10 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
 
             {trackOwnerExpense && (
               <div className="ml-6 space-y-2">
-                <Label htmlFor="ownerAmount" className="text-sm text-muted-foreground">
+                <Label
+                  htmlFor="ownerAmount"
+                  className="text-sm text-muted-foreground"
+                >
                   {t('Owner monthly amount')}
                 </Label>
                 <Input
@@ -846,9 +923,9 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                   {...register('ownerAmount')}
                 />
                 {isRecurring && (
-                <p className="text-xs text-muted-foreground">
-                  {t('Set to 0 for variable — enter actual amounts monthly.')}
-                </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t('Set to 0 for variable — enter actual amounts monthly.')}
+                  </p>
                 )}
               </div>
             )}
@@ -880,7 +957,9 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
           </Button>
           <Button
             onClick={handleSubmit(onSubmit)}
-            disabled={addMutation.isPending || updateMutation.isPending || isLoading}
+            disabled={
+              addMutation.isPending || updateMutation.isPending || isLoading
+            }
           >
             {expense?._id ? t('Update') : t('Add')}
           </Button>

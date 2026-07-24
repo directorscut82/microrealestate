@@ -408,9 +408,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
         );
         const expenseName =
           r.match?.expenseName ||
-          (b?.expenses || []).find(
-            (e) => String(e._id) === String(a.expenseId)
-          )?.name ||
+          (b?.expenses || []).find((e) => String(e._id) === String(a.expenseId))
+            ?.name ||
           r.parsed.provider;
         return {
           buildingId: a.buildingId,
@@ -451,12 +450,28 @@ export default function BillImportDialog({ open, setOpen, building }) {
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
         queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
       }
-      // H2: a bill can be SAVED yet fail to charge (bridge error). The server
-      // flags those with chargeError — surface it instead of a blanket success.
-      const chargeFailures = Array.isArray(savedBills)
-        ? savedBills.filter((b) => b && b.chargeError)
-        : [];
-      if (chargeFailures.length > 0) {
+      const rows = Array.isArray(savedBills) ? savedBills : [];
+      // The batch is non-atomic: the server returns an index-aligned row per
+      // bill, flagging per-bill save failures (saveFailed) and per-bill charge
+      // failures (chargeError) rather than aborting. Report the real outcome.
+      const saveFailures = rows.filter((b) => b && b.saveFailed);
+      // H2: a bill can be SAVED yet fail to charge (bridge error).
+      const chargeFailures = rows.filter((b) => b && b.chargeError);
+      const savedOk = rows.filter((b) => b && !b.saveFailed).length;
+
+      if (saveFailures.length > 0) {
+        // Some bills could not be saved (e.g. duplicate for the period).
+        toast.warning(
+          t(
+            '{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).',
+            {
+              saved: savedOk,
+              total: rows.length,
+              failed: saveFailures.length
+            }
+          )
+        );
+      } else if (chargeFailures.length > 0) {
         toast.warning(
           t(
             'Bills saved. {{failed}} could not charge tenants — charge them from the building statement.',
@@ -466,7 +481,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       } else {
         toast.success(
           t('{{count}} bill(s) imported successfully', {
-            count: billsToConfirm.length
+            count: savedOk || billsToConfirm.length
           })
         );
       }

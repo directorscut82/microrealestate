@@ -1363,5 +1363,6 @@
   "Create new expense": "Δημιουργία νέας δαπάνης",
   "need assignment": "χρειάζονται αντιστοίχιση",
   "Charge tenants this month": "Χρέωση ενοικιαστών αυτόν τον μήνα",
-  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Οι λογαριασμοί αποθηκεύτηκαν. {{failed}} δεν χρέωσαν ενοικιαστές — χρεώστε τους από τη μηνιαία κατάσταση."
+  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Οι λογαριασμοί αποθηκεύτηκαν. {{failed}} δεν χρέωσαν ενοικιαστές — χρεώστε τους από τη μηνιαία κατάσταση.",
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} από {{total}} λογαριασμοί αποθηκεύτηκαν. {{failed}} δεν αποθηκεύτηκαν (υπάρχουν ήδη ή είναι άκυροι)."
 }

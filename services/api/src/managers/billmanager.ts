@@ -1,4 +1,9 @@
-import { Collections, logger, ServiceError, Service } from '@microrealestate/common';
+import {
+  Collections,
+  logger,
+  ServiceError,
+  Service
+} from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
   parseBillPdf,
@@ -202,7 +207,23 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
   const results = [];
 
   for (const file of files) {
-    const parseResult = await parseBillPdf(file.buffer);
+    // Isolate per-file: a throw in parseBillPdf (OCR decode failure, pixel-bomb
+    // reject, corrupt PDF) must fail ONLY this file, not 500 the whole batch —
+    // the other files in the upload still parse and are shown to the user.
+    let parseResult;
+    try {
+      parseResult = await parseBillPdf(file.buffer);
+    } catch (err: any) {
+      logger.error(
+        `parseBillPdf threw for ${file.originalname}: ${err?.message || err}`
+      );
+      results.push({
+        filename: file.originalname,
+        success: false,
+        error: err?.message || 'Αποτυχία ανάλυσης λογαριασμού'
+      });
+      continue;
+    }
 
     if (!parseResult.success || !parseResult.bill) {
       results.push({
@@ -319,204 +340,222 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       expenseName
     } = billData;
 
-    // Verify building belongs to this realm
-    const building = await Collections.Building.findOne({
-      _id: buildingId,
-      realmId
-    }).lean();
-    if (!building) {
-      throw new ServiceError(
-        `Το κτίριο ${buildingId} δεν βρέθηκε`,
-        404
-      );
-    }
-
-    // Verify expense exists on this building
-    const expenseExists = (building as any).expenses?.some(
-      (e: any) => String(e._id) === expenseId
-    );
-    if (!expenseExists) {
-      throw new ServiceError(
-        `Η δαπάνη ${expenseId} δεν βρέθηκε στο κτίριο`,
-        404
-      );
-    }
-
-    // Validate term (YYYYMMDDHH) — it lands on the Bill doc AND, when charging,
-    // is passed to the monthly-statement bridge. saveMonthlyStatement enforces
-    // this same shape; validating here fails fast with a clear error instead of
-    // a swallowed bridge 422 or a malformed term on the stored Bill.
-    if (!term || !/^\d{10}$/.test(String(term))) {
-      throw new ServiceError(
-        `Invalid bill term (expected YYYYMMDDHH, got ${term})`,
-        422
-      );
-    }
-    // Match saveMonthlyStatement's range check (buildingmanager.ts:2920) — a
-    // regex-valid but out-of-range term would otherwise pass here and only fail
-    // later in the swallowed bridge self-call.
-    if (Number(term) < 2020010100 || Number(term) > 2099123100) {
-      throw new ServiceError(`Bill term out of valid range (got ${term})`, 422);
-    }
-
-    // Reject zero or negative totalAmount. A bill that costs nothing is
-    // never a real bill — it's almost always OCR / parser failure or a
-    // stale draft. Persisting zero/negative pollutes downstream
-    // dashboards and reconciliation. Allow a small tolerance for
-    // floating-point dust.
-    const _ta = Number(totalAmount);
-    if (!Number.isFinite(_ta) || _ta <= 0.005) {
-      throw new ServiceError(
-        `Bill totalAmount must be a positive number (got ${totalAmount})`,
-        422
-      );
-    }
-
-    // Tier A6 (B3) — Bill date validation. periodStart and periodEnd are
-    // required and must be valid dates with periodStart ≤ periodEnd.
-    // issueDate / dueDate are optional but, when set, must be valid and
-    // ordered (issueDate ≤ dueDate). Without these, a malformed
-    // periodStart pollutes the rent ledger silently (becomes Invalid Date,
-    // breaks getUTCFullYear()/getUTCMonth() in computeDefaultTerm, and
-    // computes an out-of-range term that lands on the wrong month).
-    if (!periodStart || !periodEnd) {
-      throw new ServiceError(
-        'Bill periodStart and periodEnd are required',
-        422
-      );
-    }
-    const _ps = new Date(periodStart);
-    const _pe = new Date(periodEnd);
-    if (Number.isNaN(_ps.getTime()) || Number.isNaN(_pe.getTime())) {
-      throw new ServiceError(
-        'Bill periodStart / periodEnd must be valid dates',
-        422
-      );
-    }
-    if (_ps.getTime() > _pe.getTime()) {
-      throw new ServiceError(
-        'Bill periodStart must be on or before periodEnd',
-        422
-      );
-    }
-    if (issueDate !== undefined && issueDate !== null && issueDate !== '') {
-      const _id = new Date(issueDate);
-      if (Number.isNaN(_id.getTime())) {
-        throw new ServiceError('Bill issueDate must be a valid date', 422);
-      }
-      if (dueDate !== undefined && dueDate !== null && dueDate !== '') {
-        const _dd = new Date(dueDate);
-        if (Number.isNaN(_dd.getTime())) {
-          throw new ServiceError('Bill dueDate must be a valid date', 422);
-        }
-        if (_id.getTime() > _dd.getTime()) {
-          throw new ServiceError(
-            'Bill issueDate must be on or before dueDate',
-            422
-          );
-        }
-      }
-    }
-
-    // If replacing, remove existing bill for same term+expense
-    if (replaceExisting) {
-      await Collections.Bill.deleteMany({
-        realmId,
-        buildingId,
-        expenseId,
-        term
-      });
-    }
-
-    // Store IRIS QR as data URI if provided (B2 upload can replace later)
-    const irisCodeUrl = irisCodeBase64
-      ? `data:image/png;base64,${irisCodeBase64}`
-      : undefined;
-
-    const buildBill = () =>
-      new Collections.Bill({
-        realmId,
-        buildingId,
-        expenseId,
-        provider,
-        billingId,
-        totalAmount,
-        periodStart: new Date(periodStart),
-        periodEnd: new Date(periodEnd),
-        issueDate: issueDate ? new Date(issueDate) : undefined,
-        dueDate: dueDate ? new Date(dueDate) : undefined,
-        term,
-        rfCode,
-        paymentCode: paymentCode || null,
-        irisCodeUrl,
-        status: 'pending',
-        createdDate: new Date(),
-        updatedDate: new Date()
-      });
-
-    let bill = buildBill();
+    // Per-bill isolation: the batch is NON-atomic by design (each bill is an
+    // independent Bill doc + optional charge). A validation/save failure on one
+    // bill (bad term, 409 duplicate, etc.) must NOT abort the batch and roll the
+    // client into a blanket "Failed to save bills" — the bills that DID save are
+    // committed. Capture the failure as an index-aligned entry and continue so
+    // the client can report accurate partial success.
     try {
-      await bill.save();
-    } catch (err: any) {
-      // Duplicate-key on the (realmId, buildingId, expenseId, term) unique
-      // index — translate into a proper 409 unless the caller asked to
-      // replace, in which case delete-and-retry once.
-      if (err && err.code === 11000) {
-        if (replaceExisting) {
-          await Collections.Bill.deleteOne({
-            realmId,
-            buildingId,
-            expenseId,
-            term
-          });
-          bill = buildBill();
-          await bill.save();
-        } else {
-          throw new ServiceError(
-            'A bill already exists for this period. Use replaceExisting:true to overwrite.',
-            409
-          );
-        }
-      } else {
-        throw err;
+      // Verify building belongs to this realm
+      const building = await Collections.Building.findOne({
+        _id: buildingId,
+        realmId
+      }).lean();
+      if (!building) {
+        throw new ServiceError(`Το κτίριο ${buildingId} δεν βρέθηκε`, 404);
       }
-    }
-    // «Χρέωση ενοικιαστών» — bridge the amount into the tenant-charge engine.
-    // Runs AFTER the Bill doc is saved so a bridge failure never blocks the
-    // tracking record. Best-effort: the Bill exists regardless; the charge can
-    // be retried from the building's monthly statement.
-    let chargeError: string | undefined;
-    if (chargeThisMonth) {
-      try {
-        await bridgeChargeToStatement(
+
+      // Verify expense exists on this building
+      const expenseExists = (building as any).expenses?.some(
+        (e: any) => String(e._id) === expenseId
+      );
+      if (!expenseExists) {
+        throw new ServiceError(
+          `Η δαπάνη ${expenseId} δεν βρέθηκε στο κτίριο`,
+          404
+        );
+      }
+
+      // Validate term (YYYYMMDDHH) — it lands on the Bill doc AND, when charging,
+      // is passed to the monthly-statement bridge. saveMonthlyStatement enforces
+      // this same shape; validating here fails fast with a clear error instead of
+      // a swallowed bridge 422 or a malformed term on the stored Bill.
+      if (!term || !/^\d{10}$/.test(String(term))) {
+        throw new ServiceError(
+          `Invalid bill term (expected YYYYMMDDHH, got ${term})`,
+          422
+        );
+      }
+      // Match saveMonthlyStatement's range check (buildingmanager.ts:2920) — a
+      // regex-valid but out-of-range term would otherwise pass here and only fail
+      // later in the swallowed bridge self-call.
+      if (Number(term) < 2020010100 || Number(term) > 2099123100) {
+        throw new ServiceError(
+          `Bill term out of valid range (got ${term})`,
+          422
+        );
+      }
+
+      // Reject zero or negative totalAmount. A bill that costs nothing is
+      // never a real bill — it's almost always OCR / parser failure or a
+      // stale draft. Persisting zero/negative pollutes downstream
+      // dashboards and reconciliation. Allow a small tolerance for
+      // floating-point dust.
+      const _ta = Number(totalAmount);
+      if (!Number.isFinite(_ta) || _ta <= 0.005) {
+        throw new ServiceError(
+          `Bill totalAmount must be a positive number (got ${totalAmount})`,
+          422
+        );
+      }
+
+      // Tier A6 (B3) — Bill date validation. periodStart and periodEnd are
+      // required and must be valid dates with periodStart ≤ periodEnd.
+      // issueDate / dueDate are optional but, when set, must be valid and
+      // ordered (issueDate ≤ dueDate). Without these, a malformed
+      // periodStart pollutes the rent ledger silently (becomes Invalid Date,
+      // breaks getUTCFullYear()/getUTCMonth() in computeDefaultTerm, and
+      // computes an out-of-range term that lands on the wrong month).
+      if (!periodStart || !periodEnd) {
+        throw new ServiceError(
+          'Bill periodStart and periodEnd are required',
+          422
+        );
+      }
+      const _ps = new Date(periodStart);
+      const _pe = new Date(periodEnd);
+      if (Number.isNaN(_ps.getTime()) || Number.isNaN(_pe.getTime())) {
+        throw new ServiceError(
+          'Bill periodStart / periodEnd must be valid dates',
+          422
+        );
+      }
+      if (_ps.getTime() > _pe.getTime()) {
+        throw new ServiceError(
+          'Bill periodStart must be on or before periodEnd',
+          422
+        );
+      }
+      if (issueDate !== undefined && issueDate !== null && issueDate !== '') {
+        const _id = new Date(issueDate);
+        if (Number.isNaN(_id.getTime())) {
+          throw new ServiceError('Bill issueDate must be a valid date', 422);
+        }
+        if (dueDate !== undefined && dueDate !== null && dueDate !== '') {
+          const _dd = new Date(dueDate);
+          if (Number.isNaN(_dd.getTime())) {
+            throw new ServiceError('Bill dueDate must be a valid date', 422);
+          }
+          if (_id.getTime() > _dd.getTime()) {
+            throw new ServiceError(
+              'Bill issueDate must be on or before dueDate',
+              422
+            );
+          }
+        }
+      }
+
+      // If replacing, remove existing bill for same term+expense
+      if (replaceExisting) {
+        await Collections.Bill.deleteMany({
           realmId,
           buildingId,
           expenseId,
-          term,
-          Number(totalAmount),
-          expenseName || provider || 'Bill'
-        );
-      } catch (err: any) {
-        const reason =
-          err?.response?.data?.message || err?.message || String(err);
-        logger.error(
-          `bridgeChargeToStatement failed for bill ${bill._id}: ${reason}`
-        );
-        chargeError = reason;
+          term
+        });
       }
-    }
 
-    // H2: merge chargeError into the RETURNED object out-of-band. Setting it on
-    // the Mongoose doc then calling toObject() strips it (not a schema path), so
-    // the client would never learn the charge silently failed. Spread the object
-    // and add the flag after toObject().
-    saved.push(
-      chargeError
-        ? { ...bill.toObject(), chargeRequested: true, chargeError }
-        : chargeThisMonth
-          ? { ...bill.toObject(), chargeRequested: true, charged: true }
-          : bill.toObject()
-    );
+      // Store IRIS QR as data URI if provided (B2 upload can replace later)
+      const irisCodeUrl = irisCodeBase64
+        ? `data:image/png;base64,${irisCodeBase64}`
+        : undefined;
+
+      const buildBill = () =>
+        new Collections.Bill({
+          realmId,
+          buildingId,
+          expenseId,
+          provider,
+          billingId,
+          totalAmount,
+          periodStart: new Date(periodStart),
+          periodEnd: new Date(periodEnd),
+          issueDate: issueDate ? new Date(issueDate) : undefined,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+          term,
+          rfCode,
+          paymentCode: paymentCode || null,
+          irisCodeUrl,
+          status: 'pending',
+          createdDate: new Date(),
+          updatedDate: new Date()
+        });
+
+      let bill = buildBill();
+      try {
+        await bill.save();
+      } catch (err: any) {
+        // Duplicate-key on the (realmId, buildingId, expenseId, term) unique
+        // index — translate into a proper 409 unless the caller asked to
+        // replace, in which case delete-and-retry once.
+        if (err && err.code === 11000) {
+          if (replaceExisting) {
+            await Collections.Bill.deleteOne({
+              realmId,
+              buildingId,
+              expenseId,
+              term
+            });
+            bill = buildBill();
+            await bill.save();
+          } else {
+            throw new ServiceError(
+              'A bill already exists for this period. Use replaceExisting:true to overwrite.',
+              409
+            );
+          }
+        } else {
+          throw err;
+        }
+      }
+      // «Χρέωση ενοικιαστών» — bridge the amount into the tenant-charge engine.
+      // Runs AFTER the Bill doc is saved so a bridge failure never blocks the
+      // tracking record. Best-effort: the Bill exists regardless; the charge can
+      // be retried from the building's monthly statement.
+      let chargeError: string | undefined;
+      if (chargeThisMonth) {
+        try {
+          await bridgeChargeToStatement(
+            realmId,
+            buildingId,
+            expenseId,
+            term,
+            Number(totalAmount),
+            expenseName || provider || 'Bill'
+          );
+        } catch (err: any) {
+          const reason =
+            err?.response?.data?.message || err?.message || String(err);
+          logger.error(
+            `bridgeChargeToStatement failed for bill ${bill._id}: ${reason}`
+          );
+          chargeError = reason;
+        }
+      }
+
+      // H2: merge chargeError into the RETURNED object out-of-band. Setting it on
+      // the Mongoose doc then calling toObject() strips it (not a schema path), so
+      // the client would never learn the charge silently failed. Spread the object
+      // and add the flag after toObject().
+      saved.push(
+        chargeError
+          ? { ...bill.toObject(), chargeRequested: true, chargeError }
+          : chargeThisMonth
+            ? { ...bill.toObject(), chargeRequested: true, charged: true }
+            : bill.toObject()
+      );
+    } catch (err: any) {
+      // Index-aligned failure record. status carried through so the client can
+      // distinguish a 409 duplicate ("already exists") from a real error.
+      const status =
+        err instanceof ServiceError ? (err as any).statusCode : undefined;
+      const reason = err?.message || String(err);
+      logger.error(
+        `confirmBills failed for one bill (building ${buildingId}, expense ${expenseId}, term ${term}): ${reason}`
+      );
+      saved.push({ saveFailed: true, status, error: reason });
+    }
   }
 
   res.json(saved);
@@ -527,10 +566,7 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
  * Parse payment receipt PDFs, extract RF codes, match to pending bills.
  * Returns matches for user confirmation.
  */
-export async function parsePaymentReceipts(
-  req: Req,
-  res: Res
-): Promise<void> {
+export async function parsePaymentReceipts(req: Req, res: Res): Promise<void> {
   const realmId = req.realm?._id;
   if (!realmId) {
     throw new ServiceError('Unauthorized', 401);

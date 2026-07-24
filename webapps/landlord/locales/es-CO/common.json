@@ -1214,5 +1214,6 @@
   "Create new expense": "Crear nuevo gasto",
   "need assignment": "requieren asignación",
   "Charge tenants this month": "Cobrar a los inquilinos este mes",
-  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Facturas guardadas. {{failed}} no pudieron cobrar a los inquilinos — cóbrelos desde el estado mensual."
+  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Facturas guardadas. {{failed}} no pudieron cobrar a los inquilinos — cóbrelos desde el estado mensual.",
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} de {{total}} facturas guardadas. {{failed}} no se pudieron guardar (ya existen o no son válidas)."
 }

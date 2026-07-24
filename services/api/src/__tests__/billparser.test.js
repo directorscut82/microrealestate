@@ -167,6 +167,22 @@ describe('DEH Bill Parser', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('ποσό');
     });
+
+    it('should NOT swallow the next line into the billing ID on the OCR path (regression)', () => {
+      // OCR joins page lines with \n. The billing-ID value class must stop at
+      // the line end — a following numeric line (a code, a meter reading) must
+      // not be absorbed into the provision number. Before the [ \t] fix, the
+      // \s class crossed the newline and captured "9 99000935-03 2\n123 45678".
+      const text = `ΔΕΗ A.E.
+Αριθμός παροχής 9 99000935-03 2
+123 45678
+Συνολικό ποσό πληρωμής *186,21€
+Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026`;
+      const result = parseDehBill(text);
+      expect(result.success).toBe(true);
+      expect(result.bill.billingId).toBe('9 99000935-03 2');
+      expect(result.bill.billingIdNormalized).toBe('999000935032');
+    });
   });
 
   describe('normalizeBillingId', () => {
