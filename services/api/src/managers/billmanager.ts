@@ -352,6 +352,12 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         422
       );
     }
+    // Match saveMonthlyStatement's range check (buildingmanager.ts:2920) — a
+    // regex-valid but out-of-range term would otherwise pass here and only fail
+    // later in the swallowed bridge self-call.
+    if (Number(term) < 2020010100 || Number(term) > 2099123100) {
+      throw new ServiceError(`Bill term out of valid range (got ${term})`, 422);
+    }
 
     // Reject zero or negative totalAmount. A bill that costs nothing is
     // never a real bill — it's almost always OCR / parser failure or a

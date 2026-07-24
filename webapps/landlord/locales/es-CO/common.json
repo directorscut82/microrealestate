@@ -1213,5 +1213,6 @@
   "Select an expense": "Seleccione un gasto",
   "Create new expense": "Crear nuevo gasto",
   "need assignment": "requieren asignación",
-  "Charge tenants this month": "Cobrar a los inquilinos este mes"
+  "Charge tenants this month": "Cobrar a los inquilinos este mes",
+  "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Facturas guardadas. {{failed}} no pudieron cobrar a los inquilinos — cóbrelos desde el estado mensual."
 }

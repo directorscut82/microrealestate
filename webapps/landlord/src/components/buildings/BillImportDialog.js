@@ -262,9 +262,9 @@ export default function BillImportDialog({ open, setOpen, building }) {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [replaceFlags, setReplaceFlags] = useState({});
-  // Per-result «charge tenants this month» toggle: {filename: boolean}
+  // Per-result «charge tenants this month» toggle: {_uid: boolean}
   const [chargeFlags, setChargeFlags] = useState({});
-  // Per-result manual assignment for unmatched bills: {filename: {buildingId, expenseId}}
+  // Per-result manual assignment for unmatched bills: {_uid: {buildingId, expenseId}}
   const [assignments, setAssignments] = useState({});
   // Inline "create expense" flow: which result triggered it + which building.
   const [createFor, setCreateFor] = useState(null); // {uid, building} | null
@@ -459,8 +459,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
       if (chargeFailures.length > 0) {
         toast.warning(
           t(
-            '{{saved}} bill(s) saved, but {{failed}} could not charge tenants — charge them from the building statement',
-            { saved: billsToConfirm.length, failed: chargeFailures.length }
+            'Bills saved. {{failed}} could not charge tenants — charge them from the building statement.',
+            { failed: chargeFailures.length }
           )
         );
       } else {
