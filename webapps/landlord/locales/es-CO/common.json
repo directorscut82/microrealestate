@@ -1225,5 +1225,17 @@
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "No se pudo leer la foto: {{error}}. Envíe una toma más clara al bot o registre la factura manualmente.",
   "Unreadable": "Ilegible",
   "{{count}} pending": "{{count}} pendientes",
-  "Record bill": "Registrar factura"
+  "Record bill": "Registrar factura",
+  "Match payment receipt": "Conciliar recibo de pago",
+  "Receipt details": "Detalles del recibo",
+  "Suggested match (bills + repairs)": "Coincidencia sugerida (facturas + reparaciones)",
+  "No RF/IBAN on this receipt — matched on the other details below.": "Sin RF/IBAN en este recibo — coincidencia por los demás detalles a continuación.",
+  "No open bill or repair matched this receipt.": "Ninguna factura o reparación abierta coincide con este recibo.",
+  "Drop receipt PDF or photo here or click to browse": "Suelte el PDF o la foto del recibo aquí o haga clic para buscar",
+  "Upload payment receipts (PDF or photo). Matched to open bills and repairs.": "Suba recibos de pago (PDF o foto). Se concilian con facturas y reparaciones abiertas.",
+  "shared": "comunes",
+  "remaining {{remaining}}": "restante {{remaining}}",
+  "{{paid}} paid / {{remaining}} remaining": "{{paid}} pagado / {{remaining}} restante",
+  "{{count}} payment(s) recorded": "{{count}} pago(s) registrado(s)",
+  "{{failed}} receipt(s) could not be read": "{{failed}} recibo(s) no se pudieron leer"
 }

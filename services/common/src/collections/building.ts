@@ -219,6 +219,18 @@ const RepairSchema = new mongoose.Schema({
   // Tier I-3.d: holds the storage key (S3 / MinIO) returned by
   // /documents/upload when the user attaches an invoice scan to a repair.
   invoiceDocumentId: { type: String, default: null },
+  // Slice 6 — απόδειξη installments matched to this repair (mirrors
+  // BillSchema.receipts). Repair is "fully paid" when Σ(receipts) >= actualCost.
+  receipts: [
+    {
+      amount: Number,
+      date: Date,
+      proofUrl: String,
+      ocrText: String,
+      matchedOn: [String],
+      createdDate: Date
+    }
+  ],
   notes: String,
   // Distribution to tenants
   chargeableTo: {
@@ -234,7 +246,16 @@ const RepairSchema = new mongoose.Schema({
   },
   allocationMethod: {
     type: String,
-    enum: ['general_thousandths', 'heating_thousandths', 'elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage'],
+    enum: [
+      'general_thousandths',
+      'heating_thousandths',
+      'elevator_thousandths',
+      'equal',
+      'by_surface',
+      'fixed',
+      'custom_ratio',
+      'custom_percentage'
+    ],
     default: 'general_thousandths'
   },
   chargeTerm: Number,
@@ -372,66 +393,69 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   paidDate: { type: Date, default: null }
 });
 
-const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>({
-  realmId: { type: String, ref: Realm },
+const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>(
+  {
+    realmId: { type: String, ref: Realm },
 
-  name: { type: String, required: true },
-  description: String,
-  address: {
-    _id: false,
-    street1: String,
-    street2: String,
-    zipCode: String,
-    city: String,
-    state: String,
-    country: String
+    name: { type: String, required: true },
+    description: String,
+    address: {
+      _id: false,
+      street1: String,
+      street2: String,
+      zipCode: String,
+      city: String,
+      state: String,
+      country: String
+    },
+    blockNumber: String,
+    blockStreets: [String],
+
+    atakPrefix: { type: String, required: true },
+    yearBuilt: Number,
+    totalFloors: Number,
+    hasElevator: { type: Boolean, default: false },
+    hasCentralHeating: { type: Boolean, default: false },
+    heatingType: {
+      type: String,
+      enum: ['central_oil', 'central_gas', 'autonomous', 'none', '']
+    },
+
+    manager: {
+      _id: false,
+      name: String,
+      phone: String,
+      email: String,
+      taxId: String,
+      company: String
+    },
+    bankInfo: {
+      _id: false,
+      name: String,
+      iban: String
+    },
+
+    units: [BuildingUnitSchema],
+    expenses: [BuildingExpenseSchema],
+    contractors: [ContractorSchema],
+    repairs: [RepairSchema],
+    ownerMonthlyExpenses: [OwnerMonthlyExpenseSchema],
+    uncollectedPayments: [UncollectedPaymentSchema],
+
+    notes: String,
+    createdDate: Date,
+    updatedDate: Date
   },
-  blockNumber: String,
-  blockStreets: [String],
-
-  atakPrefix: { type: String, required: true },
-  yearBuilt: Number,
-  totalFloors: Number,
-  hasElevator: { type: Boolean, default: false },
-  hasCentralHeating: { type: Boolean, default: false },
-  heatingType: {
-    type: String,
-    enum: ['central_oil', 'central_gas', 'autonomous', 'none', '']
-  },
-
-  manager: {
-    _id: false,
-    name: String,
-    phone: String,
-    email: String,
-    taxId: String,
-    company: String
-  },
-  bankInfo: {
-    _id: false,
-    name: String,
-    iban: String
-  },
-
-  units: [BuildingUnitSchema],
-  expenses: [BuildingExpenseSchema],
-  contractors: [ContractorSchema],
-  repairs: [RepairSchema],
-  ownerMonthlyExpenses: [OwnerMonthlyExpenseSchema],
-  uncollectedPayments: [UncollectedPaymentSchema],
-
-  notes: String,
-  createdDate: Date,
-  updatedDate: Date
-}, {
-  // Audit B3: Optimistic concurrency. Mongoose now bumps __v on every
-  // save() and throws VersionError if the document was modified between
-  // findOne and save. buildingmanager wraps every save() in
-  // _saveBuildingWithVersionCheck() which surfaces the conflict as a
-  // 409 instead of letting one of two concurrent writers silently
-  // overwrite the other. Mirrors realm.ts (line 119).
-  optimisticConcurrency: true
-});
+  {
+    // Audit B3: Optimistic concurrency. Mongoose now bumps __v on every
+    // save() and throws VersionError if the document was modified between
+    // findOne and save. buildingmanager wraps every save() in
+    // _saveBuildingWithVersionCheck() which surfaces the conflict as a
+    // 409 instead of letting one of two concurrent writers silently
+    // overwrite the other. Mirrors realm.ts (line 119).
+    optimisticConcurrency: true
+  }
+);
 
 BuildingSchema.index({ realmId: 1 });
 BuildingSchema.index({ realmId: 1, atakPrefix: 1 });

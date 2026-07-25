@@ -25,16 +25,48 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
   pdfUrl: String,
   status: {
     type: String,
-    enum: ['pending', 'paid'],
+    // 'partial' — some receipts recorded but Σ(receipts) < totalAmount (Slice 6
+    // installments). 'paid' — fully covered. 'pending' — nothing recorded.
+    enum: ['pending', 'partial', 'paid'],
     default: 'pending'
   },
+  // Slice 6 — the full element bag extracted at bill-confirm. An incoming
+  // απόδειξη's elements are scored against this to SUGGEST a match (never
+  // auto-classify the receipt type). Every list holds all reliably-found
+  // tokens; checksum-validated where applicable (rfCodes/ibans).
+  matchKeys: {
+    rfCodes: [String],
+    ibans: [String],
+    amounts: [Number],
+    afm: [String],
+    dates: [Date],
+    nameTokens: [String]
+  },
+  ocrText: String,
+  // Slice 6 — each recorded payment απόδειξη as its own record (installments).
+  // The bill is 'paid' only when Σ(receipts.amount) >= totalAmount, else
+  // 'partial'. Replaces the single-shot paymentProofUrl overwrite (kept for
+  // back-compat / the pre-Slice-6 confirmPayment path).
+  receipts: [
+    {
+      amount: Number,
+      date: Date,
+      proofUrl: String,
+      ocrText: String,
+      matchedOn: [String],
+      createdDate: Date
+    }
+  ],
   paymentProofUrl: String,
   paymentDate: Date,
   createdDate: Date,
   updatedDate: Date
 });
 
-BillSchema.index({ realmId: 1, buildingId: 1, expenseId: 1, term: 1 }, { unique: true });
+BillSchema.index(
+  { realmId: 1, buildingId: 1, expenseId: 1, term: 1 },
+  { unique: true }
+);
 BillSchema.index({ realmId: 1, status: 1 });
 BillSchema.index({ realmId: 1, billingId: 1 });
 BillSchema.index({ realmId: 1, rfCode: 1 });

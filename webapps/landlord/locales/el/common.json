@@ -1374,5 +1374,17 @@
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "Η φωτογραφία δεν διαβάστηκε: {{error}}. Στείλτε καθαρότερη λήψη στο bot ή καταχωρήστε τον λογαριασμό χειροκίνητα.",
   "Unreadable": "Μη αναγνώσιμο",
   "{{count}} pending": "{{count}} εκκρεμούν",
-  "Record bill": "Καταχώρηση"
+  "Record bill": "Καταχώρηση",
+  "Match payment receipt": "Αντιστοίχιση απόδειξης πληρωμής",
+  "Receipt details": "Στοιχεία απόδειξης",
+  "Suggested match (bills + repairs)": "Προτεινόμενη αντιστοίχιση (λογαριασμοί + επισκευές)",
+  "No RF/IBAN on this receipt — matched on the other details below.": "Χωρίς RF/IBAN σε αυτή την απόδειξη — η αντιστοίχιση έγινε στα υπόλοιπα στοιχεία παρακάτω.",
+  "No open bill or repair matched this receipt.": "Κανένας εκκρεμής λογαριασμός ή επισκευή δεν ταίριαξε με αυτή την απόδειξη.",
+  "Drop receipt PDF or photo here or click to browse": "Σύρετε PDF ή φωτογραφία απόδειξης εδώ ή κάντε κλικ για αναζήτηση",
+  "Upload payment receipts (PDF or photo). Matched to open bills and repairs.": "Ανεβάστε αποδείξεις πληρωμής (PDF ή φωτογραφία). Αντιστοιχίζονται με εκκρεμείς λογαριασμούς και επισκευές.",
+  "shared": "κοινά",
+  "remaining {{remaining}}": "υπόλοιπο {{remaining}}",
+  "{{paid}} paid / {{remaining}} remaining": "{{paid}} πληρωμένο / {{remaining}} υπόλοιπο",
+  "{{count}} payment(s) recorded": "Καταχωρήθηκαν {{count}} πληρωμές",
+  "{{failed}} receipt(s) could not be read": "{{failed}} αποδείξεις δεν διαβάστηκαν"
 }

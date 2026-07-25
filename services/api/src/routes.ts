@@ -485,11 +485,13 @@ export default function routes(): express.Router {
     '/confirm',
     Middlewares.asyncWrapper(billManager.confirmBills as any)
   );
+  // Slice 6: receipts arrive as phone photos too, not just digital PDFs — use
+  // the image-accepting uploadBill multer + magic-byte check (not PDF-only).
   billsRouter.post(
     '/payment-receipt',
     uploadRateLimit,
-    upload.array('bills', 5) as any,
-    verifyPdfContent,
+    uploadBill.array('bills', 10) as any,
+    verifyBillContent,
     Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any)
   );
   billsRouter.post(

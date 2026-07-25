@@ -426,6 +426,10 @@ export default function BillImportDialog({ open, setOpen, building }) {
           rfCode: r.parsed.rfCode,
           paymentCode: r.parsed.paymentCode,
           irisCodeBase64: r.parsed.irisCodeBase64,
+          // Slice 6 — carry the element bag + raw text to persist on the Bill
+          // for later απόδειξη matching.
+          matchKeys: r.parsed.matchKeys,
+          ocrText: r.parsed.ocrText,
           replaceExisting: !!replaceFlags[r._uid],
           chargeThisMonth: !!chargeFlags[r._uid],
           expenseName

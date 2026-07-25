@@ -601,6 +601,17 @@ export async function confirmBillPayment(billIds, paymentProofUrl) {
   return response.data;
 }
 
+// Slice 6 — record receipt installments against a bill OR a repair. `payments`
+// is [{kind:'bill'|'repair', billId|repairId, buildingId?, amount, date,
+// matchedOn}]. Server appends each to the target's receipts[] and recomputes
+// paid/partial. Returns { updated: [...] }.
+export async function confirmReceiptPayments(payments) {
+  const response = await apiFetcher().post('/bills/confirm-payment', {
+    payments
+  });
+  return response.data;
+}
+
 export async function fetchBills({ buildingId, status } = {}) {
   const params = new URLSearchParams();
   if (buildingId) params.set('buildingId', buildingId);

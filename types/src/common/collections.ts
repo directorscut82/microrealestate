@@ -624,6 +624,7 @@ export namespace CollectionTypes {
     affectedArea?: string;
     invoiceReference?: string;
     invoiceDocumentId?: string | null;
+    receipts?: BillReceipt[];
     notes?: string;
     chargeableTo?: 'tenants' | 'owners' | 'split';
     tenantSharePercentage?: number;
@@ -668,7 +669,28 @@ export namespace CollectionTypes {
   };
 
   export type BillProvider = 'deh' | 'eydap' | 'epa' | 'other';
-  export type BillStatus = 'pending' | 'paid';
+  export type BillStatus = 'pending' | 'partial' | 'paid';
+
+  // Slice 6 — the element bag stored per bill; a receipt's extracted elements
+  // are scored against this to suggest a match.
+  export type BillMatchKeys = {
+    rfCodes?: string[];
+    ibans?: string[];
+    amounts?: number[];
+    afm?: string[];
+    dates?: Date[];
+    nameTokens?: string[];
+  };
+
+  // Slice 6 — one recorded payment απόδειξη (installment-capable).
+  export type BillReceipt = {
+    amount?: number;
+    date?: Date;
+    proofUrl?: string;
+    ocrText?: string;
+    matchedOn?: string[];
+    createdDate?: Date;
+  };
 
   export type Bill = {
     _id: string;
@@ -689,6 +711,9 @@ export namespace CollectionTypes {
     irisCodeUrl?: string;
     pdfUrl?: string;
     status: BillStatus;
+    matchKeys?: BillMatchKeys;
+    ocrText?: string;
+    receipts?: BillReceipt[];
     paymentProofUrl?: string;
     paymentDate?: Date;
     createdDate?: Date;

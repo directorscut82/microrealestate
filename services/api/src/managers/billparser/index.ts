@@ -89,8 +89,7 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
   let text: string;
 
   const isPdf =
-    buffer.length >= 4 &&
-    buffer.subarray(0, 4).toString('ascii') === '%PDF';
+    buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === '%PDF';
 
   if (isPdf) {
     text = await extractTextFromPdf(buffer);
@@ -124,13 +123,17 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
   if (!provider) {
     return {
       success: false,
-      error: 'Δεν αναγνωρίστηκε ο πάροχος'
+      error: 'Δεν αναγνωρίστηκε ο πάροχος',
+      rawText: text
     };
   }
 
   switch (provider) {
-    case 'deh':
-      return parseDehBill(text);
+    case 'deh': {
+      // Slice 6 — surface the raw text so the confirm step can build matchKeys.
+      const parsed = parseDehBill(text);
+      return { ...parsed, rawText: text };
+    }
     case 'eydap':
       return {
         success: false,

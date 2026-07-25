@@ -1354,5 +1354,17 @@
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.",
   "Unreadable": "Unreadable",
   "{{count}} pending": "{{count}} pending",
-  "Record bill": "Record bill"
+  "Record bill": "Record bill",
+  "Match payment receipt": "Match payment receipt",
+  "Receipt details": "Receipt details",
+  "Suggested match (bills + repairs)": "Suggested match (bills + repairs)",
+  "No RF/IBAN on this receipt — matched on the other details below.": "No RF/IBAN on this receipt — matched on the other details below.",
+  "No open bill or repair matched this receipt.": "No open bill or repair matched this receipt.",
+  "Drop receipt PDF or photo here or click to browse": "Drop receipt PDF or photo here or click to browse",
+  "Upload payment receipts (PDF or photo). Matched to open bills and repairs.": "Upload payment receipts (PDF or photo). Matched to open bills and repairs.",
+  "shared": "shared",
+  "remaining {{remaining}}": "remaining {{remaining}}",
+  "{{paid}} paid / {{remaining}} remaining": "{{paid}} paid / {{remaining}} remaining",
+  "{{count}} payment(s) recorded": "{{count}} payment(s) recorded",
+  "{{failed}} receipt(s) could not be read": "{{failed}} receipt(s) could not be read"
 }
