@@ -467,7 +467,13 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
           chargeOwnerWhenVacant: expense.chargeOwnerWhenVacant ?? false,
           isRecurring: expense.isRecurring ?? true,
           startFromCurrentMonth: !expense.startTerm,
-          customAllocations: buildDefaultAllocations(expense.customAllocations)
+          // single_unit stores exactly one {propertyId,value} target (read as
+          // customAllocations[0]); do NOT expand it across all units, or the
+          // prefilled/edited target is lost. Other methods get per-unit rows.
+          customAllocations:
+            expense.allocationMethod === 'single_unit'
+              ? expense.customAllocations || []
+              : buildDefaultAllocations(expense.customAllocations)
         }
       : undefined
   });

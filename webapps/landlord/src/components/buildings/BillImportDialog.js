@@ -301,9 +301,26 @@ export default function BillImportDialog({ open, setOpen, building }) {
     try {
       const data = await parseBillPdfs(files);
       // H4: stamp a stable per-result uid so state maps don't collide on filename.
-      setResults(
-        (data || []).map((r, i) => ({ ...r, _uid: `${i}:${r.filename}` }))
-      );
+      const rows = (data || []).map((r, i) => ({
+        ...r,
+        _uid: `${i}:${r.filename}`
+      }));
+      setResults(rows);
+      // Pre-select the building for no-match bills whose αριθμός παροχής
+      // identified an apartment — the landlord lands on the right building with
+      // only the expense left to create/pick.
+      const seededAssign = {};
+      for (const r of rows) {
+        if (r.success && !r.match && r.unitMatch?.buildingId) {
+          seededAssign[r._uid] = {
+            buildingId: r.unitMatch.buildingId,
+            expenseId: ''
+          };
+        }
+      }
+      if (Object.keys(seededAssign).length) {
+        setAssignments((prev) => ({ ...seededAssign, ...prev }));
+      }
       setState('preview');
     } catch (error) {
       console.error('Bill parse error:', error);
@@ -332,15 +349,23 @@ export default function BillImportDialog({ open, setOpen, building }) {
   }, []);
 
   // The pre-filled synthetic expense (NO _id → add mode in ExpenseFormDialog).
+  // When the αριθμός παροχής identified a specific apartment (unitMatch), target
+  // that single unit (single_unit allocation) so the landlord only confirms;
+  // otherwise default to an equal split. billingId + provider→type are
+  // suggested from the parsed bill.
   const createPrefill = useMemo(() => {
     if (!createFor) return null;
     const result = results.find((r) => r._uid === createFor.uid);
     const parsed = result?.parsed;
+    const unitMatch = result?.unitMatch;
     return {
       name: parsed?.provider ? parsed.provider.toUpperCase() : '',
       type: PROVIDER_TYPE[parsed?.provider] || 'other',
       amount: 0,
-      allocationMethod: 'equal',
+      allocationMethod: unitMatch ? 'single_unit' : 'equal',
+      customAllocations: unitMatch
+        ? [{ propertyId: unitMatch.propertyId, value: 0 }]
+        : [],
       isRecurring: true,
       chargeOwnerWhenVacant: true,
       billingId: parsed?.billingId || ''

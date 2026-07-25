@@ -187,6 +187,46 @@ async function findExpenseByBillingId(
   return null;
 }
 
+/**
+ * Match a bill's αριθμός παροχής (billingId) to a specific UNIT by its stored
+ * supply number (unit.electricitySupplyNumber, the ΔΕΗ παροχή populated from E9
+ * / building import). When it hits we know the building AND the exact apartment
+ * — so a "no existing δαπάνη" bill can pre-fill create-expense with the building
+ * selected + single_unit allocation targeting that apartment. Compared on the
+ * normalized digits so spacing/dashes don't matter.
+ *
+ * Returns null when no unit carries that supply number (common — many bills are
+ * building-level, or the unit's number was never imported).
+ */
+async function findUnitBySupplyNumber(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<{
+  buildingId: string;
+  buildingName: string;
+  propertyId: string;
+  unitLabel: string;
+} | null> {
+  if (!normalizedBillingId) return null;
+  const buildings = await Collections.Building.find({ realmId }).lean();
+  for (const building of buildings as any[]) {
+    for (const unit of building.units || []) {
+      const supply = unit.electricitySupplyNumber;
+      if (!supply) continue;
+      if (normalizeBillingId(String(supply)) === normalizedBillingId) {
+        return {
+          buildingId: String(building._id),
+          buildingName: building.name || '',
+          propertyId: String(unit.propertyId || unit._id),
+          unitLabel:
+            unit.name || unit.unitLabel || unit.atakNumber || 'Διαμέρισμα'
+        };
+      }
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -249,6 +289,14 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       realmId,
       bill.billingIdNormalized
     );
+
+    // No existing δαπάνη? Try to identify the BUILDING + APARTMENT by the
+    // αριθμός παροχής (unit.electricitySupplyNumber) so the create-expense
+    // pre-fill can select the building + target that single unit. Only computed
+    // for the no-match case (a matched bill already knows its building/expense).
+    const unitMatch = match
+      ? null
+      : await findUnitBySupplyNumber(realmId, bill.billingIdNormalized);
 
     // Generate IRIS QR from RF code + payment code (verified approach).
     // C2 fix: generate regardless of match — the QR is about the bill's
@@ -316,6 +364,10 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
             expenseName: match.expense.name
           }
         : null,
+      // Building + apartment identified by the αριθμός παροχής when there is no
+      // existing δαπάνη — drives the create-expense pre-fill (building selected
+      // + single_unit targeting this apartment). Null when nothing matched.
+      unitMatch,
       existingAmount
     });
   }
