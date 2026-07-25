@@ -1237,5 +1237,12 @@
   "remaining {{remaining}}": "reste {{remaining}}",
   "{{paid}} paid / {{remaining}} remaining": "{{paid}} payé / {{remaining}} restant",
   "{{count}} payment(s) recorded": "{{count}} paiement(s) enregistré(s)",
-  "{{failed}} receipt(s) could not be read": "{{failed}} reçu(s) illisible(s)"
+  "{{failed}} receipt(s) could not be read": "{{failed}} reçu(s) illisible(s)",
+  "Send another photo": "Envoyer une autre photo",
+  "Send the photo to @MicroRealEstateBot…": "Envoyez la photo à @MicroRealEstateBot…",
+  "OCR could not read this code reliably.": "L’OCR n’a pas pu lire ce code de façon fiable.",
+  "Updated from the new photo.": "Mis à jour depuis la nouvelle photo.",
+  "Code updated from the new photo": "Code mis à jour depuis la nouvelle photo",
+  "No photo received — try again or edit manually.": "Aucune photo reçue — réessayez ou modifiez manuellement.",
+  "Type the correct code or re-photograph": "Saisissez le bon code ou reprenez la photo"
 }

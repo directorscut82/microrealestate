@@ -94,6 +94,9 @@ function makeDeps({
       // default: pretend B2 is on and returns a key
       return `${realm.realmName}-${realm.realmId}/bills/${billLikeId}/${fileName}`;
     },
+    // Tier-2: default OFF (returns false → normal ingest). Tests that exercise
+    // recapture override this.
+    tryRecapture: async () => false,
     sendReply: async (_botToken, chatId, text) => {
       state.replies.push({ chatId, text });
     }
@@ -273,5 +276,32 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     const { deps, state } = makeDeps({ updates: [textMsg(42, 1001)] });
     await scanTelegramInbox(deps);
     expect(state.archives).toHaveLength(0);
+  });
+
+  // ── Tier-2: an admin-chat photo is consumed by an active recapture session
+  // instead of being ingested as a new bill.
+  it('recapture consumes the photo: no InboxItem, offset still advances', async () => {
+    const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
+    let recaptureCalls = 0;
+    deps.tryRecapture = async (_realm, buffer) => {
+      recaptureCalls++;
+      expect(buffer.length).toBeGreaterThan(0);
+      return true; // consumed
+    };
+    await scanTelegramInbox(deps);
+    expect(recaptureCalls).toBe(1);
+    expect(state.created).toHaveLength(0); // NOT ingested as a bill
+    expect(state.archives).toHaveLength(0); // not archived either
+    expect(state.offsets['realm-1']).toBe(42); // consumed → offset advances
+    // sender gets the "code updated" ack
+    expect(state.replies.some((x) => /ενημερώθηκε/.test(x.text))).toBe(true);
+  });
+
+  it('recapture OFF (returns false) → normal ingest still happens', async () => {
+    const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
+    deps.tryRecapture = async () => false;
+    const r = await scanTelegramInbox(deps);
+    expect(r.ingested).toBe(1);
+    expect(state.created).toHaveLength(1);
   });
 });

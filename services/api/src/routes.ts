@@ -498,6 +498,17 @@ export default function routes(): express.Router {
     '/confirm-payment',
     Middlewares.asyncWrapper(billManager.confirmPayment as any)
   );
+  // Slice 6 Tier-2: re-capture a checksum-failed RF/IBAN via a Telegram re-shot.
+  // start opens a session; the poller routes the next admin-chat photo to it;
+  // the dialog polls :id until recovered/timeout.
+  billsRouter.post(
+    '/recapture/start',
+    Middlewares.asyncWrapper(billManager.startRecapture as any)
+  );
+  billsRouter.get(
+    '/recapture/:id',
+    Middlewares.asyncWrapper(billManager.pollRecapture as any)
+  );
   // Slice 5: archive a confirmed bill's source file to B2 (upload-dialog path).
   // Multipart because the source can't ride the 100kb JSON /confirm body.
   billsRouter.post(

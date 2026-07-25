@@ -612,6 +612,23 @@ export async function confirmReceiptPayments(payments) {
   return response.data;
 }
 
+// Slice 6 Tier-2 — open a Telegram re-capture session for a checksum-failed
+// RF/IBAN. target is 'rf'|'iban'. Returns { id, target, expiresAt }.
+export async function startRecapture(target) {
+  const response = await apiFetcher().post('/bills/recapture/start', {
+    target
+  });
+  return response.data;
+}
+
+// Poll a re-capture session → { status:'waiting'|'recovered'|'timeout', value?, target }.
+export async function pollRecapture(id) {
+  const response = await apiFetcher().get(
+    `/bills/recapture/${encodeURIComponent(id)}`
+  );
+  return response.data;
+}
+
 export async function fetchBills({ buildingId, status } = {}) {
   const params = new URLSearchParams();
   if (buildingId) params.set('buildingId', buildingId);

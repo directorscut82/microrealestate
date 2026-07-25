@@ -4,6 +4,8 @@
 import {
   isValidRF,
   isValidIBAN,
+  extractRFs,
+  extractIBANs,
   extractElements,
   nameTokens,
   nameSimilarity,
@@ -29,6 +31,29 @@ describe('isValidRF (ISO 11649)', () => {
     expect(isValidRF('XY36999000000000000000001')).toBe(false);
     expect(isValidRF(12345)).toBe(false);
     expect(isValidRF(undefined)).toBe(false);
+  });
+});
+
+describe('extractRFs / extractIBANs — span→validate, no greedy swallow', () => {
+  it('extracts a grouped IBAN without swallowing the next word', () => {
+    // The bug: /(?:\s?[A-Z0-9]){11,30}/ ate " amount 7" → invalid. span→prefix fix:
+    expect(
+      extractIBANs('to GR06 0109 9999 9000 0000 0000 125 amount 749,99')
+    ).toEqual(['GR3301109999990000000000001']);
+  });
+  it('extracts a compact IBAN mid-text', () => {
+    expect(extractIBANs('IBAN GR3301109999990000000000001 end')).toEqual([
+      'GR3301109999990000000000001'
+    ]);
+  });
+  it('extracts a grouped RF without swallowing following text', () => {
+    expect(extractRFs('Κωδ RF36 9990 0000 0000 0009 59050 ΠΛΗΡΩΜΗ')).toEqual([
+      'RF33999000000000000000001'
+    ]);
+  });
+  it('returns [] when no checksum-valid key is present', () => {
+    expect(extractIBANs('GR060109999990000000000012 short')).toEqual([]);
+    expect(extractRFs('RF99 0000 0000 nope')).toEqual([]);
   });
 });
 

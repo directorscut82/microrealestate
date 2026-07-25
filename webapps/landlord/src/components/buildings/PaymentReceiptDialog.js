@@ -1,15 +1,19 @@
 import {
   confirmReceiptPayments,
   parsePaymentReceipts,
-  QueryKeys
+  pollRecapture,
+  QueryKeys,
+  startRecapture
 } from '../../utils/restcalls';
 import {
   LuAlertTriangle,
+  LuCamera,
   LuCheck,
   LuFileWarning,
+  LuLoader,
   LuReceipt
 } from 'react-icons/lu';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import FileDropZone from '../ui/file-drop-zone';
 import { Input } from '../ui/input';
@@ -42,17 +46,115 @@ function formatMoney(n) {
   }).format(Number(n) || 0);
 }
 
+/*
+ * Tier-2 re-capture (Slice 6 §15). Shown when the receipt had an RF/IBAN-shaped
+ * token that failed its checksum (Tier-1 auto re-crop already tried). The field
+ * is ALWAYS manually editable; this offers «Θα στείλω άλλη φωτογραφία»: click →
+ * open a server session → poll while the user sends a zoomed close-up to the
+ * bot → on recovery the value flips in live (red→green). ~2min timeout, then
+ * the manual field remains.
+ */
+function RecaptureField({ target, value, onEdit, onRecovered }) {
+  const { t } = useTranslation('common');
+  const [phase, setPhase] = useState('idle'); // idle|waiting|recovered|timeout
+  const pollRef = useRef(null);
+
+  useEffect(
+    () => () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    },
+    []
+  );
+
+  const begin = useCallback(async () => {
+    try {
+      const { id } = await startRecapture(target);
+      setPhase('waiting');
+      pollRef.current = setInterval(async () => {
+        try {
+          const s = await pollRecapture(id);
+          if (s.status === 'recovered' && s.value) {
+            clearInterval(pollRef.current);
+            setPhase('recovered');
+            onRecovered(s.value);
+          } else if (s.status === 'timeout') {
+            clearInterval(pollRef.current);
+            setPhase('timeout');
+          }
+        } catch {
+          /* keep polling; a transient error shouldn't kill the session */
+        }
+      }, 3000);
+    } catch {
+      setPhase('idle');
+    }
+  }, [target, onRecovered]);
+
+  const label = target === 'iban' ? 'IBAN' : 'RF';
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Input
+        value={value ?? ''}
+        onChange={(e) => onEdit(e.target.value)}
+        className={`font-mono text-xs ${
+          phase === 'recovered' ? 'border-success' : 'border-destructive'
+        }`}
+        placeholder={t('Type the correct code or re-photograph')}
+      />
+      {phase === 'idle' && (
+        <div className="text-[11px] text-destructive flex items-center gap-1">
+          <LuAlertTriangle className="size-3" />
+          {t('OCR could not read this code reliably.')}
+        </div>
+      )}
+      {phase === 'waiting' && (
+        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <LuLoader className="size-3 animate-spin" />
+          {t('Send the photo to @MicroRealEstateBot…')}
+        </div>
+      )}
+      {phase === 'recovered' && (
+        <div className="text-[11px] text-success flex items-center gap-1">
+          <LuCheck className="size-3" />
+          {t('Updated from the new photo.')}
+        </div>
+      )}
+      {phase === 'timeout' && (
+        <div className="text-[11px] text-muted-foreground">
+          {t('No photo received — try again or edit manually.')}
+        </div>
+      )}
+      {(phase === 'idle' || phase === 'timeout') && (
+        <button
+          type="button"
+          onClick={begin}
+          className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-primary border border-primary/40 bg-primary/5 rounded px-2 py-1"
+        >
+          <LuCamera className="size-3.5" />
+          {t('Send another photo')}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ReceiptMatchCard({
   result,
   uid,
   selectedId,
   onSelect,
   editAmount,
-  amount
+  amount,
+  longKeys,
+  onEditLongKey,
+  onRecoverLongKey
 }) {
   const { t } = useTranslation('common');
   const rec = result.recognized || {};
   const candidates = result.candidates || [];
+  const invalid = rec.invalidLongKeys || [];
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-[1fr_1.15fr] gap-0 border rounded-lg overflow-hidden">
@@ -103,7 +205,18 @@ function ReceiptMatchCard({
             </span>
           </div>
         )}
-        {!rec.hasValidLongKey && (
+        {/* Tier-2: a long key was present but failed checksum → recapture. */}
+        {invalid.map((target) => (
+          <RecaptureField
+            key={target}
+            target={target}
+            value={longKeys?.[target] ?? ''}
+            onEdit={(v) => onEditLongKey(uid, target, v)}
+            onRecovered={(v) => onRecoverLongKey(uid, target, v)}
+          />
+        ))}
+
+        {!rec.hasValidLongKey && invalid.length === 0 && (
           <p className="text-[11px] text-muted-foreground">
             {t(
               'No RF/IBAN on this receipt — matched on the other details below.'
@@ -193,6 +306,8 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
   // Per-receipt chosen candidate + editable amount, keyed by uid.
   const [selected, setSelected] = useState({}); // uid → candidate object
   const [amounts, setAmounts] = useState({}); // uid → string
+  // Per-receipt recovered/typed long keys, keyed by uid → { rf?, iban? }.
+  const [longKeys, setLongKeys] = useState({});
 
   useEffect(() => {
     if (!open) {
@@ -201,6 +316,7 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
       setResults([]);
       setSelected({});
       setAmounts({});
+      setLongKeys({});
     }
   }, [open]);
 
@@ -244,6 +360,22 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
     setAmounts((prev) => ({ ...prev, [uid]: value }));
   }, []);
 
+  const onEditLongKey = useCallback((uid, target, value) => {
+    setLongKeys((prev) => ({
+      ...prev,
+      [uid]: { ...(prev[uid] || {}), [target]: value }
+    }));
+  }, []);
+
+  // A recovered key from Tier-2 fills the field live + is carried on confirm.
+  const onRecoverLongKey = useCallback(
+    (uid, target, value) => {
+      onEditLongKey(uid, target, value);
+      toast.success(t('Code updated from the new photo'));
+    },
+    [onEditLongKey, t]
+  );
+
   const confirmable = useMemo(
     () =>
       results
@@ -259,6 +391,7 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
       const payments = confirmable.map(({ r, uid }) => {
         const c = selected[uid];
         const parsedAmount = parseFloat(String(amounts[uid]).replace(',', '.'));
+        const lk = longKeys[uid] || {};
         return {
           kind: c.kind,
           billId: c.kind === 'bill' ? c.billId : undefined,
@@ -267,7 +400,9 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
           amount: Number.isFinite(parsedAmount) ? parsedAmount : undefined,
           date: r.recognized?.date,
           matchedOn: c.matchedOn,
-          ocrText: r.ocrText
+          // Recovered/typed long keys ride along so the stored receipt keeps the
+          // corrected RF/IBAN (appended to ocrText for the audit trail).
+          ocrText: [r.ocrText, lk.rf, lk.iban].filter(Boolean).join(' ')
         };
       });
       await confirmReceiptPayments(payments);
@@ -292,6 +427,7 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
     confirmable,
     selected,
     amounts,
+    longKeys,
     building?._id,
     handleClose,
     queryClient,
@@ -351,6 +487,9 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
                     onSelect={onSelect}
                     editAmount={editAmount}
                     amount={amounts[uid]}
+                    longKeys={longKeys[uid]}
+                    onEditLongKey={onEditLongKey}
+                    onRecoverLongKey={onRecoverLongKey}
                   />
                 );
               })}

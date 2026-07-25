@@ -22,6 +22,7 @@
 import { Collections, Crypto, logger } from '@microrealestate/common';
 import axios from 'axios';
 import * as billStorage from '../managers/billstorage.js';
+import * as recapture from '../managers/recapturesession.js';
 import { parseBillPdf } from '../managers/billparser/index.js';
 
 const POLL_MS = 60_000;
@@ -69,6 +70,17 @@ export interface InboxScanDeps {
     telegramMessageId: number
   ) => Promise<boolean>;
   createInboxItem: (doc: Record<string, unknown>) => Promise<void>;
+  /**
+   * Tier-2 re-capture (Slice 6 §15). If a recapture session is WAITING for this
+   * realm, the next admin-chat photo is a zoomed re-shot of a failed RF/IBAN —
+   * NOT a new bill. tryRecapture consumes it: OCR the crop, extract+validate the
+   * target field, resolve the session. Returns true when it consumed the
+   * message (so the poller skips normal ingest). Injected for tests.
+   */
+  tryRecapture?: (
+    realm: TelegramRealmConfig,
+    buffer: Buffer
+  ) => Promise<boolean>;
   /**
    * Archive the source bytes to B2 at ingest (Slice 5). Returns the object key
    * or null when B2 is not configured / upload failed — archival is
@@ -249,6 +261,41 @@ async function _createInboxItem(doc: Record<string, unknown>): Promise<void> {
   await Collections.InboxItem.create(doc);
 }
 
+// Tier-2: consume a re-shot photo for an active recapture session. OCR the
+// (already-zoomed) image, pull the target RF/IBAN, checksum-validate, resolve
+// the session so the polling dialog picks it up. Returns true when consumed.
+async function _tryRecapture(
+  realm: TelegramRealmConfig,
+  buffer: Buffer
+): Promise<boolean> {
+  const now = Date.now();
+  const session = recapture.activeSessionForRealm(realm.realmId, now);
+  if (!session) return false;
+  try {
+    const { ocrImage } = await import('../managers/billparser/ocr.js');
+    const { extractRFs, extractIBANs } = await import(
+      '../managers/billparser/matching.js'
+    );
+    const text = await ocrImage(buffer);
+    const found =
+      session.target === 'rf' ? extractRFs(text) : extractIBANs(text);
+    if (found.length) {
+      recapture.resolveSession(realm.realmId, found[0], now);
+      logger.info(
+        `telegram-inbox: recapture recovered ${session.target} for realm ${realm.realmId}`
+      );
+      return true;
+    }
+    // A photo arrived but still no valid key — consume it (it WAS the re-shot,
+    // even if it failed) so it isn't mis-ingested as a bill; the session stays
+    // waiting until timeout so the user can try once more or type it manually.
+    return true;
+  } catch (err: any) {
+    logger.warn(`telegram-inbox: recapture OCR failed: ${err?.message || err}`);
+    return true;
+  }
+}
+
 // Archive the source bytes to B2 at ingest (best-effort). Uses a synthetic
 // pre-Bill id (the telegram message id) for the key path — the confirmed Bill
 // later carries this key on pdfUrl, so it need not match the Bill _id.
@@ -314,6 +361,7 @@ function _defaultDeps(): InboxScanDeps {
     findMatch: _findMatch,
     hasInboxItem: _hasInboxItem,
     createInboxItem: _createInboxItem,
+    tryRecapture: _tryRecapture,
     archiveSource: _archiveSource,
     sendReply: _sendReply
   };
@@ -422,6 +470,21 @@ async function _handleUpdate(
       'Το αρχείο δεν μπόρεσε να ληφθεί (πολύ μεγάλο ή μη διαθέσιμο). Στείλτε φωτογραφία έως 6MB.'
     );
     return 'skipped';
+  }
+
+  // Tier-2 re-capture: if the open receipt dialog is WAITING for a re-shot of a
+  // failed RF/IBAN for this realm, THIS photo is that re-shot — recover the
+  // field and consume the message (do NOT ingest it as a new bill).
+  if (deps.tryRecapture) {
+    const consumed = await deps.tryRecapture(realm, file.buffer);
+    if (consumed) {
+      await deps.sendReply?.(
+        realm.botToken,
+        msg.chat.id,
+        'Ελήφθη — ο κωδικός ενημερώθηκε στην ανοιχτή φόρμα.'
+      );
+      return 'skipped';
+    }
   }
 
   // Same pipeline as the import dialog. A parse failure still creates an

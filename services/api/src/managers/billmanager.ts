@@ -15,7 +15,8 @@ import {
   computeIdf,
   extractElements,
   repairMatchKeys,
-  scoreTokens
+  scoreTokens,
+  type BillElements
 } from './billparser/matching.js';
 import { validateObjectId } from '../validators.js';
 import axios from 'axios';
@@ -688,6 +689,22 @@ export async function attachBillSource(req: Req, res: Res): Promise<void> {
   }
 }
 
+// Which long-key targets are present-but-broken: an RF/IBAN-SHAPED token
+// appears in the text but no checksum-valid one of that kind survived
+// extraction (Tier-1 already tried). These are what the UI offers Tier-2
+// re-capture for. Returns e.g. ['rf'] or ['iban'] or [].
+function _invalidLongKeys(text: string, el: BillElements): ('rf' | 'iban')[] {
+  const out: ('rf' | 'iban')[] = [];
+  const t = text || '';
+  if (/RF[0-9][0-9][A-Z0-9 ]{1,30}/i.test(t) && el.rfCodes.length === 0) {
+    out.push('rf');
+  }
+  if (/[A-Z]{2}[0-9]{2}[A-Z0-9 ]{11,40}/i.test(t) && el.ibans.length === 0) {
+    out.push('iban');
+  }
+  return out;
+}
+
 // Tier-1 field recovery (§15): when an image receipt yields NO checksum-valid
 // RF/IBAN but its text carries an RF/IBAN-SHAPED token that failed the
 // checksum (classic OCR digit-drop on a shrunk long line), re-OCR that line's
@@ -697,10 +714,10 @@ async function _recoverLongKeys(
   imageBuffer: Buffer,
   text: string
 ): Promise<{ rfCodes: string[]; ibans: string[] }> {
-  const { isValidRF, isValidIBAN } = await import('./billparser/matching.js');
+  const { extractRFs, extractIBANs } = await import('./billparser/matching.js');
   // Only bother if the text HAS an RF/IBAN-shaped token that failed checksum.
-  const rfShaped = /RF[0-9A-Z\s]{4,30}/gi.test(text);
-  const ibanShaped = /[A-Z]{2}[0-9]{2}(?:\s?[A-Z0-9]){11,30}/gi.test(text);
+  const rfShaped = /RF[0-9][0-9][A-Z0-9 ]{1,30}/i.test(text);
+  const ibanShaped = /[A-Z]{2}[0-9]{2}[A-Z0-9 ]{11,40}/i.test(text);
   if (!rfShaped && !ibanShaped) return { rfCodes: [], ibans: [] };
 
   try {
@@ -711,25 +728,16 @@ async function _recoverLongKeys(
     const rfOut = new Set<string>();
     const ibanOut = new Set<string>();
     for (const line of lines) {
-      const looksRf = /RF[0-9A-Z\s]{4,30}/i.test(line.text);
-      const looksIban = /[A-Z]{2}[0-9]{2}(?:\s?[A-Z0-9]){11,30}/i.test(
-        line.text
-      );
+      const looksRf = /RF[0-9][0-9][A-Z0-9 ]{1,30}/i.test(line.text);
+      const looksIban = /[A-Z]{2}[0-9]{2}[A-Z0-9 ]{11,40}/i.test(line.text);
       if (!looksRf && !looksIban) continue;
       // Already valid as-is? nothing to recover on this line.
-      const asIs = line.text.replace(/\s+/g, '').toUpperCase();
-      if (isValidRF(asIs) || isValidIBAN(asIs)) continue;
+      if (extractRFs(line.text).length || extractIBANs(line.text).length) {
+        continue;
+      }
       const recovered = await recropAndOcr(imageBuffer, line);
-      for (const tok of recovered.match(/RF[0-9A-Z\s]{4,30}/gi) || []) {
-        const c = tok.replace(/\s+/g, '').toUpperCase();
-        if (isValidRF(c)) rfOut.add(c);
-      }
-      for (const tok of recovered.match(
-        /[A-Z]{2}[0-9]{2}(?:\s?[A-Z0-9]){11,30}/gi
-      ) || []) {
-        const c = tok.replace(/\s+/g, '').toUpperCase();
-        if (isValidIBAN(c)) ibanOut.add(c);
-      }
+      for (const rf of extractRFs(recovered)) rfOut.add(rf);
+      for (const ib of extractIBANs(recovered)) ibanOut.add(ib);
     }
     return { rfCodes: [...rfOut], ibans: [...ibanOut] };
   } catch (err: any) {
@@ -998,7 +1006,11 @@ export async function parsePaymentReceipts(req: Req, res: Res): Promise<void> {
         // already checksum-valid; a receipt that had NONE survive is a hint the
         // OCR mangled them → Tier 1/2 recovery is offered).
         hasValidLongKey:
-          receiptEl.rfCodes.length > 0 || receiptEl.ibans.length > 0
+          receiptEl.rfCodes.length > 0 || receiptEl.ibans.length > 0,
+        // Tier-2 trigger: an RF/IBAN-SHAPED token was present but failed its
+        // checksum (Tier-1 re-crop already tried) → the UI offers «Θα στείλω
+        // άλλη φωτογραφία» for these targets. Empty when nothing was broken.
+        invalidLongKeys: _invalidLongKeys(text, receiptEl)
       },
       ocrText: text.slice(0, 4000),
       candidates: ranked
@@ -1148,6 +1160,47 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
   }
 
   res.json({ updated });
+}
+
+/**
+ * POST /bills/recapture/start  { target: 'rf' | 'iban' }
+ * Tier-2 (Slice 6 §15). Opens a re-capture session: the user is about to send a
+ * zoomed close-up of a checksum-failed RF/IBAN to the Telegram bot. The poller
+ * routes the NEXT admin-chat photo to this session (see telegramInboxScanner
+ * tryRecapture). Returns a session id the dialog then polls.
+ */
+export async function startRecapture(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+  const target = req.body?.target === 'iban' ? 'iban' : 'rf';
+  const { startSession } = await import('./recapturesession.js');
+  const id = `${realmId}-${Date.now()}-${Math.floor(
+    // eslint-disable-next-line no-bitwise
+    (typeof performance !== 'undefined' ? performance.now() : Date.now()) % 1e6
+  )}`;
+  const s = startSession(String(realmId), target, Date.now(), id);
+  res.json({ id: s.id, target: s.target, expiresAt: s.expiresAt });
+}
+
+/**
+ * GET /bills/recapture/:id
+ * Poll a re-capture session. Returns { status: 'waiting'|'recovered'|'timeout',
+ * value? }. The dialog polls until recovered (updates the field, red→green) or
+ * timeout (~2 min; field stays manually editable).
+ */
+export async function pollRecapture(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+  const { getSession } = await import('./recapturesession.js');
+  const s = getSession(String(req.params.id), Date.now());
+  if (!s || String(s.realmId) !== String(realmId)) {
+    throw new ServiceError('Η συνεδρία λήψης δεν βρέθηκε', 404);
+  }
+  res.json({ status: s.status, value: s.value, target: s.target });
 }
 
 /**

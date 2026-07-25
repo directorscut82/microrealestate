@@ -74,6 +74,53 @@ export function isValidIBAN(value: unknown): boolean {
   return mod97(numeric) === 1;
 }
 
+// ── Strong-key extraction (span → validate, prefix-tolerant) ────────────────
+//
+// A grouped IBAN/RF ("GR06 0110 …") sits between spaces, so a naive greedy
+// regex swallows the following word ("… 125 amount" → invalid). Instead we
+// grab a generous candidate span, strip separators, and validate the string
+// AND its progressively-shorter prefixes — the longest checksum-valid prefix
+// is the real key. This also recovers cases where OCR appended noise.
+
+const IBAN_SPAN = /[A-Z]{2}[0-9]{2}[A-Z0-9 ]{11,40}/gi;
+const RF_SPAN = /RF[0-9][0-9][A-Z0-9 ]{1,30}/gi;
+
+function validPrefix(
+  compact: string,
+  minLen: number,
+  isValid: (s: string) => boolean
+): string | null {
+  // Try the full compact string, then trim one trailing char at a time down to
+  // minLen; return the longest that passes the checksum.
+  for (let len = compact.length; len >= minLen; len--) {
+    const cand = compact.slice(0, len);
+    if (isValid(cand)) return cand;
+  }
+  return null;
+}
+
+/** All checksum-valid IBANs in text (span→strip→longest-valid-prefix). */
+export function extractIBANs(text: string): string[] {
+  const out = new Set<string>();
+  for (const span of text.match(IBAN_SPAN) || []) {
+    const compact = span.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const v = validPrefix(compact, 15, isValidIBAN);
+    if (v) out.add(v);
+  }
+  return [...out];
+}
+
+/** All checksum-valid RF references in text. */
+export function extractRFs(text: string): string[] {
+  const out = new Set<string>();
+  for (const span of text.match(RF_SPAN) || []) {
+    const compact = span.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const v = validPrefix(compact, 5, isValidRF);
+    if (v) out.add(v);
+  }
+  return [...out];
+}
+
 // ── Element extraction ──────────────────────────────────────────────────────
 
 export interface BillElements {
@@ -293,25 +340,10 @@ export function extractElements(
 ): BillElements {
   const t = text || '';
 
-  // RF codes — the token as printed can carry spaces from OCR; strip them.
-  const rfRaw = t.match(/RF[0-9A-Z\s]{4,30}/gi) || [];
-  const rfCodes = Array.from(
-    new Set(
-      rfRaw
-        .map((r: string) => r.replace(/\s+/g, '').toUpperCase())
-        .filter((r: string) => isValidRF(r))
-    )
-  );
-
-  // IBANs — GR + others. Allow internal spaces (bank statements group by 4).
-  const ibanRaw = t.match(/[A-Z]{2}[0-9]{2}(?:\s?[A-Z0-9]){11,30}/gi) || [];
-  const ibans = Array.from(
-    new Set(
-      ibanRaw
-        .map((r: string) => r.replace(/\s+/g, '').toUpperCase())
-        .filter((r: string) => isValidIBAN(r))
-    )
-  );
+  // RF codes + IBANs — span→strip→longest-valid-prefix (see extractRFs/IBANs),
+  // so a grouped key doesn't greedily swallow the following word.
+  const rfCodes = extractRFs(t);
+  const ibans = extractIBANs(t);
 
   // ΑΦΜ / VAT — 9 digits, often after ΑΦΜ/Α.Φ.Μ/VAT.
   const afmSet = new Set<string>();
@@ -439,14 +471,8 @@ function tokenizeAll(
   }
 
   // Strong keys as their own high-signal tokens (exact identity).
-  for (const rf of t.match(/RF[0-9A-Z\s]{4,30}/gi) || []) {
-    const c = rf.replace(/\s+/g, '').toUpperCase();
-    if (isValidRF(c)) bag.add(`rf:${c}`);
-  }
-  for (const ib of t.match(/[A-Z]{2}[0-9]{2}(?:\s?[A-Z0-9]){11,30}/gi) || []) {
-    const c = ib.replace(/\s+/g, '').toUpperCase();
-    if (isValidIBAN(c)) bag.add(`iban:${c}`);
-  }
+  for (const rf of extractRFs(t)) bag.add(`rf:${rf}`);
+  for (const ib of extractIBANs(t)) bag.add(`iban:${ib}`);
   for (const b of hints?.billingIds || []) {
     const c = normalizeBillingIdLocal(b);
     if (c) bag.add(`n:${c}`); // billingId is a numeric run → same namespace so a

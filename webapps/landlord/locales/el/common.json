@@ -1386,5 +1386,12 @@
   "remaining {{remaining}}": "υπόλοιπο {{remaining}}",
   "{{paid}} paid / {{remaining}} remaining": "{{paid}} πληρωμένο / {{remaining}} υπόλοιπο",
   "{{count}} payment(s) recorded": "Καταχωρήθηκαν {{count}} πληρωμές",
-  "{{failed}} receipt(s) could not be read": "{{failed}} αποδείξεις δεν διαβάστηκαν"
+  "{{failed}} receipt(s) could not be read": "{{failed}} αποδείξεις δεν διαβάστηκαν",
+  "Send another photo": "Θα στείλω άλλη φωτογραφία",
+  "Send the photo to @MicroRealEstateBot…": "Στείλτε τη φωτογραφία στο @MicroRealEstateBot…",
+  "OCR could not read this code reliably.": "Το OCR δεν διάβασε αξιόπιστα αυτόν τον κωδικό.",
+  "Updated from the new photo.": "Ενημερώθηκε από τη νέα φωτογραφία.",
+  "Code updated from the new photo": "Ο κωδικός ενημερώθηκε από τη νέα φωτογραφία",
+  "No photo received — try again or edit manually.": "Δεν ελήφθη φωτογραφία — δοκιμάστε ξανά ή διορθώστε χειροκίνητα.",
+  "Type the correct code or re-photograph": "Πληκτρολογήστε τον σωστό κωδικό ή ξαναφωτογραφίστε"
 }
