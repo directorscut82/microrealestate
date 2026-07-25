@@ -2171,6 +2171,7 @@ __metadata:
     "@types/multer": ^2.1.0
     "@typescript-eslint/eslint-plugin": 7.15.0
     "@typescript-eslint/parser": 7.15.0
+    aws-sdk: 2.1677.0
     axios: 1.8.4
     eslint: 8.57.0
     eslint-config-prettier: 9.1.0
@@ -2192,6 +2193,7 @@ __metadata:
     pdfjs-dist: 4.0.379
     qrcode: ^1.5.4
     rimraf: 6.0.1
+    sanitize-filename: 1.6.3
     sharp: ^0.35.3
     supertest: 6.1.3
     tsx: 3.14.0

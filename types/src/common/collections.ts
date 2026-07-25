@@ -746,6 +746,9 @@ export namespace CollectionTypes {
     telegramMessageId?: number;
     telegramFileId?: string;
     irisCodeBase64?: string;
+    // B2 object key of the archived source file (photo/PDF), set at ingest when
+    // B2 is configured. Carried onto the Bill's pdfUrl on confirm (no re-upload).
+    sourcePdfUrl?: string;
     createdDate?: Date;
     updatedDate?: Date;
   };

@@ -50,6 +50,8 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
   telegramMessageId: Number,
   telegramFileId: String,
   irisCodeBase64: String,
+  // B2 object key of the archived source file (set at ingest — Slice 5).
+  sourcePdfUrl: String,
   createdDate: Date,
   updatedDate: Date
 });

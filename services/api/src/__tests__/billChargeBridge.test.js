@@ -16,6 +16,10 @@ import { jest } from '@jest/globals';
 jest.unstable_mockModule('@microrealestate/common', () => ({
   Collections: { Building: {}, Bill: {} },
   Service: { getInstance: () => ({}) },
+  // Crypto is reached transitively: billmanager → billstorage → common.Crypto
+  // (Slice 5 B2 archival). The mock must export every symbol the import chain
+  // pulls, or the module link fails ("does not provide an export named ...").
+  Crypto: { encrypt: (v) => v, decrypt: (v) => v },
   logger: { error() {}, debug() {}, warn() {}, info() {} },
   ServiceError: class ServiceError extends Error {
     constructor(message, code) {
@@ -36,15 +40,39 @@ const buildingWithTwoCharges = () => ({
     {
       propertyId: 'p1',
       monthlyCharges: [
-        { expenseId: 'water', term: TERM, amount: 25, inputAmount: 50, description: 'Νερό' },
-        { expenseId: 'power', term: TERM, amount: 40, inputAmount: 80, description: 'Ρεύμα' }
+        {
+          expenseId: 'water',
+          term: TERM,
+          amount: 25,
+          inputAmount: 50,
+          description: 'Νερό'
+        },
+        {
+          expenseId: 'power',
+          term: TERM,
+          amount: 40,
+          inputAmount: 80,
+          description: 'Ρεύμα'
+        }
       ]
     },
     {
       propertyId: 'p2',
       monthlyCharges: [
-        { expenseId: 'water', term: TERM, amount: 25, inputAmount: 50, description: 'Νερό' },
-        { expenseId: 'power', term: TERM, amount: 40, inputAmount: 80, description: 'Ρεύμα' }
+        {
+          expenseId: 'water',
+          term: TERM,
+          amount: 25,
+          inputAmount: 50,
+          description: 'Νερό'
+        },
+        {
+          expenseId: 'power',
+          term: TERM,
+          amount: 40,
+          inputAmount: 80,
+          description: 'Ρεύμα'
+        }
       ]
     }
   ]
@@ -69,13 +97,25 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
   });
 
   it('uses inputAmount (full figure), never the per-unit slice', () => {
-    const entries = buildStatementEntries(buildingWithTwoCharges(), 'x', 10, 'X', TERM);
+    const entries = buildStatementEntries(
+      buildingWithTwoCharges(),
+      'x',
+      10,
+      'X',
+      TERM
+    );
     const water = entries.find((e) => e.expenseId === 'water');
     expect(water.amount).toBe(50); // NOT 25 (the per-unit share)
   });
 
   it('dedupes per-expense across units (one entry per expense, not per unit)', () => {
-    const entries = buildStatementEntries(buildingWithTwoCharges(), 'x', 10, 'X', TERM);
+    const entries = buildStatementEntries(
+      buildingWithTwoCharges(),
+      'x',
+      10,
+      'X',
+      TERM
+    );
     const waterEntries = entries.filter((e) => e.expenseId === 'water');
     expect(waterEntries).toHaveLength(1);
   });
@@ -125,8 +165,16 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
   });
 
   it('handles an empty building (only the bill entry)', () => {
-    const entries = buildStatementEntries({ units: [] }, 'solo', 42, 'Solo', TERM);
-    expect(entries).toEqual([{ expenseId: 'solo', amount: 42, description: 'Solo' }]);
+    const entries = buildStatementEntries(
+      { units: [] },
+      'solo',
+      42,
+      'Solo',
+      TERM
+    );
+    expect(entries).toEqual([
+      { expenseId: 'solo', amount: 42, description: 'Solo' }
+    ]);
   });
 
   // H1 — repair charges carry repairId + expenseId=null; they must be SKIPPED,
@@ -138,7 +186,13 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
           propertyId: 'p1',
           monthlyCharges: [
             { expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 },
-            { expenseId: null, repairId: 'r1', term: TERM, amount: 70, description: 'Επισκευή' }
+            {
+              expenseId: null,
+              repairId: 'r1',
+              term: TERM,
+              amount: 70,
+              description: 'Επισκευή'
+            }
           ]
         }
       ]
@@ -156,8 +210,14 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
   it('M1: legacy null-inputAmount sibling reconstructs full amount by summing shares', () => {
     const b = {
       units: [
-        { propertyId: 'p1', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25 }] },
-        { propertyId: 'p2', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25 }] }
+        {
+          propertyId: 'p1',
+          monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25 }]
+        },
+        {
+          propertyId: 'p2',
+          monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25 }]
+        }
       ]
     };
     const entries = buildStatementEntries(b, 'power', 35, 'Ρεύμα', TERM);
@@ -170,8 +230,18 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
   it('M1: inputAmount wins over share-sum when present', () => {
     const b = {
       units: [
-        { propertyId: 'p1', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 }] },
-        { propertyId: 'p2', monthlyCharges: [{ expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 }] }
+        {
+          propertyId: 'p1',
+          monthlyCharges: [
+            { expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 }
+          ]
+        },
+        {
+          propertyId: 'p2',
+          monthlyCharges: [
+            { expenseId: 'water', term: TERM, amount: 25, inputAmount: 50 }
+          ]
+        }
       ]
     };
     const entries = buildStatementEntries(b, 'power', 35, 'Ρεύμα', TERM);

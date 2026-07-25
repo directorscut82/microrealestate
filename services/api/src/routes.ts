@@ -496,6 +496,15 @@ export default function routes(): express.Router {
     '/confirm-payment',
     Middlewares.asyncWrapper(billManager.confirmPayment as any)
   );
+  // Slice 5: archive a confirmed bill's source file to B2 (upload-dialog path).
+  // Multipart because the source can't ride the 100kb JSON /confirm body.
+  billsRouter.post(
+    '/:id/attach-source',
+    uploadRateLimit,
+    uploadBill.single('source') as any,
+    verifyBillContent,
+    Middlewares.asyncWrapper(billManager.attachBillSource as any)
+  );
   billsRouter.delete(
     '/:id',
     Middlewares.asyncWrapper(billManager.remove as any)

@@ -8,6 +8,7 @@ const FIXED_NOW = new Date('2026-07-25T12:00:00.000Z');
 
 const REALM = {
   realmId: 'realm-1',
+  realmName: 'Landlord',
   botToken: 'TESTTOKEN',
   adminChatId: '111'
 };
@@ -47,7 +48,8 @@ function makeDeps({
     getUpdatesCalls: [],
     created: [],
     replies: [],
-    downloads: []
+    downloads: [],
+    archives: []
   };
   const deps = {
     now: () => FIXED_NOW,
@@ -87,7 +89,12 @@ function makeDeps({
     createInboxItem: async (doc) => {
       state.created.push(doc);
     },
-    sendReply: async (botToken, chatId, text) => {
+    archiveSource: async (realm, billLikeId, fileName, buffer) => {
+      state.archives.push({ billLikeId, fileName, bytes: buffer?.length });
+      // default: pretend B2 is on and returns a key
+      return `${realm.realmName}-${realm.realmId}/bills/${billLikeId}/${fileName}`;
+    },
+    sendReply: async (_botToken, chatId, text) => {
       state.replies.push({ chatId, text });
     }
   };
@@ -240,5 +247,31 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     expect(r.updates).toBe(0);
     expect(state.setOffsetCalls).toHaveLength(0);
     expect(state.offsets['realm-1']).toBe(7);
+  });
+
+  // ── Slice 5: B2 source archival at ingest ──────────────────────────────
+  it('archives the source buffer at ingest and stores the key on sourcePdfUrl', async () => {
+    const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
+    await scanTelegramInbox(deps);
+    expect(state.archives).toHaveLength(1);
+    expect(state.archives[0].billLikeId).toBe('tg-1001');
+    expect(state.archives[0].bytes).toBeGreaterThan(0);
+    expect(state.created[0].sourcePdfUrl).toBe(
+      'Landlord-realm-1/bills/tg-1001/photo-1001.jpg'
+    );
+  });
+
+  it('an archive failure (returns null) still ingests — sourcePdfUrl undefined', async () => {
+    const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
+    deps.archiveSource = async () => null; // B2 off or upload failed
+    const r = await scanTelegramInbox(deps);
+    expect(r.ingested).toBe(1);
+    expect(state.created[0].sourcePdfUrl).toBeUndefined();
+  });
+
+  it('does not archive when there is no file (text-only message)', async () => {
+    const { deps, state } = makeDeps({ updates: [textMsg(42, 1001)] });
+    await scanTelegramInbox(deps);
+    expect(state.archives).toHaveLength(0);
   });
 });

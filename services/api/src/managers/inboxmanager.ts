@@ -97,6 +97,8 @@ export async function confirm(req: Req, res: Res): Promise<void> {
     rfCode: p.rfCode,
     paymentCode: p.paymentCode,
     irisCodeBase64: item.irisCodeBase64,
+    // Slice 5: carry the source archived at ingest onto the Bill (no re-upload).
+    sourcePdfUrl: item.sourcePdfUrl,
     replaceExisting: !!replaceExisting,
     chargeThisMonth: !!chargeThisMonth,
     expenseName

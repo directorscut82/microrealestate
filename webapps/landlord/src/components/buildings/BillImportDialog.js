@@ -1,4 +1,5 @@
 import {
+  attachBillSource,
   confirmBills,
   fetchBuildings,
   parseBillPdfs,
@@ -432,6 +433,23 @@ export default function BillImportDialog({ open, setOpen, building }) {
       });
 
       const savedBills = await confirmBills(billsToConfirm);
+
+      // Slice 5: archive each saved bill's SOURCE file to B2. The source can't
+      // ride the JSON /confirm (100kb cap), so we re-send it per bill now that
+      // we have the bill _id — and only for bills that actually saved (no
+      // orphaned uploads). Index-aligned: savedBills[k] ↔ confirmable[k].
+      // Best-effort: a failed archive never blocks the import outcome.
+      await Promise.all(
+        (Array.isArray(savedBills) ? savedBills : []).map((row, k) => {
+          if (!row || row.saveFailed || !row._id) return null;
+          const uid = confirmable[k]?.r?._uid;
+          const idx = uid ? Number(String(uid).split(':')[0]) : NaN;
+          const file = Number.isInteger(idx) ? files[idx] : undefined;
+          if (!file) return null;
+          return attachBillSource(row._id, file).catch(() => {});
+        })
+      );
+
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
       queryClient.invalidateQueries({
         queryKey: [QueryKeys.BUILDINGS, building?._id]
@@ -493,6 +511,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
     }
   }, [
     results,
+    files,
     resolvedAssignment,
     replaceFlags,
     chargeFlags,

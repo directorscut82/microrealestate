@@ -21,6 +21,7 @@
  */
 import { Collections, Crypto, logger } from '@microrealestate/common';
 import axios from 'axios';
+import * as billStorage from '../managers/billstorage.js';
 import { parseBillPdf } from '../managers/billparser/index.js';
 
 const POLL_MS = 60_000;
@@ -30,6 +31,7 @@ const MAX_TG_FILE_BYTES = 6 * 1024 * 1024;
 
 export interface TelegramRealmConfig {
   realmId: string;
+  realmName: string;
   botToken: string;
   adminChatId: string;
 }
@@ -67,6 +69,17 @@ export interface InboxScanDeps {
     telegramMessageId: number
   ) => Promise<boolean>;
   createInboxItem: (doc: Record<string, unknown>) => Promise<void>;
+  /**
+   * Archive the source bytes to B2 at ingest (Slice 5). Returns the object key
+   * or null when B2 is not configured / upload failed — archival is
+   * best-effort and never blocks ingest. Injected so unit tests skip S3.
+   */
+  archiveSource?: (
+    realm: TelegramRealmConfig,
+    billLikeId: string,
+    fileName: string,
+    buffer: Buffer
+  ) => Promise<string | null>;
   /** Acknowledge a message we won't ingest (wrong chat, no file, too big). */
   sendReply?: (
     botToken: string,
@@ -113,6 +126,7 @@ async function _findTelegramRealms(): Promise<TelegramRealmConfig[]> {
     try {
       out.push({
         realmId: String(realm._id),
+        realmName: String(realm.name || ''),
         botToken: Crypto.decrypt(tg.botToken),
         adminChatId: String(tg.adminChatId).trim()
       });
@@ -235,6 +249,43 @@ async function _createInboxItem(doc: Record<string, unknown>): Promise<void> {
   await Collections.InboxItem.create(doc);
 }
 
+// Archive the source bytes to B2 at ingest (best-effort). Uses a synthetic
+// pre-Bill id (the telegram message id) for the key path — the confirmed Bill
+// later carries this key on pdfUrl, so it need not match the Bill _id.
+async function _archiveSource(
+  realm: TelegramRealmConfig,
+  billLikeId: string,
+  fileName: string,
+  buffer: Buffer
+): Promise<string | null> {
+  const b2Config = await _b2ConfigForRealm(realm.realmId);
+  if (!b2Config) return null;
+  try {
+    const key = billStorage.billObjectKey(
+      realm.realmName,
+      realm.realmId,
+      billLikeId,
+      fileName
+    );
+    const ct = /\.pdf$/i.test(fileName) ? 'application/pdf' : 'image/jpeg';
+    const res = await billStorage.uploadBuffer(b2Config, key, buffer, ct);
+    return res.key;
+  } catch (err: any) {
+    logger.error(
+      `telegram-inbox: source archive failed (realm ${realm.realmId}): ${err?.message || err}`
+    );
+    return null;
+  }
+}
+
+async function _b2ConfigForRealm(
+  realmId: string
+): Promise<billStorage.B2Config | null> {
+  const realm: any = await Collections.Realm.findOne({ _id: realmId }).lean();
+  const b2 = realm?.thirdParties?.b2;
+  return billStorage.isEnabled(b2) ? (b2 as billStorage.B2Config) : null;
+}
+
 async function _sendReply(
   botToken: string,
   chatId: string | number,
@@ -263,6 +314,7 @@ function _defaultDeps(): InboxScanDeps {
     findMatch: _findMatch,
     hasInboxItem: _hasInboxItem,
     createInboxItem: _createInboxItem,
+    archiveSource: _archiveSource,
     sendReply: _sendReply
   };
 }
@@ -410,6 +462,19 @@ async function _handleUpdate(
     parseError = err?.message || 'Αποτυχία ανάλυσης λογαριασμού';
   }
 
+  // Archive the source bytes to B2 at ingest (best-effort — a failure returns
+  // null and never blocks ingest). We have the buffer here; confirm carries
+  // the key onto the Bill's pdfUrl without a re-upload.
+  const safeName = fileName || 'telegram-file';
+  const sourcePdfUrl = deps.archiveSource
+    ? await deps.archiveSource(
+        realm,
+        `tg-${msg.message_id}`,
+        safeName,
+        file.buffer
+      )
+    : null;
+
   const now = deps.now();
   await deps.createInboxItem({
     realmId: realm.realmId,
@@ -419,9 +484,10 @@ async function _handleUpdate(
     parseError,
     suggestedMatch,
     warnings: [],
-    sourceFileName: fileName || 'telegram-file',
+    sourceFileName: safeName,
     telegramMessageId: msg.message_id,
     telegramFileId: fileId,
+    sourcePdfUrl: sourcePdfUrl || undefined,
     createdDate: now,
     updatedDate: now
   });

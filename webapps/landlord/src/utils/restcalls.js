@@ -573,6 +573,19 @@ export async function confirmBills(bills) {
   return response.data;
 }
 
+// Slice 5: archive a confirmed bill's source file to B2 (upload-dialog path).
+// Sent AFTER confirm returns the bill _id, as multipart (the source can't ride
+// the JSON confirm body). Best-effort — the caller ignores failures.
+export async function attachBillSource(billId, file) {
+  const formData = new FormData();
+  formData.append('source', file);
+  const response = await apiFetcher().post(
+    `/bills/${billId}/attach-source`,
+    formData
+  );
+  return response.data;
+}
+
 export async function parsePaymentReceipts(files) {
   const formData = new FormData();
   files.forEach((file) => formData.append('bills', file));

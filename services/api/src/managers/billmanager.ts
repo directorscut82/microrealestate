@@ -10,6 +10,7 @@ import {
   generateIrisQr,
   normalizeBillingId
 } from './billparser/index.js';
+import * as billStorage from './billstorage.js';
 import { validateObjectId } from '../validators.js';
 import axios from 'axios';
 
@@ -312,6 +313,12 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
   if (!realmId) {
     throw new ServiceError('Unauthorized', 401);
   }
+  // Slice 5: B2 archival context. When B2 is configured for the realm we
+  // archive the IRIS QR PNG (and any source key already set) and store B2
+  // keys instead of the inline data-URI blob. Not configured → inline stays.
+  const realmName = String((req.realm as any)?.name || '');
+  const b2Config = (req.realm as any)?.thirdParties?.b2;
+  const b2On = billStorage.isEnabled(b2Config);
 
   const { bills } = req.body;
   if (!bills || !Array.isArray(bills) || bills.length === 0) {
@@ -335,6 +342,10 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       rfCode,
       paymentCode,
       irisCodeBase64,
+      // B2 key of a source file already archived out-of-band (the Telegram
+      // inbox path archives at ingest and passes the key here). Set directly
+      // onto the Bill — no re-upload.
+      sourcePdfUrl,
       replaceExisting,
       chargeThisMonth,
       expenseName
@@ -456,8 +467,11 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         });
       }
 
-      // Store IRIS QR as data URI if provided (B2 upload can replace later)
-      const irisCodeUrl = irisCodeBase64
+      // Store IRIS QR inline as a data URI initially; if B2 is configured the
+      // post-save archival below replaces it with a B2 key (irisCodeUrl) and
+      // clears the inline blob. sourcePdfUrl (Telegram-archived source) is set
+      // directly since those bytes are already in B2.
+      const inlineIris = irisCodeBase64
         ? `data:image/png;base64,${irisCodeBase64}`
         : undefined;
 
@@ -476,7 +490,8 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           term,
           rfCode,
           paymentCode: paymentCode || null,
-          irisCodeUrl,
+          irisCodeUrl: inlineIris,
+          pdfUrl: sourcePdfUrl || undefined,
           status: 'pending',
           createdDate: new Date(),
           updatedDate: new Date()
@@ -507,6 +522,34 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           }
         } else {
           throw err;
+        }
+      }
+
+      // Slice 5: archive the IRIS QR PNG to B2 (best-effort). On success,
+      // replace the inline data-URI with the B2 key and drop the base64 blob
+      // so the Bill doc doesn't carry a fat inline image. A failure leaves the
+      // inline QR intact — archival is never allowed to fail the confirm.
+      if (b2On && irisCodeBase64) {
+        try {
+          const key = billStorage.billObjectKey(
+            realmName,
+            String(realmId),
+            String(bill._id),
+            'iris-qr.png'
+          );
+          await billStorage.uploadBuffer(
+            b2Config,
+            key,
+            Buffer.from(irisCodeBase64, 'base64'),
+            'image/png'
+          );
+          bill.irisCodeUrl = key;
+          (bill as any).irisCodeBase64 = undefined;
+          await bill.save();
+        } catch (err: any) {
+          logger.error(
+            `bill ${bill._id} QR archive failed (kept inline): ${err?.message || err}`
+          );
         }
       }
       // «Χρέωση ενοικιαστών» — bridge the amount into the tenant-charge engine.
@@ -559,6 +602,64 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
   }
 
   res.json(saved);
+}
+
+/**
+ * POST /bills/:id/attach-source  (multipart, field "source")
+ * Slice 5 — upload-dialog path. The source PDF/photo is a multer buffer that
+ * only lives during /bills/parse; the JSON /confirm can't carry it (100kb body
+ * cap). So the client re-sends the source here AFTER confirm returns a bill id,
+ * and only for a bill that actually saved — no orphaned uploads. Best-effort:
+ * a B2 failure returns 200 with archived:false; the Bill is untouched.
+ */
+export async function attachBillSource(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+  const { id } = req.params;
+  validateObjectId(id, 'bill id');
+
+  const bill: any = await Collections.Bill.findOne({ _id: id, realmId });
+  if (!bill) {
+    throw new ServiceError('Ο λογαριασμός δεν βρέθηκε', 404);
+  }
+
+  const file = (req as any).file as Express.Multer.File | undefined;
+  if (!file?.buffer?.length) {
+    throw new ServiceError('Δεν βρέθηκε αρχείο πηγής', 422);
+  }
+
+  const b2Config = (req.realm as any)?.thirdParties?.b2;
+  if (!billStorage.isEnabled(b2Config)) {
+    // B2 not configured — nothing to archive to. Not an error; the source
+    // simply isn't persisted (matches the inline-only behavior elsewhere).
+    res.json({ archived: false });
+    return;
+  }
+
+  try {
+    const realmName = String((req.realm as any)?.name || '');
+    const key = billStorage.billObjectKey(
+      realmName,
+      String(realmId),
+      String(bill._id),
+      file.originalname || 'source'
+    );
+    const ct = /\.pdf$/i.test(file.originalname || '')
+      ? 'application/pdf'
+      : file.mimetype || 'image/jpeg';
+    await billStorage.uploadBuffer(b2Config, key, file.buffer, ct);
+    bill.pdfUrl = key;
+    bill.updatedDate = new Date();
+    await bill.save();
+    res.json({ archived: true, pdfUrl: key });
+  } catch (err: any) {
+    logger.error(
+      `attachBillSource: B2 upload failed for bill ${bill._id}: ${err?.message || err}`
+    );
+    res.json({ archived: false });
+  }
 }
 
 /**
