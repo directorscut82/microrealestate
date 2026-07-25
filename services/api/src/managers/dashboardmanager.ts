@@ -921,9 +921,12 @@ function _tenantName(tenant: AnyRecord): string {
 }
 
 async function _fetchPendingBills(realmId: string): Promise<AnyRecord[]> {
+  // A bill that is 'partial' (some installments recorded but not fully
+  // covered) is still owed and MUST surface on the dashboard — querying
+  // only 'pending' silently dropped every part-paid bill from the tile.
   const bills: AnyRecord[] = await Collections.Bill.find({
     realmId,
-    status: 'pending'
+    status: { $in: ['pending', 'partial'] }
   })
     .sort({ dueDate: 1 })
     .lean();
@@ -960,10 +963,21 @@ async function _fetchPendingBills(realmId: string): Promise<AnyRecord[]> {
         bills: []
       };
     }
+    // For a 'partial' bill, what's still owed is total − Σ(receipts); showing
+    // the full totalAmount would overstate the outstanding balance.
+    const paidSoFar = Array.isArray(bill.receipts)
+      ? bill.receipts.reduce(
+          (s: number, r: AnyRecord) => s + (Number(r.amount) || 0),
+          0
+        )
+      : 0;
+    const outstanding = _round(Math.max(0, (bill.totalAmount || 0) - paidSoFar));
     grouped[buildingId].bills.push({
       _id: bill._id,
       expenseName: expenseMap.get(String(bill.expenseId)) || bill.provider,
       totalAmount: bill.totalAmount,
+      outstanding,
+      status: bill.status,
       dueDate: bill.dueDate,
       periodStart: bill.periodStart,
       periodEnd: bill.periodEnd

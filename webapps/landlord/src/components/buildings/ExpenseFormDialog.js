@@ -565,6 +565,16 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
         delete payload.startFromCurrentMonth;
         if (!METHODS_NEEDING_ALLOCATIONS.includes(payload.allocationMethod)) {
           payload.customAllocations = [];
+        } else if (payload.allocationMethod === 'single_unit') {
+          // single_unit is defined ENTIRELY by its target propertyId — the
+          // rent pipeline bills the whole amount to customAllocations[0]
+          // regardless of the value. Do NOT drop the row for value===0 (the
+          // prefill seeds value:0), or the server rejects with "single_unit
+          // allocation requires a target unit". Keep only the first row with a
+          // propertyId.
+          payload.customAllocations = (payload.customAllocations || [])
+            .filter((a) => a.propertyId)
+            .slice(0, 1);
         } else {
           payload.customAllocations = payload.customAllocations.filter(
             (a) => a.value > 0

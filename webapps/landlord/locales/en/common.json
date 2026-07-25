@@ -1373,5 +1373,6 @@
   "Updated from the new photo.": "Updated from the new photo.",
   "Code updated from the new photo": "Code updated from the new photo",
   "No photo received — try again or edit manually.": "No photo received — try again or edit manually.",
-  "Type the correct code or re-photograph": "Type the correct code or re-photograph"
+  "Type the correct code or re-photograph": "Type the correct code or re-photograph",
+  "{{failed}} source file(s) could not be archived.": "{{failed}} source file(s) could not be archived."
 }

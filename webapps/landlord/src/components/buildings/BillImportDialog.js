@@ -451,9 +451,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
           rfCode: r.parsed.rfCode,
           paymentCode: r.parsed.paymentCode,
           irisCodeBase64: r.parsed.irisCodeBase64,
-          // Slice 6 — carry the element bag + raw text to persist on the Bill
-          // for later απόδειξη matching.
-          matchKeys: r.parsed.matchKeys,
+          // Slice 6 — carry the raw OCR text to persist on the Bill for later
+          // απόδειξη matching (the server rebuilds the match bag from it).
           ocrText: r.parsed.ocrText,
           replaceExisting: !!replaceFlags[r._uid],
           chargeThisMonth: !!chargeFlags[r._uid],
@@ -467,17 +466,28 @@ export default function BillImportDialog({ open, setOpen, building }) {
       // ride the JSON /confirm (100kb cap), so we re-send it per bill now that
       // we have the bill _id — and only for bills that actually saved (no
       // orphaned uploads). Index-aligned: savedBills[k] ↔ confirmable[k].
-      // Best-effort: a failed archive never blocks the import outcome.
-      await Promise.all(
+      // Best-effort: a failed archive never blocks the import outcome, but it
+      // must NOT fail silently — log it and count so the user can be told the
+      // source PDF wasn't stored (the bill itself saved fine).
+      const archiveResults = await Promise.all(
         (Array.isArray(savedBills) ? savedBills : []).map((row, k) => {
           if (!row || row.saveFailed || !row._id) return null;
           const uid = confirmable[k]?.r?._uid;
           const idx = uid ? Number(String(uid).split(':')[0]) : NaN;
           const file = Number.isInteger(idx) ? files[idx] : undefined;
           if (!file) return null;
-          return attachBillSource(row._id, file).catch(() => {});
+          return attachBillSource(row._id, file)
+            .then(() => true)
+            .catch((err) => {
+              console.error(
+                `attachBillSource failed for bill ${row._id}:`,
+                err
+              );
+              return false;
+            });
         })
       );
+      const archiveFailures = archiveResults.filter((x) => x === false).length;
 
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
       queryClient.invalidateQueries({
@@ -529,6 +539,16 @@ export default function BillImportDialog({ open, setOpen, building }) {
         toast.success(
           t('{{count}} bill(s) imported successfully', {
             count: savedOk || billsToConfirm.length
+          })
+        );
+      }
+      // The bills saved regardless, but if the source PDF archive failed for
+      // some, tell the user (the file just isn't stored in the document
+      // archive — they can re-attach it later).
+      if (archiveFailures > 0) {
+        toast.warning(
+          t('{{failed}} source file(s) could not be archived.', {
+            failed: archiveFailures
           })
         );
       }

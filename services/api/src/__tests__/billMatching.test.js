@@ -158,6 +158,27 @@ describe('scoreTokens — soft-TF-IDF, no hard categories', () => {
     expect(r.strong).toBe(true);
   });
 
+  // REGRESSION (round-1 HIGH): a plain shared numeric run (a year, an amount,
+  // a random code) must NOT set the strong-ID floor. Only RF/IBAN/the stored
+  // billingId (παροχή) are strong. Before the fix, `n:` was a strong prefix so
+  // any shared 3+ digit token mis-flagged an unrelated bill as "certain".
+  it('a plain shared NUMBER (not a billingId/RF/IBAN) does NOT set strong', () => {
+    // The receipt shares only "2026" (a year) and "186" digits with `power`,
+    // and shares NO stored billingId/RF/IBAN.
+    const receipt = extractElements('Καταθεση 2026 κωδικος 186 τραπεζα');
+    const r = scoreTokens(power, receipt, idf);
+    expect(r.strong).toBe(false); // was true before the pn: split
+  });
+
+  it('billingId strong match is asymmetric (candidate παροχή digits in receipt)', () => {
+    // water stored billingId 999000935032 (→ pn: marker). A receipt merely
+    // containing that digit-run matches strong; a DIFFERENT candidate sharing
+    // only an unrelated number does not.
+    const receipt = extractElements('πληρωμη 999000935032');
+    expect(scoreTokens(water, receipt, idf).strong).toBe(true);
+    expect(scoreTokens(misc, receipt, idf).strong).toBe(false);
+  });
+
   it('INVOICE NUMBER carries a match with NO RF/IBAN/name (category-free)', () => {
     // The plan's worked example: invoice # 391 appears on both. It is not "an
     // RF" or "a name" — a bucketed scorer would ignore it. Soft-TF-IDF matches

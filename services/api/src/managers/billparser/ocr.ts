@@ -128,7 +128,18 @@ export async function rasterizePdfToImages(buffer: Buffer): Promise<Buffer[]> {
       // with doc.destroy() below. No per-page leak.
       for (let i = 0; i < n; i++) {
         const page = doc.getPage(i);
-        const bitmap: any = await page.render({ scale: 2, render: 'bitmap' });
+        // Bound the rendered bitmap. A fixed scale:2 is fine for an A4 page
+        // (595×842pt → 1190×1684px ≈ 2MP) but a large-format or malicious
+        // MediaBox (e.g. A0, or a crafted huge page) renders a giant RGBA
+        // bitmap that OOM-kills the 384MB container BEFORE ocrImage's cap runs.
+        // Derive the scale from the page's point size so the longest rendered
+        // side is ≤ MAX_OCR_SIDE, and never upscale past the 2× (~144dpi)
+        // default. Output px ≤ 2600² ≈ 6.8MP, well under the decode cap.
+        const { originalWidth, originalHeight } = page.getOriginalSize();
+        const longestPt = Math.max(originalWidth || 0, originalHeight || 0);
+        const scale =
+          longestPt > 0 ? Math.min(2, MAX_OCR_SIDE / longestPt) : 2;
+        const bitmap: any = await page.render({ scale, render: 'bitmap' });
         const png = await sharp(Buffer.from(bitmap.data), {
           raw: { width: bitmap.width, height: bitmap.height, channels: 4 }
         })
@@ -161,6 +172,26 @@ const MAX_OCR_MEGAPIXELS = 30;
 const MAX_OCR_INPUT_PIXELS = MAX_OCR_MEGAPIXELS * 1_000_000;
 const MAX_OCR_SIDE = 2600;
 
+// The 30MP header cap only bounds PEAK memory for formats sharp can shrink
+// on load (JPEG: libjpeg decodes at reduced resolution when .resize() shrinks
+// by ≥2×, so the full-res raw buffer is never materialized). PNG/WEBP/TIFF/GIF
+// have NO shrink-on-load in sharp — they decode the ENTIRE image to raw RGBA
+// (4 B/px) BEFORE resize. A 30MP PNG = 120MB raw, which on top of the ~239MB
+// warm OCR session blows the 384MB container cap. So non-shrink formats get a
+// tighter cap: 12MP · 4 B = 48MB raw, leaving comfortable headroom. A 300dpi
+// A4 scan is ~8.7MP, so real bills are unaffected.
+const MAX_OCR_DECODE_MEGAPIXELS = 12;
+const MAX_OCR_DECODE_INPUT_PIXELS = MAX_OCR_DECODE_MEGAPIXELS * 1_000_000;
+const SHRINK_ON_LOAD_FORMATS = new Set(['jpeg', 'jpg']);
+
+// Pick the effective pixel budget for THIS image: the generous 30MP cap when
+// sharp can shrink it on load, else the tighter full-decode cap.
+function effectiveMaxPixels(format?: string): number {
+  return format && SHRINK_ON_LOAD_FORMATS.has(format)
+    ? MAX_OCR_INPUT_PIXELS
+    : MAX_OCR_DECODE_INPUT_PIXELS;
+}
+
 // Serialize OCR decode+inference. Concurrent uploads must NOT each hold a
 // full RGBA buffer + run inference simultaneously — that multiplies peak RSS
 // past the container cap. One image at a time keeps peak RSS at
@@ -189,9 +220,12 @@ async function _ocrImageInner(buffer: Buffer): Promise<string> {
   // are only reading the header, and we enforce our own tighter bound next.
   const meta = await sharp(buffer, { limitInputPixels: false }).metadata();
   const px = (meta.width || 0) * (meta.height || 0);
-  if (px > MAX_OCR_INPUT_PIXELS) {
+  // Non-shrink-on-load formats (PNG/WEBP/…) get the tighter full-decode cap so
+  // the raw RGBA buffer can't blow the container; JPEG keeps the 30MP cap.
+  const maxPx = effectiveMaxPixels(meta.format);
+  if (px > maxPx) {
     throw new Error(
-      `Image too large to OCR (${meta.width}×${meta.height}, ${(px / 1e6).toFixed(0)}MP > ${MAX_OCR_MEGAPIXELS}MP cap). Downscale and retry.`
+      `Image too large to OCR (${meta.width}×${meta.height}, ${(px / 1e6).toFixed(0)}MP > ${(maxPx / 1e6).toFixed(0)}MP cap for ${meta.format || 'image'}). Downscale and retry.`
     );
   }
 
@@ -238,9 +272,10 @@ export async function ocrImageWithBoxes(
   const meta = await sharp(buffer, { limitInputPixels: false }).metadata();
   const origWidth = meta.width || 0;
   const origHeight = meta.height || 0;
-  if (origWidth * origHeight > MAX_OCR_INPUT_PIXELS) {
+  const maxPx = effectiveMaxPixels(meta.format);
+  if (origWidth * origHeight > maxPx) {
     throw new Error(
-      `Image too large to OCR (${origWidth}×${origHeight}, > ${MAX_OCR_MEGAPIXELS}MP cap).`
+      `Image too large to OCR (${origWidth}×${origHeight}, > ${(maxPx / 1e6).toFixed(0)}MP cap for ${meta.format || 'image'}).`
     );
   }
 

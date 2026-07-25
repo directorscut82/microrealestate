@@ -37,7 +37,13 @@ export default function PendingBills({ className, dashboardData }) {
     () =>
       pendingBills.reduce(
         (sum, group) =>
-          sum + group.bills.reduce((s, b) => s + (b.totalAmount || 0), 0),
+          sum +
+          group.bills.reduce(
+            // Outstanding = what's still owed. A part-paid bill contributes
+            // total − Σ(receipts), not its full face amount.
+            (s, b) => s + (b.outstanding ?? b.totalAmount ?? 0),
+            0
+          ),
         0
       ),
     [pendingBills]
@@ -117,10 +123,15 @@ export default function PendingBills({ className, dashboardData }) {
                               {moment(bill.periodEnd).format('DD/MM/YY')}
                             </div>
                           )}
+                          {bill.status === 'partial' && (
+                            <div className="text-label text-ink-muted mt-0.5">
+                              {t('Partially paid')}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell numeric className="font-medium">
                           <NumberFormat
-                            value={bill.totalAmount}
+                            value={bill.outstanding ?? bill.totalAmount}
                             showZero={true}
                           />
                         </TableCell>

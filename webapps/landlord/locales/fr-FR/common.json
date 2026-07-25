@@ -1244,5 +1244,11 @@
   "Updated from the new photo.": "Mis à jour depuis la nouvelle photo.",
   "Code updated from the new photo": "Code mis à jour depuis la nouvelle photo",
   "No photo received — try again or edit manually.": "Aucune photo reçue — réessayez ou modifiez manuellement.",
-  "Type the correct code or re-photograph": "Saisissez le bon code ou reprenez la photo"
+  "Type the correct code or re-photograph": "Saisissez le bon code ou reprenez la photo",
+  "Pick a unit to bill": "Choisir une unité à facturer",
+  "Pick the unit to bill": "Choisir l’unité à facturer",
+  "Select a unit": "Sélectionner une unité",
+  "This expense was changed in another tab — please reopen and retry": "Cette dépense a été modifiée dans un autre onglet — rouvrez-la et réessayez",
+  "Bill the whole expense to one specific unit": "Facturer toute la dépense à une seule unité",
+  "{{failed}} source file(s) could not be archived.": "{{failed}} fichier(s) source n’ont pas pu être archivés."
 }

@@ -326,17 +326,12 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       }
     }
 
-    // Slice 6 — build the element bag (matchKeys) from the raw text now, while
-    // we have it. Populated onto the Bill at confirm; an incoming receipt is
-    // scored against it. ocrText is capped so 20 bills' round-trip stays under
-    // the confirm JSON body cap (scorer uses matchKeys, not raw text).
-    const elements = extractElements(parseResult.rawText || '', {
-      amount: bill.totalAmount,
-      dates: [bill.periodStart, bill.periodEnd, bill.issueDate, bill.dueDate],
-      name: bill.provider,
-      billingIds: [bill.billingId, bill.rfCode].filter(Boolean) as string[]
-    });
-
+    // Slice 6 — persist the raw OCR text (capped) so an incoming απόδειξη can be
+    // scored against this bill. ocrText is the SINGLE source of truth for the
+    // receipt matcher: parsePaymentReceipts rebuilds the full soft-TF-IDF token
+    // bag from it (via extractElements) at match time, folding in the bill's
+    // structured strong keys. We do NOT persist a pre-built element bag — a
+    // stored snapshot would be a lossy partial (no `tokens`) and go stale.
     results.push({
       filename: file.originalname,
       success: true,
@@ -353,7 +348,6 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         paymentCode: bill.paymentCode, // C1 fix: was omitted, confirm stores null
         irisCodeBase64,
         proposedTerm: computeDefaultTerm(bill.periodEnd),
-        matchKeys: elements,
         ocrText: (parseResult.rawText || '').slice(0, 4000)
       },
       match: match
@@ -418,9 +412,9 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       // inbox path archives at ingest and passes the key here). Set directly
       // onto the Bill — no re-upload.
       sourcePdfUrl,
-      // Slice 6 — the element bag + raw text from the parse step, persisted so
-      // an incoming απόδειξη can be scored against this bill.
-      matchKeys,
+      // Slice 6 — the raw OCR text from the parse step, persisted so an incoming
+      // απόδειξη can be scored against this bill (the matcher rebuilds the token
+      // bag from ocrText at match time — see parsePaymentReceipts).
       ocrText,
       replaceExisting,
       chargeThisMonth,
@@ -533,7 +527,25 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         }
       }
 
-      // If replacing, remove existing bill for same term+expense
+      // provider + billingId are schema-required. Validate them BEFORE the
+      // destructive replaceExisting delete below — otherwise a confirm missing
+      // either field would delete the existing Bill and then throw a Mongoose
+      // ValidationError on save (the catch only handles duplicate-key 11000 and
+      // rethrows everything else), leaving the period with NO bill at all.
+      const VALID_PROVIDERS = ['deh', 'eydap', 'epa', 'other'];
+      if (!provider || !VALID_PROVIDERS.includes(String(provider))) {
+        throw new ServiceError(
+          `Bill provider must be one of ${VALID_PROVIDERS.join(', ')} (got ${provider})`,
+          422
+        );
+      }
+      if (!billingId || !String(billingId).trim()) {
+        throw new ServiceError('Bill billingId is required', 422);
+      }
+
+      // If replacing, remove existing bill for same term+expense. Safe now that
+      // the required fields above are validated — the subsequent save won't
+      // throw a ValidationError after the delete.
       if (replaceExisting) {
         await Collections.Bill.deleteMany({
           realmId,
@@ -568,8 +580,8 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           paymentCode: paymentCode || null,
           irisCodeUrl: inlineIris,
           pdfUrl: sourcePdfUrl || undefined,
-          // Slice 6 — element bag + raw text for receipt matching.
-          matchKeys: matchKeys || undefined,
+          // Slice 6 — raw OCR text for receipt matching (single source of truth;
+          // the matcher rebuilds the element bag from this at match time).
           ocrText: ocrText || undefined,
           status: 'pending',
           createdDate: new Date(),
@@ -863,9 +875,9 @@ export async function parsePaymentReceipts(req: Req, res: Res): Promise<void> {
   // Candidate set — UNIFIED across two kinds, because a receipt may pay a
   // utility bill OR a repair (an επισκευές απόδειξη carries NO RF/IBAN; its
   // contractor NAME is the key). Both are scored with the same fuzzy scorer:
-  //   1. Bills not fully paid (matchKeys stored at confirm).
+  //   1. Bills not fully paid — element bag rebuilt from the stored ocrText.
   //   2. Repairs with a real cost, not cancelled, not already fully paid by a
-  //      linked receipt — matchKeys derived live from the contractor + fields.
+  //      linked receipt — element bag derived live from the contractor + fields.
   type Candidate = {
     kind: 'bill' | 'repair';
     id: string;
@@ -912,11 +924,22 @@ export async function parsePaymentReceipts(req: Req, res: Res): Promise<void> {
     });
     // Fold the bill's own strong keys into the bag explicitly (in case ocrText
     // was absent — e.g. legacy bills imported before Slice 6 stored raw text).
+    // extractElements already emits these when ocrText is present; the guarded
+    // Set-dedup in tokenizeAll means the duplicate push is harmless. Emit BOTH
+    // n: (cosine) and pn: (strong-ID marker) for the billingId so the strong
+    // floor still fires for a legacy bill whose only source is this fold.
     if (bill.rfCode)
       keys.tokens.push(`rf:${String(bill.rfCode).toUpperCase()}`);
     if (bill.billingId) {
-      keys.tokens.push(`n:${String(bill.billingId).replace(/[\s\-.]/g, '')}`);
+      const c = String(bill.billingId).replace(/[\s\-.]/g, '');
+      if (c) {
+        keys.tokens.push(`n:${c}`);
+        keys.tokens.push(`pn:${c}`);
+      }
     }
+    // Dedup the token bag after the fold — a duplicate token would otherwise
+    // inflate the cosine magnitude (the scorer assumes a Set-like binary TF).
+    keys.tokens = Array.from(new Set(keys.tokens));
     candidates.push({
       kind: 'bill',
       id: String(bill._id),
@@ -1113,17 +1136,53 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
     throw new ServiceError('Δεν βρέθηκαν πληρωμές', 422);
   }
 
-  const mkReceipt = (p: any, fallbackAmount: number) => {
-    const amount = Number(p.amount);
-    return {
-      amount: Number.isFinite(amount) && amount > 0 ? amount : fallbackAmount,
-      date: p.date ? new Date(p.date) : new Date(),
-      proofUrl: p.proofUrl || undefined,
-      ocrText: p.ocrText || undefined,
-      matchedOn: Array.isArray(p.matchedOn) ? p.matchedOn : [],
-      createdDate: new Date()
-    };
+  // Every installment MUST carry an explicit positive amount. The old code
+  // silently fell back to the target's FULL total when the amount was missing
+  // (OCR failed to read it AND the user didn't type one) — which recorded a
+  // fabricated full payment and auto-marked the bill 'paid'. A receipt with no
+  // legible amount is a data problem the user must resolve, not a full payment.
+  // Validate the whole batch up front so a bad amount never mutates anything.
+  const parseAmount = (p: any): number => {
+    const a = Number(p?.amount);
+    return Number.isFinite(a) && a > 0 ? a : NaN;
   };
+  const badAmounts = payments.filter((p: any) => Number.isNaN(parseAmount(p)));
+  if (badAmounts.length) {
+    throw new ServiceError(
+      'Κάθε πληρωμή πρέπει να έχει ποσό μεγαλύτερο του μηδενός. Συμπληρώστε το ποσό της απόδειξης.',
+      422
+    );
+  }
+
+  const mkReceipt = (p: any) => ({
+    amount: parseAmount(p),
+    date: p.date ? new Date(p.date) : new Date(),
+    proofUrl: p.proofUrl || undefined,
+    ocrText: p.ocrText || undefined,
+    matchedOn: Array.isArray(p.matchedOn) ? p.matchedOn : [],
+    createdDate: new Date()
+  });
+
+  // Idempotency: a double-submit (double-click, retry after a timed-out
+  // response, re-upload of the same file) must not record the same απόδειξη
+  // twice and double-count Σ(receipts). Two receipts are "the same" when they
+  // share amount + same calendar day + same proof identity (proofUrl, else the
+  // OCR text). Returns true if an equivalent receipt already exists.
+  const dayKey = (d: any) => {
+    const t = d ? new Date(d) : null;
+    return t && !Number.isNaN(t.getTime())
+      ? t.toISOString().slice(0, 10)
+      : '';
+  };
+  const isDuplicateReceipt = (existing: any[], r: any): boolean =>
+    (existing || []).some(
+      (e: any) =>
+        Math.abs((Number(e.amount) || 0) - r.amount) < 0.005 &&
+        dayKey(e.date) === dayKey(r.date) &&
+        (r.proofUrl
+          ? e.proofUrl === r.proofUrl
+          : (e.ocrText || '') === (r.ocrText || ''))
+    );
 
   const updated = [];
   for (const p of payments) {
@@ -1143,8 +1202,26 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
           );
       if (!repair) continue;
       const cost = Number(repair.actualCost) || 0;
-      const receipt = mkReceipt(p, cost);
+      // A repair with no real cost can't be "paid" — without this guard a
+      // 0-cost repair + any receipt trips paid+0.005 >= 0 → instantly marked
+      // fully paid from the repairs fund. parsePaymentReceipts already excludes
+      // 0-cost repairs as candidates, but a direct confirm call would not.
+      if (cost <= 0) {
+        throw new ServiceError(
+          'Η επισκευή δεν έχει καταχωρημένο κόστος — καταχωρήστε το πραγματικό κόστος πρώτα.',
+          422
+        );
+      }
+      const receipt = mkReceipt(p);
       repair.receipts = repair.receipts || [];
+      if (isDuplicateReceipt(repair.receipts, receipt)) {
+        updated.push({
+          kind: 'repair',
+          repairId: String(repair._id),
+          duplicate: true
+        });
+        continue;
+      }
       repair.receipts.push(receipt);
       const paid = repair.receipts.reduce(
         (s: number, r: any) => s + (Number(r.amount) || 0),
@@ -1187,8 +1264,17 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
     });
     if (!bill) continue;
 
-    const receipt = mkReceipt(p, bill.totalAmount);
+    const receipt = mkReceipt(p);
     bill.receipts = bill.receipts || [];
+    if (isDuplicateReceipt(bill.receipts, receipt)) {
+      updated.push({
+        kind: 'bill',
+        billId: String(bill._id),
+        status: bill.status,
+        duplicate: true
+      });
+      continue;
+    }
     bill.receipts.push(receipt);
 
     const paid = bill.receipts.reduce(

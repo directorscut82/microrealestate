@@ -99,6 +99,10 @@ export async function confirm(req: Req, res: Res): Promise<void> {
     irisCodeBase64: item.irisCodeBase64,
     // Slice 5: carry the source archived at ingest onto the Bill (no re-upload).
     sourcePdfUrl: item.sourcePdfUrl,
+    // Slice 6: carry the parsed OCR text so the confirmed Bill can be matched
+    // by an incoming απόδειξη (confirmBills builds matchKeys / stores ocrText).
+    // Without this, Telegram-imported bills had an empty match bag.
+    ocrText: p.ocrText,
     replaceExisting: !!replaceExisting,
     chargeThisMonth: !!chargeThisMonth,
     expenseName

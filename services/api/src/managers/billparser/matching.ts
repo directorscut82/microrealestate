@@ -473,10 +473,19 @@ function tokenizeAll(
   // Strong keys as their own high-signal tokens (exact identity).
   for (const rf of extractRFs(t)) bag.add(`rf:${rf}`);
   for (const ib of extractIBANs(t)) bag.add(`iban:${ib}`);
+  // The bill's KNOWN billingId (αριθμός παροχής) gets TWO tokens:
+  //   n:<c>  → participates in the soft cosine (a receipt digit-run lines up).
+  //   pn:<c> → a strong-ID MARKER used only by scoreTokens' strong detection.
+  // pn: is emitted ONLY for the real billingId (from hints), NEVER for arbitrary
+  // numeric runs — so the strong +floor fires on the παροχή, not on a shared
+  // "2026"/"100". The receipt has no hints.billingIds, so it emits no pn:; the
+  // strong billingId match is asymmetric (candidate pn:X ∧ receipt n:X).
   for (const b of hints?.billingIds || []) {
     const c = normalizeBillingIdLocal(b);
-    if (c) bag.add(`n:${c}`); // billingId is a numeric run → same namespace so a
-    // receipt's matching digit-run (added above as n:<digits>) lines up with it
+    if (c) {
+      bag.add(`n:${c}`);
+      bag.add(`pn:${c}`);
+    }
   }
 
   return Array.from(bag);
@@ -535,10 +544,12 @@ export interface MatchScore {
   strong: boolean; // an exact strong-ID (RF/IBAN/billingId) matched
 }
 
-// Prefixed strong-key namespaces in the token bag. An exact match on any of
-// these is a deterministic, deliberately-saved unique identifier → treat as
-// near-certain regardless of TF-IDF weight.
-const STRONG_PREFIXES = ['rf:', 'iban:', 'n:']; // n: also carries billingId + invoice refs
+// Strong-ID detection (see scoreTokens): an exact match on a checksum-valid
+// RF/IBAN token, or the stored αριθμός παροχής (candidate pn:X ∧ receipt n:X),
+// is a deliberately-saved unique identifier → near-certain, gets the rank
+// floor. The generic `n:` numeric-run namespace is deliberately NOT strong on
+// its own — it carries every ≥3-digit token (years, amounts, codes), so a
+// coincidental shared number must never fire the floor.
 
 /**
  * Compute IDF over the candidate corpus. df = number of candidates whose bag
@@ -591,8 +602,11 @@ export function scoreTokens(
   receipt: BillElements,
   idf: Map<string, number>
 ): MatchScore {
-  const cand = candidate?.tokens || [];
-  const rec = receipt.tokens || [];
+  // pn: tokens are strong-ID MARKERS, not cosine terms — the same billingId is
+  // already represented by its n: token, so counting pn: would double-weight it
+  // and skew the magnitude. Exclude pn: from the cosine bags entirely.
+  const cand = (candidate?.tokens || []).filter((t) => !t.startsWith('pn:'));
+  const rec = (receipt.tokens || []).filter((t) => !t.startsWith('pn:'));
   if (!cand.length || !rec.length) {
     return { score: 0, matchedOn: [], strong: false };
   }
@@ -628,12 +642,30 @@ export function scoreTokens(
     if (best <= 0) continue;
     dot += best * w(rt) * w(bestTok);
 
-    // record what matched (for the "why" chips) + strong-key detection
-    const isStrong = STRONG_PREFIXES.some((p) => rt.startsWith(p));
-    if (isStrong && best === 1) strong = true;
+    // Strong-ID detection: rf:/iban: match on an exact identical token; the
+    // billingId is asymmetric (candidate holds pn:X, receipt holds the digits
+    // as n:X), handled separately below — so a plain `n:` shared number does
+    // NOT set strong.
+    if (best === 1 && (rt.startsWith('rf:') || rt.startsWith('iban:'))) {
+      strong = true;
+    }
     if (best >= 0.8) {
       const label = rt.replace(/^(w:|n:|amt:|date:|rf:|iban:)/, '');
       if (label && !matchedOn.includes(label)) matchedOn.push(label);
+    }
+  }
+
+  // Strong billingId: the candidate's stored παροχή (pn:X) appears as a numeric
+  // run (n:X) in the receipt text. Uses the ORIGINAL candidate tokens (pn: was
+  // filtered out of `cand`), matched against the receipt's n: tokens.
+  const recNumeric = new Set(rec.filter((t) => t.startsWith('n:')));
+  for (const ct of candidate?.tokens || []) {
+    if (ct.startsWith('pn:')) {
+      const digits = ct.slice(3);
+      if (recNumeric.has(`n:${digits}`)) {
+        strong = true;
+        if (!matchedOn.includes(digits)) matchedOn.unshift(digits);
+      }
     }
   }
 

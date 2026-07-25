@@ -30,18 +30,12 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
     enum: ['pending', 'partial', 'paid'],
     default: 'pending'
   },
-  // Slice 6 — the full element bag extracted at bill-confirm. An incoming
-  // απόδειξη's elements are scored against this to SUGGEST a match (never
-  // auto-classify the receipt type). Every list holds all reliably-found
-  // tokens; checksum-validated where applicable (rfCodes/ibans).
-  matchKeys: {
-    rfCodes: [String],
-    ibans: [String],
-    amounts: [Number],
-    afm: [String],
-    dates: [Date],
-    nameTokens: [String]
-  },
+  // Slice 6 — the raw OCR text captured at bill-confirm (capped). An incoming
+  // απόδειξη is matched by rebuilding a soft-TF-IDF token bag from this text
+  // (plus the bill's structured strong keys) at match time — see
+  // parsePaymentReceipts. This is the single source of truth for matching; a
+  // pre-built element bag is deliberately NOT persisted (it would be a lossy
+  // partial and could go stale relative to the scorer).
   ocrText: String,
   // Slice 6 — each recorded payment απόδειξη as its own record (installments).
   // The bill is 'paid' only when Σ(receipts.amount) >= totalAmount, else

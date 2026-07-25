@@ -19,7 +19,17 @@
  */
 import { Crypto, logger } from '@microrealestate/common';
 import AWS from 'aws-sdk';
-import sanitize from 'sanitize-filename';
+import sfn from 'sanitize-filename';
+
+// MUST match pdfgenerator's sanitize() EXACTLY (services/pdfgenerator/src/
+// utils/index.ts) — it uses { replacement: '_' }. The by-key download route
+// rebuilds the expected prefix with the SAME function and 403s any key that
+// doesn't match, so a divergent sanitizer here (e.g. the default '' replacement)
+// would produce an unretrievable object for any realm whose name/id contains an
+// illegal filename char (`/`, `:`, `*`, reserved names like `con`, …).
+function sanitize(name = ''): string {
+  return sfn(name, { replacement: '_' });
+}
 
 export interface B2Config {
   keyId: string;

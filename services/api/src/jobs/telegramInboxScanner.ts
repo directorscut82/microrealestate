@@ -30,6 +30,20 @@ const POLL_MS = 60_000;
 // 6MB cap the upload route enforces (routes.ts uploadBill limits.fileSize).
 const MAX_TG_FILE_BYTES = 6 * 1024 * 1024;
 
+// How many consecutive ticks an update may fail before we declare it poison and
+// skip past it. A transient failure (mongo blip, Telegram file API hiccup) gets
+// this many 60s retries to recover WITHOUT losing the bill; a genuinely poison
+// update (e.g. a permanently-bad file_id → getFile 400) is skipped after the
+// budget so it can't wedge the queue forever.
+const MAX_UPDATE_RETRIES = 5;
+// (realmId:update_id) → consecutive failure count. Because the scan stops at the
+// first failed update (contiguous-prefix advance), at most one entry per realm
+// is ever live; cleared on success or on poison-skip.
+const _updateRetries = new Map<string, number>();
+function _retryKey(realmId: string, updateId: number): string {
+  return `${realmId}:${updateId}`;
+}
+
 export interface TelegramRealmConfig {
   realmId: string;
   realmName: string;
@@ -73,14 +87,19 @@ export interface InboxScanDeps {
   /**
    * Tier-2 re-capture (Slice 6 §15). If a recapture session is WAITING for this
    * realm, the next admin-chat photo is a zoomed re-shot of a failed RF/IBAN —
-   * NOT a new bill. tryRecapture consumes it: OCR the crop, extract+validate the
-   * target field, resolve the session. Returns true when it consumed the
-   * message (so the poller skips normal ingest). Injected for tests.
+   * NOT a new bill. tryRecapture OCRs the crop, extracts+validates the target
+   * field, and resolves the session. Returns:
+   *   - false        → no active session; NOT consumed → normal ingest.
+   *   - 'recovered'  → consumed AND a checksum-valid key was recovered.
+   *   - 'failed'     → consumed (it WAS the re-shot) but no valid key was read;
+   *                    the session stays open so the user can retry / type it.
+   * The 'recovered' vs 'failed' distinction lets the poller send an ACCURATE
+   * reply instead of always claiming success. Injected for tests.
    */
   tryRecapture?: (
     realm: TelegramRealmConfig,
     buffer: Buffer
-  ) => Promise<boolean>;
+  ) => Promise<false | 'recovered' | 'failed'>;
   /**
    * Archive the source bytes to B2 at ingest (Slice 5). Returns the object key
    * or null when B2 is not configured / upload failed — archival is
@@ -267,7 +286,7 @@ async function _createInboxItem(doc: Record<string, unknown>): Promise<void> {
 async function _tryRecapture(
   realm: TelegramRealmConfig,
   buffer: Buffer
-): Promise<boolean> {
+): Promise<false | 'recovered' | 'failed'> {
   const now = Date.now();
   const session = recapture.activeSessionForRealm(realm.realmId, now);
   if (!session) return false;
@@ -284,15 +303,15 @@ async function _tryRecapture(
       logger.info(
         `telegram-inbox: recapture recovered ${session.target} for realm ${realm.realmId}`
       );
-      return true;
+      return 'recovered';
     }
     // A photo arrived but still no valid key — consume it (it WAS the re-shot,
     // even if it failed) so it isn't mis-ingested as a bill; the session stays
     // waiting until timeout so the user can try once more or type it manually.
-    return true;
+    return 'failed';
   } catch (err: any) {
     logger.warn(`telegram-inbox: recapture OCR failed: ${err?.message || err}`);
-    return true;
+    return 'failed';
   }
 }
 
@@ -403,25 +422,48 @@ export async function scanTelegramInbox(
       const updates = await deps.getUpdates(realm.botToken, last + 1);
       if (!updates.length) continue;
       result.updates += updates.length;
+      // Telegram returns updates ascending, but sort defensively — the
+      // contiguous-prefix commit below relies on order.
+      updates.sort((a, b) => a.update_id - b.update_id);
 
-      let maxUpdateId = last;
+      // Contiguous-prefix commit: advance the offset only across the run of
+      // updates handled successfully from the start. On a failure we STOP and
+      // leave that update (and everything after it) for the next tick, so a
+      // transient error (mongo blip, file API hiccup) NEVER loses a bill — it
+      // retries. A genuinely poison update would otherwise wedge the queue, so
+      // after MAX_UPDATE_RETRIES consecutive failures we skip past it.
+      let committed = last;
       for (const u of updates) {
-        // ALWAYS advance past every update we saw — even ones we skip or that
-        // error — otherwise a poison message wedges the queue forever.
-        if (u.update_id > maxUpdateId) maxUpdateId = u.update_id;
         try {
           const handled = await _handleUpdate(realm, u, deps);
           if (handled === 'ingested') result.ingested++;
           else result.skipped++;
+          committed = u.update_id;
+          _updateRetries.delete(_retryKey(realm.realmId, u.update_id));
         } catch (err: any) {
           result.errors++;
+          const key = _retryKey(realm.realmId, u.update_id);
+          const fails = (_updateRetries.get(key) || 0) + 1;
           logger.error(
-            `telegram-inbox: update ${u.update_id} (realm ${realm.realmId}) failed: ${err?.message || err}`
+            `telegram-inbox: update ${u.update_id} (realm ${realm.realmId}) failed (attempt ${fails}/${MAX_UPDATE_RETRIES}): ${err?.message || err}`
           );
+          if (fails >= MAX_UPDATE_RETRIES) {
+            // Poison — skip past it so the queue isn't wedged forever, then
+            // keep processing the rest of the batch.
+            logger.error(
+              `telegram-inbox: update ${u.update_id} (realm ${realm.realmId}) exhausted retries — SKIPPING (bill lost; check the source chat)`
+            );
+            _updateRetries.delete(key);
+            committed = u.update_id;
+            continue;
+          }
+          // Transient — retry this + all later updates next tick.
+          _updateRetries.set(key, fails);
+          break;
         }
       }
-      if (maxUpdateId > last) {
-        await deps.setOffset(realm.realmId, maxUpdateId);
+      if (committed > last) {
+        await deps.setOffset(realm.realmId, committed);
       }
     } catch (err: any) {
       // A realm-level failure (network, bad token) must not stop other realms,
@@ -474,14 +516,24 @@ async function _handleUpdate(
 
   // Tier-2 re-capture: if the open receipt dialog is WAITING for a re-shot of a
   // failed RF/IBAN for this realm, THIS photo is that re-shot — recover the
-  // field and consume the message (do NOT ingest it as a new bill).
+  // field and consume the message (do NOT ingest it as a new bill). Reply
+  // ACCURATELY: only claim success when a checksum-valid key was actually read;
+  // otherwise tell the user the re-shot wasn't legible so they can retry.
   if (deps.tryRecapture) {
-    const consumed = await deps.tryRecapture(realm, file.buffer);
-    if (consumed) {
+    const outcome = await deps.tryRecapture(realm, file.buffer);
+    if (outcome === 'recovered') {
       await deps.sendReply?.(
         realm.botToken,
         msg.chat.id,
         'Ελήφθη — ο κωδικός ενημερώθηκε στην ανοιχτή φόρμα.'
+      );
+      return 'skipped';
+    }
+    if (outcome === 'failed') {
+      await deps.sendReply?.(
+        realm.botToken,
+        msg.chat.id,
+        'Ελήφθη, αλλά ο κωδικός δεν διαβάστηκε καθαρά. Δοκιμάστε πιο κοντινή φωτογραφία ή πληκτρολογήστε τον χειροκίνητα στη φόρμα.'
       );
       return 'skipped';
     }
@@ -510,7 +562,13 @@ async function _handleUpdate(
         paymentCode: bill.paymentCode,
         proposedTerm: bill.periodEnd
           ? computeDefaultTerm(new Date(bill.periodEnd))
-          : undefined
+          : undefined,
+        // Carry the OCR text so the confirmed Bill stores it (capped, matching
+        // the upload lane). WITHOUT this a Telegram-imported bill has empty
+        // ocrText → parsePaymentReceipts rebuilds an empty token bag → the
+        // soft-TF-IDF name/amount/date matching is DEAD for it (only its strong
+        // billingId/RF keys would match). This closes that gap.
+        ocrText: (parseResult.rawText || '').slice(0, 4000)
       };
       if (bill.billingIdNormalized) {
         suggestedMatch = await deps.findMatch(
@@ -612,4 +670,9 @@ export function stopTelegramInboxCron(): void {
     pollTimer = null;
   }
   pollRunning = false;
+}
+
+// test-only: reset the poison-retry counters between cases.
+export function _clearRetries(): void {
+  _updateRetries.clear();
 }

@@ -2,7 +2,10 @@
 // Telegram inbox poller (Slice 4) — offset advance + routing logic, driven
 // entirely through the dependency-injection hooks (same pattern as
 // leaseExpiryScanner.test.js): no network, no mongo, no WASM.
-import { scanTelegramInbox } from '../jobs/telegramInboxScanner.js';
+import {
+  scanTelegramInbox,
+  _clearRetries
+} from '../jobs/telegramInboxScanner.js';
 
 const FIXED_NOW = new Date('2026-07-25T12:00:00.000Z');
 
@@ -105,6 +108,10 @@ function makeDeps({
 }
 
 describe('telegramInboxScanner — scanTelegramInbox', () => {
+  beforeEach(() => {
+    _clearRetries(); // poison-retry counters are module-level; reset per case
+  });
+
   it('polls from lastUpdateId+1', async () => {
     const { deps, state } = makeDeps({ initialOffset: 41, updates: [] });
     await scanTelegramInbox(deps);
@@ -202,7 +209,11 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     expect(state.offsets['realm-1']).toBe(42);
   });
 
-  it('a poison update advances the offset anyway (no wedged queue)', async () => {
+  it('a transient failure HOLDS the offset (retry next tick — bill not lost)', async () => {
+    // update 1001 fails, 1002 would succeed. Contiguous-prefix commit: we stop
+    // at the first failure and do NOT advance, so BOTH replay next tick. This
+    // is the fix for the offset-advance-before-handle bug: a mongo blip must
+    // never silently drop a bill.
     const { deps, state } = makeDeps({
       updates: [photoMsg(42, 1001), photoMsg(43, 1002)]
     });
@@ -214,8 +225,52 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     };
     const r = await scanTelegramInbox(deps);
     expect(r.errors).toBe(1);
-    expect(r.ingested).toBe(1); // the second one made it
-    expect(state.offsets['realm-1']).toBe(43); // BOTH consumed
+    expect(r.ingested).toBe(0); // 1002 not reached (we stopped at 1001)
+    expect(state.setOffsetCalls).toHaveLength(0); // offset UNCHANGED → retry
+    expect(state.offsets['realm-1']).toBe(0);
+  });
+
+  it('advances the offset for updates BEFORE the failing one (partial commit)', async () => {
+    // 1001 succeeds, 1002 fails → commit through 1001 only; 1002+ retry.
+    const { deps, state } = makeDeps({
+      updates: [photoMsg(42, 1001), photoMsg(43, 1002)]
+    });
+    let call = 0;
+    deps.createInboxItem = async (doc) => {
+      call++;
+      if (call === 2) throw new Error('mongo down');
+      state.created.push(doc);
+    };
+    const r = await scanTelegramInbox(deps);
+    expect(r.ingested).toBe(1); // 1001 made it
+    expect(r.errors).toBe(1); // 1002 failed
+    expect(state.offsets['realm-1']).toBe(42); // committed through 1001 only
+  });
+
+  it('a POISON update is skipped after the retry budget (queue not wedged)', async () => {
+    // The SAME update fails on every tick. It must not wedge the queue forever:
+    // after MAX_UPDATE_RETRIES (5) consecutive failures the poller skips past it
+    // and advances. Simulate 5 ticks against a persistently-failing update.
+    const failing = async () => {
+      throw new Error('permanently bad file');
+    };
+    let last = 0;
+    for (let tick = 1; tick <= 5; tick++) {
+      const { deps, state } = makeDeps({
+        updates: [photoMsg(42, 1001)],
+        initialOffset: last
+      });
+      deps.createInboxItem = failing;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await scanTelegramInbox(deps);
+      expect(r.errors).toBe(1);
+      if (tick < 5) {
+        expect(state.setOffsetCalls).toHaveLength(0); // held for retry
+      } else {
+        expect(state.offsets['realm-1']).toBe(42); // 5th → skipped past
+        last = state.offsets['realm-1'];
+      }
+    }
   });
 
   it('a realm-level getUpdates failure does NOT advance the offset (retry next tick)', async () => {
@@ -280,13 +335,13 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
 
   // ── Tier-2: an admin-chat photo is consumed by an active recapture session
   // instead of being ingested as a new bill.
-  it('recapture consumes the photo: no InboxItem, offset still advances', async () => {
+  it('recapture RECOVERED: no InboxItem, offset advances, success ack', async () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     let recaptureCalls = 0;
     deps.tryRecapture = async (_realm, buffer) => {
       recaptureCalls++;
       expect(buffer.length).toBeGreaterThan(0);
-      return true; // consumed
+      return 'recovered'; // consumed + a valid key was read
     };
     await scanTelegramInbox(deps);
     expect(recaptureCalls).toBe(1);
@@ -295,6 +350,20 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     expect(state.offsets['realm-1']).toBe(42); // consumed → offset advances
     // sender gets the "code updated" ack
     expect(state.replies.some((x) => /ενημερώθηκε/.test(x.text))).toBe(true);
+  });
+
+  it('recapture FAILED (re-shot unreadable): consumed, but ACCURATE reply — no false success', async () => {
+    const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
+    deps.tryRecapture = async () => 'failed'; // it WAS the re-shot, but no valid key
+    await scanTelegramInbox(deps);
+    expect(state.created).toHaveLength(0); // still not ingested as a bill
+    expect(state.offsets['realm-1']).toBe(42); // consumed → offset advances
+    // must NOT claim the code was updated…
+    expect(state.replies.some((x) => /ενημερώθηκε/.test(x.text))).toBe(false);
+    // …and must tell the user it wasn't legible
+    expect(state.replies.some((x) => /δεν διαβάστηκε καθαρά/.test(x.text))).toBe(
+      true
+    );
   });
 
   it('recapture OFF (returns false) → normal ingest still happens', async () => {
