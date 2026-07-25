@@ -694,4 +694,59 @@ export namespace CollectionTypes {
     createdDate?: Date;
     updatedDate?: Date;
   };
+
+  // Telegram inbound-poller offset — one doc per realm, tracks the last
+  // consumed getUpdates update_id so restarts never re-ingest messages.
+  export type TelegramOffset = {
+    _id: string;
+    realmId: string;
+    lastUpdateId: number;
+    updatedDate?: Date;
+  };
+
+  export type InboxItemSource = 'telegram' | 'upload';
+  export type InboxItemStatus = 'pending' | 'confirmed' | 'dismissed';
+
+  export type InboxItemWarning = {
+    level: 'block' | 'warn';
+    code: string;
+    message: string;
+  };
+
+  // A bill photo/document that arrived out-of-band (Telegram bot) and was
+  // parsed server-side; waits in the landlord's inbox bell for confirm/dismiss.
+  export type InboxItem = {
+    _id: string;
+    realmId: string;
+    source: InboxItemSource;
+    status: InboxItemStatus;
+    parsed: {
+      provider?: BillProvider;
+      billingId?: string;
+      billingIdNormalized?: string;
+      totalAmount?: number;
+      periodStart?: Date;
+      periodEnd?: Date;
+      issueDate?: Date;
+      dueDate?: Date;
+      rfCode?: string;
+      paymentCode?: string;
+      proposedTerm?: number;
+      ocrText?: string;
+    };
+    parseError?: string;
+    suggestedMatch?: {
+      buildingId: string;
+      buildingName: string;
+      expenseId: string;
+      expenseName: string;
+    } | null;
+    warnings: InboxItemWarning[] | [];
+    sourceFileName?: string;
+    telegramMessageId?: number;
+    telegramFileId?: string;
+    irisCodeBase64?: string;
+    createdDate?: Date;
+    updatedDate?: Date;
+  };
 }

@@ -4,6 +4,7 @@ import databaseManager from './managers/databasemanager.js';
 import * as buildingManager from './managers/buildingmanager.js';
 import * as dashboardManager from './managers/dashboardmanager.js';
 import * as emailManager from './managers/emailmanager.js';
+import * as inboxManager from './managers/inboxmanager.js';
 import * as leaseManager from './managers/leasemanager.js';
 import * as occupantManager from './managers/occupantmanager.js';
 import * as ownerManager from './managers/ownermanager.js';
@@ -134,20 +135,14 @@ export default function routes(): express.Router {
   });
 
   const realmsRouter = express.Router();
-  realmsRouter.get(
-    '/',
-    Middlewares.asyncWrapper(realmManager.all as any)
-  );
+  realmsRouter.get('/', Middlewares.asyncWrapper(realmManager.all as any));
   // Self-leave must be declared BEFORE the parameterized routes — otherwise
   // express matches '/:id' against 'me' and routes the DELETE to remove().
   realmsRouter.delete(
     '/me/membership',
     Middlewares.asyncWrapper(realmManager.leaveRealm as any)
   );
-  realmsRouter.get(
-    '/:id',
-    Middlewares.asyncWrapper(realmManager.one as any)
-  );
+  realmsRouter.get('/:id', Middlewares.asyncWrapper(realmManager.one as any));
   realmsRouter.post('/', Middlewares.asyncWrapper(realmManager.add as any));
   realmsRouter.patch(
     '/:id',
@@ -450,8 +445,7 @@ export default function routes(): express.Router {
         'image/webp'
       ];
       if (allowed.includes(file.mimetype)) cb(null, true);
-      else
-        cb(new ServiceError('Only PDF or image files allowed', 422));
+      else cb(new ServiceError('Only PDF or image files allowed', 422));
     }
   });
 
@@ -507,6 +501,20 @@ export default function routes(): express.Router {
     Middlewares.asyncWrapper(billManager.remove as any)
   );
   router.use('/bills', billsRouter);
+
+  // Inbox — bills that arrived via the Telegram bot (telegramInboxScanner),
+  // pending confirm/dismiss from the notification bell.
+  const inboxRouter = express.Router();
+  inboxRouter.get('/', Middlewares.asyncWrapper(inboxManager.list as any));
+  inboxRouter.post(
+    '/:id/confirm',
+    Middlewares.asyncWrapper(inboxManager.confirm as any)
+  );
+  inboxRouter.post(
+    '/:id/dismiss',
+    Middlewares.asyncWrapper(inboxManager.dismiss as any)
+  );
+  router.use('/inbox', inboxRouter);
 
   // Database backup/restore (admin only).
   // The /restore route accepts the entire backup payload as JSON, which can

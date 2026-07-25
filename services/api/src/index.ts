@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import type { Application } from 'express';
 import i18n from 'i18n';
 import { startLeaseExpiryCron } from './jobs/leaseExpiryScanner.js';
+import { startTelegramInboxCron } from './jobs/telegramInboxScanner.js';
 import migratedb from '../scripts/migration.js';
 import path from 'path';
 import { restoreDB } from '../scripts/dbbackup.js';
@@ -32,6 +33,11 @@ async function onStartUp(application: Application) {
   // .unref()'d so it never blocks shutdown. See jobs/leaseExpiryScanner.ts
   // for the full debounce / window logic.
   startLeaseExpiryCron();
+
+  // Telegram bill inbox — 60s poll of each configured realm's bot for
+  // photo/document bills; parsed items land in the notification bell.
+  // See jobs/telegramInboxScanner.ts.
+  startTelegramInboxCron();
 }
 
 async function Main() {

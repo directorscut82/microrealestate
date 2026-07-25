@@ -1215,5 +1215,15 @@
   "need assignment": "requieren asignación",
   "Charge tenants this month": "Cobrar a los inquilinos este mes",
   "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Facturas guardadas. {{failed}} no pudieron cobrar a los inquilinos — cóbrelos desde el estado mensual.",
-  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} de {{total}} facturas guardadas. {{failed}} no se pudieron guardar (ya existen o no son válidas)."
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} de {{total}} facturas guardadas. {{failed}} no se pudieron guardar (ya existen o no son válidas).",
+  "Bill": "Factura",
+  "Dismiss": "Descartar",
+  "Incoming bills": "Facturas entrantes",
+  "Matches": "Coincide con",
+  "No expense found with this billing ID": "No se encontró un gasto con este número de facturación",
+  "No pending bills. Send a bill photo to the bot and it will appear here.": "No hay facturas pendientes. Envíe una foto de la factura al bot y aparecerá aquí.",
+  "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "No se pudo leer la foto: {{error}}. Envíe una toma más clara al bot o registre la factura manualmente.",
+  "Unreadable": "Ilegible",
+  "{{count}} pending": "{{count}} pendientes",
+  "Record bill": "Registrar factura"
 }

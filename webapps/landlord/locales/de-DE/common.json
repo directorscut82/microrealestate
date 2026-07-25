@@ -1215,5 +1215,15 @@
   "need assignment": "Zuordnung erforderlich",
   "Charge tenants this month": "Mieter diesen Monat belasten",
   "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Rechnungen gespeichert. {{failed}} konnten Mieter nicht belasten — belasten Sie sie über die Monatsabrechnung.",
-  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} von {{total}} Rechnungen gespeichert. {{failed}} konnten nicht gespeichert werden (bereits vorhanden oder ungültig)."
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} von {{total}} Rechnungen gespeichert. {{failed}} konnten nicht gespeichert werden (bereits vorhanden oder ungültig).",
+  "Bill": "Rechnung",
+  "Dismiss": "Verwerfen",
+  "Incoming bills": "Eingehende Rechnungen",
+  "Matches": "Zuordnung",
+  "No expense found with this billing ID": "Keine Ausgabe mit dieser Vertragsnummer gefunden",
+  "No pending bills. Send a bill photo to the bot and it will appear here.": "Keine ausstehenden Rechnungen. Senden Sie ein Rechnungsfoto an den Bot und es erscheint hier.",
+  "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "Das Foto konnte nicht gelesen werden: {{error}}. Senden Sie eine schärfere Aufnahme an den Bot oder erfassen Sie die Rechnung manuell.",
+  "Unreadable": "Nicht lesbar",
+  "{{count}} pending": "{{count}} ausstehend",
+  "Record bill": "Rechnung erfassen"
 }

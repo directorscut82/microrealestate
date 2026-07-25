@@ -1364,5 +1364,15 @@
   "need assignment": "χρειάζονται αντιστοίχιση",
   "Charge tenants this month": "Χρέωση ενοικιαστών αυτόν τον μήνα",
   "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Οι λογαριασμοί αποθηκεύτηκαν. {{failed}} δεν χρέωσαν ενοικιαστές — χρεώστε τους από τη μηνιαία κατάσταση.",
-  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} από {{total}} λογαριασμοί αποθηκεύτηκαν. {{failed}} δεν αποθηκεύτηκαν (υπάρχουν ήδη ή είναι άκυροι)."
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} από {{total}} λογαριασμοί αποθηκεύτηκαν. {{failed}} δεν αποθηκεύτηκαν (υπάρχουν ήδη ή είναι άκυροι).",
+  "Bill": "Λογαριασμός",
+  "Dismiss": "Απόρριψη",
+  "Incoming bills": "Εισερχόμενοι λογαριασμοί",
+  "Matches": "Αντιστοιχεί",
+  "No expense found with this billing ID": "Δεν βρέθηκε δαπάνη με αυτόν τον αριθμό παροχής",
+  "No pending bills. Send a bill photo to the bot and it will appear here.": "Κανένας εκκρεμής λογαριασμός. Στείλτε φωτογραφία λογαριασμού στο bot και θα εμφανιστεί εδώ.",
+  "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "Η φωτογραφία δεν διαβάστηκε: {{error}}. Στείλτε καθαρότερη λήψη στο bot ή καταχωρήστε τον λογαριασμό χειροκίνητα.",
+  "Unreadable": "Μη αναγνώσιμο",
+  "{{count}} pending": "{{count}} εκκρεμούν",
+  "Record bill": "Καταχώρηση"
 }

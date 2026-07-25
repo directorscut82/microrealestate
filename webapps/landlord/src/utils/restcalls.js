@@ -7,6 +7,7 @@ export const QueryKeys = {
   BUILDINGS: 'buildings',
   DASHBOARD: 'dashboard',
   DOCUMENTS: 'documents',
+  INBOX: 'inbox',
   ORGANIZATIONS: 'organizations',
   OWNERS: 'owners',
   PROPERTIES: 'properties',
@@ -134,7 +135,10 @@ export async function createProperty(property) {
 }
 
 export async function updateProperty(property) {
-  const response = await apiFetcher().patch(`/properties/${property._id}`, property);
+  const response = await apiFetcher().patch(
+    `/properties/${property._id}`,
+    property
+  );
   return response.data;
 }
 
@@ -163,7 +167,11 @@ export async function fetchTenants({
 // NOTE: backend supports only `page`, `limit`, and `includeArchived` query
 // params. Search, sort, and status filters are applied client-side; the API
 // does not accept them as parameters.
-export async function fetchTenantsPage({ includeArchived = false, page = 1, limit = 100 } = {}) {
+export async function fetchTenantsPage({
+  includeArchived = false,
+  page = 1,
+  limit = 100
+} = {}) {
   const params = new URLSearchParams();
   if (includeArchived) params.set('includeArchived', 'true');
   params.set('page', String(page));
@@ -325,9 +333,7 @@ export async function deleteTemplate(ids) {
 
 export async function deleteDocumentByKey(key) {
   if (!key) return;
-  await apiFetcher().delete(
-    `/documents/by-key?key=${encodeURIComponent(key)}`
-  );
+  await apiFetcher().delete(`/documents/by-key?key=${encodeURIComponent(key)}`);
 }
 
 export async function fetchDocuments(entityFilter) {
@@ -440,8 +446,14 @@ export async function updateBuildingExpense(buildingId, expense) {
   return response.data;
 }
 
-export async function removeBuildingExpense(buildingId, expenseId, mode = 'hard') {
-  await apiFetcher().delete(`/buildings/${buildingId}/expenses/${expenseId}?mode=${mode}`);
+export async function removeBuildingExpense(
+  buildingId,
+  expenseId,
+  mode = 'hard'
+) {
+  await apiFetcher().delete(
+    `/buildings/${buildingId}/expenses/${expenseId}?mode=${mode}`
+  );
 }
 
 export async function addBuildingContractor(buildingId, contractor) {
@@ -581,6 +593,23 @@ export async function fetchBills({ buildingId, status } = {}) {
   if (buildingId) params.set('buildingId', buildingId);
   if (status) params.set('status', status);
   const response = await apiFetcher().get(`/bills?${params.toString()}`);
+  return response.data;
+}
+
+// Inbox — bills that arrived via the Telegram bot, pending confirm/dismiss
+// from the notification bell (Slice 4).
+export async function fetchInbox() {
+  const response = await apiFetcher().get('/inbox');
+  return response.data;
+}
+
+export async function confirmInboxItem(id, payload) {
+  const response = await apiFetcher().post(`/inbox/${id}/confirm`, payload);
+  return response.data;
+}
+
+export async function dismissInboxItem(id) {
+  const response = await apiFetcher().post(`/inbox/${id}/dismiss`);
   return response.data;
 }
 

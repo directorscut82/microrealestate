@@ -1,6 +1,7 @@
 import { HamburgerMenu, SideMenu } from './AppMenu';
 import { cn } from '../utils';
 import EnvironmentBar from './EnvironmentBar';
+import InboxBell from './InboxBell';
 import OrganizationMenu from './organization/OrganizationMenu';
 import { StoreContext } from '../store';
 import { Toaster } from '../components/ui/sonner';
@@ -39,6 +40,7 @@ export default function Layout({ hideMenu, children }) {
                 {!isXLorGreater ? (
                   <HamburgerMenu className="flex flex-grow items-center" />
                 ) : null}
+                <InboxBell />
                 <OrganizationMenu />
               </div>
             ) : null}

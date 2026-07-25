@@ -1344,5 +1344,15 @@
   "need assignment": "need assignment",
   "Charge tenants this month": "Charge tenants this month",
   "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.": "Bills saved. {{failed}} could not charge tenants — charge them from the building statement.",
-  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid)."
+  "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).": "{{saved}} of {{total}} bills saved. {{failed}} could not be saved (already exist or invalid).",
+  "Bill": "Bill",
+  "Dismiss": "Dismiss",
+  "Incoming bills": "Incoming bills",
+  "Matches": "Matches",
+  "No expense found with this billing ID": "No expense found with this billing ID",
+  "No pending bills. Send a bill photo to the bot and it will appear here.": "No pending bills. Send a bill photo to the bot and it will appear here.",
+  "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.",
+  "Unreadable": "Unreadable",
+  "{{count}} pending": "{{count}} pending",
+  "Record bill": "Record bill"
 }
