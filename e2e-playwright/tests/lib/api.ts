@@ -97,6 +97,41 @@ export async function ensureSeed(request: APIRequestContext): Promise<SeedHandle
   }
   const buildingId = building._id;
 
+  // 2b. Unit — the building needs at least one unit WITH thousandths before a
+  // `general_thousandths` expense can be created (the server rejects a
+  // thousandths allocation on a building with no thousandths — commit
+  // c6ec4958). On a freshly-created E2E-Building (no units) the expense-create
+  // below would 422. Seed one 1000‰ unit if the building has none. (Idempotent:
+  // skips when a unit already exists, so pre-populated realms are unaffected.)
+  const preUnitResp = await request.get(
+    `${GATEWAY}/api/v2/buildings/${buildingId}`,
+    { headers: auth(realmId) }
+  );
+  expect(preUnitResp.status(), 'fetch building (pre-unit)').toBe(200);
+  const preUnitBuilding = (await preUnitResp.json()) as {
+    units?: Array<{ _id: string }>;
+  };
+  if (!preUnitBuilding.units || preUnitBuilding.units.length === 0) {
+    const unitResp = await request.post(
+      `${GATEWAY}/api/v2/buildings/${buildingId}/units`,
+      {
+        headers: auth(realmId),
+        data: {
+          atakNumber: `E2E-UNIT-${Date.now()}`,
+          generalThousandths: 1000,
+          heatingThousandths: 1000,
+          elevatorThousandths: 1000,
+          surface: 50,
+          floor: 0
+        }
+      }
+    );
+    expect(
+      [200, 201],
+      `seed building unit (status=${unitResp.status()}, body: ${await unitResp.text().catch(() => '')})`
+    ).toContain(unitResp.status());
+  }
+
   // 3. Expense — fetch the building (expenses live nested), find one with a
   // known E2E name + recurring, create if missing. Recurring is the trigger
   // for the wave-21 server guard that demands startTerm.
