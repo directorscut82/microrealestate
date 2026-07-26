@@ -346,6 +346,7 @@
   "Error updating organization": "Error updating organization",
   "Estimated Cost": "Estimated Cost",
   "Every building and unit in this PDF is already in the system. Nothing would change.": "Every building and unit in this PDF is already in the system. Nothing would change.",
+  "Please enter a valid amount for {{name}}": "Please enter a valid amount for {{name}}",
   "Existing amount": "Existing amount",
   "Existing property found": "Existing property found",
   "Existing tenant found": "Existing tenant found",

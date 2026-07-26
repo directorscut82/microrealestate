@@ -300,11 +300,17 @@ export function payTerm(
         return;
       }
       if (index > previousRentIndex + 1) {
-        const { debts, discounts, payments } = rent;
+        const { debts, discounts, payments, description } = rent;
         settlements = {
           debts,
           discounts: discounts.filter((d) => d.origin === 'settlement'),
-          payments
+          payments,
+          // R3 (destructive-write audit 2026-07): carry the rent-level
+          // description through the forward walk. Omitting it made
+          // 1_base set `rent.description = settlements.description || ''`,
+          // wiping a thawed later term's note when an earlier arrear was
+          // settled. Pass-2 (the other settlement replay) already carries it.
+          description
         };
       }
       // Round-1 audit H4: the TARGET term is exempt from the freeze guard above

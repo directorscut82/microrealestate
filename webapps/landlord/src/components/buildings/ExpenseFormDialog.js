@@ -407,6 +407,11 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
     queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
     queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
+    // C1 (destructive-write audit 2026-07): the per-property «Έξοδα ακινήτου»
+    // card (useFetchPropertyExpenses, key ['property-expenses', …]) reads the
+    // same building expenses; without this it stayed stale after an expense
+    // add/edit until navigation.
+    queryClient.invalidateQueries({ queryKey: ['property-expenses'] });
   };
 
   const addMutation = useMutation({

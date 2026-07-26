@@ -90,11 +90,45 @@ export function buildStatementEntries(
       }
     }
   }
+  // O6 (destructive-write audit 2026-07): for a THOUSANDTHS-allocated expense
+  // the sum of per-unit monthlyCharges (shareSum) OMITS unmanaged units'
+  // slices (they never get a monthlyCharge row), so shareSum under-reports the
+  // full figure. A legacy row (inputAmount null) reconstructed from shareSum
+  // alone would then be re-saved SHORT and permanently under-bill. When we can,
+  // scale shareSum back up by the thousandths ratio (total / managed). Rows
+  // written since inputAmount landed (22316220, Jun 2026) carry the exact
+  // figure and never hit this path.
+  const THOUSANDTHS_FIELD: Record<string, string> = {
+    general_thousandths: 'generalThousandths',
+    heating_thousandths: 'heatingThousandths',
+    elevator_thousandths: 'elevatorThousandths'
+  };
+  const reconstructLegacy = (eid: string, shareSum: number): number => {
+    const exp = (building.expenses || []).find(
+      (e: any) => String(e._id) === eid
+    );
+    const field = exp && THOUSANDTHS_FIELD[String(exp.allocationMethod)];
+    if (!field) return shareSum; // non-thousandths: shareSum is complete
+    let total = 0;
+    let managed = 0;
+    for (const u of building.units || []) {
+      const th = Number(u[field]) || 0;
+      total += th;
+      if (u.propertyId) managed += th;
+    }
+    // Scale up only when some thousandths sit on unmanaged units (managed <
+    // total) and the ratio is sound; otherwise shareSum already equals the
+    // full figure.
+    if (managed > 0 && total > managed) {
+      return Math.round(shareSum * (total / managed) * 100) / 100;
+    }
+    return shareSum;
+  };
   const entries = [...byExpense.entries()].map(([eid, v]) => ({
     expenseId: eid,
-    // Prefer the landlord-typed full figure (inputAmount); else the sum of
-    // per-unit shares reconstitutes the full statement amount for legacy rows.
-    amount: v.inputAmount != null ? v.inputAmount : v.shareSum,
+    // Prefer the landlord-typed full figure (inputAmount); else reconstruct the
+    // full statement amount for legacy rows (thousandths-aware, O6).
+    amount: v.inputAmount != null ? v.inputAmount : reconstructLegacy(eid, v.shareSum),
     description: v.description
   }));
   // Merge (add or replace) the bill's expense at its full amount.
@@ -546,13 +580,56 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       // If replacing, remove existing bill for same term+expense. Safe now that
       // the required fields above are validated — the subsequent save won't
       // throw a ValidationError after the delete.
+      //
+      // Destructive-write audit 2026-07 (BUG-2): the existing bill may carry
+      // RECORDED PAYMENT HISTORY — receipts[] installments (Slice 6),
+      // paymentProofUrl, paymentDate. A re-import with "Replace" is a
+      // correction of the BILL's data (amount/dates/OCR), not a statement that
+      // the recorded payments never happened. Deleting them made the bill
+      // re-surface as pending, parsePaymentReceipts over-report the remaining
+      // owed, and risked a double payment. Snapshot the payment fields before
+      // the delete and carry them onto the rebuilt bill.
+      let priorPayment: {
+        receipts: any[];
+        paymentProofUrl?: string;
+        paymentDate?: Date;
+        priorTotalAmount?: number;
+      } | null = null;
       if (replaceExisting) {
-        await Collections.Bill.deleteMany({
+        const existing: any = await Collections.Bill.findOne({
           realmId,
           buildingId,
           expenseId,
           term
-        });
+        }).lean();
+        if (
+          existing &&
+          ((Array.isArray(existing.receipts) && existing.receipts.length) ||
+            existing.paymentProofUrl ||
+            existing.paymentDate)
+        ) {
+          priorPayment = {
+            receipts: (existing.receipts || []).map((r: any) => ({
+              amount: r.amount,
+              date: r.date,
+              proofUrl: r.proofUrl,
+              ocrText: r.ocrText,
+              matchedOn: r.matchedOn,
+              createdDate: r.createdDate
+            })),
+            paymentProofUrl: existing.paymentProofUrl || undefined,
+            paymentDate: existing.paymentDate || undefined,
+            // O4: the OLD total, so a pre-Slice-6 paymentDate-only bill (which
+            // records NO amount) can be re-classified honestly when the
+            // corrected total differs.
+            priorTotalAmount: Number(existing.totalAmount) || 0
+          };
+        }
+        // NOTE: no delete here. The replace is applied ATOMICALLY below via
+        // findOneAndReplace(upsert) — a delete-then-insert leaves a window
+        // where (a) a concurrent confirm snapshots nothing and clobbers the
+        // carried receipts, and (b) a crash between delete and insert loses
+        // the bill AND its payment history permanently (Step-7 probe 1b).
       }
 
       // Store IRIS QR inline as a data URI initially; if B2 is configured the
@@ -563,6 +640,12 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         ? `data:image/png;base64,${irisCodeBase64}`
         : undefined;
 
+      // buildBill is used ONLY on the non-replace (fresh insert) path, where
+      // priorPayment is always null (it is captured only inside
+      // `if (replaceExisting)`). So a new bill is always 'pending' with no
+      // carried receipts — the payment carry-forward + O4 status logic lives
+      // entirely in the replace PIPELINE above. (Was duplicated here before;
+      // the pipeline is the single source of truth for the replace case.)
       const buildBill = () =>
         new Collections.Bill({
           realmId,
@@ -571,6 +654,8 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           provider,
           billingId,
           totalAmount,
+          // O4: seed the stable original-total baseline on first create.
+          originalTotalAmount: Number(totalAmount),
           periodStart: new Date(periodStart),
           periodEnd: new Date(periodEnd),
           issueDate: issueDate ? new Date(issueDate) : undefined,
@@ -588,30 +673,155 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           updatedDate: new Date()
         });
 
-      let bill = buildBill();
-      try {
-        await bill.save();
-      } catch (err: any) {
-        // Duplicate-key on the (realmId, buildingId, expenseId, term) unique
-        // index — translate into a proper 409 unless the caller asked to
-        // replace, in which case delete-and-retry once.
-        if (err && err.code === 11000) {
-          if (replaceExisting) {
-            await Collections.Bill.deleteOne({
-              realmId,
-              buildingId,
-              expenseId,
-              term
-            });
-            bill = buildBill();
-            await bill.save();
-          } else {
+      let bill: any;
+      if (replaceExisting) {
+        // ATOMIC replace-or-insert via an aggregation-PIPELINE update on the
+        // unique (realmId,buildingId,expenseId,term) key (mongo 4.4+).
+        //   - Step-7 probe 1b (crash / delete-then-insert): closed — single op.
+        //   - O9 (destructive-write audit 2026-07, concurrent-receipt race):
+        //     the earlier findOneAndReplace wrote a STALE receipts snapshot,
+        //     so a confirmPayment landing between the snapshot read and the
+        //     write was clobbered. This pipeline instead PRESERVES the LIVE
+        //     receipts/paymentProofUrl/paymentDate on an existing doc (via
+        //     $ifNull against the pre-update document) and recomputes status
+        //     from those live receipts + the new total — nothing a concurrent
+        //     write added can be lost. priorPayment values are only the
+        //     insert-time fallback (when no live value exists).
+        //   - O4: the status branch reads the PRE-update $totalAmount (the old
+        //     total) — in one $set stage every RHS reference sees the document
+        //     as it was before the stage — so a pre-Slice-6 paymentDate-only
+        //     bill whose corrected total ROSE degrades 'paid'→'partial'.
+        const now = new Date();
+        const newTotal = Number(totalAmount);
+        bill = await Collections.Bill.findOneAndUpdate(
+          { realmId, buildingId, expenseId, term },
+          [
+            // STAGE 1 — write metadata, preserve LIVE payment state, and SEED
+            // originalTotalAmount ONCE. $ifNull keeps the existing field on a
+            // replace and only falls back to the snapshot (insert) / newTotal
+            // (first-ever). Because it is never overwritten, it is a stable
+            // baseline across identical re-runs (fixes O4 idempotence — the
+            // prior attempt derived the baseline from the mutable snapshot,
+            // which run 2 re-read as the already-updated total).
+            {
+              $set: {
+                provider,
+                billingId,
+                totalAmount: newTotal,
+                originalTotalAmount: {
+                  $ifNull: [
+                    '$originalTotalAmount',
+                    priorPayment?.priorTotalAmount || newTotal
+                  ]
+                },
+                periodStart: new Date(periodStart),
+                periodEnd: new Date(periodEnd),
+                issueDate: issueDate ? new Date(issueDate) : null,
+                dueDate: dueDate ? new Date(dueDate) : null,
+                rfCode: rfCode || null,
+                paymentCode: paymentCode || null,
+                irisCodeUrl: inlineIris ?? null,
+                pdfUrl: sourcePdfUrl || null,
+                ocrText: ocrText || null,
+                createdDate: { $ifNull: ['$createdDate', now] },
+                updatedDate: now,
+                // Preserve LIVE payment state; fall back to the snapshot only
+                // when the doc is being inserted (no live value). O9: a
+                // concurrent confirmPayment's receipt is never clobbered.
+                receipts: {
+                  $ifNull: ['$receipts', priorPayment?.receipts || []]
+                },
+                paymentProofUrl: {
+                  $ifNull: [
+                    '$paymentProofUrl',
+                    priorPayment?.paymentProofUrl ?? null
+                  ]
+                },
+                paymentDate: {
+                  $ifNull: ['$paymentDate', priorPayment?.paymentDate ?? null]
+                }
+              }
+            },
+            // STAGE 2 — compute status from the values stage 1 just wrote (a
+            // second stage sees stage 1's output), reading the now-stable
+            // $originalTotalAmount for the pre-Slice-6 paymentDate branch.
+            {
+              $set: {
+                status: {
+                  $let: {
+                    vars: {
+                      paidSum: {
+                        $sum: {
+                          $map: {
+                            input: { $ifNull: ['$receipts', []] },
+                            as: 'r',
+                            in: { $ifNull: ['$$r.amount', 0] }
+                          }
+                        }
+                      },
+                      hadPayDate: {
+                        $ne: [{ $ifNull: ['$paymentDate', null] }, null]
+                      }
+                    },
+                    in: {
+                      $cond: [
+                        { $gt: ['$$paidSum', 0.005] },
+                        {
+                          $cond: [
+                            {
+                              $gte: [
+                                { $add: ['$$paidSum', 0.005] },
+                                newTotal
+                              ]
+                            },
+                            'paid',
+                            'partial'
+                          ]
+                        },
+                        {
+                          $cond: [
+                            '$$hadPayDate',
+                            {
+                              $cond: [
+                                {
+                                  $gt: [
+                                    newTotal,
+                                    {
+                                      $add: [
+                                        { $ifNull: ['$originalTotalAmount', 0] },
+                                        0.005
+                                      ]
+                                    }
+                                  ]
+                                },
+                                'partial',
+                                'paid'
+                              ]
+                            },
+                            'pending'
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          { upsert: true, new: true }
+        );
+      } else {
+        bill = buildBill();
+        try {
+          await bill.save();
+        } catch (err: any) {
+          // Duplicate-key on the unique index → a proper 409.
+          if (err && err.code === 11000) {
             throw new ServiceError(
               'A bill already exists for this period. Use replaceExisting:true to overwrite.',
               409
             );
           }
-        } else {
           throw err;
         }
       }
@@ -1144,7 +1354,11 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
   // Validate the whole batch up front so a bad amount never mutates anything.
   const parseAmount = (p: any): number => {
     const a = Number(p?.amount);
-    return Number.isFinite(a) && a > 0 ? a : NaN;
+    // O10 (destructive-write audit 2026-07): round to cents. A client can POST
+    // a 3-decimal amount (e.g. 33.332); stored raw, 3×33.332=99.996 then flips
+    // a €100 bill to 'paid' via the +0.005 tolerance while it is 0.4c short.
+    // Rounding at record time keeps Σ(receipts) honest to the cent.
+    return Number.isFinite(a) && a > 0 ? Math.round(a * 100) / 100 : NaN;
   };
   const badAmounts = payments.filter((p: any) => Number.isNaN(parseAmount(p)));
   if (badAmounts.length) {

@@ -172,6 +172,11 @@ describe('contract functionalities', () => {
     expect(firstRent.discounts[0].amount).toEqual(100);
   });
 
+  // Note: the L2 frequency-change guard lives in occupantmanager.update
+  // (it needs the PERSISTED tenant frequency, which Contract.update cannot see
+  // — every caller reconstructs the contract frequency from the new value).
+  // It is covered by the Playwright spec, not here.
+
   it('terminate contract', () => {
     const contract = Contract.create({
       begin: Date.parse('2017-01-01T00:00:00Z'),

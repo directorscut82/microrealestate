@@ -588,6 +588,12 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
         _id: rent._id,
         month: rent.month,
         year: rent.year,
+        // R2: echo the tenant version we loaded so the server rejects a
+        // stale-baseline write (a payment recorded from another tab since)
+        // with 409 instead of silently clobbering it.
+        ...(rent._tenantVersion !== undefined
+          ? { __v: rent._tenantVersion }
+          : {}),
         ...clonedValues
       };
 

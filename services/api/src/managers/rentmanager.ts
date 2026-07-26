@@ -828,6 +828,26 @@ async function _updateByTerm(
   const occupant = occupantDoc;
   const documentVersion = occupant.__v;
 
+  // R2 (destructive-write audit 2026-07): payments[] has REPLACE (PUT)
+  // semantics — the request body overwrites the stored array. The __v filter
+  // on the final write only guards CONCURRENT server writes against the
+  // baseline THIS request just read; it does NOT catch a STALE CLIENT (tab A
+  // read the rent, tab B added a payment, tab A submits its old list → tab B's
+  // payment silently deleted). When the client sends the __v it read with the
+  // rent, reject a stale baseline up-front with 409 (opt-in — callers that
+  // omit __v keep the prior behavior; PaymentTabs/Express now send it). Mirrors
+  // the tenant-PATCH E15 client-version round-trip.
+  if (
+    paymentData.__v !== undefined &&
+    paymentData.__v !== null &&
+    Number(paymentData.__v) !== Number(documentVersion)
+  ) {
+    throw new ServiceError(
+      'This tenant was modified since you loaded the page (a payment may have been recorded elsewhere). Reload and try again.',
+      409
+    );
+  }
+
   // Fetch buildings for the tenant's properties so building charges (and
   // their VATs) are recomputed when the rent is repaid. Without this,
   // Contract.payTerm rebuilds rents using contract.buildings = undefined
@@ -1270,6 +1290,15 @@ async function _updateByTerm(
     } else if (paymentData.description) {
       settlements.description = paymentData.description;
     }
+    // R1 (destructive-write audit 2026-07): a guard was trialled here to 409
+    // when the target rent carried a legacy settlement discount/debt not
+    // represented in the incoming payload — but Step-7 showed it over-blocks a
+    // LEGITIMATE flow: deleting/zeroing a saved payment that carried a promo/
+    // extracharge sends a payload with no settlement, and payTerm CORRECTLY
+    // drops the discount along with the removed payment. Blocking that (and
+    // with no UI escape) was worse than the theoretical legacy risk, which has
+    // ZERO occurrences on production data (verified via mongo). Guard removed;
+    // the payTerm rebuild handles the live add/edit/remove flow correctly.
   }
 
   // Contract.payTerm throws plain Errors for business-rule failures (e.g.

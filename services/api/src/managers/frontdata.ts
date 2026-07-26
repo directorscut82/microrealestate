@@ -394,6 +394,15 @@ export function toRentData(
       });
   }
 
+  // R2 (destructive-write audit 2026-07): surface the TENANT document version
+  // so a payment-record client can echo it back and the server can reject a
+  // stale-baseline write (which, under payments[]-REPLACE semantics, would
+  // silently clobber a payment recorded from another tab). Optional — absent
+  // on paths with no occupant (e.g. the undefined-rent early return).
+  if (inputOccupant && inputOccupant.__v !== undefined) {
+    rentToReturn._tenantVersion = inputOccupant.__v;
+  }
+
   return rentToReturn;
 }
 

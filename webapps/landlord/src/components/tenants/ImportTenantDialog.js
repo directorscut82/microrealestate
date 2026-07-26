@@ -942,13 +942,6 @@ export default function ImportTenantDialog({ open, setOpen }) {
           const startDate = moment(parsed.validityStart || parsed.originalStartDate, 'DD/MM/YYYY');
           const now = moment();
           let termDate = startDate.clone();
-          // Fallback single-month rent — used only when a term has no ledger row.
-          const sumPropertyRents = (resolvedProperties || []).reduce(
-            (s, rp) => s + (Number(rp.rent) || 0),
-            0
-          );
-          const fallbackMonthly =
-            sumPropertyRents || Number(parsed.totalMonthlyRent) || 0;
           // BUGFIX (mark-past-paid balance snowball — reproduced live 2026-07):
           // the old code read `rentForTerm.total.grandTotal`, but the
           // /rents/tenant/:id payload (fetchTenantRents) has NO `.total`
@@ -963,37 +956,76 @@ export default function ImportTenantDialog({ open, setOpen }) {
           // newBalance 0 and the current month carries only its own rent.
           while (termDate.isBefore(now, 'month')) {
             const term = termDate.format('YYYYMM') + '0100';
-            let amount = fallbackMonthly;
+            // L1 (destructive-write audit 2026-07): the /rents/payment PATCH
+            // has REPLACE (PUT) semantics — the payments array sent OVERWRITES
+            // what's on disk (rentmanager `_updateByTerm`). This loop must
+            // therefore (a) preserve the term's EXISTING recorded payments and
+            // (b) add only the DELTA still owed — never post `[{amount: fullOwed}]`
+            // alone, which destroyed a partially-paid term's real payment(s)
+            // (date/reference/allocation) and left it under-paid. Only fetch +
+            // patch when a rent record exists; a fetch failure must NOT clobber
+            // with a flat fallback (that wiped even a fully-paid term).
+            let existingPayments = [];
+            let delta = 0;
+            let haveRentRecord = false;
             try {
               const snap = await fetchTenantRents(tenant._id);
               const rentForTerm = (snap?.rents || []).find(
                 (r) => String(r.term) === term
               );
               if (rentForTerm) {
-                // totalAmount already includes the carried balance + this
-                // month's rent/charges; subtract anything already paid.
+                haveRentRecord = true;
+                // Echo existing payments verbatim (dates are already
+                // DD/MM/YYYY on disk) so REPLACE preserves them.
+                existingPayments = (rentForTerm.payments || [])
+                  .filter((p) => Number(p?.amount) > 0)
+                  .map((p) => ({
+                    amount: Number(p.amount) || 0,
+                    date: p.date || '',
+                    type: p.type || 'transfer',
+                    reference: p.reference || '',
+                    description: p.description || '',
+                    promo: Number(p.promo) || 0,
+                    notepromo: p.notepromo || '',
+                    extracharge: Number(p.extracharge) || 0,
+                    noteextracharge: p.noteextracharge || '',
+                    allocation: Array.isArray(p.allocation) ? p.allocation : []
+                  }));
+                // totalAmount includes carried balance + this month's
+                // rent/charges; `payment` is what's already recorded. Only the
+                // remaining gap needs a new mark-paid row.
                 const owed =
                   (Number(rentForTerm.totalAmount) || 0) -
                   (Number(rentForTerm.payment) || 0);
-                amount = Math.max(0, Math.round(owed * 100) / 100);
+                delta = Math.max(0, Math.round(owed * 100) / 100);
               }
-            } catch {
-              /* ledger fetch failed → fall back to single-month rent */
+            } catch (err) {
+              // Fetch failed → we do NOT know the existing payments, so we must
+              // NOT PATCH (a REPLACE with a fabricated array would clobber).
+              console.warn(
+                `import: mark-past-paid skipped term ${term} (ledger fetch failed):`,
+                err?.response?.data?.message || err?.message || err
+              );
+              termDate.add(1, 'month');
+              continue;
             }
-            if (amount > 0.005) {
+            if (haveRentRecord && delta > 0.005) {
+              const payments = [
+                ...existingPayments,
+                {
+                  amount: delta,
+                  type: 'transfer',
+                  date: termDate.format('DD/MM/YYYY')
+                }
+              ];
               try {
                 await apiFetcher().patch(
                   `/rents/payment/${tenant._id}/${term}`,
-                  {
-                    _id: tenant._id,
-                    payments: [{ amount, type: 'transfer', date: termDate.format('DD/MM/YYYY') }]
-                  }
+                  { _id: tenant._id, payments }
                 );
               } catch (err) {
-                // F8 (audit-2026-07): a term with no rent record is expected
-                // (skip it), but a real settlement failure must not vanish
-                // silently — the operator has no other signal the past-paid
-                // marking didn't land. Log it (still non-fatal to the import).
+                // F8 (audit-2026-07): a real settlement failure must not vanish
+                // silently — the operator has no other signal it didn't land.
                 console.warn(
                   `import: mark-past-paid failed for ${tenant._id} term ${term}:`,
                   err?.response?.data?.message || err?.message || err

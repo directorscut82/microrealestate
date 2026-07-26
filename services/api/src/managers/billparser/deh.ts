@@ -1,10 +1,32 @@
 import { BillParseResult, normalizeBillingId } from './types.js';
+import { isValidRF } from './matching.js';
 
 function parseGreekAmount(raw: string): number | null {
-  let cleaned = raw.replace(/\s/g, '');
-  if (cleaned.includes(',')) {
-    // Greek format: dots are thousands separators, comma is decimal
-    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  // O3 (destructive-write audit 2026-07): last-separator-wins, mirroring
+  // matching.parseGreekMoney and the client numberformat.parseGreekMoney, so
+  // every amount path parses identically. The OLD logic only normalised when a
+  // comma was present, so "1.234" (dot as thousands, no decimal) parsed as
+  // 1.234 (÷1000) and "1.234.00" (OCR comma→dot) as 1.234 too. Whichever of
+  // '.' / ',' is RIGHTMOST is the decimal separator; the other is thousands.
+  const s = raw.replace(/[^\d.,]/g, '');
+  if (!s) return null;
+  let cleaned: string;
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma > lastDot) {
+    cleaned = s.replace(/\./g, '').replace(',', '.');
+  } else if (lastDot > lastComma) {
+    // Rightmost is a dot. A single dot with exactly 3 trailing digits and no
+    // comma is ambiguous (1.234 = 1234 thousands, NOT 1.234) — treat a lone
+    // 3-digit group after a dot as a thousands separator (DEH prints no
+    // sub-euro-less totals as "1.234"); otherwise the dot is decimal.
+    if (/^\d{1,3}\.\d{3}$/.test(s)) {
+      cleaned = s.replace(/\./g, '');
+    } else {
+      cleaned = s.replace(/,/g, '');
+    }
+  } else {
+    cleaned = s;
   }
   const num = parseFloat(cleaned);
   return isNaN(num) ? null : num;
@@ -17,7 +39,23 @@ function parseGreekDate(raw: string): Date | null {
   const match = raw.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (!match) return null;
   const [, day, month, year] = match;
-  return new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
+  const d = parseInt(day);
+  const mo = parseInt(month);
+  const y = parseInt(year);
+  // O8 (destructive-write audit 2026-07): reject calendar-invalid OCR dates
+  // rather than let Date.UTC ROLL them over ("31/02/2025" → March 3 → the
+  // charge lands in the wrong month). Range-check, then confirm the
+  // constructed date's parts round-trip (catches 31/04, 29/02 non-leap, etc.).
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || y < 1900 || y > 2200) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== mo - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return dt;
 }
 
 export function parseDehBill(text: string): BillParseResult {
@@ -87,9 +125,16 @@ export function parseDehBill(text: string): BillParseResult {
   );
   const dueDate = dueDateMatch ? parseGreekDate(dueDateMatch[1]) : undefined;
 
-  // Extract RF code
+  // Extract RF code — and VALIDATE its ISO-11649 mod-97 checksum (O5,
+  // destructive-write audit 2026-07). A photographed/OCR'd bill can drop or
+  // swap an RF digit; the RF + paymentCode are combined into the IRIS payment
+  // QR, so a corrupt RF would produce a SCANNABLE QR that sends the landlord's
+  // bank transfer to the wrong reference. Reject a checksum-failed RF (leave
+  // rfCode undefined → no QR / QR without a bad reference) rather than encode
+  // it. The receipt-matching path already validates via isValidRF; this closes
+  // the bill-ingest side.
   const rfMatch = text.match(/(RF\d{15,30})/);
-  const rfCode = rfMatch ? rfMatch[1] : undefined;
+  const rfCode = rfMatch && isValidRF(rfMatch[1]) ? rfMatch[1] : undefined;
 
   // Extract payment amount code (e.g., "000000186,21 3" → "000000186213")
   // This is combined with RF code to form the IRIS QR content

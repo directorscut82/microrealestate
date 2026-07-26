@@ -89,6 +89,11 @@ function InboxCard({ item, buildings, onGone }) {
         queryClient.invalidateQueries({ queryKey: [QueryKeys.OWNERS] });
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
         queryClient.invalidateQueries({ queryKey: ['expense-breakdown'] });
+        // C1 (destructive-write audit 2026-07): the bell is mounted on every
+        // page, so a PropertyExpensesCard can be visible when a bill charge
+        // lands. Its useFetchPropertyExpenses key was never invalidated, so it
+        // kept pre-charge figures until navigation. Invalidate it here.
+        queryClient.invalidateQueries({ queryKey: ['property-expenses'] });
       }
     },
     [queryClient]

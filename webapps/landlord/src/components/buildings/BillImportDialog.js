@@ -24,8 +24,10 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
+import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
+import { parseGreekMoney } from '../../utils/numberformat';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Switch } from '../ui/switch';
 import { toast } from 'sonner';
@@ -56,7 +58,9 @@ function ResultCard({
   onToggleReplace,
   replaceFlags,
   chargeFlags,
-  onToggleCharge
+  onToggleCharge,
+  amountOverride,
+  onAmountChange
 }) {
   const { t } = useTranslation('common');
 
@@ -110,8 +114,25 @@ function ResultCard({
         <div className="font-mono text-xs">{parsed.billingId}</div>
 
         <div className="text-muted-foreground">{t('Amount')}</div>
+        {/* O3 (destructive-write audit 2026-07): the amount is now EDITABLE.
+            It was a read-only NumberFormat, so an OCR misread of the total
+            (e.g. "186,21" read as "18621", or a dropped decimal) could not be
+            corrected and flowed verbatim into the bill and — via «Χρέωση
+            ενοικιαστών» — into every tenant's rent. The editable value
+            overrides parsed.totalAmount in the confirm payload. */}
         <div className="font-medium">
-          <NumberFormat value={parsed.totalAmount} />
+          <Input
+            type="text"
+            inputMode="decimal"
+            className="h-7 w-32 text-sm"
+            value={
+              amountOverride !== undefined
+                ? amountOverride
+                : String(parsed.totalAmount ?? '')
+            }
+            onChange={(e) => onAmountChange(result._uid, e.target.value)}
+            aria-label={t('Amount')}
+          />
         </div>
 
         <div className="text-muted-foreground">{t('Period')}</div>
@@ -263,6 +284,12 @@ export default function BillImportDialog({ open, setOpen, building }) {
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
   const [replaceFlags, setReplaceFlags] = useState({});
+  // O3: per-result edited amount (raw string as typed) overriding the parsed
+  // total when the operator corrects an OCR misread. {_uid: '123,45'}
+  const [amountOverrides, setAmountOverrides] = useState({});
+  const handleAmountChange = useCallback((uid, raw) => {
+    setAmountOverrides((prev) => ({ ...prev, [uid]: raw }));
+  }, []);
   // Per-result «charge tenants this month» toggle: {_uid: boolean}
   const [chargeFlags, setChargeFlags] = useState({});
   // Per-result manual assignment for unmatched bills: {_uid: {buildingId, expenseId}}
@@ -286,6 +313,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       setReplaceFlags({});
       setChargeFlags({});
       setAssignments({});
+      setAmountOverrides({});
       setCreateFor(null);
     }
   }, [open]);
@@ -425,6 +453,29 @@ export default function BillImportDialog({ open, setOpen, building }) {
       .filter(({ a }) => !!a);
     if (confirmable.length === 0) return;
 
+    // O3: resolve the effective amount (operator override → parsed) per bill
+    // and refuse to confirm if any is non-positive, so an OCR misread the user
+    // failed to correct can't silently reach the ledger.
+    const effectiveAmount = (r) => {
+      const raw = amountOverrides[r._uid];
+      if (raw !== undefined && String(raw).trim() !== '') {
+        return parseGreekMoney(raw);
+      }
+      return Number(r.parsed.totalAmount);
+    };
+    const badAmount = confirmable.find(({ r }) => {
+      const v = effectiveAmount(r);
+      return !Number.isFinite(v) || v <= 0.005;
+    });
+    if (badAmount) {
+      toast.error(
+        t('Please enter a valid amount for {{name}}', {
+          name: badAmount.r.filename || badAmount.r.parsed?.billingId || ''
+        })
+      );
+      return;
+    }
+
     setState('confirming');
 
     try {
@@ -442,7 +493,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
           expenseId: a.expenseId,
           provider: r.parsed.provider,
           billingId: r.parsed.billingId,
-          totalAmount: r.parsed.totalAmount,
+          totalAmount: effectiveAmount(r),
           periodStart: r.parsed.periodStart,
           periodEnd: r.parsed.periodEnd,
           issueDate: r.parsed.issueDate,
@@ -653,6 +704,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
                     replaceFlags={replaceFlags}
                     chargeFlags={chargeFlags}
                     onToggleCharge={handleToggleCharge}
+                    amountOverride={amountOverrides[result._uid]}
+                    onAmountChange={handleAmountChange}
                   />
                 ))}
               </div>

@@ -137,7 +137,12 @@ export default function ExpenseList({ building, onAddRepair }) {
       setOpenConfirmDelete(false);
       setExpenseToDelete(null);
     } catch (error) {
-      toast.error(t('Something went wrong'));
+      // Surface the server's specific message when it has one — e.g. the
+      // hard-delete guard 422 "linked bill(s) have recorded payments; use soft
+      // delete" — a generic toast would hide the actionable guidance.
+      const serverMessage =
+        error?.response?.data?.error || error?.response?.data?.message;
+      toast.error(serverMessage || t('Something went wrong'));
     } finally {
       setIsDeleting(false);
     }

@@ -139,6 +139,33 @@ describe('DEH Bill Parser', () => {
       expect(result.bill?.paymentCode).toBe('000000186213');
     });
 
+    // O5 — a checksum-invalid RF (OCR digit swap) must NOT be accepted; it
+    // would otherwise be encoded into the IRIS payment QR → bank transfer to a
+    // wrong reference. rfCode comes back undefined; the rest still parses.
+    it('O5: rejects an RF that fails the ISO-11649 mod-97 checksum', () => {
+      const bad = DEH_BILL_TEXT.replace(
+        'RF33999000000000000000001',
+        'RF36999000000000000959051' // last digit swapped → checksum fails
+      );
+      const result = parseDehBill(bad);
+      expect(result.success).toBe(true);
+      expect(result.bill?.rfCode).toBeUndefined();
+    });
+
+    // O8 — a calendar-invalid OCR date must be rejected, not rolled over
+    // (31/02 → March 3 would mis-term the charge one month late).
+    it('O8: rejects a calendar-invalid consumption-period date (no rollover)', () => {
+      const text = DEH_BILL_TEXT.replace(
+        'Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026',
+        'Περίοδος Κατανάλωσης 25/02/2026 - 31/02/2026'
+      );
+      const result = parseDehBill(text);
+      // periodEnd 31/02 is invalid → not silently rolled to March 3.
+      expect(result.bill?.periodEnd).not.toEqual(
+        new Date(Date.UTC(2026, 2, 3))
+      );
+    });
+
     it('should set provider to deh', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
       expect(result.bill?.provider).toBe('deh');

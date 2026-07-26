@@ -144,6 +144,16 @@ export interface BillElements {
   tokens: string[];
 }
 
+// Money-token matcher. Two alternatives, grouped-first so a properly separated
+// figure is consumed whole:
+//   1) N.NNN,NN / N NNN,NN — an integer with EXPLICIT thousands groups.
+//   2) N…,NN / N….NN — a plain (ungrouped) integer of any length + 2 decimals.
+// O2 (destructive-write audit 2026-07): the old single pattern
+// `\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}` required 3-digit groups, so an unseparated
+// "1234,56" (common on POS/OCR output) matched only "234,56" — the leading
+// digit(s) were dropped and the amount came out mod-1000 (~1000x low).
+const MONEY_TOKEN_RE = /\d{1,3}(?:[.\s]\d{3})+[.,]\d{2}|\d+[.,]\d{2}/g;
+
 // Greek money: 1.234,56 or 1234,56 or 1234.56 → number. Returns NaN on garbage.
 function parseGreekMoney(raw: string): number {
   let s = raw.replace(/[^\d.,]/g, '');
@@ -356,7 +366,7 @@ export function extractElements(
 
   // Amounts — every N,NN / N.NNN,NN money-looking token.
   const amountSet = new Set<number>();
-  const moneyTokens = t.match(/\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}\b/g) || [];
+  const moneyTokens = t.match(MONEY_TOKEN_RE) || [];
   for (const tok of moneyTokens) {
     const n = parseGreekMoney(tok);
     if (Number.isFinite(n) && n > 0) amountSet.add(Math.round(n * 100) / 100);
@@ -451,7 +461,7 @@ function tokenizeAll(
   for (const m of t.match(/\d{3,}/g) || []) bag.add(`n:${m}`);
 
   // Money amounts as normalized tokens.
-  const moneyTokens = t.match(/\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}\b/g) || [];
+  const moneyTokens = t.match(MONEY_TOKEN_RE) || [];
   for (const tok of moneyTokens) {
     const n = parseGreekMoney(tok);
     if (Number.isFinite(n) && n > 0) bag.add(`amt:${n.toFixed(2)}`);

@@ -247,4 +247,67 @@ describe('buildStatementEntries — C6/C7 no-clobber', () => {
     const entries = buildStatementEntries(b, 'power', 35, 'Ρεύμα', TERM);
     expect(entries.find((e) => e.expenseId === 'water').amount).toBe(50); // inputAmount, not 100
   });
+
+  // O6 — a LEGACY thousandths row (no inputAmount) must reconstruct the FULL
+  // figure by scaling the managed-units shareSum up by total/managed
+  // thousandths, because unmanaged units never get a monthlyCharge row.
+  it('O6: legacy thousandths row scales shareSum up by the unmanaged ratio', () => {
+    const b = {
+      // managed unit A holds 750‰, unmanaged unit B holds 250‰.
+      units: [
+        {
+          propertyId: 'pA',
+          generalThousandths: 750,
+          monthlyCharges: [
+            // legacy: NO inputAmount; A's share of a €100 expense = €75.
+            { expenseId: 'gen', term: TERM, amount: 75 }
+          ]
+        },
+        { generalThousandths: 250 } // unmanaged (no propertyId) → no charge row
+      ],
+      expenses: [
+        { _id: 'gen', name: 'Γενικά', allocationMethod: 'general_thousandths' }
+      ]
+    };
+    const entries = buildStatementEntries(b, 'other', 10, 'X', TERM);
+    // 75 × (1000/750) = 100 — the true entered figure, not the €75 shareSum.
+    expect(entries.find((e) => e.expenseId === 'gen').amount).toBe(100);
+  });
+
+  it('O6: thousandths row with inputAmount uses it verbatim (no scaling)', () => {
+    const b = {
+      units: [
+        {
+          propertyId: 'pA',
+          generalThousandths: 750,
+          monthlyCharges: [
+            { expenseId: 'gen', term: TERM, amount: 75, inputAmount: 100 }
+          ]
+        },
+        { generalThousandths: 250 }
+      ],
+      expenses: [
+        { _id: 'gen', name: 'Γενικά', allocationMethod: 'general_thousandths' }
+      ]
+    };
+    const entries = buildStatementEntries(b, 'other', 10, 'X', TERM);
+    expect(entries.find((e) => e.expenseId === 'gen').amount).toBe(100);
+  });
+
+  it('O6: all thousandths on managed units → shareSum unchanged (no false scale-up)', () => {
+    const b = {
+      units: [
+        {
+          propertyId: 'pA',
+          generalThousandths: 1000,
+          monthlyCharges: [{ expenseId: 'gen', term: TERM, amount: 100 }]
+        }
+      ],
+      expenses: [
+        { _id: 'gen', name: 'Γενικά', allocationMethod: 'general_thousandths' }
+      ]
+    };
+    const entries = buildStatementEntries(b, 'other', 10, 'X', TERM);
+    expect(entries.find((e) => e.expenseId === 'gen').amount).toBe(100);
+  });
 });

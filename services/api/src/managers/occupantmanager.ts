@@ -1398,7 +1398,11 @@ export async function update(req: Req, res: Res) {
         const paidBySettlement = (rent.discounts || []).some(
           (discount: AnyRecord) => discount.origin === 'settlement'
         );
-        return !!(paidByPayments || paidBySettlement);
+        // R4: settlement-origin debts (extra charges) are recorded money too.
+        const hasSettlementDebt = (rent.debts || []).some(
+          (debt: AnyRecord) => Number(debt.amount) > 0
+        );
+        return !!(paidByPayments || paidBySettlement || hasSettlementDebt);
       }
     );
     if (orphanPaid.length) {
@@ -1475,6 +1479,35 @@ export async function update(req: Req, res: Res) {
     newOccupant.endDate &&
     _propertiesHaveRentData(newOccupant.properties)
   ) {
+    // L2 (destructive-write audit 2026-07): changing the lease FREQUENCY
+    // re-derives every rent term key, and Contract.update restores recorded
+    // payments to rebuilt rents by EXACT term number — so a re-keyed paid term
+    // is silently dropped (and _checkLostPayments misses it: the payment DATE
+    // still falls in-window). There is no faithful monthly→yearly payment
+    // remap, so refuse the change when the PERSISTED tenant has recorded
+    // payments/settlements. Compare against originalOccupantDoc.frequency (the
+    // real prior value) — a guard inside Contract.update can't see it because
+    // every caller reconstructs the contract's frequency from the new value.
+    const newFreq = newOccupant.frequency || 'months';
+    const oldFreq = originalOccupantDoc.frequency || 'months';
+    if (newFreq !== oldFreq) {
+      const hasRecorded = (originalOccupantDoc.rents || []).some(
+        (rent: AnyRecord) =>
+          (rent.payments || []).some(
+            (p: AnyRecord) => Number(p.amount) > 0
+          ) ||
+          (rent.discounts || []).some(
+            (d: AnyRecord) => d.origin === 'settlement' && Number(d.amount) > 0
+          ) ||
+          (rent.debts || []).some((d: AnyRecord) => Number(d.amount) > 0)
+      );
+      if (hasRecorded) {
+        throw new ServiceError(
+          'Cannot change the lease frequency while recorded payments exist: the payment terms would be re-keyed and lost. Remove the recorded payments first, or keep the current frequency.',
+          422
+        );
+      }
+    }
     try {
       const termFrequency = newOccupant.frequency || 'months';
 
@@ -1540,14 +1573,22 @@ export async function update(req: Req, res: Res) {
       throw new ServiceError(String(e), 422);
     }
   } else {
-    const hasPaidRents = (newOccupant.rents || []).some(
-      (rent: AnyRecord) =>
-        (rent.payments &&
-          rent.payments.some((payment: AnyRecord) => Number(payment.amount) > 0)) ||
-        (rent.discounts || []).some(
-          (discount: AnyRecord) => discount.origin === 'settlement'
-        )
-    );
+    // R4 (destructive-write audit 2026-07): a rent counts as "has recorded
+    // money state" if it carries payments OR settlement-origin discounts OR
+    // settlement-origin debts (extra charges recorded via the payment dialog
+    // with zero payment). The old predicate omitted debts, so a tenant whose
+    // ledger held ONLY a settlement debt was wiped (rents=[]) on an edit that
+    // dropped rent-data. Mirror Contract._isPayment, which treats debts as
+    // recorded state.
+    const _rentHasRecordedMoney = (rent: AnyRecord) =>
+      (rent.payments &&
+        rent.payments.some((p: AnyRecord) => Number(p.amount) > 0)) ||
+      (rent.discounts || []).some(
+        (d: AnyRecord) => d.origin === 'settlement' && Number(d.amount) > 0
+      ) ||
+      (rent.debts || []).some((d: AnyRecord) => Number(d.amount) > 0);
+
+    const hasPaidRents = (newOccupant.rents || []).some(_rentHasRecordedMoney);
 
     if (hasPaidRents) {
       throw new ServiceError(
@@ -1560,14 +1601,7 @@ export async function update(req: Req, res: Res) {
     // _propertiesHaveRentData() returning false (e.g. user removed entryDate
     // on a property) would otherwise silently delete the rent ledger.
     const originalHasPaidRents = (originalOccupant.rents || []).some(
-      (rent: AnyRecord) =>
-        (rent.payments &&
-          rent.payments.some(
-            (payment: AnyRecord) => Number(payment.amount) > 0
-          )) ||
-        (rent.discounts || []).some(
-          (discount: AnyRecord) => discount.origin === 'settlement'
-        )
+      _rentHasRecordedMoney
     );
     if (originalHasPaidRents) {
       throw new ServiceError(
@@ -1697,7 +1731,11 @@ export async function remove(req: Req, res: Res) {
           )) ||
         (rent.discounts || []).some(
           (discount: AnyRecord) => discount.origin === 'settlement'
-        )
+        ) ||
+        // R4/L3 (destructive-write audit 2026-07): settlement-origin debts
+        // (extra charges) are recorded money — a debt-only ledger must not be
+        // hard-deleted; force-archive preserves it like any paid tenant.
+        (rent.debts || []).some((debt: AnyRecord) => Number(debt.amount) > 0)
     );
   });
 

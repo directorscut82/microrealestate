@@ -2993,17 +2993,71 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     if (!unit.propertyId) continue;
 
     if (expensesProvided) {
+      // LEGACY BACKFILL (Step-7 probe 4): statement rows written 2026-05-01..03
+      // (before 7bcdfcd1 added expenseId to the schema AND the statement push)
+      // have expenseId null + repairId null — indistinguishable from a manual
+      // addMonthlyCharge row. Left alone, the expenseId-scoped strip below
+      // would never remove them: re-saving that term would then DOUBLE-CHARGE
+      // (old legacy row + new row), and the form's description-keyed pre-fill
+      // would compound the figure on every round-trip. Backfill the key here,
+      // lazily and idempotently, scoped to THIS term: a null/null row whose
+      // description exactly matches a building expense's name (and is not a
+      // legacy repair row — those start with 'Repair: ' and are owned by
+      // _distributeRepairCharge's legacy matcher) IS a statement row — stamp
+      // its expenseId so the ownership discriminator is sound. A true manual
+      // charge with a custom description doesn't match any expense name and
+      // keeps its null key (protected by the strip below).
+      // IDs of legacy null-key rows that ARE statement rows (description
+      // matches a building expense name) but couldn't be uniquely backfilled
+      // (two expenses share the name). They must still be STRIPPED (they are
+      // not manual charges) — else the rebuild adds fresh rows and the term
+      // double-charges. Collected here, unioned into the strip filter below.
+      const ambiguousStatementRowIds = new Set<string>();
+      for (const c of unit.monthlyCharges as any[]) {
+        if (c.term !== Number(term)) continue;
+        if (c.expenseId || c.repairId) continue;
+        const desc = String(c.description || '').trim();
+        if (!desc || /^Repair: /.test(desc)) continue;
+        // S3 (destructive-write audit 2026-07): backfill the expenseId when
+        // EXACTLY ONE building expense matches the description (a first-match
+        // .find() could mis-stamp on duplicate names). If NO expense matches,
+        // it's a genuine manual charge (custom description) → keep null, the
+        // strip leaves it. If MULTIPLE match, it's still a statement row but
+        // ambiguous → mark it for stripping (don't guess the expenseId).
+        const matches = ((building as any).expenses as any[]).filter(
+          (e: any) => String(e.name || '').trim() === desc
+        );
+        if (matches.length === 1) {
+          c.expenseId = String(matches[0]._id);
+        } else if (matches.length > 1) {
+          ambiguousStatementRowIds.add(String(c._id));
+        }
+      }
+
       // Remove existing EXPENSE charges for this term, then re-add. This strip
-      // must be scoped to the rows this function OWNS (building-expense shares) —
-      // it must NOT pull REPAIR charges (they carry repairId and are owned/rebuilt
-      // by _distributeRepairCharge / redistributeRepairsForProperties, which this
-      // save does NOT re-fire). A source-blind strip silently deleted a term's
-      // tenant repair charges on every monthly-statement save (confirmed: a €90
-      // tenant repair on an occupied unit vanished when the month's statement was
-      // saved). Mirrors the owner-side strip below, which is already scoped to
-      // source:'expense'. Repair rows have repairId set; expense rows do not.
+      // must be scoped to the rows this function OWNS (building-expense shares,
+      // i.e. rows keyed by an expenseId) — it must NOT pull:
+      //   - REPAIR charges (repairId set) — owned/rebuilt by
+      //     _distributeRepairCharge / redistributeRepairsForProperties, which
+      //     this save does NOT re-fire. A source-blind strip silently deleted a
+      //     term's tenant repair charges on every monthly-statement save
+      //     (confirmed: a €90 tenant repair on an occupied unit vanished).
+      //   - MANUAL charges (expenseId null AND repairId null) — created via
+      //     POST /buildings/:id/units/:unitId/charges (addMonthlyCharge); the
+      //     rebuild below only recreates rows keyed by a validated expenseId,
+      //     so a swept manual charge is never rebuilt and the tenant's next
+      //     rent silently drops it (destructive-write audit 2026-07, BUG-4 —
+      //     the remaining sibling of the fixed repair-clobber).
+      // Owner-side mirror below is scoped to source:'expense' for the same
+      // reason. This function's ownership discriminator is: expenseId is SET
+      // (made sound for legacy rows by the backfill above).
       const idsToRemove = unit.monthlyCharges
-        .filter((c: any) => c.term === Number(term) && !(c as any).repairId)
+        .filter(
+          (c: any) =>
+            c.term === Number(term) &&
+            !(c as any).repairId &&
+            (!!c.expenseId || ambiguousStatementRowIds.has(String(c._id)))
+        )
         .map((c: any) => c._id);
       for (const chargeId of idsToRemove) {
         unit.monthlyCharges.pull(chargeId);
@@ -3088,25 +3142,61 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     // so a one-time migration carries their payments onto the new per-unit rows.
     const priorExpenseSettle = new Map<string, any>();
     const priorBuildingWide = new Map<string, any>();
+    // Merge a building-wide row into priorBuildingWide by expenseId, unioning
+    // payments so a lump AND a same-expense credit (either order) both survive.
+    const _addBuildingWide = (e: any) => {
+      const k = String(e.expenseId);
+      const existing = priorBuildingWide.get(k);
+      if (existing) {
+        existing.payments = [
+          ...(existing.payments || []),
+          ...(e.payments || [])
+        ];
+      } else {
+        priorBuildingWide.set(k, e);
+      }
+    };
     for (const e of (building as any).ownerMonthlyExpenses as any[]) {
       const src = e.source || 'expense';
-      if (src === 'expense' && Number(e.term) === Number(term)) {
+      if (Number(e.term) !== Number(term)) continue;
+      if (src === 'expense') {
         if (e.propertyId) {
           priorExpenseSettle.set(
             `${String(e.expenseId)}|${String(e.propertyId)}`,
             e
           );
         } else {
-          priorBuildingWide.set(String(e.expenseId), e);
+          _addBuildingWide(e);
         }
+      } else if (src === 'credit' && !e.propertyId) {
+        // S2 (destructive-write audit 2026-07): a BUILDING-WIDE credit
+        // (propertyId null) is what THIS function's own reattach/overpay pass
+        // emits for an omitted or over-paid expense. On a later save that
+        // RE-ADDS the expense, the new liabilities are per-unit (propertyId
+        // set) and netOwnerChargeOutstanding keys on propertyId, so the
+        // standalone building-wide credit can NEVER net against them → the
+        // ledger showed full outstanding + a detached credit while the
+        // dashboard term-netted to 0 (cross-surface disagreement). Fold it into
+        // priorBuildingWide so the migration below re-applies the recorded
+        // money onto the re-materialised PER-UNIT rows — where it nets. When
+        // the expense stays omitted, the reattach pass re-emits it unchanged
+        // (idempotent). Per-unit credits (propertyId set) already net by their
+        // matching propertyId key, so they are intentionally left untouched.
+        _addBuildingWide(e);
       }
     }
-    // Strip ONLY source:'expense' rows for this term (per-unit AND legacy lump).
+    // Strip source:'expense' rows for this term (per-unit AND legacy lump) AND
+    // building-wide source:'credit' rows (captured above so their money
+    // migrates onto the re-added per-unit rows). Per-unit credits are NOT
+    // stripped — they net by their own propertyId key.
     const idsToRemove = (building as any).ownerMonthlyExpenses
-      .filter(
-        (e: any) =>
-          (e.source || 'expense') === 'expense' && e.term === Number(term)
-      )
+      .filter((e: any) => {
+        if (e.term !== Number(term)) return false;
+        const src = e.source || 'expense';
+        if (src === 'expense') return true;
+        if (src === 'credit' && !e.propertyId) return true;
+        return false;
+      })
       .map((e: any) => e._id);
     for (const eid of idsToRemove) {
       (building as any).ownerMonthlyExpenses.pull(eid);
@@ -3151,6 +3241,10 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       // money survives (mirrors the owner-fixed loop's fallback).
       if (perUnit.length === 0) {
         const legacyFb = priorBuildingWide.get(String(entry.expenseId));
+        // MARK CONSUMED (same discipline as priorExpenseSettle) so the
+        // reattach-building-wide pass below knows this lump's payments were
+        // carried and doesn't double-reattach them.
+        if (legacyFb !== undefined) priorBuildingWide.delete(String(entry.expenseId));
         const carriedFb = carryOwnerPayments(legacyFb);
         arr.push({
           expenseId: entry.expenseId,
@@ -3166,8 +3260,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       }
       // Migrate a legacy building-wide row's recorded payments onto the new
       // per-unit rows, largest share first, so the total preserved === what was
-      // recorded (no money lost when an old lump row is split).
+      // recorded (no money lost when an old lump row is split). MARK CONSUMED
+      // (delete from the map) so the reattach-building-wide pass below can tell
+      // which lump rows the rebuild did NOT consume.
       const legacy = priorBuildingWide.get(String(entry.expenseId));
+      if (legacy !== undefined) priorBuildingWide.delete(String(entry.expenseId));
       const legacyCarried = legacy ? carryOwnerPayments(legacy) : null;
       const migrationPayments = legacyCarried
         ? [...legacyCarried.payments]
@@ -3230,6 +3327,21 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
         if (_prior !== undefined) priorExpenseSettle.delete(_puKey);
         const carried = carryOwnerPayments(_prior);
         const payments = [...carried.payments];
+        // S1 (destructive-write audit 2026-07): a per-unit prior row marked
+        // paid via setOwnerExpensePaid carries NO payments, only a paid flag
+        // (carried.priorPaid). The building-wide `legacyManualPaid` path below
+        // handles a lump, but the PER-UNIT prior was dropped here — so an
+        // identical statement re-save re-opened a settled owner liability.
+        // Preserve the per-unit manual-paid state onto the rebuilt row — but
+        // ONLY when the share is UNCHANGED (Step-7): a bare paid flag has no
+        // amount, so carrying it onto a row whose figure CHANGED (e.g. share
+        // raised €50→€100) would mark the larger liability settled without a
+        // payment. Mirrors applyCarriedSettlement's amount-unchanged contract.
+        const puAmountUnchanged =
+          Math.abs(Number(carried.priorAmount || 0) - Number(pu.share)) <=
+          0.005;
+        const puManualPaid =
+          !!carried.priorPaid && payments.length === 0 && puAmountUnchanged;
         // Then top up from the legacy lump queue, capped at this unit's free room.
         const carriedSum = payments.reduce(
           (s: number, p: any) => s + (Number(p.amount) || 0),
@@ -3247,11 +3359,15 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
           payments
         });
         recomputeOwnerExpensePaid(arr[arr.length - 1]);
-        // Propagate a bare legacy manual-paid toggle (no payments) onto this row.
-        if (legacyManualPaid && payments.length === 0) {
+        // Propagate a bare manual-paid toggle (no payments) onto this row —
+        // either from a building-wide legacy lump (legacyManualPaid) OR from
+        // this unit's own prior per-unit row (puManualPaid, S1).
+        if ((legacyManualPaid || puManualPaid) && payments.length === 0) {
           arr[arr.length - 1].paid = true;
           arr[arr.length - 1].paidDate =
-            legacyCarried.priorPaidDate || new Date();
+            carried.priorPaidDate ||
+            (legacyCarried && legacyCarried.priorPaidDate) ||
+            new Date();
         }
       }
       // OVERPAY PRESERVATION (Step-7 #4): undrained legacy pool → a BUILDING-LEVEL
@@ -3284,7 +3400,19 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     // method merely changed. A credit is counted as PAID (addOwed(0) no-op),
     // so the recorded money survives without re-opening a liability. (Zero-
     // payment orphans are safe to drop.)
-    for (const prior of priorExpenseSettle.values()) {
+    // BUILDING-WIDE lumps get the SAME protection (destructive-write audit
+    // 2026-07, BUG-1): a legacy/fallback building-wide source:'expense' row
+    // carrying recorded καταβολές whose expense was OMITTED from the re-save
+    // (amount blank/0/entry removed) was stripped at the top but never reached
+    // either priorBuildingWide consumer (both live inside the amount>0 rebuild
+    // loop) — the recorded owner money silently vanished while the per-unit
+    // orphan path below was protected. Chain the un-consumed lump rows into the
+    // same reattach-as-credit pass. (Consumed lumps are deleted from the map at
+    // their .get() sites above, mirroring priorExpenseSettle.)
+    for (const prior of [
+      ...priorExpenseSettle.values(),
+      ...priorBuildingWide.values()
+    ]) {
       const carried = carryOwnerPayments(prior);
       const paidSum = carried.payments.reduce(
         (s: number, p: any) => s + (Number(p.amount) || 0),
@@ -4448,6 +4576,35 @@ export async function removeExpense(req: Req, res: Res) {
   } else {
     // Hard delete: remove expense and clean up orphaned monthly charges
     const expId = String(expense._id);
+
+    // Destructive-write audit 2026-07 (BUG-3): the Bill cascade below would
+    // destroy linked bills INCLUDING recorded payment history (receipts[]
+    // installments, paymentProofUrl, paymentDate). Recorded money must never
+    // be silently deleted — same invariant as the owner-row credit conversion
+    // below and the referential-integrity 422s on DELETE property/lease/tenant.
+    // Block the hard delete when any linked bill carries payments; the
+    // landlord soft-deletes instead (endTerm kill-date keeps history intact).
+    const paidLinkedBills = await Collections.Bill.countDocuments({
+      realmId: realm!._id,
+      buildingId: id,
+      expenseId: expId,
+      $or: [
+        { 'receipts.0': { $exists: true } },
+        { paymentDate: { $ne: null } },
+        { paymentProofUrl: { $exists: true, $ne: '' } },
+        { status: { $in: ['partial', 'paid'] } }
+      ]
+    });
+    if (paidLinkedBills > 0) {
+      // User-facing message (surfaces as a toast): Greek, and it names the
+      // ACTUAL dialog button («Τερματισμός από τον τρέχοντα μήνα»), not the
+      // developer-facing mode=soft parameter.
+      throw new ServiceError(
+        `Η δαπάνη δεν μπορεί να διαγραφεί οριστικά: ${paidLinkedBills} συνδεδεμένος/οι λογαριασμός/οί έχουν καταχωρημένες πληρωμές. Επιλέξτε «Τερματισμός από τον τρέχοντα μήνα» για να διατηρηθεί το ιστορικό πληρωμών.`,
+        422
+      );
+    }
+
     for (const unit of (building as any).units) {
       const orphaned = unit.monthlyCharges
         .filter((c: any) => String(c.expenseId) === expId)

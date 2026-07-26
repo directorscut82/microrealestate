@@ -18,6 +18,12 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
   issueDate: Date,
   dueDate: Date,
   term: { type: Number, required: true },
+  // O4 (destructive-write audit 2026-07): the total this bill was FIRST created
+  // with. Seeded once and never overwritten on a corrective re-import (replace),
+  // so a pre-Slice-6 paymentDate-only bill (which records no paid amount) can be
+  // re-classified against a STABLE baseline — making the replace idempotent
+  // (re-saving the same correction can't flip partial↔paid).
+  originalTotalAmount: Number,
   rfCode: String,
   paymentCode: String,
   irisCodeBase64: String,

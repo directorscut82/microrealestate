@@ -327,6 +327,7 @@
   "Error updating lease": "Erreur lors de la mise à jour du bail",
   "Error updating organization": "Erreur lors de la mise à jour de l'organisation",
   "Estimated Cost": "Coût estimé",
+  "Please enter a valid amount for {{name}}": "Veuillez saisir un montant valide pour {{name}}",
   "Existing amount": "Montant existant",
   "Existing property found": "Bien existant trouvé",
   "Existing tenant found": "Locataire existant trouvé",

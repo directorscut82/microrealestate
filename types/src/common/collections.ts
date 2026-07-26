@@ -689,6 +689,9 @@ export namespace CollectionTypes {
     provider: BillProvider;
     billingId: string;
     totalAmount: number;
+    // O4: the total the bill was first created with; never overwritten on a
+    // corrective replace, so paid-status re-classification has a stable base.
+    originalTotalAmount?: number;
     periodStart: Date;
     periodEnd: Date;
     issueDate?: Date;

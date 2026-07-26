@@ -19,6 +19,7 @@ import FileDropZone from '../ui/file-drop-zone';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
+import { parseGreekMoney } from '../../utils/numberformat';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -390,7 +391,10 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
     try {
       const payments = confirmable.map(({ r, uid }) => {
         const c = selected[uid];
-        const parsedAmount = parseFloat(String(amounts[uid]).replace(',', '.'));
+        // O1 (destructive-write audit 2026-07): use the shared Greek/English
+        // money parser (last-separator-wins) — the old parseFloat(replace(','
+        // ,'.')) recorded "1.234,56" as €1.23.
+        const parsedAmount = parseGreekMoney(amounts[uid]);
         const lk = longKeys[uid] || {};
         return {
           kind: c.kind,

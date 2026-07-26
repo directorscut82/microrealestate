@@ -369,6 +369,7 @@
   "Error updating organization": "Σφάλμα ενημέρωσης οργανισμού",
   "Estimated Cost": "Εκτιμώμενο Κόστος",
   "Every building and unit in this PDF is already in the system. Nothing would change.": "Όλα τα κτίρια και οι μονάδες αυτού του PDF υπάρχουν ήδη στο σύστημα. Δεν θα αλλάξει τίποτα.",
+  "Please enter a valid amount for {{name}}": "Καταχωρίστε έγκυρο ποσό για {{name}}",
   "Existing amount": "Υπάρχον ποσό",
   "Existing property found": "Βρέθηκε υπάρχον ακίνητο",
   "Existing tenant found": "Βρέθηκε υπάρχων ενοικιαστής",
