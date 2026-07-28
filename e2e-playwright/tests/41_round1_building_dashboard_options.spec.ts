@@ -1291,3 +1291,77 @@ test('41.11 · expense form chargeOwnerWhenVacant Switch is ENABLED (vacant-owne
     .poll(() => switchEl.getAttribute('data-state'), { timeout: 5_000 })
     .not.toBe(before);
 });
+
+// ---------------------------------------------------------------------------
+// 41.13 — the annual-projection «Έξοδα ιδιοκτήτη» (Owner expenses) row prefixes
+//   an explicit minus so a cost reads as a deduction. A building with NO owner
+//   expenses used to render «−0,00 €» — a negative amount that does not exist —
+//   because the minus was applied unconditionally. This is a RENDERED-STRING
+//   defect: the API returns 0 either way, so only a UI assertion catches it.
+//   Seed a building with a rent-side expense but zero owner-side, open the Greek
+//   overview, and assert the owner row shows 0,00 € with no leading minus.
+// ---------------------------------------------------------------------------
+test('41.13 · owner-expenses projection row shows 0,00 € not −0,00 € when there are no owner expenses', async ({
+  page
+}) => {
+  test.setTimeout(180_000);
+  const api = await request.newContext();
+  let buildingId = '';
+  let realmName = '';
+  try {
+    const base = await getBaseSeed(api);
+    realmName = base.realmName;
+    buildingId = await createFreshBuilding(api, base, 'zeroown');
+    await addThousandthsBearingUnit(api, base, buildingId, 'zeroown');
+    // A rent-side recurring expense (NOT trackOwnerExpense) so the projection
+    // table renders with real numbers, but the owner-expenses row is a genuine
+    // zero — exactly the case that used to print «−0,00 €».
+    await addExpense(api, base, buildingId, {
+      name: `S41-zeroown-rent-${RUN_ID}`,
+      type: 'other',
+      amount: 60,
+      allocationMethod: 'general_thousandths',
+      isRecurring: true,
+      startTerm: yyyymmddhh(new Date().getFullYear(), 1)
+    });
+  } finally {
+    await api.dispose();
+  }
+
+  await signInGreek(page);
+  await page.goto(
+    `el/${encodeURIComponent(realmName)}/buildings/${buildingId}`
+  );
+  await expect(page.locator('[data-cy=overviewTab]')).toBeVisible({
+    timeout: 30_000
+  });
+  await expect(
+    page.getByText(/Ετήσια προβολή/i).first(),
+    'Greek «Ετήσια προβολή» headline card renders (locale is el, not en)'
+  ).toBeVisible({ timeout: 20_000 });
+
+  // The owner-expenses HEAD row.
+  const ownerRow = page.locator('tr', { hasText: /Έξοδα ιδιοκτήτη/ }).first();
+  await expect(
+    ownerRow,
+    'Greek owner-expenses head row renders'
+  ).toBeVisible({ timeout: 20_000 });
+
+  // The regression: the row must NOT contain «−0,00» in any of its money cells.
+  // A minus glyph (U+2212) on a zero is precisely the defect. Assert the exact
+  // rendered text of the row carries no −0,00 and DOES carry a plain 0,00.
+  const rowText = await ownerRow.innerText();
+  expect(
+    /−\s*0,00/.test(rowText),
+    `owner-expenses row must not render a minus on zero; got: ${JSON.stringify(rowText)}`
+  ).toBe(false);
+  expect(
+    /0,00/.test(rowText),
+    `owner-expenses row should render a plain 0,00 €; got: ${JSON.stringify(rowText)}`
+  ).toBe(true);
+
+  await page.screenshot({
+    path: '_screens/41_13_owner_expenses_zero_el.png',
+    fullPage: true
+  });
+});
