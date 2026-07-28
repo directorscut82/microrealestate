@@ -57,6 +57,14 @@ interface BaseSeed {
 }
 
 const createdBuildingIds: Array<{ token: string; realmId: string; id: string }> = [];
+// Tenants and properties this run created MUST be tracked and torn down too.
+// afterAll used to delete only buildings, so every E2E-S41-*-Tenant it created
+// leaked into the shared CYPRESS realm — 12 accumulated across three runs and
+// poisoned spec 19's L01 (the canonical tenant's status stopped flipping to
+// `partial` under the extra outstanding load). Delete tenants BEFORE properties
+// (an occupied property is un-deletable) and both before buildings.
+const createdTenantIds: Array<{ token: string; realmId: string; id: string }> = [];
+const createdPropertyIds: Array<{ token: string; realmId: string; id: string }> = [];
 
 const yyyymmddhh = (year: number, month: number) =>
   Number(`${year}${String(month).padStart(2, '0')}0100`);
@@ -221,7 +229,9 @@ async function createBareProperty(
     [200, 201],
     `create bare property (status=${r.status()}, body=${await r.text().catch(() => '')})`
   ).toContain(r.status());
-  return ((await r.json()) as { _id: string })._id;
+  const id = ((await r.json()) as { _id: string })._id;
+  createdPropertyIds.push({ token: base.token, realmId: base.realmId, id });
+  return id;
 }
 
 /**
@@ -303,6 +313,16 @@ async function createRentedProperty(
     `create tenant for fresh property (status=${tenantResp.status()}, body=${await tenantResp.text().catch(() => '')})`
   ).toContain(tenantResp.status());
   const tenantBody = (await tenantResp.json()) as { _id: string };
+  createdPropertyIds.push({
+    token: base.token,
+    realmId: base.realmId,
+    id: propBody._id
+  });
+  createdTenantIds.push({
+    token: base.token,
+    realmId: base.realmId,
+    id: tenantBody._id
+  });
   return { propertyId: propBody._id, tenantId: tenantBody._id };
 }
 
@@ -524,20 +544,37 @@ async function fetchBuildingFinance(
 }
 
 test.afterAll(async () => {
-  // Best-effort cleanup of every building this run created. Failures here
-  // must not mask the test result — afterAll never throws.
-  if (createdBuildingIds.length === 0) return;
+  // Best-effort cleanup of everything this run created. Failures here must not
+  // mask the test result — afterAll never throws. Order matters: tenants first
+  // (a tenant with recorded payments blocks its own delete, but these fixtures
+  // have none), then properties (an occupied property is un-deletable), then
+  // buildings. Leaking any of these poisons the shared CYPRESS realm for later
+  // specs (this is exactly what broke spec 19's L01).
+  if (
+    createdBuildingIds.length === 0 &&
+    createdTenantIds.length === 0 &&
+    createdPropertyIds.length === 0
+  )
+    return;
   const api = await request.newContext();
-  try {
-    for (const b of createdBuildingIds) {
+  const del = async (
+    kind: string,
+    items: Array<{ token: string; realmId: string; id: string }>
+  ) => {
+    for (const it of items) {
       try {
-        await api.delete(`${GATEWAY}/api/v2/buildings/${b.id}`, {
-          headers: authHeaders(b.token, b.realmId)
+        await api.delete(`${GATEWAY}/api/v2/${kind}/${it.id}`, {
+          headers: authHeaders(it.token, it.realmId)
         });
       } catch {
-        // swallow
+        // swallow — teardown is best-effort
       }
     }
+  };
+  try {
+    await del('tenants', createdTenantIds);
+    await del('properties', createdPropertyIds);
+    await del('buildings', createdBuildingIds);
   } finally {
     await api.dispose();
   }
