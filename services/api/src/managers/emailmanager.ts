@@ -14,6 +14,21 @@ type Req = ServiceRequest<any, any, any>;
 type Res = ServiceResponse;
 type AnyRecord = Record<string, any>;
 
+// Every api→emailer POST must bound its wait. Without a timeout a hung emailer
+// (dead SMTP, stuck Telegram upload) blocks the landlord request thread
+// indefinitely and accumulates sockets (ingress+error-path audit 2026-07).
+//
+// This MUST exceed the emailer's own worst-case for a SINGLE message, or the
+// api aborts a send that is still succeeding → reports failure → landlord
+// retries → DOUBLE email (Step-7 Finding 2). The emailer serially does: PDF
+// render+fetch (fetchpdf.ts bounds at 30s) THEN the SMTP send, whose THREE
+// nodemailer phases are additive on a pathological server: connectionTimeout
+// 20s + greetingTimeout 20s + socketTimeout 30s = 70s (Step-7 round-2 caught
+// that the earlier 90s figure omitted greetingTimeout). True worst case
+// ≈ 30 + 70 = 100s. 120s clears it with margin so the api never gives up on a
+// send that is still landing; a genuinely dead emailer still fails within 2 min.
+const EMAILER_TIMEOUT_MS = 120_000;
+
 async function _sendEmail(req: Req, message: AnyRecord): Promise<AnyRecord[]> {
   const { EMAILER_URL } = Service.getInstance().envConfig.getValues();
   const postData = {
@@ -30,7 +45,8 @@ async function _sendEmail(req: Req, message: AnyRecord): Promise<AnyRecord[]> {
         authorization: req.headers.authorization,
         organizationid: req.headers.organizationid || String(req.realm!._id),
         'Accept-Language': req.headers['accept-language']
-      }
+      },
+      timeout: EMAILER_TIMEOUT_MS
     });
 
     logger.debug(`data sent: ${JSON.stringify(postData)}`);
@@ -147,7 +163,8 @@ async function _sendSms(
               authorization: req.headers.authorization,
               organizationid: req.headers.organizationid || String(req.realm!._id),
               'Accept-Language': req.headers['accept-language']
-            }
+            },
+            timeout: EMAILER_TIMEOUT_MS
           }
         );
         // PII: don't log tenant.name or phone in plaintext. Tenant id is
@@ -285,7 +302,8 @@ export async function sendOwnerStatements(req: Req, res: Res) {
               organizationid:
                 req.headers.organizationid || String(req.realm!._id),
               'Accept-Language': req.headers['accept-language']
-            }
+            },
+            timeout: EMAILER_TIMEOUT_MS
           }
         );
         // X1: the emailer 200s even when the provider rejected a recipient —
@@ -468,7 +486,8 @@ export async function sendOwnerSms(req: Req, res: Res) {
               organizationid:
                 req.headers.organizationid || String(req.realm!._id),
               'Accept-Language': req.headers['accept-language']
-            }
+            },
+            timeout: EMAILER_TIMEOUT_MS
           }
         );
         logger.info(`owner SMS sent (${ownerKey})`);
@@ -515,7 +534,8 @@ export async function sendTelegramNotification(req: Req, res: Res) {
           organizationid:
             req.headers.organizationid || String(req.realm!._id),
           'Accept-Language': req.headers['accept-language']
-        }
+        },
+        timeout: EMAILER_TIMEOUT_MS
       }
     );
     logger.info('Telegram notification sent');

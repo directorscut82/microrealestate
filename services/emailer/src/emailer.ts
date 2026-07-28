@@ -193,29 +193,10 @@ ${email.attachment
           organizationId || (data && data.landlord && data.landlord._id);
         try {
           status = await EmailEngine.sendEmail(email, data);
-          if (auditRealmId) {
-            await new Collections.Email({
-              realmId: auditRealmId,
-              templateName,
-              recordId,
-              params,
-              sentTo: recipients.to,
-              sentDate: new Date(),
-              emailId: status.id,
-              status: 'queued'
-            }).save();
-          } else {
-            logger.debug(
-              `skipping email audit row for ${templateName} (no realm context)`
-            );
-          }
-          logger.info(`${templateName} sent to ${recordId} at ${recipients.to}`);
         } catch (sendErr) {
-          // Persist a 'failed' audit row BEFORE rethrowing so the
-          // landlord can see and triage failed sends. Without this,
-          // failed emails simply disappeared (logged but not stored)
-          // and there was no way to identify recipients who never got
-          // their notice / invoice / OTP.
+          // A genuine SEND failure — the email did NOT go out. Persist a
+          // 'failed' audit row (best-effort) and rethrow so the caller reports
+          // failure and can retry.
           if (auditRealmId) {
             try {
               await new Collections.Email({
@@ -238,6 +219,33 @@ ${email.attachment
             }
           }
           throw sendErr;
+        }
+        // The email HAS been sent (250 OK). The audit-row write is bookkeeping —
+        // a failure here must NOT be reported as a send failure, or the caller
+        // would RETRY and DOUBLE-SEND a mail the recipient already got
+        // (ingress+error-path audit 2026-07). Best-effort; log and continue.
+        try {
+          if (auditRealmId) {
+            await new Collections.Email({
+              realmId: auditRealmId,
+              templateName,
+              recordId,
+              params,
+              sentTo: recipients.to,
+              sentDate: new Date(),
+              emailId: status.id,
+              status: 'queued'
+            }).save();
+          } else {
+            logger.debug(
+              `skipping email audit row for ${templateName} (no realm context)`
+            );
+          }
+          logger.info(`${templateName} sent to ${recordId} at ${recipients.to}`);
+        } catch (auditErr) {
+          logger.error(
+            `${templateName} SENT to ${recipients.to} but audit-row write failed (NOT retrying — email already delivered): ${(auditErr as { message?: string })?.message || auditErr}`
+          );
         }
       } else {
         const message = `ALLOW_SENDING_EMAILS set to "false", ${templateName} not sent to ${recordId} at ${recipients.to}`;

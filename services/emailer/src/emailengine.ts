@@ -64,7 +64,12 @@ async function _sendWithSmtp(config: any, email: EmailMessage): Promise<EmailRes
     host: config.server,
     port: config.port,
     secure: config.secure,
-    auth
+    auth,
+    // Bound each phase — an unreachable/hung SMTP server would otherwise wedge
+    // the send forever (ingress+error-path audit 2026-07).
+    connectionTimeout: 20_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 30_000
   });
 
   const result = await transporter.sendMail({

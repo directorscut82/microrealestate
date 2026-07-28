@@ -4,6 +4,8 @@ import {
   carryOwnerPayments,
   applyCarriedSettlement,
   autoSpreadOwnerPayment,
+  committedSlicesForTxn,
+  reduceAllocationByCommitted,
   _aggregateOwners,
   _serializeOwnerSummary
 } from '../managers/ownermanager.ts';
@@ -172,6 +174,86 @@ describe('autoSpreadOwnerPayment — oldest-first allocation', () => {
   });
   it('no owed lines → empty', () => {
     expect(autoSpreadOwnerPayment(50, [])).toEqual([]);
+  });
+});
+
+// Idempotent retry after a multi-building PARTIAL COMMIT (mongo 4.4 standalone
+// has no multi-doc txn). A prior submit landed some slices under a txnId then
+// 409'd; the retry replays the same txnId and must record ONLY the remainder.
+describe('committedSlicesForTxn — sum a txn\'s already-landed slices', () => {
+  const buildings = [
+    {
+      _id: 'B1',
+      ownerMonthlyExpenses: [
+        {
+          _id: 'chargeA',
+          payments: [
+            { amount: 30, ownerKey: 'own:1', txnId: 'TXN-1' },
+            { amount: 5, ownerKey: 'own:1', txnId: 'OTHER' } // different txn
+          ]
+        }
+      ]
+    },
+    {
+      _id: 'B2',
+      ownerMonthlyExpenses: [
+        {
+          _id: 'chargeB',
+          payments: [
+            { amount: 20, ownerKey: 'own:1', txnId: 'TXN-1' },
+            { amount: 99, ownerKey: 'own:2', txnId: 'TXN-1' } // different owner
+          ]
+        }
+      ]
+    }
+  ];
+
+  it('sums only this txn + this owner, per charge', () => {
+    const { byCharge, total } = committedSlicesForTxn(buildings, 'TXN-1', 'own:1');
+    expect(byCharge.get('chargeA')).toBe(30);
+    expect(byCharge.get('chargeB')).toBe(20);
+    expect(total).toBe(50);
+  });
+
+  it('excludes a colliding txnId belonging to a different owner (no cross-credit)', () => {
+    const { total } = committedSlicesForTxn(buildings, 'TXN-1', 'own:2');
+    expect(total).toBe(99); // only own:2's slice, not own:1's 50
+  });
+
+  it('unknown txn → empty', () => {
+    const { byCharge, total } = committedSlicesForTxn(buildings, 'NOPE', 'own:1');
+    expect(byCharge.size).toBe(0);
+    expect(total).toBe(0);
+  });
+});
+
+describe('reduceAllocationByCommitted — shrink a replayed allocation by what landed', () => {
+  it('drops a fully-committed entry, shrinks a partial one, keeps a fresh one', () => {
+    const alloc = [
+      { ownerExpenseId: 'a', amount: 30 }, // fully committed → drop
+      { ownerExpenseId: 'b', amount: 50 }, // 20 committed → 30 remains
+      { ownerExpenseId: 'c', amount: 10 } // nothing committed → keep
+    ];
+    const committed = new Map([
+      ['a', 30],
+      ['b', 20]
+    ]);
+    expect(reduceAllocationByCommitted(alloc, committed)).toEqual([
+      { ownerExpenseId: 'b', amount: 30 },
+      { ownerExpenseId: 'c', amount: 10 }
+    ]);
+  });
+
+  it('all committed → empty remainder (retry becomes a no-op)', () => {
+    const alloc = [{ ownerExpenseId: 'a', amount: 30 }];
+    const committed = new Map([['a', 30]]);
+    expect(reduceAllocationByCommitted(alloc, committed)).toEqual([]);
+  });
+
+  it('sub-cent residue after subtraction is dropped', () => {
+    const alloc = [{ ownerExpenseId: 'a', amount: 30 }];
+    const committed = new Map([['a', 29.999]]);
+    expect(reduceAllocationByCommitted(alloc, committed)).toEqual([]);
   });
 });
 

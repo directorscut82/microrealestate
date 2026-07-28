@@ -1200,6 +1200,8 @@
   "Payment of {{amount}} recorded": "Payment of {{amount}} recorded",
   "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
   "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded.",
+  "This exact payment was already recorded. To record a separate one, change the reference or date.": "This exact payment was already recorded. To record a separate one, change the reference or date.",
+  "Recorded. Part of this payment had already been recorded — check the payment history.": "Recorded. Part of this payment had already been recorded — check the payment history.",
   "Split": "Split",
   "Unassigned": "Unassigned",
   "Tenant settlements": "Tenant settlements",

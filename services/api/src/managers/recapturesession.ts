@@ -26,6 +26,12 @@ export interface RecaptureSession {
   expiresAt: number;
   status: 'waiting' | 'recovered' | 'timeout';
   value?: string; // the recovered, checksum-valid token
+  // The normalized billingId of the bill being corrected, when the client
+  // knows it. The poller uses it to REFUSE a re-shot that parses to a DIFFERENT
+  // bill (which would otherwise be swallowed + inject a foreign RF — the
+  // recapture-hijack HIGH). Undefined for a bill not yet saved (billingId still
+  // being captured) — then only the timestamp gate applies.
+  expectedBillingId?: string;
 }
 
 const TTL_MS = 2 * 60 * 1000;
@@ -52,7 +58,8 @@ export function startSession(
   realmId: string,
   target: RecaptureTarget,
   now: number,
-  id: string
+  id: string,
+  expectedBillingId?: string
 ): RecaptureSession {
   _sweep(now);
   // Supersede any prior waiting session for this realm.
@@ -64,7 +71,8 @@ export function startSession(
     target,
     createdAt: now,
     expiresAt: now + TTL_MS,
-    status: 'waiting'
+    status: 'waiting',
+    ...(expectedBillingId ? { expectedBillingId } : {})
   };
   byRealm.set(realmId, s);
   byId.set(id, s);
@@ -110,6 +118,64 @@ export function resolveSession(
   s.value = value;
   byRealm.delete(realmId); // consumed — the next photo is a normal ingest again
   return s;
+}
+
+/**
+ * Is `incoming` photo the genuine re-shot for `session`, or a different bill
+ * that must NOT be consumed (recapture-hijack HIGH)? Pure + unit-testable.
+ *   - msgDate (unix seconds, optional): a re-shot is sent AFTER the session
+ *     opened; a photo timestamped before createdAt (minus a 5s skew grace) is a
+ *     backlog bill → reject.
+ *   - parsedBillingId (normalized, optional): if the session is BOUND to a bill
+ *     and the photo parses to a DIFFERENT billingId, it's another bill → reject.
+ *   - parsedAsFullBill: true when the photo parsed as a complete bill (a
+ *     billingId was extracted). A re-shot is a ZOOM of a single RF/IBAN line and
+ *     does NOT parse as a full bill. So for an UNBOUND session (the common case —
+ *     the receipt-recapture dialog sends no billingId), a photo that parses as a
+ *     full bill is a NEW bill the user happened to send during the open dialog,
+ *     NOT the re-shot → reject so normal ingest PRESERVES it instead of
+ *     swallowing it (Step-7: unbound-session hijack, silent bill loss). A bound
+ *     session already discriminates by billingId above, so this gate only bites
+ *     the unbound case.
+ * Returns true only when the photo should be consumed as the re-shot.
+ */
+export function isRecaptureCandidate(
+  session: Pick<RecaptureSession, 'createdAt' | 'expectedBillingId'>,
+  msgDate: number | undefined,
+  parsedBillingId: string | undefined,
+  parsedAsFullBill = false
+): boolean {
+  if (typeof msgDate === 'number' && msgDate * 1000 < session.createdAt - 5_000) {
+    return false;
+  }
+  if (
+    session.expectedBillingId &&
+    parsedBillingId &&
+    String(parsedBillingId) !== String(session.expectedBillingId)
+  ) {
+    return false;
+  }
+  // The photo parsed as a WHOLE bill (not a single-code zoom). Reject it as the
+  // re-shot UNLESS it is provably the bound bill — i.e. only a bound session
+  // whose billingId the photo matches (handled by the equality gate above) may
+  // consume a full bill. Otherwise it is a NEW/different bill the user sent while
+  // the dialog was open and must be INGESTED, not swallowed:
+  //   - Unbound session (the live case — the receipt dialog sends no billingId):
+  //     any full bill is foreign → reject.
+  //   - Bound session + full bill with NO parsedBillingId (uniquely EYDAP/EPA,
+  //     which never parse to a billingId): can't be confirmed as the bound bill
+  //     → reject. This closes the round-4 LATENT gap (a bound session would
+  //     otherwise swallow an EYDAP/EPA bill, reintroducing the round-2 silent
+  //     bill-loss the instant any caller starts binding billingId).
+  // A full DEH bill on a bound session with a MATCHING billingId already passed
+  // the equality gate above and is (correctly) still a candidate.
+  if (parsedAsFullBill && !parsedBillingId) {
+    return false;
+  }
+  if (!session.expectedBillingId && parsedAsFullBill) {
+    return false;
+  }
+  return true;
 }
 
 // test-only reset

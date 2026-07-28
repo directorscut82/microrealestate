@@ -150,7 +150,11 @@ export function carryOwnerPayments(prior: any): {
       // recompute → useTaggedPaid went false → the payment got re-split
       // proportionally across co-owners (one owner's debt re-opened, a co-owner
       // credited money they never paid). Mirror the other carried fields.
-      ownerKey: p.ownerKey || null
+      ownerKey: p.ownerKey || null,
+      // Same lesson for txnId: the pay() retry reconciliation (partial-commit
+      // idempotency) matches slices by txnId — a recompute that stripped it in
+      // the retry window would make the retry re-record the money.
+      txnId: p.txnId || null
     })
   );
   return {
@@ -1308,8 +1312,61 @@ export function autoSpreadOwnerPayment(
   return allocation;
 }
 
+// Sum the payment slices already recorded under `txnId` across the realm's
+// buildings — the committed portion of a prior, partially-failed submit of the
+// SAME payment. An owner payment can fan slices across several buildings and
+// mongo 4.4 standalone has no multi-doc transaction, so a mid-loop save failure
+// leaves some slices committed (409 to the caller). The retry carries the same
+// txnId; pay() subtracts what already landed and records only the remainder —
+// a naive retry would re-record real money. Pure + exported for unit testing.
+export function committedSlicesForTxn(
+  buildings: any[],
+  txnId: string,
+  ownerKey: string
+): { byCharge: Map<string, number>; total: number } {
+  const byCharge = new Map<string, number>();
+  let total = 0;
+  for (const b of buildings || []) {
+    for (const row of b?.ownerMonthlyExpenses || []) {
+      for (const p of row?.payments || []) {
+        // Match BOTH txnId AND ownerKey — a client-generated txnId is unique in
+        // practice, but scoping to the paying owner too means a hostile/colliding
+        // key can never cross-credit another owner's committed slices into this
+        // owner's remainder computation.
+        if (
+          p?.txnId &&
+          String(p.txnId) === txnId &&
+          String(p.ownerKey || '') === ownerKey
+        ) {
+          const amt = _round(Number(p.amount) || 0);
+          if (amt <= 0.005) continue;
+          const id = String(row._id);
+          byCharge.set(id, _round((byCharge.get(id) || 0) + amt));
+          total = _round(total + amt);
+        }
+      }
+    }
+  }
+  return { byCharge, total };
+}
+
+// Reduce a caller-supplied allocation by the slices a prior partial commit
+// already landed (per charge). Fully-committed entries drop out; partially
+// committed entries shrink to the remainder. Pure + exported for unit testing.
+export function reduceAllocationByCommitted(
+  allocation: { ownerExpenseId: string; amount: number }[],
+  committedByCharge: Map<string, number>
+): { ownerExpenseId: string; amount: number }[] {
+  return allocation
+    .map((a) => ({
+      ownerExpenseId: a.ownerExpenseId,
+      amount: _round(a.amount - (committedByCharge.get(a.ownerExpenseId) || 0))
+    }))
+    .filter((a) => a.amount > 0.005);
+}
+
 // POST /owners/:ownerKey/payment — record an owner καταβολή with allocation.
-// Body: { payment: { date, amount, type, reference, description,
+// Body: { payment: { date, amount, type, reference, description, txnId?,
 //   allocation?: [{ ownerExpenseId, amount }] } }
 // When allocation omitted → auto-spread oldest-term-first across the owner's
 // outstanding charges. The payment is fanned onto the matched rows'
@@ -1348,6 +1405,19 @@ export async function pay(req: Req, res: Res) {
     : 'transfer';
   validateStringField(payment.reference, 'payment.reference', { max: 200, required: false });
   validateStringField(payment.description, 'payment.description', { max: 500, required: false });
+  // Optional client idempotency key (see committedSlicesForTxn). Constrained to
+  // a safe charset so a hostile value can't smuggle anything into the ledger.
+  validateStringField(payment.txnId, 'payment.txnId', { max: 80, required: false });
+  const txnId =
+    typeof payment.txnId === 'string' && /^[A-Za-z0-9._-]{8,80}$/.test(payment.txnId)
+      ? payment.txnId
+      : null;
+  if (payment.txnId && !txnId) {
+    throw new ServiceError(
+      'payment.txnId must be 8-80 chars of [A-Za-z0-9._-]',
+      422
+    );
+  }
 
   // Load this realm's buildings (mutable docs — we save the touched ones).
   const buildings = await Collections.Building.find({ realmId: realm!._id });
@@ -1359,6 +1429,15 @@ export async function pay(req: Req, res: Res) {
   const owners = _aggregateOwners(lean as any[], occupiedKeys);
   const agg = owners.get(ownerKey);
   if (!agg) throw new ServiceError('Owner not found', 404);
+
+  // Idempotent-retry reconciliation: slices this txnId already landed in a
+  // prior, partially-committed submit. They have ALREADY reduced the charges'
+  // outstanding in the aggregation above, so the caller's replayed payload must
+  // be shrunk by them BEFORE validation/spread — otherwise the retry either
+  // 422s on the cap check or double-records the committed money.
+  const committed = txnId
+    ? committedSlicesForTxn(lean as any[], txnId, ownerKey)
+    : { byCharge: new Map<string, number>(), total: 0 };
 
   // Resolve the allocation: caller-supplied (specific/custom) or auto-spread.
   let allocation: { ownerExpenseId: string; amount: number }[];
@@ -1379,6 +1458,12 @@ export async function pay(req: Req, res: Res) {
       ownerExpenseId,
       amount
     }));
+    // Retry after a partial commit: shrink the replayed allocation by what this
+    // txnId already landed, BEFORE the cap check — the committed slices already
+    // reduced `outstanding` in the fresh aggregation, so validating the full
+    // replayed figures against the shrunk outstanding would 422 a legitimate
+    // retry (and skipping the shrink would double-record the money).
+    allocation = reduceAllocationByCommitted(allocation, committed.byCharge);
     // every allocated charge must belong to this owner, AND its (now
     // cumulative) slice may not exceed that charge's OUTSTANDING (overpaying a
     // row would push its outstanding negative, netting against other charges).
@@ -1408,13 +1493,20 @@ export async function pay(req: Req, res: Res) {
       );
     }
   } else {
-    // auto-spread oldest-first across outstanding.
+    // auto-spread oldest-first across outstanding. On a retry, spread only the
+    // REMAINDER of the typed amount — the committed slices already reduced the
+    // outstanding the spread runs against, so spreading the full amount again
+    // would land the committed euros a second time on the next-oldest charges.
     const owed = _ownerOwedLines(agg);
-    allocation = autoSpreadOwnerPayment(amount, owed);
+    const remainderAmount = _round(amount - committed.total);
+    allocation =
+      remainderAmount > 0.005
+        ? autoSpreadOwnerPayment(remainderAmount, owed)
+        : [];
     const allocatedSum = _round(
       allocation.reduce((s, a) => s + a.amount, 0)
     );
-    const surplus = _round(amount - allocatedSum);
+    const surplus = _round(remainderAmount - allocatedSum);
     // surplus (overpayment) is dropped here — owner has no carry-forward
     // ledger across terms the way rent does; a future feature could credit it.
     if (surplus > 0.005) {
@@ -1425,6 +1517,26 @@ export async function pay(req: Req, res: Res) {
   }
 
   if (allocation.length === 0) {
+    // A retry whose txnId already landed slices is FULLY recorded — answer
+    // success idempotently (nothing more to write), never 422. The response
+    // reports what actually landed (the committed total), same as a first
+    // submit would have.
+    if (committed.total > 0.005) {
+      const freshLean = lean;
+      const freshOccupied = occupiedKeys;
+      const freshOwners = _aggregateOwners(freshLean as any[], freshOccupied);
+      await _markAlsoRents(String(realm!._id), freshOwners);
+      const updated = freshOwners.get(ownerKey);
+      return res.json(
+        updated
+          ? {
+              ..._serializeOwnerSummary(updated),
+              allocatedTotal: committed.total,
+              alreadyRecorded: true
+            }
+          : { ownerKey, allocatedTotal: committed.total, alreadyRecorded: true }
+      );
+    }
     throw new ServiceError(
       'nothing to allocate — the owner has no outstanding charges',
       422
@@ -1501,7 +1613,10 @@ export async function pay(req: Req, res: Res) {
       description: payment.description || '',
       // Attribute this slice to the PAYING owner so a building-wide co-owned
       // charge's read-time re-split credits it to the right owner (audit C2).
-      ownerKey
+      ownerKey,
+      // Idempotency stamp — lets a retry of THIS submit recognise the slice as
+      // already recorded after a multi-building partial commit.
+      txnId
     });
     recomputeOwnerExpensePaid(t.row);
     touchedBuildings.add(String(t.building._id));
@@ -1528,8 +1643,12 @@ export async function pay(req: Req, res: Res) {
   // ledger), so this can be < payment.amount — the client must report THIS,
   // not the typed amount, or it would tell the landlord more money was
   // recorded than actually landed on the ledger (adversarial finding).
+  // On an idempotent retry this write covered only the REMAINDER; add the
+  // slices the prior partial commit already landed so the reported total is
+  // what the whole submit recorded, matching what a clean first submit reports.
   const allocatedTotal = _round(
-    targets.reduce((s, tgt) => s + (Number(tgt.amount) || 0), 0)
+    targets.reduce((s, tgt) => s + (Number(tgt.amount) || 0), 0) +
+      committed.total
   );
 
   // Re-aggregate for the response so the client sees fresh totals.
@@ -1541,10 +1660,23 @@ export async function pay(req: Req, res: Res) {
   const freshOwners = _aggregateOwners(fresh as any[], freshOccupied);
   await _markAlsoRents(String(realm!._id), freshOwners);
   const updated = freshOwners.get(ownerKey);
+  // reconciledTotal > 0 tells the client that part of this submit was matched
+  // to slices ALREADY recorded under the same txnId (a genuine partial-commit
+  // retry — or, pathologically, a content-hash collision with an earlier
+  // payment). The client surfaces it so a partially-reconciled submit is never
+  // silently reported as if the full typed amount landed NOW (Step-7 round-6).
   return res.json(
     updated
-      ? { ..._serializeOwnerSummary(updated), allocatedTotal }
-      : { ownerKey, allocatedTotal }
+      ? {
+          ..._serializeOwnerSummary(updated),
+          allocatedTotal,
+          ...(committed.total > 0.005 ? { reconciledTotal: committed.total } : {})
+        }
+      : {
+          ownerKey,
+          allocatedTotal,
+          ...(committed.total > 0.005 ? { reconciledTotal: committed.total } : {})
+        }
   );
 }
 

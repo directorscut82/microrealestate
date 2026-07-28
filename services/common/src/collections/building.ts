@@ -289,7 +289,16 @@ const OwnerExpensePaymentSchema = new mongoose.Schema(
     // one owner's καταβολή to a co-owner (audit C2). Set by pay() to the paying
     // owner's ownerKey. Optional: legacy rows (and single-owner charges) have
     // none → the reader falls back to the proportional split for those.
-    ownerKey: { type: String, default: null }
+    ownerKey: { type: String, default: null },
+    // Client-generated idempotency key for the ONE καταβολή submit this slice
+    // belongs to. An owner payment can fan slices across SEVERAL buildings, and
+    // mongo 4.4 standalone has no multi-doc transaction — so a failure partway
+    // through the save loop leaves some slices committed and 409s the caller. A
+    // naive retry would re-record the committed slices (double-count real money).
+    // pay() reconciles by txnId: slices already carrying this key are recognised
+    // as done and only the REMAINDER is written, making retry safe. Optional —
+    // legacy rows and API callers that omit it keep the previous behavior.
+    txnId: { type: String, default: null }
   },
   { _id: false }
 );

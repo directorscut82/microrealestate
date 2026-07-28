@@ -22,13 +22,50 @@ const PROVIDER_MARKERS: { provider: Provider; patterns: RegExp[] }[] = [
   }
 ];
 
-function detectProvider(text: string): Provider | null {
+// Exported (pure) so the recapture gate's "is this a utility bill?" signal is
+// unit-testable without a real PDF fixture (Step-7 follow-up). Returns the
+// recognized provider marker, or null when the text carries none (a receipt or
+// single-code zoom — NOT a full bill).
+export function detectProvider(text: string): Provider | null {
   for (const { provider, patterns } of PROVIDER_MARKERS) {
     if (patterns.some((p) => p.test(text))) {
       return provider;
     }
   }
   return null;
+}
+
+// Provider-AGNOSTIC "this OCR text is a whole document, not a single-code zoom"
+// signal (Step-7 round-4 residual C). detectProvider only covers named
+// providers, so a GARBLED DEH scan or an UNLISTED retailer (Elpedison,
+// Protergia, HERON, …) whose full bill arrives during an open recapture window
+// would slip past the provider gate and be SWALLOWED as the re-shot (silent
+// bill loss). A genuine re-shot is a tight zoom of ONE RF/IBAN line → short
+// text; a full A4 bill → hundreds of chars across many lines. So text VOLUME
+// separates them regardless of provider recognition — and, unlike a marker
+// match, a tight code crop that incidentally catches a provider name stays
+// short, so this does NOT reintroduce the DEH-slip false-reject the marker
+// approach caused (round-3). PAGE_BREAK separators are stripped first (mirrors
+// the H3 real-text measure) so they don't inflate the count.
+//
+// THE BOUNDARY IS DELIBERATELY ASYMMETRIC (Step-7 round-5): any zoom-vs-bill
+// threshold has a gray zone (~300-500 chars: a LOOSE re-shot crop of the whole
+// payment stub). The two failure directions are not equal —
+//   - classifying a sparse/garbled BILL as a zoom SWALLOWS it (silent,
+//     money-adjacent loss);
+//   - classifying a loose re-shot CROP as a bill fails the recapture (UX only:
+//     the photo is preserved as a visible InboxItem, the bot replies, and the
+//     dialog's field stays manually editable).
+// 300 therefore errs toward bill-preservation: tight spec-compliant zooms
+// (~70-250 chars) always pass; a loose stub crop may be false-rejected, which
+// is the recoverable direction. Raising the threshold would trade that bounded
+// UX annoyance for real silent loss on sparse bills — do not "tune" it upward
+// without fixtures proving sparse bills stay above it.
+const FULL_BILL_MIN_CHARS = 300;
+export function looksLikeFullBillText(text: string | undefined): boolean {
+  if (!text) return false;
+  const stripped = text.split(PAGE_BREAK).join('').replace(/\s/g, '');
+  return stripped.length >= FULL_BILL_MIN_CHARS;
 }
 
 // Page separator injected between PDF pages. Also stripped before the
@@ -132,22 +169,31 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
     case 'deh': {
       // Slice 6 — surface the raw text so the confirm step can build matchKeys.
       const parsed = parseDehBill(text);
-      return { ...parsed, rawText: text };
+      return { ...parsed, rawText: text, detectedProvider: 'deh' };
     }
     case 'eydap':
+      // Recognized as a bill (marker matched) but not yet parseable. Carry
+      // detectedProvider + rawText so a caller can tell this IS a utility bill
+      // — the recapture gate needs that to avoid swallowing it (Step-7), and
+      // carrying rawText avoids a redundant second OCR downstream.
       return {
         success: false,
-        error: 'Ο πάροχος ΕΥΔΑΠ δεν υποστηρίζεται ακόμα'
+        error: 'Ο πάροχος ΕΥΔΑΠ δεν υποστηρίζεται ακόμα',
+        rawText: text,
+        detectedProvider: 'eydap'
       };
     case 'epa':
       return {
         success: false,
-        error: 'Ο πάροχος ΕΠΑ δεν υποστηρίζεται ακόμα'
+        error: 'Ο πάροχος ΕΠΑ δεν υποστηρίζεται ακόμα',
+        rawText: text,
+        detectedProvider: 'epa'
       };
     default:
       return {
         success: false,
-        error: 'Μη υποστηριζόμενος πάροχος'
+        error: 'Μη υποστηριζόμενος πάροχος',
+        rawText: text
       };
   }
 }

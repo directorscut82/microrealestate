@@ -546,6 +546,12 @@ export namespace CollectionTypes {
     type: 'cash' | 'transfer' | 'cheque';
     reference?: string;
     description?: string;
+    // Paying co-owner's ownerKey (audit C2 attribution); legacy rows have none.
+    ownerKey?: string | null;
+    // Client idempotency key of the submit this slice belongs to — pay()
+    // reconciles a retry after a multi-building partial commit by skipping
+    // slices already carrying the same txnId. Legacy rows have none.
+    txnId?: string | null;
   };
 
   // §5: a VOLUNTARY contribution toward a building's Αχρέωτα (uncollected

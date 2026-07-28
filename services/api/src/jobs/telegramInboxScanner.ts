@@ -23,7 +23,10 @@ import { Collections, Crypto, logger } from '@microrealestate/common';
 import axios from 'axios';
 import * as billStorage from '../managers/billstorage.js';
 import * as recapture from '../managers/recapturesession.js';
-import { parseBillPdf } from '../managers/billparser/index.js';
+import {
+  parseBillPdf,
+  looksLikeFullBillText
+} from '../managers/billparser/index.js';
 
 const POLL_MS = 60_000;
 // A Telegram photo of a bill is a few MB; documents are bounded by the same
@@ -86,19 +89,22 @@ export interface InboxScanDeps {
   createInboxItem: (doc: Record<string, unknown>) => Promise<void>;
   /**
    * Tier-2 re-capture (Slice 6 §15). If a recapture session is WAITING for this
-   * realm, the next admin-chat photo is a zoomed re-shot of a failed RF/IBAN —
-   * NOT a new bill. tryRecapture OCRs the crop, extracts+validates the target
-   * field, and resolves the session. Returns:
-   *   - false        → no active session; NOT consumed → normal ingest.
+   * realm, the next admin-chat photo MAY be a zoomed re-shot of a failed
+   * RF/IBAN — NOT a new bill. tryRecapture OCRs the crop, extracts+validates
+   * the target field, and resolves the session. Returns:
+   *   - false        → no active session, OR the photo is NOT the re-shot
+   *                    (predates the session, or parses to a DIFFERENT bill) →
+   *                    NOT consumed → normal ingest (the bill is preserved).
    *   - 'recovered'  → consumed AND a checksum-valid key was recovered.
-   *   - 'failed'     → consumed (it WAS the re-shot) but no valid key was read;
-   *                    the session stays open so the user can retry / type it.
-   * The 'recovered' vs 'failed' distinction lets the poller send an ACCURATE
-   * reply instead of always claiming success. Injected for tests.
+   *   - 'failed'     → consumed (it WAS the re-shot for THIS bill) but no valid
+   *                    key was read; the session stays open to retry / type it.
+   * `msgDate` (unix seconds, when Telegram provided it) gates out a backlog
+   * bill photo sent BEFORE the session opened. Injected for tests.
    */
   tryRecapture?: (
     realm: TelegramRealmConfig,
-    buffer: Buffer
+    buffer: Buffer,
+    msgDate?: number
   ) => Promise<false | 'recovered' | 'failed'>;
   /**
    * Archive the source bytes to B2 at ingest (Slice 5). Returns the object key
@@ -124,6 +130,10 @@ export interface TgUpdate {
   message?: {
     message_id: number;
     chat: { id: number };
+    // Unix seconds the message was sent. Used by the recapture correlation to
+    // reject a bill photo that predates the open re-capture session (a genuine
+    // re-shot is sent AFTER the user presses «send another photo»).
+    date?: number;
     // Telegram sends multiple sizes; we take the largest (last).
     photo?: { file_id: string; file_size?: number }[];
     document?: {
@@ -285,17 +295,96 @@ async function _createInboxItem(doc: Record<string, unknown>): Promise<void> {
 // the session so the polling dialog picks it up. Returns true when consumed.
 async function _tryRecapture(
   realm: TelegramRealmConfig,
-  buffer: Buffer
+  buffer: Buffer,
+  msgDate?: number
 ): Promise<false | 'recovered' | 'failed'> {
   const now = Date.now();
   const session = recapture.activeSessionForRealm(realm.realmId, now);
   if (!session) return false;
+
+  // GATES (recapture-hijack HIGH + Step-7 unbound-session follow-up): only
+  // consume this photo as the re-shot when
+  //   (1) its Telegram timestamp is AFTER the session opened (not a backlog
+  //       bill), and
+  //   (2) if the session is BOUND to a bill, the photo does not parse to a
+  //       DIFFERENT billingId, and
+  //   (3) if the session is UNBOUND (the receipt-recapture dialog sends no
+  //       billingId — the common case), the photo does NOT parse as a full bill.
+  //       A genuine re-shot is a ZOOM of one RF/IBAN line and yields no full
+  //       bill; a photo that parses as a whole bill is a NEW bill the user sent
+  //       while the dialog was open, which must be INGESTED, not swallowed.
+  // A photo failing any gate → return false → normal ingest PRESERVES it (never
+  // consumed, its RF never injected). We ALWAYS parse now (both to feed gate 2
+  // and to detect the full-bill case for gate 3); the parse result's OCR text
+  // is reused for the RF/IBAN extraction below so there is no double-OCR.
+  //
+  // "Is this a full bill?" (gate-3 signal) is provider-honest (Step-7 rounds 2+3
+  // reconciled two opposite regressions):
+  //   - DEH is the ONLY provider the app fully parses, and it is what the receipt
+  //     dialog corrects. A DEH bill parses to success:true ONLY with a period —
+  //     a DEH payment SLIP / RF-line zoom (which prints "ΔΕΗ" next to the code)
+  //     has no period → success:false. So use pr.success for DEH: a full DEH
+  //     bill is flagged (ingested), a slip/zoom is NOT (correctly treated as the
+  //     re-shot — this preserves the recapture happy path, round-3 fix).
+  //   - EYDAP/EPA never parse to success (unsupported) but carry an RF, so
+  //     pr.success can't protect them; and the app never matches an EYDAP/EPA
+  //     RECEIPT (only DEH bills exist), so ANY EYDAP/EPA photo in a DEH-receipt
+  //     window is definitionally not the re-shot → flag it via its marker so it
+  //     is ingested, not swallowed (round-2 fix).
+  // A garbled-OCR DEH bill (no parseable period) or an UNLISTED provider
+  // (Elpedison/Protergia/… not in PROVIDER_MARKERS) is neither success nor a
+  // known marker — the named-provider gates above miss it. The text-VOLUME
+  // backstop (looksLikeFullBillText) catches it provider-agnostically: a full
+  // A4 bill OCRs to hundreds of chars, a genuine single-code re-shot to a
+  // handful, so a document-sized photo is flagged as a full bill regardless of
+  // provider (Step-7 round-4 residual C closed). This makes the gate robust to
+  // provider coverage instead of depending on it.
+  let parsedBillingId: string | undefined;
+  let parsedAsFullBill = false;
+  let parsedText: string | undefined;
   try {
-    const { ocrImage } = await import('../managers/billparser/ocr.js');
+    const pr: any = await parseBillPdf(buffer);
+    if (typeof pr?.rawText === 'string') parsedText = pr.rawText;
+    if (pr?.success && pr.bill?.billingIdNormalized) {
+      parsedBillingId = String(pr.bill.billingIdNormalized);
+    }
+    if (
+      pr?.success ||
+      pr?.detectedProvider === 'eydap' ||
+      pr?.detectedProvider === 'epa' ||
+      looksLikeFullBillText(pr?.rawText)
+    ) {
+      parsedAsFullBill = true;
+    }
+  } catch {
+    // parse failed → likely a pure RF-line zoom (no full bill) → leave
+    // parsedAsFullBill false so the gates let the RF/IBAN extraction proceed.
+  }
+  if (
+    !recapture.isRecaptureCandidate(
+      session,
+      msgDate,
+      parsedBillingId,
+      parsedAsFullBill
+    )
+  ) {
+    logger.info(
+      `telegram-inbox: photo is NOT the re-shot for realm ${realm.realmId} (older than session, a different bill ${parsedBillingId}, or a full bill on an unbound session) — ingesting normally`
+    );
+    return false;
+  }
+
+  try {
     const { extractRFs, extractIBANs } = await import(
       '../managers/billparser/matching.js'
     );
-    const text = await ocrImage(buffer);
+    // Reuse the OCR text from the parse above when present; only OCR again if
+    // the parse yielded no text (e.g. it threw before producing rawText).
+    let text = parsedText;
+    if (text === undefined) {
+      const { ocrImage } = await import('../managers/billparser/ocr.js');
+      text = await ocrImage(buffer);
+    }
     const found =
       session.target === 'rf' ? extractRFs(text) : extractIBANs(text);
     if (found.length) {
@@ -305,9 +394,9 @@ async function _tryRecapture(
       );
       return 'recovered';
     }
-    // A photo arrived but still no valid key — consume it (it WAS the re-shot,
-    // even if it failed) so it isn't mis-ingested as a bill; the session stays
-    // waiting until timeout so the user can try once more or type it manually.
+    // A photo arrived for THIS bill but still no valid key — consume it (it WAS
+    // the re-shot, even if it failed) so it isn't mis-ingested as a bill; the
+    // session stays waiting until timeout so the user can retry or type it.
     return 'failed';
   } catch (err: any) {
     logger.warn(`telegram-inbox: recapture OCR failed: ${err?.message || err}`);
@@ -448,14 +537,50 @@ export async function scanTelegramInbox(
             `telegram-inbox: update ${u.update_id} (realm ${realm.realmId}) failed (attempt ${fails}/${MAX_UPDATE_RETRIES}): ${err?.message || err}`
           );
           if (fails >= MAX_UPDATE_RETRIES) {
-            // Poison — skip past it so the queue isn't wedged forever, then
-            // keep processing the rest of the batch.
-            logger.error(
-              `telegram-inbox: update ${u.update_id} (realm ${realm.realmId}) exhausted retries — SKIPPING (bill lost; check the source chat)`
-            );
-            _updateRetries.delete(key);
-            committed = u.update_id;
-            continue;
+            // Exhausted retries. Parse failures are already caught upstream and
+            // turned into InboxItems, so a throw here is almost always TRANSIENT
+            // infra (mongo/Telegram/B2 down), not a genuinely poison message.
+            // Advancing the offset would permanently drop the bill after only
+            // ~5min of outage (ingress+error-path audit 2026-07). So before we
+            // skip, record a VISIBLE placeholder InboxItem — the landlord sees a
+            // message arrived that couldn't be processed (matching the
+            // parse-failure design), instead of silence. If the placeholder
+            // write ALSO fails, mongo is down → transient → do NOT advance;
+            // retry next tick. This ties "give up" to "we durably noted it",
+            // which is exactly the transient-vs-permanent discriminator.
+            const mid = u.message?.message_id;
+            try {
+              if (mid != null && !(await deps.hasInboxItem(realm.realmId, mid))) {
+                const now = deps.now();
+                await deps.createInboxItem({
+                  realmId: realm.realmId,
+                  source: 'telegram',
+                  status: 'pending',
+                  parsed: {},
+                  parseError:
+                    'Το μήνυμα ελήφθη αλλά δεν μπόρεσε να επεξεργαστεί μετά από επανειλημμένες προσπάθειες. Ελέγξτε τη συνομιλία.',
+                  warnings: [],
+                  telegramMessageId: mid,
+                  createdDate: now,
+                  updatedDate: now
+                });
+              }
+              logger.error(
+                `telegram-inbox: update ${u.update_id} (realm ${realm.realmId}) exhausted retries — recorded placeholder InboxItem and SKIPPING`
+              );
+              _updateRetries.delete(key);
+              committed = u.update_id;
+              continue;
+            } catch (persistErr: any) {
+              // Could not persist the placeholder → infra down → transient.
+              // Keep the retry count and stop WITHOUT advancing the offset so
+              // the bill is preserved for the next tick.
+              logger.error(
+                `telegram-inbox: update ${u.update_id} placeholder persist failed — treating as transient, NOT skipping: ${persistErr?.message || persistErr}`
+              );
+              _updateRetries.set(key, fails);
+              break;
+            }
           }
           // Transient — retry this + all later updates next tick.
           _updateRetries.set(key, fails);
@@ -520,7 +645,7 @@ async function _handleUpdate(
   // ACCURATELY: only claim success when a checksum-valid key was actually read;
   // otherwise tell the user the re-shot wasn't legible so they can retry.
   if (deps.tryRecapture) {
-    const outcome = await deps.tryRecapture(realm, file.buffer);
+    const outcome = await deps.tryRecapture(realm, file.buffer, msg.date);
     if (outcome === 'recovered') {
       await deps.sendReply?.(
         realm.botToken,

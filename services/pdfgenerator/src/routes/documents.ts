@@ -18,6 +18,30 @@ import path from 'path';
 import { sanitize } from '../utils/index.js';
 import uploadMiddleware from '../utils/uploadmiddelware.js';
 
+// Pipe a download stream to the response with a mid-transfer error handler.
+// A .pipe(res) with no 'error' listener on the source will, if the stream
+// errors after headers are sent (B2 connection drop, disk read fault), emit
+// an unhandled 'error' event and CRASH the whole pdfgenerator process — the
+// try/catch around .pipe() only catches synchronous construction errors, not
+// async stream errors (ingress+error-path audit 2026-07). Here we destroy the
+// response so the client sees a truncated transfer instead of a hung socket,
+// and the process survives.
+function safePipe(
+  source: NodeJS.ReadableStream,
+  res: express.Response,
+  label: string
+) {
+  source.on('error', (err: Error) => {
+    logger.error(`stream error while sending ${label}: ${err?.message || err}`);
+    if (!res.headersSent) {
+      res.status(502).end();
+    } else {
+      res.destroy(err);
+    }
+  });
+  return source.pipe(res);
+}
+
 // MongoDB ObjectIds are 24-character lowercase hex strings. Validating
 // before the Mongoose query prevents Mongoose's CastError from bubbling
 // up as a 500 — and short-circuits any URL-encoded path-traversal in
@@ -532,6 +556,30 @@ export default function () {
         }
       }
 
+      // InboxItem.sourcePdfUrl is a REAL B2 object key (the archived source of
+      // a Telegram-ingested bill, set at ingest — Slice 5), unlike the bill
+      // data-URIs above. A PENDING inbox item lives up to 30 days before the
+      // landlord confirms/dismisses it, so its archived source is a live,
+      // otherwise-unreferenced key: without this the reconcile would classify
+      // it as an orphan and DELETE the only copy of the incoming bill before
+      // it is ever confirmed (ingress+error-path audit 2026-07).
+      // Scope to status:'pending' ONLY (Step-7 F3): a CONFIRMED item's source is
+      // already referenced via the Bill's pdfUrl (confirm carries sourcePdfUrl
+      // onto Bill.pdfUrl), and a DISMISSED item's source is genuinely reclaimable
+      // — protecting all statuses would permanently pin dismissed sources (their
+      // rows never expire; the TTL index only reaps pending) and leak B2 forever.
+      const inboxItems: any[] = await Collections.InboxItem.find(
+        {
+          realmId: realm._id,
+          status: 'pending',
+          sourcePdfUrl: { $exists: true, $ne: '' }
+        },
+        { sourcePdfUrl: 1 }
+      ).lean();
+      for (const it of inboxItems) {
+        if (it.sourcePdfUrl) referenced.add(String(it.sourcePdfUrl));
+      }
+
       // 2. Every object B2 actually holds under this realm's prefix (with its
       // last-modified time — see the D3 age guard below).
       const prefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
@@ -677,7 +725,7 @@ export default function () {
         res.setHeader('Content-Type', mimeType);
         res.setHeader('Content-Disposition', contentDisposition);
         res.setHeader('X-Content-Type-Options', 'nosniff');
-        return fs.createReadStream(filePath).pipe(res);
+        return safePipe(fs.createReadStream(filePath), res, rawKey);
       }
       // S3/B2 fallback
       if (s3.isEnabled(realm?.thirdParties?.b2)) {
@@ -685,7 +733,11 @@ export default function () {
           res.setHeader('Content-Type', mimeType);
           res.setHeader('Content-Disposition', contentDisposition);
           res.setHeader('X-Content-Type-Options', 'nosniff');
-          return s3.downloadFile(realm.thirdParties.b2, rawKey).pipe(res);
+          return safePipe(
+            s3.downloadFile(realm.thirdParties.b2, rawKey),
+            res,
+            rawKey
+          );
         } catch (err) {
           logger.error(
             `cannot download ${rawKey} from s3: ${
@@ -837,7 +889,7 @@ export default function () {
             res.setHeader('Content-Type', mimeType);
             res.setHeader('Content-Disposition', contentDisposition);
             res.setHeader('X-Content-Type-Options', 'nosniff');
-            return fs.createReadStream(filePath).pipe(res);
+            return safePipe(fs.createReadStream(filePath), res, url);
           } catch (error) {
             logger.error(
               `cannot download file ${url} from file system`,
@@ -853,9 +905,11 @@ export default function () {
             res.setHeader('Content-Type', mimeType);
             res.setHeader('Content-Disposition', contentDisposition);
             res.setHeader('X-Content-Type-Options', 'nosniff');
-            return s3
-              .downloadFile((req as any).realm.thirdParties.b2, url)
-              .pipe(res);
+            return safePipe(
+              s3.downloadFile((req as any).realm.thirdParties.b2, url),
+              res,
+              url
+            );
           } catch (error) {
             logger.error(`cannot download file ${url} from s3`, error);
             throw new ServiceError('cannot download file', 404);

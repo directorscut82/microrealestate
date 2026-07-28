@@ -121,6 +121,76 @@ export async function confirm(req: Req, res: Res): Promise<void> {
 
   const row = Array.isArray(captured.body) ? captured.body[0] : undefined;
   if (!row || row.saveFailed) {
+    // A 409 duplicate needs disambiguation: if a crash landed BETWEEN the Bill
+    // save and the status flip below on a PRIOR confirm, the Bill already
+    // exists but the item is still pending — so every retry would 409 forever
+    // and the item is permanently stranded (ingress+error-path audit 2026-07).
+    // Reconcile idempotently, but ONLY when we can PROVE the existing bill is
+    // the exact one THIS confirm wrote (Step-7: billingId alone is too weak — it
+    // is the αριθμός παροχής, IDENTICAL across every monthly bill for the meter,
+    // so matching on it would silently confirm a DIFFERENT bill in the slot,
+    // e.g. an έναντι→εκκαθαριστικός clearing bill or a user-AMENDED amount, and
+    // discard its data). Require the occupying bill to match BOTH the same
+    // billingId AND the exact totalAmount this confirm is submitting: a genuine
+    // strand retry replays the identical payload, so both match; a different or
+    // amended bill differs in amount → falls through to a safe 409 that forces
+    // the landlord to use replaceExisting.
+    if (row?.status === 409) {
+      const resolvedTerm = term !== undefined ? term : p.proposedTerm;
+      const existing: any = await Collections.Bill.findOne({
+        realmId,
+        buildingId,
+        expenseId,
+        term: resolvedTerm
+      }).lean();
+      const itemBillingId = p.billingId;
+      const submittedTotal = Number(billPayload.totalAmount);
+      // Compare a submitted date field against the occupying bill's. Equal when
+      // both are absent, or both parse to the same day (ms tolerance). A
+      // mismatch means this confirm carries a DATE amendment the existing bill
+      // doesn't have → it is NOT the same bill → fall through to a safe 409 so
+      // the amendment isn't silently discarded (Step-7 round-2 LOW residual).
+      const sameDate = (a: any, b: any): boolean => {
+        const ta = a ? new Date(a).getTime() : NaN;
+        const tb = b ? new Date(b).getTime() : NaN;
+        const aMissing = !a || Number.isNaN(ta);
+        const bMissing = !b || Number.isNaN(tb);
+        if (aMissing && bMissing) return true;
+        if (aMissing !== bMissing) return false;
+        return Math.abs(ta - tb) <= 1000;
+      };
+      // Strand recovery requires POSITIVE identity, not merely absence of
+      // conflict (Step-7 round-3 latent LOW): require the period to be PRESENT
+      // and equal on both sides, so a hypothetical future date-less provider
+      // with a repeated identical amount + shared billingId can't false-match on
+      // sameDate(absent,absent)=true. Every real (DEH) bill has a period, so a
+      // genuine strand always satisfies this.
+      const periodPresentAndEqual =
+        !!billPayload.periodStart &&
+        !!existing?.periodStart &&
+        !!billPayload.periodEnd &&
+        !!existing?.periodEnd &&
+        sameDate(billPayload.periodStart, existing.periodStart) &&
+        sameDate(billPayload.periodEnd, existing.periodEnd);
+      const sameBill =
+        existing &&
+        itemBillingId &&
+        String(existing.billingId) === String(itemBillingId) &&
+        Number.isFinite(submittedTotal) &&
+        Math.abs(Number(existing.totalAmount) - submittedTotal) <= 0.005 &&
+        periodPresentAndEqual &&
+        // The optional dates must also match any submitted amendment.
+        sameDate(billPayload.issueDate, existing.issueDate) &&
+        sameDate(billPayload.dueDate, existing.dueDate);
+      if (sameBill) {
+        await Collections.InboxItem.updateOne(
+          { _id: id, realmId },
+          { $set: { status: 'confirmed', updatedDate: new Date() } }
+        );
+        res.json(existing);
+        return;
+      }
+    }
     // Surface the per-bill failure as a proper HTTP error — the item stays
     // pending so the landlord can amend and retry (or dismiss).
     throw new ServiceError(

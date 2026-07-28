@@ -1088,6 +1088,8 @@
   "Payment of {{amount}} recorded": "Pago de {{amount}} registrado",
   "Over-allocated by {{amount}}": "Over-allocated by {{amount}}",
   "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} of this payment is unallocated and will not be recorded.",
+  "This exact payment was already recorded. To record a separate one, change the reference or date.": "Este pago exacto ya fue registrado. Para registrar uno distinto, cambie la referencia o la fecha.",
+  "Recorded. Part of this payment had already been recorded — check the payment history.": "Registrado. Parte de este pago ya había sido registrada; revise el historial de pagos.",
   "Split": "Dividido",
   "Unassigned": "Sin asignar",
   "Tenant settlements": "Liquidaciones de inquilinos",

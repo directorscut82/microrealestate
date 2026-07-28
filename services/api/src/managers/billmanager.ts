@@ -514,6 +514,17 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           422
         );
       }
+      // Upper bound (ingress+error-path audit 2026-07). OCR/parse can drop a
+      // decimal point (45,00 → 4500000) or fuse a billing-id digit into the
+      // amount; a €1,000,000 cap is orders of magnitude above any real utility
+      // or repair bill, so it never rejects a legitimate figure but stops an
+      // absurd misread from poisoning dashboards and the tenant-charge bridge.
+      if (_ta > 1_000_000) {
+        throw new ServiceError(
+          `Bill totalAmount is implausibly large (got ${totalAmount}); check for an OCR misread`,
+          422
+        );
+      }
 
       // Tier A6 (B3) — Bill date validation. periodStart and periodEnd are
       // required and must be valid dates with periodStart ≤ periodEnd.
@@ -1527,12 +1538,27 @@ export async function startRecapture(req: Req, res: Res): Promise<void> {
     throw new ServiceError('Unauthorized', 401);
   }
   const target = req.body?.target === 'iban' ? 'iban' : 'rf';
+  // Bind the session to the bill being corrected (normalized billingId) so the
+  // poller refuses a re-shot that parses to a DIFFERENT bill (recapture-hijack
+  // HIGH). Optional — a bill still capturing its billingId sends none, and the
+  // timestamp gate still protects.
+  const rawBillingId = req.body?.billingId;
+  const expectedBillingId =
+    typeof rawBillingId === 'string' && rawBillingId.trim()
+      ? normalizeBillingId(rawBillingId.trim())
+      : undefined;
   const { startSession } = await import('./recapturesession.js');
   const id = `${realmId}-${Date.now()}-${Math.floor(
     // eslint-disable-next-line no-bitwise
     (typeof performance !== 'undefined' ? performance.now() : Date.now()) % 1e6
   )}`;
-  const s = startSession(String(realmId), target, Date.now(), id);
+  const s = startSession(
+    String(realmId),
+    target,
+    Date.now(),
+    id,
+    expectedBillingId
+  );
   res.json({ id: s.id, target: s.target, expiresAt: s.expiresAt });
 }
 

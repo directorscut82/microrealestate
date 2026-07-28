@@ -254,7 +254,7 @@ export async function checkExpiringLeases(
         'administrator',
         String(tenant.realmId)
       );
-      await postEmail(
+      const emailResp = await postEmail(
         emailerUrl,
         {
           templateName: TEMPLATE_NAME,
@@ -269,6 +269,27 @@ export async function checkExpiringLeases(
           organizationid: String(tenant.realmId)
         }
       );
+      // X1-sibling (ingress+error-path audit 2026-07): the emailer answers
+      // HTTP 200 with a per-recipient EMBEDDED error ({status:{id:null,error}})
+      // when the provider rejects (Promise.allSettled). Awaiting the POST is
+      // NOT proof of delivery — inspect the rows and treat an embedded error as
+      // a failure, so a bounced lease-expiry notice does NOT get markSent
+      // (which would permanently suppress the window). Mirrors emailmanager X1.
+      const rows: any[] = Array.isArray(emailResp?.data)
+        ? emailResp.data
+        : Array.isArray(emailResp)
+          ? emailResp
+          : [];
+      const embeddedError = rows.find(
+        (r: any) => r?.status?.error || (r?.status && r.status.id === null)
+      );
+      if (embeddedError) {
+        result.errors++;
+        logger.error(
+          `lease-expiry-notice bounced for tenant ${tenant._id} (window ${daysUntil}) — NOT marking sent: ${String(embeddedError.status?.error || 'delivery failed')}`
+        );
+        continue;
+      }
       await markSent(String(tenant._id), now, daysUntil);
       result.sent++;
       logger.info(

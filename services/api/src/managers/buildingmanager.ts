@@ -3448,12 +3448,34 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
 
-  // Recompute rents for all tenants linked to this building
+  // Recompute rents for all tenants linked to this building. The building
+  // (the authoritative statement) is already saved; these per-property
+  // recomputes are DERIVED. mongo 4.4 standalone has no multi-doc transaction,
+  // so if one property throws we must NOT abort the loop — that would leave the
+  // remaining properties' tenants stale on top of the failed one (a WIDER torn
+  // state). Instead attempt every property, collect failures, and surface them
+  // so the caller retries. The whole op is idempotent: re-saving preserves
+  // inputAmount and _recomputeVacantOwnerCharges dedups, and each recompute
+  // re-reads fresh tenant state (ingress+error-path audit 2026-07).
   const propertyIds = units
     .filter((u: any) => u.propertyId)
     .map((u: any) => String(u.propertyId));
+  const recomputeFailures: string[] = [];
   for (const propId of propertyIds) {
-    await _recomputeTenantsForProperty(realm!._id, propId);
+    try {
+      await _recomputeTenantsForProperty(realm!._id, propId);
+    } catch (err: any) {
+      recomputeFailures.push(propId);
+      logger.error(
+        `saveMonthlyStatement: tenant recompute failed for property ${propId} (building ${id}); statement saved, retry to reconcile: ${err?.message || err}`
+      );
+    }
+  }
+  if (recomputeFailures.length) {
+    throw new ServiceError(
+      `Statement saved, but rent recompute failed for ${recomputeFailures.length} unit(s). Retry to reconcile.`,
+      503
+    );
   }
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);

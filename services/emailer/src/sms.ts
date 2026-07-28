@@ -58,7 +58,8 @@ export async function sendSms(
       },
       {
         auth: { username: config.username, password: config.password },
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 20_000
       }
     );
     logger.info(`SMS sent to ${normalized}: ${response.data.id}`);

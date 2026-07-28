@@ -1223,6 +1223,8 @@
   "Payment of {{amount}} recorded": "Καταγράφηκε καταβολή {{amount}}",
   "Over-allocated by {{amount}}": "Υπερκατανομή κατά {{amount}}",
   "{{amount}} of this payment is unallocated and will not be recorded.": "{{amount}} αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν.",
+  "This exact payment was already recorded. To record a separate one, change the reference or date.": "Αυτή ακριβώς η καταβολή έχει ήδη καταγραφεί. Για να καταγράψετε ξεχωριστή, αλλάξτε την αναφορά ή την ημερομηνία.",
+  "Recorded. Part of this payment had already been recorded — check the payment history.": "Καταγράφηκε. Μέρος αυτής της καταβολής είχε ήδη καταγραφεί — ελέγξτε το ιστορικό καταβολών.",
   "Split": "Επιμερισμός",
   "Unassigned": "Χωρίς ανάθεση",
   "Tenant settlements": "Εκκαθαριστικά ενοικιαστών",

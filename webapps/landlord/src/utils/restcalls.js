@@ -613,10 +613,13 @@ export async function confirmReceiptPayments(payments) {
 }
 
 // Slice 6 Tier-2 — open a Telegram re-capture session for a checksum-failed
-// RF/IBAN. target is 'rf'|'iban'. Returns { id, target, expiresAt }.
-export async function startRecapture(target) {
+// RF/IBAN. target is 'rf'|'iban'. billingId (optional) binds the session to the
+// bill being corrected so the poller refuses a re-shot of a DIFFERENT bill.
+// Returns { id, target, expiresAt }.
+export async function startRecapture(target, billingId) {
   const response = await apiFetcher().post('/bills/recapture/start', {
-    target
+    target,
+    ...(billingId ? { billingId } : {})
   });
   return response.data;
 }

@@ -14,9 +14,12 @@ function _initS3(b2Config: B2Config): AWS.S3 {
     Crypto.decrypt(b2Config.keyId),
     Crypto.decrypt(b2Config.applicationKey)
   );
-  AWS.config.credentials = credentials;
   const ep = new AWS.Endpoint(b2Config.endpoint);
-  return new AWS.S3({ endpoint: ep });
+  // Pass credentials INTO this client, not the global AWS.config — two
+  // concurrent requests for different realms would otherwise clobber each
+  // other's global credentials mid-flight and cross-write buckets
+  // (ingress+error-path audit 2026-07).
+  return new AWS.S3({ endpoint: ep, credentials });
 }
 
 export function isEnabled(b2Config: Partial<B2Config> | undefined | null): boolean {
@@ -173,6 +176,21 @@ export function deleteFiles(
           if (err) {
             logger.error(err);
             return reject(err);
+          }
+          // deleteObjects is a BATCH op: it returns HTTP 200 even when some
+          // keys failed to delete, listing them in data.Errors[]. Treating
+          // that as success leaks objects in B2 and lets the reconcile pass
+          // record a delete that never happened (ingress+error-path audit
+          // 2026-07). Surface a partial failure to the caller.
+          if (data.Errors && data.Errors.length) {
+            logger.error(
+              `deleteObjects partial failure: ${JSON.stringify(data.Errors)}`
+            );
+            return reject(
+              new Error(
+                `deleteObjects failed for ${data.Errors.length} key(s): ${data.Errors.map((e) => `${e.Key}(${e.Code})`).join(', ')}`
+              )
+            );
           }
           logger.debug({ data });
           resolve(data);

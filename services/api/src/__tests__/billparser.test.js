@@ -1,4 +1,8 @@
 import { parseDehBill } from '../managers/billparser/deh.js';
+import {
+  detectProvider,
+  looksLikeFullBillText
+} from '../managers/billparser/index.js';
 import { normalizeBillingId } from '../managers/billparser/types.js';
 
 // Simulated text extraction from the actual DEH bill PDF
@@ -234,6 +238,73 @@ describe('DEH Bill Parser', () => {
       const parsed = normalizeBillingId('9 99000935-03 2');
       // Stored may be a prefix of parsed (check digit variation)
       expect(parsed.startsWith(stored)).toBe(true);
+    });
+  });
+
+  // Step-7 (recapture-hijack follow-up): the recapture gate treats "a provider
+  // marker was recognized" as "this photo IS a full utility bill" so it is NOT
+  // swallowed as a single-code re-shot on an unbound session. detectProvider is
+  // that signal, and it must fire for EYDAP/EPA too — not just the fully-parsed
+  // DEH — or those (ubiquitous) bills leak through the gate.
+  describe('detectProvider (recapture-gate signal)', () => {
+    it('detects DEH', () => {
+      expect(detectProvider(DEH_BILL_TEXT)).toBe('deh');
+    });
+
+    it('detects EYDAP (unsupported-but-recognized water bill)', () => {
+      expect(detectProvider('ΕΥΔΑΠ Α.Ε.\nΛογαριασμός Ύδρευσης\neydap.gr')).toBe(
+        'eydap'
+      );
+    });
+
+    it('detects EPA / ΔΕΠΑ (unsupported-but-recognized gas bill)', () => {
+      expect(detectProvider('Φυσικό Αέριο Αττικής\nΔΕΠΑ')).toBe('epa');
+      expect(detectProvider('epa.gr λογαριασμός')).toBe('epa');
+    });
+
+    it('returns null for a payment receipt / single-code zoom (no bill marker)', () => {
+      // A receipt or an RF-line zoom carries no provider marker → not a bill →
+      // the gate must let it through as a possible re-shot.
+      expect(
+        detectProvider('ΑΠΟΔΕΙΞΗ ΠΛΗΡΩΜΗΣ\nRF33999000000000000000001\n186,21€')
+      ).toBeNull();
+      expect(detectProvider('RF33999000000000000000001')).toBeNull();
+    });
+  });
+
+  // Step-7 round-4 residual C: provider-AGNOSTIC full-bill signal. A garbled-OCR
+  // DEH scan or an unlisted retailer (no provider marker) must still be caught
+  // as a full bill by text VOLUME, so it isn't swallowed as a re-shot on an open
+  // recapture session — without false-rejecting a genuine short code-line zoom.
+  describe('looksLikeFullBillText (provider-agnostic backstop)', () => {
+    it('true for a full DEH bill (hundreds of chars)', () => {
+      expect(looksLikeFullBillText(DEH_BILL_TEXT)).toBe(true);
+    });
+
+    it('true for an UNLISTED-provider full bill (no marker, still document-sized)', () => {
+      // ~400 chars of a bill from a retailer detectProvider does not know.
+      const unlisted =
+        'ELPEDISON ΛΟΓΑΡΙΑΣΜΟΣ ΡΕΥΜΑΤΟΣ '.repeat(15) +
+        'RF12000000000000000000000';
+      expect(detectProvider(unlisted)).toBeNull(); // marker gate misses it
+      expect(looksLikeFullBillText(unlisted)).toBe(true); // volume gate catches it
+    });
+
+    it('false for a genuine single RF-line zoom (short)', () => {
+      expect(looksLikeFullBillText('RF33999000000000000000001')).toBe(false);
+    });
+
+    it('false for a small multi-line code crop (still under the threshold)', () => {
+      expect(
+        looksLikeFullBillText(
+          'Κωδικός πληρωμής\nRF33999000000000000000001\nGR3301109999990000000000001'
+        )
+      ).toBe(false);
+    });
+
+    it('false for empty / undefined', () => {
+      expect(looksLikeFullBillText('')).toBe(false);
+      expect(looksLikeFullBillText(undefined)).toBe(false);
     });
   });
 });

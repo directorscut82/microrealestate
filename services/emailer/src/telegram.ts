@@ -46,7 +46,7 @@ export async function sendTelegram(
     const response = await axios.post(
       `https://api.telegram.org/bot${config.botToken}/sendMessage`,
       { chat_id: target, text, disable_web_page_preview: true },
-      { headers: { 'Content-Type': 'application/json' } }
+      { headers: { 'Content-Type': 'application/json' }, timeout: 20_000 }
     );
     const messageId = response.data?.result?.message_id;
     logger.info(`Telegram sent to ${target}: ${messageId}`);
@@ -92,13 +92,31 @@ export async function sendTelegramDocument(
     path.basename(filePath)
   );
 
-  const resp = await fetch(
-    `https://api.telegram.org/bot${config.botToken}/sendDocument`,
-    { method: 'POST', body: form }
-  );
-  const data: any = await resp.json();
+  // Bound the upload — native fetch has no default timeout, so a hung Telegram
+  // connection would pin this request thread forever (ingress+error-path audit
+  // 2026-07). 30s covers a multi-MB PDF upload.
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 30_000);
+  let data: any;
+  let status = 0;
+  try {
+    const resp = await fetch(
+      `https://api.telegram.org/bot${config.botToken}/sendDocument`,
+      { method: 'POST', body: form, signal: ac.signal }
+    );
+    status = resp.status;
+    // Read the body INSIDE the timeout window — a server that returns headers
+    // then stalls the body would otherwise hang here unbounded (Step-7 F3).
+    data = await resp.json();
+  } catch (err: any) {
+    const msg = ac.signal.aborted ? 'timeout after 30s' : err?.message || err;
+    logger.error(`Telegram document to ${target} failed: ${msg}`);
+    throw new Error(`Telegram failed: ${msg}`);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!data?.ok) {
-    const msg = data?.description || `HTTP ${resp.status}`;
+    const msg = data?.description || `HTTP ${status}`;
     logger.error(`Telegram document to ${target} failed: ${msg}`);
     throw new Error(`Telegram failed: ${msg}`);
   }

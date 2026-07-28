@@ -162,21 +162,69 @@ function exposeFrontends(application: Express.Application) {
   }
 }
 
+// Shared error handler for the service proxies. Without an onError, an
+// unreachable/timed-out upstream leaves the client socket hanging until the
+// browser gives up (no response is ever written) — the gateway looks "down"
+// (ingress+error-path audit 2026-07). Emit a clean 502/504 instead.
+function proxyErrorHandler(
+  err: NodeJS.ErrnoException,
+  _req: Express.Request,
+  res: Express.Response
+) {
+  const timedOut = err?.code === 'ECONNRESET' || err?.code === 'ETIMEDOUT';
+  logger.error(`gateway proxy error: ${err?.code || ''} ${err?.message || err}`);
+  // res may be a plain socket (ws upgrade) with no writeHead — guard it.
+  if (res && typeof (res as any).writeHead === 'function' && !res.headersSent) {
+    res.writeHead(timedOut ? 504 : 502, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({ error: timedOut ? 'upstream timeout' : 'bad gateway' })
+    );
+  } else if (res && typeof (res as any).end === 'function') {
+    (res as any).end();
+  }
+}
+
+// proxyTimeout bounds the gateway→upstream leg; timeout bounds the
+// client→gateway incoming socket.
+//
+// STANDARD (60s) — for quick money/CRUD/auth endpoints. None legitimately take
+// this long, so 60s is a fast-fail backstop against a wedged upstream (hung
+// mongo query).
+//
+// HEAVY (300s) — for the synchronous OCR / PDF-render routes. These emit NO
+// intermediate bytes before completing, so http-proxy's idle timer equals
+// wall-clock; a tight 60s would 504 the app's OWN bill-parse (up to 20 images,
+// OCR serialized) and PDF generation (per-render cap 120s) MID-OPERATION and
+// orphan the work (Step-7). The upstream services already bound each unit of
+// work at the source (OCR 120s/page in billparser/ocr.ts, page.goto/page.pdf
+// 120s in chromeheadless.ts), so an infinite hang is prevented there; this
+// larger value is only a coarse backstop covering a realistic multi-image
+// batch. (A pathological 20-image upload on a 1-thread container could still
+// exceed 300s and 504 — an accepted extreme edge, far rarer than severing every
+// 2-image parse at 60s.)
+const PROXY_TIMEOUTS = { proxyTimeout: 60_000, timeout: 65_000 };
+const HEAVY_PROXY_TIMEOUTS = { proxyTimeout: 300_000, timeout: 305_000 };
+
 function exposeServices(application: Express.Application) {
   const config = Service.getInstance().envConfig.getValues();
   application.use(
     '/api/v2/authenticator',
     createProxyMiddleware({
       target: config.AUTHENTICATOR_URL,
-      pathRewrite: { '^/api/v2/authenticator': '' }
+      pathRewrite: { '^/api/v2/authenticator': '' },
+      ...PROXY_TIMEOUTS,
+      onError: proxyErrorHandler
     })
   );
 
+  // PDF generation renders synchronously before streaming — HEAVY budget.
   application.use(
     '/api/v2/documents',
     createProxyMiddleware({
       target: config.PDFGENERATOR_URL,
-      pathRewrite: { '^/api/v2': '' }
+      pathRewrite: { '^/api/v2': '' },
+      ...HEAVY_PROXY_TIMEOUTS,
+      onError: proxyErrorHandler
     })
   );
 
@@ -184,15 +232,45 @@ function exposeServices(application: Express.Application) {
     '/api/v2/templates',
     createProxyMiddleware({
       target: config.PDFGENERATOR_URL,
-      pathRewrite: { '^/api/v2': '' }
+      pathRewrite: { '^/api/v2': '' },
+      ...HEAVY_PROXY_TIMEOUTS,
+      onError: proxyErrorHandler
     })
   );
+
+  // Slow synchronous api routes — HEAVY budget. Mounted BEFORE the /api/v2
+  // catch-all so the more-specific path wins (Express first-match); everything
+  // else on /api/v2 keeps the tight STANDARD backstop.
+  //   - /bills/*: the whole namespace. /bills/parse + /bills/payment-receipt run
+  //     seconds of serialized OCR; /bills/:id/attach-source does a B2 upload
+  //     (Step-7 round-2 LOW). The quick CRUD bill routes complete in <1s, so the
+  //     larger backstop never bites them — it only prevents a 60s cap from
+  //     severing the genuinely slow ones. Covering the namespace also avoids a
+  //     fragile `:id`-in-the-middle mount for attach-source.
+  //   - /emails/*: the api renders a PDF then waits on the emailer's own send
+  //     (PDF fetch 30s + SMTP up to 70s ≈ 100s; api EMAILER_TIMEOUT is 120s).
+  //     A tight 60s gateway cap here would 504 the browser↔api leg mid-send and
+  //     the landlord's retry would DOUBLE-send (Step-7 round-2). The gateway
+  //     budget must be the OUTERMOST, so it exceeds the api's downstream wait.
+  for (const heavyPath of ['/api/v2/bills', '/api/v2/emails']) {
+    application.use(
+      heavyPath,
+      createProxyMiddleware({
+        target: config.API_URL,
+        pathRewrite: { '^/api/v2': '' },
+        ...HEAVY_PROXY_TIMEOUTS,
+        onError: proxyErrorHandler
+      })
+    );
+  }
 
   application.use(
     '/api/v2',
     createProxyMiddleware({
       target: config.API_URL,
-      pathRewrite: { '^/api/v2': '' }
+      pathRewrite: { '^/api/v2': '' },
+      ...PROXY_TIMEOUTS,
+      onError: proxyErrorHandler
     })
   );
 
@@ -200,7 +278,9 @@ function exposeServices(application: Express.Application) {
     '/tenantapi',
     createProxyMiddleware({
       target: config.TENANTAPI_URL,
-      pathRewrite: { '^/tenantapi': '' }
+      pathRewrite: { '^/tenantapi': '' },
+      ...PROXY_TIMEOUTS,
+      onError: proxyErrorHandler
     })
   );
 

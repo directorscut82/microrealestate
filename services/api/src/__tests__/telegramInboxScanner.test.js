@@ -247,29 +247,63 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     expect(state.offsets['realm-1']).toBe(42); // committed through 1001 only
   });
 
-  it('a POISON update is skipped after the retry budget (queue not wedged)', async () => {
-    // The SAME update fails on every tick. It must not wedge the queue forever:
-    // after MAX_UPDATE_RETRIES (5) consecutive failures the poller skips past it
-    // and advances. Simulate 5 ticks against a persistently-failing update.
-    const failing = async () => {
-      throw new Error('permanently bad file');
-    };
+  it('a POISON update is skipped after the retry budget, recording a placeholder (queue not wedged)', async () => {
+    // A genuinely poison update: HANDLING fails on every tick (here the file
+    // download throws) but mongo is healthy so the placeholder write succeeds.
+    // After MAX_UPDATE_RETRIES (5) the poller records a VISIBLE placeholder
+    // InboxItem and advances past it — the landlord sees "a message arrived
+    // that couldn't be processed" rather than silence, and the queue isn't
+    // wedged forever (ingress+error-path audit 2026-07).
     let last = 0;
+    let lastState;
     for (let tick = 1; tick <= 5; tick++) {
       const { deps, state } = makeDeps({
         updates: [photoMsg(42, 1001)],
         initialOffset: last
       });
-      deps.createInboxItem = failing;
+      // Handling fails (download throws) — NOT the mongo write.
+      deps.downloadFile = async () => {
+        throw new Error('permanently bad file');
+      };
       // eslint-disable-next-line no-await-in-loop
       const r = await scanTelegramInbox(deps);
       expect(r.errors).toBe(1);
       if (tick < 5) {
         expect(state.setOffsetCalls).toHaveLength(0); // held for retry
+        expect(state.created).toHaveLength(0); // no placeholder yet
       } else {
         expect(state.offsets['realm-1']).toBe(42); // 5th → skipped past
         last = state.offsets['realm-1'];
+        lastState = state;
       }
+    }
+    // The skip recorded a visible placeholder with a parseError, keyed to the
+    // message so the dedup index still holds.
+    expect(lastState.created).toHaveLength(1);
+    expect(lastState.created[0].telegramMessageId).toBe(1001);
+    expect(lastState.created[0].parseError).toBeTruthy();
+    expect(lastState.created[0].status).toBe('pending');
+  });
+
+  it('a persistently-failing mongo write is TRANSIENT — offset never advances (bill preserved)', async () => {
+    // If the mongo write itself keeps failing, that is infra-down (transient),
+    // NOT a poison message. Advancing the offset would permanently drop the
+    // bill after only ~5min of outage. So even past the retry budget the poller
+    // must hold the offset and keep retrying (ingress+error-path audit 2026-07).
+    for (let tick = 1; tick <= 7; tick++) {
+      const { deps, state } = makeDeps({
+        updates: [photoMsg(42, 1001)],
+        initialOffset: 0
+      });
+      // BOTH the ingest write and the placeholder write fail → mongo is down.
+      deps.createInboxItem = async () => {
+        throw new Error('mongo down');
+      };
+      // eslint-disable-next-line no-await-in-loop
+      const r = await scanTelegramInbox(deps);
+      expect(r.errors).toBe(1);
+      expect(state.setOffsetCalls).toHaveLength(0); // never advances
+      expect(state.offsets['realm-1']).toBe(0); // bill preserved for next tick
     }
   });
 

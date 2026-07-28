@@ -17,6 +17,7 @@ import NumberFormat from '../NumberFormat';
 import useFormatNumber from '../../hooks/useFormatNumber';
 import { Textarea } from '../ui/textarea';
 import { ownerChargeLabel } from '../../utils/lineLabels';
+import { stableOwnerTxnId } from '../../utils/ownerPayment';
 import {
   Select,
   SelectContent,
@@ -149,17 +150,25 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
       d.mode === 'custom'
         ? _round(allocation.reduce((s, a) => s + a.amount, 0))
         : amt;
+    const base = {
+      date: d.date,
+      amount: payloadAmount,
+      type: d.type,
+      reference: d.reference,
+      description: d.description,
+      ...(allocation ? { allocation } : {})
+    };
     return {
       payload: {
-        date: d.date,
-        amount: payloadAmount,
-        type: d.type,
-        reference: d.reference,
-        description: d.description,
-        ...(allocation ? { allocation } : {})
+        ...base,
+        // Content-derived idempotency key so a retry of the SAME payment (even
+        // after a dialog close/reopen or refresh) reconciles server-side and
+        // records only the not-yet-landed remainder — never double-records a
+        // partial multi-building commit (Step-7 round-5).
+        txnId: stableOwnerTxnId(owner.ownerKey, base)
       }
     };
-  }, [t]);
+  }, [t, owner.ownerKey]);
 
   // Refresh every owner/expense surface AND block until the owners cache is
   // fresh — same contract the tenant dialog uses (PaymentTabs await-refetch)
@@ -200,6 +209,8 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
     setSaving(true);
     const committedDraftIndexes = [];
     let allocatedTotal = 0;
+    let anyAlreadyRecorded = false;
+    let anyReconciled = false;
     try {
       for (const it of items) {
         // Report the server's ACTUALLY-allocated sum, never the typed amount —
@@ -207,28 +218,64 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
         // ledger), so the typed figure would over-state what landed.
         const res = await mutation.mutateAsync(it.payload);
         committedDraftIndexes.push(it.draftIndex);
+        // The content-derived txnId dedups a retry, but two GENUINELY-separate
+        // payments with identical content (owner+amount+date+type+reference+
+        // allocation) collide on the same key, so the server treats the 2nd as
+        // an already-recorded retry: alreadyRecorded (nothing written) or
+        // reconciledTotal (only the remainder written). Surface BOTH so neither
+        // the full-drop nor the PARTIAL case is ever a silent mis-report — the
+        // landlord can add a reference/change the date to record a distinct
+        // second payment (Step-7 rounds 5-6).
+        if (res?.alreadyRecorded) anyAlreadyRecorded = true;
+        if (Number(res?.reconciledTotal) > 0.005) anyReconciled = true;
         const landed = Number(res?.allocatedTotal);
         allocatedTotal += Number.isFinite(landed)
           ? landed
           : Number(it.payload.amount) || 0;
       }
       await refreshOwners();
-      toast.success(
-        // R2-M6: org locale/currency, €-free key.
-        t('Payment of {{amount}} recorded', {
-          amount: formatNumber(allocatedTotal)
-        })
-      );
+      if (anyAlreadyRecorded) {
+        toast.warning(
+          t(
+            'This exact payment was already recorded. To record a separate one, change the reference or date.'
+          )
+        );
+      } else if (anyReconciled) {
+        // Part of the submit matched slices already recorded under the same
+        // key — either THIS payment's own earlier partial landing (a
+        // multi-building partial-commit retry, the common case) or an
+        // identical earlier payment (hash-key collision, astronomically rare).
+        // The total includes those, so tell the landlord to VERIFY rather than
+        // report plain success for money that partly landed earlier. Wording
+        // covers both cases accurately (Step-7 round-6 LOW).
+        toast.warning(
+          t(
+            'Recorded. Part of this payment had already been recorded — check the payment history.'
+          )
+        );
+      } else {
+        toast.success(
+          // R2-M6: org locale/currency, €-free key.
+          t('Payment of {{amount}} recorded', {
+            amount: formatNumber(allocatedTotal)
+          })
+        );
+      }
       setOpen(false);
     } catch (e) {
-      // Drop the drafts that already committed so a retry can't double-pay,
-      // and refresh so any remaining drafts re-validate against live
-      // outstanding. The dialog stays open with only the UNcommitted drafts.
+      // Drop the drafts that already committed so a retry can't double-pay.
       if (committedDraftIndexes.length > 0) {
         const committed = new Set(committedDraftIndexes);
         setDrafts((prev) => prev.filter((_, i) => !committed.has(i)));
-        await refreshOwners();
       }
+      // ALWAYS refresh after a failure — a partial MULTI-BUILDING commit inside
+      // a SINGLE draft's own request surfaces as a 409 with committedDraftIndexes
+      // still empty (the push happens only on success), yet slices DID land
+      // server-side. Refreshing unconditionally re-reads the reduced outstanding
+      // so the remaining/re-submitted drafts validate against live state (the
+      // content-derived txnId is the durable safety net; this keeps the UI
+      // honest too). Step-7 round-5.
+      await refreshOwners();
       const msg =
         e?.response?.data?.error ||
         e?.response?.data?.message ||
