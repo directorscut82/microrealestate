@@ -512,7 +512,7 @@ test('43.10 · trackOwnerExpense toggle exposes ownerAmount field with default 0
   await expect(ownerAmount).toHaveValue('0');
 });
 
-test('43.11 · F3-expense · chargeOwnerWhenVacant Switch is disabled with "coming soon" label', async ({ page }) => {
+test('43.11 · F3-expense · chargeOwnerWhenVacant Switch is ENABLED (vacant-owner billing shipped; no longer "coming soon")', async ({ page }) => {
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeedRichBuilding(apiCtx);
@@ -522,8 +522,16 @@ test('43.11 · F3-expense · chargeOwnerWhenVacant Switch is disabled with "comi
   await openAddDialog(page);
   const sw = page.locator('[role=dialog] #chargeOwnerWhenVacant');
   await expect(sw).toBeVisible({ timeout: 5_000 });
-  await expect(sw).toBeDisabled();
-  await expect(page.locator('[role=dialog] label[for="chargeOwnerWhenVacant"]').filter({ hasText: /coming soon|σύντομα/i })).toBeVisible();
+  // Vacant-owner billing SHIPPED (978bf92b → current). The Switch is now
+  // ENABLED and the "coming soon" stub is gone. This spec previously asserted
+  // the OPPOSITE and had been failing ever since the feature shipped — it was
+  // never updated. Mirrors spec 41.11.
+  await expect(sw).toBeEnabled();
+  await expect(
+    page
+      .locator('[role=dialog] label[for="chargeOwnerWhenVacant"]')
+      .filter({ hasText: /coming soon|σύντομα|συντομα/i })
+  ).toHaveCount(0);
 });
 
 test('43.12 · edit existing expense round-trips fields; toggling trackOwnerExpense off resets ownerAmount=0 server-side', async ({ page }) => {
