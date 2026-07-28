@@ -139,6 +139,35 @@ async function addUnit(
 }
 
 /**
+ * Precondition for any test that seeds a `general_thousandths` expense.
+ *
+ * Since c6ec4958 (2026-07-06) the server REJECTS a thousandths allocation
+ * method on a building whose units carry no thousandths — otherwise the
+ * per-unit shares divide by a zero denominator and the money evaporates. A
+ * bare `createFreshBuilding` has no units at all, so every such expense POST
+ * 422s during seed. Attach one vacant, thousandths-bearing unit.
+ *
+ * `vacant` is the deliberate choice: it needs no linked property (unlike
+ * owner_occupied, which the server also rejects without one) and contributes
+ * ZERO income, so the dashboard-headline arithmetic each caller asserts is
+ * unchanged. The unit is NOT given a propertyId, so it generates no
+ * owner-resident ledger rows either.
+ */
+async function addThousandthsBearingUnit(
+  api: APIRequestContext,
+  base: BaseSeed,
+  buildingId: string,
+  tag: string
+): Promise<string> {
+  return addUnit(api, base, buildingId, {
+    atakNumber: `S41-${tag}-THOU`,
+    isManaged: true,
+    occupancyType: 'vacant',
+    generalThousandths: 1000
+  });
+}
+
+/**
  * Add a building expense.
  */
 async function addExpense(
@@ -163,6 +192,36 @@ async function addExpense(
   const e = (j.expenses || []).find((x) => x.name === name);
   if (!e) throw new Error(`Expense ${name} missing from response`);
   return e._id;
+}
+
+/**
+ * Create a property with NO tenant. Needed for an `owner_occupied` unit: the
+ * server rejects owner-occupancy without a linked property (buildingmanager
+ * ~2202 — the breakdown skips property-less units, so the owner's genuine
+ * share would silently route to €0). No tenant is attached, so the unit stays
+ * zero-income for the headline assertions.
+ */
+async function createBareProperty(
+  api: APIRequestContext,
+  base: BaseSeed,
+  scenarioTag: string
+): Promise<string> {
+  const headers = authHeaders(base.token, base.realmId);
+  const r = await api.post(`${GATEWAY}/api/v2/properties`, {
+    headers,
+    data: {
+      name: `E2E-S41-${scenarioTag}-Prop-${RUN_ID}`,
+      type: 'apartment',
+      rent: 0,
+      surface: 50,
+      address: { street1: 'E2E', city: 'Athens', zipCode: '00000' }
+    }
+  });
+  expect(
+    [200, 201],
+    `create bare property (status=${r.status()}, body=${await r.text().catch(() => '')})`
+  ).toContain(r.status());
+  return ((await r.json()) as { _id: string })._id;
 }
 
 /**
@@ -258,6 +317,20 @@ async function signIn(page: import('@playwright/test').Page) {
   await page.locator('[data-cy=submit]').first().click();
   await expect
     .poll(() => new URL(page.url()).pathname, { timeout: 20_000 })
+    .toMatch(/\/(firstaccess|dashboard)/);
+}
+
+/**
+ * Sign in on the `el` locale segment — the realm's ACTUAL language. Used by
+ * the tests that read rendered Greek labels (UI-review rule: never review /en).
+ */
+async function signInGreek(page: import('@playwright/test').Page) {
+  await page.goto('el/signin');
+  await page.locator('input[name=email]').fill(TEST_EMAIL);
+  await page.locator('input[name=password]').fill(TEST_PASSWORD);
+  await page.locator('[data-cy=submit]').first().click();
+  await expect
+    .poll(() => new URL(page.url()).pathname, { timeout: 25_000 })
     .toMatch(/\/(firstaccess|dashboard)/);
 }
 
@@ -381,10 +454,25 @@ async function fetchBuildingFinance(
 
   const recordedOwnerEksoda = (building.ownerMonthlyExpenses || [])
     .filter((e: any) => Math.floor(Number(e.term || 0) / 1000000) === currentYear)
-    // Mirror production: exclude source:'vacant' (the building-expense vacant
-    // share is already counted whole in recurringMonthlyEksoda*12); keep
-    // 'repair-vacant'/'repair'/'expense' which are counted nowhere else.
-    .filter((e: any) => e.source !== 'vacant')
+    // Mirror production (BuildingDashboard.js recordedOwnerEksoda) EXACTLY —
+    // three exclusions, not one:
+    //  - 'vacant' and its occupancy-twin 'owner-resident': a vacant/owner-
+    //    occupied unit's share of a recurring building expense is already
+    //    counted whole in recurringMonthlyEksoda*12 (routing changes WHO pays,
+    //    not the building total).
+    //  - 'owner-fixed': the materialised per-term rows for a fixed owner-only
+    //    amount; the annual headline counts that money via the
+    //    fixedOwnerProrated projection below, so counting the rows too
+    //    double-counts.
+    // 'repair-vacant'/'repair'/'expense' are counted nowhere else, so they stay.
+    // This mirror previously excluded only 'vacant', which made the mirror —
+    // not production — the thing that double-counted (41.8 read 700 vs 600).
+    .filter(
+      (e: any) =>
+        e.source !== 'vacant' &&
+        e.source !== 'owner-resident' &&
+        e.source !== 'owner-fixed'
+    )
     .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
 
   const fixedOwnerProrated = (building.expenses || [])
@@ -516,10 +604,13 @@ test('41.2 · mixed occupancy (rented+vacant+owner+parking) → annualEsoda = re
       occupancyType: 'vacant',
       generalThousandths: 250
     });
+    // owner_occupied REQUIRES a linked property server-side, so give it a
+    // tenant-less one: still zero income, but the write is legal.
     await addUnit(api, base, buildingId, {
       atakNumber: 'S41-MIX-OWNER',
       isManaged: true,
       occupancyType: 'owner_occupied',
+      propertyId: await createBareProperty(api, base, 'mix-owner'),
       generalThousandths: 250
     });
     await addUnit(api, base, buildingId, {
@@ -557,6 +648,7 @@ test('41.3 · recurring expense started 2y ago, still active → IS in headline 
   try {
     const base = await getBaseSeed(api);
     const buildingId = await createFreshBuilding(api, base, 'f2on');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f2on');
     const today = new Date();
     const startTerm = yyyymmddhh(today.getFullYear() - 2, today.getMonth() + 1);
     await addExpense(api, base, buildingId, {
@@ -591,6 +683,7 @@ test('41.4 · recurring with endTerm=lastMonth → NOT in headline (F2 terminate
   try {
     const base = await getBaseSeed(api);
     const buildingId = await createFreshBuilding(api, base, 'f2end');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f2end');
     const today = new Date();
     const startTerm = yyyymmddhh(today.getFullYear() - 1, today.getMonth() + 1);
     // Last month: shift back by one month, normalising year if needed.
@@ -634,6 +727,7 @@ test('41.5 · recurring with startTerm=nextMonth → NOT in headline (F2 future 
   try {
     const base = await getBaseSeed(api);
     const buildingId = await createFreshBuilding(api, base, 'f2fut');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f2fut');
     const today = new Date();
     const next = new Date(
       Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)
@@ -668,6 +762,7 @@ test('41.6 · one-time 3y ago → NOT in headline (F3 currentYear gate excludes 
   try {
     const base = await getBaseSeed(api);
     const buildingId = await createFreshBuilding(api, base, 'f3old');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f3old');
     const today = new Date();
     const startTerm = yyyymmddhh(today.getFullYear() - 3, today.getMonth() + 1);
     await addExpense(api, base, buildingId, {
@@ -702,6 +797,7 @@ test('41.7 · one-time current year → IS in headline (F3 currentYear gate incl
   try {
     const base = await getBaseSeed(api);
     const buildingId = await createFreshBuilding(api, base, 'f3now');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f3now');
     const today = new Date();
     // Pin to January 1 of the CURRENT year so we don't drift across runs.
     const startTerm = yyyymmddhh(today.getFullYear(), 1);
@@ -737,6 +833,7 @@ test('41.8 · owner-tracked starting in July → contributes 6× not 12× (F4 pr
   try {
     const base = await getBaseSeed(api);
     const buildingId = await createFreshBuilding(api, base, 'f4jul');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f4jul');
     const today = new Date();
     const currentYear = today.getFullYear();
     // July 1 of the current year — gives 6 months active in [Jan..Dec].
@@ -958,88 +1055,108 @@ test('41.12 · fixed expense (amount 0, customAllocations €40+€10) counts �
 });
 
 // ---------------------------------------------------------------------------
-// 41.10 — F5: the "Owner expenses" trigger is a Popover (tap-to-open).
-//          Click MUST surface the explanatory body, proving the surface is
-//          touch-reachable and not hover-only.
+// 41.10 — F5: the owner-expense breakdown must be reachable by TAP, never
+//          hover-only, so it works on a touch device.
+//
+//          The surface was redesigned in d2ed0ef4 (2026-07-20): the headline
+//          card is now an «Ετήσια προβολή» table whose owner-expense lines are
+//          click-to-expand rows (SubRow → DetailRow), replacing the old Radix
+//          Popover. The F5 INVARIANT is unchanged and still worth guarding —
+//          only the mechanism moved — so this test now drives the row.
+//
+//          Rendered in GREEK (/el) per the UI-review rule: this is the realm's
+//          actual locale, and the labels asserted below are the Greek ones.
 // ---------------------------------------------------------------------------
-test('41.10 · tooltip Popover tap shows content (F5 — Popover, not hover-only Tooltip)', async ({
+test('41.10 · owner-expense breakdown expands on tap (F5 — click-to-expand row, not hover-only)', async ({
   page
 }) => {
   test.setTimeout(180_000);
   const api = await request.newContext();
   let buildingId = '';
   let realmName = '';
+  const ownerAmount = 100;
   try {
     const base = await getBaseSeed(api);
     realmName = base.realmName;
     buildingId = await createFreshBuilding(api, base, 'f5pop');
-    // Need annualEksoda > 0 for the breakdown row (which contains the
-    // Popover trigger) to render at all. Seed a recurring expense.
-    const today = new Date();
-    const startTerm = yyyymmddhh(today.getFullYear() - 1, today.getMonth() + 1);
+    await addThousandthsBearingUnit(api, base, buildingId, 'f5pop');
+    // The expandable row comes from finance.fixedOwnerDetail, which is built
+    // from expenses that are recurring AND trackOwnerExpense AND ownerAmount>0.
+    // A plain recurring expense (the old seed) produces NO expandable row at
+    // all, so it must be owner-tracked. startTerm = Jan 1 this year so the row
+    // is active for currentTerm regardless of which month the suite runs in.
     await addExpense(api, base, buildingId, {
-      name: `S41-F5-rec-${RUN_ID}`,
+      name: `S41-F5-own-${RUN_ID}`,
       type: 'other',
-      amount: 50,
+      amount: 0,
+      ownerAmount,
+      trackOwnerExpense: true,
       allocationMethod: 'general_thousandths',
       isRecurring: true,
-      startTerm
+      startTerm: yyyymmddhh(new Date().getFullYear(), 1)
     });
   } finally {
     await api.dispose();
   }
 
-  await signIn(page);
-  await page.goto(`${encodeURIComponent(realmName)}/buildings/${buildingId}`);
+  await signInGreek(page);
+  await page.goto(
+    `el/${encodeURIComponent(realmName)}/buildings/${buildingId}`
+  );
   await expect(page.locator('[data-cy=overviewTab]')).toBeVisible({
     timeout: 30_000
   });
 
-  // The Popover trigger is a button rendering "Owner expenses" / "Έξοδα
-  // ιδιοκτήτη" with the dotted-underline class. Click it (tap surrogate).
-  const ownerTrigger = page
-    .locator('button', {
-      hasText: /^(Owner expenses|Έξοδα ιδιοκτήτη)$/
-    })
-    .first();
+  // The Greek headline card must be the one rendering — proves /el took effect.
   await expect(
-    ownerTrigger,
-    'Popover trigger must render when annualEksoda > 0'
+    page.getByText(/Ετήσια προβολή/i).first(),
+    'Greek «Ετήσια προβολή» headline card renders (locale is el, not en)'
   ).toBeVisible({ timeout: 20_000 });
 
-  // Pre-tap: PopoverContent should not be in the DOM (Radix portal mounts
-  // on open). Use a content-substring match.
-  const popoverBodyRegex =
-    /Includes fixed owner-only expenses|Περιλαμβάνει σταθερά έξοδα ιδιοκτήτη/i;
+  // The owner-expense HEAD row always renders; the expandable child is the
+  // per-expense line carrying the seeded name.
+  await expect(
+    page.getByText(/Έξοδα ιδιοκτήτη/).first(),
+    'Greek owner-expenses head row renders'
+  ).toBeVisible({ timeout: 20_000 });
 
-  // Tap (click) — Popover opens on click, NOT hover. If this were a hover-
-  // only Tooltip, the click would not open it on a touch device and the
-  // poll below would time out.
-  await ownerTrigger.click();
-  await expect
-    .poll(
-      async () => {
-        const html = await page.content();
-        return popoverBodyRegex.test(html);
-      },
-      {
-        timeout: 8_000,
-        message:
-          'F5 — PopoverContent must appear on click (Popover, not hover-only Tooltip)'
-      }
-    )
-    .toBe(true);
+  const expenseRow = page
+    .locator('tr', { hasText: `S41-F5-own-${RUN_ID}` })
+    .first();
+  await expect(
+    expenseRow,
+    'the owner-tracked expense renders its own expandable row'
+  ).toBeVisible({ timeout: 20_000 });
 
-  // Set-narrowing: count the rendered PopoverContent body lines. There must
-  // be at least one element whose text contains the explanatory phrase.
-  const popoverBody = page.locator('text=' + 'Includes fixed owner-only expenses').or(
-    page.locator('text=' + 'Περιλαμβάνει σταθερά έξοδα ιδιοκτήτη')
-  );
-  const count = await popoverBody.count();
+  // The detail line is «<monthly> €/month × <n> μήνες». Before the tap it must
+  // be ABSENT (value-delta, not existence: count 0 → ≥1 proves the tap did it).
+  const detailLine = page.locator('tr', {
+    hasText: new RegExp(`${ownerAmount}\\s*€\\s*/`)
+  });
   expect(
-    count,
-    'F5 — at least one PopoverContent body element rendered after click'
-  ).toBeGreaterThan(0);
+    await detailLine.count(),
+    'collapsed: the per-month detail line is NOT in the DOM before the tap'
+  ).toBe(0);
+
+  // Tap (click) — the row expands on click. A hover-only surface would not
+  // open on a touch device and this assertion would fail.
+  await expenseRow.click();
+  await expect(
+    detailLine.first(),
+    'F5 — the per-month breakdown appears on TAP (click-to-expand, not hover-only)'
+  ).toBeVisible({ timeout: 10_000 });
+
+  await page.screenshot({
+    path: '_screens/41_10_owner_breakdown_expanded_el.png',
+    fullPage: true
+  });
+
+  // Tapping again must collapse it — proves it is a real toggle, not a
+  // one-way reveal that merely happened to be open.
+  await expenseRow.click();
+  await expect
+    .poll(() => detailLine.count(), { timeout: 10_000 })
+    .toBe(0);
 });
 
 // ---------------------------------------------------------------------------

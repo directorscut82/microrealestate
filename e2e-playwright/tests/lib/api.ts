@@ -484,6 +484,21 @@ export async function ensureSeedLeasedTenant(
 }
 
 /**
+ * Build a checksum-valid Greek AFM from 8 arbitrary leading digits.
+ * Algorithm (AADE, mirrored from `services/api/src/validators.ts`
+ * isValidGreekAFM): sum = Σ digit[i] * 2^(8-i) for i in 0..7, then the 9th
+ * digit is (sum mod 11) mod 10. Exported so no spec hand-rolls it again.
+ */
+export function makeValidGreekAFM(first8: string): string {
+  const digits = first8.replace(/\D/g, '').padStart(8, '1').slice(-8);
+  let sum = 0;
+  for (let i = 0; i < 8; i++) {
+    sum += parseInt(digits[i], 10) * Math.pow(2, 8 - i);
+  }
+  return digits + (((sum % 11) % 10).toString());
+}
+
+/**
  * Seeds a tenant under the test realm with a known phone1. Used by the
  * tenant-search spec (wave-24) which verifies the search-by-phone1 fix.
  *
@@ -505,10 +520,20 @@ export async function ensureSeedTenant(
   const phone1 = `69${Math.floor(10000000 + Math.random() * 89999999)}`;
   const tenantName = `E2E-Tenant-${Date.now()}`;
 
+  // Tier A1 (server commit d5df6e55, June 2026) makes firstName + lastName +
+  // a checksum-valid taxId mandatory for natural-person tenants. This helper
+  // predates that guard and sent none of them, so every consumer spec died on
+  // a 422 during SEED — the validators doing their job, not an app bug. Derive
+  // the AFM from the per-run timestamp so concurrent/repeat runs don't collide.
+  const taxId = makeValidGreekAFM(String(Date.now()).slice(-8));
+
   const created = await request.post(`${GATEWAY}/api/v2/tenants`, {
     headers: auth,
     data: {
       name: tenantName,
+      firstName: 'E2E',
+      lastName: tenantName,
+      taxId,
       isCompany: false,
       manager: tenantName,
       contacts: [{ contact: tenantName, phone1, email: '', phone: '', phone2: '' }]
@@ -802,6 +827,13 @@ export async function ensureSeedSecondTenant(
       headers: auth,
       data: {
         name: 'E2E-LeasedTenant-B',
+        // Same Tier A1 requirement as ensureSeedTenant — a natural person needs
+        // firstName + lastName + a checksum-valid AFM. Fixed AFM (not
+        // timestamp-derived) because this fixture is looked up by name and
+        // re-used across runs, so its identity must be stable.
+        firstName: 'E2E',
+        lastName: 'LeasedTenant-B',
+        taxId: makeValidGreekAFM('12345679'),
         isCompany: false,
         manager: 'E2E-LeasedTenant-B',
         contacts: [

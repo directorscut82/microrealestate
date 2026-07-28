@@ -5,6 +5,7 @@ import { Button } from '../../../components/ui/button';
 import { Card } from '../../../components/ui/card';
 import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import ErrorPage from 'next/error';
+import moment from 'moment';
 import { LuArrowLeft, LuBuilding2, LuChevronLeft, LuChevronRight, LuHome, LuWallet } from 'react-icons/lu';
 import NumberFormat from '../../../components/NumberFormat';
 import OwnerContactCard from '../../../components/owners/OwnerContactCard';
@@ -14,6 +15,7 @@ import { ownerChargeLabel } from '../../../utils/lineLabels';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
+import usePaymentTypes from '../../../hooks/usePaymentTypes';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
@@ -21,6 +23,13 @@ const _termLabel = (term) => {
   const s = String(term);
   return s.length >= 6 ? `${s.slice(4, 6)}/${s.slice(0, 4)}` : s;
 };
+
+// The stored value is the raw enum ('cash'|'transfer'|'cheque'), which is NOT a
+// translation key — t('transfer') fell through and printed English on the Greek
+// screen while the dialog's own select showed «Μεταφορά (τραπεζική)». Resolve
+// through usePaymentTypes so both surfaces read the same, and fall back to the
+// raw value for a legacy type no longer in the dropdown (e.g. 'levy').
+const _paymentTypeLabel = (map, type) => map?.[type]?.label || type || '';
 
 // Per-unit scope label for an owner charge line. Server sends scope
 // ('building'|'unit') + unitFloor + unitVacant (ownermanager.ts). A building-
@@ -101,6 +110,9 @@ const _groupCharges = (charges) => {
 
 function OwnerDetail() {
   const { t } = useTranslation('common');
+  // Same label source the payment dialog's Τύπος select uses, so the history
+  // row cannot disagree with the dropdown that wrote it.
+  const { itemMap: paymentTypeMap } = usePaymentTypes();
   const router = useRouter();
   const ownerKey = decodeURIComponent(
     Array.isArray(router.query.id) ? router.query.id[0] : router.query.id || ''
@@ -500,8 +512,9 @@ function OwnerDetail() {
                     className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground py-0.5"
                   >
                     <span className="truncate">
-                      {p.date ? new Date(p.date).toLocaleDateString() : ''} ·{' '}
-                      {_termLabel(p.term)} · {p.buildingName} · {t(p.type)}
+                      {p.date ? moment(p.date).format('L') : ''} ·{' '}
+                      {_termLabel(p.term)} · {p.buildingName} ·{' '}
+                      {_paymentTypeLabel(paymentTypeMap, p.type)}
                       {p.reference ? ` · ${p.reference}` : ''}
                     </span>
                     <span className="tabular-nums text-olive">

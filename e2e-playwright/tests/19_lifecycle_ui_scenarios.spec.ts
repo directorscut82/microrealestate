@@ -38,6 +38,7 @@ import { expect, Page, request, APIRequestContext, test } from '@playwright/test
 import {
   ensureSeedLeasedTenantWithPayment,
   ensureSeedSecondTenant,
+  makeValidGreekAFM,
   PaidLeasedTenantSeed,
   SecondTenantSeed
 } from './lib/api';
@@ -557,6 +558,12 @@ test('L02 · terminate mid-year hides tenant from future months', async ({
         headers: auth(_seed),
         data: {
           name: 'E2E-LeasedTenant-Z',
+          // Tier A1: natural persons need firstName + lastName + valid AFM.
+          // Fixed (not timestamp-derived) — this fixture is found by name and
+          // re-used across runs, so its identity must stay stable.
+          firstName: 'E2E',
+          lastName: 'LeasedTenant-Z',
+          taxId: makeValidGreekAFM('12345680'),
           isCompany: false,
           manager: 'E2E-LeasedTenant-Z',
           contacts: [

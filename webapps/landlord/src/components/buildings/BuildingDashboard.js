@@ -266,20 +266,26 @@ function BuildingProjectionTable({ finance, t }) {
   const vacantVal = finance.vacantOwnerResidentEksoda;
 
 
-  const HeadRow = ({ label, actual, est, total, cls, neg }) => (
+  // `neg` prefixes a minus so a cost reads as a deduction. Zero is not a
+  // deduction: prefixing unconditionally rendered «−0,00 €» on a building with
+  // no owner expenses, i.e. a negative amount that does not exist.
+  const HeadRow = ({ label, actual, est, total, cls, neg }) => {
+    const sign = (v) => (neg && Number(v) !== 0 ? '−' : '');
+    return (
     <tr className="font-medium">
       <td className={`py-2 ${cls || 'text-ink'}`}>{label}</td>
       <td className={`py-2 text-right font-mono tabular-nums ${cls || 'text-ink'}`}>
-        {neg ? '−' : ''}<NumberFormat value={actual} showZero abs={neg} />
+        {sign(actual)}<NumberFormat value={actual} showZero abs={neg} />
       </td>
       <td className={`py-2 text-right font-mono tabular-nums ${cls || 'text-ink'}`}>
-        {neg ? '−' : ''}<NumberFormat value={est} showZero abs={neg} />
+        {sign(est)}<NumberFormat value={est} showZero abs={neg} />
       </td>
       <td className={`py-2 text-right font-mono tabular-nums font-semibold ${cls || 'text-ink'}`}>
-        {neg ? '−' : ''}<NumberFormat value={total} showZero abs={neg} />
+        {sign(total)}<NumberFormat value={total} showZero abs={neg} />
       </td>
     </tr>
-  );
+    );
+  };
 
   const SubRow = ({ label, actual, est, total, expandKey, children }) => {
     const isOpen = expanded[expandKey];
