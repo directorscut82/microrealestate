@@ -40,6 +40,9 @@ const PROPOSED_TERM = 2026060100;
 // would normally derive July — the bug is when it derives June instead.
 const JULY_BILL = {
   rfCode: 'RF12345678901234567',
+  // Per-BILL discriminator (encodes the amount). Shape from the real ΔΕΗ
+  // samples: 000000265009 / 000000153007 / 000000120006.
+  paymentCode: '000000186212',
   billingId: '1 234567 89',
   periodStart: new Date('2026-06-09T00:00:00Z'),
   periodEnd: new Date('2026-07-09T00:00:00Z')
@@ -61,7 +64,7 @@ const call = (bill = JULY_BILL, term = PROPOSED_TERM) =>
 
 describe('findDuplicateBillByIdentity — rfCode arm', () => {
   it('finds the same physical bill filed under a DIFFERENT term', async () => {
-    state.responder = (q) => (q.rfCode ? storedBill() : null);
+    state.responder = (q) => (q.rfCode && q.paymentCode ? storedBill() : null);
     const out = await call();
     expect(out).toEqual({
       term: 2026070100,
@@ -103,6 +106,59 @@ describe('findDuplicateBillByIdentity — rfCode arm', () => {
       expect('rfCode' in q).toBe(false);
     }
   });
+
+  // REGRESSION (2026-07 review): rfCode ALONE must never key this arm. The ΔΕΗ
+  // «Κωδικός ηλεκτρονικής πληρωμής» is per-ΠΑΡΟΧΗ, not per-bill — the repo's own
+  // OCR samples show three DISTINCT bills for provision 999000565-016 (€265,00 /
+  // €153,00 / €120,00) all printing RF10999000000000000648051. Keying on it
+  // alone flagged every routine next-month import as a duplicate.
+  it('requires paymentCode TOO — never queries rfCode on its own', async () => {
+    state.responder = () => null;
+    await call();
+    const arm1 = state.queries.filter((q) => 'rfCode' in q);
+    expect(arm1.length).toBeGreaterThan(0);
+    for (const q of arm1) {
+      // rfCode arm must be paired with the per-bill paymentCode.
+      expect(q.paymentCode).toBe('000000186212');
+    }
+  });
+
+  it('is SKIPPED when paymentCode is absent (RF alone is per-provision)', async () => {
+    // THE MUTATION-KILLER: drop `&& payCode` from the guard and this fails,
+    // because the arm would query on the shared RF alone again.
+    state.responder = () => null;
+    await call({ ...JULY_BILL, paymentCode: undefined });
+    for (const q of state.queries) {
+      expect('rfCode' in q).toBe(false);
+    }
+  });
+
+  it('is SKIPPED when paymentCode is empty / whitespace', async () => {
+    state.responder = () => null;
+    await call({ ...JULY_BILL, paymentCode: '  ' });
+    for (const q of state.queries) {
+      expect('rfCode' in q).toBe(false);
+    }
+  });
+
+  it('does NOT flag next month\u2019s bill that shares the provision RF', async () => {
+    // The real-world scenario: same meter, same RF, DIFFERENT paymentCode and
+    // period. Must fall through ARM 1, and ARM 2's period band must not match a
+    // month-apart periodEnd either → no banner at all.
+    state.responder = (q) => {
+      if (q.rfCode) {
+        // Stored June bill: same RF, its OWN paymentCode.
+        return q.paymentCode === '000000186212' ? null : storedBill();
+      }
+      return null;
+    };
+    const out = await call({
+      ...JULY_BILL,
+      paymentCode: '000000186212'
+    });
+    // A genuine new month must NOT be reported as a duplicate.
+    expect(out).toBeUndefined();
+  });
 });
 
 describe('findDuplicateBillByIdentity — billingId + period arm', () => {
@@ -128,9 +184,9 @@ describe('findDuplicateBillByIdentity — billingId + period arm', () => {
     expect(q.periodEnd.$lte.getTime()).toBe(end + 10 * day);
     // A month-long window would swallow the next bill; a zero window would miss
     // the very misread this exists to catch.
-    expect(q.periodEnd.$lte.getTime() - q.periodEnd.$gte.getTime()).toBeLessThan(
-      25 * day
-    );
+    expect(
+      q.periodEnd.$lte.getTime() - q.periodEnd.$gte.getTime()
+    ).toBeLessThan(25 * day);
   });
 
   it('does NOT match the following month even when the periods TOUCH', async () => {

@@ -70,6 +70,7 @@ export async function findDuplicateBillByIdentity(
   expenseId: string,
   bill: {
     rfCode?: string;
+    paymentCode?: string;
     billingId?: string;
     periodStart?: Date | string;
     periodEnd?: Date | string;
@@ -83,19 +84,40 @@ export async function findDuplicateBillByIdentity(
     term: { $ne: Number(proposedTerm) }
   };
 
-  // ARM 1 — rfCode. The payment reference is per-bill (it pairs with
-  // paymentCode, which encodes the amount, to form the IRIS QR), so equality is
-  // a strong signal on its own. Note the invariant is "validated at parse time"
-  // (deh.ts:137 runs mod-97 before emitting it) and NOT "guaranteed on the
-  // stored doc" — confirmBills persists rfCode from the CLIENT payload
-  // (inboxmanager.ts forwards p.rfCode) and bill.ts declares it a plain String
-  // with no validator. Strong enough for an advisory banner; do NOT promote
-  // this arm to a hard block without re-running isValidRF server-side.
+  // ARM 1 — rfCode AND paymentCode together.
+  //
+  // rfCode ALONE IS NOT AN IDENTITY KEY. The comment here used to claim "the
+  // payment reference is per-bill"; that is factually inverted for the only
+  // provider that emits one. The ΔΕΗ «Κωδικός ηλεκτρονικής πληρωμής» (RF) is
+  // per-ΠΑΡΟΧΗ — the same string is printed on every monthly bill for that
+  // meter. Verified against this repo's own OCR samples
+  // (.scratch-adv-tests/bill-samples/ocr-out): three DISTINCT bills for
+  // provision 999000565-016 — Α/Α 1490834492 (€265,00), 1496401206 (€153,00),
+  // 1501215791 (€120,00) — ALL print RF10999000000000000648051, and that RF is
+  // mod-97 valid (=1) so deh.ts emits it and confirmBills persists it. Matching
+  // on it alone made the duplicate banner fire on the routine next-month import
+  // of a genuine new bill, telling the landlord to deselect real money. Worse,
+  // ARM 1 returns on first hit, so ARM 2 — the only arm with a period
+  // discriminator — was never reached.
+  //
+  // `paymentCode` IS per-bill: it encodes the amount (deh.ts builds it from the
+  // «…,… <check>» triple), and the same three samples yield 000000265009 /
+  // 000000153007 / 000000120006. Requiring BOTH keeps the arm's precision for a
+  // true re-import while letting consecutive months through to ARM 2.
+  //
+  // Note the invariant is "validated at parse time" (deh.ts runs mod-97 before
+  // emitting the RF) and NOT "guaranteed on the stored doc" — confirmBills
+  // persists both fields from the CLIENT payload and bill.ts declares them plain
+  // Strings with no validator. Strong enough for an advisory banner; do NOT
+  // promote this arm to a hard block without re-validating server-side.
   const rf = typeof bill.rfCode === 'string' ? bill.rfCode.trim() : '';
-  if (rf) {
+  const payCode =
+    typeof bill.paymentCode === 'string' ? bill.paymentCode.trim() : '';
+  if (rf && payCode) {
     const hit: any = await Collections.Bill.findOne({
       ...scope,
-      rfCode: rf
+      rfCode: rf,
+      paymentCode: payCode
     }).lean();
     if (hit) {
       return {
