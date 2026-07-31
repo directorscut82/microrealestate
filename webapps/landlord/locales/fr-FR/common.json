@@ -1267,5 +1267,6 @@
   "Select a unit": "Sélectionner une unité",
   "This expense was changed in another tab — please reopen and retry": "Cette dépense a été modifiée dans un autre onglet — rouvrez-la et réessayez",
   "Bill the whole expense to one specific unit": "Facturer toute la dépense à une seule unité",
-  "{{failed}} source file(s) could not be archived.": "{{failed}} fichier(s) source n’ont pas pu être archivés."
+  "{{failed}} source file(s) could not be archived.": "{{failed}} fichier(s) source n’ont pas pu être archivés.",
+  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "Le montant total de la dépense sera facturé à ce lot. Si le lot n'a pas de locataire pour un mois, ce mois est facturé au propriétaire lorsque « Facturer le propriétaire pour les lots vacants » est activé, et à personne sinon."
 }

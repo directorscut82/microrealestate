@@ -1267,5 +1267,6 @@
   "Select a unit": "Seleccionar una unidad",
   "This expense was changed in another tab — please reopen and retry": "Este gasto se modificó en otra pestaña — reábralo e intente de nuevo",
   "Bill the whole expense to one specific unit": "Facturar todo el gasto a una unidad específica",
-  "{{failed}} source file(s) could not be archived.": "No se pudieron archivar {{failed}} archivo(s) de origen."
+  "{{failed}} source file(s) could not be archived.": "No se pudieron archivar {{failed}} archivo(s) de origen.",
+  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "El monto total del gasto se cobrará a esta unidad. Si la unidad no tiene inquilino durante un mes, ese mes se cobra al propietario cuando «Cobrar al propietario por unidades vacías» está activo, y a nadie cuando está inactivo."
 }

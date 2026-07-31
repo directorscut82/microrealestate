@@ -491,10 +491,25 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   const ownerAmount = watch('ownerAmount');
 
   const isVariable = isRecurring && (Number(amount) || 0) === 0;
-  const filteredMethods = useMemo(
-    () => getAllocationMethodsForType(expenseType, isVariable, building),
-    [expenseType, isVariable, building]
-  );
+  const filteredMethods = useMemo(() => {
+    const methods = getAllocationMethodsForType(
+      expenseType,
+      isVariable,
+      building
+    );
+    // An expense SAVED with a method the gates would now hide (e.g. saved as
+    // elevator_thousandths, then the building's hasElevator was turned off)
+    // must still appear in its own picker — otherwise the trigger renders the
+    // «Select allocation method» placeholder and the landlord cannot see how
+    // this expense actually allocates. Append rather than re-sort so the
+    // normal option order is untouched.
+    const saved = expense?.allocationMethod;
+    if (saved && !methods.find((m) => m.id === saved)) {
+      const savedDef = allocationMethods.find((m) => m.id === saved);
+      if (savedDef) return [...methods, savedDef];
+    }
+    return methods;
+  }, [expenseType, isVariable, building, expense?.allocationMethod]);
 
   useEffect(() => {
     if (expenseType && allocationMethod) {
@@ -504,10 +519,30 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
         building
       );
       if (!valid.find((m) => m.id === allocationMethod)) {
-        setValue('allocationMethod', valid[0]?.id || '');
+        // Do NOT rewrite the method an expense was actually SAVED with. This
+        // effect exists to repair an impossible combination the USER just
+        // created by changing the type; applied to a persisted value it
+        // silently re-routes money. Reproduced: an expense saved as
+        // elevator_thousandths on a building whose hasElevator is false (or
+        // was later turned off) reopened with the picker blanked to «Select
+        // allocation method» — pressing Update then persisted a DIFFERENT
+        // allocation than the landlord chose, with no warning. The stored
+        // method stays selected and the picker still offers it (see
+        // filteredMethods below), so the landlord can keep or change it
+        // deliberately.
+        if (allocationMethod !== expense?.allocationMethod) {
+          setValue('allocationMethod', valid[0]?.id || '');
+        }
       }
     }
-  }, [expenseType, allocationMethod, isVariable, building, setValue]);
+  }, [
+    expenseType,
+    allocationMethod,
+    isVariable,
+    building,
+    setValue,
+    expense?.allocationMethod
+  ]);
 
   // F5-expense: switching allocation methods leaves customAllocations in
   // a corrupted partial state (a custom_percentage with values 30/40/30
@@ -517,7 +552,24 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   const previousAllocationMethodRef = useRef(allocationMethod);
   useEffect(() => {
     const previous = previousAllocationMethodRef.current;
-    if (previous && previous !== allocationMethod) {
+    // `previous && …` used to skip the FIRST selection too (the '' → method
+    // transition). On the ADD dialog that was a real money bug:
+    // `defaultValues.customAllocations` is buildDefaultAllocations([]) — one row
+    // PER UNIT, each with a real propertyId — so picking single_unit as the
+    // first method inherited unit #1 as a silent pre-selected target. The zod
+    // guard only checks `customAllocations[0].propertyId`, which was already
+    // populated, so «Pick a unit to bill» never fired and the whole expense was
+    // billed to whichever unit happened to be first, without the landlord
+    // choosing it.
+    //
+    // But that same `previous &&` is LOAD-BEARING on the EDIT dialog: RHF
+    // applies the `values` prop from a useEffect AFTER first render (see
+    // useForm: `if (props.values && !deepEqual(...)) control._reset(...)`), so
+    // an edited expense's saved method arrives as a '' → 'single_unit'
+    // transition too. Firing there would wipe the persisted target.
+    //
+    // So allow the first transition only when CREATING (no `expense` prop).
+    if (previous !== allocationMethod && (previous || !expense)) {
       if (allocationMethod === 'single_unit') {
         // Start with no target; the user MUST pick one (zod enforces).
         setValue('customAllocations', [], { shouldDirty: true });
@@ -533,7 +585,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
       }
     }
     previousAllocationMethodRef.current = allocationMethod;
-  }, [allocationMethod, setValue, buildDefaultAllocations]);
+  }, [allocationMethod, setValue, buildDefaultAllocations, expense]);
 
   const needsAllocations =
     METHODS_NEEDING_ALLOCATIONS.includes(allocationMethod);
@@ -809,9 +861,15 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                       })}
                     </SelectContent>
                   </Select>
+                  {/* The old copy ended "(owner billing for vacant units is
+                      coming soon)". That feature SHIPPED in 978bf92b and this
+                      same dialog carries its «Charge owner for vacant units»
+                      switch a few rows below — the note was telling the
+                      landlord a control they can see does not exist. Point at
+                      the switch instead. */}
                   <p className="text-xs text-muted-foreground">
                     {t(
-                      'The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).'
+                      'The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.'
                     )}
                   </p>
                   {errors.customAllocations && (

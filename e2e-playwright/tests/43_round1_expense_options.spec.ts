@@ -146,6 +146,18 @@ function failOnExpenseWrite(
   return () => page.off('request', handler);
 }
 
+// The FULL per-type matrix from ExpenseFormDialog's ALLOCATION_METHODS_BY_TYPE.
+//
+// STALE-SPEC FIX (2026-07): this matrix is flag-BLIND, but the dialog gates the
+// two feature-specific thousandths methods on the building's own flags —
+// `heating_thousandths` needs hasCentralHeating, `elevator_thousandths` needs
+// hasElevator (getAllocationMethodsForType, ExpenseFormDialog.js:286-295).
+// Allocating by heating thousandths on a building with no central heating is
+// meaningless, so the gating is correct and the spec was wrong: it demanded 7
+// options for `heating` on the shared seed building (both flags false) where
+// the dialog correctly offers 5. It had been failing since the gating shipped.
+// `expectedMethodsFor()` below applies the same gating so the spec tracks the
+// real contract, and 43.1b asserts the gating itself rather than ignoring it.
 const EXPECTED_METHODS_BY_TYPE: Record<string, readonly string[]> = {
   heating: ['heating_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
   elevator: ['elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
@@ -159,6 +171,34 @@ const EXPECTED_METHODS_BY_TYPE: Record<string, readonly string[]> = {
   pest_control: ['general_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit'],
   other: ['general_thousandths', 'heating_thousandths', 'elevator_thousandths', 'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage', 'single_unit']
 };
+
+/**
+ * The methods the dialog actually offers for `typeId` — i.e.
+ * EXPECTED_METHODS_BY_TYPE minus everything getAllocationMethodsForType()
+ * filters out. THREE gates, all mirrored here:
+ *   1. hasCentralHeating absent → no heating_thousandths
+ *   2. hasElevator absent       → no elevator_thousandths
+ *   3. isVariable (recurring AND amount 0, i.e. a κυμαινόμενο expense whose
+ *      total the landlord types each month) → no `fixed`, because fixed means
+ *      absolute per-unit amounts that cannot track a changing total.
+ * Gate 3 bites in the dropdown-matrix test specifically: it never fills an
+ * amount, so the dialog's default (recurring, amount 0) IS variable.
+ */
+function expectedMethodsFor(
+  typeId: string,
+  flags: {
+    hasElevator?: boolean;
+    hasCentralHeating?: boolean;
+    isVariable?: boolean;
+  }
+): readonly string[] {
+  return (EXPECTED_METHODS_BY_TYPE[typeId] ?? []).filter((m) => {
+    if (m === 'heating_thousandths') return !!flags.hasCentralHeating;
+    if (m === 'elevator_thousandths') return !!flags.hasElevator;
+    if (m === 'fixed') return !flags.isVariable;
+    return true;
+  });
+}
 
 const TYPE_LABEL_REGEX: Record<string, RegExp> = {
   heating: /^(Heating|Θέρμανση)$/,
@@ -229,17 +269,42 @@ test('43.1 · for each of 11 expense types, allocation-method dropdown lists the
   test.setTimeout(240_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeedRichBuilding(apiCtx);
+  // Read the building's real feature flags — the dialog gates
+  // heating_thousandths/elevator_thousandths on them, so the expected set is
+  // flag-dependent. Asserting a flag-blind matrix is what made this spec fail
+  // from the day the gating shipped.
+  const bResp = await apiCtx.get(
+    `${GATEWAY}/api/v2/buildings/${seed.buildingId}`,
+    { headers: { Authorization: `Bearer ${seed.token}`, organizationid: seed.realmId } }
+  );
+  expect(bResp.status(), 'read building flags').toBe(200);
+  const bJson = (await bResp.json()) as {
+    hasElevator?: boolean;
+    hasCentralHeating?: boolean;
+  };
+  const flags = {
+    hasElevator: !!bJson.hasElevator,
+    hasCentralHeating: !!bJson.hasCentralHeating,
+    // This test never fills an amount, so the dialog sits at its default
+    // (isRecurring=true, amount=0) → a κυμαινόμενο expense → `fixed` is
+    // correctly withheld. Stated explicitly so the expectation is legible.
+    isVariable: true
+  };
   await apiCtx.dispose();
 
   await signIn(page);
   await gotoExpensesTab(page, seed.realmName, seed.buildingId);
   await openAddDialog(page);
 
-  for (const [typeId, expectedMethods] of Object.entries(EXPECTED_METHODS_BY_TYPE)) {
+  for (const typeId of Object.keys(EXPECTED_METHODS_BY_TYPE)) {
+    const expectedMethods = expectedMethodsFor(typeId, flags);
     await pickOption(page, dialogCombobox(page, 0), TYPE_LABEL_REGEX[typeId]);
     const labels = await readOptionLabels(page, dialogCombobox(page, 1));
 
-    expect(labels.length, `type=${typeId} dropdown count`).toBe(expectedMethods.length);
+    expect(
+      labels.length,
+      `type=${typeId} dropdown count (flags: elevator=${flags.hasElevator}, centralHeating=${flags.hasCentralHeating})`
+    ).toBe(expectedMethods.length);
     for (const m of expectedMethods) {
       expect(labels.some((l) => METHOD_LABEL_REGEX[m].test(l)), `type=${typeId} method ${m} present`).toBe(true);
     }
@@ -251,10 +316,122 @@ test('43.1 · for each of 11 expense types, allocation-method dropdown lists the
   await page.keyboard.press('Escape');
 });
 
+test('43.1b · building feature flags GATE the thousandths methods (both directions)', async ({
+  page
+}) => {
+  // The gating 43.1 now accounts for, asserted head-on: flipping
+  // hasCentralHeating/hasElevator must add/remove exactly the corresponding
+  // thousandths option. Without this, 43.1 could be satisfied by a dialog that
+  // dropped those methods unconditionally.
+  test.setTimeout(240_000);
+  const apiCtx = await request.newContext();
+  const seed = await ensureSeedRichBuilding(apiCtx);
+  const headers = {
+    Authorization: `Bearer ${seed.token}`,
+    organizationid: seed.realmId
+  };
+  const url = `${GATEWAY}/api/v2/buildings/${seed.buildingId}`;
+  const before = (await (await apiCtx.get(url, { headers })).json()) as {
+    hasElevator?: boolean;
+    hasCentralHeating?: boolean;
+    __v?: number;
+  };
+
+  const setFlags = async (hasCentralHeating: boolean, hasElevator: boolean) => {
+    const cur = (await (await apiCtx.get(url, { headers })).json()) as {
+      __v?: number;
+    };
+    const r = await apiCtx.patch(url, {
+      headers,
+      data: { hasCentralHeating, hasElevator, __v: cur.__v }
+    });
+    expect(
+      r.status(),
+      `PATCH flags heating=${hasCentralHeating} elevator=${hasElevator} (body: ${await r.text().catch(() => '')})`
+    ).toBe(200);
+  };
+
+  const optionsForHeating = async () => {
+    // gotoExpensesTab does a full page.goto, which is enough to pick up the
+    // flag change. An extra page.reload() here bounced the session to
+    // /landlord/signin and hung on [data-cy=expensesTab].
+    await gotoExpensesTab(page, seed.realmName, seed.buildingId);
+    await openAddDialog(page);
+    await pickOption(page, dialogCombobox(page, 0), TYPE_LABEL_REGEX.heating);
+    const labels = await readOptionLabels(page, dialogCombobox(page, 1));
+    await page.keyboard.press('Escape');
+    return labels;
+  };
+
+  try {
+    await signIn(page);
+
+    // OFF → heating_thousandths must be absent.
+    await setFlags(false, false);
+    const off = await optionsForHeating();
+    expect(
+      off.some((l) => METHOD_LABEL_REGEX.heating_thousandths.test(l)),
+      'no central heating → «Χιλιοστά Θέρμανσης» must NOT be offered'
+    ).toBe(false);
+
+    // ON → it must appear, and nothing else may change.
+    await setFlags(true, false);
+    const on = await optionsForHeating();
+    expect(
+      on.some((l) => METHOD_LABEL_REGEX.heating_thousandths.test(l)),
+      'central heating ON → «Χιλιοστά Θέρμανσης» must be offered'
+    ).toBe(true);
+    expect(
+      on.length,
+      'flipping the flag adds exactly ONE option'
+    ).toBe(off.length + 1);
+  } finally {
+    // Restore the shared seed exactly as found — this realm is shared by every
+    // other spec in the suite.
+    await setFlags(!!before.hasCentralHeating, !!before.hasElevator).catch(
+      () => {}
+    );
+    await apiCtx.dispose();
+  }
+});
+
 test('43.2 · save round-trip for each of 9 allocation methods (server 200 + reopen pre-selects method)', async ({ page }) => {
   test.setTimeout(360_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeedRichBuilding(apiCtx);
+  // This spec round-trips ALL 9 methods, and two of them are gated on building
+  // feature flags (heating_thousandths ← hasCentralHeating, elevator_thousandths
+  // ← hasElevator; ExpenseFormDialog getAllocationMethodsForType). The shared
+  // seed has both flags false, so the dropdown legitimately does not offer them
+  // and this spec used to hang for 15s on «Χιλιοστά Θέρμανσης». Enable both for
+  // the duration and restore them in the finally — the realm is shared.
+  const _bHeaders = {
+    Authorization: `Bearer ${seed.token}`,
+    organizationid: seed.realmId
+  };
+  const _bUrl = `${GATEWAY}/api/v2/buildings/${seed.buildingId}`;
+  const _flagsBefore = (await (
+    await apiCtx.get(_bUrl, { headers: _bHeaders })
+  ).json()) as { hasElevator?: boolean; hasCentralHeating?: boolean };
+  const _setFlags = async (heating: boolean, elevator: boolean) => {
+    const cur = (await (
+      await apiCtx.get(_bUrl, { headers: _bHeaders })
+    ).json()) as { __v?: number };
+    const r = await apiCtx.patch(_bUrl, {
+      headers: _bHeaders,
+      data: {
+        hasCentralHeating: heating,
+        hasElevator: elevator,
+        __v: cur.__v
+      }
+    });
+    expect(
+      r.status(),
+      `PATCH building flags (body: ${await r.text().catch(() => '')})`
+    ).toBe(200);
+  };
+  await _setFlags(true, true);
+
   await signIn(page);
   await gotoExpensesTab(page, seed.realmName, seed.buildingId);
 
@@ -320,6 +497,14 @@ test('43.2 · save round-trip for each of 9 allocation methods (server 200 + reo
     }
   } finally {
     for (const id of createdIds) await cleanupExpense(apiCtx, seed, id);
+    // Restore the building's feature flags exactly as found — leaving them ON
+    // would change the dropdown contents for every later spec in the realm
+    // (43.1 reads them, so a leak there would silently pass for the wrong
+    // reason).
+    await _setFlags(
+      !!_flagsBefore.hasCentralHeating,
+      !!_flagsBefore.hasElevator
+    ).catch(() => {});
     await apiCtx.dispose();
   }
 });
@@ -445,7 +630,24 @@ test('43.7 · F6-expense · custom_percentage with empty customAllocations fails
     await pickOption(page, dialogCombobox(page, 0), TYPE_LABEL_REGEX.other);
     await pickOption(page, dialogCombobox(page, 1), METHOD_LABEL_REGEX.custom_percentage);
     await clickSave(page);
-    await expect(page.locator('[role=dialog] p.text-destructive').filter({ hasText: /Custom allocations require at least one positive entry/i })).toBeVisible({ timeout: 5_000 });
+    // The invariant that matters: the form REFUSES to submit (failOnExpenseWrite
+    // above throws on any POST) and says why. Which message appears depends on
+    // whether the building has units:
+    //   - units present → rows are seeded at value 0 → the sum branch fires
+    //     («Percentages must sum to 100% (currently 0.0%)»)
+    //   - no units       → customAllocations is [] → the length branch fires
+    //     («Custom allocations require at least one positive entry»)
+    // This spec used to demand ONLY the second message while seeding a building
+    // that HAS a unit, so it could never pass. Accept either — both are the
+    // guard working. 43.5 pins the sum message specifically.
+    await expect(
+      page
+        .locator('[role=dialog] p.text-destructive')
+        .filter({
+          hasText:
+            /Custom allocations require at least one positive entry|Percentages must sum to 100|Τα ποσοστά πρέπει να αθροίζουν/i
+        })
+    ).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('[role=dialog]')).toBeVisible();
   } finally {
     detach();

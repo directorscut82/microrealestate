@@ -922,7 +922,7 @@
   "The contacts will receive the invoices and will be able to access the tenant's portal": "Οι επαφές θα λαμβάνουν τα τιμολόγια και θα έχουν πρόσβαση στην πύλη του ενοικιαστή",
   "The contract already exists": "Το συμβόλαιο υπάρχει ήδη",
   "The document is": "Το έγγραφο είναι",
-  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).": "Το πλήρες ποσό της δαπάνης θα χρεωθεί σε αυτή τη μονάδα. Αν η μονάδα δεν έχει ενοικιαστή για κάποιον μήνα, ο μήνας αυτός δεν χρεώνεται σε κανέναν (η χρέωση του ιδιοκτήτη για κενές μονάδες έρχεται σύντομα).",
+  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "Το πλήρες ποσό της δαπάνης θα χρεωθεί σε αυτή τη μονάδα. Αν η μονάδα δεν έχει ενοικιαστή για κάποιον μήνα, ο μήνας αυτός χρεώνεται στον ιδιοκτήτη όταν η «Χρέωση ιδιοκτήτη για κενές μονάδες» είναι ενεργή, και σε κανέναν όταν είναι ανενεργή.",
   "The organization/landlord belongs to": "Ο οργανισμός/ιδιοκτήτης ανήκει σε",
   "The payment settles the oldest outstanding charges first.": "Η πληρωμή εξοφλεί πρώτα τις παλαιότερες εκκρεμείς χρεώσεις.",
   "The property already exists": "Το ακίνητο υπάρχει ήδη",

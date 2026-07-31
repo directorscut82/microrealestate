@@ -1267,5 +1267,6 @@
   "Select a unit": "Einheit auswählen",
   "This expense was changed in another tab — please reopen and retry": "Diese Ausgabe wurde in einem anderen Tab geändert — bitte erneut öffnen und wiederholen",
   "Bill the whole expense to one specific unit": "Die gesamte Ausgabe einer bestimmten Einheit berechnen",
-  "{{failed}} source file(s) could not be archived.": "{{failed}} Quelldatei(en) konnten nicht archiviert werden."
+  "{{failed}} source file(s) could not be archived.": "{{failed}} Quelldatei(en) konnten nicht archiviert werden.",
+  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "Der volle Ausgabenbetrag wird dieser Einheit belastet. Hat die Einheit in einem Monat keinen Mieter, wird dieser Monat dem Eigentümer belastet, wenn „Eigentümer für leerstehende Einheiten belasten“ aktiv ist — andernfalls niemandem."
 }

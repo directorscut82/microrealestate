@@ -903,7 +903,7 @@
   "The contacts will receive the invoices and will be able to access the tenant's portal": "The contacts will receive the invoices and will be able to access the tenant's portal",
   "The contract already exists": "The contract already exists",
   "The document is": "The document is",
-  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).": "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is not billed to anyone (owner billing for vacant units is coming soon).",
+  "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.",
   "The organization/landlord belongs to": "The organization/landlord belongs to",
   "The payment settles the oldest outstanding charges first.": "The payment settles the oldest outstanding charges first.",
   "The property already exists": "The property already exists",
