@@ -117,15 +117,29 @@ function DatabaseSettings() {
         // isValid(): moment(undefined).isValid() is TRUE (undefined means
         // "now"), so isValid() alone would let the absent case through.
         //
+        // The `typeof === 'string'` check is load-bearing for the SAME reason
+        // (2026-07 review): truthy + isValid() is not enough, because
+        // `exportDate` is echoed back UNVALIDATED (databasemanager.ts:313
+        // does `exportDate: payload.exportDate`, and the only client-side
+        // gate is `data.version && data.collections`). A backup JSON carrying
+        // `"exportDate": {}` — or `[]`, or a Mongo-extended-JSON
+        // `{"$date": …}` — is truthy AND moment() reports it valid, resolving
+        // to NOW. That prints TODAY's date as the snapshot identity on a
+        // DESTRUCTIVE restore, i.e. exactly the misstatement this guard was
+        // written to prevent. Verified against the repo's moment build:
+        // moment({}).isValid() === true → «31/07/2026 21:10».
+        //
         // TWO SENTENCES, not one with an "unknown date" noun substituted in:
         // every non-English carrier governs the {{date}} slot with a
         // preposition+article (el «της», fr «du», de «vom», pt «de», es
         // «del»), so dropping a nominative noun phrase there yields
         // case-broken text («…ασφαλείας της άγνωστη ημερομηνία»). The absent
         // case gets its own self-contained string instead.
+        const _rawExportDate =
+          typeof result.exportDate === 'string' ? result.exportDate.trim() : '';
         const _exportDate =
-          result.exportDate && moment(result.exportDate).isValid()
-            ? moment(result.exportDate).format('L HH:mm')
+          _rawExportDate && moment(_rawExportDate).isValid()
+            ? moment(_rawExportDate).format('L HH:mm')
             : null;
         toast.success(
           _exportDate
