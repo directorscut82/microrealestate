@@ -12,7 +12,11 @@ import { ensureSeedWithUnit } from './lib/api';
 
 const TEST_EMAIL = process.env.TEST_EMAIL ?? '';
 const TEST_PASSWORD = process.env.TEST_PASSWORD ?? '';
-const GATEWAY = process.env.NAS_GATEWAY_URL || 'http://192.168.0.96:1350';
+// playwright.config.ts sets NAS_GATEWAY_URL before any spec loads (and honours
+// a GATEWAY_URL override), so there is no fallback to add here. Hardcoding the
+// production IP as a default would silently pin this spec to prod if the config
+// ever stopped running.
+const GATEWAY = process.env.NAS_GATEWAY_URL as string;
 
 test.beforeAll(() => {
   if (!TEST_EMAIL || !TEST_PASSWORD) {
