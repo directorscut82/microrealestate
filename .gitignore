@@ -70,3 +70,21 @@ e2e-playwright/tests/_*.spec.ts
 **/__tests__/_diag*.test.js
 **/__tests__/ZZ_*.test.js
 **/__tests__/zz_*.test.js
+
+# Playwright run artifacts (traces/screenshots/videos + last-run state). These
+# are regenerated on every run and were never meant to be tracked.
+test-results/
+playwright-report/
+e2e-playwright/test-results/
+e2e-playwright/playwright-report/
+
+# Scratch working directory for adversarial reviews and bill-parser sampling.
+# CONTAINS REAL CUSTOMER DATA (OCR'd utility bills: names, ΑΦΜ, provision
+# numbers, addresses) — this repo is PUBLIC. Never commit it.
+.scratch-adv-tests/
+
+# Ad-hoc probe/verification specs written during a session (see the
+# __tests__ patterns above for the jest equivalents).
+e2e-playwright/tests/_probe*.spec.ts
+e2e-playwright/tests/_verify_*.spec.ts
+e2e-playwright/_postdeploy/

@@ -76,7 +76,9 @@ function expensesCard(page: import('@playwright/test').Page) {
   // `border` (Tailwind shadcn pattern). Filter to get a single match.
   return page
     .getByText(/^(Property expenses|Έξοδα ακινήτου)$/, { exact: true })
-    .locator('xpath=ancestor::div[contains(@class, "rounded-lg") and contains(@class, "border")][1]');
+    .locator(
+      'xpath=ancestor::div[contains(@class, "rounded-lg") and contains(@class, "border")][1]'
+    );
 }
 
 /**
@@ -111,12 +113,7 @@ function categoryRowsIn(scope: import('@playwright/test').Locator) {
   // collapsible's CollapsibleContent locator as `scope` so we don't
   // bleed across panels; do NOT add .first() here — it would break
   // multi-collapsible tests where the assertion is on a SPECIFIC panel.
-  // STALE-SPEC FIX (2026-07): the «By category» heading is now only the
-  // FALLBACK rendering. When the payload carries per-line details the card
-  // renders GroupedExpenseLines — a subtotal row per category plus indented
-  // member rows — and there is no such heading, so this returned 0 rows for a
-  // panel full of money. Prefer the category wrapper when present (fallback
-  // layout) and otherwise count the grouped rows directly.
+  //
   // STALE-SPEC FIX (2026-07): the «By category» heading is now only the
   // FALLBACK rendering. When the payload carries per-line details the card
   // renders GroupedExpenseLines — a subtotal row per category plus indented
@@ -136,7 +133,10 @@ function collapsibleTrigger(
   labelRegex: RegExp
 ) {
   return scope.locator('button', {
-    has: scope.page().locator('span.font-medium').filter({ hasText: labelRegex })
+    has: scope
+      .page()
+      .locator('span.font-medium')
+      .filter({ hasText: labelRegex })
   });
 }
 
@@ -211,10 +211,7 @@ test('30.1 · GET /properties/:id/expenses payload shape — 7 categories, numer
   expect(typeof lifetimeByYear, 'lifetime.byYear is an object').toBe('object');
   for (const yk of Object.keys(lifetimeByYear)) {
     expect(yk, `byYear key '${yk}' is YYYY`).toMatch(/^\d{4}$/);
-    expect(
-      typeof lifetimeByYear[yk],
-      `byYear[${yk}] numeric`
-    ).toBe('number');
+    expect(typeof lifetimeByYear[yk], `byYear[${yk}] numeric`).toBe('number');
   }
 
   // ----- H12: building expense with mongo type='elevator' MUST classify
@@ -254,10 +251,13 @@ test('30.1 · GET /properties/:id/expenses payload shape — 7 categories, numer
   // categorisation switch is the live code path producing these numbers.
 
   // ----- shape: currentMonth.lines — array of {description, amount, source} -----
-  expect(Array.isArray(body.currentMonth.lines), 'currentMonth.lines array').toBe(
-    true
-  );
-  for (const line of body.currentMonth.lines as Array<Record<string, unknown>>) {
+  expect(
+    Array.isArray(body.currentMonth.lines),
+    'currentMonth.lines array'
+  ).toBe(true);
+  for (const line of body.currentMonth.lines as Array<
+    Record<string, unknown>
+  >) {
     expect(typeof line.description, 'line.description string').toBe('string');
     expect(typeof line.amount, 'line.amount numeric').toBe('number');
     expect(typeof line.source, 'line.source string').toBe('string');
@@ -357,29 +357,36 @@ test('30.2 · UI · PropertyExpensesCard renders set of category rows derived fr
       .join(', ')}`
   ).toBeGreaterThanOrEqual(currentNonZero.length);
 
-  // …and the actual set-narrowing, which a bare ">=" would not give: the euro
-  // TOTAL rendered in the current-month panel must equal the server's
-  // currentMonth total. A dropped category, a double-counted subtotal, or a
-  // category rendered that the server reports as zero all break this, whichever
-  // layout the card chose.
+  // …and the real set-narrowing a bare ">=" cannot give: EVERY non-zero
+  // category's own euro figure must appear in the panel.
+  //
+  // This replaced an earlier `sum-of-all-euros === serverTotal || serverTotal
+  // appears somewhere` check, which was unsound arithmetic. In the GROUPED
+  // layout a multi-member category prints its subtotal AND each member, so the
+  // naive sum double-counts and the first arm is false on a CORRECT panel
+  // (measured on the live card: the rendered figures sum to 1186 against a
+  // server total of 896). The second arm was a lax escape hatch — "the total
+  // appears somewhere among the figures" is satisfied by coincidence as soon as
+  // any single row happens to equal it. Together they passed only because the
+  // current fixture has no multi-member category; a seed change would have
+  // failed a perfectly correct panel.
+  //
+  // Per-category presence has neither problem: exact, independent of how the
+  // card groups its rows, and a dropped or mis-valued category fails it
+  // directly. Mutation-checked — asserting `val + 1` fails with the real panel
+  // text in the message.
   const panelText = (await currentContent.innerText()) || '';
-  const renderedEuros = [...panelText.matchAll(/(-?[\d.]+,\d{2})\s*€/g)].map(
-    (m) => Number(m[1].replace(/\./g, '').replace(',', '.'))
-  );
-  const serverCurrentTotal = currentNonZero.reduce(
-    (s, [, v]) => s + Number(v),
-    0
-  );
-  // Every category subtotal appears exactly once; indented member lines sum to
-  // their own subtotal, so the largest coherent subset is the category set.
-  // Simplest robust check: the server total must be present among the rendered
-  // figures OR be the sum of the top-level category rows.
-  const sumOfAll = renderedEuros.reduce((s, v) => s + v, 0);
-  expect(
-    Math.abs(sumOfAll - serverCurrentTotal) < 0.01 ||
-      renderedEuros.some((v) => Math.abs(v - serverCurrentTotal) < 0.01),
-    `rendered euros ${JSON.stringify(renderedEuros)} must reconcile with server currentMonth total ${serverCurrentTotal.toFixed(2)} (either as the plain sum, or with grouped subtotals doubling the members)`
-  ).toBe(true);
+  const fmt = (v: number) =>
+    new Intl.NumberFormat('el-GR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(Math.abs(v));
+  for (const [cat, val] of currentNonZero) {
+    expect(
+      panelText.includes(fmt(Number(val))),
+      `current-month panel must show category "${cat}" = ${fmt(Number(val))} € (panel text: ${JSON.stringify(panelText.slice(0, 400))})`
+    ).toBe(true);
+  }
 
   // No category the server reports as ZERO may be rendered as a row — the
   // "absent representation" rule in reverse: a phantom row is money the
@@ -391,17 +398,20 @@ test('30.2 · UI · PropertyExpensesCard renders set of category rows derived fr
     const label = CATEGORY_LABELS[cat];
     if (!label) continue;
     await expect(
-      currentContent
-        .locator('div.flex.justify-between.text-sm')
-        .filter({
-          has: page.locator('span.text-muted-foreground').filter({ hasText: label })
-        }),
+      currentContent.locator('div.flex.justify-between.text-sm').filter({
+        has: page
+          .locator('span.text-muted-foreground')
+          .filter({ hasText: label })
+      }),
       `zero-valued category "${cat}" must NOT render a row`
     ).toHaveCount(0);
   }
 
   // ----- act: open Lifetime collapsible -----
-  const lifetimeTrigger = collapsibleTrigger(card, /Lifetime total|Σύνολο διαστήματος/);
+  const lifetimeTrigger = collapsibleTrigger(
+    card,
+    /Lifetime total|Σύνολο διαστήματος/
+  );
   await lifetimeTrigger.click();
   // STALE-SPEC FIX (2026-07): this waited on the «By year» heading as the
   // "collapsible opened" signal. But YearBreakdown only renders when there are
@@ -440,13 +450,11 @@ test('30.2 · UI · PropertyExpensesCard renders set of category rows derived fr
   //        across BOTH collapsibles — if lifetime renders Repairs, we
   //        catch it whether the assertion picks up Current or Lifetime.
   // -----
-  const repairsRow = card
-    .locator('div.flex.justify-between.text-sm')
-    .filter({
-      has: page
-        .locator('span.text-muted-foreground')
-        .filter({ hasText: /^(Repairs|Επισκευές)$/ })
-    });
+  const repairsRow = card.locator('div.flex.justify-between.text-sm').filter({
+    has: page
+      .locator('span.text-muted-foreground')
+      .filter({ hasText: /^(Repairs|Επισκευές)$/ })
+  });
   await expect(
     repairsRow,
     'H12 — Repairs category row visible (elevator+repairs_fund routed here)'
@@ -521,7 +529,10 @@ test('30.3 · refetch-resilience · collapsible state survives 30s wait + window
   // it, but a buggy implementation that re-mounts on cache invalidation
   // would).
   const currentTrigger = collapsibleTrigger(card, /Current month|Τρέχων μήνας/);
-  const lifetimeTrigger = collapsibleTrigger(card, /Lifetime total|Σύνολο διαστήματος/);
+  const lifetimeTrigger = collapsibleTrigger(
+    card,
+    /Lifetime total|Σύνολο διαστήματος/
+  );
 
   await currentTrigger.click();
   await lifetimeTrigger.click();
@@ -533,12 +544,12 @@ test('30.3 · refetch-resilience · collapsible state survives 30s wait + window
   const readState = async (trig: import('@playwright/test').Locator) =>
     (await trig.getAttribute('data-state')) || '';
 
-  await expect.poll(() => readState(currentTrigger), { timeout: 5_000 }).toBe(
-    'closed'
-  );
-  await expect.poll(() => readState(lifetimeTrigger), { timeout: 5_000 }).toBe(
-    'open'
-  );
+  await expect
+    .poll(() => readState(currentTrigger), { timeout: 5_000 })
+    .toBe('closed');
+  await expect
+    .poll(() => readState(lifetimeTrigger), { timeout: 5_000 })
+    .toBe('open');
 
   // ----- 30s wait — simulates a long idle period (user wandered off a tab) -----
   // We use Playwright's clock pressure by waiting in real time. This is
@@ -566,12 +577,12 @@ test('30.3 · refetch-resilience · collapsible state survives 30s wait + window
   await page.waitForTimeout(1_500);
 
   // ----- assert: collapsible state preserved -----
-  await expect.poll(() => readState(currentTrigger), { timeout: 10_000 }).toBe(
-    'closed'
-  );
-  await expect.poll(() => readState(lifetimeTrigger), { timeout: 10_000 }).toBe(
-    'open'
-  );
+  await expect
+    .poll(() => readState(currentTrigger), { timeout: 10_000 })
+    .toBe('closed');
+  await expect
+    .poll(() => readState(lifetimeTrigger), { timeout: 10_000 })
+    .toBe('open');
 
   // ----- assert: data is still rendered after refetch (i.e. the panel
   //        didn't fall into a loading-spinner state and stay there).

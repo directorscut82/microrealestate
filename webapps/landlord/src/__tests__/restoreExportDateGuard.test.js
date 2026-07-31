@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import moment from 'moment';
 
 // D-restore (2026-07 review): the restore-success toast names the snapshot that
@@ -16,6 +18,36 @@ function resolveExportDate(exportDate) {
   const raw = typeof exportDate === 'string' ? exportDate.trim() : '';
   return raw && moment(raw).isValid() ? moment(raw).format('L HH:mm') : null;
 }
+
+// DRIFT GUARD: `resolveExportDate` below MIRRORS the guard inside
+// settings/database.js (a page component with next-translate/sonner deps, not
+// practical to mount here). A mirror that diverges keeps passing while
+// production regresses, so pin the two load-bearing pieces — the typeof-string
+// narrowing and the isValid() check — to the real source.
+const PAGE_SRC = fs.readFileSync(
+  path.resolve(__dirname, '../pages/[organization]/settings/database.js'),
+  'utf8'
+);
+
+describe('mirror fidelity — the production guard this file re-implements', () => {
+  it('still narrows exportDate to a string before parsing', () => {
+    expect(PAGE_SRC).toContain(
+      "typeof result.exportDate === 'string' ? result.exportDate.trim() : ''"
+    );
+  });
+
+  it('still requires a non-empty value AND moment isValid()', () => {
+    expect(PAGE_SRC).toContain(
+      '_rawExportDate && moment(_rawExportDate).isValid()'
+    );
+  });
+
+  it('still falls back to the self-contained no-date sentence', () => {
+    expect(PAGE_SRC).toContain(
+      'Database restored successfully. The backup file carries no export date.'
+    );
+  });
+});
 
 describe('restore toast — exportDate guard', () => {
   it('formats a real ISO export date', () => {

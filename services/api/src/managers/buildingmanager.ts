@@ -128,10 +128,14 @@ async function _toBuildingData(
   const propIdToBuildingId = new Map<string, string>();
   for (const b of buildings as any[]) {
     for (const u of b.units || []) {
-      if (u.propertyId) propIdToBuildingId.set(String(u.propertyId), String(b._id));
+      if (u.propertyId)
+        propIdToBuildingId.set(String(u.propertyId), String(b._id));
     }
   }
-  const rentYTDByBuilding = new Map<string, { collected: number; owed: number }>();
+  const rentYTDByBuilding = new Map<
+    string,
+    { collected: number; owed: number }
+  >();
   const _r2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
   // Reuse the single tenant fetch above (L3) — it now carries the rents.total
   // projection this YTD rollup needs.
@@ -152,7 +156,8 @@ async function _toBuildingData(
     let collected = 0;
     let owed = 0;
     for (const rent of t.rents || []) {
-      if (Math.floor(Number(rent.term || 0) / 1000000) !== currentYear) continue;
+      if (Math.floor(Number(rent.term || 0) / 1000000) !== currentYear)
+        continue;
       const grand = Number(rent?.total?.grandTotal) || 0;
       const payment = Number(rent?.total?.payment) || 0;
       const balance = Number(rent?.total?.balance) || 0;
@@ -203,10 +208,11 @@ async function _toBuildingData(
       units,
       managedCount,
       unitCount: units.length,
-      tenantRentYTD:
-        rentYTDByBuilding.get(String(building._id)) || { collected: 0, owed: 0 },
-      uncollected:
-        uncollectedByBuilding.get(String(building._id)) || null
+      tenantRentYTD: rentYTDByBuilding.get(String(building._id)) || {
+        collected: 0,
+        owed: 0
+      },
+      uncollected: uncollectedByBuilding.get(String(building._id)) || null
     };
   });
 }
@@ -255,7 +261,8 @@ function _assertCustomAllocationPropertyIds(
   customAllocations: any,
   allocationMethod: string | undefined
 ): void {
-  if (!Array.isArray(customAllocations) || customAllocations.length === 0) return;
+  if (!Array.isArray(customAllocations) || customAllocations.length === 0)
+    return;
   const allocationKinds = new Set([
     'custom_percentage',
     'custom_ratio',
@@ -373,7 +380,8 @@ export function _stampLegacyChargesBeforeRename(
 ): void {
   const oldName = String(expense?.name || '').trim();
   // `newName === undefined` means this PATCH doesn't touch the name at all.
-  const nextName = newName !== undefined ? String(newName || '').trim() : undefined;
+  const nextName =
+    newName !== undefined ? String(newName || '').trim() : undefined;
   if (!oldName || !nextName || nextName === oldName) return;
   const sameNamed = ((building?.expenses || []) as any[]).filter(
     (e: any) => String(e?.name || '').trim() === oldName
@@ -423,10 +431,7 @@ function _greekNormalize(s: string | undefined | null): string {
 // labels with the rest of the UI's locale. Read realm.locale and emit
 // the localised label when we have a translation, falling back to the
 // Greek default so existing data remains stable.
-function _floorLabel(
-  floor: number | null | undefined,
-  realm: any
-): string {
+function _floorLabel(floor: number | null | undefined, realm: any): string {
   const isBasement = floor != null && floor < 0;
   const isGround = floor == null || floor === 0;
   const locale = (realm && realm.locale) || 'el';
@@ -435,27 +440,29 @@ function _floorLabel(
   // already live in webapps/landlord/locales/<lang>/common.json. Keep
   // the table small and additive — drift between server and client
   // locales is not worth dragging in a full i18n stack server-side.
-  const TABLE: Record<string, { ground: string; basement: string; floor: string }> =
-    {
-      el: { ground: 'Ισόγειο', basement: 'Υπόγειο', floor: 'Όροφος' },
-      en: { ground: 'Ground floor', basement: 'Basement', floor: 'Floor' },
-      'fr-FR': {
-        ground: 'Rez-de-chaussée',
-        basement: 'Sous-sol',
-        floor: 'Étage'
-      },
-      'de-DE': {
-        ground: 'Erdgeschoss',
-        basement: 'Keller',
-        floor: 'Stockwerk'
-      },
-      'es-CO': {
-        ground: 'Planta baja',
-        basement: 'Sótano',
-        floor: 'Piso'
-      },
-      'pt-BR': { ground: 'Térreo', basement: 'Porão', floor: 'Andar' }
-    };
+  const TABLE: Record<
+    string,
+    { ground: string; basement: string; floor: string }
+  > = {
+    el: { ground: 'Ισόγειο', basement: 'Υπόγειο', floor: 'Όροφος' },
+    en: { ground: 'Ground floor', basement: 'Basement', floor: 'Floor' },
+    'fr-FR': {
+      ground: 'Rez-de-chaussée',
+      basement: 'Sous-sol',
+      floor: 'Étage'
+    },
+    'de-DE': {
+      ground: 'Erdgeschoss',
+      basement: 'Keller',
+      floor: 'Stockwerk'
+    },
+    'es-CO': {
+      ground: 'Planta baja',
+      basement: 'Sótano',
+      floor: 'Piso'
+    },
+    'pt-BR': { ground: 'Térreo', basement: 'Porão', floor: 'Andar' }
+  };
   const entry = TABLE[locale] || TABLE['el'];
   if (isGround) return entry.ground;
   if (isBasement) return entry.basement;
@@ -818,7 +825,12 @@ export async function add(req: Req, res: Res) {
   const realm = req.realm;
   // Wave-21 C30-B5: strip server-owned identity fields from the payload.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = req.body || {};
+  const {
+    _id: _ignoredId,
+    __v: _ignoredV,
+    realmId: _ignoredRealmId,
+    ...rest
+  } = req.body || {};
   req.body = rest;
   if (!req.body.name?.trim()) {
     throw new ServiceError('Building name is missing', 422);
@@ -838,21 +850,26 @@ export async function add(req: Req, res: Res) {
   // without those is allowed and surfaces an "Ελλειπή στοιχεία" warning
   // on the tile (Tier B9), not a creation block.
   const addr = req.body?.address || {};
-  if (!addr.street1 || typeof addr.street1 !== 'string' || !addr.street1.trim()) {
+  if (
+    !addr.street1 ||
+    typeof addr.street1 !== 'string' ||
+    !addr.street1.trim()
+  ) {
     throw new ServiceError('address.street1 is required', 422);
   }
   if (!addr.city || typeof addr.city !== 'string' || !addr.city.trim()) {
     throw new ServiceError('address.city is required', 422);
   }
-  if (!addr.zipCode || typeof addr.zipCode !== 'string' || !addr.zipCode.trim()) {
+  if (
+    !addr.zipCode ||
+    typeof addr.zipCode !== 'string' ||
+    !addr.zipCode.trim()
+  ) {
     throw new ServiceError('address.zipCode is required', 422);
   }
   // Tier C2 — Greek postal code format (5 digits).
   if (!isValidGreekPostalCode(addr.zipCode.trim())) {
-    throw new ServiceError(
-      'address.zipCode must be 5 digits',
-      422
-    );
+    throw new ServiceError('address.zipCode must be 5 digits', 422);
   }
   validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
     min: 1800,
@@ -993,7 +1010,10 @@ export async function update(req: Req, res: Res) {
     }
   }
   if (req.body.atakPrefix !== undefined) {
-    if (typeof req.body.atakPrefix !== 'string' || !req.body.atakPrefix.trim()) {
+    if (
+      typeof req.body.atakPrefix !== 'string' ||
+      !req.body.atakPrefix.trim()
+    ) {
       throw new ServiceError('ATAK prefix is missing', 422);
     }
   }
@@ -1219,9 +1239,7 @@ function _mergeCoOwners(ownersArr: any[], parsedUnit: any): void {
   for (const co of (parsedUnit as any).coOwners || []) {
     const coTaxId = co.taxId || '';
     if (!coTaxId) continue; // unidentifiable co-owner → rest-slice handles it
-    const exists = ownersArr.find(
-      (o: any) => o.taxId && o.taxId === coTaxId
-    );
+    const exists = ownersArr.find((o: any) => o.taxId && o.taxId === coTaxId);
     if (exists) {
       // keep the latest declared percentage
       if (
@@ -1386,685 +1404,693 @@ export async function importFromE9(req: Req, res: Res) {
     const createdBuildingIds: string[] = [];
 
     try {
-    // L13: mirror the 200-unit cap that addUnit / addBuilding enforce on
-    // the manual path. The E9 importer can append to an existing
-    // building, so the cap is computed against (existing + incoming)
-    // and not against the parsed unit count alone — without this,
-    // re-importing a 195-unit building plus 10 new units would silently
-    // push the total over the schema limit and trigger downstream
-    // ValidationErrors on the next save.
-    for (const buildingData of parsed.buildings) {
-      const existingForCap = await Collections.Building.findOne({
-        realmId: realm!._id,
-        'address.street1': buildingData.address.street1
-      })
-        .select({ units: 1 })
-        .lean();
-      const existingCount = ((existingForCap as any)?.units || []).length;
-      const incomingCount = (buildingData.units || []).length;
-      if (existingCount + incomingCount > 200) {
-        throw new ServiceError(
-          `Too many units in E9 (${existingCount + incomingCount} ≥ 200) for building "${buildingData.address.street1}"`,
-          422
-        );
-      }
-    }
-    for (const buildingData of parsed.buildings) {
-      // Check if building exists
-      // 1. Exact address match (street1 + zipCode)
-      let building = await Collections.Building.findOne({
-        realmId: realm!._id,
-        'address.street1': buildingData.address.street1,
-        'address.zipCode': buildingData.address.zipCode
-      });
-
-      // 2. Street-only match (handles empty/different zips between owners)
-      if (!building && buildingData.address.street1) {
-        building = await Collections.Building.findOne({
+      // L13: mirror the 200-unit cap that addUnit / addBuilding enforce on
+      // the manual path. The E9 importer can append to an existing
+      // building, so the cap is computed against (existing + incoming)
+      // and not against the parsed unit count alone — without this,
+      // re-importing a 195-unit building plus 10 new units would silently
+      // push the total over the schema limit and trigger downstream
+      // ValidationErrors on the next save.
+      for (const buildingData of parsed.buildings) {
+        const existingForCap = await Collections.Building.findOne({
           realmId: realm!._id,
           'address.street1': buildingData.address.street1
-        });
-      }
-
-      // 3. L14: Greek-aware case/accent-insensitive fallback. A user
-      // who manually created "Οδος ζητά 167" before importing an E9 that
-      // declared "ΟΔΟΣ ΖΗΤΑ 167" would have those two records treated as
-      // separate buildings — silently duplicating the building and
-      // splitting unit attachment between the two. Pull every building
-      // in the realm and pick the first whose normalised street1
-      // matches the parsed street1. This is realm-scoped so it cannot
-      // cross tenants.
-      if (!building && buildingData.address.street1) {
-        const normalisedTarget = _greekNormalize(buildingData.address.street1);
-        if (normalisedTarget) {
-          const candidates = await Collections.Building.find({
-            realmId: realm!._id
-          })
-            .select({ _id: 1, address: 1 })
-            .lean();
-          const hit = (candidates as any[]).find(
-            (c) =>
-              _greekNormalize(c?.address?.street1 || '') === normalisedTarget
+        })
+          .select({ units: 1 })
+          .lean();
+        const existingCount = ((existingForCap as any)?.units || []).length;
+        const incomingCount = (buildingData.units || []).length;
+        if (existingCount + incomingCount > 200) {
+          throw new ServiceError(
+            `Too many units in E9 (${existingCount + incomingCount} ≥ 200) for building "${buildingData.address.street1}"`,
+            422
           );
-          if (hit) {
-            building = await Collections.Building.findOne({
-              _id: (hit as any)._id,
-              realmId: realm!._id
-            });
-          }
         }
       }
-
-      // NOTE: Do NOT match by ATAK prefix — it's a cadastral area code, not building ID
-      // Multiple buildings can share the same prefix (e.g. ΟΔΟΣ ΖΗΤΑ 167 and ΟΔΟΣ ΗΤΑ 24)
-
-      let wasCreated = false;
-      let wasUpdated = false;
-      let unitsAdded = 0;
-
-      if (!building) {
-        // T3.P1.29: derive UI-required fields (totalFloors, hasElevator)
-        // from the parsed unit floors so the Edit Building form does not
-        // open with two empty mandatory inputs after every E9 import.
-        // - totalFloors: max(floor) + abs(min(floor)) + 1, counting any
-        //   basement(s) as additional floors. Defaults to undefined when
-        //   no unit declared a numeric floor (server schema accepts it
-        //   as Number; the form treats undefined as "please fill in").
-        // - hasElevator: heuristic — any unit on the 4th floor or above
-        //   strongly implies an elevator. User can correct in the form.
-        const numericFloors = (buildingData.units || [])
-          .map((u: any) => u.floor)
-          .filter((f: any) => typeof f === 'number');
-        let totalFloors: number | undefined = undefined;
-        if (numericFloors.length > 0) {
-          const maxF = Math.max(...numericFloors);
-          const minF = Math.min(...numericFloors);
-          totalFloors = maxF + Math.abs(Math.min(0, minF)) + 1;
-        }
-        const hasElevator = numericFloors.some((f: number) => f >= 4);
-        building = new Collections.Building({
+      for (const buildingData of parsed.buildings) {
+        // Check if building exists
+        // 1. Exact address match (street1 + zipCode)
+        let building = await Collections.Building.findOne({
           realmId: realm!._id,
-          name: buildingData.address.street1,
-          atakPrefix: buildingData.atakPrefix,
-          address: buildingData.address,
-          blockNumber: buildingData.blockNumber,
-          blockStreets: buildingData.blockStreets,
-          yearBuilt: buildingData.yearBuilt,
-          ...(totalFloors !== undefined && { totalFloors }),
-          hasElevator,
-          hasCentralHeating: false,
-          units: [],
-          expenses: [],
-          contractors: [],
-          repairs: [],
-          createdDate: new Date(),
-          updatedDate: new Date()
+          'address.street1': buildingData.address.street1,
+          'address.zipCode': buildingData.address.zipCode
         });
-        await _saveBuildingWithVersionCheck(building);
-        // T2.P1.6: remember the new building so a downstream failure can
-        // delete it during rollback.
-        createdBuildingIds.push(String(building._id));
-        wasCreated = true;
-      } else {
-        // Consolidate: merge incoming data into existing building
-        let updated = false;
-        const b = building as any;
-        if (buildingData.address?.street1 && !b.address?.street1) {
-          b.address = buildingData.address;
-          updated = true;
-        }
-        if (buildingData.yearBuilt && !b.yearBuilt) {
-          b.yearBuilt = buildingData.yearBuilt;
-          updated = true;
-        }
-        if (buildingData.blockNumber && !b.blockNumber) {
-          b.blockNumber = buildingData.blockNumber;
-          updated = true;
-        }
-        if (buildingData.blockStreets?.length && !b.blockStreets?.length) {
-          b.blockStreets = buildingData.blockStreets;
-          updated = true;
-        }
-        if (updated) {
-          b.updatedDate = new Date();
-          await _saveBuildingWithVersionCheck(building);
-          wasUpdated = true;
-        }
-      }
 
-      // Add units and create/link properties
-      for (const parsedUnit of buildingData.units) {
-        // Check if unit already exists in building
-        // 1. By ATAK number (same owner re-importing)
-        const existingUnit = (building as any).units.find(
-          (u: any) => u.atakNumber === parsedUnit.atakNumber
-        );
-        if (existingUnit) {
-          // OWNER-IDENTITY: the E9 υπόχρεος (parsed.owner) is the real owner of
-          // record — a person on the landlord's books, NOT the app user doing
-          // the import. Identify them by ΑΦΜ (taxId) first, then by name.
-          // (Previously we stamped the importing user's memberId on every
-          // parsed owner; since ownerKeyOf keys on memberId first, that
-          // collapsed every distinct owner the same operator imported into ONE
-          // bucket — e.g. three siblings' 20 units showing as one owner. A
-          // parsed owner is never the app user, so we never stamp a memberId;
-          // identity is name + ΑΦΜ, mirroring the co-owner handling below.)
-          const ownerTaxId = (parsed.owner as any).taxId || '';
-          const findExistingOwner = (owners: any[]): any =>
-            (owners || []).find((o: any) => {
-              if (ownerTaxId && o.taxId && o.taxId === ownerTaxId) return true;
-              return o.name === ownerFullName;
-            });
-          const existingOwner = findExistingOwner(existingUnit.owners);
-          if (!existingOwner && existingUnit.owners) {
-            existingUnit.owners.push({
-              type: 'external',
-              name: ownerFullName,
-              percentage: parsedUnit.ownershipPercentage,
-              taxId: ownerTaxId || undefined
-            });
-          } else if (existingOwner) {
-            // BACKFILL ΑΦΜ: a re-import of the SAME owner now carries their ΑΦΜ
-            // (older imports stored none). Stamp it onto the name-matched
-            // owner so ownerKeyOf (n:name|taxId) stays stable and the owner is
-            // not split into two (n:name| vs n:name|taxId) on the owners page.
-            // DISAMBIGUATION GUARD: only stamp when the name is UNAMBIGUOUS on
-            // this unit — exactly one owner bears ownerFullName AND no other
-            // owner already carries this ΑΦΜ. Otherwise a second person sharing
-            // a common Greek name re-importing their own E9 would name-match a
-            // taxId-less co-owner and have THEIR ΑΦΜ stamped onto the wrong
-            // person, flipping that owner's ledger identity (money-routing
-            // corruption — adversarial finding, June 2026 round-4).
-            if (ownerTaxId && !existingOwner.taxId) {
-              const nameMatches = (existingUnit.owners || []).filter(
-                (o: any) => o.name === ownerFullName
-              );
-              const taxIdElsewhere = (existingUnit.owners || []).some(
-                (o: any) => o.taxId && o.taxId === ownerTaxId
-              );
-              if (nameMatches.length === 1 && !taxIdElsewhere) {
-                existingOwner.taxId = ownerTaxId;
-              }
-            }
-            // L4: year-on-year re-imports may declare a different
-            // ownership percentage (transfers, shifts in joint
-            // ownership). Keep the latest E9 declaration as the source
-            // of truth instead of silently preserving the prior value.
-            if (
-              typeof parsedUnit.ownershipPercentage === 'number' &&
-              parsedUnit.ownershipPercentage !== existingOwner.percentage
-            ) {
-              logger.info(
-                `E9 import: owner ${ownerFullName} percentage updated on ATAK ${parsedUnit.atakNumber}: ${existingOwner.percentage} → ${parsedUnit.ownershipPercentage}`
-              );
-              existingOwner.percentage = parsedUnit.ownershipPercentage;
-            }
-          }
-          // Append any co-owners the parser detected (was dropped on re-import).
-          _mergeCoOwners(existingUnit.owners, parsedUnit);
-          continue;
-        }
-
-        // 2. By DEH number + floor + surface (same apartment, different owner's ATAK)
-        // Must match floor+surface too: different floors sharing one meter are separate units
-        const existingByDeh = parsedUnit.electricitySupplyNumber
-          ? (building as any).units.find(
-              (u: any) =>
-                u.electricitySupplyNumber ===
-                  parsedUnit.electricitySupplyNumber &&
-                u.floor === parsedUnit.floor &&
-                u.surface === parsedUnit.surface
-            )
-          : null;
-        if (existingByDeh) {
-          // Same apartment, add co-owner. OWNER-IDENTITY: dedupe by ΑΦΜ
-          // (taxId) then name — the parsed owner is the owner of record, not
-          // the importing app user, so we never key on the user's memberId
-          // (see the ATAK-match branch above for the collapse bug this fixes).
-          const ownerTaxId = (parsed.owner as any).taxId || '';
-          const existingOwner = (existingByDeh.owners || []).find((o: any) => {
-            if (ownerTaxId && o.taxId && o.taxId === ownerTaxId) return true;
-            return o.name === ownerFullName;
+        // 2. Street-only match (handles empty/different zips between owners)
+        if (!building && buildingData.address.street1) {
+          building = await Collections.Building.findOne({
+            realmId: realm!._id,
+            'address.street1': buildingData.address.street1
           });
-          if (!existingOwner && existingByDeh.owners) {
-            existingByDeh.owners.push({
-              type: 'external',
-              name: ownerFullName,
-              percentage: parsedUnit.ownershipPercentage,
-              taxId: ownerTaxId || undefined
-            });
-          } else if (existingOwner) {
-            // BACKFILL ΑΦΜ on the name-matched owner (see ATAK branch above) —
-            // same disambiguation guard: stamp only when the name is unique on
-            // this unit and the ΑΦΜ is not already on another co-owner.
-            if (ownerTaxId && !existingOwner.taxId) {
-              const nameMatches = (existingByDeh.owners || []).filter(
-                (o: any) => o.name === ownerFullName
-              );
-              const taxIdElsewhere = (existingByDeh.owners || []).some(
-                (o: any) => o.taxId && o.taxId === ownerTaxId
-              );
-              if (nameMatches.length === 1 && !taxIdElsewhere) {
-                existingOwner.taxId = ownerTaxId;
-              }
-            }
-            // L4: see ATAK-match branch above for rationale.
-            if (
-              typeof parsedUnit.ownershipPercentage === 'number' &&
-              parsedUnit.ownershipPercentage !== existingOwner.percentage
-            ) {
-              logger.info(
-                `E9 import: owner ${ownerFullName} percentage updated on DEH-matched ATAK ${parsedUnit.atakNumber}: ${existingOwner.percentage} → ${parsedUnit.ownershipPercentage}`
-              );
-              existingOwner.percentage = parsedUnit.ownershipPercentage;
-            }
-          }
-          // Append any co-owners the parser detected (was dropped on re-import).
-          _mergeCoOwners(existingByDeh.owners, parsedUnit);
-          // Store co-owner's ATAK in altAtakNumbers (on building unit and property)
-          if (existingByDeh.atakNumber !== parsedUnit.atakNumber) {
-            if (!existingByDeh.altAtakNumbers)
-              existingByDeh.altAtakNumbers = [];
-            if (!existingByDeh.altAtakNumbers.includes(parsedUnit.atakNumber)) {
-              existingByDeh.altAtakNumbers.push(parsedUnit.atakNumber);
-            }
-            // Also update the linked Property record. Realm-scope the
-            // updateOne so a smuggled propertyId pointing at another realm's
-            // Property cannot have its altAtakNumbers mutated by this E9
-            // import.
-            if (existingByDeh.propertyId) {
-              await Collections.Property.updateOne(
-                {
-                  _id: existingByDeh.propertyId,
-                  realmId: realm!._id
-                },
-                { $addToSet: { altAtakNumbers: parsedUnit.atakNumber } }
-              );
-            }
-          }
-          // L5: when an empty-only field on the matched Property record
-          // can be filled from the new E9 row (and the user has not
-          // opted into forceOverwrite which is handled in the by-ATAK
-          // branch), fill it. Preserves user edits via the empty-only
-          // rule from T2.P1.20 — we never overwrite a non-empty value.
-          if (existingByDeh.propertyId) {
-            const fillSet: Record<string, any> = {};
-            if (parsedUnit.surface) fillSet.surface = parsedUnit.surface;
-            if (parsedUnit.yearBuilt) fillSet.yearBuilt = parsedUnit.yearBuilt;
-            if (parsedUnit.electricitySupplyNumber) {
-              fillSet.electricitySupplyNumber =
-                parsedUnit.electricitySupplyNumber;
-            }
-            if ((parsedUnit as any).kaek) {
-              fillSet.kaek = (parsedUnit as any).kaek;
-            }
-            const $or: any[] = Object.keys(fillSet).map((k) => ({
-              [k]: { $in: [null, undefined, ''] }
-            }));
-            // Build per-field empty-only update so we update each
-            // field independently and never clobber a populated value.
-            for (const k of Object.keys(fillSet)) {
-              await Collections.Property.updateOne(
-                {
-                  _id: existingByDeh.propertyId,
-                  realmId: realm!._id,
-                  $or: [
-                    { [k]: { $exists: false } },
-                    { [k]: null },
-                    { [k]: '' }
-                  ]
-                },
-                { $set: { [k]: fillSet[k] } }
-              );
-            }
-            // Suppress unused-var warning for $or (built but not used
-            // because per-field guard above is more granular).
-            void $or;
-          }
-          continue;
         }
 
-        // Find or create the Property record
-        let property = await Collections.Property.findOne({
-          realmId: realm!._id,
-          atakNumber: parsedUnit.atakNumber
-        });
-
-        if (!property) {
-          // L16: the partial unique index on (realmId, atakNumber)
-          // means a concurrent E9 import (e.g. two browser tabs) racing
-          // for the same ATAK would have the second findOne miss and
-          // both fall through to create — the loser would surface a
-          // raw E11000 as a 500. Catch the duplicate-key, refetch by
-          // ATAK, and proceed with the existing record so the user
-          // sees the same outcome as a sequential re-import.
-          try {
-            const computedName = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${_floorLabel(
-              parsedUnit.floor,
-              realm
-            )}`;
-            property = await Collections.Property.create({
-              realmId: realm!._id,
-              name: computedName,
-              type: _inferPropertyType({
-                category: parsedUnit.category,
-                floor: parsedUnit.floor,
-                name: computedName
-              }),
-              surface: parsedUnit.surface,
-              atakNumber: parsedUnit.atakNumber,
-              // L9: persist the cadastral code when E9 emitted one.
-              ...(((parsedUnit as any).kaek)
-                ? { kaek: (parsedUnit as any).kaek }
-                : {}),
-              electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
-              buildingId: String(building!._id),
-              address: buildingData.address
-            });
-            // T2.P1.6: track newly-created property so a downstream
-            // exception can delete it during rollback.
-            createdPropertyIds.push(String(property._id));
-          } catch (createErr: any) {
-            if (createErr && createErr.code === 11000) {
-              property = await Collections.Property.findOne({
-                realmId: realm!._id,
-                atakNumber: parsedUnit.atakNumber
+        // 3. L14: Greek-aware case/accent-insensitive fallback. A user
+        // who manually created "Οδος ζητά 167" before importing an E9 that
+        // declared "ΟΔΟΣ ΖΗΤΑ 167" would have those two records treated as
+        // separate buildings — silently duplicating the building and
+        // splitting unit attachment between the two. Pull every building
+        // in the realm and pick the first whose normalised street1
+        // matches the parsed street1. This is realm-scoped so it cannot
+        // cross tenants.
+        if (!building && buildingData.address.street1) {
+          const normalisedTarget = _greekNormalize(
+            buildingData.address.street1
+          );
+          if (normalisedTarget) {
+            const candidates = await Collections.Building.find({
+              realmId: realm!._id
+            })
+              .select({ _id: 1, address: 1 })
+              .lean();
+            const hit = (candidates as any[]).find(
+              (c) =>
+                _greekNormalize(c?.address?.street1 || '') === normalisedTarget
+            );
+            if (hit) {
+              building = await Collections.Building.findOne({
+                _id: (hit as any)._id,
+                realmId: realm!._id
               });
-              if (!property) {
-                // The duplicate key existed at write time but the
-                // refetch missed — surface the original error so the
-                // outer rollback path can clean up.
-                throw createErr;
-              }
-              // Round-1 audit H10 (Step-7): this E11000 catch is the OTHER
-              // buildingId-reassign path (a concurrent import for the same ATAK
-              // won the create race and may have linked the property to a
-              // DIFFERENT building). Apply the SAME cross-building steal guard
-              // as the else-branch so the race loser can't double-link it.
-              {
-                const otherBuilding = await Collections.Building.findOne({
-                  realmId: realm!._id,
-                  'units.propertyId': String(property._id)
-                }).lean();
-                if (
-                  otherBuilding &&
-                  String((otherBuilding as any)._id) !== String(building!._id)
-                ) {
-                  throw new ServiceError(
-                    `Property ${parsedUnit.atakNumber} is already linked to a unit in another building (${(otherBuilding as any).name || 'unknown'}). Remove that unit first, or re-import into that building.`,
-                    422
-                  );
+            }
+          }
+        }
+
+        // NOTE: Do NOT match by ATAK prefix — it's a cadastral area code, not building ID
+        // Multiple buildings can share the same prefix (e.g. ΟΔΟΣ ΖΗΤΑ 167 and ΟΔΟΣ ΗΤΑ 24)
+
+        let wasCreated = false;
+        let wasUpdated = false;
+        let unitsAdded = 0;
+
+        if (!building) {
+          // T3.P1.29: derive UI-required fields (totalFloors, hasElevator)
+          // from the parsed unit floors so the Edit Building form does not
+          // open with two empty mandatory inputs after every E9 import.
+          // - totalFloors: max(floor) + abs(min(floor)) + 1, counting any
+          //   basement(s) as additional floors. Defaults to undefined when
+          //   no unit declared a numeric floor (server schema accepts it
+          //   as Number; the form treats undefined as "please fill in").
+          // - hasElevator: heuristic — any unit on the 4th floor or above
+          //   strongly implies an elevator. User can correct in the form.
+          const numericFloors = (buildingData.units || [])
+            .map((u: any) => u.floor)
+            .filter((f: any) => typeof f === 'number');
+          let totalFloors: number | undefined = undefined;
+          if (numericFloors.length > 0) {
+            const maxF = Math.max(...numericFloors);
+            const minF = Math.min(...numericFloors);
+            totalFloors = maxF + Math.abs(Math.min(0, minF)) + 1;
+          }
+          const hasElevator = numericFloors.some((f: number) => f >= 4);
+          building = new Collections.Building({
+            realmId: realm!._id,
+            name: buildingData.address.street1,
+            atakPrefix: buildingData.atakPrefix,
+            address: buildingData.address,
+            blockNumber: buildingData.blockNumber,
+            blockStreets: buildingData.blockStreets,
+            yearBuilt: buildingData.yearBuilt,
+            ...(totalFloors !== undefined && { totalFloors }),
+            hasElevator,
+            hasCentralHeating: false,
+            units: [],
+            expenses: [],
+            contractors: [],
+            repairs: [],
+            createdDate: new Date(),
+            updatedDate: new Date()
+          });
+          await _saveBuildingWithVersionCheck(building);
+          // T2.P1.6: remember the new building so a downstream failure can
+          // delete it during rollback.
+          createdBuildingIds.push(String(building._id));
+          wasCreated = true;
+        } else {
+          // Consolidate: merge incoming data into existing building
+          let updated = false;
+          const b = building as any;
+          if (buildingData.address?.street1 && !b.address?.street1) {
+            b.address = buildingData.address;
+            updated = true;
+          }
+          if (buildingData.yearBuilt && !b.yearBuilt) {
+            b.yearBuilt = buildingData.yearBuilt;
+            updated = true;
+          }
+          if (buildingData.blockNumber && !b.blockNumber) {
+            b.blockNumber = buildingData.blockNumber;
+            updated = true;
+          }
+          if (buildingData.blockStreets?.length && !b.blockStreets?.length) {
+            b.blockStreets = buildingData.blockStreets;
+            updated = true;
+          }
+          if (updated) {
+            b.updatedDate = new Date();
+            await _saveBuildingWithVersionCheck(building);
+            wasUpdated = true;
+          }
+        }
+
+        // Add units and create/link properties
+        for (const parsedUnit of buildingData.units) {
+          // Check if unit already exists in building
+          // 1. By ATAK number (same owner re-importing)
+          const existingUnit = (building as any).units.find(
+            (u: any) => u.atakNumber === parsedUnit.atakNumber
+          );
+          if (existingUnit) {
+            // OWNER-IDENTITY: the E9 υπόχρεος (parsed.owner) is the real owner of
+            // record — a person on the landlord's books, NOT the app user doing
+            // the import. Identify them by ΑΦΜ (taxId) first, then by name.
+            // (Previously we stamped the importing user's memberId on every
+            // parsed owner; since ownerKeyOf keys on memberId first, that
+            // collapsed every distinct owner the same operator imported into ONE
+            // bucket — e.g. three siblings' 20 units showing as one owner. A
+            // parsed owner is never the app user, so we never stamp a memberId;
+            // identity is name + ΑΦΜ, mirroring the co-owner handling below.)
+            const ownerTaxId = (parsed.owner as any).taxId || '';
+            const findExistingOwner = (owners: any[]): any =>
+              (owners || []).find((o: any) => {
+                if (ownerTaxId && o.taxId && o.taxId === ownerTaxId)
+                  return true;
+                return o.name === ownerFullName;
+              });
+            const existingOwner = findExistingOwner(existingUnit.owners);
+            if (!existingOwner && existingUnit.owners) {
+              existingUnit.owners.push({
+                type: 'external',
+                name: ownerFullName,
+                percentage: parsedUnit.ownershipPercentage,
+                taxId: ownerTaxId || undefined
+              });
+            } else if (existingOwner) {
+              // BACKFILL ΑΦΜ: a re-import of the SAME owner now carries their ΑΦΜ
+              // (older imports stored none). Stamp it onto the name-matched
+              // owner so ownerKeyOf (n:name|taxId) stays stable and the owner is
+              // not split into two (n:name| vs n:name|taxId) on the owners page.
+              // DISAMBIGUATION GUARD: only stamp when the name is UNAMBIGUOUS on
+              // this unit — exactly one owner bears ownerFullName AND no other
+              // owner already carries this ΑΦΜ. Otherwise a second person sharing
+              // a common Greek name re-importing their own E9 would name-match a
+              // taxId-less co-owner and have THEIR ΑΦΜ stamped onto the wrong
+              // person, flipping that owner's ledger identity (money-routing
+              // corruption — adversarial finding, June 2026 round-4).
+              if (ownerTaxId && !existingOwner.taxId) {
+                const nameMatches = (existingUnit.owners || []).filter(
+                  (o: any) => o.name === ownerFullName
+                );
+                const taxIdElsewhere = (existingUnit.owners || []).some(
+                  (o: any) => o.taxId && o.taxId === ownerTaxId
+                );
+                if (nameMatches.length === 1 && !taxIdElsewhere) {
+                  existingOwner.taxId = ownerTaxId;
                 }
               }
-              // Fall into the existing-property branch below — apply
-              // the empty-only fills via a synthetic re-entry.
-              property.buildingId = String(building!._id) as any;
+              // L4: year-on-year re-imports may declare a different
+              // ownership percentage (transfers, shifts in joint
+              // ownership). Keep the latest E9 declaration as the source
+              // of truth instead of silently preserving the prior value.
               if (
-                forceOverwrite ||
-                !property.electricitySupplyNumber
+                typeof parsedUnit.ownershipPercentage === 'number' &&
+                parsedUnit.ownershipPercentage !== existingOwner.percentage
               ) {
-                property.electricitySupplyNumber =
-                  parsedUnit.electricitySupplyNumber as any;
+                logger.info(
+                  `E9 import: owner ${ownerFullName} percentage updated on ATAK ${parsedUnit.atakNumber}: ${existingOwner.percentage} → ${parsedUnit.ownershipPercentage}`
+                );
+                existingOwner.percentage = parsedUnit.ownershipPercentage;
               }
-              if (parsedUnit.surface && (forceOverwrite || !property.surface)) {
-                property.surface = parsedUnit.surface as any;
+            }
+            // Append any co-owners the parser detected (was dropped on re-import).
+            _mergeCoOwners(existingUnit.owners, parsedUnit);
+            continue;
+          }
+
+          // 2. By DEH number + floor + surface (same apartment, different owner's ATAK)
+          // Must match floor+surface too: different floors sharing one meter are separate units
+          const existingByDeh = parsedUnit.electricitySupplyNumber
+            ? (building as any).units.find(
+                (u: any) =>
+                  u.electricitySupplyNumber ===
+                    parsedUnit.electricitySupplyNumber &&
+                  u.floor === parsedUnit.floor &&
+                  u.surface === parsedUnit.surface
+              )
+            : null;
+          if (existingByDeh) {
+            // Same apartment, add co-owner. OWNER-IDENTITY: dedupe by ΑΦΜ
+            // (taxId) then name — the parsed owner is the owner of record, not
+            // the importing app user, so we never key on the user's memberId
+            // (see the ATAK-match branch above for the collapse bug this fixes).
+            const ownerTaxId = (parsed.owner as any).taxId || '';
+            const existingOwner = (existingByDeh.owners || []).find(
+              (o: any) => {
+                if (ownerTaxId && o.taxId && o.taxId === ownerTaxId)
+                  return true;
+                return o.name === ownerFullName;
               }
+            );
+            if (!existingOwner && existingByDeh.owners) {
+              existingByDeh.owners.push({
+                type: 'external',
+                name: ownerFullName,
+                percentage: parsedUnit.ownershipPercentage,
+                taxId: ownerTaxId || undefined
+              });
+            } else if (existingOwner) {
+              // BACKFILL ΑΦΜ on the name-matched owner (see ATAK branch above) —
+              // same disambiguation guard: stamp only when the name is unique on
+              // this unit and the ΑΦΜ is not already on another co-owner.
+              if (ownerTaxId && !existingOwner.taxId) {
+                const nameMatches = (existingByDeh.owners || []).filter(
+                  (o: any) => o.name === ownerFullName
+                );
+                const taxIdElsewhere = (existingByDeh.owners || []).some(
+                  (o: any) => o.taxId && o.taxId === ownerTaxId
+                );
+                if (nameMatches.length === 1 && !taxIdElsewhere) {
+                  existingOwner.taxId = ownerTaxId;
+                }
+              }
+              // L4: see ATAK-match branch above for rationale.
               if (
-                (parsedUnit as any).kaek &&
-                (forceOverwrite || !(property as any).kaek)
+                typeof parsedUnit.ownershipPercentage === 'number' &&
+                parsedUnit.ownershipPercentage !== existingOwner.percentage
               ) {
-                (property as any).kaek = (parsedUnit as any).kaek;
+                logger.info(
+                  `E9 import: owner ${ownerFullName} percentage updated on DEH-matched ATAK ${parsedUnit.atakNumber}: ${existingOwner.percentage} → ${parsedUnit.ownershipPercentage}`
+                );
+                existingOwner.percentage = parsedUnit.ownershipPercentage;
               }
-              await property.save();
-            } else {
-              throw createErr;
+            }
+            // Append any co-owners the parser detected (was dropped on re-import).
+            _mergeCoOwners(existingByDeh.owners, parsedUnit);
+            // Store co-owner's ATAK in altAtakNumbers (on building unit and property)
+            if (existingByDeh.atakNumber !== parsedUnit.atakNumber) {
+              if (!existingByDeh.altAtakNumbers)
+                existingByDeh.altAtakNumbers = [];
+              if (
+                !existingByDeh.altAtakNumbers.includes(parsedUnit.atakNumber)
+              ) {
+                existingByDeh.altAtakNumbers.push(parsedUnit.atakNumber);
+              }
+              // Also update the linked Property record. Realm-scope the
+              // updateOne so a smuggled propertyId pointing at another realm's
+              // Property cannot have its altAtakNumbers mutated by this E9
+              // import.
+              if (existingByDeh.propertyId) {
+                await Collections.Property.updateOne(
+                  {
+                    _id: existingByDeh.propertyId,
+                    realmId: realm!._id
+                  },
+                  { $addToSet: { altAtakNumbers: parsedUnit.atakNumber } }
+                );
+              }
+            }
+            // L5: when an empty-only field on the matched Property record
+            // can be filled from the new E9 row (and the user has not
+            // opted into forceOverwrite which is handled in the by-ATAK
+            // branch), fill it. Preserves user edits via the empty-only
+            // rule from T2.P1.20 — we never overwrite a non-empty value.
+            if (existingByDeh.propertyId) {
+              const fillSet: Record<string, any> = {};
+              if (parsedUnit.surface) fillSet.surface = parsedUnit.surface;
+              if (parsedUnit.yearBuilt)
+                fillSet.yearBuilt = parsedUnit.yearBuilt;
+              if (parsedUnit.electricitySupplyNumber) {
+                fillSet.electricitySupplyNumber =
+                  parsedUnit.electricitySupplyNumber;
+              }
+              if ((parsedUnit as any).kaek) {
+                fillSet.kaek = (parsedUnit as any).kaek;
+              }
+              const $or: any[] = Object.keys(fillSet).map((k) => ({
+                [k]: { $in: [null, undefined, ''] }
+              }));
+              // Build per-field empty-only update so we update each
+              // field independently and never clobber a populated value.
+              for (const k of Object.keys(fillSet)) {
+                await Collections.Property.updateOne(
+                  {
+                    _id: existingByDeh.propertyId,
+                    realmId: realm!._id,
+                    $or: [
+                      { [k]: { $exists: false } },
+                      { [k]: null },
+                      { [k]: '' }
+                    ]
+                  },
+                  { $set: { [k]: fillSet[k] } }
+                );
+              }
+              // Suppress unused-var warning for $or (built but not used
+              // because per-field guard above is more granular).
+              void $or;
+            }
+            continue;
+          }
+
+          // Find or create the Property record
+          let property = await Collections.Property.findOne({
+            realmId: realm!._id,
+            atakNumber: parsedUnit.atakNumber
+          });
+
+          if (!property) {
+            // L16: the partial unique index on (realmId, atakNumber)
+            // means a concurrent E9 import (e.g. two browser tabs) racing
+            // for the same ATAK would have the second findOne miss and
+            // both fall through to create — the loser would surface a
+            // raw E11000 as a 500. Catch the duplicate-key, refetch by
+            // ATAK, and proceed with the existing record so the user
+            // sees the same outcome as a sequential re-import.
+            try {
+              const computedName = `${parsedUnit.street} ${parsedUnit.streetNumber} - ${_floorLabel(
+                parsedUnit.floor,
+                realm
+              )}`;
+              property = await Collections.Property.create({
+                realmId: realm!._id,
+                name: computedName,
+                type: _inferPropertyType({
+                  category: parsedUnit.category,
+                  floor: parsedUnit.floor,
+                  name: computedName
+                }),
+                surface: parsedUnit.surface,
+                atakNumber: parsedUnit.atakNumber,
+                // L9: persist the cadastral code when E9 emitted one.
+                ...((parsedUnit as any).kaek
+                  ? { kaek: (parsedUnit as any).kaek }
+                  : {}),
+                electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
+                buildingId: String(building!._id),
+                address: buildingData.address
+              });
+              // T2.P1.6: track newly-created property so a downstream
+              // exception can delete it during rollback.
+              createdPropertyIds.push(String(property._id));
+            } catch (createErr: any) {
+              if (createErr && createErr.code === 11000) {
+                property = await Collections.Property.findOne({
+                  realmId: realm!._id,
+                  atakNumber: parsedUnit.atakNumber
+                });
+                if (!property) {
+                  // The duplicate key existed at write time but the
+                  // refetch missed — surface the original error so the
+                  // outer rollback path can clean up.
+                  throw createErr;
+                }
+                // Round-1 audit H10 (Step-7): this E11000 catch is the OTHER
+                // buildingId-reassign path (a concurrent import for the same ATAK
+                // won the create race and may have linked the property to a
+                // DIFFERENT building). Apply the SAME cross-building steal guard
+                // as the else-branch so the race loser can't double-link it.
+                {
+                  const otherBuilding = await Collections.Building.findOne({
+                    realmId: realm!._id,
+                    'units.propertyId': String(property._id)
+                  }).lean();
+                  if (
+                    otherBuilding &&
+                    String((otherBuilding as any)._id) !== String(building!._id)
+                  ) {
+                    throw new ServiceError(
+                      `Property ${parsedUnit.atakNumber} is already linked to a unit in another building (${(otherBuilding as any).name || 'unknown'}). Remove that unit first, or re-import into that building.`,
+                      422
+                    );
+                  }
+                }
+                // Fall into the existing-property branch below — apply
+                // the empty-only fills via a synthetic re-entry.
+                property.buildingId = String(building!._id) as any;
+                if (forceOverwrite || !property.electricitySupplyNumber) {
+                  property.electricitySupplyNumber =
+                    parsedUnit.electricitySupplyNumber as any;
+                }
+                if (
+                  parsedUnit.surface &&
+                  (forceOverwrite || !property.surface)
+                ) {
+                  property.surface = parsedUnit.surface as any;
+                }
+                if (
+                  (parsedUnit as any).kaek &&
+                  (forceOverwrite || !(property as any).kaek)
+                ) {
+                  (property as any).kaek = (parsedUnit as any).kaek;
+                }
+                await property.save();
+              } else {
+                throw createErr;
+              }
+            }
+          } else {
+            // Round-1 audit H10: refuse to STEAL a property already linked to a
+            // unit in a DIFFERENT building. The by-ATAK find above is
+            // realm-scoped (not building-scoped); without this guard the import
+            // reassigns property.buildingId + pushes a fresh unit onto this
+            // building while the OTHER building keeps its orphan unit for the
+            // same propertyId — rent computation then walks both buildings and
+            // double-bills the koinochrista. Mirror the addUnit guard exactly.
+            const otherBuilding = await Collections.Building.findOne({
+              realmId: realm!._id,
+              'units.propertyId': String(property._id)
+            }).lean();
+            if (
+              otherBuilding &&
+              String((otherBuilding as any)._id) !== String(building!._id)
+            ) {
+              throw new ServiceError(
+                `Property ${parsedUnit.atakNumber} is already linked to a unit in another building (${(otherBuilding as any).name || 'unknown'}). Remove that unit first, or re-import into that building.`,
+                422
+              );
+            }
+            // T2.P1.20: gate destructive writes. Without forceOverwrite we
+            // only fill empty fields on an existing Property — preserving
+            // user edits (e.g. a hand-corrected DEH supply number) that
+            // would otherwise be silently clobbered by every re-import.
+            property.buildingId = String(building!._id) as any;
+            if (forceOverwrite || !property.electricitySupplyNumber) {
+              property.electricitySupplyNumber =
+                parsedUnit.electricitySupplyNumber as any;
+            }
+            // Fix name if it's still just an ATAK number (from lease import)
+            // OR if force-overwriting (user opted in to refresh from E9).
+            // L2: read realm.locale so non-Greek realms get a localised
+            // label instead of always falling back to Greek strings.
+            const floorLabel = _floorLabel(parsedUnit.floor, realm);
+            if (/^\d{11}$/.test(property.name) || forceOverwrite) {
+              property.name =
+                `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
+            }
+            if (parsedUnit.surface && (forceOverwrite || !property.surface)) {
+              property.surface = parsedUnit.surface as any;
+            }
+            // L9: backfill kaek when E9 emitted one and the existing
+            // Property record does not have it (or force-overwriting).
+            if (
+              (parsedUnit as any).kaek &&
+              (forceOverwrite || !(property as any).kaek)
+            ) {
+              (property as any).kaek = (parsedUnit as any).kaek;
+            }
+            await property.save();
+          }
+
+          // OWNER-IDENTITY: the primary E9 υπόχρεος is an `external` owner of
+          // record (a person on the books), identified by name + ΑΦΜ — NOT the
+          // app user importing the file. Stamping the importing user's memberId
+          // here is what collapsed every distinct imported owner into one bucket
+          // (ownerKeyOf keys on memberId first). Co-owner triplets the parser
+          // detected are appended the same way (they carry their own AFM); a
+          // follow-up flow can reconcile any of them to realm members by taxId.
+          const primaryTaxId = (parsed.owner as any).taxId || '';
+          const owners: any[] = [
+            {
+              type: 'external',
+              name: ownerFullName,
+              percentage: parsedUnit.ownershipPercentage,
+              taxId: primaryTaxId || undefined
+            }
+          ];
+          for (const co of (parsedUnit as any).coOwners || []) {
+            // A parsed co-owner with no ΑΦΜ is unidentifiable/unsettleable (and
+            // the parser can emit a phantom one — see _mergeCoOwners). Skip it;
+            // ownerSlicesOf renders the un-named remainder as a "λοιποί" slice.
+            if (!co.taxId) continue;
+            owners.push({
+              type: 'external',
+              name: `ΑΦΜ ${co.taxId}`,
+              percentage: co.percentage,
+              taxId: co.taxId
+            });
+          }
+          (building as any).units.push({
+            atakNumber: parsedUnit.atakNumber,
+            floor: parsedUnit.floor,
+            surface: parsedUnit.surface,
+            yearBuilt: parsedUnit.yearBuilt,
+            electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
+            // T2.P1.14: persist rightType so bare/usufruct units survive
+            // round-trip and downstream UIs can treat them differently
+            // (e.g. usufruct units shouldn't appear in owner-side reports).
+            rightType: (parsedUnit as any).rightType || 'full',
+            owners,
+            propertyId: String(property._id),
+            isManaged: true
+          });
+          unitsAdded++;
+        }
+
+        (building as any).updatedDate = new Date();
+        await _saveBuildingWithVersionCheck(building!);
+
+        // T1.P1.19: a re-import that only attached units to an existing
+        // building (no field-merge above) should still report wasUpdated:true.
+        if (!wasCreated && unitsAdded > 0) {
+          wasUpdated = true;
+        }
+
+        perBuildingOutcomes.push({
+          buildingId: String((building as any)._id),
+          buildingName: (building as any).name,
+          wasCreated,
+          wasUpdated,
+          unitsAdded
+        });
+
+        createdBuildings.push(building.toObject());
+
+        // Recompute rents for existing tenants whose share may have changed
+        // (e.g. equal allocation denominator increased with new units)
+        const managedPropertyIds = (building as any).units
+          .filter((u: any) => u.isManaged && u.propertyId)
+          .map((u: any) => String(u.propertyId));
+
+        for (const propId of managedPropertyIds) {
+          await _recomputeTenantsForProperty(realm!._id, propId);
+        }
+      }
+
+      // REALM-SCOPED ΑΦΜ RECONCILIATION: the per-unit backfill above only
+      // collapses the SAME physical unit's owner row (n:name| → n:name|taxId).
+      // But the same owner can appear ΑΦΜ-less on OTHER units/buildings from a
+      // prior import that dropped the ΑΦΜ — those stay split as a second owner
+      // row on the owners page (adversarial finding, June 2026 round-4). Now that
+      // this E9 carries the filer's ΑΦΜ, backfill it onto every ΑΦΜ-less owner
+      // row of the SAME name across the realm — but ONLY when the name is
+      // realm-wide UNAMBIGUOUS (no existing owner of that name already carries a
+      // DIFFERENT ΑΦΜ). If the name is ambiguous, skip (the operator reconciles
+      // via the manual co-owner editor) rather than stamp a wrong identity.
+      const filerTaxId = (parsed.owner as any).taxId || '';
+      if (filerTaxId && ownerFullName) {
+        const realmBuildings = await Collections.Building.find({
+          realmId: realm!._id
+        });
+        const ambiguous = realmBuildings.some((b: any) =>
+          (b.units || []).some((u: any) =>
+            (u.owners || []).some(
+              (o: any) =>
+                o.name === ownerFullName && o.taxId && o.taxId !== filerTaxId
+            )
+          )
+        );
+        if (!ambiguous) {
+          for (const b of realmBuildings as any[]) {
+            let touched = false;
+            for (const u of b.units || []) {
+              const unitOwners = (u.owners || []) as any[];
+              // PER-UNIT DISAMBIGUATION (mirrors the ATAK/DEH backfill guards):
+              // only stamp filerTaxId onto a taxId-less owner when the name is
+              // UNIQUE on this unit AND no owner on this unit already carries
+              // filerTaxId. Otherwise two same-named co-owners on one unit (a
+              // common Greek name) would both get the filer's ΑΦΜ — flipping the
+              // second person's ledger identity to the filer. The realm-wide
+              // `ambiguous` check above only catches a DIFFERENT existing taxId;
+              // two taxId-less same-name owners on one unit slip past it, so this
+              // per-unit guard is required (round-4 review).
+              const nameMatchesOnUnit = unitOwners.filter(
+                (o: any) => o.name === ownerFullName
+              );
+              const filerTaxIdOnUnit = unitOwners.some(
+                (o: any) => o.taxId && o.taxId === filerTaxId
+              );
+              if (nameMatchesOnUnit.length !== 1 || filerTaxIdOnUnit) continue;
+              const target = nameMatchesOnUnit[0];
+              if (!target.taxId) {
+                target.taxId = filerTaxId;
+                touched = true;
+              }
+            }
+            if (touched) {
+              b.updatedDate = new Date();
+              // BEST-EFFORT: this is a cosmetic owner-row dedup (it only collapses
+              // n:name| into n:name|taxId on the owners page — it writes NO core
+              // import data). It touches potentially every same-named-owner
+              // building in the realm, INCLUDING pre-existing legacy buildings
+              // whose full-document validation may fail on save (CLAUDE.md notes
+              // partially-corrupt legacy rows exist). This step MUST NEVER fail
+              // the import: it runs INSIDE the import try, whose catch rolls back
+              // (deletes) every building/property the import just created. So
+              // swallow ALL save errors here (a 409 concurrency conflict OR a
+              // legacy-row ValidationError) — log and move on; the owners page
+              // shows the un-collapsed split row until the next reconcile. Do NOT
+              // re-throw (round-4-review-2: re-throwing a non-409 ValidationError
+              // nuked a fully-successful import).
+              try {
+                await _saveBuildingWithVersionCheck(b);
+              } catch (reconErr: any) {
+                logger.warn(
+                  `E9 import: realm-scoped ΑΦΜ backfill skipped building ${String(
+                    b._id
+                  )} (${
+                    reconErr?.statusCode === 409
+                      ? 'concurrent modification'
+                      : String(reconErr)
+                  })`
+                );
+              }
             }
           }
         } else {
-          // Round-1 audit H10: refuse to STEAL a property already linked to a
-          // unit in a DIFFERENT building. The by-ATAK find above is
-          // realm-scoped (not building-scoped); without this guard the import
-          // reassigns property.buildingId + pushes a fresh unit onto this
-          // building while the OTHER building keeps its orphan unit for the
-          // same propertyId — rent computation then walks both buildings and
-          // double-bills the koinochrista. Mirror the addUnit guard exactly.
-          const otherBuilding = await Collections.Building.findOne({
-            realmId: realm!._id,
-            'units.propertyId': String(property._id)
-          }).lean();
-          if (
-            otherBuilding &&
-            String((otherBuilding as any)._id) !== String(building!._id)
-          ) {
-            throw new ServiceError(
-              `Property ${parsedUnit.atakNumber} is already linked to a unit in another building (${(otherBuilding as any).name || 'unknown'}). Remove that unit first, or re-import into that building.`,
-              422
-            );
-          }
-          // T2.P1.20: gate destructive writes. Without forceOverwrite we
-          // only fill empty fields on an existing Property — preserving
-          // user edits (e.g. a hand-corrected DEH supply number) that
-          // would otherwise be silently clobbered by every re-import.
-          property.buildingId = String(building!._id) as any;
-          if (
-            forceOverwrite ||
-            !property.electricitySupplyNumber
-          ) {
-            property.electricitySupplyNumber =
-              parsedUnit.electricitySupplyNumber as any;
-          }
-          // Fix name if it's still just an ATAK number (from lease import)
-          // OR if force-overwriting (user opted in to refresh from E9).
-          // L2: read realm.locale so non-Greek realms get a localised
-          // label instead of always falling back to Greek strings.
-          const floorLabel = _floorLabel(parsedUnit.floor, realm);
-          if (/^\d{11}$/.test(property.name) || forceOverwrite) {
-            property.name =
-              `${parsedUnit.street} ${parsedUnit.streetNumber} - ${floorLabel}` as any;
-          }
-          if (parsedUnit.surface && (forceOverwrite || !property.surface)) {
-            property.surface = parsedUnit.surface as any;
-          }
-          // L9: backfill kaek when E9 emitted one and the existing
-          // Property record does not have it (or force-overwriting).
-          if (
-            (parsedUnit as any).kaek &&
-            (forceOverwrite || !(property as any).kaek)
-          ) {
-            (property as any).kaek = (parsedUnit as any).kaek;
-          }
-          await property.save();
+          logger.info(
+            `E9 import: skipped realm-scoped ΑΦΜ backfill for ambiguous owner name "${ownerFullName}" (another owner of that name already carries a different ΑΦΜ)`
+          );
         }
-
-        // OWNER-IDENTITY: the primary E9 υπόχρεος is an `external` owner of
-        // record (a person on the books), identified by name + ΑΦΜ — NOT the
-        // app user importing the file. Stamping the importing user's memberId
-        // here is what collapsed every distinct imported owner into one bucket
-        // (ownerKeyOf keys on memberId first). Co-owner triplets the parser
-        // detected are appended the same way (they carry their own AFM); a
-        // follow-up flow can reconcile any of them to realm members by taxId.
-        const primaryTaxId = (parsed.owner as any).taxId || '';
-        const owners: any[] = [
-          {
-            type: 'external',
-            name: ownerFullName,
-            percentage: parsedUnit.ownershipPercentage,
-            taxId: primaryTaxId || undefined
-          }
-        ];
-        for (const co of (parsedUnit as any).coOwners || []) {
-          // A parsed co-owner with no ΑΦΜ is unidentifiable/unsettleable (and
-          // the parser can emit a phantom one — see _mergeCoOwners). Skip it;
-          // ownerSlicesOf renders the un-named remainder as a "λοιποί" slice.
-          if (!co.taxId) continue;
-          owners.push({
-            type: 'external',
-            name: `ΑΦΜ ${co.taxId}`,
-            percentage: co.percentage,
-            taxId: co.taxId
-          });
-        }
-        (building as any).units.push({
-          atakNumber: parsedUnit.atakNumber,
-          floor: parsedUnit.floor,
-          surface: parsedUnit.surface,
-          yearBuilt: parsedUnit.yearBuilt,
-          electricitySupplyNumber: parsedUnit.electricitySupplyNumber,
-          // T2.P1.14: persist rightType so bare/usufruct units survive
-          // round-trip and downstream UIs can treat them differently
-          // (e.g. usufruct units shouldn't appear in owner-side reports).
-          rightType: (parsedUnit as any).rightType || 'full',
-          owners,
-          propertyId: String(property._id),
-          isManaged: true
-        });
-        unitsAdded++;
       }
 
-      (building as any).updatedDate = new Date();
-      await _saveBuildingWithVersionCheck(building!);
-
-      // T1.P1.19: a re-import that only attached units to an existing
-      // building (no field-merge above) should still report wasUpdated:true.
-      if (!wasCreated && unitsAdded > 0) {
-        wasUpdated = true;
-      }
-
-      perBuildingOutcomes.push({
-        buildingId: String((building as any)._id),
-        buildingName: (building as any).name,
-        wasCreated,
-        wasUpdated,
-        unitsAdded
-      });
-
-      createdBuildings.push(building.toObject());
-
-      // Recompute rents for existing tenants whose share may have changed
-      // (e.g. equal allocation denominator increased with new units)
-      const managedPropertyIds = (building as any).units
-        .filter((u: any) => u.isManaged && u.propertyId)
-        .map((u: any) => String(u.propertyId));
-
-      for (const propId of managedPropertyIds) {
-        await _recomputeTenantsForProperty(realm!._id, propId);
-      }
-    }
-
-    // REALM-SCOPED ΑΦΜ RECONCILIATION: the per-unit backfill above only
-    // collapses the SAME physical unit's owner row (n:name| → n:name|taxId).
-    // But the same owner can appear ΑΦΜ-less on OTHER units/buildings from a
-    // prior import that dropped the ΑΦΜ — those stay split as a second owner
-    // row on the owners page (adversarial finding, June 2026 round-4). Now that
-    // this E9 carries the filer's ΑΦΜ, backfill it onto every ΑΦΜ-less owner
-    // row of the SAME name across the realm — but ONLY when the name is
-    // realm-wide UNAMBIGUOUS (no existing owner of that name already carries a
-    // DIFFERENT ΑΦΜ). If the name is ambiguous, skip (the operator reconciles
-    // via the manual co-owner editor) rather than stamp a wrong identity.
-    const filerTaxId = (parsed.owner as any).taxId || '';
-    if (filerTaxId && ownerFullName) {
-      const realmBuildings = await Collections.Building.find({
-        realmId: realm!._id
-      });
-      const ambiguous = realmBuildings.some((b: any) =>
-        (b.units || []).some((u: any) =>
-          (u.owners || []).some(
-            (o: any) =>
-              o.name === ownerFullName && o.taxId && o.taxId !== filerTaxId
-          )
-        )
+      // Import route: skip the §5 breakdown (no Overview tile rendered from the
+      // import dialog response) — L4.
+      const result = await _toBuildingData(realm!._id, createdBuildings, false);
+      // T1.P1.19: emit per-building outcomes plus aggregate counts so the
+      // dialog can surface accurate "X created, Y updated, Z units added"
+      // text instead of a blanket "created:true" lie. Keep the legacy
+      // `created` boolean (true when any building was created) so older
+      // callers don't break, but its meaning is now "imported successfully"
+      // rather than "everything was newly created".
+      const createdCount = perBuildingOutcomes.filter(
+        (o) => o.wasCreated
+      ).length;
+      const updatedCount = perBuildingOutcomes.filter(
+        (o) => !o.wasCreated && o.wasUpdated
+      ).length;
+      const unitsAddedTotal = perBuildingOutcomes.reduce(
+        (sum, o) => sum + o.unitsAdded,
+        0
       );
-      if (!ambiguous) {
-        for (const b of realmBuildings as any[]) {
-          let touched = false;
-          for (const u of b.units || []) {
-            const unitOwners = (u.owners || []) as any[];
-            // PER-UNIT DISAMBIGUATION (mirrors the ATAK/DEH backfill guards):
-            // only stamp filerTaxId onto a taxId-less owner when the name is
-            // UNIQUE on this unit AND no owner on this unit already carries
-            // filerTaxId. Otherwise two same-named co-owners on one unit (a
-            // common Greek name) would both get the filer's ΑΦΜ — flipping the
-            // second person's ledger identity to the filer. The realm-wide
-            // `ambiguous` check above only catches a DIFFERENT existing taxId;
-            // two taxId-less same-name owners on one unit slip past it, so this
-            // per-unit guard is required (round-4 review).
-            const nameMatchesOnUnit = unitOwners.filter(
-              (o: any) => o.name === ownerFullName
-            );
-            const filerTaxIdOnUnit = unitOwners.some(
-              (o: any) => o.taxId && o.taxId === filerTaxId
-            );
-            if (nameMatchesOnUnit.length !== 1 || filerTaxIdOnUnit) continue;
-            const target = nameMatchesOnUnit[0];
-            if (!target.taxId) {
-              target.taxId = filerTaxId;
-              touched = true;
-            }
-          }
-          if (touched) {
-            b.updatedDate = new Date();
-            // BEST-EFFORT: this is a cosmetic owner-row dedup (it only collapses
-            // n:name| into n:name|taxId on the owners page — it writes NO core
-            // import data). It touches potentially every same-named-owner
-            // building in the realm, INCLUDING pre-existing legacy buildings
-            // whose full-document validation may fail on save (CLAUDE.md notes
-            // partially-corrupt legacy rows exist). This step MUST NEVER fail
-            // the import: it runs INSIDE the import try, whose catch rolls back
-            // (deletes) every building/property the import just created. So
-            // swallow ALL save errors here (a 409 concurrency conflict OR a
-            // legacy-row ValidationError) — log and move on; the owners page
-            // shows the un-collapsed split row until the next reconcile. Do NOT
-            // re-throw (round-4-review-2: re-throwing a non-409 ValidationError
-            // nuked a fully-successful import).
-            try {
-              await _saveBuildingWithVersionCheck(b);
-            } catch (reconErr: any) {
-              logger.warn(
-                `E9 import: realm-scoped ΑΦΜ backfill skipped building ${String(
-                  b._id
-                )} (${
-                  reconErr?.statusCode === 409
-                    ? 'concurrent modification'
-                    : String(reconErr)
-                })`
-              );
-            }
-          }
-        }
-      } else {
-        logger.info(
-          `E9 import: skipped realm-scoped ΑΦΜ backfill for ambiguous owner name "${ownerFullName}" (another owner of that name already carries a different ΑΦΜ)`
-        );
-      }
-    }
-
-    // Import route: skip the §5 breakdown (no Overview tile rendered from the
-    // import dialog response) — L4.
-    const result = await _toBuildingData(realm!._id, createdBuildings, false);
-    // T1.P1.19: emit per-building outcomes plus aggregate counts so the
-    // dialog can surface accurate "X created, Y updated, Z units added"
-    // text instead of a blanket "created:true" lie. Keep the legacy
-    // `created` boolean (true when any building was created) so older
-    // callers don't break, but its meaning is now "imported successfully"
-    // rather than "everything was newly created".
-    const createdCount = perBuildingOutcomes.filter((o) => o.wasCreated).length;
-    const updatedCount = perBuildingOutcomes.filter(
-      (o) => !o.wasCreated && o.wasUpdated
-    ).length;
-    const unitsAddedTotal = perBuildingOutcomes.reduce(
-      (sum, o) => sum + o.unitsAdded,
-      0
-    );
-    return res.json({
-      created: true,
-      buildings: result,
-      outcomes: perBuildingOutcomes,
-      createdCount,
-      updatedCount,
-      unitsAddedTotal,
-      skippedLandPlots: parsed.skippedLandPlots,
-      failedRows: parsed.failedRows
-    });
+      return res.json({
+        created: true,
+        buildings: result,
+        outcomes: perBuildingOutcomes,
+        createdCount,
+        updatedCount,
+        unitsAddedTotal,
+        skippedLandPlots: parsed.skippedLandPlots,
+        failedRows: parsed.failedRows
+      });
     } catch (importErr) {
       // T2.P1.6: rollback any Property and Building records this request
       // created before re-throwing. Without this, a mid-batch failure
@@ -2144,8 +2170,13 @@ function _validateUnitOwners(rawOwners: any): any[] | undefined {
     // Contact fields — needed for owner notifications (email/SMS with the
     // owner-statement PDF). Light format validation; empty = absent.
     const phone = String(o?.phone || '').trim();
-    const email = String(o?.email || '').trim().toLowerCase();
-    const iban = String(o?.iban || '').trim().toUpperCase().replace(/\s+/g, '');
+    const email = String(o?.email || '')
+      .trim()
+      .toLowerCase();
+    const iban = String(o?.iban || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '');
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new ServiceError(`owner #${i + 1}: invalid email`, 422);
     }
@@ -2213,10 +2244,7 @@ export async function addUnit(req: Req, res: Res) {
       realmId: realm!._id
     }).lean();
     if (!sameRealmProperty) {
-      throw new ServiceError(
-        'propertyId does not exist in this realm',
-        422
-      );
+      throw new ServiceError('propertyId does not exist in this realm', 422);
     }
   }
 
@@ -2291,7 +2319,11 @@ export async function addUnit(req: Req, res: Res) {
   // adding this unit would push any sum above 1000.
   {
     const sums = (
-      ['generalThousandths', 'heatingThousandths', 'elevatorThousandths'] as const
+      [
+        'generalThousandths',
+        'heatingThousandths',
+        'elevatorThousandths'
+      ] as const
     ).map((field) => ({
       field,
       total: (building as any).units.reduce(
@@ -2354,10 +2386,7 @@ export async function updateUnit(req: Req, res: Res) {
       realmId: realm!._id
     }).lean();
     if (!sameRealmProperty) {
-      throw new ServiceError(
-        'propertyId does not exist in this realm',
-        422
-      );
+      throw new ServiceError('propertyId does not exist in this realm', 422);
     }
   }
 
@@ -2458,7 +2487,11 @@ export async function updateUnit(req: Req, res: Res) {
   // edit pushes any of the three schemes above 1000, refuse the change.
   {
     const sums = (
-      ['generalThousandths', 'heatingThousandths', 'elevatorThousandths'] as const
+      [
+        'generalThousandths',
+        'heatingThousandths',
+        'elevatorThousandths'
+      ] as const
     ).map((field) => ({
       field,
       total: (building as any).units.reduce(
@@ -2522,7 +2555,9 @@ export async function updateUnit(req: Req, res: Res) {
       try {
         await redistributeRepairsForProperties(realm!._id as string, [pid]);
       } catch (err) {
-        logger.error(`repair redistribution after occupancy flip failed: ${err}`);
+        logger.error(
+          `repair redistribution after occupancy flip failed: ${err}`
+        );
       }
     }
   }
@@ -2846,15 +2881,14 @@ function _allocateOwnerAmountPerUnit(
         .sort();
       let allocated = 0;
       for (let i = 0; i < withT.length; i++) {
-        const u = managed.find(
-          (m: any) => String(m.propertyId) === withT[i]
-        );
+        const u = managed.find((m: any) => String(m.propertyId) === withT[i]);
         const raw = (amt * (Number(u[key]) || 0)) / totalT;
         const share =
           i === withT.length - 1
             ? Math.round((amt - allocated) * 100) / 100
             : Math.round(raw * 100) / 100;
-        if (i < withT.length - 1) allocated = Math.round((allocated + share) * 100) / 100;
+        if (i < withT.length - 1)
+          allocated = Math.round((allocated + share) * 100) / 100;
         if (share > 0) perUnit.push({ propertyId: withT[i], share });
       }
     }
@@ -2913,7 +2947,10 @@ function _allocateOwnerAmountPerUnit(
     }
     const residual = Math.round((target - sum) * 100) / 100;
     const roundingTolerance = managed.length * 0.01 + 0.01;
-    if (Math.abs(residual) >= 0.005 && Math.abs(residual) <= roundingTolerance) {
+    if (
+      Math.abs(residual) >= 0.005 &&
+      Math.abs(residual) <= roundingTolerance
+    ) {
       const largest = perUnit.reduce((a, b) => (b.share > a.share ? b : a));
       largest.share = Math.round((largest.share + residual) * 100) / 100;
     }
@@ -3026,10 +3063,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       if (entry?.expenseId) {
         const exp = (building as any).expenses.id(entry.expenseId);
         if (!exp) {
-          throw new ServiceError(
-            `Unknown expenseId: ${entry.expenseId}`,
-            422
-          );
+          throw new ServiceError(`Unknown expenseId: ${entry.expenseId}`, 422);
         }
       }
     }
@@ -3039,10 +3073,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       if (entry?.expenseId) {
         const exp = (building as any).expenses.id(entry.expenseId);
         if (!exp) {
-          throw new ServiceError(
-            `Unknown expenseId: ${entry.expenseId}`,
-            422
-          );
+          throw new ServiceError(`Unknown expenseId: ${entry.expenseId}`, 422);
         }
       }
     }
@@ -3277,9 +3308,7 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       if (!entry.amount || entry.amount <= 0) continue;
       const buildingExpense = (building as any).expenses.id(entry.expenseId);
       const allocationMethod =
-        entry.allocationMethod ||
-        buildingExpense?.allocationMethod ||
-        'equal';
+        entry.allocationMethod || buildingExpense?.allocationMethod || 'equal';
       const description =
         entry.description || buildingExpense?.name || 'Building charge';
       // Per-unit shares of the entered owner amount — split per MANAGED UNIT
@@ -3304,7 +3333,8 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
         // MARK CONSUMED (same discipline as priorExpenseSettle) so the
         // reattach-building-wide pass below knows this lump's payments were
         // carried and doesn't double-reattach them.
-        if (legacyFb !== undefined) priorBuildingWide.delete(String(entry.expenseId));
+        if (legacyFb !== undefined)
+          priorBuildingWide.delete(String(entry.expenseId));
         const carriedFb = carryOwnerPayments(legacyFb);
         arr.push({
           expenseId: entry.expenseId,
@@ -3324,7 +3354,8 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       // (delete from the map) so the reattach-building-wide pass below can tell
       // which lump rows the rebuild did NOT consume.
       const legacy = priorBuildingWide.get(String(entry.expenseId));
-      if (legacy !== undefined) priorBuildingWide.delete(String(entry.expenseId));
+      if (legacy !== undefined)
+        priorBuildingWide.delete(String(entry.expenseId));
       const legacyCarried = legacy ? carryOwnerPayments(legacy) : null;
       const migrationPayments = legacyCarried
         ? [...legacyCarried.payments]
@@ -3503,7 +3534,11 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   // version-checked save (mirrors addExpense). The breakdown persistedVacantKeys
   // dedup + dashboard `covered` set suppress the now-duplicate live rows, so this
   // is additive, not double-counting (Step-7 checks 1+4 confirmed safe).
-  await _recomputeVacantOwnerCharges(building, realm!._id as string, Number(term));
+  await _recomputeVacantOwnerCharges(
+    building,
+    realm!._id as string,
+    Number(term)
+  );
 
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
@@ -3726,12 +3761,16 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
   // no extra stored field.
   const ownerAmountTotalByExpense = new Map<string, number>();
   for (const e of ownerEntries) {
-    if ((e.source || 'expense') === 'owner-fixed' || (e.source || '') === 'expense') {
+    if (
+      (e.source || 'expense') === 'owner-fixed' ||
+      (e.source || '') === 'expense'
+    ) {
       const k = String(e.expenseId);
       ownerAmountTotalByExpense.set(
         k,
         Math.round(
-          ((ownerAmountTotalByExpense.get(k) || 0) + (Number(e.amount) || 0)) * 100
+          ((ownerAmountTotalByExpense.get(k) || 0) + (Number(e.amount) || 0)) *
+            100
         ) / 100
       );
     }
@@ -3839,9 +3878,7 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
     // Owner NAME: from the row's unit when propertyId-scoped; otherwise (a
     // building-wide owner-direct/repair row with no propertyId) from the
     // building's distinct owner set — so it never renders the bare "Ιδιοκτήτης".
-    const ownerName = unit
-      ? _ownerDisplayName(unit)
-      : buildingWideOwnerName();
+    const ownerName = unit ? _ownerDisplayName(unit) : buildingWideOwnerName();
     // Single owner's declared percentage (when <100), for "Name (50%)".
     const soleOwner =
       unit && (unit.owners || []).length === 1 ? unit.owners[0] : null;
@@ -3934,7 +3971,8 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
             (u: any) => u.propertyId
           );
           if (e.propertyId && unit && muRep.length > 1) {
-            const method = (rep as any).allocationMethod || 'general_thousandths';
+            const method =
+              (rep as any).allocationMethod || 'general_thousandths';
             return _ownerAmountBasis(unit, method, ownerPortion, rowAmount);
           }
           return {
@@ -3966,8 +4004,10 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
             part = Math.round((Number(unit?.surface) || 0) * 100) / 100;
             whole =
               Math.round(
-                mu.reduce((s: number, u: any) => s + (Number(u.surface) || 0), 0) *
-                  100
+                mu.reduce(
+                  (s: number, u: any) => s + (Number(u.surface) || 0),
+                  0
+                ) * 100
               ) / 100;
           } else if (
             method === 'general_thousandths' ||
@@ -4233,10 +4273,10 @@ export async function addUncollectedPayment(req: Req, res: Res) {
     );
   }
   const outstandingTerms = Array.from(grossByTerm.entries())
-    .map(([tm, gross]) => [tm, _r(gross - (paidByTerm.get(tm) || 0))] as [
-      number,
-      number
-    ])
+    .map(
+      ([tm, gross]) =>
+        [tm, _r(gross - (paidByTerm.get(tm) || 0))] as [number, number]
+    )
     .filter(([, rem]) => rem > 0.005)
     .sort((a, b) => a[0] - b[0]); // oldest term first
 
@@ -4262,14 +4302,21 @@ export async function addUncollectedPayment(req: Req, res: Res) {
   const reference = String(req.body?.reference || '');
   // Optional attribution — only carried when a specific payer was supplied.
   const attribution: Record<string, any> = {};
-  if (req.body?.paidByType != null) attribution.paidByType = req.body.paidByType;
+  if (req.body?.paidByType != null)
+    attribution.paidByType = req.body.paidByType;
   if (payerId) attribution.payerId = payerId;
   let remaining = _r(Number(amount));
   const pushed: any[] = [];
   for (const [tm, rem] of outstandingTerms) {
     if (remaining <= 0.005) break;
     const apply = Math.min(rem, remaining);
-    pushed.push({ term: tm, amount: _r(apply), date, reference, ...attribution });
+    pushed.push({
+      term: tm,
+      amount: _r(apply),
+      date,
+      reference,
+      ...attribution
+    });
     remaining = _r(remaining - apply);
   }
   // Any surplus beyond the year's outstanding gross is recorded against the
@@ -4321,10 +4368,7 @@ export async function addExpense(req: Req, res: Res) {
   // back to epoch (the rent pipeline treats undefined startTerm as "always
   // active"). Require an explicit anchor.
   if (req.body.isRecurring !== false && !req.body.startTerm) {
-    throw new ServiceError(
-      'startTerm is required for recurring expenses',
-      422
-    );
+    throw new ServiceError('startTerm is required for recurring expenses', 422);
   }
 
   if (!req.body.name?.trim()) {
@@ -4445,10 +4489,7 @@ export async function updateExpense(req: Req, res: Res) {
   }
   // Wave-18 B6: same invariant for recurring expenses (mirror addExpense).
   if (req.body.isRecurring === true && !req.body.startTerm) {
-    throw new ServiceError(
-      'startTerm is required for recurring expenses',
-      422
-    );
+    throw new ServiceError('startTerm is required for recurring expenses', 422);
   }
 
   if (req.body.type) {
@@ -4580,8 +4621,14 @@ export async function updateExpense(req: Req, res: Res) {
     effectiveCustomAllocations,
     effectiveAllocationMethod
   );
-  validateRatioAllocations(effectiveCustomAllocations, effectiveAllocationMethod);
-  validateFixedAllocations(effectiveCustomAllocations, effectiveAllocationMethod);
+  validateRatioAllocations(
+    effectiveCustomAllocations,
+    effectiveAllocationMethod
+  );
+  validateFixedAllocations(
+    effectiveCustomAllocations,
+    effectiveAllocationMethod
+  );
   validateSingleUnitAllocations(
     effectiveCustomAllocations,
     effectiveAllocationMethod
@@ -4595,10 +4642,7 @@ export async function updateExpense(req: Req, res: Res) {
   // effective tenant amount.
   const _effectiveAmount =
     req.body.amount !== undefined ? req.body.amount : (expense as any).amount;
-  if (
-    req.body.allocationMethod !== undefined &&
-    Number(_effectiveAmount) > 0
-  ) {
+  if (req.body.allocationMethod !== undefined && Number(_effectiveAmount) > 0) {
     _assertThousandthsAvailable(building, effectiveAllocationMethod);
   }
 
@@ -4615,12 +4659,10 @@ export async function updateExpense(req: Req, res: Res) {
     delete patchBody.endTerm;
   }
   // RENAME-BACKFILL (bill-OCR audit 2026-07) — stamp legacy null-key rows with
-  // this expense's id BEFORE the name changes; see the helper's header.
-  _stampLegacyChargesBeforeRename(
-    building,
-    expense,
-    patchBody.name !== undefined ? patchBody.name : undefined
-  );
+  // this expense's id BEFORE the name changes; see the helper's header. Passing
+  // patchBody.name directly: the helper treats `undefined` as "this PATCH does
+  // not touch the name", which is exactly what an absent key already yields.
+  _stampLegacyChargesBeforeRename(building, expense, patchBody.name);
 
   expense.set(patchBody);
   (building as any).updatedDate = new Date();
@@ -5131,8 +5173,7 @@ function _applyRepairPaymentPool(
           // never crossed owners). Cap per bucket by the owner's own stake.
           for (const [bkt, paidIntoBkt] of bm)
             dropBudget = _round(
-              dropBudget +
-                Math.min(droppableByProp.get(bkt) || 0, paidIntoBkt)
+              dropBudget + Math.min(droppableByProp.get(bkt) || 0, paidIntoBkt)
             );
         }
         const toDrop = Math.min(_round(toPlace), _round(dropBudget));
@@ -5181,7 +5222,10 @@ function _applyRepairPaymentPool(
     // rows + dropped + preserved as a per-owner credit), so the bucket-keyed
     // passes only distribute the genuinely UNTAGGED remainder.
     for (const [bucket, consumed] of _placedByBucket) {
-      remainingByProp.set(bucket, _round((remainingByProp.get(bucket) || 0) - consumed));
+      remainingByProp.set(
+        bucket,
+        _round((remainingByProp.get(bucket) || 0) - consumed)
+      );
     }
   }
 
@@ -5195,9 +5239,10 @@ function _applyRepairPaymentPool(
     if (rem <= 0.005) continue;
     const rowAmount = Number(row.amount) || 0;
     if (rowAmount <= 0.005) continue;
-    const already = (
-      Array.isArray(row.payments) ? row.payments : []
-    ).reduce((s: number, p: any) => s + (Number(p && p.amount) || 0), 0);
+    const already = (Array.isArray(row.payments) ? row.payments : []).reduce(
+      (s: number, p: any) => s + (Number(p && p.amount) || 0),
+      0
+    );
     const room = _round(rowAmount - already);
     if (room <= 0.005) continue;
     const apply = Math.min(room, rem);
@@ -5230,8 +5275,12 @@ function _applyRepairPaymentPool(
     if (!a || !b) return false;
     if (a.memberId && b.memberId)
       return String(a.memberId) === String(b.memberId);
-    const an = String(a.name || '').trim().toLowerCase();
-    const bn = String(b.name || '').trim().toLowerCase();
+    const an = String(a.name || '')
+      .trim()
+      .toLowerCase();
+    const bn = String(b.name || '')
+      .trim()
+      .toLowerCase();
     if (!an || !bn || an !== bn) return false; // names must match
     const at = String(a.taxId || '').trim();
     const bt = String(b.taxId || '').trim();
@@ -5295,9 +5344,10 @@ function _applyRepairPaymentPool(
       if (left <= 0.005) break;
       if (!sameAttributedOwner(srcOwners, rowOwners(row))) continue;
       const rowAmount = Number(row.amount) || 0;
-      const already = (
-        Array.isArray(row.payments) ? row.payments : []
-      ).reduce((s: number, p: any) => s + (Number(p && p.amount) || 0), 0);
+      const already = (Array.isArray(row.payments) ? row.payments : []).reduce(
+        (s: number, p: any) => s + (Number(p && p.amount) || 0),
+        0
+      );
       const room = _round(rowAmount - already);
       if (room <= 0.005) continue;
       const apply = Math.min(room, left);
@@ -5409,8 +5459,7 @@ function _applyRepairPaymentPool(
         amount: 0,
         propertyId: k === OWNER_KEY ? null : k,
         source: 'credit',
-        description:
-          'Repair credit (κατάλοιπο καταβολής): ' + repairIdStr,
+        description: 'Repair credit (κατάλοιπο καταβολής): ' + repairIdStr,
         payments: [mkPoolPayment(toPreserve)],
         paid: true,
         paidDate: new Date()
@@ -5505,7 +5554,11 @@ export async function _distributeRepairCharge(
     );
   };
   if (!repair.chargeableTo || !repair.chargeTerm) {
-    await _removeRepairCharges(building, repair, await _frozenOccupiedForStrip());
+    await _removeRepairCharges(
+      building,
+      repair,
+      await _frozenOccupiedForStrip()
+    );
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
     const propertyIds = building.units
@@ -5518,7 +5571,11 @@ export async function _distributeRepairCharge(
   }
   const cost = repair.actualCost || repair.estimatedCost || 0;
   if (cost <= 0) {
-    await _removeRepairCharges(building, repair, await _frozenOccupiedForStrip());
+    await _removeRepairCharges(
+      building,
+      repair,
+      await _frozenOccupiedForStrip()
+    );
     building.updatedDate = new Date();
     await _saveBuildingWithVersionCheck(building);
     const propertyIds = building.units
@@ -5941,9 +5998,7 @@ export async function _distributeRepairCharge(
     const toRemove = unit.monthlyCharges.filter(
       (c: any) =>
         (c.repairId && String(c.repairId) === repairIdStr) ||
-        (!c.repairId &&
-          c.term === term &&
-          c.description === legacyDescription)
+        (!c.repairId && c.term === term && c.description === legacyDescription)
     );
     for (const charge of toRemove) {
       unit.monthlyCharges.pull(charge._id);
@@ -5968,10 +6023,7 @@ export async function _distributeRepairCharge(
         const dk = paidByProp.has(String(unit.propertyId))
           ? String(unit.propertyId)
           : OWNER_KEY;
-        droppableByProp.set(
-          dk,
-          _round((droppableByProp.get(dk) || 0) + share)
-        );
+        droppableByProp.set(dk, _round((droppableByProp.get(dk) || 0) + share));
       } else if (
         ownerOccupiedForRepair.has(String(unit.propertyId)) ||
         repair.chargeOwnerWhenVacant
@@ -5999,7 +6051,8 @@ export async function _distributeRepairCharge(
           amount: Math.round(share * 100) / 100,
           propertyId: String(unit.propertyId),
           source: 'repair-vacant',
-          description: 'Repair: ' + (repair.title || repair.description || 'untitled'),
+          description:
+            'Repair: ' + (repair.title || repair.description || 'untitled'),
           payments: []
         });
       }
@@ -6598,9 +6651,7 @@ export async function recomputeVacantOwnerForProperties(
   const now = moment().startOf('month');
   const terms: number[] = [];
   for (let i = 11; i >= 0; i--) {
-    terms.push(
-      Number(moment(now).subtract(i, 'months').format('YYYYMMDDHH'))
-    );
+    terms.push(Number(moment(now).subtract(i, 'months').format('YYYYMMDDHH')));
   }
   for (let i = 1; i <= 12; i++) {
     terms.push(Number(moment(now).add(i, 'months').format('YYYYMMDDHH')));
@@ -6818,14 +6869,40 @@ export async function computeOwnerEksodaByMonth(
   // rows (live gap-fill lines have no recorded paid).
   detailByTerm: Map<
     number,
-    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean; owners?: Array<{ name: string; percentage: number; amount: number; isRest?: boolean }> }>
+    Array<{
+      ownerName: string | null;
+      category: string;
+      label: string;
+      owed: number;
+      paid: number;
+      vacant?: boolean;
+      owners?: Array<{
+        name: string;
+        percentage: number;
+        amount: number;
+        isRest?: boolean;
+      }>;
+    }>
   >;
 }> {
   const owedByTerm = new Map<number, number>();
   const paidByTerm = new Map<number, number>();
   const detailByTerm = new Map<
     number,
-    Array<{ ownerName: string | null; category: string; label: string; owed: number; paid: number; vacant?: boolean; owners?: Array<{ name: string; percentage: number; amount: number; isRest?: boolean }> }>
+    Array<{
+      ownerName: string | null;
+      category: string;
+      label: string;
+      owed: number;
+      paid: number;
+      vacant?: boolean;
+      owners?: Array<{
+        name: string;
+        percentage: number;
+        amount: number;
+        isRest?: boolean;
+      }>;
+    }>
   >();
   const addOwed = (term: number, amt: number) => {
     if (!(amt > 0)) return;
@@ -6850,7 +6927,12 @@ export async function computeOwnerEksodaByMonth(
     // Per-individual-owner € slices of THIS line's owed, so the dashboard can
     // group ΑΝΑ ΙΔΙΟΚΤΗΤΗ by each real owner (not by the joined co-owner name).
     // [] / undefined = single owner (use ownerName as the whole line's owner).
-    owners: Array<{ name: string; percentage: number; amount: number; isRest?: boolean }> = []
+    owners: Array<{
+      name: string;
+      percentage: number;
+      amount: number;
+      isRest?: boolean;
+    }> = []
   ) => {
     if (!(owed > 0) && !(paid > 0)) return;
     const arr = detailByTerm.get(term) || [];
@@ -6875,7 +6957,9 @@ export async function computeOwnerEksodaByMonth(
       if (owners && owners.length) {
         const ex = existing.owners || [];
         for (const s of owners) {
-          const hit = ex.find((x) => x.name === s.name && !!x.isRest === !!s.isRest);
+          const hit = ex.find(
+            (x) => x.name === s.name && !!x.isRest === !!s.isRest
+          );
           if (hit) hit.amount = Math.round((hit.amount + s.amount) * 100) / 100;
           else ex.push({ ...s });
         }
@@ -6889,7 +6973,8 @@ export async function computeOwnerEksodaByMonth(
         owed,
         paid,
         vacant,
-        owners: owners && owners.length ? owners.map((s) => ({ ...s })) : undefined
+        owners:
+          owners && owners.length ? owners.map((s) => ({ ...s })) : undefined
       });
     }
     detailByTerm.set(term, arr);
@@ -6900,7 +6985,9 @@ export async function computeOwnerEksodaByMonth(
     const unit = (building.units || []).find(
       (u: any) => String(u.propertyId) === String(propertyId)
     );
-    const named = ((unit?.owners || []) as any[]).filter((o: any) => o && o.name);
+    const named = ((unit?.owners || []) as any[]).filter(
+      (o: any) => o && o.name
+    );
     if (named.length === 0) return null;
     return named.map((o: any) => o.name).join(', ');
   };
@@ -6912,7 +6999,7 @@ export async function computeOwnerEksodaByMonth(
     const unit = (building.units || []).find(
       (u: any) => String(u.propertyId) === String(propertyId)
     );
-    return ownerSlicesOf(((unit?.owners || []) as any[]), amount);
+    return ownerSlicesOf((unit?.owners || []) as any[], amount);
   };
 
   // Building-level owner name for a building-WIDE liability (a repair
@@ -6963,7 +7050,9 @@ export async function computeOwnerEksodaByMonth(
     const named = slices.filter((s: any) => !s.isRest);
     const rest = slices.find((s: any) => s.isRest && s.amount > 0.005);
     if (!rest || named.length === 0) return named.length ? named : slices;
-    const largest = named.reduce((a: any, b: any) => (b.amount > a.amount ? b : a));
+    const largest = named.reduce((a: any, b: any) =>
+      b.amount > a.amount ? b : a
+    );
     largest.amount = Math.round((largest.amount + rest.amount) * 100) / 100;
     return named;
   };
@@ -7133,9 +7222,7 @@ export async function computeOwnerEksodaByMonth(
     );
     const fromFlag = row.paid ? amount : 0;
     const rowPaid =
-      row.source === 'credit'
-        ? fromPayments
-        : Math.max(fromPayments, fromFlag);
+      row.source === 'credit' ? fromPayments : Math.max(fromPayments, fromFlag);
     addPaid(term, rowPaid);
     // breakdown line: category from source (repair → 'repair', else the
     // source expense's schema type), owner from the row's unit (vacant /
@@ -7199,7 +7286,16 @@ export async function computeOwnerEksodaByMonth(
       if (ownerFixedMaterialised.has(ownerFixedKey(e._id, term))) continue; // per-unit
       const fixedAmt = Math.round(Number(e.ownerAmount) * 100) / 100;
       addOwed(term, fixedAmt);
-      addDetail(term, buildingOwnerName, e.type || 'other', e.name || '', fixedAmt, 0, false, buildingOwnerSlices(fixedAmt));
+      addDetail(
+        term,
+        buildingOwnerName,
+        e.type || 'other',
+        e.name || '',
+        fixedAmt,
+        0,
+        false,
+        buildingOwnerSlices(fixedAmt)
+      );
     }
     // building-expense shares routed to the owner: a truly-EMPTY unit's share
     // when the expense opts in (chargeOwnerWhenVacant), AND an OWNER-OCCUPIED
@@ -7264,7 +7360,9 @@ export async function computeOwnerEksodaByMonth(
     // so the three can't drift). Same result as the prior inline copy.
     const sharePercentage = repairTenantSharePercentage(repair);
     const ownerPortion =
-      repair.chargeableTo === 'owners' ? cost : cost * (1 - sharePercentage / 100);
+      repair.chargeableTo === 'owners'
+        ? cost
+        : cost * (1 - sharePercentage / 100);
     // owner-portion (source:'repair') — skip if materialised, checking BOTH the
     // legacy building-wide cov-key AND the per-unit materialised set (the
     // owner-portion is now materialised per-unit; else the full amount is
@@ -7303,10 +7401,14 @@ export async function computeOwnerEksodaByMonth(
     // repair tenant-share was never billed on the dashboard when the flag was
     // OFF — reader/writer disagreement (the resident-owner repair bug).
     const ownerOccForRepair = _ownerOccupiedPropertyIds(building);
-    if (effectiveAmount > 0 && (repair.chargeOwnerWhenVacant || ownerOccForRepair.size > 0)) {
+    if (
+      effectiveAmount > 0 &&
+      (repair.chargeOwnerWhenVacant || ownerOccForRepair.size > 0)
+    ) {
       const allocationMethod = repair.allocationMethod || 'general_thousandths';
       const restrictUnits =
-        Array.isArray(repair.affectedUnitIds) && repair.affectedUnitIds.length > 0
+        Array.isArray(repair.affectedUnitIds) &&
+        repair.affectedUnitIds.length > 0
           ? new Set(repair.affectedUnitIds.map((u: any) => String(u)))
           : null;
       const occupied = await occupiedForTerm(term);
@@ -7322,7 +7424,11 @@ export async function computeOwnerEksodaByMonth(
         const share = computeBuildingChargeForProperty(
           buildingObj,
           String(unit.propertyId),
-          { amount: effectiveAmount, allocationMethod, name: repair.title } as any,
+          {
+            amount: effectiveAmount,
+            allocationMethod,
+            name: repair.title
+          } as any,
           term
         );
         const shareR = Math.round(share * 100) / 100;
@@ -7393,7 +7499,9 @@ async function _uncollectedGrossByTerm(
   }
   for (const u of hydratedBase.units || []) {
     u.property = u.propertyId ? propMap.get(String(u.propertyId)) : null;
-    u.tenant = u.propertyId ? tenantByProp.get(String(u.propertyId)) || null : null;
+    u.tenant = u.propertyId
+      ? tenantByProp.get(String(u.propertyId)) || null
+      : null;
   }
   await _attachTenantGroupsToBuildings(realmId, [hydratedBase]);
   const groups = (hydratedBase._tenantGroups || []) as any[];
@@ -7645,10 +7753,7 @@ export async function addRepair(req: Req, res: Res) {
         (u: any) => typeof u !== 'string' || !u.trim()
       )
     ) {
-      throw new ServiceError(
-        'affectedUnitIds must be non-empty strings',
-        422
-      );
+      throw new ServiceError('affectedUnitIds must be non-empty strings', 422);
     }
   }
   if (req.body.chargeTerm) {
@@ -7760,10 +7865,7 @@ export async function updateRepair(req: Req, res: Res) {
         (u: any) => typeof u !== 'string' || !u.trim()
       )
     ) {
-      throw new ServiceError(
-        'affectedUnitIds must be non-empty strings',
-        422
-      );
+      throw new ServiceError('affectedUnitIds must be non-empty strings', 422);
     }
   }
   if (req.body.chargeTerm) {
@@ -7852,10 +7954,7 @@ export async function updateRepair(req: Req, res: Res) {
     req.body.allocationMethod !== undefined ||
     req.body.chargeableTo !== undefined ||
     req.body.tenantSharePercentage !== undefined;
-  if (
-    _repairAllocTouched &&
-    repairTenantSharePercentage(repair as any) > 0
-  ) {
+  if (_repairAllocTouched && repairTenantSharePercentage(repair as any) > 0) {
     _assertThousandthsAvailable(building, (repair as any).allocationMethod);
   }
   (building as any).updatedDate = new Date();

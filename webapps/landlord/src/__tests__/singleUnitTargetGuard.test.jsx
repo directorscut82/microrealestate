@@ -1,4 +1,6 @@
 import React from 'react';
+import fs from 'fs';
+import path from 'path';
 import { JSDOM } from 'jsdom';
 import ReactDOM from 'react-dom';
 import { act } from 'react-dom/test-utils';
@@ -30,6 +32,42 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 // create-vs-edit: `previous !== method && (previous || !expense)`.
 //
 // This test reproduces BOTH paths with the real effect + real RHF.
+// DRIFT GUARD. Both suites below MIRROR production logic rather than importing
+// it (ExpenseFormDialog is a large component with Radix/next-translate deps that
+// make it impractical to mount here). A mirror that silently diverges is worse
+// than no test: it keeps passing while production breaks. So assert that the two
+// load-bearing predicates still exist VERBATIM in the component. If someone
+// edits either one, this fails and points them at the mirror.
+const DIALOG_SRC = fs.readFileSync(
+  path.resolve(__dirname, '../components/buildings/ExpenseFormDialog.js'),
+  'utf8'
+);
+
+describe('mirror fidelity — the production predicates this file re-implements', () => {
+  it('the reset-on-method-change condition is unchanged', () => {
+    expect(DIALOG_SRC).toContain(
+      'if (previous !== allocationMethod && (previous || !expense)) {'
+    );
+  });
+
+  it('single_unit still resets customAllocations to []', () => {
+    expect(DIALOG_SRC).toMatch(
+      /allocationMethod === 'single_unit'[\s\S]{0,200}setValue\(\s*'customAllocations',\s*\[\]/
+    );
+  });
+
+  it('the saved-method guard on the validity-repair effect is unchanged', () => {
+    expect(DIALOG_SRC).toContain(
+      'if (allocationMethod !== expense?.allocationMethod) {'
+    );
+  });
+
+  it('the picker still offers a saved method the gates would hide', () => {
+    expect(DIALOG_SRC).toContain('const saved = expense?.allocationMethod;');
+    expect(DIALOG_SRC).toMatch(/return \[\.\.\.methods, savedDef\];/);
+  });
+});
+
 describe('single_unit billing target — reset-on-method-change effect', () => {
   const UNIT_A = 'prop-A';
   const UNIT_B = 'prop-B';
@@ -287,8 +325,8 @@ describe('allocationMethod validity repair — must not rewrite a SAVED method',
       expense: { allocationMethod: 'elevator_thousandths' }
     });
     expect(r.method).toBe('elevator_thousandths');
-    expect(
-      r.options.filter((m) => m === 'elevator_thousandths')
-    ).toHaveLength(1);
+    expect(r.options.filter((m) => m === 'elevator_thousandths')).toHaveLength(
+      1
+    );
   });
 });
