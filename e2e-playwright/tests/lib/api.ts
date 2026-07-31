@@ -607,6 +607,7 @@ export async function ensureSeedRichBuilding(
       _id: string;
       atakNumber: string;
       propertyId?: string;
+      occupancyType?: string;
       generalThousandths?: number;
       heatingThousandths?: number;
       elevatorThousandths?: number;
@@ -672,6 +673,41 @@ export async function ensureSeedRichBuilding(
     }
   }
   if (!unit) throw new Error('Could not seed/find rich unit');
+
+  // IDEMPOTENCY REPAIR (2026-07): the branch above only sets the thousandths
+  // when it CREATES or LINKS the unit. An already-linked unit whose
+  // generalThousandths got cleared by another spec was returned as-is — and a
+  // unit with generalThousandths=undefined receives a 0 share of every
+  // `general_thousandths` expense, so the whole rich-building money fixture
+  // silently reads as zero. That is what broke spec 30 ("heating expense
+  // classifies as heating" → 0 while repairs > 0: only the general_thousandths
+  // expenses vanished). Re-assert them on every call so the seed is genuinely
+  // idempotent rather than create-once.
+  if (
+    !unit.generalThousandths ||
+    !unit.heatingThousandths ||
+    !unit.elevatorThousandths
+  ) {
+    const repaired = await request.patch(
+      `${GATEWAY}/api/v2/buildings/${seed.buildingId}/units/${unit._id}`,
+      {
+        headers: auth,
+        data: {
+          isManaged: true,
+          occupancyType: unit.occupancyType || 'rented',
+          propertyId: seed.propertyId,
+          generalThousandths: 1000,
+          heatingThousandths: 1000,
+          elevatorThousandths: 1000
+        }
+      }
+    );
+    expect(
+      repaired.status(),
+      `repair rich-unit thousandths (was general=${unit.generalThousandths}, heating=${unit.heatingThousandths}, elevator=${unit.elevatorThousandths}; body: ${await repaired.text().catch(() => '')})`
+    ).toBeLessThan(400);
+  }
+
   const unitId = unit._id;
 
   // Helper to ensure a recurring expense by name exists on the building.

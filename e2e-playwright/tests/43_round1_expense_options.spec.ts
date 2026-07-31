@@ -470,7 +470,7 @@ test('43.2 · save round-trip for each of 9 allocation methods (server 200 + reo
       ).toBe(200);
       await waitDialogClosed(page);
 
-      const row = page.locator('tr', { has: page.locator('td', { hasText: name }) });
+      const row = page.locator('tr', { has: page.locator(`td:text-is("${name}")`) });
       await expect(row).toBeVisible({ timeout: 10_000 });
       // Anchor on the Edit aria-label so we don't accidentally click
       // Delete (row has 2+ buttons). The realm renders el for the bot
@@ -513,14 +513,14 @@ test('43.3 · F4-expense · single_unit save without picked unit fails client-si
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeedRichBuilding(apiCtx);
-  await apiCtx.dispose();
   await signIn(page);
   await gotoExpensesTab(page, seed.realmName, seed.buildingId);
 
+  const name = `E2E-Round1-F4-${Date.now()}`;
   const detach = failOnExpenseWrite(page, seed.buildingId);
   try {
     await openAddDialog(page);
-    await fillCommon(page, `E2E-Round1-F4-${Date.now()}`, 50);
+    await fillCommon(page, name, 50);
     await pickOption(page, dialogCombobox(page, 0), TYPE_LABEL_REGEX.other);
     await pickOption(page, dialogCombobox(page, 1), METHOD_LABEL_REGEX.single_unit);
     await clickSave(page);
@@ -528,6 +528,15 @@ test('43.3 · F4-expense · single_unit save without picked unit fails client-si
     await expect(page.locator('[role=dialog]')).toBeVisible();
   } finally {
     detach();
+    // This test asserts NOTHING is created, so it originally had no cleanup.
+    // But while the single_unit target-inheritance bug was live the save DID
+    // go through, and every run leaked an E2E-Round1-F4-* expense into the
+    // shared realm (5 were found). Those leftovers then broke 43.4, whose
+    // row selector matches on a td SUBSTRING. Sweep defensively: if the guard
+    // ever regresses, the realm stays clean and the failure stays local.
+    const leaked = await findExpenseIdByName(apiCtx, seed, name);
+    if (leaked) await cleanupExpense(apiCtx, seed, leaked);
+    await apiCtx.dispose();
   }
 });
 
@@ -559,7 +568,7 @@ test('43.4 · F2-expense · single_unit with target → 200, reopen pre-selects 
     expect((await postPromise).status()).toBe(200);
     await waitDialogClosed(page);
 
-    const row = page.locator('tr', { has: page.locator('td', { hasText: name }) });
+    const row = page.locator('tr', { has: page.locator(`td:text-is("${name}")`) });
     await expect(row).toBeVisible({ timeout: 10_000 });
     await row.locator('button').first().click();
     await expect(page.locator('[role=dialog]')).toBeVisible();
@@ -774,7 +783,7 @@ test('43.12 · edit existing expense round-trips fields; toggling trackOwnerExpe
   try {
     await signIn(page);
     await gotoExpensesTab(page, seed.realmName, seed.buildingId);
-    const row = page.locator('tr', { has: page.locator('td', { hasText: name }) });
+    const row = page.locator('tr', { has: page.locator(`td:text-is("${name}")`) });
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.locator('button').first().click();
     await expect(page.locator('[role=dialog]')).toBeVisible({ timeout: 10_000 });
