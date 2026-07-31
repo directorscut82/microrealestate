@@ -333,6 +333,66 @@ export function _assertThousandthsAvailable(
   }
 }
 
+/**
+ * RENAME-BACKFILL (bill-OCR audit 2026-07). Legacy statement rows written
+ * 2026-05-01..03 (before 7bcdfcd1 put expenseId on the MonthlyCharge schema)
+ * carry expenseId null + repairId null, so saveMonthlyStatement can only
+ * recognise them as ITS rows via `description === expense.name` (the lazy
+ * backfill at ~3016). A RENAME breaks that match permanently: the rows stop
+ * looking like statement rows, the expenseId-scoped strip leaves them in place,
+ * and the rebuild adds a SECOND row for the same expense+term → the tenant is
+ * charged TWICE for one month, compounding on every later save of that term.
+ *
+ * Stamp the key HERE, before the name changes, because this is the last moment
+ * the evidence (the old name) exists. Afterwards the rows are keyed by
+ * expenseId forever and no description match is ever needed again.
+ *
+ * Not scoped to a term: every term's rows have the same defect, and writing
+ * expenseId changes only ownership metadata — never an amount — so a frozen
+ * past term is untouched until someone re-saves it, at which point strip+rebuild
+ * is the correct behaviour rather than a double charge.
+ *
+ * Requires the OLD name to be unique among the building's expenses, so we never
+ * guess between two candidates (same rule as the statement-save backfill, which
+ * marks the ambiguous case for stripping instead of stamping).
+ *
+ * RESIDUAL, inherent to null/null rows: a genuine MANUAL charge whose custom
+ * description happens to equal the expense's old name is indistinguishable from
+ * a legacy statement row. That is exactly why this is a rename-time stamp using
+ * the authoritative old name rather than a heuristic to be tightened later.
+ * LIMITATION: rows whose expense was renamed BEFORE this shipped cannot be
+ * recovered automatically — the old name is gone. They surface as a double
+ * charge on the next save of that term and need a manual mongo fix.
+ *
+ * Mutates `building` in place; the caller saves. Exported for unit test.
+ */
+export function _stampLegacyChargesBeforeRename(
+  building: any,
+  expense: any,
+  newName: unknown
+): void {
+  const oldName = String(expense?.name || '').trim();
+  // `newName === undefined` means this PATCH doesn't touch the name at all.
+  const nextName = newName !== undefined ? String(newName || '').trim() : undefined;
+  if (!oldName || !nextName || nextName === oldName) return;
+  const sameNamed = ((building?.expenses || []) as any[]).filter(
+    (e: any) => String(e?.name || '').trim() === oldName
+  );
+  if (sameNamed.length !== 1) return; // ambiguous — never guess
+  const expenseIdStr = String(expense._id);
+  for (const unit of (building?.units || []) as any[]) {
+    for (const c of (unit?.monthlyCharges || []) as any[]) {
+      if (c.expenseId || c.repairId) continue;
+      const desc = String(c.description || '').trim();
+      // 'Repair: ' rows belong to _distributeRepairCharge's own legacy matcher.
+      if (!desc || /^Repair: /.test(desc)) continue;
+      if (desc === oldName) {
+        c.expenseId = expenseIdStr;
+      }
+    }
+  }
+}
+
 // See businesslogic/inferPropertyType.ts for the documented mapping.
 // Re-exported here so external call sites continue to import from
 // './buildingmanager.js' if they were already doing so.
@@ -4554,6 +4614,14 @@ export async function updateExpense(req: Req, res: Res) {
     expense.set({ endTerm: undefined });
     delete patchBody.endTerm;
   }
+  // RENAME-BACKFILL (bill-OCR audit 2026-07) — stamp legacy null-key rows with
+  // this expense's id BEFORE the name changes; see the helper's header.
+  _stampLegacyChargesBeforeRename(
+    building,
+    expense,
+    patchBody.name !== undefined ? patchBody.name : undefined
+  );
+
   expense.set(patchBody);
   (building as any).updatedDate = new Date();
   await _recomputeVacantOwnerCharges(

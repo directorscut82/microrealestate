@@ -1,6 +1,10 @@
 # Design — Bill OCR Import + Telegram Inbox
 
-> Status: DRAFT v3.1 — from code reads + empirical testing, adversarially verified.
+> Status: v3.2 — Slices 1–6 SHIPPED (see §16 for the commit trail and the post-ship
+> audit). This document is now part design-of-record, part audit log: §1–§15 describe
+> what was designed and built; **§16 records the 2026-07 audit of the shipped code (7
+> fixes) and is the current state of play.**
+>
 > Architecture (OCR-in-api WASM, sharp build, memory, threads, saveMonthlyStatement bridge)
 > is MEASURED on the real NAS. Remaining unverified items are flagged inline as UNVERIFIED.
 > Every fact cites its source file:line or test run.
@@ -603,11 +607,19 @@ DECISION: **(A)** — api uploads directly (fewer parts, no cross-service file t
 **Slice 5 (B2):** integration test with mocked S3 → `pdfUrl`/`irisCodeUrl` populated.
 
 ### Pre-merge gate (every slice)
-1. Full jest green (node@20, ~644+ passed, 0 failed).
-2. `yarn workspace landlord build` (catches import errors dev-mode misses).
+1. Full jest green (node@20, 0 failed). **Baseline as of 2026-07-31: 875 passed / 17
+   skipped / 892 total, 54 suites passed + 1 skipped suite (e9parser /tmp fixtures).**
+   Do not copy an older figure from CLAUDE.md — it records ~644 (July 1) and is stale;
+   read the actual run. A count that DROPS is a deleted test, not a pass.
+2. `yarn workspace @microrealestate/landlord build` (catches import errors dev-mode
+   misses). **The workspace name is `@microrealestate/landlord`** — plain `landlord`
+   makes yarn exit with a *usage error* whose tail looks nothing like a build failure,
+   so a scripted `tail -5` on the log reads as "fine". Always assert `EXIT=0` from the
+   yarn process itself, never eyeball the tail.
 3. Deploy to NAS, verify container revision via Portainer.
 4. New specs + shared expense specs green on live NAS.
-5. Manual Greek spot-check (`/landlord/el/`).
+5. Manual Greek spot-check (`/landlord/el/`) — screenshot and READ it
+   (`ui-review-do-not-skip.md`); a green suite is not a UI review.
 
 ---
 
@@ -632,12 +644,14 @@ Process: ASCII/HTML mock → your approval → code the approved version → tes
 
 ## 11. Sequencing (independently shippable slices)
 
-1. **Slice 1: Image import + OCR** — api in-process OCR (paddleocr+WASM), api accepts images (new multer), FileDropZone accepts images, `hasAnyBillingId` precheck removed. Ship → you can drop a photo into "Εισαγωγή Λογαριασμού" and it parses.
-2. **Slice 2: No-match flow + charge bridge** — confirm/amend surface, ExpenseFormDialog extraction, `saveMonthlyStatement` bridge.
-3. **Slice 3: Providers** — ΔΕΥΑ Τήνου (have text), ΕΥΔΑΠ Αττικής (need sample), ΕΠΑ (need sample).
-4. **Slice 4: Telegram inbox + bell** — poller, InboxItem, bell UI.
-5. **Slice 5: B2 archival** — upload source + QR on confirm.
-6. **Slice 6: Απόδειξη OCR + match-to-pending** — see §15.
+Status column added 2026-07-31 — see §16.1 for the commit trail.
+
+1. ✅ **Slice 1: Image import + OCR** — api in-process OCR (paddleocr+WASM), api accepts images (new multer), FileDropZone accepts images, `hasAnyBillingId` precheck removed. Ship → you can drop a photo into "Εισαγωγή Λογαριασμού" and it parses.
+2. ✅ **Slice 2: No-match flow + charge bridge** — confirm/amend surface, ExpenseFormDialog extraction, `saveMonthlyStatement` bridge.
+3. ⛔ **Slice 3: Providers** — **NOT blocked. NOT started.** See §17: the real samples have been on disk since 2026-07-26 (`.scratch-adv-tests/bill-samples/logariasmoi.pdf`, 14 pages) and were already OCR'd clean by this project's own pipeline. ΕΥΔΑΠ ground truth is `ocr-out/page-09.txt`. ΕΠΑ is genuinely absent from the samples; **NOVA (telecoms) is present and was never in the plan.** Only `deh.ts` exists — there is no `providers/` directory.
+4. ✅ **Slice 4: Telegram inbox + bell** — poller, InboxItem, bell UI.
+5. ✅ **Slice 5: B2 archival** — upload source + QR on confirm.
+6. ✅ **Slice 6: Απόδειξη OCR + match-to-pending** — see §15.
 
 ---
 
@@ -857,6 +871,258 @@ PP-OCR ONNX models are inference-only. Fine-tuning requires PaddlePaddle trainin
 3. **Past/frozen term** — **warn-and-allow.** `saveMonthlyStatement` accepts any term 2020–2099 (`buildingmanager.ts:2916`); the engine already preserves frozen+occupied tenant charges internally (`buildingmanager.ts:4643-4652`). The assertion shows "Εκπρόθεσμο" but does not block confirm.
 4. **Realm routing** — single-realm. One bot token, one `ADMIN_CHAT_ID` in `.secrets/`. Poller maps `message.chat.id === adminChatId` → that realm. No multi-realm problem exists.
 
-## 14. Remaining blocker
+## 14. Remaining blocker — ✅ MOSTLY RESOLVED 2026-07-26, see §17
 
-Sample bills needed for providers #2 and #3 (ΕΥΔΑΠ Αττικής + ΕΠΑ) — parsers are written against real OCR text, not invented regexes. ΔΕΥΑ Τήνου is done (tested). Send to the bot or drop a file path.
+~~Sample bills needed for providers #2 and #3 (ΕΥΔΑΠ Αττικής + ΕΠΑ)~~ — **the user supplied a
+14-page PDF of real scanned bills + bank receipts on 2026-07-26.** ΕΥΔΑΠ is IN it (page 9,
+fully OCR'd). This section stayed stale for five days and was repeatedly quoted back at the
+user as "blocked on samples". Only **ΕΠΑ (gas)** is still absent — and it is now the *lowest*
+priority, because NOVA (present, 3 bills) was never in the plan at all. See §17.
+
+---
+
+## 16. STATE OF PLAY — shipped slices + the 2026-07 post-ship audit
+
+### 16.1 What is shipped (merged to `nas`)
+
+Slices 1–6 are all in. Commit trail (`git log --grep`):
+
+| Slice | Commits |
+|---|---|
+| 1 — image import + in-process OCR | `df869d8b`, `48f09d5e` (ExpenseFormDialog extract) |
+| 2 — no-match confirm + charge bridge | `5d75483f` (2d), `28628a3a` (2e bridge), `3f6b482f` (2f scanned-PDF via pdfium) |
+| — review rounds on 1–2 | `cf276bff`, `8e512923`, `89a9094e` |
+| 4 — Telegram inbox + bell | `c52e9540` |
+| 5 — B2 archival | `304a32ee` |
+| 6 — απόδειξη matching | `44a5bff0`, `4d37e135` (Tier-2 re-capture), `a5e5389b` (αριθμός-παροχής pre-fill) |
+| post-ship reviews | `93d8ebb0` (5 HIGH adversarial), `d6cb8376` (20 write-through-integrity bugs), `24033841` (resilience) |
+
+**Slice 3 (providers) is NOT shipped** and is still blocked on §14 — no ΕΥΔΑΠ Αττικής or
+ΕΠΑ sample bills. This is the only planned slice with no code.
+
+### 16.2 The 2026-07 audit — 7 fixes, IN THE WORKING TREE, NOT YET COMMITTED
+
+An audit of the *shipped* Slice 4–6 code found and fixed 7 defects. All are code-complete
+with tests; none are committed, none are deployed. 18 modified files + 3 new
+(`billidentity.ts`, `billidentity.test.js`, `renameBackfill.test.js`).
+
+| # | Finding | Fix | Proof |
+|---|---|---|---|
+| 1 | 7 raw `toLocaleDateString`/`toLocaleString` calls | → `moment().format('L')` | build + locale read |
+| 2 | `BuildingDashboard.js` dot-decimal euro + hardcoded `'months'` plural | i18n'd | build |
+| 3 | **MED RECEIPT-IDENTITY** — receipt dedup keyed on `date`, which `mkReceipt` DEFAULTS to the server clock. Any retry (not just one crossing midnight) got a fresh stamp → same απόδειξη recorded twice → Σ(receipts) double-counted → bill silently flipped to `'paid'`. | identity = `proofUrl`, else `ocrText`; never a server-defaultable field | `confirmPayment.test.js`, mutation-verified |
+| 4 | **LOW BATCH-TRUTH** — toast reported client *intent*, not server truth; failure path skipped cache invalidation | report from the server response; invalidate on both paths | tests + 6 locales |
+| 5 | **MED BILL-IDENTITY** — bill dedup keyed on fields the server could default | key only on OCR-derived `term`; proximity (±10d on `periodEnd`), NOT interval overlap, discriminates physical-bill identity | new `billidentity.ts` + 15 tests |
+| 6 | **LOW RENAME-BACKFILL** — a description-keyed identity went stale on rename | stamp `expenseId` at rename time, while the OLD name still exists | 16 tests, 3 mutants killed |
+| 7 | **LOW OVERPAY-CREDIT** — see 16.3 | derived `overpaid` + operator warning | 10 tests, 4 mutants killed |
+
+Plus one test-harness repair: `mediumBatch.test.js`'s `@microrealestate/common` mock
+spread `...real`, so it carried the REAL `Service` singleton. A later commit added a
+`Service.getInstance()` call to an exercised path and the suite broke — a *pre-existing*
+gap that blocked the green gate and had nothing to do with these fixes.
+
+### 16.3 Why OVERPAY-CREDIT is worth reading (the generalisable lesson)
+
+Σ(receipts) exceeding what is owed had **no representation anywhere** — this was an
+*absent* representation, not a wrong number, which is why no surface was "wrong":
+
+- `bill.status` enum is exactly `['pending','partial','paid']` (`bill.ts:32-38`) — no overpay value.
+- the dashboard clamps: `Math.max(0, total - paidSoFar)` (`dashboardmanager.ts:974`).
+- **both** the dashboard tile query (`dashboardmanager.ts:929`) and the receipt-candidate
+  query (`billmanager.ts:1143`) filter `status: {$in:['pending','partial']}` — so an
+  overpaid bill (now `'paid'`) *vanishes from both*.
+
+So a receipt matched to the WRONG bill, or an amount typed with a slipped decimal, looked
+like a clean payment. Design constraints that fell out of that:
+
+1. **Derive, never persist.** Persisting the excess adds a second source of truth for the
+   same arithmetic.
+2. **Never add a `status` value.** A 4th value silently excludes the bill from four
+   existing `status:{$in:[...]}` queries (`dashboardmanager.ts:929`, `billmanager.ts:1143`,
+   `billmanager.ts:1371`, `buildingmanager.ts:4685`).
+3. **Report at the only moment it matters.** `confirmPayment` both creates the excess and
+   is the only moment the operator is still looking at the receipt they matched.
+4. **Flag, don't refuse.** Dropping money the landlord actually paid is worse than
+   recording it visibly and flagging it (same rule the dedup guard already documents).
+5. **The tolerance is DIRECTIONAL.** The `+0.005` used for the paid/partial decision exists
+   for the SHORTFALL direction (99,995 must count as 100,00). Reused in the EXCESS
+   direction it fires on `33,34+33,34+33,33 = 100,01` — the ordinary artifact of splitting
+   an odd total across installments. Threshold is one cent. *My first implementation copied
+   the half-cent and my own new test caught it; I fixed the code, not the test.*
+
+### 16.4 Where the design was WRONG and what replaced it
+
+Recorded because the plan should not read as if it were right the first time:
+
+- **RENAME-BACKFILL's designed call site was BROKEN.** The design named
+  `1_base.ts:1095-1130`. That is the rent-computation pipeline — it does not see rename
+  events and cannot stamp identity at rename time. Actually fixed at the
+  description-keyed backfill in `buildingmanager.ts:3016-3035` plus the strip at
+  `:3054-3061`, i.e. where the rename actually happens *while the old name still exists*.
+- **Money surfaces were missing from the original plan's requirements (§0).** They are
+  first-class prerequisites, not downstream consumers: any change to bill/receipt state
+  must be checked against `MONEY_SURFACE_MATRIX.md` *and* against every
+  `status:{$in:[...]}` query before it is called complete.
+- **Source-derived identity is a requirement, not an implementation detail.** An
+  idempotency key must contain only fields the SOURCE DOCUMENT carries. Three of the seven
+  fixes (3, 5, 6) are the same bug in three places.
+
+### 16.5 OWED — not done, and not claimable as done
+
+1. **Greek-screen UI review** for the five touched surfaces — `BillImportDialog`,
+   `InboxBell`, `PaymentReceiptDialog` (including the NEW overpay warning toast),
+   `BuildingDashboard` projection row, `settings/database`. **Currently impossible: NAS is
+   unreachable** (`landlord signin: 000`, `portainer: 000`). Per
+   `ui-review-do-not-skip.md` this work is NOT done until those screens are screenshotted
+   in `/landlord/el/...` and read.
+2. **Playwright on live NAS** — same blocker. No spec for the overpay path has run against
+   real data, so per `E2E_TESTING.md` it does not count as coverage yet.
+3. **Deploy — NOT AUTHORIZED.** Nothing in this batch has been pushed or deployed.
+
+### 16.6 Verified gates (run 2026-07-31, local)
+
+- `npx tsc --noEmit -p tsconfig.json` in `services/api` → **EXIT=0**
+- full api jest under node@20 → **875 passed / 17 skipped / 892 total, 54 suites passed
+  + 1 skipped, 0 failed** (13.2s)
+- `yarn workspace @microrealestate/landlord build` → **EXIT=0**, full route table emitted
+- four touched suites together (`confirmPayment billidentity renameBackfill mediumBatch`)
+  → 4 suites / 60 tests passed
+- mutation-tested: RECEIPT-IDENTITY, RENAME-BACKFILL (3 mutants), OVERPAY (4 mutants —
+  each killing exactly its intended subset, which is what proves the guards aren't
+  vacuously green)
+
+---
+
+## 17. Slice 3 — the samples were never missing (correcting a 5-day-old false blocker)
+
+### 17.1 What actually happened
+
+**§14 said "blocked on sample bills" for five days while the samples sat on disk.** The user
+supplied them on **2026-07-26** and they were OCR'd the same day, by this project's own
+pipeline, with **zero errors on all 14 pages**. Every subsequent session — including the
+2026-07-31 audit write-up — re-quoted the stale blocker back at the user instead of reading
+its own scratch directory. The correct move, before writing "blocked" anywhere: `find . -iname '*.pdf'`.
+
+Artifacts (untracked, NOT gitignored — `.scratch-adv-tests/`):
+
+| Path | What |
+|---|---|
+| `.scratch-adv-tests/bill-samples/logariasmoi.pdf` | 6.9 MB, **14 pages**, PDF 1.7, CamScanner scans |
+| `.scratch-adv-tests/bill-samples/ocr-out/page-NN.txt` | per-page ground-truth OCR (14 files) |
+| `.scratch-adv-tests/bill-samples/ocr-out/ALL_PAGES.txt` | all pages concatenated (25 KB) |
+| `.scratch-adv-tests/bill-samples/ocr-out/summary.json` + `summary-tail.json` | chars/lines/secs per page, **`err: null` on every page** |
+| `.scratch-adv-tests/bill-samples/ocr_all.mjs` | the driver — imports the REAL `rasterizePdfToImages` + `ocrImage` from `dist/`, i.e. exactly the bill-import path |
+
+OCR cost: 2.2 s (sparse receipt) → 17.0 s (dense ΕΥΔΑΠ bill), ~95 s for all 14 pages.
+
+### 17.2 Sample inventory — 7 bill+receipt pairs, verified by marker grep
+
+| Page | Document | `detectProvider()` today |
+|---|---|---|
+| 1 | **NOVA** telecoms bill — 27,38 € + 6,60 € prior = 33,98 € | **`null`** → "Δεν αναγνωρίστηκε ο πάροχος" |
+| 2 | Alpha Bank receipt — NOVA, 33,98 € | (receipt) |
+| 3 | **ΔΕΗ** bill — 120,00 €, `RF10999000000000000648051` | `deh` ✅ parses |
+| 4 | Alpha Bank receipt — ΔΕΗ, 120,00 € | (receipt) |
+| 5 | **ΔΕΗ** bill | `deh` ✅ |
+| 6 | Piraeus receipt — ΔΕΗ, 4/6/2026 | (receipt) |
+| 7 | **NOVA** bill | **`null`** |
+| 8 | Alpha Bank receipt — NOVA, 21,03 € | (receipt) |
+| 9 | **ΕΥΔΑΠ** bill — 72,11 €, the "missing" sample | `eydap` → **"δεν υποστηρίζεται ακόμα"** |
+| 10 | CrediaBank receipt — ΕΥΔΑΠ | (receipt) |
+| 11 | **NOVA** bill | **`null`** |
+| 12 | CrediaBank receipt — NOVA/ex-WIND, RF | (receipt) |
+| 13 | **ΔΕΗ** bill | `deh` ✅ |
+| 14 | CrediaBank receipt — ΔΕΗ 90773, RF | (receipt) |
+
+Grep-verified: `ΕΥΔΑΠ|eydap\.gr` matches **only page 9 (5×) and 10 (1×)**; `ΔΕΗ|dei\.gr` matches
+pages 3,4,5,6,13,14; **no page contains `ΕΠΑ|ΔΕΠΑ|Φυσικ|Αέρι|ΑΕΡΙΟ`.**
+
+### 17.3 Two corrections to the plan's own premises
+
+1. **ΕΠΑ is NOT the priority — NOVA is, and NOVA is not in this document.** The user's real bills
+   are ΔΕΗ ×3, NOVA ×3, ΕΥΔΑΠ ×1. The plan named ΕΥΔΑΠ/ΕΠΑ/ΔΕΥΑ-Τήνου and never mentioned
+   telecoms, so **3 of 7 sample bills fall through `detectProvider` to `null`** and produce
+   "Δεν αναγνωρίστηκε ο πάροχος" — the plan optimised for a provider that isn't in the data
+   while ignoring one that is 43% of it.
+2. **NOVA has no `type` to map to.** `BuildingExpenseSchema.type` (`building.ts:92-108`) is
+   `heating|elevator|cleaning|water_common|electricity_common|insurance|management_fee|garden|repairs_fund|pest_control|other`
+   — there is **no telecoms/internet value**. §13's provider→type map has no answer for NOVA;
+   it would land in `other`. Whether a landlord's telecoms bill is even a *building* expense
+   (vs. a personal one that shouldn't enter this flow at all) is a **product question for the
+   user**, not a parser question. Do not invent an enum value — see the absent-representation
+   rule in `MONEY_SURFACE_MATRIX.md`.
+
+Also stale: §3's proposed `providers/` tree lists `deuaTinou/` "← the bill we tested". There is
+**no `providers/` directory at all** (`billparser/` holds only `deh.ts`, `index.ts`,
+`matching.ts`, `ocr.ts`, `types.ts`), and no ΔΕΥΑ Τήνου sample among these 14 pages.
+
+### 17.4 ΕΥΔΑΠ ground truth — every field a parser needs (`ocr-out/page-09.txt`)
+
+| Field | Value | Line(s) | Note |
+|---|---|---|---|
+| Amount payable | `72,11` | 40, 89 (`ΜΕΡΙΚΟ ΣΥΝΟΛΟ`), 91 (`ΠΛΗΡΩΤΕΟ`), 117 (`72,11€`) | 4 independent occurrences → cross-checkable |
+| Due date | `05/06/2026` | 39, 116 | `ΛΗΞΗ ΠΡΟΘΕΣΜΙΑΣ ΠΛΗΡΩΜΗΣ` |
+| Issue date | `07/05/2026` | 34, 107 | |
+| Consumption period | `29/01/2026-27/04/2026` | 41, 98 | **a 3-month period — see 17.5** |
+| Document no. | `2026 0999 9000 0006 74` | 42, 115 | spaced quartets |
+| Registry no. (ΑΡ. ΜΗΤΡΩΟΥ) | `9990001-33` | 17, 102 | the stable per-meter id |
+| Consumption | `53` m³ | 29, 104 | |
+| Payment barcode line | `20260999900000060000072112026060509990001` | 96 | concatenates doc-no + amount + due-date + registry |
+
+**No `RF` code on the ΕΥΔΑΠ bill** — unlike ΔΕΗ (`RF10999000000000000648051`, page 3 line 22)
+and NOVA (`RF29 9900 0000 0000 0000 0035 5`, page 1). ΕΥΔΑΠ identity must come from
+`ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ` + `ΑΡΙΘΜΟΣ ΠΑΡΑΣΤΑΤΙΚΟΥ`. Any code assuming "a bill has an RF" — including
+`generateIrisQr` (`index.ts:104-123`, returns `null` without one) and the Slice-6 Tier-2
+RF-recapture path — must degrade gracefully, not treat ΕΥΔΑΠ as a failed parse.
+
+The line-break trap the plan already documents (§3) is **confirmed on real ΕΥΔΑΠ text and is
+worse than described**: this is a *columnar* bill, so ALL labels come first (lines 4-11:
+`ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ`, `ΤΙΜΟΛ.`, `ΕΙΔ. ΚΑΤ.`, `ΑΡΙΘΜΟΣ ΜΕΤΡΗΤΗ`, `ΑΡΙΟΜΟΣ ΜΗΤΡΩΟΥ`, `Α.Φ.Μ.`)
+and then ALL values (lines 13-17). A label is 4-8 lines from its value, and `[\s\S]*?` from
+label to "first number" grabs the WRONG column. **ΕΥΔΑΠ needs positional/ordinal column
+pairing, not label-proximity regex.** Note also OCR corruption in the labels themselves —
+`ΑΡΙΟΜΟΣ` for `ΑΡΙΘΜΟΣ` (line 10), `ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ` intact at 101 — so label regexes must
+tolerate Θ↔Ο confusion or anchor on the intact copy in the stub.
+
+### 17.5 Money-correctness risks specific to ΕΥΔΑΠ (read before writing the parser)
+
+1. **A 3-month consumption period vs. a monthly charge model.** `29/01/2026-27/04/2026` spans
+   three terms. Every other provider here is monthly. Which `term` does a quarterly water bill
+   post to — issue month, due month, or split across three? This decides whether the amount is
+   allocated once or thrice, so it is a **money decision requiring the user's answer**, not a
+   parser default. It also interacts with the ±10-day `periodEnd` proximity rule in
+   `billidentity.ts` (§16.2 fix 5), which was designed against monthly bills.
+2. **`ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ` (previous debts), line 65.** NOVA has the same trap explicitly:
+   page 1 shows `Σύνολο παρόντος λογαριασμού 27,38 €` but `Συνολικό ποσό πληρωμής 33,98 €`
+   (= 27,38 + 6,60 prior balance) — and **the bank receipt on page 2 is for 33,98 €.** So the
+   receipt legitimately exceeds the current bill. A parser that takes the largest euro figure
+   as "the bill amount" **double-counts the prior balance** (it was already a charge in an
+   earlier term). This is exactly the shape the new OVERPAY warning (§16.3) would fire on —
+   correctly. Parse **current-period** amount for the charge; keep total-payable separately for
+   receipt matching.
+3. **`ΠΙΣΤΩΤΙΚΟ` (credit), line 79** — a credit column exists on ΕΥΔΑΠ. Confirm it is empty
+   here before assuming amounts are always positive.
+
+### 17.6 What Slice 3 actually needs (nothing is blocked)
+
+Ready to build now, no new inputs required:
+
+1. **ΕΥΔΑΠ parser** — real ground truth in hand; **column-pair extraction, not label regex**;
+   no-RF path; decide current-period vs total-payable per 17.5.2.
+2. **NOVA parser + `detectProvider` marker** (`/NOVA/i`, `/nova\.gr/i`) — 3 of 7 sample bills.
+   Has an RF code, so it fits the existing QR/matching machinery. **Blocked only on the
+   product question in 17.3.2** (which expense `type`, or whether telecoms belongs here).
+3. **Fixture-backed jest suites** — copy the page texts into
+   `services/api/src/__tests__/fixtures/` so the suites don't depend on the untracked scratch
+   dir. (`billparser.test.js` has 34 tests; its only ΕΥΔΑΠ coverage is a `detectProvider`
+   assertion on a 3-line synthetic string, line 254 — no real-text parse test exists.)
+4. **7 bank-receipt fixtures for Slice 6** — Alpha ×3, Piraeus ×1, CrediaBank ×3, each pairing
+   with a known bill. This is *free* end-to-end matching test data that is currently unused.
+5. **Decide `providers/` tree or not** — §3's versioned structure was never built. `deh.ts`
+   works fine flat; adding two more parsers is the moment to decide, and the answer may be
+   "keep it flat, delete §3's tree."
+
+**Genuinely still missing: an ΕΠΑ (gas) sample.** Not in these 14 pages. Lowest priority of
+everything above — and per `.kiro/steering/`, no ΕΠΑ parser gets written from invented regexes.
+
+**Not startable until NAS returns:** the E2E gate + Greek-screen review for any of it.

@@ -17,6 +17,7 @@
 import { Collections, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import { confirmBills } from './billmanager.js';
+import { findDuplicateBillByIdentity } from './billidentity.js';
 import { validateObjectId } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,7 +36,37 @@ export async function list(req: Req, res: Res): Promise<void> {
   })
     .sort({ createdDate: -1 })
     .lean();
-  res.json(items);
+
+  // BILL-IDENTITY (bill-OCR audit 2026-07): the Telegram lane needs the same
+  // already-imported-under-a-different-term warning the upload dialog gets,
+  // otherwise confirming from the bell silently inserts a second Bill for one
+  // physical λογαριασμός and charges the tenants twice.
+  //
+  // Computed HERE at read time, not seeded onto the doc at ingest: an item can
+  // be ingested BEFORE the other month's bill exists (so an ingest-time seed
+  // would be permanently absent for exactly the sequence that causes the bug),
+  // and a seeded warning also goes stale when the other bill is later replaced
+  // or deleted. Read-time keeps it true whenever it is shown, and matches how
+  // the upload lane computes it per parse.
+  //
+  // Only for items that already have a suggestedMatch — without a resolved
+  // building+expense there is no scope to probe within.
+  const withWarnings = await Promise.all(
+    (items as any[]).map(async (item) => {
+      const p = item?.parsed || {};
+      const m = item?.suggestedMatch;
+      if (!m?.buildingId || !m?.expenseId || !p.proposedTerm) return item;
+      const duplicate = await findDuplicateBillByIdentity(
+        realmId,
+        String(m.buildingId),
+        String(m.expenseId),
+        p,
+        Number(p.proposedTerm)
+      );
+      return duplicate ? { ...item, duplicate } : item;
+    })
+  );
+  res.json(withWarnings);
 }
 
 /**

@@ -26,7 +26,14 @@ beforeAll(async () => {
       Tenant: { find: () => ({ lean: async () => TENANTS }) },
       // send() does a double-send-guard lookup on Email; return none.
       Email: { find: () => ({ lean: async () => [] }) }
-    }
+    },
+    // `...real` leaves the REAL Service singleton in place, whose getInstance()
+    // throws "envConfig is required" outside a booted service. Harmless until
+    // dd697cdf (2026-07-18) added the Telegram admin echo, which reads
+    // EMAILER_URL from it AFTER res.json() — so send() started rejecting and
+    // this suite's assertions never ran. Same override every other suite in
+    // this directory uses (confirmPayment, lifecycleUnsetGuards, …).
+    Service: { getInstance: () => ({ envConfig: { getValues: () => ({}) } }) }
   }));
   // Mock axios so _sendEmail/_sendSms capture the posted payload (term) without
   // hitting the network. The emailer responds 200 with an ok body.

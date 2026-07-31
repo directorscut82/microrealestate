@@ -63,6 +63,42 @@ Every money mutation must invalidate the keys for the surfaces above. The establ
 
 ## Standing invariants
 
+### An ABSENT representation hides money as effectively as a wrong number
+
+When you ask "does any surface show this wrong?", also ask **"is there any surface that CAN show it at all?"** A quantity with no field, no enum value, and no query that selects it is invisible — and invisible reads as correct on every screen. The 2026-07 bill-OCR audit found overpayment (Σ(receipts) > owed) had *no representation anywhere*:
+
+- `bill.status` enum is exactly `['pending','partial','paid']` (`bill.ts:32-38`) — no overpay value existed.
+- the dashboard **clamped** it away: `Math.max(0, total - paidSoFar)` (`dashboardmanager.ts:974`).
+- **two** queries filter `status: {$in:['pending','partial']}` (`dashboardmanager.ts:929`, `billmanager.ts:1143`), so an overpaid bill (now `'paid'`) *disappeared from both* the dashboard tile and the receipt-candidate list.
+
+Net effect: a receipt matched to the WRONG bill, or an amount typed with a slipped decimal, rendered as a clean payment on every surface. The three shapes to grep for on any money change:
+
+1. **`Math.max(0, …)` / `Math.min(…)` clamps** — a clamp is a deliberate decision to discard a signed quantity. Confirm the discarded direction is truly impossible, not merely unrepresented.
+2. **`status: {$in: [...]}` (and any enum-membership filter)** — enumerate EVERY such query before adding a state. In this codebase: `dashboardmanager.ts:929`, `billmanager.ts:1143`, `billmanager.ts:1371`, `buildingmanager.ts:4685`. A new enum value is silently excluded from all of them.
+3. **A total with no signed counterpart** — if `remaining` can go negative but nothing reads the negative branch, the excess is being dropped.
+
+Rules that follow:
+
+- **Derive, never persist.** Persisting an excess (or any restatement of existing arithmetic) creates a second source of truth that will drift. Compute it at read/response time.
+- **Do not add an enum value to represent it.** See (2) — the cure is worse than the disease.
+- **Report at the moment it is created**, where the operator still has the context to act (for overpay: `confirmPayment`, where they are still looking at the receipt they matched).
+- **Flag, don't refuse.** Dropping money the landlord actually paid is worse than recording it visibly and flagging it. Same rule the receipt dedup guard follows.
+- **Tolerances are DIRECTIONAL.** The `+0.005` that makes `99,995` count as `100,00` is a SHORTFALL tolerance. Reused in the excess direction it fires on `33,34+33,34+33,33 = 100,01` — the ordinary artifact of splitting an odd total across installments, not a mis-match. Pick the threshold per direction, and per the *class of error* you're catching (wrong bill / slipped decimal are euros, not cents).
+
+### Idempotency keys must contain ONLY fields the source document carries
+
+Three separate 2026-07 audit findings were this one bug in three places (receipt dedup, bill dedup, rename backfill). The failure mode is always the same: a dedup/identity key includes a field the **server defaults**, so two submissions of the same physical document produce two different keys → the same money is recorded twice → a total silently crosses a threshold (`partial` → `paid`).
+
+- **Never key on a server-defaultable field.** `mkReceipt` defaults `date` to the server clock, so *every* retry got a fresh stamp — not just one crossing midnight. Identity is the proof (`proofUrl`, else `ocrText`), i.e. something the document itself carries.
+- **For every server-defaulted field, there must be a test that OMITS it.** A suite that always passes `date` cannot see this class of bug. Omission is the test case.
+- **Proximity, not interval overlap, discriminates physical-document identity.** Two bills for the same service are the same physical bill if their `periodEnd` are within ~10 days; billing intervals routinely overlap between genuinely different bills.
+- **A description-keyed identity must be re-keyed AT RENAME TIME, while the old name still exists.** Once the rename lands, the link to the old key is unrecoverable. (The 2026-07 fix site: `buildingmanager.ts:3016-3035` + the strip at `:3054-3061`.)
+- **Ask which DIRECTION a "safer" dedup fails in.** Tightening a dedup makes it drop real money; loosening it double-counts. Dropping is worse — it is silent and unrecoverable, while a double-count is visible on the ledger.
+
+### `moment(undefined)` is NOW — an unguarded date parse converts a loud failure into a silent lie
+
+A locale/format swap at a site with no validity guard doesn't throw; it yields the current date and the money lands on the wrong term. Any `moment(x)` on external input needs `moment.utc(x, FORMAT, true)` (strict) plus an `isValid()` branch. See also the timezone section in `CLAUDE.md` — mixing `moment()` and `moment.utc()` in one comparison is the same class of defect.
+
 ### Dual-role: a person can be BOTH a tenant AND an owner
 
 The same person (keyed by `name+ΑΦΜ` or `memberId`) can simultaneously **rent** unit X (an `Occupant` record) and **own / co-own** unit Y (`building.units[].owners[]`). "renter" and "owner" are roles, NOT mutually-exclusive identities. Audited July 1 2026 (4-dimension workflow + adversarial verify: 19 findings / 0 real). The invariant holds because:

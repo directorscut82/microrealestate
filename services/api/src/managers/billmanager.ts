@@ -12,6 +12,10 @@ import {
 } from './billparser/index.js';
 import * as billStorage from './billstorage.js';
 import {
+  findDuplicateBillByIdentity,
+  type DuplicateBillMatch
+} from './billidentity.js';
+import {
   computeIdf,
   extractElements,
   repairMatchKeys,
@@ -348,15 +352,37 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
 
     // Check for existing bill in same term+expense
     let existingAmount: number | undefined;
+    // BILL-IDENTITY (bill-OCR audit 2026-07): the probe above keys on the term
+    // DERIVED from the OCR'd periodEnd, so it is blind to the failure where the
+    // same physical bill derives a DIFFERENT term (misread end date, or the
+    // Athens UTC+3 boundary — billparser/deh.ts:37) and upserts as a second Bill
+    // that charges the tenants in a second month. This finds that sibling by
+    // physical identity instead. Advisory only — see billidentity.ts.
+    let duplicate: DuplicateBillMatch | undefined;
     if (match) {
+      const proposedTerm = computeDefaultTerm(bill.periodEnd);
       const existing = await Collections.Bill.findOne({
         realmId,
         buildingId: String(match.building._id),
         expenseId: String(match.expense._id),
-        term: computeDefaultTerm(bill.periodEnd)
+        term: proposedTerm
       }).lean();
       if (existing) {
         existingAmount = (existing as any).totalAmount;
+      }
+      // Only when the same-term probe found nothing — otherwise the operator
+      // gets two banners for one file and the actionable one (Replace) is
+      // buried. `=== undefined` deliberately mirrors the client's guard in
+      // BillImportDialog exactly: a legitimate totalAmount-0 bill must not make
+      // the two predicates disagree.
+      if (existingAmount === undefined) {
+        duplicate = await findDuplicateBillByIdentity(
+          realmId,
+          String(match.building._id),
+          String(match.expense._id),
+          bill,
+          proposedTerm
+        );
       }
     }
 
@@ -396,7 +422,11 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       // existing δαπάνη — drives the create-expense pre-fill (building selected
       // + single_unit targeting this apartment). Null when nothing matched.
       unitMatch,
-      existingAmount
+      existingAmount,
+      // BILL-IDENTITY: `{term, totalAmount, matchedOn}` when this same physical
+      // bill is already stored under a DIFFERENT term, else undefined. Optional
+      // additive field — an older cached landlord bundle just ignores it.
+      duplicate
     });
   }
 
@@ -1381,6 +1411,10 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
 
   const mkReceipt = (p: any) => ({
     amount: parseAmount(p),
+    // NOTE: this fallback is the SERVER CLOCK at the moment of the POST — the
+    // OCR read no date and the user typed none. It is fine for DISPLAY and
+    // ordering, but it is NOT receipt identity and must never be used as a
+    // dedup discriminator (see isDuplicateReceipt below).
     date: p.date ? new Date(p.date) : new Date(),
     proofUrl: p.proofUrl || undefined,
     ocrText: p.ocrText || undefined,
@@ -1391,23 +1425,78 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
   // Idempotency: a double-submit (double-click, retry after a timed-out
   // response, re-upload of the same file) must not record the same απόδειξη
   // twice and double-count Σ(receipts). Two receipts are "the same" when they
-  // share amount + same calendar day + same proof identity (proofUrl, else the
-  // OCR text). Returns true if an equivalent receipt already exists.
+  // share amount + proof identity (proofUrl, else the OCR text); the calendar
+  // day is only consulted when there is NO proof identity to go on. Returns
+  // true if an equivalent receipt already exists.
   const dayKey = (d: any) => {
     const t = d ? new Date(d) : null;
     return t && !Number.isNaN(t.getTime())
       ? t.toISOString().slice(0, 10)
       : '';
   };
+  // Proof identity, precedence unchanged: the uploaded object wins, else the
+  // OCR text. Both sides empty compares equal — that is the identity-less case
+  // the day check below is there to cover.
+  const sameProof = (e: any, r: any) =>
+    r.proofUrl
+      ? e.proofUrl === r.proofUrl
+      : (e.ocrText || '') === (r.ocrText || '');
+  const hasProofIdentity = (r: any) => !!(r.proofUrl || r.ocrText);
   const isDuplicateReceipt = (existing: any[], r: any): boolean =>
     (existing || []).some(
       (e: any) =>
         Math.abs((Number(e.amount) || 0) - r.amount) < 0.005 &&
-        dayKey(e.date) === dayKey(r.date) &&
-        (r.proofUrl
-          ? e.proofUrl === r.proofUrl
-          : (e.ocrText || '') === (r.ocrText || ''))
+        sameProof(e, r) &&
+        // The day is a discriminator ONLY when we have no proof identity.
+        // `receipt.date` falls back to the SERVER CLOCK when the OCR read no
+        // date and the user typed none (mkReceipt above), so keying identity on
+        // it double-records the same απόδειξη whenever a retry crosses midnight
+        // — or whenever one of the two submissions carries a typed date and the
+        // other doesn't. An idempotency key must never contain a field the
+        // server defaults. Same amount + same proof IS the same receipt, on
+        // whatever day either copy claims to be.
+        //
+        // Deliberately NOT relaxed for the identity-less case: with no
+        // proofUrl and no ocrText, amount alone would swallow a landlord's
+        // second genuine €X installment, and dropping money silently is worse
+        // than recording it twice visibly. Those keep the legacy amount + day
+        // heuristic, and every dedup is reported back as `duplicate: true`.
+        (hasProofIdentity(r) || dayKey(e.date) === dayKey(r.date))
     );
+
+  // OVERPAY (bill-OCR audit 2026-07). Σ(receipts) can exceed what is owed — a
+  // receipt matched to the wrong bill, a typed amount with a slipped decimal, or
+  // a genuine utility overpayment. The old code had NO representation for it:
+  // `status` only knows paid|partial|pending, the dashboard clamps outstanding
+  // with Math.max(0, …), and both the tile query and the receipt-candidate query
+  // drop 'paid' bills — so the excess money left no trace on any surface and the
+  // landlord had no way to notice the mis-match.
+  //
+  // The excess is DERIVED (Σ(receipts) − owed), never persisted: persisting it
+  // would add a second source of truth for the same arithmetic, and a new
+  // `status` value would silently exclude the bill from the four existing
+  // `status: {$in: [...]}` queries. Reporting it in the response is enough,
+  // because this handler is the only moment the excess is created and the only
+  // moment the operator is still looking at the receipt they just matched.
+  //
+  // Recording is NOT refused. Dropping money the landlord actually paid is worse
+  // than recording it visibly and flagging it (same rule as the dedup guard
+  // above). Rounded to cents so a float tail can't render as «κατά 0,00 €».
+  //
+  // The threshold is ONE CENT, not the +0.005 the paid/partial decision uses.
+  // That half-cent exists for the SHORTFALL direction (99,995 must count as
+  // 100,00); in the excess direction it fires on a €100 bill settled as
+  // 33,34+33,34+33,33 = 100,01, which is the ordinary artifact of the landlord
+  // splitting an odd total across installments — not a mis-match. The class this
+  // exists to catch (wrong bill, slipped decimal) is euros, not cents.
+  // Residual, accepted: a many-way split whose typed amounts drift ≥2c will
+  // still warn. The message is advisory and names the target, so the cost is a
+  // glance, and a tolerance wide enough to swallow that would also swallow real
+  // small overpayments.
+  const overpayOf = (paid: number, owed: number): number | undefined => {
+    const excess = Math.round((paid - owed) * 100) / 100;
+    return excess > 0.01 ? excess : undefined;
+  };
 
   const updated = [];
   for (const p of payments) {
@@ -1476,7 +1565,8 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
         repairId: String(repair._id),
         fullyPaid,
         paidSoFar: Math.round(paid * 100) / 100,
-        remaining: Math.round((cost - paid) * 100) / 100
+        remaining: Math.round((cost - paid) * 100) / 100,
+        overpaid: overpayOf(paid, cost)
       });
       continue;
     }
@@ -1518,7 +1608,8 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
       billId: String(bill._id),
       status: bill.status,
       paidSoFar: Math.round(paid * 100) / 100,
-      remaining: Math.round((bill.totalAmount - paid) * 100) / 100
+      remaining: Math.round((bill.totalAmount - paid) * 100) / 100,
+      overpaid: overpayOf(paid, Number(bill.totalAmount) || 0)
     });
   }
 

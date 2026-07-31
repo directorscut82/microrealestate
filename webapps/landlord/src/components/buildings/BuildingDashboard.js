@@ -20,6 +20,7 @@ import NumberFormat from '../NumberFormat';
 import { Button } from '../ui/button';
 import UncollectedPaymentDialog from './UncollectedPaymentDialog';
 import { useContext, useMemo, useState } from 'react';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import { useQuery } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 import { StoreContext } from '../../store';
@@ -247,6 +248,7 @@ function UnitCountCell({ n, label, tone }) {
 
 function BuildingProjectionTable({ finance, t }) {
   const [expanded, setExpanded] = useState({});
+  const formatNumber = useFormatNumber();
   const toggle = (key) =>
     setExpanded((s) => ({ ...s, [key]: !s[key] }));
 
@@ -380,8 +382,17 @@ function BuildingProjectionTable({ finance, t }) {
               total={exp.annual}
               expandKey={`fixed-${i}`}
             >
+              {/* i18n (2026-07): was `${exp.monthly} €/…` — a raw JS number, so
+                  a monthly share of 41.5 printed «41.5 €» with a DOT decimal on
+                  a Greek screen, and «months» was hardcoded plural («× 1
+                  μήνες»). The monthly figure now goes through the org's
+                  currency formatter and the month count through a
+                  {{count}}-pluralised key. */}
               <DetailRow
-                label={`${exp.monthly} €/${t('month')} × ${exp.months} ${t('months')}`}
+                label={t('{{amount}} per month × {{count}} months', {
+                  amount: formatNumber(exp.monthly),
+                  count: exp.months
+                })}
                 value={<NumberFormat value={exp.annual} showZero />}
               />
             </SubRow>

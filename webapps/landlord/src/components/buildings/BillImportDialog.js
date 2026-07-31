@@ -26,6 +26,7 @@ import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import { parseGreekMoney } from '../../utils/numberformat';
 import ResponsiveDialog from '../ResponsiveDialog';
@@ -78,7 +79,7 @@ function ResultCard({
     );
   }
 
-  const { parsed, match, existingAmount } = result;
+  const { parsed, match, existingAmount, duplicate } = result;
   // Effective assignment: an exact server match wins; otherwise the user's
   // in-dialog selection (assignment). An unmatched result is confirmable only
   // once BOTH building and expense are chosen.
@@ -136,15 +137,22 @@ function ResultCard({
         </div>
 
         <div className="text-muted-foreground">{t('Period')}</div>
+        {/* i18n (2026-07): moment(undefined) is TODAY, not "Invalid Date" —
+            unguarded, an absent period bound would silently claim today as the
+            billing period on the very screen the landlord uses to decide what
+            to commit. Today the parser can't produce that (deh.ts:104 returns
+            success:false without a period and ResultCard early-returns above),
+            so this is defence-in-depth against a future parser that relaxes
+            the non-optional `periodStart: Date` contract. */}
         <div>
-          {new Date(parsed.periodStart).toLocaleDateString()} –{' '}
-          {new Date(parsed.periodEnd).toLocaleDateString()}
+          {parsed.periodStart ? moment(parsed.periodStart).format('L') : '—'} –{' '}
+          {parsed.periodEnd ? moment(parsed.periodEnd).format('L') : '—'}
         </div>
 
         {parsed.dueDate && (
           <>
             <div className="text-muted-foreground">{t('Due Date')}</div>
-            <div>{new Date(parsed.dueDate).toLocaleDateString()}</div>
+            <div>{moment(parsed.dueDate).format('L')}</div>
           </>
         )}
 
@@ -259,6 +267,52 @@ function ResultCard({
                   ? t('Keep existing (cancel replace)')
                   : t('Replace existing bill')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BILL-IDENTITY (bill-OCR audit 2026-07): the same PHYSICAL bill is
+          already stored under a DIFFERENT term. The banner above cannot see
+          this — it queries by the term derived from this file's OCR'd periodEnd,
+          which is exactly the value that diverged. Confirming would insert a
+          second Bill and charge the tenants in a second month.
+
+          Mutually exclusive with the same-term banner (identical `=== undefined`
+          predicate on both sides of the wire; the server skips the probe in that
+          case) so the operator never gets two warnings for one file.
+
+          NO «Replace existing bill» button here, deliberately: replaceExisting
+          upserts on (buildingId, expenseId, term) and would write at THIS file's
+          term, leaving the other month's bill untouched — a button that looks
+          like it resolves the duplicate while silently creating it. The only
+          remedy the dialog actually offers is to deselect this file, so that is
+          what the hint says (the period renders as static text — there is no
+          period/term override input on this row). */}
+      {duplicate && existingAmount === undefined && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 p-3 dark:bg-amber-950/30 dark:border-amber-800">
+          <div className="flex items-start gap-2">
+            <LuAlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-medium text-amber-800 dark:text-amber-200">
+                {t('This bill appears to be already imported')}
+              </p>
+              <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
+                {t('Already imported for {{month}}', {
+                  // Term is YYYYMMDDHH; the first 6 chars are the month. moment
+                  // (not toLocaleDateString) so the month name follows the
+                  // locale set in _app.js and renders «Ιούλιος 2026».
+                  month: moment(String(duplicate.term).slice(0, 6), 'YYYYMM')
+                    .format('MMMM YYYY')
+                })}
+                {' — '}
+                <NumberFormat value={duplicate.totalAmount} />
+              </p>
+              <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
+                {t(
+                  'Check that month before confirming — deselect this file if it is a duplicate'
+                )}
+              </p>
             </div>
           </div>
         </div>

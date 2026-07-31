@@ -18,6 +18,7 @@ import {
   AlertDialogTitle
 } from '../../../components/ui/alert-dialog';
 import { LuDownload, LuLoader2, LuUpload } from 'react-icons/lu';
+import moment from 'moment';
 import Page from '../../../components/Page';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
@@ -100,7 +101,22 @@ function DatabaseSettings() {
       } else {
         toast.success(
           t('Database restored successfully from backup dated {{date}}', {
-            date: new Date(result.exportDate).toLocaleString()
+            // i18n (2026-07): was `new Date(x).toLocaleString()` (US M/D/YYYY
+            // on the Greek screen). exportDate is echoed straight back from
+            // the CLIENT-UPLOADED backup JSON (databasemanager.ts:313) and
+            // only `version`/`collections` are validated — so it can be
+            // absent. moment(undefined) is TODAY, which on a destructive
+            // restore would confidently misstate which snapshot just
+            // overwrote the realm. Guard with isValid() and say so instead.
+            // 'HH:mm' not 'LT' on purpose: moment's el LT is a 12-hour clock
+            // («5:05 ΜΜ») where Greek convention is 24-hour.
+            // The truthiness check is load-bearing AND NOT redundant with
+            // isValid(): moment(undefined).isValid() is TRUE (undefined means
+            // "now"), so isValid() alone would let the absent case through.
+            date:
+              result.exportDate && moment(result.exportDate).isValid()
+                ? moment(result.exportDate).format('L HH:mm')
+                : t('unknown date')
           })
         );
       }

@@ -147,6 +147,19 @@ This is the step the old document was missing, and its absence is why fixes kept
 
 **There is no "it was a one-line change" exemption from Step 7.** The duplicate-propertyId bug was a one-line validator gap. The huge-pills bug was a one-line `cn()` behavior. One line of wrong money is still wrong money.
 
+### Step 7a — how to prompt the refutation subagents (they fail in predictable ways)
+
+A vague reviewer prompt returns plausible prose, and plausible prose is exactly what this gate exists to filter out. Every dispatched reviewer prompt must carry:
+
+- **The refute-by-default verdict rule, verbatim in the prompt.** "Default verdict is BROKEN; HOLDS must be earned." Without it reviewers converge on agreeable summaries.
+- **A demand for `file:line` on every claim, from a file the reviewer opened.** A finding whose line numbers don't match the real file is a fabrication — reject the finding, don't relay it.
+- **A concrete failure scenario, not a category.** "Inputs/state → wrong output" or it isn't a finding. "This could be fragile" is noise.
+- **An explicit instruction to enumerate SIBLING shapes**, not only the reported one (the June 2026 batch: reported fix HELD, siblings were broken).
+- **A hard idle timeout.** Reviewer agents in this repo have hung silently; the working value is **180,000 ms**. A hung agent that never reports reads exactly like a clean HOLDS — which is the worst possible failure mode for this gate.
+- **Independence.** Do not paste one reviewer's findings into another's prompt; correlated reviewers produce a false consensus.
+
+And when the reports come back: **subagent findings are claims, not results.** Re-read the cited code yourself before relaying anything to the user. A confident subagent that read the wrong file is still wrong, and relaying it unverified breaks the no-fabrication rule (`no-fabrication-do-not-skip.md`) with your name on it.
+
 ---
 
 ## Anti-patterns this document exists to kill
@@ -164,6 +177,11 @@ This is the step the old document was missing, and its absence is why fixes kept
 | "Fixed." (no Step 7 verdict pasted) | You self-certified. The June 2026 batch was self-certified done four times before adversarial review broke it. Run Step 7. |
 | "I read the surfaces" (no line refs pasted) | A claim is not an artifact. Paste the reading. |
 | "It's a one-line change, no need to challenge it" | One line of wrong money is still wrong money. No Step-7 exemption exists. |
+| "No surface displays it wrong, so it's fine" | Ask whether ANY surface displays it *at all*. A clamp (`Math.max(0, …)`), a missing enum value, or a `status:{$in:[...]}` filter makes money invisible — and invisible reads as correct everywhere. See `MONEY_SURFACE_MATRIX.md` § "An ABSENT representation". |
+| "My new test passes, so the fix is covered" | Break the fix on purpose. If nothing fails, the test is decoration. Mutation procedure in `test-running-guide.md`. |
+| "My new test failed, let me adjust the assertion" | The test is the only independent check on code you just wrote. Suspect the CODE first — that's how the overpay threshold bug was caught. |
+| "The subagents reported it HOLDS" | Findings are claims. Re-read the cited `file:line` yourself. A silently-hung agent is indistinguishable from a clean verdict. |
+| "The plan says it's blocked on the user" | **Go look on disk before you repeat that.** `BILL_OCR_INBOX_PLAN.md` §14 said "blocked — need sample bills" for five days while the bills sat in `.scratch-adv-tests/bill-samples/`, already OCR'd by a prior session. Every session re-quoted it back at the user who had supplied them. A "blocked on <artifact>" line is a claim with a rot date: run `find . -iname '*.<ext>' -not -path '*/node_modules/*'`, check `.scratch-adv-tests/`, and date-stamp the blocker so its staleness is visible next time. |
 
 ## What the user has explicitly said that overrides any other instruction
 

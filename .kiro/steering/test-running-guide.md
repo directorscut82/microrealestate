@@ -271,9 +271,26 @@ cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/je
 
 (The `test` npm script is `node --experimental-vm-modules ../../node_modules/jest/bin/jest.js`, so `yarn workspace @microrealestate/api test` works too — but only under node@20.)
 
-Per-service jest, no Docker. Full suite (as of July 2026): **~628 passing across 47 `services/api` test files**, 0 failed (plus the e9parser suite skipped when /tmp fixtures are absent). Grew 431 (May) → 609 (June) → ~628 (July). Re-run to get the live count; treat older figures (431, 609, 644) as point-in-time snapshots, not the current baseline.
+Per-service jest, no Docker. Full suite (measured 2026-07-31): **875 passed / 17 skipped / 892 total, 54 suites passed + 1 skipped suite** (e9parser, skipped when /tmp fixtures are absent), 0 failed, ~13s. Grew 431 (May) → 609 (June) → ~628/644 (July 1) → 875 (July 31). **Re-run to get the live count — every figure in this repo's docs, including CLAUDE.md's ~644, is a point-in-time snapshot.** A count that DROPS between runs is a deleted or silently-skipped test, not a pass; investigate it.
 
 **Jest mock infra (don't regress this):** the winston / express-winston / jsonwebtoken mocks are `.cjs` (`services/api/src/__mocks__/*.cjs`) mapped via `moduleNameMapper` — a `.js` mock is loaded as ESM under `type: module` and the real CJS express-winston cannot `require()` it. `jest.mock`-using suites need `import { jest } from '@jest/globals'` (jest is not an ambient global under ESM). Factory-mock suites (`realmmanager.test.js`, `propertymanager.classifyExpense.test.js`) use `jest.unstable_mockModule` + dynamic `import()` inside `beforeAll`. ESM test files use `import.meta.url`, not `__dirname`.
+
+**Mock-factory trap — a factory that spreads `...real` still carries the real singletons.** A `jest.unstable_mockModule('@microrealestate/common', () => ({ ...real, Collections: fake }))` looks conservative but leaks the genuine `Service` singleton. The suite stays green until *a later, unrelated commit* adds a `Service.getInstance()` call to an exercised path — then it breaks with an error that points at the new commit, not at the mock. (Hit in `mediumBatch.test.js`, 2026-07.) Enumerate the exports the code-under-test actually imports and mock each explicitly. Same root cause as the `ShareBasis` breakage noted in CLAUDE.md: **a factory mock must provide EVERY export the module under test imports**, or you get `SyntaxError: does not provide an export named 'X'`.
+
+### Mutation-test your own regression tests
+
+A new test that passes proves nothing — it may be asserting something that was already true, or nothing at all. Before claiming a test covers a fix: **break the fix on purpose and confirm the test fails, and that the RIGHT subset fails.**
+
+Procedure (used on all four 2026-07 audit fixes):
+
+1. `cp` the source file to `/tmp/<name>.bak`.
+2. Introduce one mutant that neuters exactly one property of the fix (return early; revert a threshold; drop a rounding; add the behavior to a path that must NOT have it). Mark it `// MUTANT` so it's greppable.
+3. Run the suite. **Record which tests fail.** The count and the identity both matter: 4 mutants on the overpay fix killed exactly 4 / 1 / 2 / 1 tests respectively, each the intended subset — that is what proves the *other* tests aren't vacuously green.
+4. Restore from the backup and `grep -c MUTANT` → must be 0.
+
+A mutant that kills *nothing* means the test is decoration. A mutant that kills *everything* means the tests aren't isolating behavior. Both are findings.
+
+**Corollary — when your own new test fails, suspect the code first.** The overpay threshold was written as `> 0.005` (copied from the shortfall tolerance) and the new one-cent-split test caught it. The fix was to the code, not the assertion. Editing a fresh test to match the code you just wrote destroys the only independent check you had.
 
 **Notable suites:**
 

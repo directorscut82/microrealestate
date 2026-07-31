@@ -1165,10 +1165,17 @@ test('41.10 · owner-expense breakdown expands on tap (F5 — click-to-expand ro
     'the owner-tracked expense renders its own expandable row'
   ).toBeVisible({ timeout: 20_000 });
 
-  // The detail line is «<monthly> €/month × <n> μήνες». Before the tap it must
+  // The detail line is «<monthly> €/μήνα × <n> μήνες». Before the tap it must
   // be ABSENT (value-delta, not existence: count 0 → ≥1 proves the tap did it).
+  //
+  // i18n fix 2026-07: the monthly figure now goes through the org's currency
+  // formatter, so it renders «100,00 €/μήνα» — a COMMA decimal and two forced
+  // fraction digits. The old regex `100\s*€\s*/` matched the raw dot-decimal
+  // JS number and would silently pass again if the formatter were reverted, so
+  // the comma + «/μήνα» are asserted explicitly: this line IS the regression
+  // guard for the dot-decimal defect.
   const detailLine = page.locator('tr', {
-    hasText: new RegExp(`${ownerAmount}\\s*€\\s*/`)
+    hasText: new RegExp(`${ownerAmount},00\\s*€/μήνα`)
   });
   expect(
     await detailLine.count(),
@@ -1194,6 +1201,87 @@ test('41.10 · owner-expense breakdown expands on tap (F5 — click-to-expand ro
   await expect
     .poll(() => detailLine.count(), { timeout: 10_000 })
     .toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// 41.14 — i18n: the per-month projection label must PLURALISE. The label used
+//          to hardcode t('months'), so a one-month-active owner expense
+//          rendered «× 1 μήνες» (plural) on the Greek screen. It now uses a
+//          {{count}} key with an `_one` sibling in all 6 locales.
+//
+//          Seed startTerm = endTerm = the CURRENT month (not December): the row
+//          is gated by isExpenseActiveForTerm BEFORE the month count is
+//          computed, so a future startTerm drops the row entirely and the test
+//          would be dead 11 months a year. st === et === currentTerm satisfies
+//          both branches and yields exactly 1 month year-round.
+// ---------------------------------------------------------------------------
+test('41.14 · a ONE-month owner expense reads «× 1 μήνας» (singular), never «× 1 μήνες»', async ({
+  page
+}) => {
+  test.setTimeout(180_000);
+  const api = await request.newContext();
+  let buildingId = '';
+  let realmName = '';
+  const ownerAmount = 100;
+  try {
+    const base = await getBaseSeed(api);
+    realmName = base.realmName;
+    buildingId = await createFreshBuilding(api, base, 'f5sing');
+    await addThousandthsBearingUnit(api, base, buildingId, 'f5sing');
+    const now = new Date();
+    const thisMonth = yyyymmddhh(now.getFullYear(), now.getMonth() + 1);
+    await addExpense(api, base, buildingId, {
+      name: `S41-F14-own-${RUN_ID}`,
+      type: 'other',
+      amount: 0,
+      ownerAmount,
+      trackOwnerExpense: true,
+      allocationMethod: 'general_thousandths',
+      isRecurring: true,
+      startTerm: thisMonth,
+      endTerm: thisMonth
+    });
+  } finally {
+    await api.dispose();
+  }
+
+  await signInGreek(page);
+  await page.goto(
+    `el/${encodeURIComponent(realmName)}/buildings/${buildingId}`
+  );
+  await expect(page.locator('[data-cy=overviewTab]')).toBeVisible({
+    timeout: 30_000
+  });
+
+  const expenseRow = page
+    .locator('tr', { hasText: `S41-F14-own-${RUN_ID}` })
+    .first();
+  await expect(
+    expenseRow,
+    'the one-month owner-tracked expense renders its expandable row'
+  ).toBeVisible({ timeout: 20_000 });
+  await expenseRow.click();
+
+  const singular = page.locator('tr', {
+    hasText: new RegExp(`${ownerAmount},00\\s*€/μήνα\\s*×\\s*1\\s*μήνας`)
+  });
+  await expect(
+    singular.first(),
+    'the detail line pluralises: «100,00 €/μήνα × 1 μήνας»'
+  ).toBeVisible({ timeout: 10_000 });
+
+  // And the wrong plural must be ABSENT — this is the assertion that fails if
+  // the `_one` sibling is missing from el/common.json (i18n silently falls
+  // back to the base/plural form).
+  expect(
+    await page.locator('tr', { hasText: /×\s*1\s*μήνες/ }).count(),
+    'the plural form «× 1 μήνες» must NOT render for a single month'
+  ).toBe(0);
+
+  await page.screenshot({
+    path: '_screens/41_14_owner_breakdown_singular_el.png',
+    fullPage: true
+  });
 });
 
 // ---------------------------------------------------------------------------

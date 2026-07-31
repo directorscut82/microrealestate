@@ -245,18 +245,48 @@ function InboxCard({ item, buildings, onGone }) {
           <>
             <div className="text-muted-foreground">{t('Period')}</div>
             <div>
-              {new Date(parsed.periodStart).toLocaleDateString()} –{' '}
-              {new Date(parsed.periodEnd).toLocaleDateString()}
+              {moment(parsed.periodStart).format('L')} –{' '}
+              {moment(parsed.periodEnd).format('L')}
             </div>
           </>
         )}
         {parsed.dueDate && (
           <>
             <div className="text-muted-foreground">{t('Due Date')}</div>
-            <div>{new Date(parsed.dueDate).toLocaleDateString()}</div>
+            <div>{moment(parsed.dueDate).format('L')}</div>
           </>
         )}
       </div>
+
+      {/* BILL-IDENTITY (bill-OCR audit 2026-07): this same physical bill is
+          already stored under a DIFFERENT term. Confirming from the bell would
+          insert a second Bill and charge the tenants in a second month. The
+          server computes it at read time (inboxmanager.list) so it is never
+          stale, and only when the item already has a suggestedMatch scope. */}
+      {item.duplicate && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs dark:bg-amber-950/30 dark:border-amber-800">
+          <div className="flex items-start gap-1.5">
+            <LuAlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-600" />
+            <div className="text-amber-800 dark:text-amber-200">
+              <div className="font-medium">
+                {t('This bill appears to be already imported')}
+              </div>
+              <div className="text-amber-700/80 dark:text-amber-300/80">
+                {t('Already imported for {{month}}', {
+                  // term is YYYYMMDDHH → first 6 chars are the month. moment
+                  // (locale set in _app.js) so it reads «Ιούλιος 2026».
+                  month: moment(
+                    String(item.duplicate.term).slice(0, 6),
+                    'YYYYMM'
+                  ).format('MMMM YYYY')
+                })}
+                {' — '}
+                <NumberFormat value={item.duplicate.totalAmount} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {match ? (
         <div className="flex items-center gap-1.5 rounded-md bg-success/10 text-success text-xs px-2.5 py-1.5">

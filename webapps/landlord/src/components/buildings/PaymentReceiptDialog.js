@@ -18,6 +18,7 @@ import { Button } from '../ui/button';
 import FileDropZone from '../ui/file-drop-zone';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import { parseGreekMoney } from '../../utils/numberformat';
 import ResponsiveDialog from '../ResponsiveDialog';
@@ -182,9 +183,7 @@ function ReceiptMatchCard({
         {rec.date && (
           <div className="grid grid-cols-2 gap-x-3 text-sm">
             <span className="text-muted-foreground">{t('Date')}</span>
-            <span className="font-mono">
-              {new Date(rec.date).toLocaleDateString()}
-            </span>
+            <span className="font-mono">{moment(rec.date).format('L')}</span>
           </div>
         )}
 
@@ -385,6 +384,21 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
     [results, selected]
   );
 
+  // Every money surface a recorded receipt moves. Kept as one callback because
+  // the success AND failure paths must both run it — the server's batch is not
+  // transactional (one save() per receipt), so a mid-batch failure has already
+  // persisted the earlier ones. See documentation/MONEY_SURFACE_MATRIX.md.
+  const invalidateMoneySurfaces = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
+    if (building?._id) {
+      queryClient.invalidateQueries({
+        queryKey: [QueryKeys.BUILDINGS, building._id]
+      });
+    }
+    queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+  }, [queryClient, building?._id]);
+
   const handleConfirm = useCallback(async () => {
     if (confirmable.length === 0) return;
     setState('confirming');
@@ -409,21 +423,77 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
           ocrText: [r.ocrText, lk.rf, lk.iban].filter(Boolean).join(' ')
         };
       });
-      await confirmReceiptPayments(payments);
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BILLS] });
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
-      if (building?._id) {
-        queryClient.invalidateQueries({
-          queryKey: [QueryKeys.BUILDINGS, building._id]
-        });
+      const data = await confirmReceiptPayments(payments);
+      invalidateMoneySurfaces();
+      // BATCH-TRUTH (2026-07): report what the SERVER did, not what we asked
+      // for. `payments.length` was our own intent — it counted deduped receipts
+      // and vanished bills as recorded, so the landlord read «2 πληρωμές
+      // καταχωρήθηκαν» when Σ(receipts) moved by one or by nothing at all. The
+      // server returns one `updated` entry per processed payment, flagged
+      // `duplicate: true` when its idempotency guard skipped the write, and
+      // omits entries entirely for a bill/repair it could not find.
+      // NOT named `results` — that is the component-level OCR result list this
+      // dialog renders from, and shadowing it here would be a trap for the next
+      // edit inside this block.
+      const serverResults = Array.isArray(data?.updated) ? data.updated : [];
+      const recorded = serverResults.filter((u) => !u?.duplicate).length;
+      const duplicates = serverResults.filter((u) => u?.duplicate).length;
+      const missing = Math.max(0, payments.length - serverResults.length);
+      if (recorded) {
+        toast.success(t('{{count}} payment(s) recorded', { count: recorded }));
       }
-      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
-      toast.success(
-        t('{{count}} payment(s) recorded', { count: payments.length })
-      );
+      if (duplicates) {
+        toast.info(
+          t('{{count}} payment(s) were already recorded — skipped', {
+            count: duplicates
+          })
+        );
+      }
+      if (missing) {
+        toast.warning(
+          t('{{count}} payment(s) could not be matched and were not recorded', {
+            count: missing
+          })
+        );
+      }
+      // OVERPAY (2026-07): the server reports `overpaid` (Σ(receipts) − owed) on
+      // any target this batch pushed past its total. Recording still happened —
+      // refusing would drop money the landlord actually paid — but this is the
+      // ONLY moment the excess is visible: an overpaid bill becomes 'paid', and
+      // every downstream surface either clamps the outstanding at zero or filters
+      // 'paid' out entirely. Usually it means the receipt matched the WRONG bill
+      // or an amount was typed with a slipped decimal, so name the target (from
+      // the candidate the user picked) and keep the toast up until dismissed.
+      for (const u of serverResults) {
+        if (!(u?.overpaid > 0)) continue;
+        const id = u.kind === 'repair' ? u.repairId : u.billId;
+        const picked = confirmable.find(({ uid }) => {
+          const c = selected[uid];
+          return (
+            c &&
+            String(c.kind === 'repair' ? c.repairId : c.billId) === String(id)
+          );
+        });
+        const name = picked
+          ? selected[picked.uid].expenseName
+          : t('the selected item');
+        toast.warning(
+          t('{{name}} is now overpaid by {{amount}} — check the match', {
+            name,
+            amount: formatMoney(u.overpaid)
+          }),
+          { duration: Infinity }
+        );
+      }
       handleClose();
     } catch (error) {
       console.error('Payment confirm error:', error);
+      // The server records each receipt in its own save() — the batch is NOT
+      // transactional, so a failure on payment 3 of 5 has already persisted 1
+      // and 2. Skipping invalidation here left those two paid bills rendering
+      // as unpaid until the next refetch, which invites the landlord to record
+      // them a second time. Invalidate on the failure path too.
+      invalidateMoneySurfaces();
       toast.error(t('Failed to confirm payment'));
       setState('preview');
     }
@@ -432,9 +502,8 @@ export default function PaymentReceiptDialog({ open, setOpen, building }) {
     selected,
     amounts,
     longKeys,
-    building?._id,
     handleClose,
-    queryClient,
+    invalidateMoneySurfaces,
     t
   ]);
 
