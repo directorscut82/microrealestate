@@ -681,8 +681,20 @@ test('43.8 · F5-expense · switching custom_percentage→single_unit resets cus
     await v0.fill('100');
     await pickOption(page, dialogCombobox(page, 1), METHOD_LABEL_REGEX.single_unit);
 
-    const unitLabel = await readTriggerLabel(dialogCombobox(page, 2));
-    expect(unitLabel).toMatch(/Select a unit|Επιλέξτε μονάδα|Επιλέξτε|Select/i);
+    // The unit picker is a THIRD combobox that only mounts once
+    // allocationMethod === 'single_unit', and the reset-on-method-change effect
+    // clears customAllocations in the same render pass. `readTriggerLabel` reads
+    // ONCE with no retry, so a bare read raced that mount and saw the stale
+    // per-unit value ("E2E-Property — ATAK E2E-Unit …"). Wait for the picker,
+    // then poll its label. (Verified against the live dialog: it does settle on
+    // «Select a unit» / «Επιλέξτε μονάδα».)
+    await expect(
+      dialogCombobox(page, 2),
+      'the single_unit picker mounts after the method switch'
+    ).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(() => readTriggerLabel(dialogCombobox(page, 2)), { timeout: 10_000 })
+      .toMatch(/Select a unit|Επιλέξτε μονάδα|Επιλέξτε|Select/i);
     await clickSave(page);
     await expect(page.locator('[role=dialog] p.text-destructive').filter({ hasText: /Pick a unit to bill/ })).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('[role=dialog]')).toBeVisible();
