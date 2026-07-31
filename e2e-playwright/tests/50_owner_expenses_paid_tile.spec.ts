@@ -130,13 +130,18 @@ test('50.1 — Overview renders the owner paid/unpaid tile with correct paid/tot
   await signIn(page);
   await openOverview(page);
 
-  // The tile header is "Owner expenses paid" (el: "Πληρωμένα έξοδα ιδιοκτήτη").
+  // STALE-SPEC FIX (2026-07): the tile was written as "Owner expenses paid"
+  // (el «Πληρωμένα έξοδα ιδιοκτήτη»). That string still exists but ONLY on the
+  // Owners pages (OwnerList / OwnerListItem / owners/[id]); the BUILDING
+  // Overview tile this spec drives is labelled «Έξοδα ιδιοκτητών» /
+  // "Owner expenses short" with «Εξοφλημένα» / «Οφειλές ιδιοκτητών» footers
+  // (BuildingDashboard BarRow). The spec had been failing since that rename.
   const tileHeader = page.getByText(
-    /Owner expenses paid|Πληρωμένα έξοδα ιδιοκτήτη/
+    /Owner expenses short|Owner expenses|Έξοδα ιδιοκτητών/
   );
-  await expect(tileHeader, 'paid/unpaid tile header present').toBeVisible({
-    timeout: 15_000
-  });
+  await expect(tileHeader.first(), 'paid/unpaid tile header present').toBeVisible(
+    { timeout: 15_000 }
+  );
 
   // The "paid / total" figure: 200 / 500. Locale formats the number; match
   // the digits with optional thousands/decimal separators around them.
@@ -146,13 +151,16 @@ test('50.1 — Overview renders the owner paid/unpaid tile with correct paid/tot
   // labels (unique to this tile) and the paid/total line — value-delta, not
   // existence. Locale formats with comma decimals (200,00) so match the
   // integer part with a flexible decimal tail.
+  // Footer labels are «Εξοφλημένα:» (Settled) and «Οφειλές ιδιοκτητών:»
+  // (Owner owed) — the old "Paid:"/"Outstanding:" wording is gone from this
+  // tile. Values unchanged: €200 settled of €500, so €300 owed.
   await expect(
-    page.getByText(/Paid:\s*200([.,]\d+)?\s*€/),
-    'tile shows Paid: 200 €'
+    page.getByText(/(Settled|Εξοφλημένα):\s*200([.,]\d+)?\s*€/),
+    'tile shows Settled: 200 €'
   ).toBeVisible({ timeout: 10_000 });
   await expect(
-    page.getByText(/Outstanding:\s*300([.,]\d+)?\s*€/),
-    'tile shows Outstanding: 300 € (the unpaid €300 charge)'
+    page.getByText(/(Owner owed|Οφειλές ιδιοκτητών):\s*300([.,]\d+)?\s*€/),
+    'tile shows Owner owed: 300 € (the unpaid €300 charge)'
   ).toBeVisible();
   // The paid/total headline "200,00 € / 500,00 €".
   await expect(
@@ -167,7 +175,7 @@ test('50.2 — the tile value is refetch-resilient (navigate away + back)', asyn
   await signIn(page);
   await openOverview(page);
   await expect(
-    page.getByText(/Owner expenses paid|Πληρωμένα έξοδα ιδιοκτήτη/)
+    page.getByText(/Owner expenses short|Owner expenses|Έξοδα ιδιοκτητών/).first()
   ).toBeVisible({ timeout: 15_000 });
 
   // Navigate away to the buildings list, then back. The value must re-render
@@ -177,11 +185,13 @@ test('50.2 — the tile value is refetch-resilient (navigate away + back)', asyn
   await openOverview(page);
 
   // Same value after the round-trip — not a one-shot render artifact.
-  await expect(page.getByText(/Paid:\s*200([.,]\d+)?\s*€/)).toBeVisible({
-    timeout: 15_000
-  });
+  // Labels renamed with the tile (see 50.1): «Εξοφλημένα» / «Οφειλές
+  // ιδιοκτητών», not "Paid:" / "Outstanding:".
   await expect(
-    page.getByText(/Outstanding:\s*300([.,]\d+)?\s*€/)
+    page.getByText(/(Settled|Εξοφλημένα):\s*200([.,]\d+)?\s*€/)
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.getByText(/(Owner owed|Οφειλές ιδιοκτητών):\s*300([.,]\d+)?\s*€/)
   ).toBeVisible();
 });
 

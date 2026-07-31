@@ -1,7 +1,7 @@
 /**
  * Spec 31 — BuildingDashboard owner-totals card.
  *
- * Surface: BuildingDashboard renders the "Income vs expenses" annual-projection
+ * Surface: BuildingDashboard renders the «ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ» annual-projection
  * card on /buildings/[id] (the default Overview tab in
  * webapps/landlord/src/pages/[organization]/buildings/[id].js). The expenses
  * row breaks out four streams; the right-most cell ("Owner expenses") is the

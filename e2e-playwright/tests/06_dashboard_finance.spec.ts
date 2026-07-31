@@ -2,7 +2,9 @@ import { test, expect, request } from '@playwright/test';
 import { ensureSeedLeasedTenant, ensureSeedWithUnit } from './lib/api';
 
 /**
- * Wave-24 bug 10: building dashboard renders an "Income vs expenses" card
+ * Wave-24 bug 10: building dashboard renders an annual-projection card
+ * («ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ» / «Annual projection <year>»; the original
+ * "Income vs expenses" title no longer exists anywhere in the app)
  * showing annualEsoda (rent × 12), annualEksoda (recurring × 12 + one-time
  * + repairs + owner expenses), and net. Pre-fix the dashboard had no such
  * card; the landlord could not see the financial picture for a building.
@@ -69,8 +71,28 @@ test('building dashboard finance card shows income, expenses, and net', async ({
   // landing tab and renders the finance card. We don't need to click a tab.
   // ----- assert: card is visible with non-zero income, non-zero expenses,
   //               and net = income - expenses ----------------------------
-  const card = page.locator('div', { hasText: 'Income vs expenses' }).first();
+  // STALE-SPEC FIX (2026-07): this anchored on an "Income vs expenses" card
+  // title. That string has ZERO renderers anywhere in the app — the card was
+  // rebuilt as the «ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ / Annual projection <year>» table
+  // (BuildingProjectionTable) with Income / Owner expenses / Net rows and
+  // up-to-month / projected / total columns. The spec had been failing ever
+  // since, and the orphaned locale key is removed in this commit.
+  const card = page
+    .locator('div')
+    .filter({ hasText: /Annual projection|ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ/ })
+    .first();
   await expect(card).toBeVisible({ timeout: 20_000 });
+
+  // The projection table itself: the one whose header row carries the
+  // «Total» / «Σύνολο» column. Anchoring reads to THIS table keeps them off the
+  // other Overview tiles (Rent collected, Uncollected expenses, Repairs).
+  const projectionTable = page
+    .locator('table')
+    .filter({ has: page.locator('th').filter({ hasText: /^(Total|Σύνολο)$/ }) })
+    .first();
+  await expect(projectionTable, 'projection table present').toBeVisible({
+    timeout: 20_000
+  });
 
   // Read the three figures by their stable label text. NumberFormat outputs
   // locale-aware money — for el-GR EUR realm it's like "6.000,00 €".
@@ -81,32 +103,61 @@ test('building dashboard finance card shows income, expenses, and net', async ({
     return Number(normalized);
   };
 
-  // Each labelled row is rendered as <div><div>Label</div><div>amount</div></div>.
-  // Locate each label by EXACT text match, then read its next sibling div.
-  // This is robust against innerText line-wrapping differences and
-  // sidebar/heading text that pollutes a card-level innerText() probe.
-  const readAmountFor = async (label: string): Promise<number> => {
-    const labelDiv = page.locator(`div:text-is("${label}")`).first();
-    await expect(labelDiv, `label "${label}" must exist`).toBeVisible({
+  // The projection is a <table>: each row is
+  //   <tr><td>Label</td><td>up-to-month</td><td>projected</td><td>total</td></tr>
+  // so the figure to compare is the LAST cell (Total), not a sibling <div>.
+  // Accept the Greek labels too — the realm's locale is el, and reviewing this
+  // in English is how the rename went unnoticed.
+  const readAmountFor = async (labels: RegExp): Promise<number> => {
+    // Scope to the projection table. A page-wide `tr` search also matched rows
+    // in the tiles further down the Overview (Rent collected / Uncollected
+    // expenses / Repairs), so the first match was not always the projection row
+    // and the figure read 0 while the card plainly showed 6.000,00 €.
+    const row = projectionTable
+      .locator('tr')
+      .filter({ has: page.locator('td').filter({ hasText: labels }) })
+      .first();
+    await expect(row, `row matching ${labels} must exist`).toBeVisible({
       timeout: 10_000
     });
-    const sibling = labelDiv.locator(
-      'xpath=following-sibling::div[1]'
-    );
-    const text = (await sibling.innerText()).trim();
+    const cells = row.locator('td');
+    const n = await cells.count();
+    const text = (await cells.nth(n - 1).innerText()).trim();
     return numberFromText(text);
   };
 
-  const income = await readAmountFor('Income');
-  const expenses = await readAmountFor('Expenses');
-  const net = await readAmountFor('Net');
+  // React Query hydrates the projection AFTER first paint, so the table renders
+  // once with zeros and then fills in. Reading immediately raced that and got
+  // 0 for a card that visibly showed 6.000,00 € in the failure snapshot. Poll
+  // until the Income row is populated before reading any figure.
+  await expect
+    .poll(() => readAmountFor(/^(Income|Έσοδα)$/), { timeout: 30_000 })
+    .toBeGreaterThan(0);
+
+  const income = await readAmountFor(/^(Income|Έσοδα)$/);
+  // Renamed from a bare "Expenses": the row is the OWNER-borne total
+  // («Έξοδα ιδιοκτήτη»), which is what Net subtracts.
+  const expenses = await readAmountFor(/^(Owner expenses|Έξοδα ιδιοκτήτη)$/);
+  const net = await readAmountFor(/^(Net|Καθαρό)$/);
 
   expect(income, `annual income must be > 0 (got ${income})`).toBeGreaterThan(0);
-  expect(expenses, `annual expenses must be > 0 (got ${expenses})`).toBeGreaterThan(0);
-  // Net should equal income - expenses within a 0.5 tolerance for any
-  // rounding the locale formatter applies.
+  // The Owner-expenses row renders with a leading «−» because it IS a deduction
+  // (HeadRow's `neg` prop, added so a cost reads as one). The spec predated
+  // that and demanded a positive figure. Assert the magnitude, and assert the
+  // sign explicitly so a regression to an unsigned cost still fails.
   expect(
-    Math.abs(net - (income - expenses)),
-    `net=${net} must equal income(${income}) - expenses(${expenses})`
+    expenses,
+    `annual owner expenses render as a NEGATIVE deduction (got ${expenses})`
+  ).toBeLessThan(0);
+  const expensesMagnitude = Math.abs(expenses);
+  expect(
+    expensesMagnitude,
+    `annual owner expenses must be non-zero (got ${expenses})`
+  ).toBeGreaterThan(0);
+  // Net = income − expenses. Since `expenses` is already signed negative here,
+  // that is income + expenses. 1-cent tolerance for locale rounding.
+  expect(
+    Math.abs(net - (income + expenses)),
+    `net=${net} must equal income(${income}) − owner expenses(${expensesMagnitude})`
   ).toBeLessThan(1);
 });

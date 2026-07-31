@@ -208,19 +208,42 @@ test('54.3 inert credit — cancel a PAID owners-repair keeps the money; un-canc
   });
   expect(repair).toBeDefined();
   let rows = readOwnerRows()!;
-  const liab = rows.find(
+  // STALE-SPEC FIX (2026-07): the owner-portion of a repair is materialised
+  // PER-UNIT (b4781e11 — the ΒΗΤΑ over-bill fix), so a €300 building-wide
+  // owners-repair on this 2-property building lands as 2 × €150, not 1 × €300.
+  // 54.1 already encodes that split (€200 → a €100 per-unit row). This test
+  // still assumed a single row AND paid it with a positional
+  // `ownerMonthlyExpenses.$.` update, which touches only the FIRST match — so
+  // it recorded €150 against one row and read back 150 where it wanted 300.
+  // Assert on the SUM across the repair's rows, and pay ALL of them.
+  const liabRows = rows.filter(
     (e) => e.source === 'repair' && e.expenseId === repair._id
   );
-  expect(liab, 'owner-portion repair row').toBeDefined();
-  expect(liab!.amount).toBeCloseTo(300, 1);
+  expect(liabRows.length, 'owner-portion repair row(s)').toBeGreaterThan(0);
+  const liabTotal = liabRows.reduce((s, e) => s + e.amount, 0);
+  expect(
+    liabTotal,
+    `owner-portion sums to €300 across ${liabRows.length} per-unit row(s)`
+  ).toBeCloseTo(300, 1);
 
   // Owner pays the €300 in full (direct mongo — the payment dialog fan-out).
+  // `$[elem]` with arrayFilters, NOT the positional `$`: every per-unit row of
+  // this repair must be paid its own amount, or the "money survived" assertions
+  // below measure a partially-paid liability.
   mongoExec(`
-    db.buildings.updateOne(
-      { _id: ObjectId("${BID}"), "ownerMonthlyExpenses.expenseId": "${repair._id}", "ownerMonthlyExpenses.source": "repair" },
-      { $set: { "ownerMonthlyExpenses.$.payments": [{ amount: 300, date: new Date(), type: "transfer" }], "ownerMonthlyExpenses.$.paid": true } }
-    );
-    print("paid");
+    var b = db.buildings.findOne({_id: ObjectId("${BID}")});
+    var n = 0;
+    (b.ownerMonthlyExpenses || []).forEach(function (e, i) {
+      if (String(e.expenseId) === "${repair._id}" && e.source === "repair") {
+        var set = {};
+        set["ownerMonthlyExpenses." + i + ".payments"] =
+          [{ amount: e.amount, date: new Date(), type: "transfer" }];
+        set["ownerMonthlyExpenses." + i + ".paid"] = true;
+        db.buildings.updateOne({_id: b._id}, { $set: set });
+        n++;
+      }
+    });
+    print("paid rows: " + n);
   `);
 
   // CANCEL → the paid row must survive as an inert credit (money preserved).
@@ -229,8 +252,16 @@ test('54.3 inert credit — cancel a PAID owners-repair keeps the money; un-canc
   const creditAfterCancel = rows.filter(
     (e) => e.source === 'credit' && e.expenseId === repair._id
   );
-  expect(creditAfterCancel.length, 'credit remnant kept on cancel').toBe(1);
-  expect(creditAfterCancel[0].paidSum).toBeCloseTo(300, 1); // money survived
+  // Per-unit again: one credit remnant PER paid row, and it is their SUM that
+  // must equal the €300 the owner actually handed over.
+  expect(
+    creditAfterCancel.length,
+    'credit remnant kept on cancel (one per paid per-unit row)'
+  ).toBeGreaterThan(0);
+  expect(
+    creditAfterCancel.reduce((s, e) => s + e.paidSum, 0),
+    'money survived the cancel in full'
+  ).toBeCloseTo(300, 1);
 
   // UN-CANCEL → inert credit stays + a fresh €300 liability re-opens; the two
   // reconcile (owed €300 === paid €300). Assert via the owner ledger API that

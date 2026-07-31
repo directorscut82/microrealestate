@@ -3,7 +3,7 @@
  *
  * Surface: BuildingDashboard at /buildings/[id] (the default Overview tab in
  * webapps/landlord/src/pages/[organization]/buildings/[id].js). The headline
- * card "Income vs expenses" exposes:
+ * annual-projection card («ΕΤΗΣΙΑ ΠΡΟΒΟΛΗ») exposes:
  *   • Income   = Σ rented-unit monthlyRent × 12  (rented-occupancy units only)
  *   • Expenses = recurringMonthlyEksoda × 12 + oneTimeEksoda + repairEksoda
  *                + ownerEksoda
