@@ -14,6 +14,7 @@ import { ensureSeed } from './lib/api';
 
 const TEST_EMAIL = process.env.TEST_EMAIL ?? '';
 const TEST_PASSWORD = process.env.TEST_PASSWORD ?? '';
+const GATEWAY = process.env.NAS_GATEWAY_URL || 'http://192.168.0.96:1350';
 
 test.beforeAll(() => {
   if (!TEST_EMAIL || !TEST_PASSWORD) {
@@ -47,7 +48,11 @@ test('editing a recurring expense PATCHes with 200 and persists the new amount',
   // ----- act: edit expense → change amount → submit -----
   const newAmount = String(Math.floor(100 + Math.random() * 800)); // randomized so we always observe a change
 
-  const expenseRow = page.locator('tr', { has: page.locator('td', { hasText: 'E2E-Expense' }) });
+  // `:text-is` = EXACT match. `hasText` is a substring test, so it would also
+  // lock onto any future `E2E-Expense-*` sibling and edit the wrong row.
+  const expenseRow = page.locator('tr', {
+    has: page.locator('td:text-is("E2E-Expense")')
+  });
   // pencil icon == first button in the row (matches existing UI conventions)
   await expenseRow.locator('button').first().click();
   await expect(page.locator('[role=dialog]')).toBeVisible();
@@ -72,7 +77,51 @@ test('editing a recurring expense PATCHes with 200 and persists the new amount',
 
   // ----- assert: round-trip read-back — re-open dialog, confirm new amount persists -----
   await expect(page.locator('[role=dialog]')).toBeHidden({ timeout: 10_000 });
+
+  // Wait for the LIST to show the new amount before re-opening. The dialog is
+  // seeded from the React Query cache, so re-opening immediately after the
+  // PATCH renders the PREVIOUS amount until the building refetch lands — this
+  // read once sampled 663 (the prior value) while the API already held 439,
+  // i.e. the write had persisted and only the read raced.
+  await expect
+    .poll(async () => (await expenseRow.innerText().catch(() => '')) || '', {
+      timeout: 20_000
+    })
+    .toContain(newAmount);
+
   await expenseRow.locator('button').first().click();
   await expect(page.locator('[role=dialog]')).toBeVisible();
-  await expect(page.locator('input[name=amount]')).toHaveValue(newAmount);
+  await expect
+    .poll(
+      () =>
+        page
+          .locator('input[name=amount]')
+          .inputValue()
+          .catch(() => ''),
+      { timeout: 15_000 }
+    )
+    .toBe(newAmount);
+
+  // …and the SERVER agrees, so a cache-only render cannot make this pass.
+  const verifyCtx = await request.newContext();
+  try {
+    const seedAuth = await ensureSeed(verifyCtx);
+    const b = await verifyCtx.get(
+      `${GATEWAY}/api/v2/buildings/${buildingId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${seedAuth.token}`,
+          organizationid: seedAuth.realmId
+        }
+      }
+    );
+    expect(b.status(), 'read building back').toBe(200);
+    const json = (await b.json()) as {
+      expenses?: Array<{ name: string; amount: number }>;
+    };
+    const stored = (json.expenses || []).find((e) => e.name === 'E2E-Expense');
+    expect(Number(stored?.amount), 'server-side amount').toBe(Number(newAmount));
+  } finally {
+    await verifyCtx.dispose();
+  }
 });
