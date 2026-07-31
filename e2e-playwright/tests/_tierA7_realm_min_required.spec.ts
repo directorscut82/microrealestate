@@ -89,10 +89,27 @@ test.describe.serial('Tier A7: realm min-required at creation', () => {
     expect(body._id).toBeTruthy();
     expect(body.name).toBe(unique);
 
-    // Cleanup: delete this realm so we don't pollute the test account
-    await request.delete(`${GATEWAY}/api/v2/realms/${body._id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    // Cleanup: delete this realm so we don't pollute the test account.
+    // The `organizationid` header is REQUIRED: realmManager.remove() gates on
+    // `req.user.role === 'administrator'`, and that role is resolved from the
+    // organization context. Without it every DELETE silently 404'd and this
+    // spec leaked one realm per run — 14 had accumulated, and one of them
+    // sorted ahead of CYPRESS-TEST-DO-NOT-USE and became the account's DEFAULT
+    // realm, so any spec that relies on `signIn` alone landed in an EMPTY realm
+    // showing the onboarding wizard (that is what broke 16's T31).
+    const del = await request.delete(
+      `${GATEWAY}/api/v2/realms/${body._id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          organizationid: body._id
+        }
+      }
+    );
+    expect(
+      del.status(),
+      `cleanup DELETE realm ${body.name} (body: ${await del.text().catch(() => '')})`
+    ).toBeLessThan(400);
   });
 
   test('accepts company realm with all companyInfo fields', async ({ request }) => {
@@ -113,9 +130,20 @@ test.describe.serial('Tier A7: realm min-required at creation', () => {
     const body = await r.json();
     expect(body._id).toBeTruthy();
 
-    // Cleanup
-    await request.delete(`${GATEWAY}/api/v2/realms/${body._id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    // Cleanup — see the note above: `organizationid` is required or the
+    // DELETE 404s and the realm leaks.
+    const del = await request.delete(
+      `${GATEWAY}/api/v2/realms/${body._id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          organizationid: body._id
+        }
+      }
+    );
+    expect(
+      del.status(),
+      `cleanup DELETE realm ${body.name} (body: ${await del.text().catch(() => '')})`
+    ).toBeLessThan(400);
   });
 });

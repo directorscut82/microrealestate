@@ -285,15 +285,24 @@ test('T03 · overpayment 750 (>500 grandTotal) surfaces a success toast', async 
 // =============================================================
 // T04 cross-month FUTURE date is rejected by the client guard
 // =============================================================
-test('T04 · cross-month FUTURE date triggers error toast (no PATCH)', async ({
+// STALE-SPEC FIX (2026-07): T04 asserted the "after term-end + 7d" guard, i.e.
+// that recording TODAY's date against a PAST month is refused. That guard was
+// REMOVED ON PURPOSE in 595b4499 ("allow express/manual katavolh on past months
+// — remove after-term date guard"): it blocked legitimately settling arrears
+// with the real date the cash changed hands, the date is never used in money
+// math, and the "negative grandTotal" it claimed to prevent is legitimate
+// credit-carry from overpayment regardless of date. Both the client mirror
+// (PaymentTabs `_handleSubmit`) and the server guard (rentmanager F3) are gone;
+// only the BEFORE-term guard remains (T05 covers that, and T06 covers the
+// >7d-future zod rule). So the spec now asserts the shipped behaviour: a
+// past-month payment dated today is ACCEPTED.
+test('T04 · past-month term accepts a payment dated TODAY (after-term guard removed in 595b4499)', async ({
   page
 }) => {
   if (!_seed) throw new Error('seed not ready');
   await signIn(page);
-  // Open NEXT month's rents page so the term is the future month;
-  // pick a date in the CURRENT month → before-term guard fires.
-  // (Or: open prior month, pick today's date → after-term guard.)
-  // We choose: open last month's rents, pick today's date.
+  // Open LAST month's rents page and pay with today's date — the arrears-
+  // settlement flow the guard used to block.
   const now = new Date();
   const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const ym = `${prev.getFullYear()}.${String(prev.getMonth() + 1).padStart(2, '0')}`;
@@ -316,25 +325,66 @@ test('T04 · cross-month FUTURE date triggers error toast (no PATCH)', async ({
 
   await page.locator('[data-cy="addNewPayment"]').click();
   await page.locator('input[name="payments.0.amount"]').fill('100');
-  // Date defaults to today (current month) — past-term recording with
-  // today's date triggers the after-term + 7d guard.
-  const patchHappened = await clickRecordExpectNoPatch(page);
-  // The cushion is 7 days. If today is within 7 days of the prior
-  // month's end, the guard would NOT fire. Compute that and skip
-  // assertion in that case (last week of month).
-  const cushionEnd = new Date(prev.getFullYear(), prev.getMonth() + 1, 7);
-  const guardWillFire = now > cushionEnd;
-  if (guardWillFire) {
-    expect(
-      patchHappened,
-      'cross-month forward date must NOT trigger PATCH'
-    ).toBe(false);
-    // An error toast must be visible.
-    await expect(
-      page.locator('[data-sonner-toast]').first()
-    ).toBeVisible({ timeout: 3_000 });
+  // Date defaults to today, which is AFTER this (past) term's month. That is
+  // the arrears-settlement case, and it must go through.
+  const patchPromise = page
+    .waitForResponse(
+      (r) =>
+        r.url().includes('/api/v2/rents/payment/') &&
+        r.request().method() === 'PATCH',
+      { timeout: 20_000 }
+    )
+    .catch(() => null);
+  await page
+    .locator('[role=dialog] button')
+    .filter({ hasText: /Record|Εκτέλεση/i })
+    .first()
+    .click();
+  const patchResp = await patchPromise;
+  expect(
+    patchResp,
+    'a past-month payment dated today must FIRE a PATCH (guard removed in 595b4499)'
+  ).not.toBeNull();
+  expect(
+    patchResp!.status(),
+    `PATCH status (body: ${await patchResp!.text().catch(() => '')})`
+  ).toBe(200);
+  // …and no error toast about the date.
+  await expect(
+    page
+      .locator('[data-sonner-toast]')
+      .filter({ hasText: /date|ημερομηνία/i }),
+    'no date-rejection toast'
+  ).toHaveCount(0);
+
+  // Cleanup: strip the payment we just recorded so later specs see a clean
+  // ledger for that term, then close the dialog if still open.
+  const api = await request.newContext();
+  try {
+    const term = Number(
+      `${prev.getFullYear()}${String(prev.getMonth() + 1).padStart(2, '0')}0100`
+    );
+    await api.patch(
+      `${GATEWAY}/api/v2/rents/payment/${_seed.tenantId}/${term}`,
+      {
+        headers: {
+          Authorization: `Bearer ${_seed.token}`,
+          organizationid: _seed.realmId,
+          'Content-Type': 'application/json'
+        },
+        data: {
+          _id: _seed.tenantId,
+          year: prev.getFullYear(),
+          month: prev.getMonth() + 1,
+          payments: [],
+          promo: 0,
+          extracharge: 0
+        }
+      }
+    );
+  } finally {
+    await api.dispose();
   }
-  // Cleanup: close the dialog.
   await page
     .locator('[role=dialog] button')
     .filter({ hasText: /Cancel|Άκυρο/i })
@@ -394,23 +444,51 @@ test('T06 · date >7d in the future is rejected by zod', async ({ page }) => {
   await openTenantDialog(page);
   await page.locator('[data-cy="addNewPayment"]').click();
   await page.locator('input[name="payments.0.amount"]').fill('100');
-  // Pick a date 14 days from now via the DatePicker. Open it then
-  // click "Next month" if needed, and pick a day.
+  // Pick a date well beyond +7 days via the DatePicker.
   await page.locator('#payments\\.0\\.date').click();
   await expect(page.locator('.rdp')).toBeVisible({ timeout: 5_000 });
-  // Click next-month nav twice to jump well into the future.
+
+  // STALE-SPEC FIX (2026-07): this advanced a month then clicked the FIRST
+  // button matching /^28$/. The calendar renders with `showOutsideDays`, so the
+  // next month's grid LEADS with the previous month's trailing days — on the
+  // August 2026 page the first "28" is the outside day Jul 28, i.e. 3 days in
+  // the PAST. The guard then correctly stayed silent, the PATCH fired, and the
+  // test read that as a regression. Two fixes: require the nav button (never
+  // silently skip the month advance), and exclude outside days.
   const navNext = page.locator('button[name="next-month"]').first();
-  if (await navNext.isVisible().catch(() => false)) {
-    await navNext.click();
-    await page.waitForTimeout(200);
-  }
-  // Pick day 28 of the displayed month — guaranteed >7d ahead within
-  // the next page.
-  await page
-    .locator('.rdp button')
+  await expect(
+    navNext,
+    'next-month nav must exist — silently skipping it leaves the CURRENT month displayed'
+  ).toBeVisible({ timeout: 5_000 });
+  await navNext.click();
+  await page.waitForTimeout(250);
+
+  // `:not(.day-outside)` — the shadcn calendar tags leading/trailing days from
+  // the adjacent months with that class (calendar.js `day_outside`).
+  const day28 = page
+    .locator('.rdp button:not(.day-outside)')
     .filter({ hasText: /^28$/ })
-    .first()
-    .click();
+    .first();
+  await expect(
+    day28,
+    'day 28 of the NEXT month (not an outside day) is selectable'
+  ).toBeVisible({ timeout: 5_000 });
+  await day28.click();
+
+  // Sanity: the chosen date really is more than 7 days out, so the assertion
+  // below tests the guard rather than an accidentally-valid date.
+  const chosen = await page.locator('#payments\\.0\\.date').innerText();
+  const m = chosen.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  expect(m, `date input shows a DD/MM/YYYY value (got "${chosen}")`).not.toBeNull();
+  const chosenDate = new Date(Number(m![3]), Number(m![2]) - 1, Number(m![1]));
+  const daysAhead = Math.round(
+    (chosenDate.getTime() - Date.now()) / 86_400_000
+  );
+  expect(
+    daysAhead,
+    `picked date ${chosen} must be >7 days ahead (got ${daysAhead})`
+  ).toBeGreaterThan(7);
+
   // Submit; expect zod error toast.
   const patchHappened = await clickRecordExpectNoPatch(page);
   expect(
@@ -984,15 +1062,40 @@ test('T30 · dashboard route loads with correct heading', async ({ page }) => {
 // =============================================================
 // T31 bar chart greyscale legend
 // =============================================================
-test('T31 · YearFigures legend uses greyscale swatches', async ({ page }) => {
+test('T31 · dashboard chart legends render a swatch per series', async ({
+  page
+}) => {
+  // STALE-SPEC FIX (2026-07): renamed from "uses greyscale swatches". The
+  // swatches are deliberately NOT greyscale any more — Wave-26 round-3s made
+  // them carry the exact bar fill colours (CHART_UNPAID / CHART_PAID) so the
+  // legend matches the bars pixel-for-pixel. The markup assertion still holds
+  // and is what protects the legend; the colour claim in the old title did not.
+  //
+  // The count read 0 for a more basic reason: `signIn` lands on whatever realm
+  // the account defaults to, and a leaked `E2E-A7-Personal-*` realm had become
+  // that default — an EMPTY realm that renders the onboarding wizard, where no
+  // chart (and therefore no legend) exists at all. Navigate explicitly to the
+  // SEEDED realm's dashboard. Also poll rather than sleep: YearFigures /
+  // MonthFigures / ExpensesYearFigures are `dynamic()` imports, so a flat 2s
+  // wait raced their chunk load.
+  if (!_seed) throw new Error('seed not ready');
   await signIn(page);
-  await page.waitForTimeout(2000);
-  const swatches = page.locator(
-    'span.size-2\\.5.rounded-pill[aria-hidden]'
-  );
-  // Either pie or bar legend swatches will be present.
-  const count = await swatches.count();
-  expect(count).toBeGreaterThanOrEqual(2);
+  await page.goto(`${encodeURIComponent(_seed.realmName)}/dashboard`);
+  const swatches = page.locator('span.size-2\\.5.rounded-pill[aria-hidden]');
+  await expect
+    .poll(() => swatches.count(), { timeout: 30_000 })
+    .toBeGreaterThanOrEqual(2);
+
+  // Set-narrowing: each swatch must carry an inline background (the legend
+  // reads its colour from the chart tokens). A swatch with no colour is an
+  // invisible legend key.
+  const n = await swatches.count();
+  for (let i = 0; i < n; i++) {
+    const bg = await swatches.nth(i).evaluate(
+      (el) => (el as HTMLElement).style.background || (el as HTMLElement).style.backgroundColor
+    );
+    expect(bg, `legend swatch ${i} has a background colour`).toBeTruthy();
+  }
 });
 
 // =============================================================
