@@ -25,6 +25,30 @@ test.beforeAll(() => {
   }
 });
 
+// LEAK FIX (2026-07): 29.40 terminates the CANONICAL E2E-LeasedTenant and
+// $unsets it again as its LAST statement. If any assertion before that line
+// fails, the cleanup never runs and the canonical tenant stays terminated —
+// which then breaks every later spec that needs it active (25.4's "Lease
+// running" chip read 0 rows for exactly this reason, and 06's building income
+// read 0,00 €). 29.40 already clears at START, but that only protects 29.40
+// itself, never the specs that run after it. An afterAll runs even when a test
+// panics, so the realm is handed back clean either way.
+test.afterAll(async () => {
+  const apiCtx = await request.newContext();
+  try {
+    const seed = await ensureSeedLeasedTenant(apiCtx);
+    mongoExec(
+      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {$unset: {terminationDate: ''}});`
+    );
+  } catch (e) {
+    console.warn(
+      `[S29 afterAll] could not restore the canonical tenant: ${(e as Error).message}`
+    );
+  } finally {
+    await apiCtx.dispose();
+  }
+});
+
 async function signIn(page: Page) {
   await page.goto('signin');
   await page.locator('input[name=email]').fill(TEST_EMAIL);
@@ -267,7 +291,7 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
   // seed leakage cascade" — only $unset (not PATCH null) clears reliably.
   try {
     mongoExec(
-      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {\\$unset: {terminationDate: ''}});`
+      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {$unset: {terminationDate: ''}});`
     );
   } catch (e) {
     // Best-effort. If mongoExec is unavailable (no portainer-token),
@@ -395,7 +419,7 @@ test('29.40 search active on tenants → terminate via API → filter outcome de
   // CI dry-run), so this is a no-op outside the NAS environment.
   try {
     mongoExec(
-      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {\\$unset: {terminationDate: ''}});`
+      `db.occupants.updateOne({_id: ObjectId('${seed.tenantId}')}, {$unset: {terminationDate: ''}});`
     );
   } catch (e) {
     console.warn(

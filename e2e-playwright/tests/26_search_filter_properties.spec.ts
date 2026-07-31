@@ -218,24 +218,55 @@ test('26.13 search 4 chars of address.street1 narrows the list', async ({ page }
   test.setTimeout(120_000);
   const apiCtx = await request.newContext();
   const seed = await ensureSeed(apiCtx);
-  const tag = 'STRZ' + Math.random().toString(36).slice(2, 4).toUpperCase();
+  // STALE-SPEC FIX (2026-07): the tag was `STRZ` + 2 random chars, but the
+  // search typed only `tag.slice(0, 4)` — i.e. the CONSTANT prefix `STRZ`,
+  // which every previous run's leftover also matches. Three `E2E-STRZ*-Name`
+  // properties had accumulated (this spec has no cleanup at all), so the count
+  // read 3 where it demanded 1. Search the FULL tag, which is unique per run,
+  // and delete the fixture afterwards so the realm stops growing.
+  const tag = 'STRZ' + Math.random().toString(36).slice(2, 6).toUpperCase();
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Name`,
     atakNumber: `${tag}-AT`,
-    // Street name carries the unique tag — we'll search a 4-char prefix.
+    // Street name carries the unique tag — we search the whole thing.
     street1: `${tag}-Avenue`,
     surface: 60
   });
-  await apiCtx.dispose();
 
-  await signIn(page);
-  await gotoProperties(page, seed.realmName);
+  try {
+    await signIn(page);
+    await gotoProperties(page, seed.realmName);
 
-  await page.locator('[data-cy=globalSearchField]').fill(tag.slice(0, 4));
+    await page.locator('[data-cy=globalSearchField]').fill(tag);
 
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+    await expect(
+      page.locator('[data-cy=openResourceButton]'),
+      `street1 search for the unique tag ${tag} narrows to exactly 1`
+    ).toHaveCount(1, { timeout: 15_000 });
+  } finally {
+    const list = await apiCtx.get(`${GATEWAY}/api/v2/properties`, {
+      headers: {
+        Authorization: `Bearer ${seed.token}`,
+        organizationid: seed.realmId
+      }
+    });
+    if (list.status() === 200) {
+      const mine = ((await list.json()) as Array<{ _id: string; name: string }>)
+        .filter((p) => p.name === `E2E-${tag}-Name`)
+        .map((p) => p._id);
+      for (const id of mine) {
+        await apiCtx
+          .delete(`${GATEWAY}/api/v2/properties/${id}`, {
+            headers: {
+              Authorization: `Bearer ${seed.token}`,
+              organizationid: seed.realmId
+            }
+          })
+          .catch(() => {});
+      }
+    }
+    await apiCtx.dispose();
+  }
 });
 
 test('26.14 search a 2-digit surface value narrows the list', async ({ page }) => {

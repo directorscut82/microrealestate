@@ -445,10 +445,15 @@ test('25.8 search persists across navigate-into-detail then Back', async ({
   await signIn(page);
   await gotoTenants(page, leased.realmName);
 
+  // Count with the EXACT-name `tenantCard` selector, not the raw
+  // openResourceButton: the tenants-page filter uses String.indexOf, so typing
+  // "E2E-LeasedTenant" also matches a leaked "E2E-LeasedTenant-B" from a
+  // panicked spec-19 run (CLAUDE.md "Test seed leakage cascade"), and the raw
+  // count read 2. Same recipe as 25.5 / 28.29 / 29.39 in this suite.
   await page.locator('[data-cy=globalSearchField]').fill(leased.tenantName);
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(tenantCard(page, leased.tenantName)).toHaveCount(1, {
+    timeout: 15_000
+  });
 
   // Click into the tenant detail page.
   await tenantCard(page, leased.tenantName).first().click();
@@ -466,9 +471,11 @@ test('25.8 search persists across navigate-into-detail then Back', async ({
   await expect(
     page.locator('[data-cy=globalSearchField]')
   ).toHaveValue(leased.tenantName, { timeout: 15_000 });
-  await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+  // Exact-name count again (see above) — the rehydrated filter is still a
+  // substring match, so the leaked "-B" sibling would inflate a raw count.
+  await expect(tenantCard(page, leased.tenantName)).toHaveCount(1, {
+    timeout: 15_000
+  });
 });
 
 test('25.9 search with no matches → empty state, no rows', async ({ page }) => {
@@ -505,11 +512,21 @@ test('25.10 typing then clearing the input restores the full list', async ({
   await gotoTenants(page, leased.realmName);
 
   const before = await page.locator('[data-cy=openResourceButton]').count();
+  expect(before, 'sanity: the unfiltered list has rows').toBeGreaterThan(0);
 
   await page.locator('[data-cy=globalSearchField]').fill(leased.tenantName);
+  // Exact-name count: the tenants-page filter is a substring match, so typing
+  // "E2E-LeasedTenant" also matches a leaked "E2E-LeasedTenant-B" from a
+  // panicked spec-19 run and the raw count read 2 (same trap as 25.8).
+  await expect(tenantCard(page, leased.tenantName)).toHaveCount(1, {
+    timeout: 15_000
+  });
+  // The list must ALSO have actually narrowed — otherwise "exactly one exact
+  // match" would still hold on a filter that did nothing at all.
   await expect(
-    page.locator('[data-cy=openResourceButton]')
-  ).toHaveCount(1, { timeout: 15_000 });
+    page.locator('[data-cy=openResourceButton]'),
+    'the search narrowed the list'
+  ).not.toHaveCount(before, { timeout: 15_000 });
 
   // Clear the input.
   await page.locator('[data-cy=globalSearchField]').fill('');

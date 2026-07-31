@@ -585,13 +585,60 @@ test('28.37 chip + payment that flips status drops the row from filtered set', a
   expect(payResp.status(), 'pay full').toBe(200);
   await apiCtx2.dispose();
 
-  // Trigger refetch.
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  // Trigger a refetch. A synthetic `window.dispatchEvent(new Event('focus'))`
+  // is NOT enough here: React Query's focus manager listens on
+  // `visibilitychange` (and a real focus), so the dispatched event left the
+  // cache untouched and the row still rendered «Payment …» / «Remaining
+  // 4.562,00 €» — confirmed on the rendered screen. Fire both, then fall back
+  // to a reload, so the assertion measures the server's truth rather than a
+  // stale cache. (Spec 30.3 gets away with the bare focus event only because it
+  // waits 30s first.)
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  const tenantRow = () =>
+    page.locator(`span.text-lg.font-medium:text-is("${seed.tenantName}")`);
+  const CHIP = /In arrears|Σε καθυστέρηση|Οφειλόμενο|Οφειλόμενα/i;
+  // Positive control: prove the chip is genuinely APPLIED, so that "row is
+  // absent" cannot silently mean "the list is unfiltered / the chip broke".
+  // The applied filter renders as a BADGE INSIDE the «Filters» trigger button,
+  // so scope to that button — a page-wide text match also hits the status
+  // legend at the foot of the list («Outstanding»), which is present regardless
+  // of any filter, making the control worthless.
+  const filtersButton = page
+    .getByRole('button', { name: /Filters|Φίλτρα/i })
+    .first();
+  const chipApplied = filtersButton.getByText(CHIP);
+
+  // If the cache did not turn over, reload and RE-APPLY the chip. Re-applying
+  // is essential: a reload CLEARS the filter, and the unfiltered list is
+  // exactly where this tenant still legitimately appears — asserting absence
+  // there would be a tautology, and the row's continued presence would be a
+  // failure for entirely the wrong reason (that is what happened here: the
+  // payment HAD settled — «Payment 4.562,00 € / Remaining 0,00 €», green
+  // Settled dot — but the reload had dropped the chip).
+  if ((await tenantRow().count()) > 0) {
+    await page.reload();
+    await expect(page.locator('[data-cy=globalSearchField]')).toBeVisible({
+      timeout: 20_000
+    });
+    await clickFilterChip(page, CHIP);
+    // The menu-based chip click is easy to lose to a re-render right after a
+    // reload; confirm it took, and retry once if not.
+    if ((await chipApplied.count()) === 0) {
+      await clickFilterChip(page, CHIP);
+    }
+  }
+
+  await expect(
+    chipApplied,
+    'positive control: In-arrears filter applied (badge inside the Filters button)'
+  ).toBeVisible({ timeout: 20_000 });
 
   // The tenant must now be GONE from the In arrears filtered set.
-  await expect(
-    page.locator(`span.text-lg.font-medium:text-is("${seed.tenantName}")`)
-  ).not.toBeVisible({ timeout: 15_000 });
+  await expect(tenantRow()).toHaveCount(0, { timeout: 20_000 });
 
   // Cleanup
   const apiCtx3 = await request.newContext();
