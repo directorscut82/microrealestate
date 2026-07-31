@@ -61,19 +61,22 @@ function DatabaseSettings() {
     }
   }, [t]);
 
-  const handleFileSelect = useCallback((event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleFileSelect = useCallback(
+    (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
 
-    if (!file.name.endsWith('.json')) {
-      toast.error(t('Please select a JSON backup file'));
-      return;
-    }
+      if (!file.name.endsWith('.json')) {
+        toast.error(t('Please select a JSON backup file'));
+        return;
+      }
 
-    setSelectedFile(file);
-    setConfirmOpen(true);
-    event.target.value = '';
-  }, [t]);
+      setSelectedFile(file);
+      setConfirmOpen(true);
+      event.target.value = '';
+    },
+    [t]
+  );
 
   const handleRestore = useCallback(async () => {
     if (!selectedFile) return;
@@ -94,30 +97,44 @@ function DatabaseSettings() {
         // D6 (audit-2026-07): a partial restore must warn loudly, not show a
         // green success — some collections did not fully reinsert.
         toast.error(
-          t('Restore completed with errors in: {{collections}}. Review and retry.', {
-            collections: (result.failedCollections || []).join(', ')
-          })
+          t(
+            'Restore completed with errors in: {{collections}}. Review and retry.',
+            {
+              collections: (result.failedCollections || []).join(', ')
+            }
+          )
         );
       } else {
+        // i18n (2026-07): the date was `new Date(x).toLocaleString()` (US
+        // M/D/YYYY on the Greek screen). exportDate is echoed straight back
+        // from the CLIENT-UPLOADED backup JSON (databasemanager.ts:313) and
+        // only `version`/`collections` are validated — so it can be absent.
+        // moment(undefined) is TODAY, which on a destructive restore would
+        // confidently misstate which snapshot just overwrote the realm.
+        // 'HH:mm' not 'LT' on purpose: moment's el LT is a 12-hour clock
+        // («5:05 ΜΜ») where Greek convention is 24-hour.
+        // The truthiness check is load-bearing AND NOT redundant with
+        // isValid(): moment(undefined).isValid() is TRUE (undefined means
+        // "now"), so isValid() alone would let the absent case through.
+        //
+        // TWO SENTENCES, not one with an "unknown date" noun substituted in:
+        // every non-English carrier governs the {{date}} slot with a
+        // preposition+article (el «της», fr «du», de «vom», pt «de», es
+        // «del»), so dropping a nominative noun phrase there yields
+        // case-broken text («…ασφαλείας της άγνωστη ημερομηνία»). The absent
+        // case gets its own self-contained string instead.
+        const _exportDate =
+          result.exportDate && moment(result.exportDate).isValid()
+            ? moment(result.exportDate).format('L HH:mm')
+            : null;
         toast.success(
-          t('Database restored successfully from backup dated {{date}}', {
-            // i18n (2026-07): was `new Date(x).toLocaleString()` (US M/D/YYYY
-            // on the Greek screen). exportDate is echoed straight back from
-            // the CLIENT-UPLOADED backup JSON (databasemanager.ts:313) and
-            // only `version`/`collections` are validated — so it can be
-            // absent. moment(undefined) is TODAY, which on a destructive
-            // restore would confidently misstate which snapshot just
-            // overwrote the realm. Guard with isValid() and say so instead.
-            // 'HH:mm' not 'LT' on purpose: moment's el LT is a 12-hour clock
-            // («5:05 ΜΜ») where Greek convention is 24-hour.
-            // The truthiness check is load-bearing AND NOT redundant with
-            // isValid(): moment(undefined).isValid() is TRUE (undefined means
-            // "now"), so isValid() alone would let the absent case through.
-            date:
-              result.exportDate && moment(result.exportDate).isValid()
-                ? moment(result.exportDate).format('L HH:mm')
-                : t('unknown date')
-          })
+          _exportDate
+            ? t('Database restored successfully from backup dated {{date}}', {
+                date: _exportDate
+              })
+            : t(
+                'Database restored successfully. The backup file carries no export date.'
+              )
         );
       }
       const recon = result.storageReconcile;
@@ -143,9 +160,12 @@ function DatabaseSettings() {
       }
       if (recon?.missingFiles?.length) {
         toast.warning(
-          t('{{count}} document(s) reference files that no longer exist in cloud storage', {
-            count: recon.missingFiles.length
-          })
+          t(
+            '{{count}} document(s) reference files that no longer exist in cloud storage',
+            {
+              count: recon.missingFiles.length
+            }
+          )
         );
       }
 
@@ -179,10 +199,7 @@ function DatabaseSettings() {
               )}
             </p>
             <div className="mt-2">
-              <Button
-                onClick={handleSave}
-                disabled={saving || restoring}
-              >
+              <Button onClick={handleSave} disabled={saving || restoring}>
                 {saving ? (
                   <LuLoader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -230,9 +247,7 @@ function DatabaseSettings() {
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('Are you sure?')}
-            </AlertDialogTitle>
+            <AlertDialogTitle>{t('Are you sure?')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t(
                 'This will replace ALL current data with the backup file. This action cannot be undone. Make sure you have saved a backup of your current data first.'

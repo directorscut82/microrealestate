@@ -22,6 +22,7 @@ import { Label } from './ui/label';
 import moment from 'moment';
 import NumberFormat from './NumberFormat';
 import { Switch } from './ui/switch';
+import { termMonthYearAccusative } from '../utils/greekMonths';
 import useTranslation from 'next-translate/useTranslation';
 
 /*
@@ -58,7 +59,7 @@ const PROVIDER_LABEL = {
 };
 
 function InboxCard({ item, buildings, onGone }) {
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
   const queryClient = useQueryClient();
   const [assignment, setAssignment] = useState(null); // {buildingId, expenseId}
   const [charge, setCharge] = useState(false);
@@ -273,12 +274,12 @@ function InboxCard({ item, buildings, onGone }) {
               </div>
               <div className="text-amber-700/80 dark:text-amber-300/80">
                 {t('Already imported for {{month}}', {
-                  // term is YYYYMMDDHH → first 6 chars are the month. moment
-                  // (locale set in _app.js) so it reads «Ιούλιος 2026».
-                  month: moment(
-                    String(item.duplicate.term).slice(0, 6),
-                    'YYYYMM'
-                  ).format('MMMM YYYY')
+                  // term is YYYYMMDDHH → first 6 chars are the month.
+                  // The el carrier is «Έχει καταχωρηθεί για {{month}}» and
+                  // «για» governs the ACCUSATIVE, so moment's nominative
+                  // «Ιούλιος» would read «για Ιούλιος 2026». Must be
+                  // «για Ιούλιο 2026» — hence the shared helper.
+                  month: termMonthYearAccusative(item.duplicate.term, lang)
                 })}
                 {' — '}
                 <NumberFormat value={item.duplicate.totalAmount} />

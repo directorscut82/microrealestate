@@ -31,6 +31,7 @@ import NumberFormat from '../NumberFormat';
 import { parseGreekMoney } from '../../utils/numberformat';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { Switch } from '../ui/switch';
+import { termMonthYearAccusative } from '../../utils/greekMonths';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
@@ -63,7 +64,7 @@ function ResultCard({
   amountOverride,
   onAmountChange
 }) {
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
 
   if (!result.success) {
     return (
@@ -299,11 +300,12 @@ function ResultCard({
               </p>
               <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
                 {t('Already imported for {{month}}', {
-                  // Term is YYYYMMDDHH; the first 6 chars are the month. moment
-                  // (not toLocaleDateString) so the month name follows the
-                  // locale set in _app.js and renders «Ιούλιος 2026».
-                  month: moment(String(duplicate.term).slice(0, 6), 'YYYYMM')
-                    .format('MMMM YYYY')
+                  // Term is YYYYMMDDHH; the first 6 chars are the month.
+                  // Accusative, not moment's nominative: the el carrier is
+                  // «Έχει καταχωρηθεί για {{month}}» and «για» governs the
+                  // accusative («για Ιούλιο 2026», not «για Ιούλιος 2026»).
+                  // Same banner as InboxBell — same helper.
+                  month: termMonthYearAccusative(duplicate.term, lang)
                 })}
                 {' — '}
                 <NumberFormat value={duplicate.totalAmount} />
