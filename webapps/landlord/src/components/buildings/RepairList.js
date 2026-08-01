@@ -866,7 +866,7 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                           const uid = String(u._id);
                           const checked = affectedUnitIds.includes(uid);
                           // The property name already encodes the floor
-                          // ("ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο" / "- Όροφος 1"),
+                          // ("ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο" / "- Όροφος 1"),
                           // so appending floor + unitLabel repeated it up
                           // to 3×. Only add a floor/unit suffix when the
                           // name doesn't already carry one. ATAK stays as

@@ -27,8 +27,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
 /*
- * PaymentReceiptDialog — U6 (Slice 6, approved mock
- * documentation/mockups/receipt-match-panel.html).
+ * PaymentReceiptDialog — U6 (Slice 6). Built against an approved local mock
+ * (receipt-match-panel.html), which is NOT in the repo: the mockups render real
+ * bill/receipt data and are gitignored. This comment is the surviving spec.
  *
  * Two-pane suggested-match: the receipt is OCR'd server-side, its elements
  * scored (soft TF-IDF, no hard categories) against every open bill AND repair.

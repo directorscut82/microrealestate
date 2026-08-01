@@ -79,8 +79,8 @@ function makeDeps({
             success: true,
             bill: {
               provider: 'deh',
-              billingId: '9 99000935-03 2',
-              billingIdNormalized: '999000935032',
+              billingId: '9 99935585-03 2',
+              billingIdNormalized: '999935585032',
               totalAmount: 186.21,
               periodStart: new Date('2026-02-25'),
               periodEnd: new Date('2026-03-23'),
@@ -130,7 +130,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     expect(item.source).toBe('telegram');
     expect(item.status).toBe('pending');
     expect(item.telegramMessageId).toBe(1001);
-    expect(item.parsed.billingIdNormalized).toBe('999000935032');
+    expect(item.parsed.billingIdNormalized).toBe('999935585032');
     expect(item.parsed.totalAmount).toBe(186.21);
     // proposedTerm derived from periodEnd (2026-03) → 2026030100
     expect(item.parsed.proposedTerm).toBe(2026030100);

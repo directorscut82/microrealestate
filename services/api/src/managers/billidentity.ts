@@ -90,20 +90,22 @@ export async function findDuplicateBillByIdentity(
   // payment reference is per-bill"; that is factually inverted for the only
   // provider that emits one. The ΔΕΗ «Κωδικός ηλεκτρονικής πληρωμής» (RF) is
   // per-ΠΑΡΟΧΗ — the same string is printed on every monthly bill for that
-  // meter. Verified against this repo's own OCR samples
-  // (.scratch-adv-tests/bill-samples/ocr-out): three DISTINCT bills for
-  // provision 999000565-016 — Α/Α 1490834492 (€265,00), 1496401206 (€153,00),
-  // 1501215791 (€120,00) — ALL print RF10999000000000000648051, and that RF is
-  // mod-97 valid (=1) so deh.ts emits it and confirmBills persists it. Matching
+  // meter. Verified against real ΔΕΗ bills held OUTSIDE this repo (see
+  // documentation/BILL_OCR_INBOX_PLAN.md for how to obtain samples; the actual
+  // scans are personal data and must never be committed): three DISTINCT bills
+  // for one provision, with three different Α/Α serials and three different
+  // amounts (€265,00 / €153,00 / €120,00), ALL print the SAME RF code — and that
+  // RF is mod-97 valid so deh.ts emits it and confirmBills persists it. Matching
   // on it alone made the duplicate banner fire on the routine next-month import
   // of a genuine new bill, telling the landlord to deselect real money. Worse,
   // ARM 1 returns on first hit, so ARM 2 — the only arm with a period
   // discriminator — was never reached.
   //
   // `paymentCode` IS per-bill: it encodes the amount (deh.ts builds it from the
-  // «…,… <check>» triple), and the same three samples yield 000000265009 /
-  // 000000153007 / 000000120006. Requiring BOTH keeps the arm's precision for a
-  // true re-import while letting consecutive months through to ARM 2.
+  // «…,… <check>» triple), so the same three samples yield three DISTINCT codes
+  // — zero-padded amount + check digit, e.g. 265,00 € → `000000265` + check.
+  // Requiring BOTH keeps the arm's precision for a true re-import while letting
+  // consecutive months through to ARM 2.
   //
   // Note the invariant is "validated at parse time" (deh.ts runs mod-97 before
   // emitting the RF) and NOT "guaranteed on the stored doc" — confirmBills

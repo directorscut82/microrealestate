@@ -1445,8 +1445,8 @@ export async function importFromE9(req: Req, res: Res) {
         }
 
         // 3. L14: Greek-aware case/accent-insensitive fallback. A user
-        // who manually created "Οδος ζητά 167" before importing an E9 that
-        // declared "ΟΔΟΣ ΖΗΤΑ 167" would have those two records treated as
+        // who manually created "Ζήτα 167" before importing an E9 that
+        // declared "ΖΗΤΑ 167" would have those two records treated as
         // separate buildings — silently duplicating the building and
         // splitting unit attachment between the two. Pull every building
         // in the realm and pick the first whose normalised street1

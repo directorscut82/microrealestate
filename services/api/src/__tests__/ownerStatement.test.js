@@ -23,7 +23,7 @@ describe('buildOwnerStatement', () => {
     const buildings = [
       {
         _id: 'b1',
-        name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ',
+        name: 'ΟΔΟΣ ΕΨΙΛΟΝ',
         // A source:'vacant' row can only be created by the recompute from a
         // flag-on, active recurring expense — fixtures must reflect that or the
         // shared read-time staleness guard correctly drops them.
@@ -418,7 +418,7 @@ describe('buildOwnerStatement — ΛΟΙΠΟΙ remainder', () => {
   const buildings = () => [
     {
       _id: 'b1',
-      name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ',
+      name: 'ΟΔΟΣ ΕΨΙΛΟΝ',
       expenses: [
         {
           _id: 'e1',

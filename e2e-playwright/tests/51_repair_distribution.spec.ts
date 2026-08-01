@@ -490,10 +490,16 @@ test.describe('Repair surfaces render correctly', () => {
     page
   }) => {
     // Sign in (shares the same browser context as S9 if run in same worker,
-    // but defensively sign in again for isolation)
+    // but defensively sign in again for isolation). Credentials come from
+    // `.secrets/cypress-test-account` via playwright.config.ts — the SAME
+    // account `ensureSeedRichBuilding` seeded as, so the browser session owns
+    // the `seed.realmName` realm this test then navigates into. Never hardcode
+    // credentials in a spec: this file is published.
     await page.goto(`${GATEWAY}/landlord/signin`);
-    await page.locator('input[name=email]').fill('e2elandlord82@gmail.com');
-    await page.locator('input[name=password]').fill('Passcode@1234');
+    await page.locator('input[name=email]').fill(process.env.TEST_EMAIL ?? '');
+    await page
+      .locator('input[name=password]')
+      .fill(process.env.TEST_PASSWORD ?? '');
     await page.locator('button[type=submit]').click();
     await page.waitForURL(/dashboard/, { timeout: 15000 }).catch(() => {});
 

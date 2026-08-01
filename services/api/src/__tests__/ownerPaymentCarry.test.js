@@ -1344,21 +1344,21 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     realmId: 'r1',
     save: async function () { return this; },
     toObject: function () { return this; },
-    name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28',
+    name: 'ΟΔΟΣ ΕΨΙΛΟΝ 28',
     // 11 units all owned by ΒΗΤΑ; 4 at 50% (co-owner absent), 7 at 100%.
     // thousandths mirror the live data so the split matches €421.75 / €78.25.
     units: [
-      mkUnit('a1', { generalThousandths: 13, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
-      mkUnit('a2', { generalThousandths: 8, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
-      mkUnit('a3', { generalThousandths: 7, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
-      mkUnit('a4', { generalThousandths: 16, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
-      mkUnit('a5', { generalThousandths: 30, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
-      mkUnit('a6', { generalThousandths: 36, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
-      mkUnit('a7', { generalThousandths: 36, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
-      mkUnit('a8', { generalThousandths: 242, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
-      mkUnit('a9', { generalThousandths: 155, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' }),
-      mkUnit('a10', { generalThousandths: 228, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 50 }], occupancyType: 'vacant' }),
-      mkUnit('a11', { generalThousandths: 229, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }], occupancyType: 'vacant' })
+      mkUnit('a1', { generalThousandths: 13, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a2', { generalThousandths: 8, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a3', { generalThousandths: 7, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a4', { generalThousandths: 16, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a5', { generalThousandths: 30, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a6', { generalThousandths: 36, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a7', { generalThousandths: 36, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a8', { generalThousandths: 242, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a9', { generalThousandths: 155, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' }),
+      mkUnit('a10', { generalThousandths: 228, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 50 }], occupancyType: 'vacant' }),
+      mkUnit('a11', { generalThousandths: 229, owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }], occupancyType: 'vacant' })
     ],
     expenses: [],
     repairs: [],
@@ -1378,7 +1378,7 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     expect(rows.reduce((s, r) => s + r.amount, 0)).toBeCloseTo(500, 2); // conservation
     const plain = JSON.parse(JSON.stringify(building));
     const map = _aggregateOwners([plain], new Set());
-    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' })));
+    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' })));
     expect(beta.totalAmount).toBeCloseTo(421.75, 1); // her thousandths-weighted share, NOT €500
     const loipoi = [...map.values()].filter((a) => String(a.ownerKey).startsWith('loipoi:'));
     const loipoiTotal = loipoi.reduce((s, a) => s + a.totalAmount, 0);
@@ -1402,15 +1402,15 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
       expenseId: 'agRoof', term: T, amount: 500, source: 'repair', propertyId: null,
       description: 'Repair: Στέγη', paid: true, paidDate: new Date('2026-06-06'),
       payments: [
-        { amount: 331.68, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }) },
-        { amount: 168.32, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }) }
+        { amount: 331.68, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' }) },
+        { amount: 168.32, date: '06/06/2026', type: 'transfer', ownerKey: ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' }) }
       ]
     });
     // MIGRATE: one writer run.
     await _distributeRepairCharge(building, repair, 'r1');
     const plain = JSON.parse(JSON.stringify(building));
     const map = _aggregateOwners([plain], new Set());
-    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' })));
+    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' })));
     // Her €500 payment must be on HER per-unit rows: paid ~€421.75 (her share),
     // outstanding €0 (she fully paid). NOT phantom-outstanding with a floating credit.
     expect(beta.totalAmount).toBeCloseTo(421.75, 1);
@@ -1426,7 +1426,7 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     building.repairs = [repair];
     await _distributeRepairCharge(building, repair, 'r1');
     // She paid €500 total, tagged to her key, spread across her per-unit rows.
-    payRepairOwnerPortion(building, 'agRoof', 500, ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }));
+    payRepairOwnerPortion(building, 'agRoof', 500, ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' }));
     // Re-run (innocuous edit) — payments must survive; her €421.75 liability
     // settles and the €78.25 beyond it is PRESERVED (no tenant re-bill → not a
     // droppable overpay; recorded money must survive).
@@ -1438,8 +1438,8 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     TENANTS = [];
     const T = term(6, 2026);
     const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
-    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
-    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΑΜΑ', taxId: '999000020', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 };
     const building = {
       _id: 'b_sp', realmId: 'r1', save: async function () { return this; }, toObject: function () { return this; }, name: 'ΟΔΟΣ ΖΗΤΑ 9',
       units: [
@@ -1480,8 +1480,8 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     TENANTS = [];
     const T = term(6, 2026);
     const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
-    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
-    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΑΜΑ', taxId: '999000020', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 };
     const building = {
       _id: 'b_sp2', realmId: 'r1', save: async function () { return this; }, toObject: function () { return this; }, name: 'ΟΔΟΣ ΖΗΤΑ 9',
       units: [
@@ -1527,8 +1527,8 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     TENANTS = [];
     const T = term(6, 2026);
     const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
-    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
-    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΑΜΑ', taxId: '999000020', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 };
     const building = {
       _id: 'b_sp_mig', realmId: 'r1', name: 'ΟΔΟΣ ΖΗΤΑ 9',
       save: async function () { return this; }, toObject: function () { return this; },
@@ -1598,8 +1598,8 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     TENANTS = [];
     const T = term(6, 2026);
     const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
-    const G = { name: 'ΔΟΚΙΜΗ ΓΕΩΡΓΙΟΣ', taxId: '125479189', percentage: 100 };
-    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 };
+    const G = { name: 'ΔΟΚΙΜΗ ΓΑΜΑ', taxId: '999000020', percentage: 100 };
+    const I = { name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 };
     const mkBuilding = () => ({
       _id: 'b_sp_idem', realmId: 'r1', name: 'ΟΔΟΣ ΖΗΤΑ 9',
       save: async function () { return this; }, toObject: function () { return this; },
@@ -1686,10 +1686,10 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     // it agrees with the dashboard (previously the ledger ignored row.paid and
     // dunned the full €500). ΒΗΤΑ's outstanding for the repair is 0.
     const map = _aggregateOwners([JSON.parse(JSON.stringify(building))], new Set());
-    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' })));
+    const beta = _serializeOwnerSummary(map.get(ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' })));
     expect(beta.totalOutstanding).toBeCloseTo(0, 1);
     // and the legal owner-statement PDF agrees (all three surfaces settled).
-    const st = buildOwnerStatement([JSON.parse(JSON.stringify(building))], ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811' }), []);
+    const st = buildOwnerStatement([JSON.parse(JSON.stringify(building))], ownerKeyOf({ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031' }), []);
     expect(st.totals.outstanding).toBeCloseTo(0, 1);
     expect(st.totals.paid).toBeCloseTo(st.totals.amount, 1);
   });
@@ -1805,7 +1805,7 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     // pristine per-bucket code handled it correctly; this guards the fix.
     const A = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 50 };
     const A2 = { memberId: 'mA', name: 'ΚΑΠΠΑ', taxId: '999000018', percentage: 100 };
-    const B = { memberId: 'mB', name: 'ΒΑΣΙΛΗΣ', taxId: '077889900', percentage: 50 };
+    const B = { memberId: 'mB', name: 'ΒΑΣΙΛΗΣ', taxId: '999000092', percentage: 50 };
     const T = CURRENT_TERM;
     // u1 co-owned A+B (surface 100), u2 A-alone (surface 30). Repair by_surface,
     // cost €130, chargeableTo tenants 100% + chargeOwnerWhenVacant. u1 rebills
@@ -1905,7 +1905,7 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
     TENANTS = [];
     const T = term(6, 2026);
     const A = { name: 'ΔΟΚΙΜΗ ΚΑΠΠΑ', taxId: '999000018', percentage: 50 };
-    const Z = { name: 'ΔΟΚΙΜΗ ΛΑΜΔΑ', taxId: '021301485', percentage: 50 };
+    const Z = { name: 'ΔΟΚΙΜΗ ΔΕΛΤΑ', taxId: '999000006', percentage: 50 };
     const building = {
       _id: 'b_ka', realmId: 'r1', save: async function () { return this; }, toObject: function () { return this; }, name: 'ΟΔΟΣ ΗΤΑ 24',
       units: [
@@ -1941,7 +1941,7 @@ describe('repair owner-portion per-unit split + per-owner attribution (end-to-en
 
 // ── ΒΗΤΑ: owner-fixed (ownerAmount) is materialised PER-UNIT, sliced per ──
 // ── owner — END-TO-END through the real writer + the real ledger reader.   ──
-// Reproduces the live ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 shape: an expense with a FIXED owner-only
+// Reproduces the live ΟΔΟΣ ΕΨΙΛΟΝ 28 shape: an expense with a FIXED owner-only
 // amount (trackOwnerExpense + ownerAmount=100, equal allocation) across units
 // the SAME owner holds at MIXED percentages (50% on some, 100% on others), the
 // 50% units' co-owner ABSENT from the data. Before the fix this wrote ONE
@@ -1958,7 +1958,7 @@ describe('ΒΗΤΑ owner-fixed per-unit materialisation + per-owner slice (end-t
   const mkBuilding = () => ({
     _id: 'b_beta',
     realmId: 'r1',
-    name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28',
+    name: 'ΟΔΟΣ ΕΨΙΛΟΝ 28',
     units: [
       mkUnit('pA', { owners: [beta(50)], occupancyType: 'vacant' }),
       mkUnit('pB', { owners: [beta(50)], occupancyType: 'vacant' }),

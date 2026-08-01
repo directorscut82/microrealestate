@@ -6,7 +6,7 @@ import {
 import { normalizeBillingId } from '../managers/billparser/types.js';
 
 // Simulated text extraction from the actual DEH bill PDF
-const DEH_BILL_TEXT = `999000935031
+const DEH_BILL_TEXT = `999935585031
 ΑΔΜΗΕ-ΔΕΔΔΗΕ ....: 15,69
 ΥΚΩ..............: 13,13
 ΕΤΜΕΑΡ...........: 12,24
@@ -23,7 +23,7 @@ RF33999000000000000000001
 Εκκαθαριστικός λογαριασμός
 Τιμολόγιο: Γ21 Επαγγελματικό
 Διεύθυνση ακινήτου: ΟΔΟΣ ΗΤΑ 24 199 47 ΔΟΚΙΜΑΙ
-Αριθμός παροχής 9 99000935-03 2
+Αριθμός παροχής 9 99935585-03 2
 Χρεώσεις προμήθειας ΔΕΗ 115,81€
 Ρυθμιζόμενες χρεώσεις 41,06€
 Διάφορα - Δήμος - ΕΡΤ 19,71€
@@ -39,7 +39,7 @@ RF33999000000000000000001
 
 const DEH_BILL_TEXT_ABBREVIATED = `ΔΕΗ A.E.
 dei.gr
-Αρ. παροχής: 9 99000935-03 2
+Αρ. παροχής: 9 99935585-03 2
 Συνολικό ποσό πληρωμής *1.186,21€
 ΕΞΟΦΛΗΣΗ ΕΩΣ 22/04/2026
 Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026
@@ -48,14 +48,14 @@ RF33999000000000000000001`;
 
 const DEH_BILL_TEXT_LARGE_AMOUNT = `ΔΕΗ A.E.
 dei.gr
-Αριθμός παροχής 9 99000935-03 2
+Αριθμός παροχής 9 99935585-03 2
 Συνολικό ποσό πληρωμής *12.345,67€
 Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026
 Ημ/νία Έκδοσης 27/03/2026`;
 
 const DEH_BILL_TEXT_SPACED_AMOUNTS = `ΔΕΗ A.E.
 dei.gr
-Αριθμός παροχής 9 99000935-03 2
+Αριθμός παροχής 9 99935585-03 2
 Συνολικό ποσό πληρωμής * 186 , 21€
 ΕΞΟΦΛΗΣΗ ΕΩΣ 22/04/2026
 Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026
@@ -67,12 +67,12 @@ describe('DEH Bill Parser', () => {
     it('should parse billing ID correctly', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
       expect(result.success).toBe(true);
-      expect(result.bill?.billingId).toBe('9 99000935-03 2');
+      expect(result.bill?.billingId).toBe('9 99935585-03 2');
     });
 
     it('should normalize billing ID', () => {
       const result = parseDehBill(DEH_BILL_TEXT);
-      expect(result.bill?.billingIdNormalized).toBe('999000935032');
+      expect(result.bill?.billingIdNormalized).toBe('999935585032');
     });
 
     it('should extract total amount', () => {
@@ -89,7 +89,7 @@ describe('DEH Bill Parser', () => {
     it('should handle abbreviated billing ID format (Αρ. παροχής:)', () => {
       const result = parseDehBill(DEH_BILL_TEXT_ABBREVIATED);
       expect(result.success).toBe(true);
-      expect(result.bill?.billingId).toBe('9 99000935-03 2');
+      expect(result.bill?.billingId).toBe('9 99935585-03 2');
     });
 
     it('should parse amounts >= 1000 with dot as thousands separator', () => {
@@ -149,7 +149,7 @@ describe('DEH Bill Parser', () => {
     it('O5: rejects an RF that fails the ISO-11649 mod-97 checksum', () => {
       const bad = DEH_BILL_TEXT.replace(
         'RF33999000000000000000001',
-        'RF36999000000000000959051' // last digit swapped → checksum fails
+        'RF33999000000000000000000' // last digit swapped → checksum fails
       );
       const result = parseDehBill(bad);
       expect(result.success).toBe(true);
@@ -183,7 +183,7 @@ describe('DEH Bill Parser', () => {
 
     it('should fail if no period found', () => {
       const text = `ΔΕΗ A.E.
-Αριθμός παροχής 9 99000935-03 2
+Αριθμός παροχής 9 99935585-03 2
 Συνολικό ποσό πληρωμής *186,21€`;
       const result = parseDehBill(text);
       expect(result.success).toBe(false);
@@ -192,7 +192,7 @@ describe('DEH Bill Parser', () => {
 
     it('should fail if no amount found', () => {
       const text = `ΔΕΗ A.E.
-Αριθμός παροχής 9 99000935-03 2
+Αριθμός παροχής 9 99935585-03 2
 Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026`;
       const result = parseDehBill(text);
       expect(result.success).toBe(false);
@@ -203,26 +203,26 @@ describe('DEH Bill Parser', () => {
       // OCR joins page lines with \n. The billing-ID value class must stop at
       // the line end — a following numeric line (a code, a meter reading) must
       // not be absorbed into the provision number. Before the [ \t] fix, the
-      // \s class crossed the newline and captured "9 99000935-03 2\n123 45678".
+      // \s class crossed the newline and captured "9 99935585-03 2\n123 45678".
       const text = `ΔΕΗ A.E.
-Αριθμός παροχής 9 99000935-03 2
+Αριθμός παροχής 9 99935585-03 2
 123 45678
 Συνολικό ποσό πληρωμής *186,21€
 Περίοδος Κατανάλωσης 25/02/2026 - 23/03/2026`;
       const result = parseDehBill(text);
       expect(result.success).toBe(true);
-      expect(result.bill.billingId).toBe('9 99000935-03 2');
-      expect(result.bill.billingIdNormalized).toBe('999000935032');
+      expect(result.bill.billingId).toBe('9 99935585-03 2');
+      expect(result.bill.billingIdNormalized).toBe('999935585032');
     });
   });
 
   describe('normalizeBillingId', () => {
     it('should strip spaces', () => {
-      expect(normalizeBillingId('9 99000935-03 2')).toBe('999000935032');
+      expect(normalizeBillingId('9 99935585-03 2')).toBe('999935585032');
     });
 
     it('should strip dashes', () => {
-      expect(normalizeBillingId('9-990-009-35')).toBe('999000935');
+      expect(normalizeBillingId('9-999-355-85')).toBe('999935585');
     });
 
     it('should strip dots', () => {
@@ -230,12 +230,12 @@ describe('DEH Bill Parser', () => {
     });
 
     it('should handle already normalized IDs', () => {
-      expect(normalizeBillingId('99900093503')).toBe('99900093503');
+      expect(normalizeBillingId('99993558503')).toBe('99993558503');
     });
 
     it('should match normalized stored vs parsed IDs', () => {
-      const stored = normalizeBillingId('9 99000935-03');
-      const parsed = normalizeBillingId('9 99000935-03 2');
+      const stored = normalizeBillingId('9 99935585-03');
+      const parsed = normalizeBillingId('9 99935585-03 2');
       // Stored may be a prefix of parsed (check digit variation)
       expect(parsed.startsWith(stored)).toBe(true);
     });

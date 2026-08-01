@@ -176,7 +176,7 @@ than to the resident owner(s). J11 does that routing. This job is void.
 ### TIER 2 gate
 - Step-7 adversarial refutation on the money computation (J11-J14) comes back clean.
 - Every J1x acceptance test shown (jest numbers + PDF read + each UI screenshot).
-- Full api jest green; deploy; browser-verify on the real ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 building.
+- Full api jest green; deploy; browser-verify on the real ΟΔΟΣ ΕΨΙΛΟΝ 28 building.
 
 ---
 

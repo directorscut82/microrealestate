@@ -73,7 +73,7 @@ describe('inferPropertyType', () => {
 
   describe('name-based fallback when category + floor null', () => {
     it('name contains Ypogeio -> storage', () => {
-      expect(inferPropertyType({ category: null, floor: null, name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο' })).toBe('storage');
+      expect(inferPropertyType({ category: null, floor: null, name: 'ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο' })).toBe('storage');
     });
     it('name contains Apothiki -> storage', () => {
       expect(inferPropertyType({ category: null, floor: null, name: 'Αποθήκη Β1' })).toBe('storage');

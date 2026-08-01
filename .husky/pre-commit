@@ -1,1 +1,10 @@
+# This repository is PUBLIC. Scan STAGED content for real personal data before
+# anything can be committed — a failed lint is recoverable, a published tax ID
+# is not. Runs first because it is the cheaper failure.
+#
+# Bypass knowingly: PII_SCAN_SKIP=1 git commit …
+if [ -z "$PII_SCAN_SKIP" ]; then
+  node scripts/scan-pii.mjs || exit 1
+fi
+
 yarn lint

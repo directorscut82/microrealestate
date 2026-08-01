@@ -94,7 +94,7 @@ const mkUnit = (propertyId, extra = {}) => ({
 
 describe('computeOwnerEksodaByMonth (live owner-borne eksoda)', () => {
   it('vacant FIXED expense (amount 0, cost in customAllocations) → owner owes €40+€10 from its startTerm onward', async () => {
-    // Mirrors ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28: fixed expense €40 on p1 + €10 on p2, both
+    // Mirrors ΟΔΟΣ ΕΨΙΛΟΝ 28: fixed expense €40 on p1 + €10 on p2, both
     // vacant, chargeOwnerWhenVacant ON, starts June 2026.
     const building = {
       _id: 'b_agan',

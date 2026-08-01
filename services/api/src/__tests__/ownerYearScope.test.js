@@ -49,7 +49,7 @@ function building() {
         _id: 'u1',
         propertyId: 'p1',
         isManaged: true,
-        owners: [{ name: 'ΛΑΜΔΑ', taxId: '021301485', percentage: 100 }]
+        owners: [{ name: 'ΛΑΜΔΑ', taxId: '999000006', percentage: 100 }]
       }
     ],
     expenses: [

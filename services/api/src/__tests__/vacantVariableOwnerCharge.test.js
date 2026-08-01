@@ -75,7 +75,7 @@ function makeBuilding() {
   const expenseId = 'exp-reuma';
   return {
     _id: 'b1',
-    name: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28',
+    name: 'ΟΔΟΣ ΕΨΙΛΟΝ 28',
     toObject() {
       return JSON.parse(JSON.stringify(this));
     },
@@ -97,7 +97,7 @@ function makeBuilding() {
         propertyId: 'p1',
         name: 'Υπόγειο',
         occupancyType: 'vacant',
-        owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }],
+        owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }],
         monthlyCharges: [
           { term: TERM, expenseId, amount: 4.86, inputAmount: 53.44 }
         ]
@@ -106,7 +106,7 @@ function makeBuilding() {
         propertyId: 'p2',
         name: 'Όροφος 2',
         occupancyType: 'vacant',
-        owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '148152811', percentage: 100 }],
+        owners: [{ name: 'ΔΟΚΙΜΗ ΒΗΤΑ', taxId: '999000031', percentage: 100 }],
         monthlyCharges: [
           { term: TERM, expenseId, amount: 4.86, inputAmount: 53.44 }
         ]
@@ -146,7 +146,7 @@ describe('vacant VARIABLE-expense owner charge materialisation (Step-7 fix)', ()
     await _recomputeVacantOwnerCharges(b, 'realm1', TERM);
     // record a payment on the first vacant row
     const row = b.ownerMonthlyExpenses.find((e) => e.source === 'vacant');
-    row.payments = [{ date: '2026-06-20', amount: 4.86, type: 'cash', ownerKey: 'ΔΟΚΙΜΗ ΒΗΤΑ|148152811' }];
+    row.payments = [{ date: '2026-06-20', amount: 4.86, type: 'cash', ownerKey: 'ΔΟΚΙΜΗ ΒΗΤΑ|999000031' }];
     // re-run the recompute (strip + re-derive) — the καταβολή must carry.
     await _recomputeVacantOwnerCharges(b, 'realm1', TERM);
     const after = b.ownerMonthlyExpenses.filter(

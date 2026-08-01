@@ -46,7 +46,7 @@ beforeAll(async () => {
     _id: '6a4551f5efd7970071c44002',
     name: 'Κτίριο',
     realmId: 'r1',
-    address: { street1: 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28' },
+    address: { street1: 'ΟΔΟΣ ΕΨΙΛΟΝ 28' },
     units: [
       {
         _id: '6a4551f5efd7970071c44003',

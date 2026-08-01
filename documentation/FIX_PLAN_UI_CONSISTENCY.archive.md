@@ -63,12 +63,12 @@ Every panel that shows building charges renders them in a different format. The 
 - Line 3: `Επισκευή (Repair: ασανσερτ)  10,00 €` — English "Repair:" mixed in, NO formula
 
 ΙΔΙΟΚΤΗΤΕΣ section:
-- `Ιδιοκτήτες· Ιδιοκτήτης: ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ  50,00 €`
-- Sub-line: `Επισκευή (ασανσερτ) (μερίδιο ιδιοκτήτη) (ΔΟΚΙΜΗ ΛΑΜΔΑ 50% = 25,00 €, ΕΠΙΤΡΟΠΟ...  50,00 €`
+- `Ιδιοκτήτες· Ιδιοκτήτης: ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ  50,00 €`
+- Sub-line: `Επισκευή (ασανσερτ) (μερίδιο ιδιοκτήτη) (ΔΟΚΙΜΗ ΔΕΛΤΑ 50% = 25,00 €, ΕΠΙΤΡΟΠΟ...  50,00 €`
 
 ### Owner detail page — Χρεώσεις section
 
-- `06/2026 · ΟΔΟΣ ΗΤΑ 24 · Επισκευή (ασανσερτ) (ΔΟΚΙΜΗ ΛΑΜΔΑ 50% = 25,00 €, ΔΟΚΙΜΗ ΚΑΠΠΑ 50% = 25,00 €)  25,00 €  Οφειλές 25,00 €`
+- `06/2026 · ΟΔΟΣ ΗΤΑ 24 · Επισκευή (ασανσερτ) (ΔΟΚΙΜΗ ΔΕΛΤΑ 50% = 25,00 €, ΔΟΚΙΜΗ ΚΑΠΠΑ 50% = 25,00 €)  25,00 €  Οφειλές 25,00 €`
 - Same line repeated 3x with different amounts (25€, 5€, 5€) — one per unit distribution
 
 ### Dashboard tooltip
@@ -82,7 +82,7 @@ Every panel that shows building charges renders them in a different format. The 
 3. **English mixed with Greek** — "Repair:" in Greek UI
 4. **Internal names shown** — "(τεστε2)" is a test name, "(d6aa8660a511)" is an ObjectId
 5. **(κενή μονάδα) / (μερίδιο ιδιοκτήτη)** — labels that add clutter
-6. **Co-owner split repeated on every line** — "(ΔΟΚΙΜΗ ΛΑΜΔΑ 50% = 25€, ΔΟΚΙΜΗ ΚΑΠΠΑ 50% = 25€)" on each of 3 lines
+6. **Co-owner split repeated on every line** — "(ΔΟΚΙΜΗ ΔΕΛΤΑ 50% = 25€, ΔΟΚΙΜΗ ΚΑΠΠΑ 50% = 25€)" on each of 3 lines
 
 ## Proposed fix — consistent format on all panels
 
@@ -99,7 +99,7 @@ Every line: **expense name (label) + (calculation basis) + amount**. Basis alway
 
 ΙΔΙΟΚΤΗΤΕΣ — group header:
 ```
-ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ                               50,00 €
+ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ                               50,00 €
   Επισκευή (ασανσέρ) (ΛΑΜΔΑ 50% = 25€, ΚΑΠΠΑ 50% = 25€)       50,00 €
 ```
 
@@ -419,7 +419,7 @@ Pattern: Name (label) (calculation basis appropriate to allocation method) amoun
 
 Case 1: Multiple owners, repair split 50% tenant / 50% owner, total cost 100€, single month:
 ```
-ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                              70,00 €
+ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                              70,00 €
   Επισκευή (ασανσέρ) (100 € × 50% μερίδιο ιδιοκτητών = 50.00 €)          50,00 €
   Επισκευή (ασανσέρ) (100 € × 50% ÷ 5 μονάδες, Όροφος 4 = 10.00 €) *    10,00 €
   Επισκευή (ασανσέρ) (100 € × 50% ÷ 5 μονάδες, Ισόγειο = 10.00 €) *     10,00 €
@@ -429,7 +429,7 @@ Case 1: Multiple owners, repair split 50% tenant / 50% owner, total cost 100€,
 
 Case 1b: Same repair but spread over 3 months (completionDate set), viewing ONE month:
 ```
-ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                                   23,33 €
+ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                                   23,33 €
   Επισκευή (ασανσέρ) (100 € ÷ 3 μήνες × 50% μερίδιο ιδιοκτητών = 16.67 €)     16,67 €
   Επισκευή (ασανσέρ) (100 € ÷ 3 μήνες × 50% ÷ 5 μονάδες, Όροφος 4 = 3.33 €) * 3,33 €
   Επισκευή (ασανσέρ) (100 € ÷ 3 μήνες × 50% ÷ 5 μονάδες, Ισόγειο = 3.33 €) *  3,33 €
@@ -448,7 +448,7 @@ Case 2: Single owner (ΒΗΤΑ 50%), one expense (Νερό), equal allocation:
 Single month:
 ```
 ΙΔΙΟΚΤΗΤΕΣ
-ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                              50,00 €
+ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                              50,00 €
   Επισκευή (ασανσέρ) (100 € × 50% μερίδιο ιδιοκτητών = 50.00 €)          50,00 €
 
 ⚠ Αχρέωτα (κενές μονάδες)                                                 20,15 €
@@ -462,7 +462,7 @@ Single month:
 Spread over 3 months, viewing ONE month:
 ```
 ΙΔΙΟΚΤΗΤΕΣ
-ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                                   16,67 €
+ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ (50%/50%)                                   16,67 €
   Επισκευή (ασανσέρ) (100 € ÷ 3 μήνες × 50% μερίδιο ιδιοκτητών = 16.67 €)     16,67 €
 
 ⚠ Αχρέωτα (κενές μονάδες)                                                       6,81 €
@@ -578,9 +578,9 @@ Issues:
 
 | # | What's on screen | Root cause (file:line) | Fix |
 |---|------------------|------------------------|-----|
-| OD1 | Ακίνητα rows show only the **raw ATAK number** (`00112233465` …); the address column is blank for all 9 even though `ΟΔΟΣ ΗΤΑ 24` exists in Χρεώσεις | `owners/[id].js:159-165` renders `prop.address.street1/city/zipCode` else `prop.propertyName`. The deployed NAS revision predates the worktree `ownermanager.ts` which now populates `address`/`propertyName` (`ownermanager.ts:682-683`, the local edit). So the JSX is correct; the **deployed server isn't sending `address`** yet. | Deploy the worktree `ownermanager.ts` change (the `Property.findOne` populate at ~`ownermanager.ts:649-690`). No frontend change needed. This is FIX_PLAN item 7.1, **already coded locally, not yet deployed.** |
+| OD1 | Ακίνητα rows show only the **raw ATAK number** (`01234567890` …); the address column is blank for all 9 even though `ΟΔΟΣ ΗΤΑ 24` exists in Χρεώσεις | `owners/[id].js:159-165` renders `prop.address.street1/city/zipCode` else `prop.propertyName`. The deployed NAS revision predates the worktree `ownermanager.ts` which now populates `address`/`propertyName` (`ownermanager.ts:682-683`, the local edit). So the JSX is correct; the **deployed server isn't sending `address`** yet. | Deploy the worktree `ownermanager.ts` change (the `Property.findOne` populate at ~`ownermanager.ts:649-690`). No frontend change needed. This is FIX_PLAN item 7.1, **already coded locally, not yet deployed.** |
 | OD2 | Three Χρεώσεις rows are **visually identical** (`06/2026 · ΟΔΟΣ ΗΤΑ 24 · Επισκευή (ασανσερτ) …`); only the amounts (25 / 5 / 5) differ. Landlord can't tell which unit each is. | `owners/[id].js:191-193` renders `term · buildingName · ownerChargeLabel(t, c)` with NO per-unit discriminator. `ownerChargeLabel` (`lineLabels.js:85-97`) returns only type-label + description. | Add a per-unit suffix to each charge row (e.g. `— ολόκληρο κτίριο` / `— <όροφος/μονάδα>`). Needs the server to send a unit/scope label on the charge object (the building-wide `source:'repair'` row vs the per-`propertyId` `source:'repair-vacant'` rows). FIX_PLAN item 9.1. |
-| OD3 | Co-owner split `(ΔΟΚΙΜΗ ΛΑΜΔΑ 50% = X, ΔΟΚΙΜΗ ΚΑΠΠΑ 50% = X)` repeated on **all three** rows of the same repair, on the owner's OWN page | `owners/[id].js:194-209` renders the `c.coOwners` split inline per charge row | Show the co-owner split ONCE at a group header (per month+building group), not per line. FIX_PLAN item 9.2. Gated by the open question below (should it show at all on his own page?). |
+| OD3 | Co-owner split `(ΔΟΚΙΜΗ ΔΕΛΤΑ 50% = X, ΔΟΚΙΜΗ ΚΑΠΠΑ 50% = X)` repeated on **all three** rows of the same repair, on the owner's OWN page | `owners/[id].js:194-209` renders the `c.coOwners` split inline per charge row | Show the co-owner split ONCE at a group header (per month+building group), not per line. FIX_PLAN item 9.2. Gated by the open question below (should it show at all on his own page?). |
 | OD4 | Top tile pair renders as malformed `−/ 35,00 €` (a `—` glued to ` / ` with no left value) | `owners/[id].js:112-118`: `<NumberFormat value={paid} />` with `paid=0` → `NumberFormat.js:53-58` returns `'—'` (no `showZero`), then literal `' / '`, then total | Pass `showZero` to the paid `<NumberFormat>` at `:113` so it renders `0,00 € / 35,00 €`. One-prop change. (`NumberFormat` already supports `showZero` — `NumberFormat.js:23`.) |
 
 ### Retracted (first-pass screenshot misreads — do NOT action)
@@ -590,7 +590,7 @@ Issues:
 
 ### Net: only OD4 is a pure frontend one-liner. OD1 is already-coded-locally-pending-deploy. OD2/OD3 need a server-side per-unit/scope label on the owner charge object (touches `ownermanager.ts` charge serialization → reclassify to TIER-MONEY if it changes how charges are grouped/summed).
 
-## Τιμολόγια → Εκκαθαριστικά ιδιοκτητών tab (`OwnerStatements.js`) — findings from screenshots `2026-06-20 20.40.xx` (owner tab) compared with the tenant tab (DOKIMASTI E2ETEST) + `TenantSettlements.js`
+## Τιμολόγια → Εκκαθαριστικά ιδιοκτητών tab (`OwnerStatements.js`) — findings from screenshots `2026-06-20 20.40.xx` (owner tab) compared with the tenant tab (DOKIMASTI DELTA) + `TenantSettlements.js`
 
 > Tier: presentation, BUT the root fix is in `ownermanager.ts` settlement serialization → treat with TIER-MONEY caution
 > (the totals must still reconcile; do not change how money is computed, only what the monthly grid is built from).
@@ -603,7 +603,7 @@ Issues:
 
 Card header (`TenantSettlements.js:204-211`): title `Καταβολές` (Payments) on the left, **CSV icon button on the right** (`:207-209`). Per-tenant block header (`:218-235`): name + **`Απόδειξη` receipt button** on one line, then a **second line with the lease date range** `beginDate - endDate` (`:232-235`). Then the 6-col month grid:
 - **Left** `col-span-1` (`:140-142`): month name.
-- **Middle** `col-span-3` (`:143-178`): the MONEY — each καταβολή renders date (`:164`) + payment type Μεταφορά/Μετρητά (`:171`) + amount (`:173`). Multi-payment months wrap (DOKIMASTI E2ETEST May = 6 payments).
+- **Middle** `col-span-3` (`:143-178`): the MONEY — each καταβολή renders date (`:164`) + payment type Μεταφορά/Μετρητά (`:171`) + amount (`:173`). Multi-payment months wrap (DOKIMASTI DELTA May = 6 payments).
 - **Right** `col-span-2` (`:179-190`): payment NOTES only — `Note`/`Discount`/`Extra charge` text (`:128-137`). Empty when no notes (as in the tenant screenshot).
 
 ### Confirmed defects in the owner tab (ordered: most visually obvious first)
@@ -707,7 +707,7 @@ paid carried for live lines, D2 3-state weight/color on the amount.
 │ Πληρωμένα                          [exΧ] €    │
 │ Οφειλές                            [exΥ] €    │
 │ ───────────────────────────────────────────  │
-│ ΔΟΚΙΜΗ ΛΑΜΔΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ            │
+│ ΔΟΚΙΜΗ ΔΕΛΤΑ, ΔΟΚΙΜΗ ΚΑΠΠΑ            │
 │   Επισκευή (ασανσερτ)            [50,00] €    │  fully paid → blue
 │   Επισκευή (ασανσερτ) — ΚΕΝΟ     [10,00] €    │  partial → bold (NOT "κενή" — ΚΕΝΟ)
 │   Κοιν. Νερό (‹name›)            ‹x› €        │  unpaid → plain
@@ -732,9 +732,10 @@ paid carried for live lines, D2 3-state weight/color on the amount.
 > verification killed 16 (intentional/not-a-bug — listed at the bottom so they are NOT re-investigated), 5 survived.
 > Beyond those micro-defects, the screen's INFORMATION ARCHITECTURE is the real problem (mixed time-bases,
 > 4× duplication, asymmetry, missing info). User reviewed two HTML mockup iterations and approved v2.
-> **Reference mockup (the agreed target): `documentation/mockups/building-overview-redesign.html`** — open it; it
-> renders the redesign with the REAL values from the screenshot (the one figure not on the screenshot — rent
-> collected YTD — is a marked placeholder, never invented).
+> **Reference mockup (the agreed target): `building-overview-redesign.html`, local-only — NOT in this repo.**
+> It renders the redesign with the REAL values from the screenshot, which is exactly why it is gitignored: this
+> repo is public and those figures are a landlord's actual money. The build spec below is the tracked
+> substitute — it carries the full layout order without the data.
 > Tier: UI for B-series; E1 + A2 touch money the card already computes (no recompute change) → verify the
 > surfaced euros reconcile. All anchors read 2026-06-20.
 
@@ -780,7 +781,7 @@ paid carried for live lines, D2 3-state weight/color on the amount.
 
 ### BUILD SPEC — when implementation starts, the new Επισκόπηση form MUST match the reference mockup
 
-**The reference mockup `documentation/mockups/building-overview-redesign.html` is the authoritative target render.** Build the form to match it, in this order top-to-bottom:
+**The reference mockup `building-overview-redesign.html` (local-only, gitignored — it holds real figures) was the authoritative target render; this ordered list is its tracked equivalent.** Build the form to match it, in this order top-to-bottom:
 1. **Ετήσια προβολή 2026 card** — Έσοδα shown as TWO component lines (Ενοίκια ×12 + Δαπάνες επί ενοικίου ×12) and their **Σύνολο εσόδων** (E1: `monthlyEsoda` must add each rented unit's δαπάνες-επί-ενοικίου, not rent alone); then `− Έξοδα ιδιοκτήτη`; then **Καθαρό = Σύνολο εσόδων − έξοδα ιδιοκτήτη** (A5). Below it, **Ανάλυση εξόδων κτιρίου** with the two plural-noun groups (ΕΝΟΙΚΙΑΣΤΕΣ 4-cell A6 / ΙΔΙΟΚΤΗΤΕΣ 1-cell) + the note (no "Μόνο τα έξοδα…" sentence — removed per user).
 2. **Φέτος μέχρι σήμερα — 2026** — tenant rent bar (A2, needs server YTD-collected) + owner-expenses bar.
 3. **Επισκευές** (A3, moved up) — one repair, 2 lines, dual badges (A7), split label (B4).

@@ -82,14 +82,14 @@
    {
     "severity": "P1",
     "category": "cramping",
-    "what": "The ΧΡΕΩΣΕΙΣ breakdown is a wall of ~13 near-identical rows, every one reading 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος N (or Υπόγειο) · Ενοικιαστής: ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ' with a second tiny grey sub-line 'Κοινόχρηστο Ρεύμα (Ρεύμα) ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ × ...' and amounts that are almost all 4,86 €. The same tenant name is repeated on all 13 lines and the same expense name on every sub-line. This is the monotonous identical-stack anti-pattern the DESIGN doc warns against, and it reads as machine-generated noise rather than a ledger a person would lay out.",
+    "what": "The ΧΡΕΩΣΕΙΣ breakdown is a wall of ~13 near-identical rows, every one reading 'ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος N (or Υπόγειο) · Ενοικιαστής: ΔΟΚΙΜΗ ΒΗΤΑ' with a second tiny grey sub-line 'Κοινόχρηστο Ρεύμα (Ρεύμα) ΔΟΚΙΜΗ ΒΗΤΑ × ...' and amounts that are almost all 4,86 €. The same tenant name is repeated on all 13 lines and the same expense name on every sub-line. This is the monotonous identical-stack anti-pattern the DESIGN doc warns against, and it reads as machine-generated noise rather than a ledger a person would lay out.",
     "where": "Right column ChargeBreakdown — byProperty renter rows (BuildingExpensePanel.js line 815-853)",
-    "fix": "Since one tenant (ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ) is charged across many units for the same expense, collapse repeated identical rows: group by recipient first (tenant name once as a section header) then list the units beneath, or show 'ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ — 13 units, Κοινόχρηστο Ρεύμα, σύνολο 63,18 €' with an expand affordance. Don't render 13 visually-identical lines."
+    "fix": "Since one tenant (ΔΟΚΙΜΗ ΒΗΤΑ) is charged across many units for the same expense, collapse repeated identical rows: group by recipient first (tenant name once as a section header) then list the units beneath, or show 'ΔΟΚΙΜΗ ΒΗΤΑ — 13 units, Κοινόχρηστο Ρεύμα, σύνολο 63,18 €' with an expand affordance. Don't render 13 visually-identical lines."
    },
    {
     "severity": "P1",
     "category": "truncation",
-    "what": "The calc-basis grey sub-line in the ΧΡΕΩΣΕΙΣ rows is clipped/running into the amount column. Lines like 'Κοινόχρηστο Ρεύμα (Ρεύμα) ΔΟΚΙΜΕΖΟΥ ΒΗΤΑ × 2,45 ...' are cut off mid-formula — the user cannot read the full 'X € ÷ N μονάδες = share €' explanation that formatBasis() is supposed to provide. The panel is too narrow for the content it carries (formatBasis output + expense label + co-owner split all on one truncated line).",
+    "what": "The calc-basis grey sub-line in the ΧΡΕΩΣΕΙΣ rows is clipped/running into the amount column. Lines like 'Κοινόχρηστο Ρεύμα (Ρεύμα) ΔΟΚΙΜΗ ΒΗΤΑ × 2,45 ...' are cut off mid-formula — the user cannot read the full 'X € ÷ N μονάδες = share €' explanation that formatBasis() is supposed to provide. The panel is too narrow for the content it carries (formatBasis output + expense label + co-owner split all on one truncated line).",
     "where": "Right column ChargeBreakdown item rows, formatBasis span (BuildingExpensePanel.js line 834-851), panel constrained to lg:grid-cols-2 half width",
     "fix": "Either give the breakdown its own full-width row below the calendar instead of cramming it into the right half of a 2-col grid, or move the calc-basis to a second line that wraps instead of truncating, or expose it on hover/tooltip. The amount must not collide with the label."
    },
@@ -186,8 +186,8 @@
    {
     "severity": "P2",
     "category": "greek-wording",
-    "what": "Grammatical mismatch on singular counts. The Odos Zita card reads '1 διαχειριζόμενα από 1 μονάδα' — 'διαχειριζόμενα' is plural but the count is 1, so it should agree as singular ('1 διαχειριζόμενη μονάδα'). The i18n key '{{count}} managed of {{total}} units' has no Greek plural form for the participle.",
-    "where": "BuildingListItem.js lines 117-120; Odos Zita card (1 unit) footer",
+    "what": "Grammatical mismatch on singular counts. The Δοκιμή card reads '1 διαχειριζόμενα από 1 μονάδα' — 'διαχειριζόμενα' is plural but the count is 1, so it should agree as singular ('1 διαχειριζόμενη μονάδα'). The i18n key '{{count}} managed of {{total}} units' has no Greek plural form for the participle.",
+    "where": "BuildingListItem.js lines 117-120; Δοκιμή card (1 unit) footer",
     "fix": "Add proper Greek plural/singular handling for the 'managed' participle, or rephrase to a count-agnostic form like 'Διαχειριζόμενες μονάδες: 1 / 1'."
    },
    {
@@ -262,7 +262,7 @@
    {
     "severity": "P2",
     "category": "typography",
-    "what": "Card title names ('3ed3ed', 'DashTest2-178093431761...', 'DOKIMASTI E2ETEST', 'ΜΙΣΘΩΤΗΣ ΕΜΜΑΝΟΥΗΛ') are rendered as link-styled Inter text, while monetary/identifier-like strings such as the long tax-id tail 'DashTest2-178093431761…' run as proportional sans and clip at the card edge. There is no mono treatment for the ΑΦΜ/identifier and the long token truncates against the avatar column.",
+    "what": "Card title names ('3ed3ed', 'DashTest2-178093431761...', 'DOKIMASTI DELTA', 'ΜΙΣΘΩΤΗΣ ΑΛΦΑ') are rendered as link-styled Inter text, while monetary/identifier-like strings such as the long tax-id tail 'DashTest2-178093431761…' run as proportional sans and clip at the card edge. There is no mono treatment for the ΑΦΜ/identifier and the long token truncates against the avatar column.",
     "where": "TenantListItem.js CardTitle Button (lines 145-151) renders tenant.name; long company/ref strings overflow in the lg:grid-cols-3 narrow column",
     "fix": "Truncate long names with ellipsis inside the title (truncate/min-w-0) so they never run to the card edge, and render any embedded ΑΦΜ/identifier in JetBrains Mono per the numeric/identifier rule rather than mixing it into the proportional title."
    },
@@ -303,9 +303,9 @@
    {
     "severity": "P1",
     "category": "typography",
-    "what": "Two display-serif headlines appear in the same content column ('Πληροφορίες ενοικιαστή' and 'Στοιχεία επικοινωνίας'), and neither is the page title. The single biggest serif on the page is a section header, so there is no 'where am I?' anchor naming the tenant (ΕΜΜΑΝΟΥΗΛ ΜΙΣΘΩΤΗΣ). Violates the Single-Display-Per-Page rule and leaves the page without a title.",
+    "what": "Two display-serif headlines appear in the same content column ('Πληροφορίες ενοικιαστή' and 'Στοιχεία επικοινωνίας'), and neither is the page title. The single biggest serif on the page is a section header, so there is no 'where am I?' anchor naming the tenant (ΑΛΦΑ ΜΙΣΘΩΤΗΣ). Violates the Single-Display-Per-Page rule and leaves the page without a title.",
     "where": "Center column section headers; absent page title.",
-    "fix": "Add one display-serif page title with the tenant's name ('ΕΜΜΑΝΟΥΗΛ ΜΙΣΘΩΤΗΣ') at the top. Downgrade both section headers ('Πληροφορίες ενοικιαστή', 'Στοιχεία επικοινωνίας') to Headline (serif 500, 1.375rem) or Title (Inter 600) so the display serif appears exactly once."
+    "fix": "Add one display-serif page title with the tenant's name ('ΑΛΦΑ ΜΙΣΘΩΤΗΣ') at the top. Downgrade both section headers ('Πληροφορίες ενοικιαστή', 'Στοιχεία επικοινωνίας') to Headline (serif 500, 1.375rem) or Title (Inter 600) so the display serif appears exactly once."
    },
    {
     "severity": "P2",
@@ -413,15 +413,15 @@
    {
     "severity": "P1",
     "category": "other",
-    "what": "The 'Ακίνητο' overview card shows the property name 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος 1' with a bare '—' in the price slot on the right. NumberFormat renders '—' when property.price is undefined/null/0 (NumberFormat.js line 45/53). So the single most important figure on a property card — its rent/price — is blank, and the placeholder reads as a stray dash floating next to the title. The card looks broken/empty.",
+    "what": "The 'Ακίνητο' overview card shows the property name 'ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος 1' with a bare '—' in the price slot on the right. NumberFormat renders '—' when property.price is undefined/null/0 (NumberFormat.js line 45/53). So the single most important figure on a property card — its rent/price — is blank, and the placeholder reads as a stray dash floating next to the title. The card looks broken/empty.",
     "where": "Right sidebar, top 'Ακίνητο' card, right of the property name row",
     "fix": "If price is genuinely zero/unset, render '0,00 €' with showZero (so it reads as a real figure) or hide the price slot entirely and label it; do not leave a lone '—' beside the name. Confirm the property actually has a price flowing through (the form has rent 81,44-area data but the overview shows nothing)."
    },
    {
     "severity": "P1",
     "category": "typography",
-    "what": "Numeric form values render in proportional Inter sans, not the mandated tabular mono numeric role. PropertyForm.js uses plain <Input> for Surface (81,44), ATAK Number (00849565780) and the ΔΕΗ supply number. DESIGN.md's Tabular-Numeral / Numeric rule explicitly names 'every ATAK number' as mono. ATAK and supply codes are exactly the identifiers that must read straight in JetBrains Mono.",
-    "where": "Main form, 'Επιφάνεια' (81,44), 'Αριθμός ΑΤΑΚ' (00849565780), 'Αριθμός Παροχής ΔΕΗ' fields",
+    "what": "Numeric form values render in proportional Inter sans, not the mandated tabular mono numeric role. PropertyForm.js uses plain <Input> for Surface (81,44), ATAK Number (00998877780) and the ΔΕΗ supply number. DESIGN.md's Tabular-Numeral / Numeric rule explicitly names 'every ATAK number' as mono. ATAK and supply codes are exactly the identifiers that must read straight in JetBrains Mono.",
+    "where": "Main form, 'Επιφάνεια' (81,44), 'Αριθμός ΑΤΑΚ' (00998877780), 'Αριθμός Παροχής ΔΕΗ' fields",
     "fix": "Apply the input-numeric role (className 'font-mono tabular-nums') to the Surface, ATAK, plot-surface, and ΔΕΗ inputs so identifiers and measurements render in JetBrains Mono per the design system."
    },
    {
@@ -434,7 +434,7 @@
    {
     "severity": "P1",
     "category": "hierarchy",
-    "what": "There is no display-serif page title identifying the property. The page's only 'where am I?' marker is the single lifeless 'Ακίνητο' tab and a repeated 'Ακίνητο' card title in the sidebar. DESIGN.md requires the display serif once per page on the page-level title (e.g. the property name 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος 1'). The screen has no top-level identity, so it reads as a generic form, not 'this property'.",
+    "what": "There is no display-serif page title identifying the property. The page's only 'where am I?' marker is the single lifeless 'Ακίνητο' tab and a repeated 'Ακίνητο' card title in the sidebar. DESIGN.md requires the display serif once per page on the page-level title (e.g. the property name 'ΟΔΟΣ ΕΨΙΛΟΝ 28 - Όροφος 1'). The screen has no top-level identity, so it reads as a generic form, not 'this property'.",
     "where": "Top of the page, between the 'Πίσω' back button row and the form",
     "fix": "Add a Source Serif 4 display-scale page title showing the property name (with the building/floor) once at the top of the page. Demote or remove the duplicate 'Ακίνητο' labels so the property name is the single biggest type on the screen."
    },
@@ -449,7 +449,7 @@
     "severity": "P2",
     "category": "color",
     "what": "The card icons (LuKeyRound key, LuHistory clock, LuReceipt receipt, LuBuilding2) and the dotted-underline building link in the overview card are rendered in the sea-blue accent. With multiple blue glyphs plus the blue link and the building-name link all visible in the narrow right column at once, the earned-accent ≤5% rule is being stretched: a stranger can spot the accent in three-plus places simultaneously, and none of these icons carry semantic 'action/selection/pending' weight.",
-    "where": "Right sidebar card header icons (key, history, receipt) and the 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28' building link",
+    "where": "Right sidebar card header icons (key, history, receipt) and the 'ΟΔΟΣ ΕΨΙΛΟΝ 28' building link",
     "fix": "Render the decorative card-header icons in ink-muted, not sea-blue. Reserve sea-blue for the genuinely interactive building link (which legitimately earns it) and focus/selected states only."
    },
    {

@@ -114,8 +114,8 @@ const initValues = (tenant) => {
 //     If the user leaves all editable fields empty on save, _onSubmit drops
 //     the placeholder so blank rows don't pollute the database.
 // Wave-26: dedup co-tenants against (a) their own ΑΦΜ — most reliable —
-// and (b) a sorted-words name comparison so "ΔΟΚΙΜΑΚΗ ΜΑΡΙΑ" and
-// "ΜΑΡΙΑ ΔΟΚΙΜΑΚΗ" are treated as the same person regardless of how the
+// and (b) a sorted-words name comparison so "ΔΟΚΙΜΗ ΜΑΡΙΑ" and
+// "ΜΑΡΙΑ ΔΟΚΙΜΗ" are treated as the same person regardless of how the
 // PDF parser ordered them. Always skip the primary tenant himself
 // (he's typically present in coTenants[] from the import flow).
 function _normalizeName(name) {
@@ -210,7 +210,7 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
 
   // Auto-prefill contact #1 with the primary tenant's name as the user
   // types it. Only runs when contact[0].contact is currently empty so we
-  // never clobber a user edit (e.g. "Maria Dokimaki (mother)"). Skipped
+  // never clobber a user edit (e.g. "Maria Dokimi (mother)"). Skipped
   // for company accounts — businesses identify by `company` not first/last.
   const watchedFirstName = watch('firstName');
   const watchedLastName = watch('lastName');

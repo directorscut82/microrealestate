@@ -21,14 +21,14 @@ describe('isValidRF (ISO 11649)', () => {
     expect(isValidRF('RF33999000000000000000001')).toBe(true);
   });
   it('accepts with internal spaces (OCR groups digits)', () => {
-    expect(isValidRF('RF36 9990 0000 0000 0009 59050')).toBe(true);
+    expect(isValidRF('RF33 9990 0000 0000 0000 00001')).toBe(true);
   });
   it('rejects a one-digit-off RF (checksum fails)', () => {
-    expect(isValidRF('RF36999000000000000959051')).toBe(false);
+    expect(isValidRF('RF33999000000000000000000')).toBe(false);
   });
   it('rejects non-RF garbage', () => {
     expect(isValidRF('RF')).toBe(false);
-    expect(isValidRF('XY36999000000000000000001')).toBe(false);
+    expect(isValidRF('XY33999000000000000000001')).toBe(false);
     expect(isValidRF(12345)).toBe(false);
     expect(isValidRF(undefined)).toBe(false);
   });
@@ -38,7 +38,7 @@ describe('extractRFs / extractIBANs — span→validate, no greedy swallow', () 
   it('extracts a grouped IBAN without swallowing the next word', () => {
     // The bug: /(?:\s?[A-Z0-9]){11,30}/ ate " amount 7" → invalid. span→prefix fix:
     expect(
-      extractIBANs('to GR06 0109 9999 9000 0000 0000 125 amount 749,99')
+      extractIBANs('to GR33 0110 9999 9900 0000 0000 001 amount 749,99')
     ).toEqual(['GR3301109999990000000000001']);
   });
   it('extracts a compact IBAN mid-text', () => {
@@ -47,12 +47,12 @@ describe('extractRFs / extractIBANs — span→validate, no greedy swallow', () 
     ]);
   });
   it('extracts a grouped RF without swallowing following text', () => {
-    expect(extractRFs('Κωδ RF36 9990 0000 0000 0009 59050 ΠΛΗΡΩΜΗ')).toEqual([
+    expect(extractRFs('Κωδ RF33 9990 0000 0000 0000 00001 ΠΛΗΡΩΜΗ')).toEqual([
       'RF33999000000000000000001'
     ]);
   });
   it('returns [] when no checksum-valid key is present', () => {
-    expect(extractIBANs('GR060109999990000000000012 short')).toEqual([]);
+    expect(extractIBANs('GR330110999999000000000000 short')).toEqual([]);
     expect(extractRFs('RF99 0000 0000 nope')).toEqual([]);
   });
 });
@@ -62,20 +62,20 @@ describe('isValidIBAN (ISO 13616)', () => {
     expect(isValidIBAN('GR3301109999990000000000001')).toBe(true);
   });
   it('accepts with spaces', () => {
-    expect(isValidIBAN('GR06 0109 9999 9000 0000 0000 125')).toBe(true);
+    expect(isValidIBAN('GR33 0110 9999 9900 0000 0000 001')).toBe(true);
   });
   it('rejects a 26-digit GR IBAN (OCR dropped a digit — 27 needed)', () => {
-    expect(isValidIBAN('GR060109999990000000000012')).toBe(false);
+    expect(isValidIBAN('GR330110999999000000000000')).toBe(false);
   });
 });
 
 describe('extractElements', () => {
   const RECEIPT = `ΕΘΝΙΚΗ ΤΡΑΠΕΖΑ
-  Μεταφορά προς GR06 0109 9999 9000 0000 0000 125
+  Μεταφορά προς GR33 0110 9999 9900 0000 0000 001
   Ποσό 749,99 €
   Ημ/νία 15/04/2026
   Τιμ Πωλ 391
-  DOKIMASTIS KOSTAS MARIOS
+  DOKIMAMPOUS KOSTAS MARIOS
   Α.Φ.Μ. 123456789`;
 
   it('extracts a checksum-valid IBAN', () => {
@@ -96,7 +96,7 @@ describe('extractElements', () => {
     expect(el.afm).toContain('123456789');
   });
   it('does NOT surface a checksum-failed IBAN', () => {
-    const el = extractElements('to GR060109999990000000000012 amount 5,00');
+    const el = extractElements('to GR330110999999000000000000 amount 5,00');
     expect(el.ibans).toHaveLength(0);
   });
   it('folds hint fields (amount/dates/name) into the bag', () => {
@@ -129,8 +129,8 @@ describe('nameTokens', () => {
 describe('scoreTokens — soft-TF-IDF, no hard categories', () => {
   // A small realm corpus of candidate bills (as their extracted element bags).
   const water = extractElements(
-    'ΕΥΔΑΠ Νερό Αριθμός παροχής 999000935032 Ποσό 749,99 € 15/04/2026',
-    { amount: 749.99, billingIds: ['999000935032'] }
+    'ΕΥΔΑΠ Νερό Αριθμός παροχής 999935585032 Ποσό 749,99 € 15/04/2026',
+    { amount: 749.99, billingIds: ['999935585032'] }
   );
   const power = extractElements(
     'ΔΕΗ Ρεύμα RF33999000000000000000001 Ποσό 186,21 € 22/04/2026',
@@ -144,12 +144,12 @@ describe('scoreTokens — soft-TF-IDF, no hard categories', () => {
 
   it('STRONG billingId (αναγνωριστικό/παροχή) match → strong + top score', () => {
     // A receipt printing the same παροχή number — no RF/IBAN needed.
-    const receipt = extractElements('ΕΞΟΦΛΗΣΗ παροχη 999000935032 ποσο 749,99');
+    const receipt = extractElements('ΕΞΟΦΛΗΣΗ παροχη 999935585032 ποσο 749,99');
     const rWater = scoreTokens(water, receipt, idf);
     const rPower = scoreTokens(power, receipt, idf);
     expect(rWater.strong).toBe(true);
     expect(rWater.score).toBeGreaterThan(rPower.score);
-    expect(rWater.matchedOn).toContain('999000935032');
+    expect(rWater.matchedOn).toContain('999935585032');
   });
 
   it('STRONG RF match → strong', () => {
@@ -171,10 +171,10 @@ describe('scoreTokens — soft-TF-IDF, no hard categories', () => {
   });
 
   it('billingId strong match is asymmetric (candidate παροχή digits in receipt)', () => {
-    // water stored billingId 999000935032 (→ pn: marker). A receipt merely
+    // water stored billingId 999935585032 (→ pn: marker). A receipt merely
     // containing that digit-run matches strong; a DIFFERENT candidate sharing
     // only an unrelated number does not.
-    const receipt = extractElements('πληρωμη 999000935032');
+    const receipt = extractElements('πληρωμη 999935585032');
     expect(scoreTokens(water, receipt, idf).strong).toBe(true);
     expect(scoreTokens(misc, receipt, idf).strong).toBe(false);
   });
@@ -183,7 +183,7 @@ describe('scoreTokens — soft-TF-IDF, no hard categories', () => {
     // The plan's worked example: invoice # 391 appears on both. It is not "an
     // RF" or "a name" — a bucketed scorer would ignore it. Soft-TF-IDF matches
     // it because it is a rare shared token.
-    const inv = extractElements('Τιμολόγιο 391 DOKIMASTIS 749,99 €', {
+    const inv = extractElements('Τιμολόγιο 391 DOKIMAMPOUS 749,99 €', {
       amount: 749.99
     });
     const idf2 = computeIdf([inv, misc, power]);
@@ -225,18 +225,18 @@ describe('transliterateGreek (letter-by-letter base)', () => {
 
 describe('nameSimilarity (fuzzy)', () => {
   it('matches Greek vs Latin spelling of the same firm', () => {
-    // "ΔΟΚΙΜΑΣΤΗΣ" (Greek) vs "DOKIMASTIS" (Latin receipt)
-    const a = nameTokens('ΔΟΚΙΜΑΣΤΗΣ ΚΩΝ/ΝΟΣ');
-    const b = nameTokens('DOKIMASTIS KOSTAS');
+    // "ΔΟΚΙΜΑΜΠΟΥΣ" (Greek) vs "DOKIMAMPOUS" (Latin receipt)
+    const a = nameTokens('ΔΟΚΙΜΑΜΠΟΥΣ ΚΩΝ/ΝΟΣ');
+    const b = nameTokens('DOKIMAMPOUS KOSTAS');
     expect(nameSimilarity(a, b)).toBeGreaterThanOrEqual(0.5);
   });
-  it('tolerates an OCR variant (dokimastis/dokimastis)', () => {
+  it('tolerates an OCR variant (dokimampous/dokimambous)', () => {
     expect(
-      nameSimilarity(nameTokens('DOKIMASTIS'), nameTokens('DOKIMASTIS'))
+      nameSimilarity(nameTokens('DOKIMAMBOUS'), nameTokens('DOKIMAMPOUS'))
     ).toBeGreaterThanOrEqual(0.8);
   });
   it('scores 0 for unrelated names', () => {
-    expect(nameSimilarity(nameTokens('ΔΟΚΙΜΗΣ'), nameTokens('ΕΥΔΑΠ'))).toBe(0);
+    expect(nameSimilarity(nameTokens('ΜΠΕΤΑ'), nameTokens('ΕΥΔΑΠ'))).toBe(0);
   });
 });
 
@@ -249,21 +249,21 @@ describe('scoreTokens — NAME carries a match with no RF/IBAN (επισκευέ
         completionDate: new Date(Date.UTC(2026, 3, 10))
       },
       {
-        name: 'ΔΟΚΙΜΗΣ ΤΕΧΝΙΚΗ',
-        company: 'ΔΟΚΙΜΗΣ ΤΕΧΝΙΚΗ ΕΠΕ',
+        name: 'ΜΠΕΤΑ ΤΕΧΝΙΚΗ',
+        company: 'ΜΠΕΤΑ ΤΕΧΝΙΚΗ ΕΠΕ',
         taxId: '999888777'
       }
     );
     const otherBill = extractElements('ΔΕΗ Ρεύμα 186,21 €', { amount: 186.21 });
     const idf = computeIdf([repairKeys, otherBill]);
     // receipt: a POS/handwritten slip — no RF, no IBAN, just the firm (in Latin)
-    const receipt = extractElements('DOKIMIS TEXNIKI ΠΛΗΡΩΜΗ 450,00 EUR');
+    const receipt = extractElements('BETA TEXNIKI ΠΛΗΡΩΜΗ 450,00 EUR');
     const rRepair = scoreTokens(repairKeys, receipt, idf);
     const rOther = scoreTokens(otherBill, receipt, idf);
     expect(rRepair.score).toBeGreaterThan(0);
     expect(rRepair.score).toBeGreaterThan(rOther.score); // name+amount beats nothing
-    // the contractor name token carried it (DOKIMIS canonical)
-    expect(rRepair.matchedOn.join(' ')).toMatch(/bab|texnik/i);
+    // the contractor name token carried it (BETA canonical)
+    expect(rRepair.matchedOn.join(' ')).toMatch(/bet|texnik/i);
   });
 
   it('name + amount together beat amount alone (ranking sanity)', () => {
@@ -294,11 +294,11 @@ describe('repairMatchKeys', () => {
         actualCost: 120.5,
         completionDate: new Date(Date.UTC(2026, 1, 3))
       },
-      { company: 'ΔΟΚΙΜΗΣ ΑΕ', taxId: '123456789' }
+      { company: 'ΜΠΕΤΑ ΑΕ', taxId: '123456789' }
     );
     expect(k.amounts).toContain(120.5);
     expect(k.afm).toContain('123456789');
-    expect(k.nameTokens).toContain('dokimis'); // ΔΟΚΙΜΗΣ → DOKIMIS
+    expect(k.nameTokens).toContain('beta'); // ΜΠΕΤΑ → BETA
     expect(k.dates.map((d) => d.toISOString())).toContain(
       '2026-02-03T00:00:00.000Z'
     );

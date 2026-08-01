@@ -652,7 +652,7 @@ const EXPENSE_TYPE_LABEL = {
 };
 
 // Strip the redundant building-name prefix from a unit's property name so the
-// breakdown doesn't repeat 'ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - ' on every one of 11 rows. The
+// breakdown doesn't repeat 'ΟΔΟΣ ΕΨΙΛΟΝ 28 - ' on every one of 11 rows. The
 // building name is already the page title, so each row only needs its unit
 // suffix ('Υπόγειο', '1ος όροφος'). Returns the original name when it isn't a
 // '<building> - <unit>' compound (so non-conforming names never get mangled).

@@ -385,7 +385,7 @@ describe('owner settlements grid reconciles with header (Step-7 batch1)', () => 
     // Her ledger total = €75, NOT €100.
     const building = {
       _id: 'b1',
-      name: 'AG ODOS EPSILON',
+      name: 'AG OdosEpsilon',
       units: [
         { propertyId: 'pA', atakNumber: 'AKA', floor: 0, owners: [beta(50)] },
         { propertyId: 'pB', atakNumber: 'AKB', floor: 1, owners: [beta(100)] }
@@ -423,7 +423,7 @@ describe('ΛΟΙΠΟΙ un-named co-owner remainder placeholder', () => {
   // owns 50% (co-owner absent), plus a fully-owned unit.
   const buildingPerUnit = () => ({
     _id: 'b1',
-    name: 'AG ODOS EPSILON',
+    name: 'AG OdosEpsilon',
     units: [
       { propertyId: 'pA', atakNumber: 'AKA', floor: 0, owners: [beta(50)] },
       { propertyId: 'pB', atakNumber: 'AKB', floor: 1, owners: [beta(100)] }
@@ -443,7 +443,7 @@ describe('ΛΟΙΠΟΙ un-named co-owner remainder placeholder', () => {
     // The per-unit ΛΟΙΠΟΙ placeholder name carries its building + floor context
     // so multiple un-named-remainder rows are DISTINGUISHABLE in the UI (user
     // report: 4 identical «Λοιποί ιδιοκτήτες» rows with no building/unit hint).
-    expect(loipoi.name).toBe('Λοιποί ιδιοκτήτες — AG ODOS EPSILON, Ισόγειο');
+    expect(loipoi.name).toBe('Λοιποί ιδιοκτήτες — AG OdosEpsilon, Ισόγειο');
     // Unit A's €50 split: Beta 50% = €25, remainder 50% = €25 → ΛΟΙΠΟΙ.
     expect(loipoi.totalAmount).toBeCloseTo(25, 2);
     expect(loipoi.totalOutstanding).toBeCloseTo(25, 2);

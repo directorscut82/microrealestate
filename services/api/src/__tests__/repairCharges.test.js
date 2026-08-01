@@ -468,7 +468,7 @@ describe('Repair Charge Distribution Logic', () => {
   // code read repair.tenantSharePercentage first, but RepairSchema defaults it
   // to 0 and the form only sends it for 'split' — so a 'tenants' repair persisted
   // tenantSharePercentage:0 and was billed 100% to the OWNER (inverse of intent).
-  // Found on live NAS via seeding (ΟΔΟΣ ΖΗΤΑ «κουζίνας» 130€ → owner). These call
+  // Found on live NAS via seeding (ΟΔΟΣ ΘΗΤΑ «κουζίνας» 130€ → owner). These call
   // the REAL repairTenantSharePercentage with the exact persisted shape (the old
   // arithmetic-literal tests above never did, which is why they missed the bug).
   describe('repairTenantSharePercentage — chargeableTo is source of truth (schema-default-0 regression)', () => {

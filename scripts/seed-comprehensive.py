@@ -1,20 +1,51 @@
 #!/usr/bin/env python3
 """
 Comprehensive test account seeder for MicroRealEstate.
-Account: seed@example.com / Redact3d!
 Realm: COMPREHENSIVE-TEST
 
 Creates: 30 buildings, ~100 apartments, ~40 tenants, expenses, repairs,
 payments across 3 years — exhausting all allocation/behaviour combinations.
+
+Credentials are read from .secrets/comprehensive-test-account (gitignored),
+which defines EMAIL / PASSWORD / REALM / REALM_ID. This repo is PUBLIC —
+never inline a credential here.
 """
 import json
+import os
 import random
+import sys
 import requests
 from datetime import datetime, timedelta
 
 NAS = "http://192.168.0.96:1350"
-EMAIL = "seed@example.com"
-PASSWORD = "Redact3d!"
+
+_ACCOUNT_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ".secrets", "comprehensive-test-account",
+)
+
+
+def _load_account(path):
+    """Parse a dotenv-style KEY=VALUE file. No dependency on python-dotenv."""
+    if not os.path.exists(path):
+        sys.exit("FATAL: %s not found. Create it with EMAIL/PASSWORD." % path)
+    out = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            out[k.strip()] = v.strip().strip("'\"")
+    for key in ("EMAIL", "PASSWORD"):
+        if not out.get(key):
+            sys.exit("FATAL: %s must define %s." % (path, key))
+    return out
+
+
+_ACCOUNT = _load_account(_ACCOUNT_FILE)
+EMAIL = _ACCOUNT["EMAIL"]
+PASSWORD = _ACCOUNT["PASSWORD"]
 
 # Sign in
 r = requests.post(f"{NAS}/api/v2/authenticator/landlord/signin",
@@ -61,7 +92,7 @@ print(f"  lease: {LEASE_ID}")
 # Phase 2: Buildings (30)
 # ═══════════════════════════════════════════════════════════════════════════
 print("\n=== Phase 2: Buildings ===")
-STREETS = ["Οδος ζητά", "Πατησίων", "Σταδίου", "Ερμού", "Κηφισίας",
+STREETS = ["Λιοσίων", "Πατησίων", "Σταδίου", "Ερμού", "Κηφισίας",
            "Βουλιαγμένης", "Λεωφ. Αλεξάνδρας", "Πανεπιστημίου",
            "Μεσογείων", "Ηλιουπόλεως"]
 CITIES = ["Αθήνα", "Μαρούσι", "Γλυφάδα", "Πειραιάς", "Χαλάνδρι"]

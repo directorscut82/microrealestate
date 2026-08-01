@@ -84,7 +84,35 @@ e2e-playwright/playwright-report/
 .scratch-adv-tests/
 
 # Ad-hoc probe/verification specs written during a session (see the
-# __tests__ patterns above for the jest equivalents).
+# __tests__ patterns above for the jest equivalents). These drive the LIVE
+# production realm and routinely quote real owner names, ΑΦΜ, ATAK numbers and
+# absolute paths to real AADE PDFs on the author's laptop — they are scratch,
+# never suite, and must not be published.
+# NOTE: the pattern is `_verify*`, not `_verify_*`. The underscore-suffixed
+# form did NOT match `_verifyT0_e9_dialog.spec.ts` / `_verifyT2_...`, which is
+# how two specs carrying real family names + tax ids stayed tracked on public
+# branches. Ignore the shape, not the names that already caused a problem.
 e2e-playwright/tests/_probe*.spec.ts
-e2e-playwright/tests/_verify_*.spec.ts
-e2e-playwright/_postdeploy/
+e2e-playwright/tests/_verify*.spec.ts
+
+# Every underscore-prefixed scratch directory under e2e-playwright/. These hold
+# session artifacts from driving the LIVE production realm: screenshots of real
+# tenants/owners, findings write-ups quoting real names and amounts, DOM dumps.
+# 18 such directories and 151 screenshots existed untracked-but-unignored, i.e.
+# one `git add -A` away from being published. Ignore the shape, not each name —
+# the previous per-directory rules only ever covered the ones that had already
+# caused a problem.
+e2e-playwright/_*/
+
+# Design mockups are hand-built from screenshots of the live realm and quote real
+# owner names, addresses and balances as sample data. Keep them local.
+documentation/mockups/
+
+# Python bytecode from the seed scripts. Machine-generated, and a .pyc embeds
+# string literals from its source — including anything read from .secrets/.
+__pycache__/
+*.pyc
+
+# Ad-hoc driver scripts at the e2e root (same rationale as tests/_*.spec.ts:
+# throwaway probes that hardcode realm data while debugging a live surface).
+e2e-playwright/_*.mjs

@@ -831,7 +831,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                       {unitsWithProperty.map((u) => {
                         const occ = occupantsByPropertyId[u.propertyId];
                         // The property name already encodes the floor
-                        // ("ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο" / "- Όροφος 1"), so
+                        // ("ΟΔΟΣ ΕΨΙΛΟΝ 28 - Υπόγειο" / "- Όροφος 1"), so
                         // appending t('Floor {{n}}') AND unitLabel repeated
                         // the floor up to 3× ("Υπόγειο — Όροφος -1 — Όροφος
                         // -1"). Only add a floor/unit suffix when the name

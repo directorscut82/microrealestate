@@ -40,8 +40,9 @@ const PROPOSED_TERM = 2026060100;
 // would normally derive July — the bug is when it derives June instead.
 const JULY_BILL = {
   rfCode: 'RF12345678901234567',
-  // Per-BILL discriminator (encodes the amount). Shape from the real ΔΕΗ
-  // samples: 000000265009 / 000000153007 / 000000120006.
+  // Per-BILL discriminator (encodes the amount): zero-padded cents + a check
+  // digit, so 186,21 € → 000000186212. Three bills for one provision therefore
+  // yield three DISTINCT codes, which is what makes it a usable identity key.
   paymentCode: '000000186212',
   billingId: '1 234567 89',
   periodStart: new Date('2026-06-09T00:00:00Z'),
@@ -108,10 +109,10 @@ describe('findDuplicateBillByIdentity — rfCode arm', () => {
   });
 
   // REGRESSION (2026-07 review): rfCode ALONE must never key this arm. The ΔΕΗ
-  // «Κωδικός ηλεκτρονικής πληρωμής» is per-ΠΑΡΟΧΗ, not per-bill — the repo's own
-  // OCR samples show three DISTINCT bills for provision 999000565-016 (€265,00 /
-  // €153,00 / €120,00) all printing RF10999000000000000648051. Keying on it
-  // alone flagged every routine next-month import as a duplicate.
+  // «Κωδικός ηλεκτρονικής πληρωμής» is per-ΠΑΡΟΧΗ, not per-bill — real bills for
+  // a single provision (three months, €265,00 / €153,00 / €120,00, three
+  // different Α/Α serials) ALL print the SAME RF code. Keying on it alone
+  // flagged every routine next-month import as a duplicate.
   it('requires paymentCode TOO — never queries rfCode on its own', async () => {
     state.responder = () => null;
     await call();

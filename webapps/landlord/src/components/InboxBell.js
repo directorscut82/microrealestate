@@ -26,8 +26,9 @@ import { termMonthYearAccusative } from '../utils/greekMonths';
 import useTranslation from 'next-translate/useTranslation';
 
 /*
- * InboxBell — U4/U5 (Slice 4, approved mock documentation/mockups/
- * inbox-bell-popover.html).
+ * InboxBell — U4/U5 (Slice 4). Built against an approved local mock
+ * (inbox-bell-popover.html), which is NOT in the repo: the mockups render real
+ * tenant/owner data and are gitignored. This comment is the surviving spec.
  *
  * Bell + count badge in the top bar; popover lists pending InboxItems (bills
  * that arrived at the Telegram bot, parsed server-side by

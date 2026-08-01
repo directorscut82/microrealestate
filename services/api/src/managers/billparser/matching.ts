@@ -233,7 +233,7 @@ export function transliterateGreek(input: string): string {
 /**
  * Phonetic canonical key — the fuzzy core for names. A Greek business name and
  * its Latin romanization on a receipt seldom match character-for-character
- * ("ΔΟΚΙΜΗΣ" vs "DOKIMIS", "ΔΟΚΙΜΑΣΤΗΣ" vs "DOKIMASTIS"). Collapsing the
+ * ("ΜΠΕΤΑ" vs "BETA", "ΔΟΚΙΜΑΜΠΟΥΣ" vs "DOKIMAMPOUS"). Collapsing the
  * common Greek↔Latin digraph/phoneme ambiguities makes BOTH sides converge on
  * one key, so a plain comparison (plus a little edit tolerance) matches them.
  * Applied to every name token on both the stored bill and the OCR'd receipt.
@@ -264,7 +264,7 @@ export function canonicalName(raw: string): string {
  * and a receipt's OCR'd name go through this, so Greek and Latin spellings land
  * in the same phonetic space. Stopwords (legal-form suffixes, articles)
  * removed. Filters on the pre-canonical romanized length so short canonical
- * forms (e.g. DOKIMIS) aren't dropped.
+ * forms (e.g. BETA) aren't dropped.
  */
 export function nameTokens(raw: string): string[] {
   if (!raw) return [];
@@ -303,7 +303,7 @@ function editSimilarity(a: string, b: string): number {
 }
 
 // Two tokens "match" if identical, one is a prefix of the other (≥4 chars — an
-// OCR often truncates), or edit-similarity ≥ 0.8 ("dokimastis"/"dokimastis").
+// OCR often truncates), or edit-similarity ≥ 0.8 ("dokimampous"/"dokimambous").
 function tokensMatch(a: string, b: string): number {
   if (a === b) return 1;
   if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) {

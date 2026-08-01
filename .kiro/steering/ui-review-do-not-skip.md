@@ -95,7 +95,7 @@ authenticates on load.
 
 ### Capture harness
 `e2e-playwright/tests/_local_capture_all.spec.ts` does exactly this against the
-real `landlord` realm + real Greek buildings (ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28 etc.). It:
+real `landlord` realm + real Greek buildings (ΟΔΟΣ ΕΨΙΛΟΝ 28 etc.). It:
 fresh-cookie per page, navigates, RETRIES if it lands on the error overlay, and
 tags any shot that's the overlay/signin `_BROKEN_` so a crashed capture can
 never be mistaken for a reviewed surface. Writes to `e2e-playwright/_ui/`.
@@ -164,7 +164,9 @@ prove nothing — use real data.
   spacing, inconsistent wording, wrong number/currency format (must be
   `1.234,56 €`), control misalignment.
 - **Pass 2 — DESIGN.md + mockup conformance.** Re-check against
-  `DESIGN.md` laws and any approved mockup in `documentation/mockups/`. The
+  `DESIGN.md` laws and any approved mockup in `documentation/mockups/` (that
+  directory is gitignored and local-only — the mockups render real tenant/owner
+  figures, and this repo is public; ask for the file if you don't have it). The
   banned patterns are not suggestions: no identical card grids, no nested cards,
   no side-stripe borders, no drop shadows on cards, no gradient text, no
   `#000`/`#fff`, sea-accent ≤5%, display serif once per page, tabular mono for

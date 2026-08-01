@@ -60,8 +60,8 @@ function parseGreekDate(raw: string): Date | null {
 
 export function parseDehBill(text: string): BillParseResult {
   // Extract billing ID - handle both full and abbreviated forms:
-  // "Αριθμός παροχής 9 99000935-03 2"
-  // "Αρ. παροχής: 9 99000935-03 2"
+  // "Αριθμός παροχής 9 99935585-03 2"
+  // "Αρ. παροχής: 9 99935585-03 2"
   // The value class is [\d \t-] (NOT \s): a DEH provision number is a single
   // line of digits/spaces/hyphens. Allowing \s let it cross a newline on the
   // OCR path (page text joined with \n), swallowing the next line's digits

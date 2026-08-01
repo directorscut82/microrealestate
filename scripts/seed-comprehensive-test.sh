@@ -1,18 +1,31 @@
 #!/bin/bash
 # Comprehensive test account seeder
-# Account: seed@example.com / Redact3d!
 # Realm: COMPREHENSIVE-TEST
 # Creates: 30 buildings, ~100 apartments, ~40 tenants, 3 years of data
 # Exercises ALL expense/repair/behaviour combinations
+#
+# Credentials are read from .secrets/comprehensive-test-account (gitignored):
+#   EMAIL= PASSWORD= REALM= REALM_ID=
+# This repo is PUBLIC — never inline a credential here.
 
 set -e
 NAS="http://192.168.0.96:1350"
 
-echo "=== Signing in ==="
+ACCOUNT_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.secrets/comprehensive-test-account"
+if [ ! -f "$ACCOUNT_FILE" ]; then
+  echo "FATAL: $ACCOUNT_FILE not found. Create it with EMAIL/PASSWORD/REALM_ID." >&2
+  exit 1
+fi
+set -a; . "$ACCOUNT_FILE"; set +a
+if [ -z "$EMAIL" ] || [ -z "$PASSWORD" ] || [ -z "$REALM_ID" ]; then
+  echo "FATAL: $ACCOUNT_FILE must define EMAIL, PASSWORD and REALM_ID." >&2
+  exit 1
+fi
+
+echo "=== Signing in as $EMAIL ==="
 TOKEN=$(curl -s -X POST "$NAS/api/v2/authenticator/landlord/signin" \
   -H "Content-Type: application/json" \
-  -d '{"email":"seed@example.com","password":"Redact3d!"}' | python3 -c "import json,sys; print(json.load(sys.stdin).get('accessToken',''))")
-REALM_ID="6a35c19eb02b5d83b83ba084"
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('accessToken',''))")
 
 if [ -z "$TOKEN" ]; then echo "FAILED to sign in"; exit 1; fi
 
@@ -65,7 +78,7 @@ create_building() {
 
 # Create buildings
 for i in $(seq 1 5); do
-  BID=$(create_building "Κτήριο-Α$i" "Οδος ζητά $((i*10))" "1114$i" "Αθήνα")
+  BID=$(create_building "Κτήριο-Α$i" "Λιοσίων $((i*10))" "1114$i" "Αθήνα")
   BUILDING_IDS+=("$BID")
   echo "  A$i: $BID"
 done
@@ -186,7 +199,7 @@ echo "Total units/properties created: $PROP_COUNT"
 echo "=== Phase 3 complete ==="
 echo ""
 echo "=== SEED SUMMARY ==="
-echo "Account: seed@example.com / Redact3d!"
+echo "Account: $EMAIL (from .secrets/comprehensive-test-account)"
 echo "Realm: COMPREHENSIVE-TEST ($REALM_ID)"
 echo "Buildings: ${#BUILDING_IDS[@]}"
 echo "Units: $PROP_COUNT"

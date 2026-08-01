@@ -948,8 +948,8 @@ export function repairTenantSharePercentage(repair: any): number {
   // RepairSchema defaults tenantSharePercentage to 0, and the form sends it
   // for 'split' only (undefined otherwise → Mongoose persists the 0 default).
   // Reading that 0 for a 'tenants' repair inverted the split (0% tenant → 100%
-  // owner) — a real money bug found via seeding (ΟΔΟΣ ΖΗΤΑ «κουζίνας» 130€ billed
-  // to the owner). Gate on chargeableTo FIRST so the stored 0 can't win.
+  // owner) — a real money bug found via seeding (a «κουζίνας» repair of 130€
+  // billed to the owner). Gate on chargeableTo FIRST so the stored 0 can't win.
   if (repair.chargeableTo === 'tenants') return 100;
   if (repair.chargeableTo === 'owners') return 0;
   // 'split' (or any legacy/unknown value): honor the explicit stored %.

@@ -64,8 +64,8 @@ describe('recapture sessions', () => {
 
   it('start binds expectedBillingId when provided', () => {
     const now = 7_000_000;
-    const s = startSession(R, 'rf', now, 'sess-7', '999000935032');
-    expect(s.expectedBillingId).toBe('999000935032');
+    const s = startSession(R, 'rf', now, 'sess-7', '999935585032');
+    expect(s.expectedBillingId).toBe('999935585032');
   });
 });
 

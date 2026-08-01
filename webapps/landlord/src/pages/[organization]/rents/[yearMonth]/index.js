@@ -39,9 +39,9 @@ function _filterData(data, filters) {
   if (filters.searchText) {
     const regExp = /\s|\.|-/gi;
     // Greek final-sigma normalization: ς (U+03C2, word-final) must match
-    // σ (U+03C3, medial). Without this, "ΔΟΚΙΜΙΩΡΟΣ" lowercased with spaces
-    // stripped produces "επωνυμοσ" (medial σ) in the stored name but
-    // "δοκιμιωρος" (final ς) in the typed search — no match.
+    // σ (U+03C3, medial). Without this, "ΔΟΚΙΜΑΣΤΗΣ" lowercased with spaces
+    // stripped produces "δοκιμαστησ" (medial σ) in the stored name but
+    // "δοκιμαστης" (final ς) in the typed search — no match.
     const norm = (s) => s.replace(regExp, '').toLowerCase().replace(/ς/g, 'σ');
     const cleanedSearchText = norm(filters.searchText);
 

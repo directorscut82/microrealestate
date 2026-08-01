@@ -135,16 +135,28 @@ These scenarios are NOT optional. If you change anything in `ResourceList/List.j
 ### Prereqs (one-time)
 
 - `~/Development/microrealestate/.secrets/portainer-token` — Portainer API token used by the backup script.
-- `~/Development/microrealestate/.secrets/cypress-test-account` — bot account credentials. Created by the harness; if missing, ask before regenerating.
+- `~/Development/microrealestate/.secrets/cypress-test-account` — bot account credentials (realm `CYPRESS-TEST-DO-NOT-USE`). Created by the harness; if missing, ask before regenerating.
+- `~/Development/microrealestate/.secrets/landlord-account` — the REAL landlord realm credentials. Read-only inspection only; see below.
 - The NAS must be reachable on LAN (`http://192.168.0.96:1350`).
+
+### NEVER hardcode credentials in a spec or a doc
+
+`.secrets/` is gitignored; this repo is **public**. Every credential is read from
+a `.secrets/` file at run time and reaches specs as an env var —
+`playwright.config.ts` parses `.secrets/cypress-test-account` and exports
+`TEST_EMAIL` / `TEST_PASSWORD` / `TEST_ORG_NAME`. ~40 specs already do this;
+match them. A plaintext password in a tracked file was published for 63 days
+because this rule was not written down.
 
 ### You CAN drive the user's REAL realm with Playwright — do it for any "verify the actual surface" ask
 
-Do NOT claim "I can't log in to the real account" — that is FALSE and has wasted the user's trust. The real realm (`landlord`, owner `e2elandlord82@gmail.com`) signs in with **email + password**, not Google-only OAuth. The working credentials + signin pattern live in the committed `tests/_diag_*.spec.ts` and `tests/_dash*_*.spec.ts` files. The canonical signin:
+Do NOT claim "I can't log in to the real account" — that is FALSE and has wasted the user's trust. The real realm (`landlord`) signs in with **email + password**, not Google-only OAuth. Credentials live in `.secrets/landlord-account` (`EMAIL` / `PASSWORD` / `REALM`) — read that file at run time, never paste its contents into a spec. The canonical signin:
 
 ```ts
-const EMAIL = 'e2elandlord82@gmail.com';
-const PASSWORD = 'Passcode@1234';            // also in _diag_*.spec.ts
+// Load from .secrets/landlord-account (NOT the config's TEST_* vars — those are
+// the bot realm). dotenv.parse it in the spec, or export it before the run.
+const EMAIL = process.env.LANDLORD_EMAIL!;
+const PASSWORD = process.env.LANDLORD_PASSWORD!;
 await page.goto('signin');
 await page.locator('input[name=email]').fill(EMAIL);
 await page.locator('input[name=password]').fill(PASSWORD);
@@ -152,6 +164,12 @@ await page.locator('button[type=submit]').click();
 // then, if landed on the org chooser:
 await page.locator('[data-cy=organizationCard]').first().click();
 await page.waitForURL(/\/dashboard/);
+```
+
+```bash
+# one-liner to export them for a scratch inspection run
+set -a; . ./.secrets/landlord-account; set +a
+LANDLORD_EMAIL="$EMAIL" LANDLORD_PASSWORD="$PASSWORD" yarn playwright test tests/_inspect.spec.ts
 ```
 
 Gotchas learned the hard way:
@@ -460,7 +478,7 @@ Every tier deploys foreground (NOT backgrounded — `bash` returns exit 0 the mo
 2. **Deploy foreground.** `yarn deploy:nas` (no `&`). Wait for it to print the verification line.
 3. **Portainer revision check.** Run the revision-poll snippet in "Verifying a deploy actually landed" (above). Both the API and the frontend container must be on the commit you pushed before any test runs.
 4. **Tier-specific tests.** Per-entity validation: jest unit tests for the schema; UI test runs through the form; mongo readback to confirm the document state. Per-locale: `curl -s` the rendered URL, grep for the expected string. Per-format: run the validator with 3 valid + 5 invalid samples. Each tier's required tests are listed in the table below.
-5. **Lawnmower spec.** `e2e-playwright/tests/_lawnmower.spec.ts` — a broad sign-in-and-click-everywhere spec. Visits every top-level menu item, opens each "+" dialog, opens the first edit page for each entity. Asserts: no `{{...}}` template literals leak to DOM, no `lang="en"` on `/el/...` URLs, no console errors, no `500` responses, no broken images. **MUST pass after every tier deploy.** This is how we catch the "you fixed X but Y is now broken" class of regression.
+5. **Lawnmower spec.** `e2e-playwright/tests/67_lawnmower_surface_sweep.spec.ts` — a broad sign-in-and-click-everywhere spec. Visits every top-level menu item, opens each "+" dialog, opens the first edit page for each entity. Asserts: no `{{...}}` template literals leak to DOM, no `lang="en"` on `/el/...` URLs, no console errors, no `500` responses, no broken images. **MUST pass after every tier deploy.** This is how we catch the "you fixed X but Y is now broken" class of regression.
 6. **Manual 5-minute browser drive.** Open `http://192.168.0.96:1350/landlord/`, sign in, navigate the surface that was changed AND two adjacent surfaces. Document what was clicked. Sign out, sign in as a fresh visitor on `/landlord/el/<...>`, repeat.
 
 A tier is not "done" until all six steps pass and a mongo readback confirms the persisted state.
@@ -486,7 +504,7 @@ A tier is not "done" until all six steps pass and a mongo readback confirms the 
 
 ### Lawnmower spec — the regression backstop
 
-`e2e-playwright/tests/_lawnmower.spec.ts` is a single test that runs after every tier deploy. It MUST be kept up to date as new top-level surfaces are added.
+`e2e-playwright/tests/67_lawnmower_surface_sweep.spec.ts` is a single test that runs after every tier deploy. It MUST be kept up to date as new top-level surfaces are added.
 
 **Three known infra-noise classes are filtered** so the spec only fires on real regressions:
 
@@ -496,7 +514,7 @@ A tier is not "done" until all six steps pass and a mongo readback confirms the 
 | `Failed to load resource: 401 (Unauthorized)` on `/api/v2/*` | Built-in axios interceptor in `webapps/landlord/src/utils/fetch.js` retries 401s after a token refresh. First call fails, refresh succeeds, retry succeeds — user experience is correct; browser console still logs the original 401. | Real bug only if non-401 / non-/api/v2 status appears |
 | favicon 404s | LAN IP vs Tailscale IP host mismatch | Ignore |
 
-**The actual spec is the source of truth** — `e2e-playwright/tests/_lawnmower.spec.ts`. The skeleton below documents the shape; do not duplicate.
+**The actual spec is the source of truth** — `e2e-playwright/tests/67_lawnmower_surface_sweep.spec.ts`. The skeleton below documents the shape; do not duplicate.
 
 ```ts
 import { test, expect } from '@playwright/test';
@@ -532,7 +550,7 @@ Run before declaring any tier complete:
 
 ```bash
 cd /Users/epitrogi/Development/microrealestate/e2e-playwright
-yarn playwright test tests/_lawnmower.spec.ts --reporter=list
+yarn playwright test tests/67_lawnmower_surface_sweep.spec.ts --reporter=list
 ```
 
 If the lawnmower fails on a surface unrelated to your tier, **stop, investigate, fix in the same PR.** That's the bug you would have shipped if you didn't run it.

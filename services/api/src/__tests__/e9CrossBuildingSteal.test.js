@@ -45,7 +45,7 @@ beforeAll(async () => {
   // parseE9 → one building at address "ΟΔΟΣ ΗΤΑ 24" containing ATAK 'ATAK-X'.
   jest.unstable_mockModule('../managers/e9parser.js', () => ({
     parseE9: () => ({
-      owner: { taxId: '021301485', firstName: 'ΛΑΜΔΑ', lastName: 'ΔΟΚΙΜΗ' },
+      owner: { taxId: '999000006', firstName: 'ΛΑΜΔΑ', lastName: 'ΔΟΚΙΜΗ' },
       skippedLandPlots: 0,
       buildings: [
         {
@@ -75,7 +75,7 @@ beforeAll(async () => {
     _id: 'A',
     name: 'Building A',
     realmId: 'r1',
-    address: { street1: 'ΟΔΟΣ ΖΗΤΑ 167', zipCode: '22222' },
+    address: { street1: 'ΟΔΟΣ ΘΗΤΑ 167', zipCode: '22222' },
     units: [{ atakNumber: 'ATAK-X', propertyId: 'P1', isManaged: true, owners: [] }]
   };
   const makeSaveable = (obj) => {

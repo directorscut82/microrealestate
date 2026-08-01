@@ -36,9 +36,9 @@ describeIfPdf('DEH Bill Parser - Real PDF Integration', () => {
     expect(result.bill.provider).toBe('deh');
   });
 
-  it('should extract billing ID: 9 99000935-03 2', () => {
-    expect(result.bill.billingId).toBe('9 99000935-03 2');
-    expect(result.bill.billingIdNormalized).toBe('999000935032');
+  it('should extract billing ID: 9 99935585-03 2', () => {
+    expect(result.bill.billingId).toBe('9 99935585-03 2');
+    expect(result.bill.billingIdNormalized).toBe('999935585032');
   });
 
   it('should extract total amount: 186.21€', () => {

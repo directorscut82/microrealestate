@@ -6,7 +6,7 @@
 //      the local dumps are absent (e.g. CI) — by design, to avoid
 //      committing tax IDs. Do NOT treat their green as coverage in CI.
 //   2. A committed, REDACTED ΟΔΟΣ ΕΨΙΛΟΝ fixture (owner taxId scrubbed,
-//      structural rows intact) at fixtures/e9/odosepsiln-redacted.txt
+//      structural rows intact) at fixtures/e9/odos-epsilon-redacted.txt
 //      drives the AADE category→type regression block at the bottom,
 //      which therefore DOES run in CI. That block exists because the
 //      whole /tmp suite asserted everything EXCEPT category — letting a
@@ -34,28 +34,28 @@ function readFixture(name) {
 const E9_FIXTURES = [
   {
     file: 'PeriousiakiKatastasi2026-3.txt',
-    expectOwnerTaxId: '021301485',
+    expectOwnerTaxId: '999000006',
     expectOwnerLast: 'ΔΟΚΙΜΗ',
     expectOwnerFirst: 'ΛΑΜΔΑ',
     expectMinBuildings: 2
   },
   {
     file: 'PeriousiakiKatastasi2027-1.txt',
-    expectOwnerTaxId: '125479189',
+    expectOwnerTaxId: '999000020',
     expectOwnerLast: 'ΔΟΚΙΜΗ',
     expectOwnerFirst: 'ΓΕΩΡΓΙΟΣ',
     expectMinBuildings: 1
   },
   {
     file: 'PeriousiakiKatastasi2027-2.txt',
-    expectOwnerTaxId: '148152811',
+    expectOwnerTaxId: '999000031',
     expectOwnerLast: 'ΔΟΚΙΜΗ',
     expectOwnerFirst: 'ΒΗΤΑ',
     expectMinBuildings: 2
   },
   {
     file: 'PeriousiakiKatastasi2027-4.txt',
-    expectOwnerTaxId: '125479189',
+    expectOwnerTaxId: '999000020',
     expectOwnerLast: 'ΔΟΚΙΜΗ',
     expectOwnerFirst: 'ΓΕΩΡΓΙΟΣ',
     expectMinBuildings: 1
@@ -178,7 +178,7 @@ skipIfNoFixtures('parseE9 — T2 regressions', () => {
     expect(realUnits.length).toBeGreaterThan(0);
   });
 
-  // T2.P1.4 spot-check: a row with a 50,0 ownership fraction (ΟΔΟΣ ΗΤΑ
+  // T2.P1.4 spot-check: a row with a 50,0 ownership fraction (ΟΔΟΣ ΔΟΚΙΜΗΣ
   // 24 in fixture 2027-5) should round-trip as 50 (or 50.0). Earlier
   // versions clamped this to 100.
   test('T2.P1.4: fractional ownership percentages round-trip', () => {
@@ -197,7 +197,7 @@ skipIfNoFixtures('parseE9 — T2 regressions', () => {
 // ───────────────────────────────────────────────────────────────────────
 // AADE category → property-type mapping. THIS BLOCK EXISTS BECAUSE THE
 // WHOLE SUITE PREVIOUSLY ASSERTED EVERYTHING EXCEPT category and the
-// resulting type — so a real building (ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28) imported with
+// resulting type — so a real building (ΟΔΟΣ ΕΨΙΛΟΝ 28) imported with
 // 7 basement units silently classified ALL of them 'storage' when 3 are
 // actually category-6 PARKING. A user found it by eye; no test did.
 //
@@ -207,7 +207,7 @@ skipIfNoFixtures('parseE9 — T2 regressions', () => {
 // ───────────────────────────────────────────────────────────────────────
 // This block does NOT use skipIfNoFixtures: the ΟΔΟΣ ΕΨΙΛΟΝ rows are
 // committed (redacted: owner taxId scrubbed to 000000000, structural row
-// data intact) at fixtures/e9/odosepsiln-redacted.txt, so the category→type
+// data intact) at fixtures/e9/odos-epsilon-redacted.txt, so the category→type
 // regression runs in CI — unlike the /tmp/e9-reaudit suite above, which
 // silently skips wherever those local dumps are absent (the gap that let
 // the parking misclassification ship). Falls back to the /tmp dump if the
@@ -217,9 +217,9 @@ skipIfNoFixtures('parseE9 — T2 regressions', () => {
 const __testDir = path.dirname(fileURLToPath(import.meta.url));
 const COMMITTED_E9 = path.resolve(
   __testDir,
-  '../fixtures/e9/odosepsiln-redacted.txt'
+  '../fixtures/e9/odos-epsilon-redacted.txt'
 );
-function readOdos Epsilon() {
+function readOdosepsilon() {
   if (fs.existsSync(COMMITTED_E9)) return fs.readFileSync(COMMITTED_E9, 'utf8');
   const tmp = path.join(FIXTURE_DIR, 'PeriousiakiKatastasi2027-2.txt');
   return fs.existsSync(tmp) ? fs.readFileSync(tmp, 'utf8') : null;
@@ -227,28 +227,28 @@ function readOdos Epsilon() {
 
 describe('parseE9 — AADE category → type', () => {
   // The ΟΔΟΣ ΕΨΙΛΟΝ building lives in fixture 2027-2.
-  const ODOS EPSILON = {
+  const OdosEpsilon = {
     // ATAK → { category, type } expected from the real E9 rows.
-    '00849565730': { category: 5, type: 'storage' },
-    '00849565756': { category: 5, type: 'storage' },
-    '00849565799': { category: 5, type: 'storage' },
-    '00849565801': { category: 5, type: 'storage' },
-    '00849565810': { category: 6, type: 'parking' },
-    '00849565852': { category: 6, type: 'parking' },
-    '00849565772': { category: 6, type: 'parking' },
-    '00849565780': { category: 1, type: 'apartment' },
-    '00849565705': { category: 1, type: 'apartment' },
-    '00849565828': { category: 1, type: 'apartment' }
+    '00998877730': { category: 5, type: 'storage' },
+    '00998877756': { category: 5, type: 'storage' },
+    '00998877799': { category: 5, type: 'storage' },
+    '00998877801': { category: 5, type: 'storage' },
+    '00998877810': { category: 6, type: 'parking' },
+    '00998877852': { category: 6, type: 'parking' },
+    '00998877772': { category: 6, type: 'parking' },
+    '00998877780': { category: 1, type: 'apartment' },
+    '00998877705': { category: 1, type: 'apartment' },
+    '00998877828': { category: 1, type: 'apartment' }
   };
 
   test('parser extracts the AADE category digit for every ΟΔΟΣ ΕΨΙΛΟΝ row', () => {
-    const text = readOdos Epsilon();
+    const text = readOdosepsilon();
     if (!text) return;
     const parsed = parseE9(text);
     const byAtak = new Map(
       parsed.buildings.flatMap((b) => b.units).map((u) => [u.atakNumber, u])
     );
-    for (const [atak, expected] of Object.entries(ODOS EPSILON)) {
+    for (const [atak, expected] of Object.entries(OdosEpsilon)) {
       const u = byAtak.get(atak);
       // (this jest config's expect() takes no message arg — encode the
       // ATAK in a thrown error instead so a failure is still legible)
@@ -262,14 +262,14 @@ describe('parseE9 — AADE category → type', () => {
   });
 
   test('inferPropertyType maps every ΟΔΟΣ ΕΨΙΛΟΝ category to the right type (3 parking, 4 storage, 3 apartment)', () => {
-    const text = readOdos Epsilon();
+    const text = readOdosepsilon();
     if (!text) return;
     const parsed = parseE9(text);
     const byAtak = new Map(
       parsed.buildings.flatMap((b) => b.units).map((u) => [u.atakNumber, u])
     );
     const counts = { storage: 0, parking: 0, apartment: 0 };
-    for (const [atak, expected] of Object.entries(ODOS EPSILON)) {
+    for (const [atak, expected] of Object.entries(OdosEpsilon)) {
       const u = byAtak.get(atak);
       if (!u) continue;
       const type = inferPropertyType({
@@ -315,7 +315,7 @@ describe('parseE9 — AADE category → type', () => {
 // ───────────────────────────────────────────────────────────────────────
 describe('parseE9 — bare-plot guard (AADE category 0 + no DEH = land)', () => {
   test('every imported ΟΔΟΣ ΕΨΙΛΟΝ unit is a genuine building unit (category≥1 OR has a DEH meter)', () => {
-    const text = readOdos Epsilon();
+    const text = readOdosepsilon();
     if (!text) return;
     const parsed = parseE9(text);
     const units = parsed.buildings.flatMap((b) => b.units);

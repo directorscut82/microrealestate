@@ -221,7 +221,7 @@ function parseE9Row(
       : null;
 
   // T2.P1.3: 4th fallback for settlement-style rows with a NON-NUMERIC
-  // block-plot identifier (e.g. "\u039B\u0391\u0393\u039F\u039D\u0397\u03A3\u0399 ... X ... X 831\u0391"). The PDF
+  // block-plot identifier (e.g. "\u0394\u039F\u039A\u0399\u039C\u0397\u03A3\u0399 ... X ... X 831\u0391"). The PDF
   // emits a settlement chain followed by `X`, then block streets,
   // another `X`, then an alphanumeric block-plot id (e.g. "831\u0391") in
   // place of a street number. The three earlier patterns require pure

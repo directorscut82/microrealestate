@@ -648,7 +648,7 @@ Status column added 2026-07-31 — see §16.1 for the commit trail.
 
 1. ✅ **Slice 1: Image import + OCR** — api in-process OCR (paddleocr+WASM), api accepts images (new multer), FileDropZone accepts images, `hasAnyBillingId` precheck removed. Ship → you can drop a photo into "Εισαγωγή Λογαριασμού" and it parses.
 2. ✅ **Slice 2: No-match flow + charge bridge** — confirm/amend surface, ExpenseFormDialog extraction, `saveMonthlyStatement` bridge.
-3. ⛔ **Slice 3: Providers** — **NOT blocked. NOT started.** See §17: the real samples have been on disk since 2026-07-26 (`.scratch-adv-tests/bill-samples/logariasmoi.pdf`, 14 pages) and were already OCR'd clean by this project's own pipeline. ΕΥΔΑΠ ground truth is `ocr-out/page-09.txt`. ΕΠΑ is genuinely absent from the samples; **NOVA (telecoms) is present and was never in the plan.** Only `deh.ts` exists — there is no `providers/` directory.
+3. ⛔ **Slice 3: Providers** — **NOT blocked. NOT started.** See §17: the real samples have existed since 2026-07-26 (`logariasmoi.pdf`, 14 pages) and were already OCR'd clean by this project's own pipeline. They now live OUTSIDE the repo at `~/mre-pii-backup-2026-08-01/real-bill-samples/bill-samples/` (§17.4 — they are a live account's personal data). ΕΥΔΑΠ ground truth is `ocr-out/page-09.txt`. ΕΠΑ is genuinely absent from the samples; **NOVA (telecoms) is present and was never in the plan.** Only `deh.ts` exists — there is no `providers/` directory.
 4. ✅ **Slice 4: Telegram inbox + bell** — poller, InboxItem, bell UI.
 5. ✅ **Slice 5: B2 archival** — upload source + QR on confirm.
 6. ✅ **Slice 6: Απόδειξη OCR + match-to-pending** — see §15.
@@ -666,7 +666,7 @@ repair tenant-shares ARE written to `unit.monthlyCharges` as `{term, repairId}` 
 save tail re-fires `_recomputeVacantOwnerCharges` + `_recomputeTenantsForProperty` but NOT
 `redistributeRepairsForProperties`, so a stripped repair charge is never rebuilt.
 
-REPRO (local NAS-copy, real data — tenant `blah blah` occupying unit 5 of ΑΓ. ΟΔΟΣ ΕΨΙΛΟΝ 28,
+REPRO (local NAS-copy, real data — tenant `blah blah` occupying unit 5 of ΟΔΟΣ ΕΨΙΛΟΝ 28,
 lease covers Nov 2026):
 - step 0: repair charges on term 2026-11 = **0**
 - step 1: `POST /buildings/:id/repairs` (€90, split, tenantShare 100, chargeTerm 2026-11) →
@@ -791,7 +791,7 @@ independent keys — proving the subset-scoring design:
 | amount | 749,99 € | 749,99 € | +60 |
 | payee IBAN | GR3301109999990000000000001 | to-IBAN GR3301109999990000000000001 | +40 (mod-97 VALID) |
 | invoice # | 391 | «Τιμ Πωλ 391» | +20 |
-| supplier name | DOKIMASTIS | DOKIMASTIS KOSTAS MARIOS | +15 (variant) |
+| supplier name | DOKIMAMBOUS | DOKIMAMPOUS KOSTAS MARIOS | +15 (variant) |
 → confident top suggestion, RF never involved. A DIFFERENT receipt would score via a
 different subset (e.g. RF+amount, or amount+date only) — the ranker handles both.
 Note the payee IBAN here is the SAME one that passed mod-97 earlier while two others failed
@@ -1003,15 +1003,20 @@ pipeline, with **zero errors on all 14 pages**. Every subsequent session — inc
 2026-07-31 audit write-up — re-quoted the stale blocker back at the user instead of reading
 its own scratch directory. The correct move, before writing "blocked" anywhere: `find . -iname '*.pdf'`.
 
-Artifacts (untracked, NOT gitignored — `.scratch-adv-tests/`):
+Artifacts — **moved OUT of the repo tree on 2026-08-01** to
+`~/mre-pii-backup-2026-08-01/real-bill-samples/bill-samples/`. They are scans of a
+live utility account: names, ΑΦΜ, παροχή numbers, RF codes, a payee IBAN. They were
+sitting in a gitignored directory inside a public repo's working tree, which is one
+`git add -A -f` away from publication — that is exactly how the 2026-08-01 leak
+happened. Do not move them back in. Paths below are relative to that directory:
 
 | Path | What |
 |---|---|
-| `.scratch-adv-tests/bill-samples/logariasmoi.pdf` | 6.9 MB, **14 pages**, PDF 1.7, CamScanner scans |
-| `.scratch-adv-tests/bill-samples/ocr-out/page-NN.txt` | per-page ground-truth OCR (14 files) |
-| `.scratch-adv-tests/bill-samples/ocr-out/ALL_PAGES.txt` | all pages concatenated (25 KB) |
-| `.scratch-adv-tests/bill-samples/ocr-out/summary.json` + `summary-tail.json` | chars/lines/secs per page, **`err: null` on every page** |
-| `.scratch-adv-tests/bill-samples/ocr_all.mjs` | the driver — imports the REAL `rasterizePdfToImages` + `ocrImage` from `dist/`, i.e. exactly the bill-import path |
+| `logariasmoi.pdf` | 6.9 MB, **14 pages**, PDF 1.7, CamScanner scans |
+| `ocr-out/page-NN.txt` | per-page ground-truth OCR (14 files) |
+| `ocr-out/ALL_PAGES.txt` | all pages concatenated (25 KB) |
+| `ocr-out/summary.json` + `summary-tail.json` | chars/lines/secs per page, **`err: null` on every page** |
+| `ocr_all.mjs` | the driver — imports the REAL `rasterizePdfToImages` + `ocrImage` from `dist/`, i.e. exactly the bill-import path |
 
 OCR cost: 2.2 s (sparse receipt) → 17.0 s (dense ΕΥΔΑΠ bill), ~95 s for all 14 pages.
 
@@ -1021,7 +1026,7 @@ OCR cost: 2.2 s (sparse receipt) → 17.0 s (dense ΕΥΔΑΠ bill), ~95 s for a
 |---|---|---|
 | 1 | **NOVA** telecoms bill — 27,38 € + 6,60 € prior = 33,98 € | **`null`** → "Δεν αναγνωρίστηκε ο πάροχος" |
 | 2 | Alpha Bank receipt — NOVA, 33,98 € | (receipt) |
-| 3 | **ΔΕΗ** bill — 120,00 €, `RF10999000000000000648051` | `deh` ✅ parses |
+| 3 | **ΔΕΗ** bill — 120,00 €, RF code present (synthetic stand-in: `RF33999000000000000000001`) | `deh` ✅ parses |
 | 4 | Alpha Bank receipt — ΔΕΗ, 120,00 € | (receipt) |
 | 5 | **ΔΕΗ** bill | `deh` ✅ |
 | 6 | Piraeus receipt — ΔΕΗ, 4/6/2026 | (receipt) |
@@ -1064,13 +1069,20 @@ Also stale: §3's proposed `providers/` tree lists `deuaTinou/` "← the bill we
 | Due date | `05/06/2026` | 39, 116 | `ΛΗΞΗ ΠΡΟΘΕΣΜΙΑΣ ΠΛΗΡΩΜΗΣ` |
 | Issue date | `07/05/2026` | 34, 107 | |
 | Consumption period | `29/01/2026-27/04/2026` | 41, 98 | **a 3-month period — see 17.5** |
-| Document no. | `2026 0999 9000 0006 74` | 42, 115 | spaced quartets |
+| Document no. | `2026 0009 9990 0000 01` | 42, 115 | spaced quartets |
 | Registry no. (ΑΡ. ΜΗΤΡΩΟΥ) | `9990001-33` | 17, 102 | the stable per-meter id |
 | Consumption | `53` m³ | 29, 104 | |
-| Payment barcode line | `20260999900000060000072112026060509990001` | 96 | concatenates doc-no + amount + due-date + registry |
+| Payment barcode line | `20260009999000000000072112026060509990001` | 96 | concatenates doc-no(16) + amount(9) + due-date(8) + registry(8) |
 
-**No `RF` code on the ΕΥΔΑΠ bill** — unlike ΔΕΗ (`RF10999000000000000648051`, page 3 line 22)
-and NOVA (`RF29 9900 0000 0000 0000 0035 5`, page 1). ΕΥΔΑΠ identity must come from
+> **Identifiers in this section are SYNTHETIC**, rewritten to the exact shape and
+> length of the real ones (so a parser written against this table works on a real
+> bill) but carrying reserved `999…` values. The real document numbers, registry
+> numbers, RF codes and barcode lines are personal data tied to a live utility
+> account; they belong in `.scratch-adv-tests/` (gitignored), never here. This
+> repo is public.
+
+**No `RF` code on the ΕΥΔΑΠ bill** — unlike ΔΕΗ (`RF33999000000000000000001`, page 3 line 22)
+and NOVA (`RF06 9990 0000 0000 0000 0000 2`, page 1). ΕΥΔΑΠ identity must come from
 `ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ` + `ΑΡΙΘΜΟΣ ΠΑΡΑΣΤΑΤΙΚΟΥ`. Any code assuming "a bill has an RF" — including
 `generateIrisQr` (`index.ts:104-123`, returns `null` without one) and the Slice-6 Tier-2
 RF-recapture path — must degrade gracefully, not treat ΕΥΔΑΠ as a failed parse.
