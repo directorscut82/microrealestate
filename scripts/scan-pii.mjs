@@ -326,17 +326,26 @@ const REAL_BILL_DIGIT_RUNS = [
   '9999000000', // ΕΥΔΑΠ document number interior
   '9990001', // ΕΥΔΑΠ ΑΡ. ΜΗΤΡΩΟΥ (stable per-meter id)
   '1099999900000000000', // payee IBAN interior
-  '000565', // ΔΕΗ παροχή tail — see note below
+  '000565', // ΔΕΗ παροχή A tail — see note below
+  '000286', // ΔΕΗ παροχή B tail — same failure mode, found 2026-08-01
   '9990000000000000000' // NOVA RF interior
 ];
 
 /**
- * The παροχή is listed as a 6-digit TAIL, not the full 9 digits, because of a
- * failure mode worth naming: a comment in billidentity.ts had "scrubbed" the
- * real provision 999000565 to `999000565` — first three digits masked, last six
- * left intact. A denylist holding only the complete value would have called that
+ * The παροχή values are listed as 6-digit TAILS, not the full 9 digits, because
+ * of a failure mode worth naming: a comment in billidentity.ts had "scrubbed" a
+ * real provision by masking its first three digits and leaving the last six
+ * intact. A denylist holding only the complete value would have called that
  * clean. Partial scrubs are the norm, not the exception, so match the part that
  * survives them.
+ *
+ * Both tails are here because BOTH mistakes were made in this repo, and the
+ * second one was made by the very commit that added this comment: the AADE
+ * fixture's provision was masked to `999000286`, which is the real tail with a
+ * `999` bolted on. It sailed past the guard because only the first tail was
+ * listed. Writing down a failure mode is not the same as being immune to it —
+ * the entry in this array is what makes the guard immune, not the paragraph
+ * above it. If you mask a value, add its surviving tail here in the same edit.
  *
  * 6 digits is short enough to collide by chance (~1 in 10^6 per position), which
  * is why the digit-stream pass reports rather than hard-fails on its own: a hit
