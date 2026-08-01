@@ -100,10 +100,14 @@ function isSyntheticAFM(value) {
  * DIGIT-STREAM MATCHING.
  *
  * Every literal-string scrub this repo has attempted was defeated by SPACING.
- * A real IBAN written `GR06 0109 9999 9000 0000 0000 125` survived three
- * separate passes that were searching for `GR3301109999990000000000001`, and a
- * real ΕΥΔΑΠ document number survived as `2026 0999 9000 0006 74`. The regexes
- * above have the same blind spot: `[0-9]{9}` never sees `999 000 565`.
+ * A real IBAN written `GR99 9999 9999 9999 9999 9999 999` survived three
+ * separate passes that were searching for the unspaced `GR9999…` form, and a
+ * real ΕΥΔΑΠ document number survived the same way. The regexes above have the
+ * same blind spot: `[0-9]{9}` never sees `999 999 999`.
+ *
+ * (The examples here are deliberately synthetic. An earlier version of this
+ * comment illustrated the point with the actual leaked IBAN and an actual ΔΕΗ
+ * provision, which made the guard's own documentation a publisher of the data.)
  *
  * So each line is ALSO reduced to its bare digit sequence and the sensitive
  * numerics are searched in that stream. Offsets are meaningless there, which is
@@ -116,10 +120,11 @@ function digitStream(text) {
 /**
  * SCRIPT / HOMOGLYPH FOLDING.
  *
- * `ΜΙΣΘΩΤΗΣ` is Latin K (U+004B) followed by Greek ΡΑΝΤΑΣ. It renders
+ * `KΑΠΠΑΣ` written with a Latin K (U+004B) followed by Greek ΑΠΠΑΣ renders
  * identically to the all-Greek spelling and is the same person's name, but no
  * Greek-only matcher will ever see it. OCR output is full of these because the
- * recognizer picks whichever codepoint scored higher per glyph.
+ * recognizer picks whichever codepoint scored higher per glyph. One real
+ * surname in this repo's fixtures was mixed-script for exactly that reason.
  *
  * Fold the Greek letters that share a glyph with a Latin one onto the Latin
  * form, uppercase, and strip accents — then match tokens in that space too.
@@ -153,7 +158,15 @@ const DOCUMENT_EXTENSIONS = new Set([
  * Kept deliberately short: every entry here is a hole in the net.
  */
 const ALLOWLIST_PATHS = [
-  'scripts/scan-pii.mjs', // this file names the patterns it hunts
+  // scripts/scan-pii.mjs used to be exempt here, because it held ~30 real
+  // surnames and 7 real bill identifiers as plaintext and would otherwise have
+  // blocked every commit by reporting itself. The exemption was the direct
+  // consequence of the plaintext, and it meant the one file guaranteed to
+  // contain real PII was the one file never checked.
+  //
+  // Both are gone: the values now live in an uncommitted denylist, and this file
+  // is scanned like anything else. It is the regression test for its own leak —
+  // paste a real name into it and the commit is refused. Do not re-add it.
   '.husky/pre-commit'
 ];
 
@@ -173,11 +186,11 @@ const GENERATED_FILES = /(^|\/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml)$/
  * CAREFUL — this is a muzzle as much as a filter. It applies ONLY to the
  * unstructured 9-digit tax-ID patterns (see `hashBlind` below). Applying it to
  * everything is what made the `iban` and `rf-payment-code` patterns dead code
- * from the day they were written: a bare `GR3301109999990000000000001` is 25
- * alphanumerics and `RF10999000000000000648051` is 23 hex-ish characters, so
- * both were blanked to spaces before matching, and a canary test planting the
- * REAL leaked IBAN sailed straight through the guard. The spaced forms matched,
- * the raw forms did not — the exact inverse of what anyone would assume.
+ * from the day they were written: a bare `GR99……` IBAN is 25 alphanumerics and
+ * an `RF99……` creditor reference is 23 hex-ish characters, so both were blanked
+ * to spaces before matching, and a canary test planting the REAL leaked IBAN
+ * sailed straight through the guard. The spaced forms matched, the raw forms did
+ * not — the exact inverse of what anyone would assume.
  */
 const HEXISH_RUN = /[0-9a-fA-F]{24,}|[A-Za-z0-9+/=_-]{40,}/g;
 
@@ -206,67 +219,68 @@ const PRODUCT_ASSET_DIRS = [
 ];
 
 /**
- * Literal strings that must never be committed. Populated with the real values
- * that leaked, so a copy-paste of the same data is caught verbatim.
+ * LITERAL DENYLIST — loaded from an UNCOMMITTED file, by design.
  *
- * NOTE: this list is itself sensitive. It lives in the repo because a guard that
- * depends on an uncommitted file silently stops working on a fresh clone — but
- * only the SURNAMES and STREET NAMES are listed, never a full identity, and the
- * tax IDs are matched structurally (checksum + not-synthetic) rather than by
- * literal value, so no real tax ID appears in this file.
+ * This array used to hold ~30 real surnames and street names of real third
+ * parties as plaintext, plus 7 digit runs off real bills, and its own comment
+ * conceded "this list is itself sensitive". That was a real leak, not a
+ * theoretical one: on a PUBLIC repo the guard had become the single largest
+ * remaining publisher of the exact data it was written to protect — 53 real
+ * values, helpfully annotated as belonging to real people. A denylist of
+ * victims' names is not a mitigation when the denylist is world-readable.
+ *
+ * The old justification was "a guard that depends on an uncommitted file
+ * silently stops working on a fresh clone". Two things are wrong with it:
+ *
+ *  1. SILENTLY is the fixable part, not the dependency. Missing file now prints
+ *     a loud warning (see loadLocalDenylist) instead of passing quietly.
+ *  2. A fresh clone on someone else's machine has none of this data to
+ *     re-introduce. The literal layer exists to catch THIS machine copy-pasting
+ *     from its own scratch files and mongodumps. Every check that a stranger's
+ *     clone actually needs is STRUCTURAL — tax-ID checksum, IBAN, RF code,
+ *     provision, mobile, document-by-extension — and none of those needs a
+ *     secret. They all keep running with no denylist present.
+ *
+ * Hashing the tokens instead was considered and rejected: surnames and 6-digit
+ * tails are tiny search spaces, so a committed hash falls to a wordlist in
+ * seconds. It would have republished the same PII with better branding.
+ *
+ * The file is generated from the same replace map that drives the history
+ * rewrite, so the guard and the scrub cannot drift apart.
  */
-const FORBIDDEN_TOKENS = [
-  // Family surnames of the repo owner's real landlords/owners/tenants.
-  'ΔΟΚΙΜΗ',
-  'ΔΟΚΙΜΑΣΤΗ',
-  // Real property street names.
-  'ΟΔΟΣ ΗΤΑ',
-  'ΟΔΟΣ ΕΨΙΛΟΝ',
-  'ΟΔΟΣ ΖΗΤΑ',
-  'ΠΕΡΙΟΧΗ ΘΗΤΑ',
-  // Found by the 2026-08-01 folded/digit-stream sweeps AFTER the first scrub
-  // had been declared complete. Each one had survived at least one pass that
-  // was searching case-sensitively, or searching only for the Greek spelling,
-  // or searching the literal text while the value sat in \uXXXX escapes.
-  // ΠΕΡΙΟΧΗ ΘΗΤΑ above is here for exactly that reason: it lived on as
-  // "ΛΑΓ..." in an e9parser comment.
-  'ΔΟΚΙΜΑΣΤΗΣ',
-  'ΔΟΚΙΜΑΣΤΗΣ',
-  'ΔΟΚΙΜΑΚΗ',
-  'ΔΟΚΙΜΑΡΗΣ',
-  'ΔΟΚΙΜΙΩΤΗΣ',
-  'ΜΙΣΘΩΤΡΙΑ',
-  'ΒΗΤΑ',
-  'ΔΟΚΙΜΕΖΟΥ',
-  'ΔΟΚΙΜΙΩΡΟΣ',
-  'ΔΟΚΙΜΗΣ',
-  'ΜΙΣΘΩΤΗΣ',
-  'ΟΔΟΣ ΖΗΤΑ',
-  // Latin forms of the above that actually appeared in this repo.
-  'DOKIMASTIS',
-  'DOKIMASTIS',
-  'DOKIMAKI',
-  'DOKIMARIS',
-  'DOKIMIOTIS',
-  'DOKIMIOROS',
-  'DOKIMIS',
-  'MISTHOTIS',
-  'ODOS ZITA',
-  'ODOS ZITA',
-  // Test-realm identity that leaked as a plaintext credential pair.
-  'E2ETEST',
-  // LATIN TRANSLITERATIONS. A Greek-only token list is trivially defeated by
-  // writing the same surname in Latin script, and this repo did exactly that
-  // without anyone intending to: "DOKIMASTI" sat in a buildingmanager comment and
-  // in three spec headers while every Greek spelling had been scrubbed. Matched
-  // case-insensitively (see TOKEN_MATCHERS), so Dokimasti/dokimasti/DOKIMASTI all trip.
-  'DOKIMASTI',
-  'DOKIMI',
-  'ODOS ITA',
-  'ODOS EPSILON',
-  'ODOS ZITA',
-  'PERIOCHI THITA'
-];
+const LOCAL_DENYLIST_PATH = path.join(REPO, '.secrets/pii-denylist.json');
+
+function loadLocalDenylist() {
+  if (!existsSync(LOCAL_DENYLIST_PATH)) {
+    process.stderr.write(
+      `\n  ! scan-pii: no local denylist at .secrets/pii-denylist.json\n` +
+        `    Structural checks (tax ID, IBAN, RF, provision, mobile, documents)\n` +
+        `    are ACTIVE. Literal known-value matching is OFF.\n` +
+        `    Regenerate it before scrubbing history or trusting a clean result.\n\n`
+    );
+    return { tokens: [], digitRuns: [], patterns: [] };
+  }
+  try {
+    const raw = JSON.parse(readFileSync(LOCAL_DENYLIST_PATH, 'utf8'));
+    return {
+      tokens: Array.isArray(raw.tokens) ? raw.tokens : [],
+      digitRuns: Array.isArray(raw.digitRuns) ? raw.digitRuns : [],
+      patterns: Array.isArray(raw.patterns) ? raw.patterns : []
+    };
+  } catch (err) {
+    // Do NOT fall through to "no denylist" on a parse error. A corrupt file is
+    // indistinguishable from an empty one at match time, and the failure mode of
+    // guessing wrong here is a silent publish.
+    process.stderr.write(
+      `\n  ! scan-pii: .secrets/pii-denylist.json is unreadable: ${err.message}\n` +
+        `    Refusing to run with a half-loaded denylist.\n\n`
+    );
+    process.exit(1);
+  }
+}
+
+const LOCAL_DENYLIST = loadLocalDenylist();
+const FORBIDDEN_TOKENS = LOCAL_DENYLIST.tokens;
 
 /**
  * Every token is matched in the FOLDED space: uppercased, accents stripped, and
@@ -275,9 +289,9 @@ const FORBIDDEN_TOKENS = [
  * The previous version special-cased Greek tokens as `text.includes(token)` —
  * case-SENSITIVE, on the reasoning that "Greek tokens are already uppercase in
  * every real occurrence". That reasoning was wrong, and it was wrong in this
- * repo: a lowercase `("dokimastis"/"dokimastis")` in a matching.ts comment
- * survived a scrub whose grep was case-sensitive, and was only found later by a
- * folded scan. Folding both sides removes the entire class.
+ * repo: a real surname written lowercase in a matching.ts comment (in both of
+ * its two transliterations) survived a scrub whose grep was case-sensitive, and
+ * was only found later by a folded scan. Folding both sides removes the class.
  *
  * Cost: `ΡΑΝΤΑΣ` folds to `PANTAS`, so a Latin word could in principle collide
  * with a folded Greek token. With these tokens (8+ chars, all distinctive
@@ -305,52 +319,75 @@ function decodeUnicodeEscapes(text) {
 }
 
 /**
- * Digit sequences from the REAL utility bills and bank receipts. These are the
- * values the 2026-08-01 sweep found still sitting in tracked files: a ΔΕΗ RF
- * creditor reference, a ΕΥΔΑΠ document/registry/barcode triple, and a payee
- * IBAN off a bank transfer confirmation.
+ * Digit sequences off the REAL utility bills and bank receipts — RF creditor
+ * references, ΕΥΔΑΠ document/registry ids, payee IBAN interiors, ΔΕΗ provision
+ * tails. Also loaded from the uncommitted denylist; see FORBIDDEN_TOKENS above
+ * for why these are no longer written down in a public file.
  *
- * Listed as digit streams WITHOUT their prefixes precisely so the spaced forms
- * are caught: `GR06 0109 9999 9000 0000 0000 125` and
- * `GR3301109999990000000000001` reduce to the same stream, and the spaced form
- * is the one that survived three literal-string scrubs.
+ * Stored as bare digit streams WITHOUT their prefixes, because that is the form
+ * that survives spacing: the spaced and unspaced writings of the same IBAN
+ * reduce to one stream, and the spaced form is the one that walked past three
+ * separate literal-string scrubs.
  *
- * These are identifiers, not secrets in the password sense — they cannot be used
- * to authenticate. They are in this file for the same reason the surnames are:
- * a guard that depends on an uncommitted denylist silently stops working on a
- * fresh clone. Truncated to a distinctive interior run so the file does not
- * itself republish a complete account number.
+ * The provision entries are 6-digit TAILS rather than full values, for a failure
+ * mode worth naming: this repo twice "scrubbed" a real provision by masking its
+ * leading three digits and leaving the last six intact (`999` bolted onto a real
+ * tail — the second instance committed by the very change that documented the
+ * first, which is why this is a class and not an anecdote). A
+ * denylist holding only complete values calls both of those clean. Partial
+ * scrubs are the norm, so match the part that survives them, and add the
+ * surviving tail in the same edit that masks a value.
+ *
+ * 6 digits collides by chance (~1 in 10^6 per position), which is why a
+ * digit-stream hit reports for a human to look at rather than claiming
+ * certainty. Values shorter than that (5-digit postcodes) are matched
+ * word-bounded via DENY_PATTERNS instead — in the digit stream they fire on any
+ * 5-digit window of a longer number, and that noise is precisely what teaches a
+ * human to reach for PII_SCAN_SKIP by reflex.
  */
-const REAL_BILL_DIGIT_RUNS = [
-  '999000000000000', // ΔΕΗ RF creditor reference body (shared across months)
-  '9999000000', // ΕΥΔΑΠ document number interior
-  '9990001', // ΕΥΔΑΠ ΑΡ. ΜΗΤΡΩΟΥ (stable per-meter id)
-  '1099999900000000000', // payee IBAN interior
-  '000565', // ΔΕΗ παροχή A tail — see note below
-  '000286', // ΔΕΗ παροχή B tail — same failure mode, found 2026-08-01
-  '9990000000000000000' // NOVA RF interior
-];
+const REAL_BILL_DIGIT_RUNS = LOCAL_DENYLIST.digitRuns;
 
 /**
- * The παροχή values are listed as 6-digit TAILS, not the full 9 digits, because
- * of a failure mode worth naming: a comment in billidentity.ts had "scrubbed" a
- * real provision by masking its first three digits and leaving the last six
- * intact. A denylist holding only the complete value would have called that
- * clean. Partial scrubs are the norm, not the exception, so match the part that
- * survives them.
+ * Boundary-matched regexes for values too short or too collision-prone for the
+ * substring/digit-stream passes.
  *
- * Both tails are here because BOTH mistakes were made in this repo, and the
- * second one was made by the very commit that added this comment: the AADE
- * fixture's provision was masked to `999000286`, which is the real tail with a
- * `999` bolted on. It sailed past the guard because only the first tail was
- * listed. Writing down a failure mode is not the same as being immune to it —
- * the entry in this array is what makes the guard immune, not the paragraph
- * above it. If you mask a value, add its surviving tail here in the same edit.
+ * Two categories, both learned the hard way:
+ *  · A short Latin token collides with hash interiors. One 3-letter given name,
+ *    folded, matches base64 and sha512 bodies in the Yarn release binary and both
+ *    lockfiles — bounding it is the difference between a guard and a corrupted
+ *    dependency tree.
+ *  · A short GREEK token is a substring of ordinary Greek words (one real given
+ *    name here is a substring of the common word for "lively"). Bounded, it
+ *    matches the name and not the vocabulary.
  *
- * 6 digits is short enough to collide by chance (~1 in 10^6 per position), which
- * is why the digit-stream pass reports rather than hard-fails on its own: a hit
- * is a prompt to look, and the surrounding context makes the call obvious.
+ * These are matched against the RAW line, so the patterns are written in raw
+ * script — a folded pattern would match nothing, since the folded spelling
+ * (Latin letters around a Greek one) appears in no real file.
  */
+const DENY_PATTERNS = LOCAL_DENYLIST.patterns
+  .map((src) => {
+    try {
+      // Flags, both load-bearing:
+      //   no `g` — these are membership tests, and a sticky lastIndex across two
+      //            .test() calls on the same regex object is a classic silent miss.
+      //   `u`    — the short-token patterns use \p{L} lookarounds, which are a
+      //            syntax error without it. JS \b is ASCII-only and cannot
+      //            express a boundary next to a Greek letter.
+      return { src, re: new RegExp(src, 'iu') };
+    } catch (err) {
+      // Hard-fail. Dropping an uncompilable pattern would silently disable one
+      // value's only check while the run still reports "clean" — the same
+      // failure shape as the muzzled iban/rf patterns that made a canary planting
+      // the real leaked IBAN pass for as long as those patterns existed.
+      process.stderr.write(
+        `\n  ! scan-pii: denylist pattern does not compile: ${src}\n` +
+          `    ${err.message}\n` +
+          `    Refusing to run with a check silently disabled.\n\n`
+      );
+      process.exit(1);
+    }
+  })
+  .filter(Boolean);
 
 const PATTERNS = [
   {
@@ -518,8 +555,16 @@ function scan(files, read) {
 
     const content = read(file);
     if (content === null) continue;
-    // Skip anything that looks binary.
-    if (content.includes(' ')) continue;
+    // Skip anything that looks binary — but only on the evidence git itself
+    // uses: a NUL byte within the first 8 KiB.
+    //
+    // This test used to read the WHOLE file, which exempted any source file that
+    // so much as MENTIONS a NUL. The worked example is this very file: the line
+    // below contains a NUL literal, so scan-pii.mjs classified ITSELF as binary
+    // and skipped its own content — silently. Planting a real surname in it
+    // raised nothing. A text file's NUL sits deep in its prose; a real binary's
+    // sits in the header, which is why the window matters.
+    if (content.slice(0, 8192).includes('\u0000')) continue;
 
     const lines = content.split('\n');
     lines.forEach((text, i) => {
@@ -537,8 +582,8 @@ function scan(files, read) {
       // Identity tokens are checked in the FOLDED space (case-insensitive,
       // accent-stripped, homoglyph-normalised) against BOTH the literal line and
       // — when the line carries \uXXXX escapes — its decoded form. A name
-      // spelled as escape sequences is still a published name: ΠΕΡΙΟΧΗ ΘΗΤΑ lived on
-      // in an e9parser comment as ΛΑΓ... through an entire scrub.
+      // spelled as escape sequences is still a published name: one real place
+      // name survived an entire scrub as \uXXXX escapes in an e9parser comment.
       const decoded = decodeUnicodeEscapes(text);
       const foldedText = foldScript(text);
       const foldedDecoded = decoded === null ? null : foldScript(decoded);
@@ -572,11 +617,11 @@ function scan(files, read) {
       }
 
       // DIGIT-STREAM pass. Strip every non-digit and look for the known real
-      // identifiers. This is what catches `GR06 0109 9999 9000 0000 0000 125`
-      // and `2026 0999 9000 0006 74` — spaced forms that the regexes above and
+      // identifiers. This is what catches the group-spaced writings of a real
+      // IBAN and a real ΕΥΔΑΠ document number — forms that the regexes above and
       // three rounds of literal-string grep all walked straight past.
       const stream = digitStream(text);
-      if (stream.length >= 7) {
+      if (stream.length >= 6) {
         for (const run of REAL_BILL_DIGIT_RUNS) {
           if (stream.includes(run)) {
             violations.push({
@@ -586,6 +631,21 @@ function scan(files, read) {
               detail: `digit sequence from a real utility bill / bank receipt (${mask(run)}) — matched ignoring spaces and punctuation`
             });
           }
+        }
+      }
+
+      // Word-bounded denylist patterns: real postcodes, and Latin tokens that
+      // occur inside checksums. Run against the RAW line (bounded, so a hash
+      // interior cannot match) and its \uXXXX-decoded form.
+      for (const { src, re } of DENY_PATTERNS) {
+        const hit = re.test(text) || (decoded !== null && re.test(decoded));
+        if (hit) {
+          violations.push({
+            file,
+            line: i + 1,
+            id: 'real-identity-pattern',
+            detail: `real postcode/identifier matching ${src}`
+          });
         }
       }
     });
