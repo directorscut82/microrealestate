@@ -113,10 +113,19 @@ function NoticeCard({ item, onGone, onNavigate }) {
   });
 
   const Icon = NOTICE_ICON[item.notice?.code] || LuBell;
-  const link =
-    organization && item.notice?.link
-      ? `/${organization}${item.notice.link}`
+  // notice.link comes off a server document and is interpolated into an href.
+  // Today every writer builds it from an ObjectId or a formatted term
+  // (`/tenants/{id}`, `/rents/2026.07`) and no HTTP route can write a notice —
+  // so this is not currently reachable. But "not reachable today" is one
+  // refactor away from "reachable", and an href is the wrong place to find out:
+  // a stored `javascript:…` or `//evil.example` would navigate off-app.
+  // Accept only an app-relative single-slash path.
+  const rawLink = item.notice?.link;
+  const safeLink =
+    typeof rawLink === 'string' && /^\/(?!\/)[A-Za-z0-9._~/-]*$/.test(rawLink)
+      ? rawLink
       : null;
+  const link = organization && safeLink ? `/${organization}${safeLink}` : null;
 
   return (
     <div className="p-4 space-y-2 border-b last:border-b-0">

@@ -312,6 +312,8 @@
   "Energy Class": "Energy Class",
   "Energy Inspector Number": "Número del inspector energético",
   "Enter a rent settlement": "Ingresar un pago de alquiler",
+  "Select a charge to settle": "Seleccione un cargo para liquidar",
+  "Enter at least one charge amount": "Ingrese al menos un monto de cargo",
   "Enter actual expense amounts for a specific month. Amounts will be distributed to units based on allocation method.": "Ingrese los montos reales de gastos para un mes específico. Los montos se distribuirán entre las unidades según el método de asignación.",
   "Enter the details of your property so it can be listed and made available for renting.": "Ingresa los detalles de su propiedad para que pueda ser listada y disponible para alquilar.",
   "Enter your email and we'll send you a link to reset your password": "Introduce tu email y te enviaremos un enlace para restablecer tu contraseña",
