@@ -16,7 +16,10 @@ import { Label } from '../ui/label';
 import NumberFormat from '../NumberFormat';
 import useFormatNumber from '../../hooks/useFormatNumber';
 import { Textarea } from '../ui/textarea';
-import { ownerChargeLabel } from '../../utils/lineLabels';
+import {
+  ownerChargeLabel,
+  ownerChargeScopeLabel
+} from '../../utils/lineLabels';
 import { stableOwnerTxnId } from '../../utils/ownerPayment';
 import {
   Select,
@@ -119,56 +122,61 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
   // Build the payOwner payload for one draft (mirrors the owner allocation
   // contract: omit allocation for auto; one entry for specific; per-charge for
   // custom). Returns null when the draft is empty/invalid.
-  const draftToPayload = useCallback((d) => {
-    const amt = _round(d.amount);
-    if (!(amt > 0)) return null;
-    let allocation;
-    if (d.mode === 'specific') {
-      if (!d.specificId) return { error: t('Select a charge to settle') };
-      allocation = [{ ownerExpenseId: d.specificId, amount: amt }];
-    } else if (d.mode === 'custom') {
-      allocation = Object.entries(d.custom)
-        .map(([ownerExpenseId, v]) => ({ ownerExpenseId, amount: _round(v) }))
-        .filter((a) => a.amount > 0.005);
-      if (allocation.length === 0)
-        return { error: t('Enter at least one charge amount') };
-      const allocSum = _round(allocation.reduce((s, a) => s + a.amount, 0));
-      // Block over-allocation client-side (server would 422). The submitted
-      // amount IS the allocation sum in custom mode, so the toast + the
-      // recorded figure can never disagree.
-      if (allocSum > amt + 0.005) {
-        // R2-M6: org locale/currency, €-free key.
-        return { error: t('Over-allocated by {{amount}}', {
-          amount: formatNumber(allocSum - amt)
-        }) };
+  const draftToPayload = useCallback(
+    (d) => {
+      const amt = _round(d.amount);
+      if (!(amt > 0)) return null;
+      let allocation;
+      if (d.mode === 'specific') {
+        if (!d.specificId) return { error: t('Select a charge to settle') };
+        allocation = [{ ownerExpenseId: d.specificId, amount: amt }];
+      } else if (d.mode === 'custom') {
+        allocation = Object.entries(d.custom)
+          .map(([ownerExpenseId, v]) => ({ ownerExpenseId, amount: _round(v) }))
+          .filter((a) => a.amount > 0.005);
+        if (allocation.length === 0)
+          return { error: t('Enter at least one charge amount') };
+        const allocSum = _round(allocation.reduce((s, a) => s + a.amount, 0));
+        // Block over-allocation client-side (server would 422). The submitted
+        // amount IS the allocation sum in custom mode, so the toast + the
+        // recorded figure can never disagree.
+        if (allocSum > amt + 0.005) {
+          // R2-M6: org locale/currency, €-free key.
+          return {
+            error: t('Over-allocated by {{amount}}', {
+              amount: formatNumber(allocSum - amt)
+            })
+          };
+        }
       }
-    }
-    // In custom mode the payment amount IS the allocation sum (so no surplus
-    // is silently dropped and the toast is truthful); auto/specific use the
-    // typed amount.
-    const payloadAmount =
-      d.mode === 'custom'
-        ? _round(allocation.reduce((s, a) => s + a.amount, 0))
-        : amt;
-    const base = {
-      date: d.date,
-      amount: payloadAmount,
-      type: d.type,
-      reference: d.reference,
-      description: d.description,
-      ...(allocation ? { allocation } : {})
-    };
-    return {
-      payload: {
-        ...base,
-        // Content-derived idempotency key so a retry of the SAME payment (even
-        // after a dialog close/reopen or refresh) reconciles server-side and
-        // records only the not-yet-landed remainder — never double-records a
-        // partial multi-building commit (Step-7 round-5).
-        txnId: stableOwnerTxnId(owner.ownerKey, base)
-      }
-    };
-  }, [t, owner.ownerKey]);
+      // In custom mode the payment amount IS the allocation sum (so no surplus
+      // is silently dropped and the toast is truthful); auto/specific use the
+      // typed amount.
+      const payloadAmount =
+        d.mode === 'custom'
+          ? _round(allocation.reduce((s, a) => s + a.amount, 0))
+          : amt;
+      const base = {
+        date: d.date,
+        amount: payloadAmount,
+        type: d.type,
+        reference: d.reference,
+        description: d.description,
+        ...(allocation ? { allocation } : {})
+      };
+      return {
+        payload: {
+          ...base,
+          // Content-derived idempotency key so a retry of the SAME payment (even
+          // after a dialog close/reopen or refresh) reconciles server-side and
+          // records only the not-yet-landed remainder — never double-records a
+          // partial multi-building commit (Step-7 round-5).
+          txnId: stableOwnerTxnId(owner.ownerKey, base)
+        }
+      };
+    },
+    [t, owner.ownerKey]
+  );
 
   // Refresh every owner/expense surface AND block until the owners cache is
   // fresh — same contract the tenant dialog uses (PaymentTabs await-refetch)
@@ -294,10 +302,32 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
 
   // Per-charge summary row — the owner twin of the rent dialog's owed-line
   // header: label (incl. επισκευές) + Οφειλόμενο / Καταβολή / Υπόλοιπο.
+  // Column header — rendered ONCE per month block instead of repeating the
+  // Οφειλές / Καταβολή / Υπόλοιπο triplet on every single row (with 15+ rows
+  // the labels outweighed the figures, user screenshot 2026-08-02).
+  const renderChargeHeader = () => (
+    <div className="grid grid-cols-[1fr_auto] gap-2 pb-1 border-b border-stone-line/60">
+      <span />
+      <div className="flex items-center gap-4 shrink-0 text-label uppercase tracking-wide text-ink-muted">
+        <span className="w-20 text-right">{t('Owed')}</span>
+        <span className="w-20 text-right">{t('Payment')}</span>
+        <span className="w-20 text-right">{t('Balance')}</span>
+      </div>
+    </div>
+  );
+
   const renderChargeRow = (c) => {
     const paidSoFar = _round(
       (Number(c.amount) || 0) - (Number(c.outstanding) || 0)
     );
+    // WHICH unit this charge bills. Without it, five units in one building
+    // produced five byte-identical rows («Θέρμανση … / <κτίριο>») and the
+    // landlord could not tell which was which — the server has always sent the
+    // discriminator (scope/unitFloor/unitVacant + unitName/unitAtak); this
+    // surface just never read it. Floor alone is NOT unique, hence the name/ΑΤΑΚ.
+    const scope = ownerChargeScopeLabel(t, c);
+    const unitId = c.unitName || c.unitAtak || '';
+    const where = [c.buildingName, scope, unitId].filter(Boolean).join(' · ');
     return (
       <div
         key={c.ownerExpenseId}
@@ -307,22 +337,17 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
           <div className="text-sm text-ink truncate">
             {ownerChargeLabel(t, c)}
           </div>
-          <div className="text-label text-ink-muted">{c.buildingName}</div>
+          <div className="text-label text-ink-muted truncate">{where}</div>
         </div>
         <div className="flex items-center gap-4 shrink-0 text-label tabular-nums">
-          <span className="text-right">
-            <span className="block text-ink-muted">{t('Owed')}</span>
+          <span className="w-20 text-right">
             <NumberFormat value={c.amount} />
           </span>
-          <span className="text-right">
-            <span className="block text-ink-muted">{t('Payment')}</span>
+          <span className="w-20 text-right">
             <NumberFormat value={paidSoFar} />
           </span>
-          <span className="text-right">
-            <span className="block text-ink-muted">{t('Balance')}</span>
-            <span className="text-oxide">
-              <NumberFormat value={c.outstanding} />
-            </span>
+          <span className="w-20 text-right text-oxide">
+            <NumberFormat value={c.outstanding} />
           </span>
         </div>
       </div>
@@ -350,7 +375,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
             type="button"
             variant="ghost"
             size="icon"
-            onClick={() => setDrafts((prev) => prev.filter((_, i) => i !== index))}
+            onClick={() =>
+              setDrafts((prev) => prev.filter((_, i) => i !== index))
+            }
             aria-label={t('Cancel')}
           >
             <LuTrash2 className="size-4" />
@@ -387,7 +414,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                     key={pt.id}
                     value={pt.value}
                     disabled={pt.disabled}
-                    className={pt.disabled ? 'italic text-ink-muted' : undefined}
+                    className={
+                      pt.disabled ? 'italic text-ink-muted' : undefined
+                    }
                   >
                     {pt.label}
                   </SelectItem>
@@ -516,7 +545,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                   </div>
                 ))}
                 <div className="flex justify-between text-xs pt-1 border-t border-stone-line/50">
-                  <span className="text-muted-foreground">{t('Allocated')}</span>
+                  <span className="text-muted-foreground">
+                    {t('Allocated')}
+                  </span>
                   <span className="tabular-nums">
                     <NumberFormat value={customTotal} /> /{' '}
                     <NumberFormat value={draftAmt} />
@@ -537,9 +568,12 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                       ? t('Over-allocated by {{amount}}', {
                           amount: formatNumber(Math.abs(customDelta))
                         })
-                      : t('{{amount}} of this payment is unallocated and will not be recorded.', {
-                          amount: formatNumber(customDelta)
-                        })}
+                      : t(
+                          '{{amount}} of this payment is unallocated and will not be recorded.',
+                          {
+                            amount: formatNumber(customDelta)
+                          }
+                        )}
                   </div>
                 )}
               </div>
@@ -558,7 +592,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
               <Textarea
                 id={`ownerPay.${index}.description`}
                 value={d.description}
-                onChange={(e) => setDraft(index, { description: e.target.value })}
+                onChange={(e) =>
+                  setDraft(index, { description: e.target.value })
+                }
               />
             </div>
           </Collapse>
@@ -590,6 +626,7 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">
                   {_termLabel(term)}
                 </div>
+                {renderChargeHeader()}
                 {charges.map(renderChargeRow)}
               </div>
             ))
@@ -614,7 +651,9 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
               disabled={outstandingCharges.length === 0}
             >
               <LuPlus className="size-4 mr-1" />
-              {drafts.length > 0 ? t('Add another payment') : t('Add a payment')}
+              {drafts.length > 0
+                ? t('Add another payment')
+                : t('Add a payment')}
             </Button>
           </div>
         </div>

@@ -12,6 +12,7 @@ import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import axios from 'axios';
 import { customAlphabet } from 'nanoid';
 import moment from 'moment';
+import { pushNotice } from '../jobs/noticeHelpers.js';
 import {
   validateObjectId,
   validateFiniteNumber,
@@ -90,9 +91,7 @@ async function _fetchBuildingsForProperties(
   properties: AnyRecord[],
   inFlightTenant?: { _id?: string; properties: AnyRecord[] }
 ): Promise<CollectionTypes.Building[]> {
-  const propertyIds = properties
-    .map((p) => p.propertyId)
-    .filter(Boolean);
+  const propertyIds = properties.map((p) => p.propertyId).filter(Boolean);
 
   if (propertyIds.length === 0) return [];
 
@@ -204,7 +203,9 @@ export async function _attachTenantGroupsToBuildings(
     const groups: AnyRecord[] = [];
     for (const t of tenants) {
       const owned = ((t.properties || []) as AnyRecord[])
-        .filter((p) => p.propertyId && buildingPropIds.has(String(p.propertyId)))
+        .filter(
+          (p) => p.propertyId && buildingPropIds.has(String(p.propertyId))
+        )
         .map((p) => ({
           propertyId: String(p.propertyId),
           entryDate: p.entryDate || null,
@@ -269,7 +270,8 @@ async function _recomputeSiblingTenantsInBuildings(
   if (excludeTenantId) {
     tenantFilter._id = { $ne: new Collections.ObjectId(excludeTenantId) };
   }
-  const siblings: AnyRecord[] = await Collections.Tenant.find(tenantFilter).lean();
+  const siblings: AnyRecord[] =
+    await Collections.Tenant.find(tenantFilter).lean();
   if (!siblings.length) return;
 
   // Wave-26 round-3u: see buildingmanager._saveRecomputedRentsWithRetry.
@@ -419,7 +421,9 @@ async function _recomputeVacantOwnerForProperties(
   if (!propertyIds || !propertyIds.length) return;
   try {
     const buildingManager = await import('./buildingmanager.js');
-    if (typeof buildingManager.recomputeVacantOwnerForProperties === 'function') {
+    if (
+      typeof buildingManager.recomputeVacantOwnerForProperties === 'function'
+    ) {
       await buildingManager.recomputeVacantOwnerForProperties(
         realmId,
         propertyIds
@@ -447,7 +451,9 @@ async function _redistributeRepairsForProperties(
   if (!propertyIds || !propertyIds.length) return;
   try {
     const buildingManager = await import('./buildingmanager.js');
-    if (typeof buildingManager.redistributeRepairsForProperties === 'function') {
+    if (
+      typeof buildingManager.redistributeRepairsForProperties === 'function'
+    ) {
       await buildingManager.redistributeRepairsForProperties(
         realmId,
         propertyIds
@@ -474,8 +480,15 @@ async function _syncOccupancyForProperties(
 
   for (const building of buildings) {
     let changed = false;
+    // Units that actually flipped rented→vacant in THIS pass. The notice must
+    // fire only AFTER building.save() succeeds: Building carries
+    // optimisticConcurrency, so a concurrent write makes save() throw
+    // VersionError and the flip never persists — notifying before the save
+    // would alert the landlord about a vacancy that was rolled back.
+    const wentVacant: any[] = [];
     for (const unit of (building as any).units) {
-      if (!unit.propertyId || !propertyIds.includes(String(unit.propertyId))) continue;
+      if (!unit.propertyId || !propertyIds.includes(String(unit.propertyId)))
+        continue;
       // owner_occupied and parking are NOT auto-derived occupancy: the stored
       // occupancyType is the money-authoritative flag (owner_occupied routes the
       // expense share to the resident owner; a per-term recompute reads it), and
@@ -486,10 +499,28 @@ async function _syncOccupancyForProperties(
       // derives "rented" from an ACTIVE tenant on top of the flag
       // (BuildingDashboard.deriveEffectiveOccupancy), so an occupied
       // owner-occupied unit reads as rented WITHOUT mutating the money flag.
-      if (unit.occupancyType === 'owner_occupied' || unit.occupancyType === 'parking') continue;
+      if (
+        unit.occupancyType === 'owner_occupied' ||
+        unit.occupancyType === 'parking'
+      )
+        continue;
 
       const newType = action === 'link' ? 'rented' : 'vacant';
       if (unit.occupancyType !== newType) {
+        // A rented→vacant flip is a silent money event when the building has
+        // chargeOwnerWhenVacant expenses: the owner starts accruing the
+        // unit's share (see _recomputeVacantOwnerForProperties). Collect the
+        // unit now, notify after the save lands.
+        if (unit.occupancyType === 'rented' && newType === 'vacant') {
+          // Snapshot the identifying fields — `unit` is a live subdocument
+          // and the message must describe the unit as it was flipped.
+          wentVacant.push({
+            name: unit.name,
+            unitLabel: unit.unitLabel,
+            atakNumber: unit.atakNumber,
+            propertyId: unit.propertyId
+          });
+        }
         unit.occupancyType = newType;
         changed = true;
       }
@@ -497,8 +528,63 @@ async function _syncOccupancyForProperties(
     if (changed) {
       (building as any).updatedDate = new Date();
       await building.save();
+      // Post-save: the flip is durable, so the notice can't describe a
+      // rolled-back state. Best-effort and NEVER past the lifecycle write
+      // (same rule as the repair recompute: a notification failure must not
+      // fail the tenant update).
+      for (const unit of wentVacant) {
+        _notifyUnitVacant(realmId, building, unit).catch((err) =>
+          logger.warn(
+            `unit-vacant notice failed (non-blocking): ${err?.message || err}`
+          )
+        );
+      }
     }
   }
+}
+
+// Bell + Telegram notice for a unit that just went vacant while the building
+// carries active chargeOwnerWhenVacant expenses.
+//
+// Deduped per (building, unit, UTC DAY) — deliberately NOT per month. A month
+// key swallowed a real money event: unit goes vacant on the 3rd, is re-let on
+// the 10th, the tenant leaves again on the 25th — the second rented→vacant flip
+// resumes the owner's koinochrista share, but the identical month key made
+// createNotice report {created:false} and neither channel said anything. A day
+// key still collapses same-day relink/unlink churn (the case the dedupe is
+// actually for) while letting a genuine re-vacate through.
+//
+// UTC, matching every other dedupeKey in the feature and the scanners' UTC day
+// boundaries — a local-time key rolls over at Athens midnight (UTC+2/+3), so a
+// late-evening flip and the next morning's re-flip could land on the same or
+// different keys depending on the hour.
+async function _notifyUnitVacant(
+  realmId: string,
+  building: any,
+  unit: any
+): Promise<void> {
+  const currentTerm = Number(moment.utc().format('YYYYMM') + '0100');
+  // Same soft-delete predicate billmanager uses (endTerm < current — skip).
+  const hasOwnerBorneExpense = (building.expenses || []).some(
+    (e: any) =>
+      e.chargeOwnerWhenVacant && !(e.endTerm && Number(e.endTerm) < currentTerm)
+  );
+  if (!hasOwnerBorneExpense) return;
+  const service = Service.getInstance();
+  const emailerUrl = service.envConfig.getValues().EMAILER_URL as string;
+  await pushNotice(
+    {
+      realmId,
+      code: 'unit-vacant',
+      // Same guard as the bill-due notice: parenthesise the building only when
+      // it has a name, so an unnamed building can't render «Μονάδα Α1 ()».
+      message: `🏠 Μονάδα ${unit.name || unit.unitLabel || unit.atakNumber}${building.name ? ` (${building.name})` : ''} έμεινε κενή — τα κοινόχρηστα βαρύνουν τον ιδιοκτήτη`,
+      link: `/buildings/${building._id}`,
+      dedupeKey: `vacant:${building._id}:${unit.propertyId}:${moment.utc().format('YYYYMMDD')}`
+    },
+    emailerUrl,
+    (role, rId) => service.createServiceToken(role, rId)
+  );
 }
 
 // Auto-link properties to buildings by matching ATAK prefix.
@@ -510,26 +596,31 @@ async function _autoLinkPropertiesToBuildings(
 ): Promise<void> {
   if (!propertyIds.length) return;
 
-  const properties: any[] = await Collections.Property.find(
-    {
+  const properties: any[] = await Collections.Property.find({
     realmId,
     _id: { $in: propertyIds },
-      atakNumber: { $exists: true, $ne: '' },
-      buildingId: { $exists: false }
-    }
-  ).lean();
+    atakNumber: { $exists: true, $ne: '' },
+    buildingId: { $exists: false }
+  }).lean();
 
   if (!properties.length) return;
 
   // Fetch all buildings once and build prefix map
-  const buildings: any[] = await Collections.Building.find({ realmId }, { atakPrefix: 1 }).lean();
-  const prefixMap = new Map(buildings.map((b: any) => [b.atakPrefix, String(b._id)]));
+  const buildings: any[] = await Collections.Building.find(
+    { realmId },
+    { atakPrefix: 1 }
+  ).lean();
+  const prefixMap = new Map(
+    buildings.map((b: any) => [b.atakPrefix, String(b._id)])
+  );
 
   const bulkOps = properties
     .filter((p: any) => p.atakNumber && p.atakNumber.length >= 6)
     .map((p: any) => {
       const buildingId = prefixMap.get(p.atakNumber.substring(0, 6));
-      return buildingId ? { updateOne: { filter: { _id: p._id }, update: { buildingId } } } : null;
+      return buildingId
+        ? { updateOne: { filter: { _id: p._id }, update: { buildingId } } }
+        : null;
     })
     .filter(Boolean);
 
@@ -538,7 +629,10 @@ async function _autoLinkPropertiesToBuildings(
   }
 }
 
-async function _fetchTenants(realmId: string, tenantId?: string | string[]): Promise<AnyRecord[]> {
+async function _fetchTenants(
+  realmId: string,
+  tenantId?: string | string[]
+): Promise<AnyRecord[]> {
   const $match: AnyRecord = {
     realmId
   };
@@ -649,9 +743,7 @@ async function _fetchTenants(realmId: string, tenantId?: string | string[]): Pro
 // rent term to €0 because the contract loop computes negative spans.
 // Wave-20 F8: also reject duplicate propertyIds — the same propertyId
 // appearing twice doubles the billing and corrupts the rent ledger.
-function _validatePropertyWindows(
-  tenant: AnyRecord
-): void {
+function _validatePropertyWindows(tenant: AnyRecord): void {
   const props = tenant.properties as AnyRecord[] | undefined;
   if (!Array.isArray(props) || props.length === 0) return;
 
@@ -702,7 +794,9 @@ function _validatePropertyWindows(
     // these guards an expense could persist with an inverted window and
     // silently never appear on the rent ledger, or appear in the wrong
     // months. amount must be non-negative.
-    const expenses = Array.isArray(p?.expenses) ? (p.expenses as AnyRecord[]) : [];
+    const expenses = Array.isArray(p?.expenses)
+      ? (p.expenses as AnyRecord[])
+      : [];
     for (let j = 0; j < expenses.length; j++) {
       const e = expenses[j];
       if (e?.amount !== undefined && e.amount !== null && e.amount !== '') {
@@ -741,7 +835,8 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
   return (
     !!properties?.length &&
     properties.every(
-      ({ rent, entryDate, exitDate }: AnyRecord) => rent && entryDate && exitDate
+      ({ rent, entryDate, exitDate }: AnyRecord) =>
+        rent && entryDate && exitDate
     )
   );
 }
@@ -776,10 +871,7 @@ function _validateOccupantPayload(body: AnyRecord): void {
     Number.isFinite(Number(body.guarantyPayback)) &&
     Number(body.guarantyPayback) > Number(body.guaranty)
   ) {
-    throw new ServiceError(
-      'guarantyPayback cannot exceed guaranty',
-      422
-    );
+    throw new ServiceError('guarantyPayback cannot exceed guaranty', 422);
   }
 
   // Wave-24 A5: negative properties[].rent silently produced negative
@@ -813,7 +905,8 @@ async function _assertNoDoubleOccupancy(
   incoming: AnyRecord,
   excludeTenantId?: string
 ): Promise<void> {
-  if (!Array.isArray(incoming.properties) || !incoming.properties.length) return;
+  if (!Array.isArray(incoming.properties) || !incoming.properties.length)
+    return;
 
   const incomingBegin = incoming.beginDate
     ? moment.utc(incoming.beginDate)
@@ -872,10 +965,14 @@ async function _assertNoDoubleOccupancy(
     for (const otherProp of (other.properties || []) as AnyRecord[]) {
       const otherPropId = String(otherProp.propertyId || '');
       if (!otherPropId) continue;
-      const incomingW = incomingWindows.find((w) => w.propertyId === otherPropId);
+      const incomingW = incomingWindows.find(
+        (w) => w.propertyId === otherPropId
+      );
       if (!incomingW) continue;
 
-      const oEntry = otherProp.entryDate ? moment.utc(otherProp.entryDate) : null;
+      const oEntry = otherProp.entryDate
+        ? moment.utc(otherProp.entryDate)
+        : null;
       const oExit = otherProp.exitDate ? moment.utc(otherProp.exitDate) : null;
 
       const oFrom = oEntry && oEntry.isAfter(otherBegin) ? oEntry : otherBegin;
@@ -908,7 +1005,12 @@ export async function add(req: Req, res: Res) {
   // _id is also destructured later via _formatTenant, but stripping here
   // prevents accidental retention of __v/realmId from a round-tripped GET.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { _id: _ignoredId, __v: _ignoredV, realmId: _ignoredRealmId, ...rest } = (req.body || {}) as any;
+  const {
+    _id: _ignoredId,
+    __v: _ignoredV,
+    realmId: _ignoredRealmId,
+    ...rest
+  } = (req.body || {}) as any;
   req.body = rest;
 
   // Strict type guard for `name` — hits .trim() later. Mongoose string casts
@@ -992,33 +1094,53 @@ export async function add(req: Req, res: Res) {
   // missing-info warning surfaces them post-create instead.
   const isCompanyTenant = occupant.isCompany === true;
   if (isCompanyTenant) {
-    if (!occupant.company || typeof occupant.company !== 'string' || !occupant.company.trim()) {
+    if (
+      !occupant.company ||
+      typeof occupant.company !== 'string' ||
+      !occupant.company.trim()
+    ) {
       throw new ServiceError(
         'company is required for legal-entity tenants',
         422
       );
     }
-    if (!occupant.legalForm || typeof occupant.legalForm !== 'string' || !occupant.legalForm.trim()) {
+    if (
+      !occupant.legalForm ||
+      typeof occupant.legalForm !== 'string' ||
+      !occupant.legalForm.trim()
+    ) {
       throw new ServiceError(
         'legalForm is required for legal-entity tenants',
         422
       );
     }
   } else {
-    if (!occupant.firstName || typeof occupant.firstName !== 'string' || !occupant.firstName.trim()) {
+    if (
+      !occupant.firstName ||
+      typeof occupant.firstName !== 'string' ||
+      !occupant.firstName.trim()
+    ) {
       throw new ServiceError(
         'firstName is required for natural-person tenants',
         422
       );
     }
-    if (!occupant.lastName || typeof occupant.lastName !== 'string' || !occupant.lastName.trim()) {
+    if (
+      !occupant.lastName ||
+      typeof occupant.lastName !== 'string' ||
+      !occupant.lastName.trim()
+    ) {
       throw new ServiceError(
         'lastName is required for natural-person tenants',
         422
       );
     }
   }
-  if (!occupant.taxId || typeof occupant.taxId !== 'string' || !occupant.taxId.trim()) {
+  if (
+    !occupant.taxId ||
+    typeof occupant.taxId !== 'string' ||
+    !occupant.taxId.trim()
+  ) {
     throw new ServiceError('taxId is required', 422);
   }
   // Tier C1 — AFM checksum. Reject obviously-invalid AFMs at creation
@@ -1046,7 +1168,10 @@ export async function add(req: Req, res: Res) {
     }
   }
   validateFiniteNumber(occupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
-  validateFiniteNumber(occupant.discount, 'discount', { min: 0, max: 10000000 });
+  validateFiniteNumber(occupant.discount, 'discount', {
+    min: 0,
+    max: 10000000
+  });
   // Use isSameOrBefore so equal begin/end dates surface here as 422 rather
   // than later inside Contract.create as a 409 (the contract layer treats
   // equal dates as a duration error).
@@ -1143,7 +1268,12 @@ export async function add(req: Req, res: Res) {
       // Current term = moment.utc().startOf(freq) → matches _currentTermFor.
       const freq = occupant.frequency || 'months';
       const autoPayThroughTerm = markPastPaid
-        ? Number(moment.utc().startOf(freq as moment.unitOfTime.StartOf).format('YYYYMMDDHH'))
+        ? Number(
+            moment
+              .utc()
+              .startOf(freq as moment.unitOfTime.StartOf)
+              .format('YYYYMMDDHH')
+          )
         : undefined;
 
       // Schema default ('months') applies at persistence time. Fall back
@@ -1176,9 +1306,10 @@ export async function add(req: Req, res: Res) {
   });
 
   // Sync building occupancy
-  const linkedPropIds = (newOccupant as any).properties
-    ?.map((p: AnyRecord) => p.propertyId)
-    .filter(Boolean) || [];
+  const linkedPropIds =
+    (newOccupant as any).properties
+      ?.map((p: AnyRecord) => p.propertyId)
+      .filter(Boolean) || [];
   await _syncOccupancyForProperties(realm!._id, linkedPropIds, 'link');
 
   // Wave-20 F1: cohort changed — sibling tenants in the same building(s)
@@ -1196,7 +1327,7 @@ export async function add(req: Req, res: Res) {
   }
 
   const occupants = await _fetchTenants(req.realm!._id, newOccupant._id);
-  res.json(FD.toOccupantData(occupants.length ? occupants[0] : null as any));
+  res.json(FD.toOccupantData(occupants.length ? occupants[0] : (null as any)));
 }
 
 export async function update(req: Req, res: Res) {
@@ -1285,7 +1416,10 @@ export async function update(req: Req, res: Res) {
     }
   }
   validateFiniteNumber(newOccupant.vatRatio, 'vatRatio', { min: 0, max: 1 });
-  validateFiniteNumber(newOccupant.discount, 'discount', { min: 0, max: 10000000 });
+  validateFiniteNumber(newOccupant.discount, 'discount', {
+    min: 0,
+    max: 10000000
+  });
   // Wave-21 C28-B1/B2: deposit field validators. Without these, negative
   // values for guaranty / guarantyPayback are silently persisted and break
   // accounting aggregations downstream.
@@ -1381,30 +1515,30 @@ export async function update(req: Req, res: Res) {
   if (
     newOccupant.endDate &&
     originalOccupantDoc.endDate &&
-    moment.utc(newOccupant.endDate).isBefore(moment.utc(originalOccupantDoc.endDate))
+    moment
+      .utc(newOccupant.endDate)
+      .isBefore(moment.utc(originalOccupantDoc.endDate))
   ) {
     const newEndTerm = Number(
       moment.utc(newOccupant.endDate).format('YYYYMMDDHH')
     );
-    const orphanPaid = ((originalOccupantDoc.rents || []) as AnyRecord[]).filter(
-      (rent: AnyRecord) => {
-        if (!Number.isFinite(Number(rent.term))) return false;
-        if (Number(rent.term) <= newEndTerm) return false;
-        const paidByPayments =
-          rent.payments &&
-          rent.payments.some(
-            (payment: AnyRecord) => Number(payment.amount) > 0
-          );
-        const paidBySettlement = (rent.discounts || []).some(
-          (discount: AnyRecord) => discount.origin === 'settlement'
-        );
-        // R4: settlement-origin debts (extra charges) are recorded money too.
-        const hasSettlementDebt = (rent.debts || []).some(
-          (debt: AnyRecord) => Number(debt.amount) > 0
-        );
-        return !!(paidByPayments || paidBySettlement || hasSettlementDebt);
-      }
-    );
+    const orphanPaid = (
+      (originalOccupantDoc.rents || []) as AnyRecord[]
+    ).filter((rent: AnyRecord) => {
+      if (!Number.isFinite(Number(rent.term))) return false;
+      if (Number(rent.term) <= newEndTerm) return false;
+      const paidByPayments =
+        rent.payments &&
+        rent.payments.some((payment: AnyRecord) => Number(payment.amount) > 0);
+      const paidBySettlement = (rent.discounts || []).some(
+        (discount: AnyRecord) => discount.origin === 'settlement'
+      );
+      // R4: settlement-origin debts (extra charges) are recorded money too.
+      const hasSettlementDebt = (rent.debts || []).some(
+        (debt: AnyRecord) => Number(debt.amount) > 0
+      );
+      return !!(paidByPayments || paidBySettlement || hasSettlementDebt);
+    });
     if (orphanPaid.length) {
       throw new ServiceError(
         `Cannot shrink endDate: ${orphanPaid.length} paid rent term(s) would be orphaned. Reverse those payments first.`,
@@ -1440,18 +1574,21 @@ export async function update(req: Req, res: Res) {
     }
   });
 
-  newOccupant.properties = newOccupant.properties.map((rentedProperty: AnyRecord) => {
-    if (!rentedProperty.property) {
-      const orignalProperty = originalOccupant.properties?.find(
-        ({ propertyId }: AnyRecord) => propertyId === rentedProperty.propertyId
-      );
+  newOccupant.properties = newOccupant.properties.map(
+    (rentedProperty: AnyRecord) => {
+      if (!rentedProperty.property) {
+        const orignalProperty = originalOccupant.properties?.find(
+          ({ propertyId }: AnyRecord) =>
+            propertyId === rentedProperty.propertyId
+        );
 
-      rentedProperty.property =
-        orignalProperty?.property || propertyMap[rentedProperty.propertyId];
+        rentedProperty.property =
+          orignalProperty?.property || propertyMap[rentedProperty.propertyId];
+      }
+
+      return rentedProperty;
     }
-
-    return rentedProperty;
-  });
+  );
 
   // Mirror the cap check from add(): a discount > total rent silently
   // produces negative preTaxAmount → negative VAT → negative grandTotal,
@@ -1493,9 +1630,7 @@ export async function update(req: Req, res: Res) {
     if (newFreq !== oldFreq) {
       const hasRecorded = (originalOccupantDoc.rents || []).some(
         (rent: AnyRecord) =>
-          (rent.payments || []).some(
-            (p: AnyRecord) => Number(p.amount) > 0
-          ) ||
+          (rent.payments || []).some((p: AnyRecord) => Number(p.amount) > 0) ||
           (rent.discounts || []).some(
             (d: AnyRecord) => d.origin === 'settlement' && Number(d.amount) > 0
           ) ||
@@ -1518,10 +1653,12 @@ export async function update(req: Req, res: Res) {
       await _autoLinkPropertiesToBuildings(realm!._id, newPropIds);
 
       // Fetch buildings for both old and new properties to cover property changes
-      const allPropertyIds = [...new Set([
-        ...originalOccupant.properties.map((p: AnyRecord) => p.propertyId),
-        ...newOccupant.properties.map((p: AnyRecord) => p.propertyId)
-      ])];
+      const allPropertyIds = [
+        ...new Set([
+          ...originalOccupant.properties.map((p: AnyRecord) => p.propertyId),
+          ...newOccupant.properties.map((p: AnyRecord) => p.propertyId)
+        ])
+      ];
       const buildings = await _fetchBuildingsForProperties(
         realm!._id,
         allPropertyIds.map((id: string) => ({ propertyId: id })),
@@ -1656,19 +1793,23 @@ export async function update(req: Req, res: Res) {
   const newPropIds = (newOccupant.properties || [])
     .map((p: AnyRecord) => String(p.propertyId))
     .filter(Boolean);
-  const removedPropIds = oldPropIds.filter((id: string) => !newPropIds.includes(id));
-  const addedPropIds = newPropIds.filter((id: string) => !oldPropIds.includes(id));
+  const removedPropIds = oldPropIds.filter(
+    (id: string) => !newPropIds.includes(id)
+  );
+  const addedPropIds = newPropIds.filter(
+    (id: string) => !oldPropIds.includes(id)
+  );
 
-  if (addedPropIds.length) await _syncOccupancyForProperties(realm!._id, addedPropIds, 'link');
-  if (removedPropIds.length) await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
+  if (addedPropIds.length)
+    await _syncOccupancyForProperties(realm!._id, addedPropIds, 'link');
+  if (removedPropIds.length)
+    await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
 
   // Wave-20 F1: any change in cohort membership (added/removed properties)
   // OR change to lease window (terminationDate, endDate) requires sibling
   // tenants in the affected building(s) to re-allocate equal-method
   // expenses for current/future terms.
-  const allTouchedPropIds = Array.from(
-    new Set([...oldPropIds, ...newPropIds])
-  );
+  const allTouchedPropIds = Array.from(new Set([...oldPropIds, ...newPropIds]));
   if (allTouchedPropIds.length) {
     // Re-route repair shares BEFORE the sibling rent recompute so an occupancy
     // change (move-in / move-out / termination) re-bills or releases each
@@ -1685,7 +1826,9 @@ export async function update(req: Req, res: Res) {
   }
 
   const newOccupants = await _fetchTenants(req.realm!._id, occupantId);
-  res.json(FD.toOccupantData(newOccupants.length ? newOccupants[0] : null as any));
+  res.json(
+    FD.toOccupantData(newOccupants.length ? newOccupants[0] : (null as any))
+  );
 }
 
 export async function remove(req: Req, res: Res) {
@@ -1827,7 +1970,9 @@ export async function remove(req: Req, res: Res) {
 
   // Sync building occupancy for removed tenant's properties
   const removedPropIds = occupants.flatMap((o: any) =>
-    (o.properties || []).map((p: AnyRecord) => String(p.propertyId)).filter(Boolean)
+    (o.properties || [])
+      .map((p: AnyRecord) => String(p.propertyId))
+      .filter(Boolean)
   );
   if (removedPropIds.length) {
     await _syncOccupancyForProperties(realm!._id, removedPropIds, 'unlink');
@@ -1869,10 +2014,7 @@ export async function remove(req: Req, res: Res) {
     (tenantDeleteResult?.deletedCount ?? 0) === 0 &&
     idsToArchive.size === 0
   ) {
-    throw new ServiceError(
-      'No records deleted (none of the ids matched)',
-      404
-    );
+    throw new ServiceError('No records deleted (none of the ids matched)', 404);
   }
 
   // Wave-20 F1: post-delete sibling recompute now that the cohort has
@@ -1948,7 +2090,9 @@ export async function all(req: Req, res: Res) {
     expiringWithinDays = Math.floor(parsed);
   }
 
-  const { page, limit, skip, isPaginated } = Pagination.parsePagination(req as any);
+  const { page, limit, skip, isPaginated } = Pagination.parsePagination(
+    req as any
+  );
   const countFilter: AnyRecord = { realmId: req.realm!._id };
   if (!includeArchived) {
     countFilter.$or = [{ archived: { $exists: false } }, { archived: false }];
@@ -1965,7 +2109,9 @@ export async function all(req: Req, res: Res) {
     const today = moment.utc().startOf('day');
     const horizon = moment.utc().add(days, 'days').endOf('day');
     const end = moment.utc(t.endDate);
-    return end.isSameOrAfter(today, 'day') && end.isSameOrBefore(horizon, 'day');
+    return (
+      end.isSameOrAfter(today, 'day') && end.isSameOrBefore(horizon, 'day')
+    );
   };
 
   if (!isPaginated) {
@@ -1975,7 +2121,9 @@ export async function all(req: Req, res: Res) {
       ? tenants
       : tenants.filter((t) => !t.archived);
     if (expiringWithinDays !== null) {
-      filtered = filtered.filter((t) => _isExpiringSoon(t, expiringWithinDays!));
+      filtered = filtered.filter((t) =>
+        _isExpiringSoon(t, expiringWithinDays!)
+      );
     }
     res.json(filtered.map((tenant) => FD.toOccupantData(tenant)));
     return;
@@ -1999,9 +2147,7 @@ export async function all(req: Req, res: Res) {
     const fullTenants = tenantIds.length
       ? await _fetchTenants(req.realm!._id, tenantIds)
       : [];
-    const tenantMap = new Map(
-      fullTenants.map((t) => [String(t._id), t])
-    );
+    const tenantMap = new Map(fullTenants.map((t) => [String(t._id), t]));
     const sorted = tenantIds
       .map((id) => tenantMap.get(id))
       .filter(Boolean) as AnyRecord[];
@@ -2171,16 +2317,13 @@ export async function extendLease(req: Req, res: Res) {
   // a PDF that belongs to one of their co-tenants. The user must pick
   // "Replace in place" or "Create new" for review-kind matches.
   const parsedPrimaryTaxId =
-    parsed?.tenants?.[0]?.taxId ||
-    parsed?.taxId ||
-    null;
+    parsed?.tenants?.[0]?.taxId || parsed?.taxId || null;
   if (
     typeof parsedPrimaryTaxId === 'string' &&
     parsedPrimaryTaxId &&
     typeof existingDoc.taxId === 'string' &&
     existingDoc.taxId &&
-    String(parsedPrimaryTaxId).trim() !==
-      String(existingDoc.taxId).trim()
+    String(parsedPrimaryTaxId).trim() !== String(existingDoc.taxId).trim()
   ) {
     throw new ServiceError(
       "Refusing to extend: the parsed PDF's primary taxId does not match this tenant. If the PDF refers to a co-tenant, use Replace in place or Create new.",
@@ -2259,11 +2402,13 @@ export async function extendLease(req: Req, res: Res) {
         end: existingDoc.endDate,
         frequency: termFrequency,
         terms: Math.ceil(
-          moment.utc(existingDoc.endDate).diff(
-            moment.utc(existingDoc.beginDate),
-            termFrequency as moment.unitOfTime.Diff,
-            true
-          )
+          moment
+            .utc(existingDoc.endDate)
+            .diff(
+              moment.utc(existingDoc.beginDate),
+              termFrequency as moment.unitOfTime.Diff,
+              true
+            )
         ),
         properties: existingDoc.properties,
         buildings,
@@ -2342,11 +2487,7 @@ export async function extendLease(req: Req, res: Res) {
       // repair shares BEFORE the sibling recompute so a month that flipped
       // vacant→occupied picks up its repair share on the tenant's rent.
       await _redistributeRepairsForProperties(realm!._id, propIds);
-      await _recomputeSiblingTenantsInBuildings(
-        realm!._id,
-        propIds,
-        tenantId
-      );
+      await _recomputeSiblingTenantsInBuildings(realm!._id, propIds, tenantId);
       // Extending a lease changes which months a unit is occupied vs
       // vacant — recompute owner vacant shares for the affected buildings.
       await _recomputeVacantOwnerForProperties(realm!._id, propIds);

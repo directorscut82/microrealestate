@@ -5,7 +5,22 @@ import {
   fetchInbox,
   QueryKeys
 } from '../utils/restcalls';
-import { LuAlertTriangle, LuBell, LuCheck, LuPlusCircle } from 'react-icons/lu';
+import {
+  LuAlertTriangle,
+  LuBell,
+  LuCalendarClock,
+  LuCheck,
+  LuCoins,
+  LuFileWarning,
+  LuHome,
+  LuPlusCircle,
+  LuReceipt,
+  LuTimer,
+  LuTrash2,
+  LuWallet
+} from 'react-icons/lu';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import {
   Select,
@@ -58,6 +73,94 @@ const PROVIDER_LABEL = {
   eydap: 'ΕΥΔΑΠ',
   epa: 'ΕΠΑ'
 };
+
+// Icon per server notice code — falls back to the bell for unknown codes so a
+// future server-side code renders sensibly before the client catches up.
+const NOTICE_ICON = {
+  'lease-expiry': LuCalendarClock,
+  'energy-cert': LuFileWarning,
+  'bill-due': LuReceipt,
+  'unpaid-rents': LuTimer,
+  'deposit-unreturned': LuWallet,
+  'holdover-lease': LuCoins,
+  'unit-vacant': LuHome,
+  'inbox-ttl': LuTrash2
+};
+
+/*
+ * NoticeCard — a kind:'notice' InboxItem. The message arrives server-composed
+ * in Greek (the same string that went to Telegram), so it renders as-is, NOT
+ * through t(). Only two actions exist: open the linked surface (when the
+ * notice carries a link) and dismiss. Confirm/charge belong to bills only —
+ * the server 422s a confirm on a notice.
+ */
+function NoticeCard({ item, onGone, onNavigate }) {
+  const { t } = useTranslation('common');
+  const router = useRouter();
+  const organization = router.query?.organization;
+  const queryClient = useQueryClient();
+  const [error, setError] = useState(null);
+
+  const dismissMutation = useMutation({
+    mutationFn: () => dismissInboxItem(item._id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.INBOX] });
+      onGone();
+    },
+    onError: (err) => {
+      setError(err?.response?.data?.message || t('Something went wrong'));
+    }
+  });
+
+  const Icon = NOTICE_ICON[item.notice?.code] || LuBell;
+  const link =
+    organization && item.notice?.link
+      ? `/${organization}${item.notice.link}`
+      : null;
+
+  return (
+    <div className="p-4 space-y-2 border-b last:border-b-0">
+      <div className="flex items-start gap-2.5">
+        <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+        <div className="min-w-0 flex-1 text-sm text-ink">
+          {item.notice?.message}
+        </div>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {moment(item.createdDate).fromNow()}
+        </span>
+      </div>
+      {error && (
+        <div className="text-xs rounded-md bg-destructive/5 border border-destructive/30 p-2 text-destructive">
+          {error}
+        </div>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={dismissMutation.isPending}
+          onClick={() => {
+            setError(null);
+            dismissMutation.mutate();
+          }}
+        >
+          {t('Dismiss')}
+        </Button>
+        {link && (
+          <Link href={link} passHref legacyBehavior>
+            <Button asChild size="sm" variant="secondary">
+              {/* Close the popover on navigate. InboxBell is mounted in
+                  Layout (outside the page component), so a client-side route
+                  change does NOT unmount it — without this the 420px popover
+                  stays portaled over the destination page. */}
+              <a onClick={onNavigate}>{t('Open')}</a>
+            </Button>
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function InboxCard({ item, buildings, onGone }) {
   const { t, lang } = useTranslation('common');
@@ -429,50 +532,74 @@ export default function InboxBell() {
 
   const pending = Array.isArray(items) ? items : [];
   const count = pending.length;
+  // The badge and the «N εκκρεμούν» label mean "needs your action", which is
+  // true of a bill (confirm/dismiss) but NOT of a notice — a notice is an
+  // FYI, and one condition legitimately produces several of them (a bill
+  // warns at 7/1/0/-3 days). Counting notices made the badge read 4 for one
+  // unpaid bill. Bills drive the number; notices only add the dot.
+  const billCount = pending.filter((i) => i.kind !== 'notice').length;
+  const noticeCount = count - billCount;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={t('Incoming bills')}
+          aria-label={t('Notifications')}
           className="relative inline-flex size-9 items-center justify-center rounded-md border border-border bg-background hover:bg-accent"
         >
           <LuBell className="size-[19px] text-muted-foreground" />
-          {count > 0 && (
+          {billCount > 0 ? (
             <span className="absolute -top-1.5 -right-1.5 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-destructive px-1 font-mono text-[11px] font-semibold text-destructive-foreground">
-              {count}
+              {billCount}
             </span>
-          )}
+          ) : noticeCount > 0 ? (
+            // Notices present but nothing to action: a plain dot, no number.
+            <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-oxide" />
+          ) : null}
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[420px] p-0">
         <div className="flex items-baseline justify-between border-b px-4 py-3">
-          <span className="font-medium">{t('Incoming bills')}</span>
-          {count > 0 && (
+          <span className="font-medium">{t('Notifications')}</span>
+          {billCount > 0 && (
             <span className="text-xs text-muted-foreground">
-              {t('{{count}} pending', { count })}
+              {t('{{count}} pending', { count: billCount })}
             </span>
           )}
         </div>
         <div className="max-h-[520px] overflow-y-auto">
           {count === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-              {t(
-                'No pending bills. Send a bill photo to the bot and it will appear here.'
-              )}
+              <div>{t('No pending notifications.')}</div>
+              <div className="mt-1 text-xs">
+                {t(
+                  'Bills sent to the Telegram bot and app alerts appear here.'
+                )}
+              </div>
             </div>
           ) : (
-            pending.map((item) => (
-              <InboxCard
-                key={item._id}
-                item={item}
-                buildings={buildings}
-                onGone={() => {
-                  if (count <= 1) setOpen(false);
-                }}
-              />
-            ))
+            pending.map((item) =>
+              item.kind === 'notice' ? (
+                <NoticeCard
+                  key={item._id}
+                  item={item}
+                  onGone={() => {
+                    if (count <= 1) setOpen(false);
+                  }}
+                  onNavigate={() => setOpen(false)}
+                />
+              ) : (
+                <InboxCard
+                  key={item._id}
+                  item={item}
+                  buildings={buildings}
+                  onGone={() => {
+                    if (count <= 1) setOpen(false);
+                  }}
+                />
+              )
+            )
           )}
         </div>
       </PopoverContent>

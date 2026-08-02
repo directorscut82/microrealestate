@@ -25,7 +25,7 @@
  *   47.9  past terms (2024/2023/2025 etc.): BuildingDashboard headline
  *         shows ONLY current-year totals, not the lifetime sum.
  *   47.10 future-dated lease → "Lease starts in the future" pill, NOT
- *         classified into the expiring-leases tile.
+ *         classified into the expiring-leases set.
  *   47.11 month-boundary clock at the last second of the month → no
  *         off-by-one on the expense window selection.
  *   47.12 Greek tenant name with an apostrophe — round-trip via the API
@@ -1054,7 +1054,7 @@ test('47.9 · past terms 2024/2023/2025 · BuildingDashboard headline shows ONLY
 
 // --- 47.10 -----------------------------------------------------------------
 
-test('47.10 · future-dated lease · "Lease starts in the future" pill, not in expiring tile', async () => {
+test('47.10 · future-dated lease · "Lease starts in the future" pill, not in the expiring set', async () => {
   test.setTimeout(180_000);
   const api = await request.newContext();
   let createdTenantId: string | null = null;
@@ -1151,7 +1151,7 @@ test('47.10 · future-dated lease · "Lease starts in the future" pill, not in e
 
     // The expiring-leases endpoint MUST NOT include this tenant. We pull
     // the rents listing and check that the tenant's earliest rent term
-    // is well past today — the expiring tile only surfaces tenants whose
+    // is well past today — the expiring filter only surfaces tenants whose
     // endDate is within 30/60/90d.
     const tenantsList = (await (
       await api.get(`${GATEWAY}/api/v2/tenants`, { headers })
@@ -1164,7 +1164,7 @@ test('47.10 · future-dated lease · "Lease starts in the future" pill, not in e
     const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
     expect(
       endAsDate.getTime() - Date.now(),
-      'endDate is past the 90d expiring window (NOT in expiring tile)'
+      'endDate is past the 90d expiring window (NOT in the expiring set)'
     ).toBeGreaterThan(ninetyDaysMs);
   } finally {
     if (createdTenantId && cleanupHeaders) {

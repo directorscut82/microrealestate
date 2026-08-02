@@ -6,8 +6,6 @@ import {
   QueryKeys
 } from '../../utils/restcalls';
 import dynamic from 'next/dynamic';
-import ExpiringEnergyCertsTile from '../../components/dashboard/ExpiringEnergyCertsTile';
-import ExpiringLeasesTile from '../../components/dashboard/ExpiringLeasesTile';
 import GeneralFigures from '../../components/dashboard/GeneralFigures';
 import Page from '../../components/Page';
 import PendingBills from '../../components/dashboard/PendingBills';
@@ -115,11 +113,10 @@ function Dashboard() {
               className="md:col-span-5"
               dashboardData={dashboardData}
             />
-            <ExpiringLeasesTile className="md:col-span-5" />
-            <ExpiringEnergyCertsTile
-              className="md:col-span-5"
-              dashboardData={dashboardData}
-            />
+            {/* Expiring-leases + energy-cert tiles removed (user decision
+                2026-08-02): those conditions now arrive as PUSH notifications —
+                bell (InboxItem kind:'notice') + Telegram — via the daily
+                scanners in services/api/src/jobs/. */}
           </div>
         )}
       </div>

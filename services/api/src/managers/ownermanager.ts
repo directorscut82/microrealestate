@@ -227,6 +227,10 @@ type OwnerCharge = {
   scope?: 'building' | 'unit';
   unitFloor?: number | null;
   unitVacant?: boolean;
+  // The unit's own identity, so same-floor units are distinguishable (floor
+  // alone is not unique — see the assignment site for the user report).
+  unitName?: string;
+  unitAtak?: string;
   // present when the charge's unit/building has >1 owner; the charge is
   // attributed once to the canonical owner but flagged co-owned for the UI.
   coOwnerCount?: number;
@@ -608,7 +612,15 @@ export function _aggregateOwners(
           return {
             scope: 'unit' as const,
             unitFloor: u.floor != null ? Number(u.floor) : null,
-            unitVacant: (u.occupancyType || 'vacant') === 'vacant'
+            unitVacant: (u.occupancyType || 'vacant') === 'vacant',
+            // The unit's OWN identity. Floor alone is not a discriminator —
+            // five units on one floor produced five visually-identical charge
+            // rows in the owner-payment dialog (user report 2026-08-02, five
+            // «Θέρμανση … / <κτίριο>» lines with no way to tell them apart).
+            // name/unitLabel is what the landlord typed; atakNumber is the
+            // guaranteed-unique fallback (required by the unit schema).
+            unitName: u.name || u.unitLabel || '',
+            unitAtak: u.atakNumber || ''
           };
         })(),
         // raw recorded payments on this owner row (full, unsliced). For the

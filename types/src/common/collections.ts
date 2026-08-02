@@ -726,8 +726,26 @@ export namespace CollectionTypes {
     updatedDate?: Date;
   };
 
-  export type InboxItemSource = 'telegram' | 'upload';
+  export type InboxItemSource = 'telegram' | 'upload' | 'system';
   export type InboxItemStatus = 'pending' | 'confirmed' | 'dismissed';
+  export type InboxItemKind = 'bill' | 'notice';
+
+  // kind:'notice' payload — a server-composed alert. `message` is the
+  // ready-to-render Greek text (identical to the Telegram message); `link` is
+  // app-relative without the org segment, '' when there is nothing to open.
+  export type InboxItemNotice = {
+    code:
+      | 'lease-expiry'
+      | 'energy-cert'
+      | 'bill-due'
+      | 'unpaid-rents'
+      | 'deposit-unreturned'
+      | 'holdover-lease'
+      | 'unit-vacant'
+      | 'inbox-ttl';
+    message: string;
+    link: string;
+  };
 
   export type InboxItemWarning = {
     level: 'block' | 'warn';
@@ -742,6 +760,11 @@ export namespace CollectionTypes {
     realmId: string;
     source: InboxItemSource;
     status: InboxItemStatus;
+    // Absent on legacy docs — treat missing as 'bill'.
+    kind?: InboxItemKind;
+    notice?: InboxItemNotice | null;
+    // Idempotence key for kind:'notice' items (unique+sparse per realm).
+    dedupeKey?: string;
     parsed: {
       provider?: BillProvider;
       billingId?: string;

@@ -102,3 +102,33 @@ export function ownerChargeLabel(t, charge) {
   if (desc && desc !== base) return `${base}  (${desc})`;
   return base;
 }
+
+/**
+ * Per-unit scope label for an owner charge. The server sends `scope`
+ * ('building' | 'unit') plus `unitFloor` / `unitVacant` (ownermanager.ts
+ * OwnerCharge) precisely so identical-looking lines can be told apart: a
+ * building-wide owner-portion reads «Ολόκληρο κτίριο», a unit line reads its
+ * floor (Ισόγειο / Όροφος N), suffixed ΚΕΝΟ when that unit is vacant.
+ *
+ * Returns '' when the scope is unknown, so callers can omit the suffix.
+ *
+ * This lived privately in owners/[id].js, which is why the OwnerPaymentDialog
+ * still rendered five visually-identical «Θέρμανση (…) / <κτίριο>» rows for
+ * five different units — the discriminator existed server-side and simply was
+ * not read on that surface. One implementation, both surfaces.
+ */
+export function ownerChargeScopeLabel(t, charge) {
+  if (charge?.scope === 'building') return t('Whole building');
+  if (charge?.scope !== 'unit') return '';
+  let floorLabel = '';
+  if (charge.unitFloor === 0) floorLabel = t('Ground floor');
+  else if (typeof charge.unitFloor === 'number')
+    floorLabel = `${t('Floor')} ${charge.unitFloor}`;
+  if (charge.unitVacant) {
+    // ΚΕΝΟ (neuter) per the user. With a known floor: "Ισόγειο — ΚΕΝΟ".
+    return floorLabel
+      ? `${floorLabel} — ${t('Vacant unit')}`
+      : t('Vacant unit');
+  }
+  return floorLabel;
+}

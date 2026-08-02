@@ -94,6 +94,14 @@ export async function confirm(req: Req, res: Res): Promise<void> {
   if (!item) {
     throw new ServiceError('Το στοιχείο εισερχομένων δεν βρέθηκε', 404);
   }
+  // kind:'notice' items carry no parsed bill — running them through the
+  // confirmBills pipeline would insert a garbage Bill. Dismiss is the only
+  // write a notice accepts.
+  if (item.kind === 'notice') {
+    throw new ServiceError(
+      'Μια ειδοποίηση δεν μπορεί να καταχωρηθεί ως λογαριασμός', 422
+    );
+  }
 
   const {
     buildingId,

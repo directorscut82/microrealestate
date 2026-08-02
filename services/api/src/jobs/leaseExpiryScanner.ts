@@ -1,7 +1,9 @@
 import { Collections, logger, Service } from '@microrealestate/common';
 import type { ConnectionRole } from '@microrealestate/types';
 import axios from 'axios';
+import { createNotice, notifyTelegram } from './noticeHelpers.js';
 import moment from 'moment';
+import { runNoticeScans } from './noticeScanner.js';
 
 // Days-before-expiry that should trigger a notice. Each tenant is matched
 // against the "in N days" window (±0.5 day) so the scanner is tolerant of
@@ -43,52 +45,11 @@ const TEMPLATE_NAME = 'lease_expiry_notice';
 export const ENERGY_CERT_VALIDITY_YEARS = 5;
 export const ENERGY_CERT_DAY_WINDOWS: number[] = [60, 30, 7];
 
-// Outcome of a Telegram admin notification. The lease path ignores this (the
-// email is its channel of record; the Telegram ping is a best-effort extra).
-// The energy-cert path is Telegram-ONLY, so it must know whether the message
-// actually went out before it records the per-window debounce (N1).
-interface TelegramNotifyResult {
-  delivered: boolean;
-  // 503 → Telegram not configured for this realm. A permanent-until-admin-acts
-  // condition, distinct from a transient delivery failure.
-  notConfigured: boolean;
-}
-
-// POST a Telegram admin notification through the emailer (which holds the
-// encrypted bot token). Auth uses the same short-lived service token as the
-// email path. Never throws (never aborts the scan) — it reports the outcome
-// so the caller decides whether the notice counts as sent.
-async function _notifyTelegram(
-  emailerUrl: string,
-  mintToken: (role: ConnectionRole, realmId: string) => Promise<string>,
-  realmId: string,
-  text: string
-): Promise<TelegramNotifyResult> {
-  try {
-    const serviceToken = await mintToken('administrator', realmId);
-    await axios.post(
-      `${emailerUrl}/telegram`,
-      { text },
-      {
-        headers: {
-          authorization: `Bearer ${serviceToken}`,
-          organizationid: realmId
-        },
-        timeout: 15_000
-      }
-    );
-    return { delivered: true, notConfigured: false };
-  } catch (err: any) {
-    // 503 = Telegram not configured for this realm — normal, stay quiet.
-    if (err?.response?.status === 503) {
-      return { delivered: false, notConfigured: true };
-    }
-    logger.warn(
-      `expiry-scanner telegram notify failed (non-blocking): ${err?.message || err}`
-    );
-    return { delivered: false, notConfigured: false };
-  }
-}
+// Telegram plumbing (TelegramNotifyResult + the sender) lives in
+// noticeHelpers.ts so every scanner shares ONE implementation. The lease path
+// treats it as fire-and-forget (email is its channel of record); the
+// energy-cert path is Telegram-ONLY and gates its debounce on `delivered`
+// (N1).
 
 export interface ExpiryScanDeps {
   emailerUrl: string;
@@ -111,6 +72,9 @@ export interface ExpiryScanDeps {
   // suite can drive the send path without a Service bootstrap (otherwise
   // createServiceToken throws and every send silently lands in the catch).
   mintToken?: (role: ConnectionRole, realmId: string) => Promise<string>;
+  // Bell-notice insert seam (defaults to noticeHelpers.createNotice, which
+  // hits mongo). Same rationale as the hooks above.
+  createNotice?: typeof createNotice;
 }
 
 interface ScanResult {
@@ -210,6 +174,8 @@ export async function checkExpiringLeases(
     ((role: ConnectionRole, realmId: string) =>
       Service.getInstance().createServiceToken(role, realmId));
 
+  const insertNotice = deps.createNotice || createNotice;
+
   for (const tenant of tenants) {
     if (!tenant.endDate) {
       result.skipped++;
@@ -295,15 +261,27 @@ export async function checkExpiringLeases(
       logger.info(
         `lease-expiry-notice sent to tenant ${tenant._id} (expires in ${daysUntil}d)`
       );
+      const leaseNoticeText = `⏳ Μίσθωση λήγει σε ${daysUntil} ημέρ${daysUntil === 1 ? 'α' : 'ες'}: ${tenant.name} (${moment.utc(tenant.endDate).format('DD/MM/YYYY')})`;
       // Telegram admin ping — piggybacks on the SAME per-window debounce as
       // the email (we only reach here when the window fired), so no extra
       // timers or state. Best-effort.
-      await _notifyTelegram(
+      await notifyTelegram(
         emailerUrl,
         mintToken,
         String(tenant.realmId),
-        `⏳ Μίσθωση λήγει σε ${daysUntil} ημέρ${daysUntil === 1 ? 'α' : 'ες'}: ${tenant.name} (${moment.utc(tenant.endDate).format('DD/MM/YYYY')})`
+        leaseNoticeText
       );
+      // Bell notice — same text, same window; createNotice (NOT pushNotice)
+      // because the Telegram ping above already went out. The dedupeKey pins
+      // (tenant, endDate, window) so a re-run after a markSent-race can't
+      // duplicate the bell item.
+      await insertNotice({
+        realmId: String(tenant.realmId),
+        code: 'lease-expiry',
+        message: leaseNoticeText,
+        link: `/tenants/${tenant._id}`,
+        dedupeKey: `lease-expiry:${tenant._id}:${moment.utc(tenant.endDate).format('YYYYMMDD')}:${daysUntil}`
+      });
     } catch (err: any) {
       // J1C-004: distinguish a structural skip ("no registered realm
       // members" — admin hasn't invited anyone) from a real failure.
@@ -326,6 +304,15 @@ export async function checkExpiringLeases(
         logger.warn(
           `lease-expiry-notice: tenant ${tenant._id} realm has no recipients — marked window ${daysUntil} as sent to avoid retry loop`
         );
+        // The email channel is structurally dead for this realm, but the BELL
+        // still works — surface the expiry there so the window isn't silent.
+        await insertNotice({
+          realmId: String(tenant.realmId),
+          code: 'lease-expiry',
+          message: `⏳ Μίσθωση λήγει σε ${daysUntil} ημέρ${daysUntil === 1 ? 'α' : 'ες'}: ${tenant.name} (${moment.utc(tenant.endDate).format('DD/MM/YYYY')})`,
+          link: `/tenants/${tenant._id}`,
+          dedupeKey: `lease-expiry:${tenant._id}:${moment.utc(tenant.endDate).format('YYYYMMDD')}:${daysUntil}`
+        });
         continue;
       }
       result.errors++;
@@ -389,6 +376,7 @@ export async function checkExpiringEnergyCerts(
     deps.mintToken ||
     ((role: ConnectionRole, realmId: string) =>
       Service.getInstance().createServiceToken(role, realmId));
+  const insertNotice = deps.createNotice || createNotice;
 
   const properties: any[] = await Collections.Property.find({
     'energyCertificate.issueDate': { $gte: issueStart, $lte: issueEnd }
@@ -423,17 +411,29 @@ export async function checkExpiringEnergyCerts(
     }
 
     try {
-      const notify = await _notifyTelegram(
+      const certNoticeText = `📜 Ενεργειακό πιστοποιητικό λήγει σε ${daysUntil} ημέρ${
+        daysUntil === 1 ? 'α' : 'ες'
+      }: ${property.name} (έκδοση ${moment
+        .utc(cert.issueDate)
+        .format('DD/MM/YYYY')}, λήξη ${moment
+        .utc(expiresAt)
+        .format('DD/MM/YYYY')})`;
+      // Bell notice FIRST — Telegram was the only channel here (N1), which
+      // meant a not-configured realm never saw cert expiries at all. The bell
+      // works regardless of Telegram config, so it is now the channel of
+      // record; the per-window Telegram debounce below is unchanged.
+      await insertNotice({
+        realmId: String(property.realmId),
+        code: 'energy-cert',
+        message: certNoticeText,
+        link: `/properties/${property._id}`,
+        dedupeKey: `energy-cert:${property._id}:${moment.utc(expiresAt).format('YYYYMMDD')}:${daysUntil}`
+      });
+      const notify = await notifyTelegram(
         emailerUrl,
         mintToken,
         String(property.realmId),
-        `📜 Ενεργειακό πιστοποιητικό λήγει σε ${daysUntil} ημέρ${
-          daysUntil === 1 ? 'α' : 'ες'
-        }: ${property.name} (έκδοση ${moment
-          .utc(cert.issueDate)
-          .format('DD/MM/YYYY')}, λήξη ${moment
-          .utc(expiresAt)
-          .format('DD/MM/YYYY')})`
+        certNoticeText
       );
 
       // N1 (audit-2026-07): Telegram is the ONLY channel for cert notices, so
@@ -550,6 +550,14 @@ export async function runOncePerUtcDay(
       logger.error(
         `energy-cert-scanner: top-level failure: ${err?.message || err}`
       );
+    }
+    // Notice scans (bill due, unpaid-rents digest, deposits, holdover,
+    // inbox-TTL) share the same daily slot too — runNoticeScans try/catches
+    // each scan internally and logs its own summary.
+    try {
+      await runNoticeScans(deps);
+    } catch (err: any) {
+      logger.error(`notice-scans: top-level failure: ${err?.message || err}`);
     }
     return r;
   } catch (err: any) {

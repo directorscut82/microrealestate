@@ -1,40 +1,32 @@
 /**
- * Spec 32 — ExpiringLeasesTile (Dashboard).
+ * Spec 32 — GET /api/v2/tenants?expiringWithin=N (HTTP filter).
  *
- * Surface: webapps/landlord/src/components/dashboard/ExpiringLeasesTile.js,
- * mounted on /[organization]/dashboard. Tile renders the rows returned by
- * GET /api/v2/tenants?expiringWithin=60 (HORIZON_DAYS), filtered client-side
- * to (endDate present, !terminationDate, !archived, days in [0..60]).
+ * Surface: services/api/src/managers/occupantmanager.ts — the
+ * `?expiringWithin=N` query filter (window bounds + archived exclusion).
+ *
+ * HISTORY (2026-08-02): this spec also asserted the dashboard
+ * ExpiringLeasesTile UI. That tile was REMOVED — lease expiry is now a push
+ * notification (bell InboxItem kind:'notice' + Telegram) produced by the
+ * daily scanner. The tile-UI assertions and the blur+focus refetch block
+ * were deleted with it; the server-side filter contract below is unchanged.
  *
  * Coverage targets:
  *  - J-1C: HTTP filter `?expiringWithin=N` — happy path + bounds (-1, 4000).
- *  - Tile UI: tile body row count matches API count for the same horizon.
  *  - Archived exclusion: the API filter MUST drop archived tenants even when
  *    their endDate is inside the window.
  *
  * Discipline (per .kiro/steering/test-running-guide.md):
- *  - Set-narrowing via toHaveCount (NOT tautological toBeVisible).
+ *  - Set-narrowing on the OUR-fixtures axis, not tautological assertions.
  *  - Status assertion on every awaited HTTP response.
- *  - Refetch resilience: blur+focus → re-assert tile count holds.
- *  - No waitForTimeout — wait on responses / locators / expect.poll.
  *
  * Seeds (3 fresh tenants, unique AFMs, namespaced names with timestamp so
  * concurrent reruns don't collide and a stale leftover from an earlier run
  * cannot satisfy the count assertion):
- *  - A: endDate today + 5d, NOT archived → in 60-day tile window AND in
- *       N=20 day API window. Tile MUST show exactly this one row.
- *  - B: endDate today + 90d, NOT archived → OUTSIDE 60-day tile window
- *       AND outside N=20 day API window. Must NOT appear in tile / API.
- *  - C: endDate today + 5d, ARCHIVED → server-side filter drops archived
- *       even though endDate is inside both windows. Excluded from tile /
- *       API regardless of N.
- *
- * NOTE on the choice of B = +90d (vs the briefing's "+45d"): the tile's
- * HORIZON_DAYS is hard-coded to 60 in the component. With +45d, B would
- * still satisfy the tile's 60-day window and the load-bearing
- * "Tile MUST show count=1" assertion would fail. +90d is unambiguously
- * outside the tile's window, which is the property the spec actually
- * cares about: in-window vs out-of-window vs archived.
+ *  - A: endDate today + 5d, NOT archived → inside both the 60-day and the
+ *       N=20 API window.
+ *  - B: endDate today + 90d, NOT archived → outside both windows.
+ *  - C: endDate today + 5d, ARCHIVED → the server-side filter drops archived
+ *       even though endDate is inside both windows.
  */
 import { expect, request, test, Page, APIRequestContext } from '@playwright/test';
 import { getAccessToken } from './lib/api';
@@ -245,21 +237,9 @@ async function teardownFixtures(api: APIRequestContext, fx: FixtureSet) {
   await deleteTenantHard(api, fx.token, fx.realmId, fx.tenantCId);
 }
 
-async function signInUI(page: Page) {
-  await page.goto('signin');
-  await page.locator('input[name=email]').fill(TEST_EMAIL);
-  await page.locator('input[name=password]').fill(TEST_PASSWORD);
-  await page.locator('[data-cy=submit]').first().click();
-  await expect
-    .poll(() => new URL(page.url()).pathname, { timeout: 20_000 })
-    .toMatch(/\/(firstaccess|dashboard)/);
-}
 
 test.describe('ExpiringLeasesTile — J-1C HTTP filter, tile UI, archived exclusion', () => {
-  test('tile row count matches `expiringWithin` API; archived excluded; bounds 422', async ({
-    page,
-    context
-  }) => {
+  test('`expiringWithin` HTTP filter: happy path, archived excluded, bounds 422', async () => {
     test.setTimeout(180_000);
 
     // ----- arrange: API seeds + token -----
@@ -358,103 +338,13 @@ test.describe('ExpiringLeasesTile — J-1C HTTP filter, tile UI, archived exclus
           '(A in window, B out, C archived)'
       ).toBe(1);
 
-      // -----------------------------------------------------------------
-      // UI: dashboard ExpiringLeasesTile renders the API result
-      // -----------------------------------------------------------------
-      await signInUI(page);
+      // The tile-UI half of this test (and its blur+focus refetch
+      // assertions) was removed on 2026-08-02 together with the
+      // ExpiringLeasesTile component: lease expiry is now a PUSH
+      // notification (bell InboxItem kind:'notice' + Telegram) emitted by
+      // the daily scanner, not a dashboard tile. The HTTP-filter contract
+      // asserted above is the durable part and is unaffected.
 
-      // The dashboard query mounts at /[organization]/dashboard.
-      await page.goto(`${encodeURIComponent(fx.realmName)}/dashboard`);
-
-      // Wait for the tile heading. The tile renders a table when rows exist
-      // and a "No leases expiring..." stub otherwise. We have at least our
-      // seeded A in the tile, so the table form is the expected branch.
-      const tileHeader = page.getByText(/Expiring leases|Λήξη μίσθωσης|Λήξεις μισθώσεων/i).first();
-      await expect(tileHeader, 'tile heading must render').toBeVisible({ timeout: 30_000 });
-
-      // Locate the tile card by ascending from the heading; restrict row
-      // queries to that card so PendingBills / GeneralFigures rows can't
-      // pollute the count.
-      const tileCard = tileHeader.locator(
-        'xpath=ancestor::*[contains(@class,"Card") or self::*][1]/ancestor-or-self::div[.//table or .//*[contains(text(),"No leases expiring") or contains(text(),"Καμία")]][1]'
-      );
-
-      // Our row MUST be present (set-narrowing: assert by exact tenant name).
-      const ourRow = page.locator('tr', {
-        has: page.locator(`td:has-text("${fx.tenantAName}")`)
-      });
-      await expect(
-        ourRow,
-        'tile body MUST contain the +5d non-archived tenant row'
-      ).toHaveCount(1, { timeout: 20_000 });
-
-      // Negative assertions: B (out of window) and C (archived) must NOT
-      // appear as tile rows.
-      const bRow = page.locator('tr', {
-        has: page.locator(`td:has-text("${fx.tenantBName}")`)
-      });
-      await expect(
-        bRow,
-        'tile MUST NOT show the +90d tenant — outside the tile horizon'
-      ).toHaveCount(0);
-      const cRow = page.locator('tr', {
-        has: page.locator(`td:has-text("${fx.tenantCName}")`)
-      });
-      await expect(
-        cRow,
-        'tile MUST NOT show the archived tenant — server filter drops archived'
-      ).toHaveCount(0);
-
-      // Set-narrowing across our fixture axis: the tile's representation of
-      // OUR seeded tenants must equal the API's count (1). We don't assert
-      // total tile row count because the realm may host pre-existing
-      // expiring tenants from other specs / manual data — but the COUNT of
-      // our specific E2E-Expiring-* names in the tile must match what the
-      // API returned for the tile horizon.
-      const allTileTenantCells = page.locator('tr td:has-text("E2E-Expiring-")');
-      // Count cells that are our specific run's names (timestamp-suffixed).
-      const tileRowsForOurFixtures = await allTileTenantCells.evaluateAll(
-        (els, names: string[]) =>
-          els
-            .map((el) => el.textContent?.trim() || '')
-            .filter((t) => names.includes(t)).length,
-        [fx.tenantAName, fx.tenantBName, fx.tenantCName]
-      );
-      expect(
-        tileRowsForOurFixtures,
-        `tile UI must surface exactly ${ourCountInTileApi} of our 3 seeded tenants ` +
-          `(matched the API's expiringWithin=60 result)`
-      ).toBe(ourCountInTileApi);
-
-      // -----------------------------------------------------------------
-      // Refetch resilience: blur+focus → tile count stable
-      // -----------------------------------------------------------------
-      // refetchOnMount is 'always' on the tile's useQuery — but window-focus
-      // refetch can race a parent re-render. Open an aux tab, return, and
-      // re-assert that the tile still shows the same row count. The
-      // previous-realm regression class: parent tenants/leases queries
-      // refetch on focus, the dashboard re-renders, and the tile briefly
-      // mounts an empty body before the data resolves. The assertion
-      // (toHaveCount=1 with the 20s default) covers that race.
-      const aux = await context.newPage();
-      await aux.goto('about:blank');
-      await aux.bringToFront();
-      await page.bringToFront();
-
-      await expect(
-        ourRow,
-        'after blur+focus, tile MUST still show the +5d row (refetch resilience)'
-      ).toHaveCount(1, { timeout: 20_000 });
-      await expect(
-        bRow,
-        'after blur+focus, tile MUST still NOT show the +90d row'
-      ).toHaveCount(0);
-      await expect(
-        cRow,
-        'after blur+focus, tile MUST still NOT show the archived row'
-      ).toHaveCount(0);
-
-      await aux.close();
     } finally {
       // ----- teardown: best-effort tenant cleanup -----
       await teardownFixtures(apiCtx, fx);

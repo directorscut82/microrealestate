@@ -33,6 +33,7 @@ function tenant({ _id, daysFromNow, terminated, archived, lastSent }) {
 function makeDeps({ tenants, recentEmails }) {
   const sent = [];
   const marked = [];
+  const notices = [];
   const deps = {
     emailerUrl: 'http://test/emailer',
     now: () => FIXED_NOW,
@@ -52,9 +53,18 @@ function makeDeps({ tenants, recentEmails }) {
     // throws and every send would silently land in the catch, leaving
     // result.sent at 0). Mirrors the production seam added to
     // leaseExpiryScanner.ts ExpiryScanDeps.mintToken.
-    mintToken: jest.fn(async () => 'test-service-token')
+    mintToken: jest.fn(async () => 'test-service-token'),
+    // Bell-notice seam. WITHOUT this the scanner falls through to the real
+    // Collections.InboxItem.create(), which mongoose buffers against a
+    // connection jest never opens — every firing-window test then dies on the
+    // 5s timeout rather than failing an assertion. (That is exactly how this
+    // harness broke when the bell notice was added.)
+    createNotice: jest.fn(async (input) => {
+      notices.push(input);
+      return { created: true };
+    })
   };
-  return { deps, sent, marked };
+  return { deps, sent, marked, notices };
 }
 
 describe('leaseExpiryScanner', () => {
@@ -99,6 +109,38 @@ describe('leaseExpiryScanner', () => {
     expect(sent[0].body.params.daysUntilExpiry).toBe(30);
     expect(marked).toHaveLength(1);
     expect(marked[0].tenantId).toBe('t30');
+  });
+
+  test('a firing window also creates the bell notice (same text, tenant deep-link, per-window dedupeKey)', async () => {
+    const tenants = [tenant({ _id: 't30', daysFromNow: 30 })];
+    const { deps, notices } = makeDeps({ tenants });
+    const r = await checkExpiringLeases(deps);
+    expect(r.sent).toBe(1);
+    expect(notices).toHaveLength(1);
+    expect(notices[0].code).toBe('lease-expiry');
+    expect(notices[0].link).toBe('/tenants/t30');
+    expect(notices[0].message).toContain('Μίσθωση λήγει σε 30');
+    expect(notices[0].message).toContain('Tenant t30');
+    expect(notices[0].dedupeKey).toMatch(/^lease-expiry:t30:\d{8}:30$/);
+  });
+
+  test('the no-recipients structural skip still creates the bell notice (bell works when email cannot)', async () => {
+    const tenants = [tenant({ _id: 't7', daysFromNow: 7 })];
+    const { deps, marked, notices } = makeDeps({ tenants });
+    deps.postEmail = jest.fn(async () => {
+      const err = new Error('unprocessable');
+      err.response = {
+        status: 422,
+        data: { error: 'missing recipient list' }
+      };
+      throw err;
+    });
+    const r = await checkExpiringLeases(deps);
+    expect(r.skipped).toBe(1);
+    expect(marked).toHaveLength(1); // window marked to stop the retry loop
+    expect(notices).toHaveLength(1);
+    expect(notices[0].code).toBe('lease-expiry');
+    expect(notices[0].dedupeKey).toMatch(/^lease-expiry:t7:\d{8}:7$/);
   });
 
   test('tenant ending in exactly 7 days fires', async () => {

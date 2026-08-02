@@ -666,6 +666,31 @@ const PATTERNS = [
       // JWT shapes are the two that actually occur in this repo's tests.
       if (/^\$2[aby]\$[0-9]{2}\$/.test(v)) return false;
       if (/^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(v)) return false;
+      // A LOCALE TRANSLATION PAIR is a label, not an assignment. next-translate
+      // JSON maps an English UI string to its translation, so a settings-form
+      // label whose text happens to contain the word secret/token/password
+      // matches the credential-key regex above with a "value" that is just the
+      // same words in another language. Three such labels in the de-DE file
+      // fired on a commit whose only real finding was elsewhere — and 3-of-4
+      // noise is how a guard trains you to reach for PII_SCAN_SKIP.
+      //
+      // Detected STRUCTURALLY (quoted spaced-words, colon, quoted text), NOT by
+      // exempting locale paths. That distinction is the point: a real credential
+      // pasted into a locale file is still caught, because a credential is not
+      // spaced English words on the left of the colon. Verified by positive
+      // control — a real password planted under a `password` key in a .json
+      // still blocks the commit.
+      //
+      // No example pair is spelled out here on purpose: this file is scanned
+      // like any other, so an illustrative pair in a comment is itself a match.
+      // The first version of this comment blocked its own commit.
+      // `m` is only the tail from the keyword onward (the rule's `re` starts at
+      // pass|secret|token…), so the pair must be recognised on that tail: a
+      // quote, colon, then a quoted value made of letters/spaces/hyphens only.
+      // A credential has digits or symbols; a UI label does not.
+      if (/^[a-z_]*["']\s*:\s*["'][\p{L} .\-]+["']$/iu.test(m.trim())) {
+        return false;
+      }
       return looksHighEntropy(v);
     },
     describe: 'high-entropy literal assigned to a credential-shaped key'

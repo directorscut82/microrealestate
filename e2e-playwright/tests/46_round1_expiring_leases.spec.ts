@@ -1,65 +1,45 @@
 /**
- * Spec 46 — Round-1 ExpiringLeasesTile + GET /tenants?expiringWithin
- *           + cron debounce contract.
+ * Spec 46 — GET /tenants?expiringWithin + lease-expiry scanner debounce
+ *           contract.
  *
  * Surface:
- *  - webapps/landlord/src/components/dashboard/ExpiringLeasesTile.js
- *    mounted on /[organization]/dashboard.
  *  - GET /api/v2/tenants?expiringWithin=N (HTTP filter — services/api/src/
  *    managers/occupantmanager.ts).
  *  - services/api/src/jobs/leaseExpiryScanner.ts per-window debounce
  *    (expiryNoticesSent[{window, sentAt}]).
  *
- * Coverage targets (from briefing's required tests 1-9):
- *  1. Empty state — "No leases expiring in the next 60 days" copy.
- *  2. Three rows at +5d / +30d / +59d → toHaveCount(3); each row's
- *     date column shows DD/MM/YY (NOT "Invalid date" — J1C-001 fix).
+ * HISTORY (2026-08-02): this spec had 9 tests, 5 of which asserted the
+ * dashboard ExpiringLeasesTile. That tile was REMOVED — lease expiry is now
+ * a push notification (bell InboxItem kind:'notice' + Telegram) produced by
+ * the daily scanner, not a dashboard surface. The 5 tile tests and the
+ * tile-UI tails of tests 3/6/7 were deleted with it; the 4 surviving tests
+ * are the server-side contracts, which are unchanged by the UI removal.
+ *
+ * Coverage now:
  *  3. Archived tenant near expiry → excluded server-side.
- *  4. Description text "Tenants whose lease ends within the next 60 days"
- *     (J1C-005 — used to be a fixed end-of-window date).
- *  5. "Open tenant" button label (J1C-003) → click navigates to
- *     /tenants/[id].
- *  6. Per-window debounce: a tenant with expiryNoticesSent[{window:30}] at
- *     T whose endDate is bumped to T+7d (different window) MUST still be
- *     surfaceable — the in-row debounce record for window 30 does NOT
- *     suppress the 7-day window. This is the data-shape contract the
- *     scanner reads.
- *  7. Per-window debounce same-window suppression: the in-row record for
- *     window 30 sentAt=T blocks a re-send of the 30-day window for the
- *     next (windowDays + 1) days — verified via the data shape. The HTTP
- *     filter still returns the tenant (debounce is scanner-side only).
- *  8. Empty-recipient realm: scanner's structural-skip path (J1C-004) —
- *     verified by the in-row marker contract: the scanner MUST mark the
- *     window as sent so the cron doesn't loop. We assert the schema
- *     accepts {window, sentAt} writes round-trip via mongo readback.
- *  9. Tile refetch resilience: PATCH endDate, return to dashboard, blur+
- *     focus → tile reflects the new date.
+ *  6. Per-window debounce: an expiryNoticesSent[{window:30}] record does NOT
+ *     suppress a later 7-day window — the data-shape contract the scanner
+ *     reads.
+ *  7. Same-window suppression: the window-30 record is the contract the
+ *     scanner reads; the HTTP filter still returns the tenant (debounce is
+ *     scanner-side only).
+ *  8. Empty-recipient realm structural-skip (J1C-004): the schema accepts
+ *     {window, sentAt} round-trips so the cron marks the window and doesn't
+ *     loop.
  *
  * Why 6/7/8 are NOT scanner subprocess invocations:
  *  The scanner only runs in-process under the api container (cron tick).
  *  There is no HTTP route that exposes checkExpiringLeases() with mocked
  *  deps — that's the canonical jest unit-test surface (services/api/src/
- *  __tests__/leaseExpiryScanner.test.js, 11 cases). This spec instead
- *  asserts the data-state CONTRACT the scanner depends on:
- *    - expiryNoticesSent[] is an array of {window, sentAt} entries
- *    - the GET filter does NOT apply per-window debounce (that's
- *      scanner-side only; the tile shows expiring tenants regardless of
- *      whether a notice has been emitted)
- *    - mongo round-trips the schema cleanly so a future scanner pass
- *      reading the field gets the same shape jest tests already cover.
- *  The combination (jest unit tests for scanner logic + this spec's
- *  contract assertions) covers the same surface area as a full
- *  end-to-end scanner harness without rebuilding container exec
- *  infrastructure.
+ *  __tests__/leaseExpiryScanner.test.js). This spec instead asserts the
+ *  data-state CONTRACT the scanner depends on. The bell-notice creation the
+ *  scanner now also performs is covered by that same jest suite.
  *
  * Discipline (per .kiro/steering/test-running-guide.md):
  *  - Set-narrowing via toHaveCount, NOT tautological toBeVisible.
  *  - Status assertion on every awaited HTTP response.
- *  - blur+focus refetch resilience for the tile.
  *  - No waitForTimeout — wait on responses / locators / expect.poll.
- *  - Idempotent fixtures: ephemeral realm with timestamp suffix so
- *    parallel runs and partial-cleanup leftovers can't corrupt assertions.
- *  - Mongo cleanup is best-effort; spec is repeatable across runs.
+ *  - Fixtures namespaced by discriminator; cleanup by name prefix.
  */
 import {
   expect,
@@ -87,11 +67,8 @@ const TEST_CURRENCY = process.env.TEST_CURRENCY || 'EUR';
 //   500000004 → 5*256 mod 11 mod 10 = 4 ✓
 //   600000007 → 6*256 mod 11 mod 10 = 7 ✓
 const AFM_5D = '100000003';
-const AFM_30D = '200000006';
-const AFM_59D = '300000009';
 const AFM_ARCHIVED = '400000001';
 const AFM_DEBOUNCE = '500000004';
-const AFM_REFETCH = '600000007';
 
 test.beforeAll(() => {
   if (!TEST_EMAIL || !TEST_PASSWORD) {
@@ -118,22 +95,10 @@ function toDDMMYYYY(d: Date): string {
   return `${day}/${month}/${year}`;
 }
 
-function toDDMMYY(d: Date): string {
-  // Tile column format: see ExpiringLeasesTile.js:142 — moment.format('DD/MM/YY').
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const yy = String(d.getUTCFullYear()).slice(-2);
-  return `${day}/${month}/${yy}`;
-}
-
 function dateAtOffsetDays(days: number): Date {
   const now = new Date();
   return new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() + days
-    )
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days)
   );
 }
 
@@ -176,7 +141,10 @@ async function createEphemeralRealm(
     headers: authHeaders(token)
   });
   expect(realmsResp.status(), 'list realms').toBe(200);
-  const realms = (await realmsResp.json()) as Array<{ _id: string; name: string }>;
+  const realms = (await realmsResp.json()) as Array<{
+    _id: string;
+    name: string;
+  }>;
   const orgName = process.env.TEST_ORG_NAME || 'CYPRESS-TEST-DO-NOT-USE';
   let realm = realms.find((r) => r.name === orgName);
   if (!realm) {
@@ -223,7 +191,9 @@ async function deleteEphemeralRealm(
     });
     if (resp.status() !== 200) return;
     const tenants = (await resp.json()) as Array<{ _id: string; name: string }>;
-    const mine = tenants.filter((t) => t.name && t.name.startsWith(sharedPrefix));
+    const mine = tenants.filter(
+      (t) => t.name && t.name.startsWith(sharedPrefix)
+    );
     for (const t of mine) {
       await api
         .delete(`${GATEWAY}/api/v2/tenants/${t._id}`, {
@@ -290,36 +260,11 @@ async function archiveTenant(
 ): Promise<void> {
   // PUT /api/v2/tenants/:id/archive sets archived=true. Does NOT set
   // terminationDate, so this is a clean archived-only signal.
-  const r = await api.put(
-    `${GATEWAY}/api/v2/tenants/${tenantId}/archive`,
-    { headers: authHeaders(fx.token, fx.realmId), data: {} }
-  );
-  expect(r.status(), `archive tenant ${tenantId}`).toBe(200);
-}
-
-async function patchTenantEndDate(
-  api: APIRequestContext,
-  fx: EphemeralRealm,
-  tenantId: string,
-  newEndDateDDMMYYYY: string
-): Promise<void> {
-  // The tenant PATCH endpoint validates the FULL document (name, taxId,
-  // __v optimistic lock, etc.), not a partial patch — sending only
-  // endDate 422s "name is required". GET the current tenant, merge the
-  // new endDate, and PATCH the whole thing back with the live __v.
-  const cur = await api.get(`${GATEWAY}/api/v2/tenants/${tenantId}`, {
-    headers: authHeaders(fx.token, fx.realmId)
-  });
-  expect(cur.status(), `GET tenant ${tenantId} before endDate PATCH`).toBe(200);
-  const doc = (await cur.json()) as Record<string, any>;
-  const r = await api.patch(`${GATEWAY}/api/v2/tenants/${tenantId}`, {
+  const r = await api.put(`${GATEWAY}/api/v2/tenants/${tenantId}/archive`, {
     headers: authHeaders(fx.token, fx.realmId),
-    data: { ...doc, endDate: newEndDateDDMMYYYY }
+    data: {}
   });
-  expect(
-    r.status(),
-    `PATCH tenant ${tenantId} endDate (body: ${await r.text().catch(() => '')})`
-  ).toBe(200);
+  expect(r.status(), `archive tenant ${tenantId}`).toBe(200);
 }
 
 async function deleteTenantBestEffort(
@@ -336,257 +281,7 @@ async function deleteTenantBestEffort(
   }
 }
 
-async function signInUI(page: Page) {
-  await page.goto('signin');
-  await page.locator('input[name=email]').fill(TEST_EMAIL);
-  await page.locator('input[name=password]').fill(TEST_PASSWORD);
-  await page.locator('[data-cy=submit]').first().click();
-  await expect
-    .poll(() => new URL(page.url()).pathname, { timeout: 20_000 })
-    .toMatch(/\/(firstaccess|dashboard)/);
-}
-
-async function gotoDashboard(page: Page, fx: EphemeralRealm) {
-  // Dashboard renders at /[organization]/dashboard. The realm name is
-  // the org slug — encode it for the URL.
-  //
-  // First navigate to the SIGNIN page after a hard reload so the
-  // StoreContext re-fetches realms (the ephemeral realm was created
-  // AFTER signin and isn't in the cached user.realms list). Without
-  // this the dashboard renders a 'realm not found' redirect.
-  await page.goto('/');
-  // Then deep-link to the ephemeral realm's dashboard.
-  await page.goto(`${encodeURIComponent(fx.realmName)}/dashboard`, {
-    waitUntil: 'networkidle'
-  });
-  await expect
-    .poll(() => new URL(page.url()).pathname, { timeout: 20_000 })
-    .toContain('/dashboard');
-}
-
-/**
- * Locate the ExpiringLeasesTile card by anchoring on the heading text.
- * The component renders a Card whose CardTitle contains the localized
- * "Expiring leases" string. We ascend to the nearest Card-shaped div
- * (rounded-lg + border, the shadcn Card root pattern).
- */
-function expiringTile(page: Page) {
-  return page
-    .getByText(/^(Expiring leases|Λήξεις μισθώσεων|Λήξη μίσθωσης)$/, {
-      exact: true
-    })
-    .locator(
-      'xpath=ancestor::div[contains(@class, "rounded-lg") and contains(@class, "border")][1]'
-    );
-}
-
 test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + scanner debounce contract', () => {
-  // -----------------------------------------------------------------------
-  // Test 1 — empty state copy renders when no tenants are expiring.
-  // -----------------------------------------------------------------------
-  test('Test 1 — empty state copy renders when no tenants are expiring', async ({
-    page
-  }) => {
-    test.setTimeout(120_000);
-    const apiCtx = await request.newContext();
-    const fx = await createEphemeralRealm(apiCtx, 'T1');
-    try {
-      // The canonical realm is shared, so it may already have expiring
-      // tenants from other fixtures. Read the API count first and make
-      // the UI assertion match WHATEVER state the realm is in:
-      //   - 0 expiring → assert the empty-state copy + no table
-      //   - >0 expiring → assert the table is present with that row count
-      // This keeps the test correct on a shared realm without depending
-      // on a pristine empty realm (the old ephemeral-realm assumption,
-      // which broke because the browser session can't see a realm
-      // created after signin).
-      const apiResp = await apiCtx.get(
-        `${GATEWAY}/api/v2/tenants?expiringWithin=60`,
-        { headers: authHeaders(fx.token, fx.realmId) }
-      );
-      expect(apiResp.status(), 'expiringWithin=60 must be 200').toBe(200);
-      const tenants = (await apiResp.json()) as Array<{ _id: string }>;
-      const expiringCount = tenants.length;
-
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-
-      const tile = expiringTile(page);
-      await expect(tile, 'ExpiringLeasesTile card must mount').toBeVisible({
-        timeout: 30_000
-      });
-
-      // Re-read the count right before asserting the UI — the shared
-      // realm can have its expiring set change between the first read and
-      // the page render (other serial tests / leftover fixtures). Use the
-      // fresh count as the source of truth.
-      const freshResp = await apiCtx.get(
-        `${GATEWAY}/api/v2/tenants?expiringWithin=60`,
-        { headers: authHeaders(fx.token, fx.realmId) }
-      );
-      const freshCount = freshResp.status() === 200
-        ? ((await freshResp.json()) as Array<unknown>).length
-        : expiringCount;
-
-      if (freshCount === 0) {
-        // Empty-state copy: "No leases expiring in the next {{n}} days".
-        const emptyState = tile
-          .locator('div')
-          .filter({
-            hasText:
-              /No leases expiring in the next 60 days|Καμία λήξη μίσθωσης τις επόμενες 60 ημέρες|Δεν υπάρχουν λήξεις μισθώσεων στις επόμενες 60 ημέρες|Δεν λήγουν μισθώσεις στις επόμενες 60 ημέρες/
-          });
-        await expect(
-          emptyState,
-          'empty-state copy must render (J1C-005: horizon, not fixed date)'
-        ).not.toHaveCount(0, { timeout: 15_000 });
-        await expect(
-          tile.locator('table'),
-          'no table when there are no expiring tenants'
-        ).toHaveCount(0);
-      } else {
-        // Non-empty realm: the tile must render a table. Assert it has at
-        // least one row (the tile reflects the non-empty API state). We
-        // don't pin an exact count here because the shared realm's
-        // expiring set can shift mid-test; the exact-count contract is
-        // covered by Test 2 which controls its own fixtures.
-        await expect(
-          tile.locator('table tbody tr').first(),
-          'tile shows a row when API reports expiring tenants'
-        ).toBeVisible({ timeout: 15_000 });
-      }
-    } finally {
-      await deleteEphemeralRealm(apiCtx, fx);
-      await apiCtx.dispose();
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 2 — three tenants at +5d / +30d / +59d render with DD/MM/YY.
-  //   - toHaveCount(3) on tile body rows.
-  //   - Each row's date column shows DD/MM/YY format (NOT "Invalid date" —
-  //     J1C-001 fix: moment was parsing the API's DD/MM/YYYY string
-  //     without a format hint and falling through to Invalid Date).
-  // -----------------------------------------------------------------------
-  test('Test 2 — three tenants at +5d / +30d / +59d render with DD/MM/YY (no Invalid date)', async ({
-    page
-  }) => {
-    test.setTimeout(180_000);
-    const apiCtx = await request.newContext();
-    const fx = await createEphemeralRealm(apiCtx, 'T2');
-    const beginISO = dateAtOffsetDays(-30);
-    const end5 = dateAtOffsetDays(5);
-    const end30 = dateAtOffsetDays(30);
-    const end59 = dateAtOffsetDays(59);
-
-    let tenant5: { _id: string; name: string } | null = null;
-    let tenant30: { _id: string; name: string } | null = null;
-    let tenant59: { _id: string; name: string } | null = null;
-    try {
-      tenant5 = await createTenant(apiCtx, fx, {
-        name: `E2E-S46-T2-5d-${Date.now()}`,
-        firstName: 'Five',
-        lastName: 'Days',
-        taxId: AFM_5D,
-        beginDate: toDDMMYYYY(beginISO),
-        endDate: toDDMMYYYY(end5)
-      });
-      tenant30 = await createTenant(apiCtx, fx, {
-        name: `E2E-S46-T2-30d-${Date.now()}`,
-        firstName: 'Thirty',
-        lastName: 'Days',
-        taxId: AFM_30D,
-        beginDate: toDDMMYYYY(beginISO),
-        endDate: toDDMMYYYY(end30)
-      });
-      tenant59 = await createTenant(apiCtx, fx, {
-        name: `E2E-S46-T2-59d-${Date.now()}`,
-        firstName: 'FiftyNine',
-        lastName: 'Days',
-        taxId: AFM_59D,
-        beginDate: toDDMMYYYY(beginISO),
-        endDate: toDDMMYYYY(end59)
-      });
-
-      // HTTP shape: all three returned in the 60-day window.
-      const apiResp = await apiCtx.get(
-        `${GATEWAY}/api/v2/tenants?expiringWithin=60`,
-        { headers: authHeaders(fx.token, fx.realmId) }
-      );
-      expect(apiResp.status(), 'expiringWithin=60 status').toBe(200);
-      const tenantsApi = (await apiResp.json()) as Array<{
-        _id: string;
-        name: string;
-        endDate?: string;
-      }>;
-      const ourNames = new Set([tenant5.name, tenant30.name, tenant59.name]);
-      const ourReturned = tenantsApi.filter((t) => ourNames.has(t.name));
-      expect(
-        ourReturned.length,
-        'all three seeded tenants returned by HTTP filter'
-      ).toBe(3);
-
-      // Drive the UI.
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-
-      const tile = expiringTile(page);
-      await expect(tile, 'tile mounted').toBeVisible({ timeout: 30_000 });
-
-      // Set-narrowing: exactly three rows in the tile body.
-      // Use the rows scoped to the tile's <tbody>.
-      const tileRows = tile.locator('tbody tr');
-      await expect(
-        tileRows,
-        'tile must render exactly 3 rows for 3 in-window tenants'
-      ).toHaveCount(3, { timeout: 30_000 });
-
-      // J1C-001: each row's date column MUST show DD/MM/YY (not "Invalid
-      // date"). Construct the expected strings from the seeded ends.
-      const expected5 = toDDMMYY(end5);
-      const expected30 = toDDMMYY(end30);
-      const expected59 = toDDMMYY(end59);
-
-      // Search for the date string anywhere in the tile body. moment is
-      // strict so DD/MM/YY is the canonical render. We assert all three
-      // expected strings appear, and that "Invalid date" does NOT.
-      const tileBodyText = await tile.locator('tbody').innerText();
-      expect(
-        tileBodyText,
-        `tile body must contain 5d date ${expected5}`
-      ).toContain(expected5);
-      expect(
-        tileBodyText,
-        `tile body must contain 30d date ${expected30}`
-      ).toContain(expected30);
-      expect(
-        tileBodyText,
-        `tile body must contain 59d date ${expected59}`
-      ).toContain(expected59);
-      expect(
-        tileBodyText,
-        'tile body MUST NOT contain "Invalid date" (J1C-001 regression marker)'
-      ).not.toMatch(/Invalid date/i);
-
-      // Defense in depth: each tenant name appears in exactly one row.
-      for (const name of [tenant5.name, tenant30.name, tenant59.name]) {
-        const rowsForName = tile.locator('tbody tr', {
-          has: page.locator(`td:has-text("${name}")`)
-        });
-        await expect(
-          rowsForName,
-          `exactly one row for tenant ${name}`
-        ).toHaveCount(1);
-      }
-    } finally {
-      if (tenant5) await deleteTenantBestEffort(apiCtx, fx, tenant5._id);
-      if (tenant30) await deleteTenantBestEffort(apiCtx, fx, tenant30._id);
-      if (tenant59) await deleteTenantBestEffort(apiCtx, fx, tenant59._id);
-      await deleteEphemeralRealm(apiCtx, fx);
-      await apiCtx.dispose();
-    }
-  });
-
   // -----------------------------------------------------------------------
   // Test 3 — archived tenant near expiry is excluded server-side.
   //   - Seed one tenant in-window AND one tenant in-window + archived.
@@ -594,9 +289,7 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
   //     the archived (server filter `archived: { $ne: true }`).
   //   - Tile body must render exactly 1 row, never the archived one.
   // -----------------------------------------------------------------------
-  test('Test 3 — archived tenant with endDate near expiry is excluded server-side', async ({
-    page
-  }) => {
+  test('Test 3 — archived tenant with endDate near expiry is excluded server-side', async () => {
     test.setTimeout(180_000);
     const apiCtx = await request.newContext();
     const fx = await createEphemeralRealm(apiCtx, 'T3');
@@ -649,192 +342,13 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
         ).not.toBe(true);
       }
 
-      // UI: the tile must render exactly 1 row (the alive one).
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-      const tile = expiringTile(page);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-
-      const aliveRow = tile.locator('tbody tr', {
-        has: page.locator(`td:has-text("${alive.name}")`)
-      });
-      await expect(
-        aliveRow,
-        'tile MUST show the non-archived in-window tenant'
-      ).toHaveCount(1, { timeout: 20_000 });
-
-      const archivedRow = tile.locator('tbody tr', {
-        has: page.locator(`td:has-text("${archived.name}")`)
-      });
-      await expect(
-        archivedRow,
-        'tile MUST NOT show the archived tenant'
-      ).toHaveCount(0);
-
-      // Set-narrowing: total tile rows for OUR seeds equals 1.
-      await expect(
-        tile.locator('tbody tr'),
-        'exactly 1 row in this fresh realm'
-      ).toHaveCount(1);
+      // The tile-UI half of this test was removed on 2026-08-02 with the
+      // ExpiringLeasesTile itself (the condition is now a bell notice +
+      // Telegram push, not a dashboard tile). The server-side filter
+      // contract asserted above is the durable part and still holds.
     } finally {
       if (alive) await deleteTenantBestEffort(apiCtx, fx, alive._id);
       if (archived) await deleteTenantBestEffort(apiCtx, fx, archived._id);
-      await deleteEphemeralRealm(apiCtx, fx);
-      await apiCtx.dispose();
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 4 — tile description text is the J1C-005 horizon string.
-  //   The CardDescription must say "Tenants whose lease ends within the
-  //   next 60 days" (or its localized equivalent), NOT a fixed
-  //   end-of-window date like "Lease expires on DD/MM/YYYY".
-  // -----------------------------------------------------------------------
-  test('Test 4 — tile description text is the J1C-005 horizon string, not a fixed end-of-window date', async ({
-    page
-  }) => {
-    test.setTimeout(120_000);
-    const apiCtx = await request.newContext();
-    const fx = await createEphemeralRealm(apiCtx, 'T4');
-    const beginISO = dateAtOffsetDays(-30);
-    const endNear = dateAtOffsetDays(20);
-
-    let seeded: { _id: string; name: string } | null = null;
-    try {
-      // Need at least one tenant so the tile renders the table body — but
-      // the description is part of the CardHeader and renders regardless.
-      // Seed one to exercise both branches in a single test.
-      seeded = await createTenant(apiCtx, fx, {
-        name: `E2E-S46-T4-${Date.now()}`,
-        firstName: 'Horizon',
-        lastName: 'Test',
-        taxId: AFM_5D,
-        beginDate: toDDMMYYYY(beginISO),
-        endDate: toDDMMYYYY(endNear)
-      });
-
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-
-      const tile = expiringTile(page);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-
-      // Match the J1C-005 horizon-shaped description. The component emits
-      //   "Tenants whose lease ends within the next 60 days"
-      // (or the Greek equivalent). Regex tolerates either rendering.
-      const description = tile
-        .locator('div')
-        .filter({
-          hasText:
-            /Tenants whose lease ends within the next 60 days|Ενοικιαστές των οποίων η μίσθωση λήγει εντός των επόμενων 60 ημερών|Μισθώσεις που λήγουν εντός των επόμενων 60 ημερών/
-        });
-      await expect(
-        description,
-        'description must render the horizon string (J1C-005)'
-      ).not.toHaveCount(0, { timeout: 15_000 });
-
-      // Negative assertion: the description must NOT be a fixed end-of-
-      // window date like "Lease expires on DD/MM/YYYY". Assert the tile
-      // text does NOT contain the legacy fixed-date phrasing.
-      const headerText = await tile.innerText();
-      // The legacy bug rendered something like "Lease expires on
-      // 14/06/2026". The fix replaced this with the horizon copy.
-      // Allow DD/MM/YY to appear inside the table body, but the
-      // CardHeader must not say "Lease expires on" (no localized
-      // variant exists for that string in the post-fix component).
-      expect(
-        headerText,
-        'description MUST NOT be a fixed end-of-window date phrase'
-      ).not.toMatch(/Lease expires on \d{1,2}\/\d{1,2}\/\d{2,4}/i);
-    } finally {
-      if (seeded) await deleteTenantBestEffort(apiCtx, fx, seeded._id);
-      await deleteEphemeralRealm(apiCtx, fx);
-      await apiCtx.dispose();
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 5 — "Open tenant" button label (J1C-003); click navigates to
-  //          /tenants/[id].
-  //   The legacy component rendered a "Renew/Extend" button that deep-
-  //   linked with ?action=renew but the tenant page never wired up the
-  //   action. The fix relabeled it to "Open tenant" and changed the href
-  //   to plain navigation.
-  // -----------------------------------------------------------------------
-  test('Test 5 — "Open tenant" button label (J1C-003); click navigates to /tenants/[id]', async ({
-    page
-  }) => {
-    test.setTimeout(180_000);
-    const apiCtx = await request.newContext();
-    const fx = await createEphemeralRealm(apiCtx, 'T5');
-    const beginISO = dateAtOffsetDays(-30);
-    const endNear = dateAtOffsetDays(20);
-
-    let seeded: { _id: string; name: string } | null = null;
-    try {
-      seeded = await createTenant(apiCtx, fx, {
-        name: `E2E-S46-T5-${Date.now()}`,
-        firstName: 'Open',
-        lastName: 'Tenant',
-        taxId: AFM_5D,
-        beginDate: toDDMMYYYY(beginISO),
-        endDate: toDDMMYYYY(endNear)
-      });
-
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-
-      const tile = expiringTile(page);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-
-      // Locate the row for our tenant.
-      const ourRow = tile.locator('tbody tr', {
-        has: page.locator(`td:has-text("${seeded.name}")`)
-      });
-      await expect(ourRow, 'seeded tenant row visible').toHaveCount(1, {
-        timeout: 20_000
-      });
-
-      // J1C-003: the button label MUST be "Open tenant" (or its localized
-      // equivalent). Use exact-text regex so a regression to "Renew" or
-      // "Extend" fails this assertion.
-      const openButton = ourRow.getByRole('link', {
-        name: /^(Open tenant|Άνοιγμα ενοικιαστή|Άνοιγμα μισθωτή|Προβολή ενοικιαστή)$/
-      });
-      await expect(
-        openButton,
-        '"Open tenant" link/button must be present (J1C-003 — was "Renew")'
-      ).toHaveCount(1, { timeout: 10_000 });
-
-      // The href must be /[organization]/tenants/[id] with NO action param
-      // (the legacy bug had ?action=renew that never wired up).
-      const href = await openButton.getAttribute('href');
-      expect(href, 'href is set').toBeTruthy();
-      expect(
-        href,
-        'href links to /tenants/<id> under the org'
-      ).toMatch(
-        new RegExp(
-          `/${encodeURIComponent(fx.realmName)}/tenants/${seeded._id}`
-        )
-      );
-      expect(
-        href,
-        'href MUST NOT carry the legacy ?action=renew query param'
-      ).not.toMatch(/[?&]action=renew/);
-
-      // Click navigates to /tenants/[id]. Wait for URL change.
-      await Promise.all([
-        page.waitForURL(/\/tenants\/[^/]+/, { timeout: 20_000 }),
-        openButton.click()
-      ]);
-      const finalUrl = new URL(page.url());
-      expect(
-        finalUrl.pathname,
-        'navigation lands on /tenants/<id>'
-      ).toContain(`/tenants/${seeded._id}`);
-    } finally {
-      if (seeded) await deleteTenantBestEffort(apiCtx, fx, seeded._id);
       await deleteEphemeralRealm(apiCtx, fx);
       await apiCtx.dispose();
     }
@@ -868,9 +382,7 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
   //   logic in the jest tests assumes; if the schema regressed (e.g.
   //   array nesting changed), the readback would fail.
   // -----------------------------------------------------------------------
-  test('Test 6 — per-window debounce: a 30-day in-row marker does NOT block a later 7-day window (data contract)', async ({
-    page
-  }) => {
+  test('Test 6 — per-window debounce: a 30-day in-row marker does NOT block a later 7-day window (data contract)', async () => {
     test.setTimeout(180_000);
     const apiCtx = await request.newContext();
     const fx = await createEphemeralRealm(apiCtx, 'T6');
@@ -966,18 +478,9 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
         'tenant with stale window-30 marker is STILL returned by HTTP filter'
       ).toContain(seeded.name);
 
-      // UI contract: tile surfaces the tenant.
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-      const tile = expiringTile(page);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-      const ourRow = tile.locator('tbody tr', {
-        has: page.locator(`td:has-text("${seeded.name}")`)
-      });
-      await expect(
-        ourRow,
-        'tile MUST show the tenant — different-window marker does not block tile render'
-      ).toHaveCount(1, { timeout: 20_000 });
+      // The tile-UI tail was removed with the ExpiringLeasesTile on
+      // 2026-08-02 (condition is now a bell notice + Telegram push). The
+      // debounce-agnostic HTTP filter contract above is the durable part.
     } finally {
       if (seeded) await deleteTenantBestEffort(apiCtx, fx, seeded._id);
       await deleteEphemeralRealm(apiCtx, fx);
@@ -1002,9 +505,7 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
   //   The scanner logic itself is covered by jest unit tests that read
   //   this exact schema shape.
   // -----------------------------------------------------------------------
-  test('Test 7 — per-window debounce same-window suppression: window-30 marker is the contract the scanner reads', async ({
-    page
-  }) => {
+  test('Test 7 — per-window debounce same-window suppression: window-30 marker is the contract the scanner reads', async () => {
     test.setTimeout(180_000);
     const apiCtx = await request.newContext();
     const fx = await createEphemeralRealm(apiCtx, 'T7');
@@ -1043,10 +544,7 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
       if (mongoWrite !== null) {
         const parsed = JSON.parse(mongoWrite);
         expect(parsed.len, 'window-30 marker persisted').toBe(1);
-        expect(
-          Number(parsed.window),
-          'window field is numeric 30'
-        ).toBe(30);
+        expect(Number(parsed.window), 'window field is numeric 30').toBe(30);
         const written = new Date(parsed.sentAtIso);
         const drift = Math.abs(written.getTime() - sentAt10dAgo.getTime());
         expect(
@@ -1070,18 +568,9 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
         'tenant with same-window marker is STILL returned by HTTP filter'
       ).toContain(seeded.name);
 
-      // UI: tile renders the tenant.
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-      const tile = expiringTile(page);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-      const ourRow = tile.locator('tbody tr', {
-        has: page.locator(`td:has-text("${seeded.name}")`)
-      });
-      await expect(
-        ourRow,
-        'tile MUST show the tenant — same-window marker is scanner-side only'
-      ).toHaveCount(1, { timeout: 20_000 });
+      // The tile-UI assertion was removed with the ExpiringLeasesTile on
+      // 2026-08-02. The HTTP-path contract above (scanner-side suppression
+      // does NOT hide the tenant from the filter) is what mattered here.
 
       // Re-readback: the marker survives the round-trip (no UI mutation
       // alters the field).
@@ -1134,7 +623,7 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
   //   unit suite. This Playwright assertion guarantees the on-disk
   //   schema can hold what the scanner writes.
   // -----------------------------------------------------------------------
-  test('Test 8 — empty-recipient realm contract: markSent shape with windowDays so retry does not loop (J1C-004)', async ({}) => {
+  test('Test 8 — empty-recipient realm contract: markSent shape with windowDays so retry does not loop (J1C-004)', async () => {
     test.setTimeout(180_000);
     const apiCtx = await request.newContext();
     const fx = await createEphemeralRealm(apiCtx, 'T8');
@@ -1189,18 +678,12 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
         return;
       }
       const parsed = JSON.parse(mongoWrite);
-      expect(
-        parsed.len,
-        'markSent($push) inserted exactly 1 entry'
-      ).toBe(1);
+      expect(parsed.len, 'markSent($push) inserted exactly 1 entry').toBe(1);
       expect(
         parsed.windowType,
         'window field is numeric (scanner does Number(e?.window) on read)'
       ).toBe('number');
-      expect(
-        Number(parsed.window),
-        'window value persisted as 30'
-      ).toBe(30);
+      expect(Number(parsed.window), 'window value persisted as 30').toBe(30);
       expect(
         parsed.sentAtType,
         'sentAt is a Date (so the scanner can compare with new Date(e.sentAt) >= cutoff)'
@@ -1260,137 +743,6 @@ test.describe('Spec 46 — ExpiringLeasesTile + GET /tenants?expiringWithin + sc
         tenants.map((t) => t.name),
         'tenant still returned by HTTP filter — debounce is scanner-side'
       ).toContain(seeded.name);
-    } finally {
-      if (seeded) await deleteTenantBestEffort(apiCtx, fx, seeded._id);
-      await deleteEphemeralRealm(apiCtx, fx);
-      await apiCtx.dispose();
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // Test 9 — tile refetch resilience.
-  //   PATCH a tenant's endDate via the API (move from +5d to +50d), then
-  //   blur+focus the dashboard tab. The tile's useQuery uses
-  //   refetchOnMount: 'always' AND the React Query default refetch on
-  //   window focus, so the tile MUST reflect the new date after the
-  //   refetch fires. The post-refetch render must:
-  //     - still show exactly 1 row for our tenant
-  //     - show the NEW DD/MM/YY date in the date column
-  //     - never show "Invalid date"
-  // -----------------------------------------------------------------------
-  test('Test 9 — tile refetch resilience: PATCH endDate, return to dashboard, blur+focus → tile reflects new date', async ({
-    page,
-    context
-  }) => {
-    test.setTimeout(180_000);
-    const apiCtx = await request.newContext();
-    const fx = await createEphemeralRealm(apiCtx, 'T9');
-    const beginISO = dateAtOffsetDays(-30);
-    const endInitial = dateAtOffsetDays(5);
-    const endUpdated = dateAtOffsetDays(50);
-
-    let seeded: { _id: string; name: string } | null = null;
-    try {
-      seeded = await createTenant(apiCtx, fx, {
-        name: `E2E-S46-T9-${Date.now()}`,
-        firstName: 'Refetch',
-        lastName: 'Resilience',
-        taxId: AFM_REFETCH,
-        beginDate: toDDMMYYYY(beginISO),
-        endDate: toDDMMYYYY(endInitial)
-      });
-
-      await signInUI(page);
-      await gotoDashboard(page, fx);
-
-      const tile = expiringTile(page);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-
-      // Initial render: row shows the original DD/MM/YY.
-      const ourRow = tile.locator('tbody tr', {
-        has: page.locator(`td:has-text("${seeded.name}")`)
-      });
-      await expect(
-        ourRow,
-        'initial render: tenant row visible'
-      ).toHaveCount(1, { timeout: 20_000 });
-
-      const initialDDMMYY = toDDMMYY(endInitial);
-      const updatedDDMMYY = toDDMMYY(endUpdated);
-
-      const initialBodyText = await tile.locator('tbody').innerText();
-      expect(
-        initialBodyText,
-        `initial render shows ${initialDDMMYY}`
-      ).toContain(initialDDMMYY);
-      expect(
-        initialBodyText,
-        'initial render does NOT show "Invalid date"'
-      ).not.toMatch(/Invalid date/i);
-
-      // PATCH the endDate via API.
-      await patchTenantEndDate(
-        apiCtx,
-        fx,
-        seeded._id,
-        toDDMMYYYY(endUpdated)
-      );
-
-      // Trigger a refetch. First try the blur+focus path (React Query
-      // refetchOnWindowFocus). Then — because headless focus events are
-      // unreliable and the dashboard query may not have
-      // refetchOnWindowFocus enabled — fall back to an explicit
-      // navigation refetch (re-goto the dashboard). The test's intent is
-      // "the tile reflects fresh server state", and a re-navigation is a
-      // legitimate, deterministic way to assert that without depending
-      // on the flaky focus-event path.
-      const aux = await context.newPage();
-      await aux.goto('about:blank');
-      await aux.bringToFront();
-      await page.bringToFront();
-      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-      await aux.close();
-      // Deterministic refetch: re-navigate to the dashboard.
-      await gotoDashboard(page, fx);
-      await expect(tile).toBeVisible({ timeout: 30_000 });
-
-      // Wait for the tile to reflect the new date. The refetch kicks
-      // off, queryFn returns the new endDate, useMemo recomputes the
-      // rows, and the date cell re-renders. expect.poll bounded so the
-      // assertion is real-time, not waitForTimeout-based.
-      await expect
-        .poll(
-          async () => (await tile.locator('tbody').innerText()).includes(updatedDDMMYY),
-          {
-            timeout: 30_000,
-            message: `tile body must contain updated date ${updatedDDMMYY} after refetch`
-          }
-        )
-        .toBe(true);
-
-      // Set-narrowing post-refetch:
-      //   - exactly one row for our tenant
-      //   - new DD/MM/YY visible
-      //   - old DD/MM/YY no longer visible
-      //   - no "Invalid date"
-      await expect(
-        ourRow,
-        'after refetch: still exactly 1 row for our tenant'
-      ).toHaveCount(1);
-
-      const postBodyText = await tile.locator('tbody').innerText();
-      expect(
-        postBodyText,
-        `post-refetch body contains updated ${updatedDDMMYY}`
-      ).toContain(updatedDDMMYY);
-      expect(
-        postBodyText,
-        `post-refetch body no longer contains initial ${initialDDMMYY}`
-      ).not.toContain(initialDDMMYY);
-      expect(
-        postBodyText,
-        'post-refetch body does NOT show "Invalid date"'
-      ).not.toMatch(/Invalid date/i);
     } finally {
       if (seeded) await deleteTenantBestEffort(apiCtx, fx, seeded._id);
       await deleteEphemeralRealm(apiCtx, fx);
