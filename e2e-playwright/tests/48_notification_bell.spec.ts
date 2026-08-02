@@ -132,10 +132,14 @@ function seedNotices(realmId: string, codes: readonly string[]): number {
     dedupeKey: `${TAG}:${n.code}`,
     createdDate: new Date().toISOString()
   }));
+  // realmId is a STRING on this collection (inboxItem.ts:11
+  // `realmId: { type: String, ref: Realm }`), NOT an ObjectId. Casting it with
+  // ObjectId() inserted rows that mongo held happily but that Mongoose's
+  // schema-cast query never matched — GET /inbox returned 0 and five tests in
+  // this spec failed for a reason that had nothing to do with the UI.
   const script = `
     var docs = ${JSON.stringify(docs)};
     docs.forEach(function (d) {
-      d.realmId = ObjectId(d.realmId);
       d.createdDate = new Date(d.createdDate);
       db.inboxitems.insert(d);
     });
@@ -369,7 +373,7 @@ test.describe('Spec 48 — notification bell', () => {
       // A legacy/corrupt row: kind:'notice' with the subdoc missing entirely.
       mongoExec(`
         db.inboxitems.insert({
-          realmId: ObjectId("${realmId}"),
+          realmId: "${realmId}",
           source: 'system', status: 'pending', kind: 'notice',
           dedupeKey: '${TAG}:malformed', createdDate: new Date()
         });

@@ -120,43 +120,49 @@ function NoticeCard({ item, onGone, onNavigate }) {
 
   return (
     <div className="p-4 space-y-2 border-b last:border-b-0">
+      {/* The message gets the FULL width. The timestamp used to sit in this row
+          and «λίγα δευτερόλεπτα πριν» is wide in Greek, so it squeezed a
+          3-line message into 4 wrapped lines and read as part of the sentence.
+          It now shares the action row, which is otherwise empty on the left. */}
       <div className="flex items-start gap-2.5">
         <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
         <div className="min-w-0 flex-1 text-sm text-ink">
           {item.notice?.message}
         </div>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {moment(item.createdDate).fromNow()}
-        </span>
       </div>
       {error && (
         <div className="text-xs rounded-md bg-destructive/5 border border-destructive/30 p-2 text-destructive">
           {error}
         </div>
       )}
-      <div className="flex justify-end gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={dismissMutation.isPending}
-          onClick={() => {
-            setError(null);
-            dismissMutation.mutate();
-          }}
-        >
-          {t('Dismiss')}
-        </Button>
-        {link && (
-          <Link href={link} passHref legacyBehavior>
-            <Button asChild size="sm" variant="secondary">
-              {/* Close the popover on navigate. InboxBell is mounted in
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground">
+          {moment(item.createdDate).fromNow()}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={dismissMutation.isPending}
+            onClick={() => {
+              setError(null);
+              dismissMutation.mutate();
+            }}
+          >
+            {t('Dismiss')}
+          </Button>
+          {link && (
+            <Link href={link} passHref legacyBehavior>
+              <Button asChild size="sm" variant="secondary">
+                {/* Close the popover on navigate. InboxBell is mounted in
                   Layout (outside the page component), so a client-side route
                   change does NOT unmount it — without this the 420px popover
                   stays portaled over the destination page. */}
-              <a onClick={onNavigate}>{t('Open')}</a>
-            </Button>
-          </Link>
-        )}
+                <a onClick={onNavigate}>{t('Open')}</a>
+              </Button>
+            </Link>
+          )}
+        </div>
       </div>
     </div>
   );
