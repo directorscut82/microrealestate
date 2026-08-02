@@ -22,7 +22,7 @@
  * there is no guard at all. Bypassing is a decision the human makes knowingly.)
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const REPO = execFileSync('git', ['rev-parse', '--show-toplevel'], {
@@ -35,7 +35,7 @@ function isChecksumValidAFM(value) {
   if (/^(\d)\1{8}$/.test(value)) return false; // 000000000, 111111111 — sentinels
   let sum = 0;
   for (let i = 0; i < 8; i++) sum += Number(value[i]) * 2 ** (8 - i);
-  return ((sum % 11) % 10) === Number(value[8]);
+  return (sum % 11) % 10 === Number(value[8]);
 }
 
 /**
@@ -130,8 +130,20 @@ function digitStream(text) {
  * form, uppercase, and strip accents — then match tokens in that space too.
  */
 const HOMOGLYPH_MAP = {
-  Α: 'A', Β: 'B', Ε: 'E', Ζ: 'Z', Η: 'H', Ι: 'I', Κ: 'K', Μ: 'M',
-  Ν: 'N', Ο: 'O', Ρ: 'P', Τ: 'T', Υ: 'Y', Χ: 'X'
+  Α: 'A',
+  Β: 'B',
+  Ε: 'E',
+  Ζ: 'Z',
+  Η: 'H',
+  Ι: 'I',
+  Κ: 'K',
+  Μ: 'M',
+  Ν: 'N',
+  Ο: 'O',
+  Ρ: 'P',
+  Τ: 'T',
+  Υ: 'Y',
+  Χ: 'X'
 };
 
 function foldScript(text) {
@@ -177,7 +189,8 @@ const ALLOWLIST_PATHS = [
  * which is precisely how a guard earns a reputation for crying wolf and gets
  * bypassed by reflex. Lockfiles cannot contain hand-entered personal data.
  */
-const GENERATED_FILES = /(^|\/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml)$/;
+const GENERATED_FILES =
+  /(^|\/)(yarn\.lock|package-lock\.json|pnpm-lock\.yaml)$/;
 
 /**
  * Long hex/base64 runs (checksums, integrity hashes, git SHAs, JWTs, base64
@@ -389,7 +402,253 @@ const DENY_PATTERNS = LOCAL_DENYLIST.patterns
   })
   .filter(Boolean);
 
+/**
+ * CREDENTIALS — the class this guard was structurally blind to until 2026-08-01.
+ *
+ * Everything above matches PII: names, tax IDs, IBANs, bill identifiers. That is
+ * what the denylist holds, so that is all the guard could ever see. The
+ * consequence, on the record: through a two-day scrub every scan of this repo
+ * truthfully reported "0 PII remaining" while a WORKING production login sat in
+ * `.kiro/steering/test-running-guide.md` and three e2e specs, and the sms-gate
+ * account sat hardcoded as a react-hook-form fallback in ThirdPartiesForm.js.
+ * A scanner cannot report what its denylist has no word for, and "clean" from a
+ * scanner with a category-shaped hole reads exactly like "clean".
+ *
+ * Two passes, because the failure had two halves:
+ *
+ *  1. LITERAL — every value in `.secrets/` is matched exactly. This is the pass
+ *     that would have caught both leaks on the commit that introduced them.
+ *  2. STRUCTURAL — a high-entropy literal assigned to a credential-shaped key,
+ *     which catches a NEW secret that is not in `.secrets/` yet (the sms-gate
+ *     password was hardcoded in a component before it was ever written down).
+ *
+ * `.secrets/` is gitignored and local-only, so this is the same "the guard reads
+ * a private file the repo never carries" arrangement as FORBIDDEN_TOKENS, for
+ * the same reason: writing the values into a public script would republish them.
+ * The structural pass needs no local file and keeps working in a fresh clone.
+ */
+const LOCAL_SECRETS_DIR = path.join(REPO, '.secrets');
+
+/**
+ * Values that are public BY DESIGN and must never become needles.
+ *
+ * `base.env` is committed and ships upstream's placeholders —
+ * `change_this_access_token_secret`, `gmail_password`, `mongodb://mongo/mredb`.
+ * A local `.env` that never overrode them holds those same strings, so
+ * harvesting `.env` naively turns three upstream defaults into "leaked
+ * secrets" and buries the two real ones in noise. That is not hypothetical:
+ * it is exactly the false-positive set the first credential scan produced.
+ *
+ * So: anything literally present in the committed base.env is a public default,
+ * not a secret. Read it from the INDEX/HEAD rather than the worktree — the
+ * worktree copy may hold real values a developer typed in locally.
+ */
+function committedPublicDefaults() {
+  for (const rev of [':base.env', 'HEAD:base.env']) {
+    try {
+      return execFileSync('git', ['show', rev], {
+        encoding: 'utf8',
+        cwd: REPO,
+        maxBuffer: 4 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+    } catch {
+      /* try the next rev */
+    }
+  }
+  return '';
+}
+
+/** A value that grants nothing: placeholder, env reference, URL, or boolean. */
+function isNonSecretValue(value) {
+  if (
+    /^(true|false|null|undefined|localhost|production|development)$/i.test(
+      value
+    )
+  )
+    return true;
+  if (/^[0-9]+$/.test(value)) return true;
+  // Upstream/scaffold placeholders. These are meant to be published.
+  if (
+    /^(change_?this|change_?me|your_?|example|placeholder|sample|dummy|redacted|xxx+|\*+|<.*>)/i.test(
+      value
+    )
+  )
+    return true;
+  if (/(_here|_goes_here|password_here)$/i.test(value)) return true;
+  // Env indirection and template holes are the CORRECT pattern, never a leak.
+  if (/^\$\{|^\$[A-Z_]|process\.env|^%[A-Z_]+%$/.test(value)) return true;
+  // Bare URLs, hostnames and connection strings are topology, not credentials.
+  // A credential EMBEDDED in a URL is caught by the literal pass on its own
+  // value, so skipping the whole URL here does not lose it.
+  if (
+    /^(https?|mongodb(\+srv)?|redis|amqp|postgres(ql)?|mysql|smtp|ws{1,2}):\/\//i.test(
+      value
+    )
+  )
+    return true;
+  if (/^[a-z0-9.-]+\.(com|org|net|io|gr|dev|app|local)$/i.test(value))
+    return true;
+  if (/^\.?\/|^[A-Za-z]:\\/.test(value)) return true; // filesystem paths
+  return false;
+}
+
+/**
+ * Harvest the real credential values from `.secrets/`.
+ *
+ * Only CREDENTIAL files are read. The first version of this harvest globbed the
+ * whole directory including the `.js` helper scripts that live there, which
+ * turned ordinary code tokens — `MicroRealEstate`, a source filename, the word
+ * `username` — into needles and produced a confident, entirely false "your
+ * secrets are public" report. Helpers are code; code is not a credential file.
+ */
+function loadLocalCredentials() {
+  if (!existsSync(LOCAL_SECRETS_DIR)) {
+    process.stderr.write(
+      `\n  ! scan-pii: no .secrets/ directory\n` +
+        `    Structural credential detection is ACTIVE.\n` +
+        `    Literal matching against your real credentials is OFF.\n\n`
+    );
+    return [];
+  }
+
+  const publicDefaults = committedPublicDefaults();
+  const out = [];
+  const seen = new Set();
+
+  const consider = (label, key, rawValue) => {
+    const value = String(rawValue)
+      .trim()
+      .replace(/\s+#.*$/, '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
+    if (!value || value.length < 6 || value.length > 512) return;
+    if (isNonSecretValue(value)) return;
+    // Public by design — see committedPublicDefaults().
+    if (publicDefaults.includes(value)) return;
+    // Short values collide with ordinary text, so require the KEY to name a
+    // credential before trusting a sub-10-character needle. `CLOUD_USERNAME`
+    // qualifies (that is the 6-char sms-gate account name); a 6-char
+    // `ORG_NAME` or `REALM` does not, and those two are precisely the needles
+    // that generated 3,017- and 122-blob false-positive storms when the first
+    // harvest trusted length alone.
+    const keyNamesACredential =
+      /(PASS|PASSWD|PWD|SECRET|TOKEN|KEY|CRED|AUTH|USERNAME|USER_?NAME|EMAIL|LOGIN|ACCOUNT|APIKEY|BOT|SESSION|COOKIE|SALT|CIPHER|PRIVATE|REALM_ID)/i.test(
+        key
+      );
+    if (value.length < 10 && !keyNamesACredential) return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    out.push({ label: `${label}:${key}`, value, key });
+  };
+
+  let files;
+  try {
+    files = readdirSync(LOCAL_SECRETS_DIR);
+  } catch {
+    return [];
+  }
+
+  for (const name of files) {
+    // Helpers, notes, fixtures and binaries are not credential files.
+    if (
+      /\.(js|mjs|cjs|ts|tsx|json|md|txt|png|jpe?g|gif|pdf|zip|sh|py|log|html?)$/i.test(
+        name
+      )
+    ) {
+      continue;
+    }
+    const abs = path.join(LOCAL_SECRETS_DIR, name);
+    let text;
+    try {
+      if (!statSync(abs).isFile() || statSync(abs).size > 1024 * 1024) continue;
+      text = readFileSync(abs, 'utf8');
+    } catch {
+      continue;
+    }
+    if (text.includes('\0')) continue;
+    for (const line of text.split('\n')) {
+      if (/^\s*#/.test(line)) continue;
+      const kv = line.match(
+        /^\s*(?:export\s+)?([A-Za-z0-9_.-]+)\s*[=:]\s*(.*)$/
+      );
+      if (kv) {
+        consider(name, kv[1], kv[2]);
+        continue;
+      }
+      // Token-only files (an API key alone on a line, no key= prefix).
+      const bare = line.trim();
+      if (/^[A-Za-z0-9_\-./+=:]{20,}$/.test(bare))
+        consider(name, '(bare)', bare);
+    }
+  }
+
+  return out;
+}
+
+const LOCAL_CREDENTIALS = loadLocalCredentials();
+
+/**
+ * Character-class variety, as a cheap stand-in for entropy.
+ *
+ * Used only by the STRUCTURAL pass, to separate `password: 'hunter2'` in a
+ * fixture from a real 14-character account password. The literal pass needs no
+ * such test — it already knows the exact value.
+ */
+function looksHighEntropy(value) {
+  const classes =
+    (/[a-z]/.test(value) ? 1 : 0) +
+    (/[A-Z]/.test(value) ? 1 : 0) +
+    (/[0-9]/.test(value) ? 1 : 0) +
+    (/[^A-Za-z0-9]/.test(value) ? 1 : 0);
+  if (value.length >= 24 && classes >= 2) return true;
+  if (value.length >= 12 && classes >= 3) return true;
+  // A long single-class run (hex key, base32 token) is still a credential.
+  if (value.length >= 32 && /^[A-Za-z0-9]+$/.test(value)) return true;
+  return false;
+}
+
 const PATTERNS = [
+  {
+    id: 'hardcoded-credential',
+    /**
+     * A high-entropy literal assigned to a credential-shaped key.
+     *
+     * Deliberately conservative. This file's own history is a catalogue of
+     * guards that got bypassed by reflex once they cried wolf, so the accept
+     * test demands real entropy and rejects the fixture vocabulary rather than
+     * flagging every `password:` in the test suite. It is the backstop; the
+     * literal pass over `.secrets/` is the primary check.
+     *
+     * The `||` case is here by name because that is the exact shape that
+     * published the sms-gate account:
+     *     smsUsername: organization.thirdParties?.smsGateway?.username || '<the real account name>',
+     * A react-hook-form default is not obviously a secret when you are reading
+     * a form component, which is why a machine has to be the one looking.
+     */
+    re: /(?:pass(?:word|wd)?|pwd|secret|token|api_?key|access_?key|private_?key|credential|bot_?token|cipher_?key)["'\]]?\s*(?:[:=]|=>|\|\|)\s*["'`]([^"'`\s]{8,200})["'`]/gi,
+    extract: (m) => m.match(/["'`]([^"'`\s]{8,200})["'`]\s*$/)?.[1] ?? m,
+    accept: (m) => {
+      const v = m.match(/["'`]([^"'`\s]{8,200})["'`]\s*$/)?.[1];
+      if (!v) return false;
+      if (isNonSecretValue(v)) return false;
+      // Fixture vocabulary. A real credential is not the word "password".
+      if (
+        /^(pass(word)?|secret|token|test|demo|foo|bar|baz|qwerty|admin|hunter2|letmein|abc+|123+|0+)$/i.test(
+          v
+        )
+      )
+        return false;
+      if (/^(test|demo|fake|mock|stub|fixture|seed|e2e)[-_@.]/i.test(v))
+        return false;
+      // A hash/encoded blob in a fixture is not a live credential. bcrypt and
+      // JWT shapes are the two that actually occur in this repo's tests.
+      if (/^\$2[aby]\$[0-9]{2}\$/.test(v)) return false;
+      if (/^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(v)) return false;
+      return looksHighEntropy(v);
+    },
+    describe: 'high-entropy literal assigned to a credential-shaped key'
+  },
   {
     id: 'greek-tax-id',
     // 9 consecutive digits, not part of a longer number.
@@ -634,6 +893,30 @@ function scan(files, read) {
         }
       }
 
+      // LITERAL CREDENTIAL pass. Exact match against the real values in
+      // `.secrets/`. This is the pass that would have blocked the production
+      // landlord login and the sms-gate account on the commit that introduced
+      // them, instead of two days later from an orphaned-commit audit.
+      //
+      // Matched case-SENSITIVELY and unfolded, unlike the identity tokens: a
+      // credential is only that credential at its exact bytes, and folding would
+      // invent collisions between a 6-character account name and ordinary words.
+      // The \uXXXX-decoded form is checked too — a secret can be escaped on its
+      // way into a JSON or JS literal just as a name can.
+      for (const cred of LOCAL_CREDENTIALS) {
+        if (
+          text.includes(cred.value) ||
+          (decoded !== null && decoded.includes(cred.value))
+        ) {
+          violations.push({
+            file,
+            line: i + 1,
+            id: 'real-credential',
+            detail: `LIVE CREDENTIAL from .secrets/${cred.label} (${cred.value.length}ch, ${mask(cred.value)}) — rotate it if this was ever pushed`
+          });
+        }
+      }
+
       // Word-bounded denylist patterns: real postcodes, and Latin tokens that
       // occur inside checksums. Run against the RAW line (bounded, so a hash
       // interior cannot match) and its \uXXXX-decoded form.
@@ -699,11 +982,17 @@ console.error('');
 console.error(`  ${violations.length} violation(s) in ${byFile.size} file(s).`);
 console.error('');
 console.error('  Fix by replacing real data with synthetic equivalents:');
-console.error('    · names/addresses → E2E-* or ΟΔΟΣ ΔΟΚΙΜΗΣ style placeholders');
-console.error('    · tax IDs → the reserved synthetic band 9990000xx (checksum-valid,');
+console.error(
+  '    · names/addresses → E2E-* or ΟΔΟΣ ΔΟΚΙΜΗΣ style placeholders'
+);
+console.error(
+  '    · tax IDs → the reserved synthetic band 9990000xx (checksum-valid,'
+);
 console.error('      so parser tests still exercise the real validation path)');
 console.error('    · scanned documents → keep them OUTSIDE the repo entirely');
 console.error('');
-console.error('  Deliberate override (you are publishing this):  PII_SCAN_SKIP=1 git commit …');
+console.error(
+  '  Deliberate override (you are publishing this):  PII_SCAN_SKIP=1 git commit …'
+);
 console.error('');
 process.exit(1);

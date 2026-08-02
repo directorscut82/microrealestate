@@ -1,0 +1,23 @@
+#!/bin/sh
+# This repository is PUBLIC. The pre-commit hook scans the STAGING AREA, which
+# means it can only ever see content you are creating right now. It is blind to
+# the case that actually published this repo's secrets:
+#
+#   pushing a branch whose commits were made BEFORE the guard existed.
+#
+# In April 2026 a live sms-gate.app credential was hardcoded as a Next.js
+# `defaultValue` in ThirdPartiesForm.js, and branches carried that commit for
+# months afterwards. No pre-commit hook can stop `git push origin <such branch>`
+# — those commits are already written. That is what this hook is for.
+#
+# NOTE: this hook only runs if it is EXECUTABLE. git silently ignores a
+# non-executable hook (it prints a `hint:` and pushes anyway), so a mode-644
+# copy of this file provides ZERO protection. Verify with:
+#   git push --dry-run origin <a branch known to carry a secret>   # must exit 1
+#
+# Bypass knowingly: PII_SCAN_SKIP=1 git push …
+if [ -n "$PII_SCAN_SKIP" ]; then
+  exit 0
+fi
+
+node scripts/scan-push.mjs || exit 1
