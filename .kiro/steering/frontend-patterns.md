@@ -143,51 +143,62 @@ src/
 
 ## New Page Skeleton
 
+⚠️ **The skeleton that used to live here taught four things this codebase bans.** It was written before
+the design system landed and then sat here as the copy-paste starting point. For reference, so it isn't
+reintroduced: it used a **card grid** (`grid md:grid-cols-2 lg:grid-cols-3` of `<Card>`) — banned, see
+`ui-review-do-not-skip.md`; **raw English strings** (`"Buildings"`, `"Add Building"`, `"Loading..."`) —
+every realm here runs `el`, so untranslated literals ship as visible English; **`text-2xl font-bold`** —
+stock Tailwind sizes bypass the project's own scale; and **`export default` without
+`withAuthentication`** — the page would render for an unauthenticated visitor.
+
+Copy the shape from a **real, recent page** instead — `src/pages/[organization]/owners/index.js` is the
+current-idiom reference. The non-negotiable parts:
+
 ```js
-// src/pages/[organization]/buildings.js
+// src/pages/[organization]/<feature>/index.js
+import { fetchBuildings, QueryKeys } from '../../../utils/restcalls';
+import { useContext, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button } from '../../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
-import Page from '../../components/Page';
-import { apiFetcher } from '../../utils/fetch';
+import Page from '../../../components/Page';
+import { StoreContext } from '../../../store';
+import useTranslation from 'next-translate/useTranslation';
+import { withAuthentication } from '../../../components/Authentication';
 
-function useBuildings() {
-  return useQuery({
-    queryKey: ['buildings'],
-    queryFn: async () => {
-      const { data } = await apiFetcher().get('/buildings');
-      return data;
-    },
+function Buildings() {
+  const { t } = useTranslation('common');          // 1. EVERY string through t()
+  const store = useContext(StoreContext);
+  const { data, isLoading } = useQuery({
+    queryKey: [QueryKeys.BUILDINGS],               // 2. key from QueryKeys, not a literal
+    queryFn: () => fetchBuildings()                //    fetcher from restcalls.js
   });
-}
-
-export default function Buildings() {
-  const { data: buildings, isLoading } = useBuildings();
-
-  if (isLoading) return <p>Loading...</p>;
 
   return (
-    <Page>
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Buildings</h1>
-        <Button>Add Building</Button>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {buildings?.map((b) => (
-          <Card key={b._id}>
-            <CardHeader>
-              <CardTitle>{b.name}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">{b.address}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+    <Page loading={isLoading}>                     {/* 3. Page owns the loading state */}
+      <h1 className="text-headline">{t('Buildings')}</h1>
+      {/* 4. project fontSize tokens only: label/body/title/headline/display/display-lg
+             (tailwind.config.js:34-50). No text-2xl, no font-bold-by-default.
+             5. Tables/lists — NOT a card grid. */}
     </Page>
   );
 }
+
+export default withAuthentication(Buildings);      // 6. always wrapped
 ```
+
+Add the fetcher to `src/utils/restcalls.js` and the key to its `QueryKeys` object; add every new string
+to **all 6 locale files** under `webapps/landlord/locales/*/common.json`.
+
+⚠️ **Calling `t()` without importing `useTranslation` is a runtime crash that no lint gate catches.**
+`webapps/landlord/.eslintrc.json` is `root: true` and extends only `next/core-web-vitals` +
+`prettier` — it never picks up the repo root's `eslint:recommended`, so **`no-undef` is unset for
+every file in the landlord app** (verified 2026-08-02: `npx eslint --print-config` on a component
+returns no `no-undef`, while a planted `react-hooks/rules-of-hooks` violation in the same file does
+error — so the linter is live, it just isn't looking for this). A component missing its
+`useTranslation` import therefore passes `yarn lint` and takes out the whole page via the error
+boundary the first time the route is visited. This shipped twice — `TenantPropertyList` (tenants
+page) and `FormatMenu` (RichTextEditor dialog). When you add `t()` to an existing component, grep
+that file for the import; and visit the route, because the dev server only compiles routes you
+actually open (see [[project_dev_server_misses_build_errors]]).
 
 ## SSR Gotchas (Pages Router)
 
@@ -263,7 +274,7 @@ Backward-compat: rent-level `paymentData.promo / extracharge / description` path
 
 Anywhere the UI needs to classify a rent as paid / partiallypaid / notpaid, read `rent.status` (set by `services/api/src/managers/frontdata.ts:toRentData()`). Do NOT re-classify from raw fields like `totalAmount <= 0 || newBalance >= 0` — that heuristic misses retroactive carry-forward settlement and direct-pay coverage logic, and a parallel classifier WILL drift from the row UI.
 
-The `_listRents` overview classifier was on a different code path until round-3p; both surfaces now share `rent.status`.
+The `/rents` **overview KPI** classifier was on a different code path until round-3p; both surfaces now share `rent.status`. It lives in the `rents.reduce()` over the `overview` accumulator in `services/api/src/managers/rentmanager.ts` (~`:427-460`) — **there is no `_listRents` function**; that name appears nowhere in `services/api/src`. Grep `countPartiallyPaid` to find it.
 
 ### Date-picker `paymentContext` mode
 

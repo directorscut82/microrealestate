@@ -9,7 +9,7 @@ Now I'll write the final punch-list, deduplicating the strip-without-payment-gua
 
 ---
 
-# MicroRealEstate — Maintainer Punch-List (HEAD `f6f75966`, branch `nas`)
+# MicroRealEstate — Maintainer Punch-List (HEAD `2a48a511`, branch `nas`)
 
 Findings are deduplicated to root cause and ordered highest-money-risk × highest-confidence first. File:line citations are against current code on disk.
 

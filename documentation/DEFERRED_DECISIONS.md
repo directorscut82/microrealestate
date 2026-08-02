@@ -36,7 +36,7 @@ also billed in full.
    historical ledger).
 
 **Hooks the audit identified if we eventually do this.** (line anchors as of
-HEAD `4a55ddc4`; code drifts — grep the symbol if a number is off.)
+HEAD `6e771282`; code drifts — grep the symbol if a number is off.)
 - `services/api/src/businesslogic/tasks/1_base.ts:~705` — the `startOf('month')`
   NOTE block stating proration is not implemented (normalization at ~712).
 - `services/api/src/managers/occupantmanager.ts` —
@@ -110,7 +110,7 @@ patch.
 
 ## D-6 — Tenant search clears on data refetch (spec 03) — RESOLVED
 
-**Status:** Fixed in `49040d15` (June 1 2026). `ResourceList/List.js`'s
+**Status:** Fixed in `5cc27004` (June 1 2026). `ResourceList/List.js`'s
 init useEffect was removing the user's typed search on every data-reference
 change because the parent's effect ran AFTER `SearchFilterBar`'s onMount
 effect. The fix removes the init useEffect entirely and lets
@@ -123,11 +123,11 @@ inside `handleSearch` so consumer `filterFn`s don't dereference
 normalized to match buildings/properties shape (`if (statuses?.length)
 filter else all`).
 
-**Earlier history.** A first attempt at the fix shipped as `fb024ed4`
+**Earlier history.** A first attempt at the fix shipped as `e11a4bc8`
 introduced a race that clobbered the user's search on every data
 reference change, breaking 60+ payment dialog tests in suite #7-#10. That
-attempt was reverted in `e1fe87d3` to restore dialog tests. The
-`49040d15` fix avoids the race by deleting the init effect rather than
+attempt was reverted in `4b5c18c2` to restore dialog tests. The
+`5cc27004` fix avoids the race by deleting the init effect rather than
 trying to feed it current state.
 
 **Anchors (for regression hunting).**
@@ -172,13 +172,13 @@ before assuming the test is wrong.
 
 ## D-8 — Past-month overpayment does NOT propagate forward (term-based freeze)
 
-**Update (Tier I-1, June 2026, commit `01d48c46`).** The two-regime behavior
+**Update (Tier I-1, June 2026, commit `2ad674cc`).** The two-regime behavior
 this entry previously documented has COLLAPSED. `_isFrozen` was changed from
 the old `_isPayment`-based check (frozen ⟺ has a payment/discount/debt/
 description) to a purely TERM-based rule:
 
 ```
-_isFrozen (services/api/src/managers/contract.ts:315):
+_isFrozen (services/api/src/managers/contract.ts:472 as of 2026-08-02):
   future term  → never frozen
   PAST term    → ALWAYS frozen (paid OR unpaid, settled or clean)
   current term → frozen only if fully paid
@@ -208,8 +208,10 @@ it needs a UX decision (explicit credit-carry button? automatic with
 confirmation?) and must not reopen the re-pricing hazard the freeze closes.
 
 **Hooks.**
-- `services/api/src/managers/contract.ts:315` — `_isFrozen` function (term-based);
-  the guard CALL inside the pay path is ~line 270.
+- `services/api/src/managers/contract.ts:472` — `_isFrozen` function (term-based).
+  Call sites: `:172`, `:218`, `:297`, `:328`. (Both anchors in this file said `:315`
+  and the pay-path call `~270`; the file has grown. Re-derive with
+  `grep -n '_isFrozen' services/api/src/managers/contract.ts` — don't trust the number.)
 - `services/api/src/businesslogic/tasks/5_balance.ts` — already supports
   negative balance; no change needed there.
 

@@ -537,6 +537,27 @@ function loadLocalCredentials() {
         key
       );
     if (value.length < 10 && !keyNamesACredential) return;
+    // PUBLIC IDENTIFIERS. Some fields in a credential file are not credentials:
+    // a bot's @handle, a bucket name, a cloud project id, a test-realm display
+    // name. They grant nothing on their own, they are MEANT to appear in the
+    // setup docs that tell you which resource to configure, and they are ≥10
+    // characters so the length rule above cannot filter them.
+    //
+    // Left as needles they made the guard cry wolf on 12 of 13 findings in one
+    // run — and a guard that cries wolf gets bypassed with PII_SCAN_SKIP by
+    // reflex, which is exactly how the one REAL finding in that run (an
+    // sms-gate account name printed inline in a tracked doc) would have sailed
+    // through. Precision here is a security property, not a convenience.
+    //
+    // Deliberately NOT exempted: anything matching the credential-key regex
+    // above. `BOT_USERNAME` is a public @handle, but `BOT_TOKEN` is the secret,
+    // and `CLOUD_USERNAME` stays a needle because half a credential pair is
+    // still worth withholding.
+    const keyIsPublicIdentifier =
+      /^(BOT_USERNAME|PROJECT_ID|BUCKET|BUCKET_ID|ENDPOINT|ORG_NAME|REALM|REALM_NAME|LOCALE|CURRENCY|FROM|REPLY_?TO|URL|HOST|PORT|COUNTRY_?CODE)$/i.test(
+        key
+      );
+    if (keyIsPublicIdentifier) return;
     if (seen.has(value)) return;
     seen.add(value);
     out.push({ label: `${label}:${key}`, value, key });

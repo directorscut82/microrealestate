@@ -1,7 +1,7 @@
 # UI Coverage Backlog (from workflow ww0gn2vsh)
 
-> **Baseline:** this catalog was generated ~2026-06-01 (commit `887a2ca0`).
-> Current HEAD is `4a55ddc4` (2026-06-13). It predates specs 25-50 and the
+> **Baseline:** this catalog was generated ~2026-06-01 (commit `584ccb85`).
+> Current HEAD is `6e771282` (2026-06-13). It predates specs 25-50 and the
 > June 8-13 building-expense / vacant-owner work, so several "not covered /
 > never clicked" rationales below are now stale — see the Status update.
 

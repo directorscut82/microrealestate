@@ -10,50 +10,24 @@ Changes are grouped into phases. Each phase should be completed before the next.
 
 ---
 
-## Phase 1 — Critical Fixes ✅ COMPLETED
+## Phases 1–3 — ARCHIVED (all completed, 2026-Q1/Q2)
 
-### 1.1 Fix ServiceError bug ✅
-### 1.2 Disable RESTORE_DB in base.env ✅
-### 1.3 Add MongoDB indexes ✅
+These phases closed long ago and their line-items are now just history; they were being re-read
+every session as if they were live work. One-line summary each, no detail:
 
----
-
-## Phase 2 — Data Integrity ✅ COMPLETED
-
-### 2.1 Referential integrity guards ✅
-- Property deletion blocked when tenants reference it (422)
-- Lease deletion error message fixed
-- Nonexistent tenant/property now return 404 (was 500)
-- Tenant deletion blocked when has payments, active lease, or unpaid balance (422)
-- Realm deletion blocked when child records exist (422 with counts)
-
-### 2.2 Redis TTL alignment ✅
-- Access tokens: 5min (was 30s)
-- Refresh tokens: 600s prod / 12h dev
-- OTP codes: 5min
-- Session tokens: 30min prod / 12h dev
-- Reset tokens: 1h
-
----
-
-## Phase 3 — Codebase Consistency ✅ COMPLETED
-
-### 3.1 Centralize locale configuration
-- **Status:** Deferred — functional but locale arrays duplicated across 15 files
-
-### 3.2 Standardize frontend patterns ✅
-- Created `.kiro/steering/frontend-patterns.md`
-
-### 3.3 Migrate JS services to TypeScript ✅
-- All 4 services migrated: authenticator (4), pdfgenerator (11), emailer (23), api (20)
-- 58 files converted, 0 compilation errors
-
-### 3.4 Remove MobX from landlord frontend ✅
-- All 12 MobX stores resolved: 9 deleted, 3 converted to plain classes
-- `mobx` and `mobx-react-lite` removed from package.json
-- All data fetching migrated to `@tanstack/react-query`
-- All 22 forms on react-hook-form + zod
-- Material UI v4 fully removed
+1. **Critical fixes** — ServiceError bug, `RESTORE_DB` disabled in `base.env`, MongoDB indexes added.
+2. **Data integrity** — referential-integrity guards + Redis TTL alignment. ⚠️ Both of those lists
+   were **factually wrong** where they were quoted: the guards are described (re-measured
+   2026-08-02) in `architecture-patterns.md` § Referential Integrity — the tenant-delete guard is
+   **recorded money only**, not "active lease or unpaid balance", and property delete has a second
+   building-unit blocker. Live TTLs, measured in `services/authenticator/src/routes/`: access token
+   **15m** (`landlord.ts:37`), refresh **3600s prod / 12h dev** (`:33`), tenant session **30m prod /
+   12h dev** (`tenant.ts:165`), app M2M token **300s** (`landlord.ts:185`), reset-password token
+   **5m** signed + **300s** in Redis (`:412`/`:417`), password-reset link **1h** (`:478`). The old
+   "Access tokens: 5min" line was the M2M token, not the user access token.
+3. **Codebase consistency** — 4 services migrated to TypeScript (58 files); MobX fully removed
+   (12 stores, all 22 forms on react-hook-form + zod); MUI v4 removed; `frontend-patterns.md`
+   created. Still open from 3.1: locale arrays duplicated across ~15 files (never centralised).
 
 ---
 
@@ -64,7 +38,7 @@ Changes are grouped into phases. Each phase should be completed before the next.
   - Top level: name, address, atakPrefix, blockNumber, totalFloors, heatingType, manager, bankInfo
   - Sub-documents: units[], expenses[], contractors[], repairs[], ownerMonthlyExpenses[]
 - **Unit model:** atakNumber, floor, surface, thousandths (general/heating/elevator), owners[], occupancyType, propertyId link, monthlyCharges[]
-- **Expense model:** name, type (11 types), amount, allocationMethod (8 methods), customAllocations[], isRecurring, billingId, trackOwnerExpense
+- **Expense model:** name, type (11 types), amount, allocationMethod (**9** methods — `single_unit` was added later and this line said 8 for months; `building.ts:113`), customAllocations[], isRecurring, billingId, trackOwnerExpense. Note the **unit-level** `monthlyCharges` allocationMethod enum (`building.ts:249`) still has only the original 8 — no `single_unit`.
 - **Contractor model:** name, company, specialty (8 types), contact info
 - **Repair model:** title, category, status, urgency, cost, contractor link, affected units, chargeable allocation
 - **API:** Full CRUD at `/api/v2/buildings` with sub-resource routes for units, expenses, contractors, repairs
@@ -80,11 +54,11 @@ Changes are grouped into phases. Each phase should be completed before the next.
 - Retroactive rent recalculation on expense changes
 
 #### 4.2.1 Building-domain hardening wave (June 2026) ✅ COMPLETE
-Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `58f94315`.
-- **Owner-billing for vacant managed units** — a unit with no tenant covering the term has its building-expense share routed to the OWNER when the expense opts in via `chargeOwnerWhenVacant` (per-expense toggle; previously a disabled "coming soon" stub). `equal` allocation now counts vacant managed units as parties (`1_base.ts`), matching the thousandths/surface methods. `OwnerMonthlyExpenseSchema` gained `source` enum `['expense','repair','vacant','repair-vacant']` (the distinct `repair-vacant` source prevents the expense-recompute from wiping a vacant unit's repair share) plus `paid`/`paidDate`. `MonthlyChargeSchema` gained `inputAmount`.
-- **Money-correctness bugs fixed** (adversarially verified across 3 rounds): kymainomeno (variable) statement amount eroding to zero on re-save (`22316220` — `inputAmount` preserves the entered figure); fixed-zero server guard (`5a14bee6`) + method-flip bypass (`42b7860e`) + single_unit/sub-cent (`182c3d4d`) + duplicate-propertyId (`4a55ddc4`). New `validateSingleUnitAllocations` + duplicate-propertyId rejection + per-unit-rounded fixed check in `validators.ts`.
-- **Owner-expenses paid/unpaid Overview tile** (`6cf15c26`) — progress tile under the income tile; per-charge paid checkbox in the breakdown; route `PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid` → `setOwnerExpensePaid`.
-- **Repairs/scheduled-work summary tile** on the building Overview (`b218f09f`); vacant-owner lifecycle recompute trigger + dashboard double-count fix (`bba9c74c`).
+Shipped on `nas` (HEAD `6e771282`); ~83 commits since the prior reference rev `257ed94f`.
+- **Owner-billing for vacant managed units** — a unit with no tenant covering the term has its building-expense share routed to the OWNER when the expense opts in via `chargeOwnerWhenVacant` (per-expense toggle; previously a disabled "coming soon" stub). `equal` allocation now counts vacant managed units as parties (`1_base.ts`), matching the thousandths/surface methods. `OwnerMonthlyExpenseSchema` gained a `source` enum (the distinct `repair-vacant` source prevents the expense-recompute from wiping a vacant unit's repair share) plus `paid`/`paidDate`. **The enum now has 7 members**, not the 4 this line used to list — `building.ts:380` = `expense`, `repair`, `vacant`, `repair-vacant`, `owner-fixed`, `owner-resident`, `credit`. A missing enum value is how the OVERPAY absent-representation bug hid money (see `documentation/MONEY_SURFACE_MATRIX.md`), so read the schema rather than this list. `MonthlyChargeSchema` gained `inputAmount`.
+- **Money-correctness bugs fixed** (adversarially verified across 3 rounds): kymainomeno (variable) statement amount eroding to zero on re-save (`22316220` — `inputAmount` preserves the entered figure); fixed-zero server guard (`d652f3ca`) + method-flip bypass (`f9e54d68`) + single_unit/sub-cent (`7ed0e539`) + duplicate-propertyId (`6e771282`). New `validateSingleUnitAllocations` + duplicate-propertyId rejection + per-unit-rounded fixed check in `validators.ts`.
+- **Owner-expenses paid/unpaid Overview tile** (`a6fd2567`) — progress tile under the income tile; per-charge paid checkbox in the breakdown; route `PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid` → `setOwnerExpensePaid`.
+- **Repairs/scheduled-work summary tile** on the building Overview (`4faf79da`); vacant-owner lifecycle recompute trigger + dashboard double-count fix (`c432f5bf`).
 - **NAS specs**: `48_building_expense_panel`, `49_vacant_owner_money`, `50_owner_expenses_paid_tile`.
 
 ### 4.3 Event/Webhook system — NOT STARTED
@@ -99,10 +73,16 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
 - Greek AADE Taxisnet lease PDF import (regex-based parser, pdfjs-dist text extraction)
 - Greek DEH utility bill PDF import (parser + auto-match to building expenses)
 - Bill collection with status tracking, IRIS QR code generation, RF payment codes
-- API routes: `POST /api/v2/bills/parse`, `POST /api/v2/bills/confirm`
-- Payment receipt import: `POST /api/v2/bills/parse-payment`, `POST /api/v2/bills/confirm-payment`
+- API routes (verified against `services/api/src/routes.ts:474-525`): `POST /bills/parse`,
+  `POST /bills/confirm`, `POST /bills/payment-receipt` → `billManager.parsePaymentReceipts`,
+  `POST /bills/confirm-payment`, `POST /bills/recapture/start`, `GET /bills/recapture/:id`,
+  `POST /bills/:id/attach-source`, `GET /bills`, `GET /bills/:id`, `DELETE /bills/:id`.
+  ⚠️ **`/bills/parse-payment` does not exist** — this doc invented that path; the real one is
+  `/bills/payment-receipt`. Read `routes.ts`, don't copy from here.
 - Frontend: BillImportDialog, PaymentReceiptDialog
-- 13 unit tests for PDF parser
+- PDF-parser unit tests: **14** in `services/api/src/__tests__/managers/e9parser.test.js` (this line
+  said 13; elsewhere the E9 audit entry claims 42 — that figure counted the whole audit's assertions,
+  not `it()` blocks. Measure: `grep -cE '^\s*(it|test)\(' <file>`.)
 
 ### 4.6 SMS Gateway integration ✅ COMPLETE
 - Uses Android SMS Gateway app (sms-gate.app) as bridge
@@ -110,7 +90,11 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
 - Sends SMS to all tenant contacts' phone numbers alongside email
 
 ### 4.7 Database Backup/Restore ✅ COMPLETE (added May 2026)
-- Full MongoDB backup of all 10 collections to JSON (with type markers for ObjectId, Date, Binary)
+- MongoDB backup to JSON (with type markers for ObjectId, Date, Binary) of the **10 collections named
+  in `COLLECTIONS_TO_BACKUP`** (`services/api/src/managers/databasemanager.ts:13`) — **not "all"**.
+  There are **12** collections; `InboxItem` and `TelegramOffset` are excluded, so a restore drops
+  pending Telegram-inbox bills and rewinds the poller cursor. `accounts` is also deliberately emptied
+  on a per-realm backup (no `realmId`), so 9 are really captured.
 - Restore with atomic wipe-and-replace per collection
 - Triple-layer production protection (legacy Cypress era):
   1. resetservice `assertTestDatabase` guard (403 if connected to mredb)
@@ -120,10 +104,34 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
 - 50MB body parser limit for large restores
 - Settings UI panel with download/upload
 
-### 4.8 Security Hardening ✅ COMPLETE (added April-May 2026)
+### 4.8 Security Hardening — ⚠️ REOPENED 2026-08-02 (was "✅ COMPLETE, April–May 2026")
+
+**Why reopened:** the ✅ was applied in May 2026 and then sat, in the only open-items document, across
+a live credential leak. It covered *application input hardening* only and never covered secret
+handling, yet it read as "security: done" — which is precisely why nobody looked.
+
+**What actually happened while this said COMPLETE:** real credentials and personal data were
+committed to a **public** GitHub fork and stayed reachable for ~3.5 months. Full record:
+`documentation/PII_INCIDENT_2026_08.md`. The mechanism that hid it is the diff-vs-tree distinction —
+a secret introduced in commit A and never removed shows up only in A's diff, but every later
+commit's *tree* still serves it, so `git log -p` review of recent work sees nothing.
+
+**Open (as of 2026-08-02):**
+- 🔴 **A live sms-gate.app credential is still public.** It is reachable from `origin/nas` and
+  `origin/master`, and pinned by the server-owned, read-only, permanent `refs/pull/1/head`. No
+  history rewrite and no Support ticket can remove that ref. **Rotation is the only remedy and has
+  NOT been authorized.** Do not describe this as fixed.
+- 🟡 Local-dev secret values in git history — rotation deferred by the user.
+- 🟡 No secret-scanning in CI (the two guards are local git hooks only: `.husky/pre-commit` PII scan,
+  `.husky/pre-push` commit-tree credential scan). A hook is bypassable with `--no-verify` and does
+  nothing for anyone who clones.
+- 🟡 `scripts/*.mjs` — where both guards live — is in **no lint gate** (see `tech-stack.md`).
+
+**Done (application input hardening, the original scope):**
 - NoSQL injection prevention (express-mongo-sanitize)
 - Input validation (percentage sums, enum/range checks, NaN guards)
-- Rate limiting on auth endpoints
+- Rate limiting on auth endpoints — hand-rolled `authRateLimit`, **not** a library; see `tech-stack.md`
+  for the routes it does and does not cover (`/refreshtoken` and `/session` are deliberately excluded)
 - Financial rounding fixes (precision errors)
 - Race condition fixes (concurrent mutations)
 - Error handling improvements (ServiceError propagation)
@@ -167,10 +175,16 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
   - **Channel status banners on /rents** (`ChannelStatusBanners.js`): three thin stacked banners (Email / SMS / Messengers) replacing the single pink Email warning. Olive when configured, amber when not, slate for not-implemented (messengers). Dismissible per-session per-realm via sessionStorage. Backed by `Organization.canSendEmails` / `canSendSms` / `emailProviderName` derived getters.
   - **ErrorBoundary**: i18n strings + locale-aware Go Home button (preserves the realm's locale instead of dropping to defaultLocale=en).
 - **Renames in 6 locales**: "Additional cost" → "Έκτακτη χρέωση" / "Extraordinary charge" (key unchanged so call sites still work). 30+ new i18n keys added across el / en / fr-FR / de-DE / es-CO / pt-BR.
-- **Out of scope (deferred)**:
-  - Wiring imported TAXIS PDF into "Uploaded documents" — Backblaze B2 storage required first. Document model only stores metadata pointers, not local file blobs.
-  - SMS bulk-send actions on /rents — server-side `_sendSms` exists but no UI surface yet.
-  - Accounting CSV export of notes — only the in-app accounting view shows them.
+- **Out of scope (deferred)** — ⚠️ two of these three **have since shipped** and were still listed as
+  deferred on 2026-08-02, which is how a re-implementation request gets accepted:
+  - ~~Wiring imported TAXIS PDF into "Uploaded documents"~~ — **SHIPPED.** B2 storage went live July
+    2026; the import calls `uploadDocument()` at
+    `webapps/landlord/src/components/tenants/ImportTenantDialog.js:1042-1060` (best-effort, creates the
+    Document record).
+  - ~~SMS bulk-send actions on /rents~~ — **SHIPPED.** `sendRentSms` is wired through a mutation at
+    `webapps/landlord/src/pages/[organization]/rents/[yearMonth]/index.js:133` with a **Send SMS**
+    button at `:222-236`.
+  - Accounting CSV export of notes — **still open.** Only the in-app accounting view shows them.
 
 ### 4.13 Payment Dialog Approach A + Per-Payment Refactor ✅ COMPLETE (May–June 2026)
 - **Driven by**: live UX feedback during landlord onboarding — re-opening the payment dialog on an already-paid rent showed the saved payment in editable inputs (so pressing Record looked like a no-op), Note/Discount/Extra-charge fields kept reseeding from the rent record, and several minor papercuts.
@@ -238,7 +252,9 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
   - Per-month receipt picker on accounting page (popover with 12 months); 10-digit term endpoint.
 - **May 2026 audit batches A–H** — 41 findings across rent-call PDF math (was inconsistent for VAT realms), PDF locale gaps (23 keys × 5 locales), landlord-app locale gaps, OCC realmId scoping, retry budget, issuer key, and a long polish tail. All reproduced fixes verified live.
 - **Search/filter scenario catalog (specs 25–29)** — 40 scenarios authored per `test-running-guide.md` mandate; resolved D-6 (search clears on data refetch); subsequent test-side mop-up batches landed `T_M1..T_M5`.
-- **Import-PDF tenant audit** — 23 findings reproduced on real AADE lease PDFs at `~/Downloads/New folder/for_microestate/`: H1 dehNumber dropped without energy cert (between() end-anchor missing), H2 multi-property merge wipe, M2 atakPrefix collision recovery, M4 mark-past-paid `/rents/tenant/:id` (was 404 on `/rents/:year`), M6 non-AADE PDF rejection at server, M7 `Αποθήκη` → 'storage' (was 'store'), M8 Greek company-tenant detection (`Α.Ε./Ε.Π.Ε./Ι.Κ.Ε./Ο.Ε./Ε.Ε./ΑΕΒΕ`), N4 `parsed.landlords` → `units[].owners[]` (6 of 11 PDFs had 50% co-ownership silently dropped), plus pluralisation `_one` variants and 41 untranslated labels in 4 locales.
+- **Import-PDF tenant audit** — 23 findings reproduced on the user's real AADE lease PDFs (kept
+  outside the repo; ask for the path rather than recording it here — an on-disk path to real
+  tax documents used to be printed on this line): H1 dehNumber dropped without energy cert (between() end-anchor missing), H2 multi-property merge wipe, M2 atakPrefix collision recovery, M4 mark-past-paid `/rents/tenant/:id` (was 404 on `/rents/:year`), M6 non-AADE PDF rejection at server, M7 `Αποθήκη` → 'storage' (was 'store'), M8 Greek company-tenant detection (`Α.Ε./Ε.Π.Ε./Ι.Κ.Ε./Ο.Ε./Ε.Ε./ΑΕΒΕ`), N4 `parsed.landlords` → `units[].owners[]` (6 of 11 PDFs had 50% co-ownership silently dropped), plus pluralisation `_one` variants and 41 untranslated labels in 4 locales.
 - **Import-PDF E9 audit** — 47 findings on real `PeriousiakiKatastasi*.pdf` files: T0 owner.name compose + plural _one + FileDropZone i18n + surface server message; T1 multi-PDF preview dedup + empty-zip merge + cleanCity always + storage classification (cat 5/6) + auxSurface dup guard + yearBuilt 1600-2099 + cache invalidation + per-unit existing-property metadata + outcomes shape; T2 file cap + Promise.allSettled + transactional rollback + AbortController + co-owners + rightType + ΠΕΡΙΟΧΗ ΘΗΤΑ block-plot + force=false property overwrites + jest e9parser fixture suite (42 tests, 94% coverage); T3 blockStreets noise + ΑΓ. preservation + blockNumber aggregation + cleanState + district drop + error-shape + totalFloors/hasElevator auto-derive + idempotent re-import banner; L tier latents incl. fractional rights `1/2`, locale-aware floor names, legal-entity owner detection, KAEK schema field, rate-limit GC, accent-aware building dedup, ATAK regex extract, TOCTOU race recovery; L7 marker gate (with hotfix to accept genitive `ΠΕΡΙΟΥΣΙΑΚΗΣ`).
 - **No-fabrication steering doc** — `.kiro/steering/no-fabrication-do-not-skip.md` added (loads on every session); bans rendering ASCII/mockups/numbers without source citation.
 
@@ -248,10 +264,16 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
   1. `services/gateway/src/index.ts` — `configureCORS()` accepts comma-separated `APP_DOMAIN`, builds a CORS regex per origin.
   2. `services/authenticator/src/index.ts` — removed explicit cookie `domain` attribute so cookies become host-only and work across multiple hostnames.
   3. `webapps/landlord/src/utils/fetch.js` — `apiFetcher()` uses `window.location.origin` on the client instead of the build-time `GATEWAY_URL`, so the browser always talks to the same origin it loaded from.
-- **Branch strategy:** `master` mirrors upstream for local dev. `nas` adds the 3 source changes above plus `.github/workflows/nas-ci.yml` which builds `:nas` + `:nas-<sha>` images to GHCR on every push.
+- **Branch strategy (corrected 2026-08-02):** `master` **does not mirror upstream** — `origin/master`
+  and `origin/nas` are the *same commit* (`752e6e20`), 887 commits ahead of `upstream/master`. That
+  claim was true when written and has been false for a long time. `nas` is the only branch that
+  matters; `.github/workflows/nas-ci.yml` builds `:nas` + `:nas-<sha>` images to GHCR on every push.
 - **Local-only files (gitignored, never pushed):** `docker-compose.nas.yml` (stack definition with inlined secrets), `.secrets/github-pat`, `.secrets/portainer-token`, `.env.nas-secrets`.
 - **Deployment automation:** `scripts/deploy-nas.sh` (invoked via `yarn deploy:nas`) asks 2 questions upfront (wait for CI? redeploy stack?), merges master → nas, pushes, and triggers a Portainer stack redeploy using the local `.secrets/portainer-token`. `scripts/validate-nas-deploy.sh` runs 22 sanity checks on the local `docker-compose.nas.yml` before push.
-- **Known limitation:** The deploy script does not sync from upstream (microrealestate/microrealestate). The fork's git history was rewritten during the initial authorship change, so `git merge upstream/main` fails with "refusing to merge unrelated histories". Use `git cherry-pick <sha>` manually to pull in specific upstream fixes.
+- **Known limitation (re-measured 2026-08-02):** the deploy script does not sync from upstream
+  (microrealestate/microrealestate). But the "unrelated histories, cherry-pick only" claim is **no
+  longer true** — `git merge-base nas upstream/master` resolves to `88ad6787`, so a common ancestor
+  exists and `git merge upstream/master` works. Check before assuming either way.
 - **Docs:** `documentation/DEV_AND_DEPLOY.md` (dev + deploy workflow, troubleshooting, historical gotchas).
 
 ---
@@ -259,13 +281,30 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
 ## Phase 5 — Quality & Operations
 
 ### 5.1 Unit tests for critical paths — IN PROGRESS
-- **Current state (June 2026):** 24 `services/api` jest test files; full suite **431 passed, 15 skipped, 1 skipped suite** (e9parser /tmp fixtures), 0 failed. New suites since the prior count include `repairCharges`, `expenseBreakdown`, `buildingChargesScenarios`, `buildingChargesGroupCarrier`, `dashboardManagerComputePaidByBucket`, `contract-freeze-past-unpaid`, `moneyFlowLifecycle`.
-- **⚠️ Jest infra (repaired in `6cf15c26`):** `services/api` is `type: module`, so the suite ONLY runs under **node@20** (system node drifted to v25 and breaks it with `ERR_REQUIRE_ESM`; node@20 is at `/usr/local/opt/node@20/bin/node`). The winston/express-winston/jsonwebtoken mocks are `.cjs` under `services/api/src/__mocks__/*.cjs` (via `moduleNameMapper`); `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Run: `export PATH="/usr/local/opt/node@20/bin:$PATH"; cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage`.
+- **No count is quoted here.** Five different figures (431 / 609 / 628 / 644 / 875) have each sat in
+  this doc reading as current long after they were snapshots. The one dated baseline lives in
+  `test-running-guide.md`; anything else, measure — and note a count that DROPS is not necessarily
+  lost coverage (a `.skip`, a deleted duplicate, or an untracking can do it):
+  ```bash
+  export PATH="/usr/local/opt/node@20/bin:$PATH"
+  cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage
+  ls services/api/src/__tests__/**/*.test.js | wc -l   # test files on disk
+  ```
+- **⚠️ Jest infra (repaired in `a6fd2567`):** `services/api` is `type: module`, so the suite ONLY runs under **node@20** (system node drifted to v25 and breaks it with `ERR_REQUIRE_ESM`; node@20 is at `/usr/local/opt/node@20/bin/node`). The winston/express-winston/jsonwebtoken mocks are `.cjs` under `services/api/src/__mocks__/*.cjs` (via `moduleNameMapper`); `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Run: `export PATH="/usr/local/opt/node@20/bin:$PATH"; cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage`.
 - **Covered:** Rent computation pipeline, building expense allocation (incl. vacant-owner billing + repair distribution), dashboard aggregation, PDF parsers (lease + E9), auth token refresh, payment double-submit, ErrorBoundary, allocation validators.
 - **Remaining:** Auth flows (JWT refresh full cycle, OTP, M2M).
 
 ### 5.2 E2E test coverage — REBUILT (May–June 2026)
-- **Current state (June 2026):** **38 non-scratch Playwright specs** (numbered 00..50 with gaps), `e2e-playwright/`, against the live NAS. Run from `e2e-playwright/` with `export PATH="/usr/local/opt/node@20/bin:$PATH"` then `npx playwright test --project=chromium tests/NN_*.spec.ts` (or `yarn test:nas` which backs up NAS first).
+- **Measure the fleet, don't quote it** (the "38 specs, 00..50" figure here was stale in three docs at
+  once). From `e2e-playwright/`, with `export PATH="/usr/local/opt/node@20/bin:$PATH"`:
+  ```bash
+  git ls-files 'tests/*.spec.ts' | wc -l    # tracked, numbered specs
+  ls tests/*.spec.ts | wc -l                # on disk, incl. untracked scratch
+  npx playwright test --project=chromium tests/NN_*.spec.ts
+  ```
+  ⚠️ **Never run bare.** `playwright.config.ts` sets only `testDir: './tests'` — no `testIgnore` — so
+  a bare `npx playwright test` / `yarn test:nas` also collects every untracked `tests/_*.spec.ts`
+  scratch file and writes to the **live NAS**. Always pass explicit paths.
 - **Replaced** the 68-spec Cypress 14 suite, which was structurally incapable of catching API failures (only 3% asserted HTTP status codes; pattern of weakening tests rather than fixing them — see `documentation/E2E_TESTING.md` § "Why Playwright?").
 - **Coverage:** signin; expense edit; unit occupancy; tenant/property/building/rent search-filter catalog (specs 25-29); property energy cert; rent tile dimming; dashboard finance; repair past-term guard; lease URL :id authoritative; last-admin guard; tenantapi auth chain; validators; payment matrices (15-17); lifecycle UI scenarios (19); round-1 option catalogs (40-46); boundary/concurrency (47); building-domain money (48 expense panel, 49 vacant-owner money, 50 owner-expenses paid/unpaid tile).
 - **Roadmap:** the fleet has passed the ~50-spec threshold the doc once gated CI integration on; CI integration still deferred (would need a self-hosted runner with LAN access to NAS). Page-Object extraction remains a candidate refactor.
@@ -281,13 +320,20 @@ Shipped on `nas` (HEAD `4a55ddc4`); ~83 commits since the prior reference rev `5
 
 ---
 
-## Implementation Order
+## What is actually still open
 
-```
-Phase 1-3 ✅ → Phase 4.1-4.2 ✅ (Building + κοινόχρηστα)
-                → Phase 4.5-4.6 ✅ (OCR + SMS)
-                → Phase 4.7-4.10 ✅ (Backup, Security, Pagination, Performance)
-                → Phase 4.11 ✅ (Multi-origin NAS deployment)
-                → Phase 4.3 (Webhooks) → Phase 4.4 (Payments)
-Phase 5 ongoing in parallel
-```
+The old "Implementation Order" diagram was a wall of ✅ with two items at the end; it made the
+document look like a completion record instead of a work list. The open items, all of them:
+
+- 🔴 **4.8 Security — REOPENED.** A live sms-gate.app credential is still public and rotation is not
+  authorized. No secret scanning in CI. See §4.8 above and `documentation/PII_INCIDENT_2026_08.md`.
+- **4.3 Event/Webhook system** — not started.
+- **4.4 Payment gateway integration** — not started.
+- **4.5 Bill OCR, Slice 3** (ΕΥΔΑΠ/ΕΠΑ providers) — the sample bills exist on disk; see
+  `documentation/BILL_OCR_INBOX_PLAN.md` §16.
+- **4.10** — real multi-document Mongo transactions (needs a replica set on the deployed single-node).
+- **3.1** — locale arrays still duplicated across ~15 files.
+- **5.1** — auth-flow unit tests (JWT refresh full cycle, OTP, M2M).
+- **5.2** — E2E in CI (needs a self-hosted runner with LAN access to the NAS); Page-Object extraction.
+- **5.3 API documentation (OpenAPI/Swagger)** — not started.
+- **4.12** — accounting CSV export of notes.

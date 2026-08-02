@@ -5,7 +5,7 @@
 # What it does:
 #   1. Asks upfront about CI wait and NAS redeploy
 #   2. Validates local state (clean tree, nas branch exists, compose file OK)
-#   3. Merges master -> nas
+#   3. Merges master -> nas (skipped when no local master exists — the normal case)
 #   4. Pushes nas to GitHub (triggers CI to build :nas images)
 #   5. Waits for CI to finish (if requested)
 #   6. Redeploys the Portainer stack (if requested)
@@ -100,7 +100,7 @@ ok "Working tree is clean (current branch: $current_branch)"
 
 # ---- validate nas branch exists ----
 if ! git show-ref --quiet refs/heads/nas; then
-  err "nas branch doesn't exist locally. Create it first: git checkout -b nas master"
+  err "nas branch doesn't exist locally. Create it first: git checkout -b nas origin/nas"
   exit 1
 fi
 ok "nas branch exists"
@@ -120,15 +120,25 @@ bash scripts/validate-nas-deploy.sh || {
 }
 ok "Compose file validated"
 
-# ---- merge master -> nas ----
+# ---- merge master -> nas (only if a local master still exists) ----
+# All work lands directly on `nas`; local `master` was deleted 2026-08-02 as stale
+# (it had zero unique commits vs nas). This step is kept for the case where someone
+# re-creates a local master and lands work there, but its ABSENCE is the normal
+# state and must not abort the deploy. `git merge master` with no such ref fails
+# with "not something we can merge", which the old handler mis-reported as a
+# merge conflict.
 info "Switching to nas branch..."
 git checkout nas
-info "Merging master into nas..."
-git merge --no-edit master || {
-  err "Merge conflict. Resolve and re-run."
-  exit 1
-}
-ok "master merged into nas"
+if git show-ref --quiet refs/heads/master; then
+  info "Local master exists — merging master into nas..."
+  git merge --no-edit master || {
+    err "Merge conflict merging master into nas. Resolve and re-run."
+    exit 1
+  }
+  ok "master merged into nas"
+else
+  warn "No local master branch — skipping merge (nas is the only branch; this is expected)"
+fi
 
 # ---- push nas branch ----
 info "Pushing nas to fork..."

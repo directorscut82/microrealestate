@@ -176,18 +176,33 @@ Gotchas learned the hard way:
 - **URL shape is `/landlord/<locale>/<org>/...`** — the realm slug is `landlord` and the locale `el` is a SEPARATE segment (`/landlord/el/landlord/dashboard`). Parse the org as the segment immediately before `/dashboard`, not the first segment after `/landlord`.
 - The owner card on `/owners` navigates via `router.push` (NOT an `<a href>`), so `a[href*="/owners/"]` finds 0 — click by visible text (`text=/ΔΟΚΙΜΗ ΒΗΤΑ/`) instead.
 - To read a surface's real data, intercept the XHR: `page.waitForResponse(r => r.url().includes('/api/v2/dashboard'))` then `.json()` — far more reliable than scraping DOM.
-- Keep inspection specs **read-only** (no writes) and prefix them `_` (the runner treats `_*`-prefixed as scratch, not part of the numbered fleet). Run a single one with `yarn playwright test tests/_inspect.spec.ts --reporter=line`.
+- Keep inspection specs **read-only** (no writes) and prefix them `_`. ⚠️ **The `_` prefix is a naming
+  convention only — the runner does NOT treat it as scratch.** This line used to claim it did, which is
+  false and dangerous: `playwright.config.ts` sets only `testDir: './tests'` (no `testIgnore`,
+  `testMatch`, `grep` or `grepInvert`), so a bare `npx playwright test` / `yarn test:nas` collects every
+  `_*.spec.ts` too and runs it against the **live NAS**. Measured 2026-08-02: 484 tests across 142
+  files, ~87 of those files untracked scratch. Always pass explicit paths — run one with
+  `yarn playwright test tests/_inspect.spec.ts --reporter=line`.
 - This is REQUIRED, not optional, whenever the user says "check the surfaces with my account" or reports a visual bug: drive it, screenshot it (`page.screenshot({path, fullPage:true})`), READ the screenshot, and report what you actually saw before changing code.
 
 ### Backup + run the full suite
 
 ```bash
 cd /Users/epitrogi/Development/microrealestate/e2e-playwright
-yarn test:nas
-# script chains: backup-nas-before-tests.sh && playwright test
-# 38 non-scratch numbered specs (00..50 with gaps) as of June 2026; running
-# the WHOLE fleet takes minutes, not seconds — usually run one spec at a time.
-# Requires node@20: export PATH="/usr/local/opt/node@20/bin:$PATH" first.
+export PATH="/usr/local/opt/node@20/bin:$PATH"   # required
+
+# COUNT the fleet, don't trust a number in a doc (this block said "38 specs,
+# 00..50" long after it stopped being true):
+git ls-files 'tests/*.spec.ts' | wc -l    # tracked, numbered specs
+ls tests/*.spec.ts | wc -l                # on disk, incl. untracked scratch
+
+# ⚠️ `yarn test:nas` chains backup-nas-before-tests.sh && `playwright test` with
+# NO path filter, and the config excludes nothing — so it also runs every
+# untracked tests/_*.spec.ts against the LIVE NAS (484 tests / 142 files as
+# measured 2026-08-02). To run the real fleet, pass explicit paths:
+bash ./backup-nas-before-tests.sh
+npx playwright test --project=chromium $(git ls-files 'tests/[0-9]*.spec.ts')
+# The whole fleet takes minutes, not seconds — usually run one spec at a time.
 ```
 
 ### Run a single spec
@@ -246,7 +261,7 @@ For every NEW spec file, in the same session you author it:
    - `ensureSeedRichBuilding`, `ensureSeedLeasedTenant`, `ensureSeedLeasedTenantWithPayment` — common shapes
    - `mongoExec(script)` from `tests/lib/mongoExec.ts` — direct mongo readback / backdoor seeding for cases the API can't express (e.g., creating a tenant with intentionally-invalid data so a "missing-fields" warning can be tested). Returns `null` if `.secrets/portainer-token` is missing — handle that branch with `test.skip(!result, '...')` rather than throwing.
 4. **Real-data scenarios are required for any spec touching:**
-   - PDF parser (Greek leases, E9) — must use real fixture PDFs from `e2e-playwright/fixtures/pdfs/` (commit small samples with PII redacted) OR call the parser via mock-data injection if the parser exposes one. Tests that "would parse a PDF" without an actual PDF do not count.
+   - PDF parser (Greek leases, E9) — ⚠️ **`e2e-playwright/fixtures/pdfs/` does not exist** and this line invented it (`documentation/E2E_TESTING.md` explicitly says not to reference it). The real fixtures are redacted **text** dumps under `services/api/src/__tests__/fixtures/e9/`, exercised by jest; the Playwright specs (`33_import_extend_lease`, `45_round1_pdf_import`) mock `POST /api/v2/tenants/import-pdf` via `page.route()` and assert the review-dialog behaviour, not the parser. Do not commit real bill/lease PDFs to the repo — it is public, and those are a live account's tax documents. Tests that "would parse a PDF" without an actual fixture still do not count.
    - Real-tenant data shapes (multi-property, co-tenants, partial-data legacy rows) — seed via `mongoExec` direct insert, not via API POST (which validators correctly reject). The point of the spec is to verify the UI handles the bad-data case it must already cope with in production.
 5. **Anti-patterns that cause silent test rot — REJECT in review:**
    - Tests that create an ephemeral realm but sign in with the canonical account → canonical account can't see ephemeral data, every assertion fails. If a spec needs ephemerality, sign in to the ephemeral realm, OR don't use ephemeral realms.
@@ -280,7 +295,7 @@ The API's `_stringToDate` parser is strict on `DD/MM/YYYY`. ISO `YYYY-MM-DD` wil
 
 ## Running unit tests
 
-> **⚠️ The suite requires node@20.** `services/api` is `type: module`; the system node has drifted to v25, which breaks jest with `ERR_REQUIRE_ESM` on the winston mock the moment any suite imports `@microrealestate/common` (i.e. nearly all of them). node@20 is installed at `/usr/local/opt/node@20/bin/node`. Running `npx jest` under v25 will fail — this is NOT a code problem, it is the node version. (Infra repaired in commit `6cf15c26`.)
+> **⚠️ The suite requires node@20.** `services/api` is `type: module`; the system node has drifted to v25, which breaks jest with `ERR_REQUIRE_ESM` on the winston mock the moment any suite imports `@microrealestate/common` (i.e. nearly all of them). node@20 is installed at `/usr/local/opt/node@20/bin/node`. Running `npx jest` under v25 will fail — this is NOT a code problem, it is the node version. (Infra repaired in commit `a6fd2567`.)
 
 ```bash
 export PATH="/usr/local/opt/node@20/bin:$PATH"
@@ -289,7 +304,17 @@ cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/je
 
 (The `test` npm script is `node --experimental-vm-modules ../../node_modules/jest/bin/jest.js`, so `yarn workspace @microrealestate/api test` works too — but only under node@20.)
 
-Per-service jest, no Docker. Full suite (measured 2026-07-31): **875 passed / 17 skipped / 892 total, 54 suites passed + 1 skipped suite** (e9parser, skipped when /tmp fixtures are absent), 0 failed, ~13s. Grew 431 (May) → 609 (June) → ~628/644 (July 1) → 875 (July 31). **Re-run to get the live count — every figure in this repo's docs, including CLAUDE.md's ~644, is a point-in-time snapshot.** A count that DROPS between runs is a deleted or silently-skipped test, not a pass; investigate it.
+Per-service jest, no Docker. **This is the one dated baseline in the repo — every other figure in
+every other doc has been deleted in favour of the command, because a snapshot number reads as current
+for months.**
+
+Full suite, measured **2026-08-02** with the command above: **883 passed / 17 skipped / 900 total,
+54 of 55 suites passed + 1 skipped suite** (e9parser, skipped when the /tmp fixtures are absent),
+0 failed, 12.74s. 55 api test files on disk.
+
+Growth: 431 (May) → 609 (June) → ~628/644 (July 1) → 875 (July 31) → 883 (Aug 2). **Re-run to get the
+live count.** A count that DROPS is not automatically a regression — a deleted duplicate, a `.skip`, or
+an untracking can each do it — but it is never a pass either: find out which one it was.
 
 **Jest mock infra (don't regress this):** the winston / express-winston / jsonwebtoken mocks are `.cjs` (`services/api/src/__mocks__/*.cjs`) mapped via `moduleNameMapper` — a `.js` mock is loaded as ESM under `type: module` and the real CJS express-winston cannot `require()` it. `jest.mock`-using suites need `import { jest } from '@jest/globals'` (jest is not an ambient global under ESM). Factory-mock suites (`realmmanager.test.js`, `propertymanager.classifyExpense.test.js`) use `jest.unstable_mockModule` + dynamic `import()` inside `beforeAll`. ESM test files use `import.meta.url`, not `__dirname`.
 
@@ -389,59 +414,100 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Both the API and frontend containers must be on the same revision before re-running tests.
 
-## Known stable failures (June 2026 baseline)
+## Known stable failures — the list is STALE; re-measure before trusting it
 
-The following tests fail on a green build and they are **test-side bugs**, not app bugs. Don't "fix" them by changing app code:
+⚠️ **This section was a June-2026 snapshot and three of its four entries had been fixed in the
+specs without anyone updating it** (audited 2026-08-02 by reading each spec). A stale
+known-failures list is worse than no list: it tells you to ignore a failure that is now a real
+regression. Only one entry survives.
 
-- **spec 03 `tenant search by partial phone1`** — RESOLVED on master in `49040d15` (June 1 2026). Re-running this spec against any revision ≥ `49040d15` should pass. The note about the `fb024ed4` race is preserved for archaeology only — the resolved fix takes a different shape (delete the init useEffect rather than feed it current state).
-- **spec 15 S36/S37** — assert that a date `last day of current month` and `5 days into next month` pass the server's F3 guard. They pass when run near month-end but fail when run on day 1-22 of the month because the date is ≥7 days away → "too far in future" guard fires. Test should compute the date dynamically against `today + 5d` instead of "month end".
-- **spec 17 C28 `double-clicking Record does not double-fire PATCH`** — flaky timing race against the 80ms submittingRef fallback. Don't tighten the timeout (see AGENTS.md "saga"); accept the flake.
-- **spec 19 L06 `adding a building expense lifts next-rent grandTotal`** — test logic computes the wrong expected delta. Expense isn't reflected in the next month because `Contract.payTerm` only generates rent for the requested term (not future months); the assertion needs to PATCH the next month explicitly to trigger regeneration.
+**Still true:**
 
-If a NEW failure appears outside that list, it's a real regression and you should investigate.
+- **spec 17 C28 `double-clicking Record does not double-fire PATCH`**
+  (`e2e-playwright/tests/17_payment_combinatorial.spec.ts:912`) — flaky timing race against the
+  80ms `submittingRef` fallback in `NewPaymentDialog.js:88-93`. Don't tighten the timeout (see
+  AGENTS.md "saga"); accept the flake.
 
-## Verified-clean summary (June 2026 audit waves A–F)
+**Withdrawn (the spec was fixed; a failure here is now a REAL signal):**
 
-The audit waves run between late May and early June 2026 catalogued
-behaviors as either "fix required" (shipped under batches A–E) or
-"verified clean / behavior is correct as-is". The clean list is recorded
-here so future agents don't re-investigate already-confirmed behavior
-and don't accidentally regress it during cleanup work.
+- **spec 03 `tenant search by partial phone1`** — was resolved in `5cc27004`; the whole entry was
+  archaeology about an `e11a4bc8` race that no longer applies.
+- **spec 15 S36/S37** — the doc said the dates were hardcoded to "month end" and would fail on
+  days 1–22. They are computed dynamically now (`15_payment_matrix.spec.ts:724` and `:742` build
+  from `new Date(Date.UTC(...))`), and `c2f1f9af` split off `S37b` for the outside-the-cushion
+  case. The prescribed fix had already been applied.
+- **spec 19 L06** — the doc said the assertion needed to PATCH the next month. The spec
+  (`19_lifecycle_ui_scenarios.spec.ts:804`) already forces recomputation via a tenant PATCH and
+  polls `paymentTerm` (the CURRENT month, from `ensureSeedLeasedTenantWithPayment` in
+  `tests/lib/api.ts:932`) — hardened in `3f8e44ea`. Note the spec title still says "next-rent",
+  which is what made this entry read as unfixed; the title is wrong, the assertion is right.
 
-**Behaviors verified correct as-is (do NOT change without re-running the
-relevant probe first):**
+If a failure appears outside the one surviving entry, treat it as a real regression — **and if you
+find an entry here that no longer matches the spec, delete the entry rather than working around
+it.** Every stale line in this list is a live instruction to ignore a real failure.
+
+## Behaviours verified correct as-is — do NOT "fix" these
+
+Each item below is a deliberate design decision that an agent has previously mistaken for a bug and
+tried to "fix". They were confirmed correct during the May–June 2026 audit waves and re-anchored to
+code on **2026-08-02**. This is not a dated snapshot — it is a standing do-not-touch list, and each
+entry names the probe to re-run if you think you've found a counterexample.
+
+**Every entry cites a symbol or a grep, not a bare line number** — the `_isFrozen` entry below was
+pointing at `:315` long after the function moved to `:472`, and two places in
+`documentation/DEFERRED_DECISIONS.md` copied that dead anchor. Cite the symbol.
 
 - **Past-month overpayment propagation** — `_isFrozen` is now purely
-  TERM-based (Tier I-1, commit `01d48c46`): a future term is never frozen,
+  TERM-based (Tier I-1, commit `2ad674cc`): a future term is never frozen,
   a PAST term is always frozen (paid OR unpaid), and the current term is
   frozen only if fully paid. So an overpayment in a past month no longer
   propagates forward — every past term is locked regardless of settlements
   (the old "two regimes" in `documentation/DEFERRED_DECISIONS.md` D-8 have
   collapsed). The `_isFrozen` function is at
-  `services/api/src/managers/contract.ts:315`; the guard call inside the
-  pay path is ~line 270. This guard is intentional and load-bearing.
-- **Payment dialog `submittingRef` 80ms reset fallback** — load-bearing.
-  Several attempts to tighten or remove this timeout broke the entire
-  dialog flow. The C28 double-click race remains a known test flake;
-  accept it. See AGENTS.md "saga" section.
+  `services/api/src/managers/contract.ts:472` (**was cited as `:315` here and in
+  two places in `documentation/DEFERRED_DECISIONS.md` — the file has grown since**;
+  `grep -n '_isFrozen' services/api/src/managers/contract.ts` rather than trusting
+  a line number). Its call sites are at `:172`, `:218`, `:297`, `:328`. This guard
+  is intentional and load-bearing.
+- **`submittingRef` 80ms reset fallback** — load-bearing. It lives in
+  `webapps/landlord/src/components/payment/NewPaymentDialog.js:79-94` (the
+  OUTER dialog — `grep -rn submittingRef webapps/landlord/src` confirms it
+  is NOT in `PaymentTabs.js`, which several docs implied). Several attempts
+  to tighten or remove this timeout broke the entire dialog flow. The C28
+  double-click race remains a known test flake; accept it. See AGENTS.md
+  "saga" section.
 - **Greek lease parser, IRIS QR generation, RF payment codes** — covered
   by the manager unit tests under `services/api/src/__tests__/managers/`
-  (`greekleaseparser.test.js` 20 tests, `e9parser.test.js` 13, `contract.test.js`
-  17, `inferPropertyType.test.js` 23). Don't rewrite the parser regexes
+  (`greekleaseparser.test.js` 20 tests, `e9parser.test.js` **14**, `contract.test.js`
+  17, `inferPropertyType.test.js` 23 — measured 2026-08-02 with
+  `grep -cE '^\s*(it|test)\(' <file>`). Don't rewrite the parser regexes
   without re-running those.
 - **Frontend store reactivity (`InjectStoreContext` /
   `useSyncExternalStore`)** — current shape (subscribe + notify, plain
   classes) is a deliberate replacement for MobX. Don't reintroduce
   `mobx` or `mobx-react-lite`.
-- **`destructUrl()` port handling** — FIXED (`59e37bda`, May 2026):
-  `services/common/src/utils/url.ts` returns `domain = url.host`
-  (including the port), and `configureCORS()` derives the allowed origin
-  from `new URL(DOMAIN_URL).host`. `APP_DOMAIN=host:port` (comma-separated)
-  is the multi-origin allowlist for NAS deploys, not a bug workaround.
+- **`destructUrl()` port handling and CORS origins are TWO separate
+  mechanisms** — don't conflate them (this entry used to).
+  `destructUrl()` (`services/common/src/utils/url.ts:9`) returns
+  `domain = url.host` so the port is preserved — but note it still
+  collapses a 3+-label hostname to its last two labels (`:13-20`), which
+  is exactly why CORS stopped using it. `configureCORS()` lives in
+  **`services/gateway/src/index.ts:65`** (not in `common`) and deliberately
+  bypasses the helper: it takes `new URL(DOMAIN_URL).host` directly
+  (`:87-90`), falling back to `destructUrl` only on a malformed URL
+  (`:95`). It also regex-escapes each domain and anchors the pattern
+  (`:104-110`) so `attacker.com.example.com` can't slip past.
+  `APP_DOMAIN=host:port` (comma-separated) is the multi-origin allowlist
+  for NAS deploys, not a bug workaround.
 - **Dashboard pie tooltip layout** — kept as 3-column table per round-3o
-  decision. Pie segments themselves still use the `paidRatio` estimate
-  (per explicit instruction). Don't change segment math without
-  re-running `dashboardManagerComputePaidByBucket.test.js`.
+  decision. ⚠️ The old text here said segments "still use the `paidRatio`
+  estimate"; the code comment at
+  `services/api/src/managers/dashboardmanager.ts:456-458` says the
+  per-bucket paid amount is computed exactly **instead of** `paidRatio`
+  estimates. Read that comment before changing segment math, and re-run
+  `services/api/src/businesslogic/__tests__/dashboardManagerComputePaidByBucket.test.js`
+  (11 tests) — note the path is `businesslogic/__tests__/`, not
+  `__tests__/managers/`.
 - **Auto-spread payment allocation order (oldest-debt-first)** — used by
   both `paymentAllocation.js` (frontend) and `_computePaidByBucket`
   (backend). They operate on different bucket spaces (rent-pipeline
@@ -454,11 +520,15 @@ relevant probe first):**
   topology change. Optimistic concurrency on individual documents is
   the current correctness mechanism.
 
-If you read this list and are about to "fix" one of these items: stop,
-re-run the probe that validated the existing behavior first, and confirm
-the regression you think you see is real. The audit waves spent a lot of
-time confirming these are correct; the cost of re-verification is
-cheaper than the cost of regressing them.
+If you are about to "fix" one of these: stop, re-run the named probe, and confirm the regression you
+think you see is real. Re-verification is cheaper than regressing a deliberate decision.
+
+**But do not treat this list as evidence.** The 2026-08-02 audit found that three of its entries had
+drifted off the code they described — a dead `_isFrozen` line number, a CORS claim that named the
+wrong file and the wrong mechanism, and a pie-segment claim that asserted the *opposite* of what the
+code comment says. A do-not-touch list whose citations have rotted defends the wrong thing. If you
+open a cited symbol and it doesn't say what the entry says, **the entry is wrong — fix the entry**,
+and say so rather than quietly working around it.
 
 ## Canonical fix-and-test procedure (June 2026 onward) — READ BEFORE TOUCHING ANY CODE
 
@@ -557,12 +627,19 @@ If the lawnmower fails on a surface unrelated to your tier, **stop, investigate,
 
 ### Full-sweep audit (June 2026 — June onward — every 2 months)
 
-Every two months, an audit-mode workflow MUST be run that re-reviews every commit landed in the prior 60 days for AI-introduced regressions. The mode is read-only; it produces a punch-list of suspect commits. Each suspect must be re-tested against the lawnmower + tier-specific tests. Skeleton in `documentation/AUDIT_PROCEDURE.md` (write it if missing); high-level shape:
+Every two months, an audit-mode workflow MUST be run that re-reviews every commit landed in the prior 60 days for AI-introduced regressions. The mode is read-only; it produces a punch-list of suspect commits. Each suspect must be re-tested against the lawnmower + tier-specific tests.
+
+⚠️ **Three of the four filenames this section used to cite have never existed** — there is no
+`documentation/AUDIT_PROCEDURE.md`, no `verified-clean-summary.md`, no `documentation/audit-2026-08.md`.
+The one real precedent is the **directory** form: `documentation/audit-2026-06/` (`round1-punchlist.md`,
+`round1-raw.json`, `round2-*`, `step7-r7-raw.json`, `FIX-LOG.md`) and `documentation/ui-audit-2026-06/`
+(`catalogue.md`, `findings.json`). Follow that shape.
 
 1. `git log --since='60 days ago' --pretty='%h %s'` — full commit list.
 2. For each commit: read the diff, identify the surface, run the corresponding tier-specific test on the current `nas` revision (NOT against the historic commit — what we care about is whether today's behavior is correct).
-3. Fail-list commits whose tier-specific test fails today get a fix in a new tier; pass-list commits are recorded in `verified-clean-summary.md` so the next sweep doesn't re-do the work.
-4. The sweep result is one report file per audit (`documentation/audit-2026-08.md` etc.) and one PR per fix.
+3. Fail-list commits whose tier-specific test fails today get a fix in a new tier; pass-list commits go in that audit's own punchlist file so the next sweep doesn't re-do the work.
+4. The sweep result is one **directory** per audit — `documentation/audit-YYYY-MM/` with a punchlist + raw JSON + FIX-LOG — and one PR per fix.
+5. ⚠️ **Diff review alone cannot find the class of bug that leaked credentials for 3.5 months.** A secret (or any defect) introduced in commit A and never removed appears only in A's diff, while every later commit's *tree* still carries it. A 60-day `log -p` sweep is structurally blind to it. Add a tree-state pass: scan the current checkout and the current tip's tree, not just the window's diffs.
 
 This 2-month cadence is the rule that catches the "T2.2 made signin worse" class of regression before the user finds it manually. **Skipping the sweep is not an option.**
 
@@ -582,6 +659,23 @@ This 2-month cadence is the rule that catches the "T2.2 made signin worse" class
 
 ## Test inventory
 
-See `e2e-playwright/tests/`. Every spec file's leading comment names the wave-24 bug it covers and the trigger condition. The PR description on master (search PR title "Add Playwright E2E harness") summarizes coverage.
+`e2e-playwright/tests/` is the inventory — read it, don't read a count here. Every numbered spec's
+leading comment names the bug it covers and the trigger condition (see
+`58_settlements_xlsx_owed_strip.spec.ts` for the shape). Enumerate with:
 
-When the count grows past ~30 specs, consider extracting Page Object classes (one per landlord screen) — until then the duplication is cheaper than the abstraction.
+```bash
+git ls-files 'e2e-playwright/tests/[0-9]*.spec.ts' | wc -l   # tracked fleet
+ls e2e-playwright/tests/*.spec.ts | wc -l                    # + untracked scratch specs
+```
+
+The gap between those two numbers is untracked `_*` scratch specs that a bare `playwright test`
+would also run against the LIVE NAS — see the warning in "Backup + run the full suite".
+
+⚠️ The old text here pointed at a PR description on `master` as the coverage summary. Don't: this
+fork's `master` is not upstream (`origin/master` == `origin/nas`, hundreds of commits ahead), and a
+PR body is not a maintained artifact. The specs are.
+
+The old "when the count grows past ~30 specs, consider Page Object classes" note is **past due** —
+the tracked fleet was 55 when measured on 2026-08-02. Treat the duplication as a known debt, not as
+a still-open decision; extract Page Objects when a spec batch makes it cheap, and don't re-litigate
+the threshold.

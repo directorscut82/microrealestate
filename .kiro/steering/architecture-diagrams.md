@@ -14,7 +14,7 @@ graph TB
     end
 
     subgraph ReverseProxy["Reverse Proxy"]
-        Caddy["Caddy<br/>(auto HTTPS)"]
+        Caddy["Caddy<br/>(standalone compose only;<br/>auto_https OFF in this fork)"]
     end
 
     subgraph Gateway["Gateway :8080"]
@@ -125,12 +125,13 @@ sequenceDiagram
     participant R as Redis
 
     Note over B,R: Login Flow
-    B->>GW: POST /api/v2/authenticator/signin
-    GW->>AUTH: proxy request
+    B->>GW: POST /api/v2/authenticator/landlord/signin
+    GW->>AUTH: proxy (strips /api/v2/authenticator)
+    AUTH->>AUTH: authRateLimit (20/min, keyed by email)
     AUTH->>DB: find account by email
     AUTH->>AUTH: verify password (bcrypt)
     AUTH->>R: store refresh token
-    AUTH-->>GW: { accessToken } + refreshToken cookie
+    AUTH-->>GW: { accessToken 15m } + refreshToken cookie (1h prod / 12h dev)
     GW-->>B: response
 
     Note over B,R: Authenticated API Request
@@ -299,15 +300,48 @@ erDiagram
         string phone
     }
 
+    Realm ||--o{ InboxItem : receives
+    InboxItem {
+        string _id PK
+        string realmId FK
+        string source
+        string status
+        string parseError
+        string suggestedMatch
+    }
+
+    Realm ||--|| TelegramOffset : "poll cursor"
+    TelegramOffset {
+        string _id PK
+        string realmId FK
+        number lastUpdateId
+    }
+
 ```
+
+**12 collections** exist (`ls services/common/src/collections/`); this diagram shows all of them as of
+2026-08-02. `InboxItem` (Telegram-bot bill inbox, backs `/api/v2/inbox`, `inboxItem.ts`) and
+`TelegramOffset` (`telegramOffset.ts` — one doc **per realm**, unique index on `realmId`, holds
+`lastUpdateId` for `telegramInboxScanner.ts`) were **missing from this diagram for months**. They are
+also missing from `COLLECTIONS_TO_BACKUP`, so a restore silently drops pending inbox bills and rewinds
+the poll cursor — which then re-ingests old Telegram messages.
 
 ## 5. CI/CD Pipeline
 
 This diagram represents the **upstream canonical** pipeline. The directorscut82 NAS fork strips Deploy + E2E from CI and replaces them with `bash scripts/deploy-nas.sh` (manual on-Mac) plus Playwright run on the developer Mac against the live NAS. See `documentation/E2E_TESTING.md`.
 
-The fork has TWO image-build workflows (each a 9-image parallel matrix: gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice, landlord-frontend, tenant-frontend):
-- `.github/workflows/ci.yml` — push to `master` → lint → build/push images tagged `:<sha>` + `:latest`.
-- `.github/workflows/nas-ci.yml` ("NAS Branch CI") — push to **`nas`** → lint → build/push the same 9 images tagged `:nas` + `:nas-<sha>`. This is the workflow whose images the NAS deploy pulls.
+**FOUR workflows build images; THREE of them push to GHCR** (re-measured 2026-08-02; this said "TWO"
+for months, which is how `release.yml` overwriting `:latest` goes unnoticed). Each is a 9-image
+parallel matrix: gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice,
+landlord-frontend, tenant-frontend.
+
+- `.github/workflows/nas-ci.yml` ("NAS Branch CI") — push to **`nas`** → lint → build/push tagged
+  `:nas` + `:nas-<sha>`. **This is the one the NAS deploy waits on and pulls from.**
+- `.github/workflows/ci.yml` — push to `master` → lint → build/push tagged `:<sha>` + `:latest`.
+- `.github/workflows/release.yml` — on `release` → build/push tagged `:<tag>` and **overwrites
+  `:latest`**. Easy to miss when reasoning "only master and nas publish".
+- `.github/workflows/pr-ci.yml` — on `pull_request` → builds with `push: false`, never publishes.
+- `.github/workflows/codeql-analysis.yml` — builds no images.
 
 ```mermaid
 graph LR

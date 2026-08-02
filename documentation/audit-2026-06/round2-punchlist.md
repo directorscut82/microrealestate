@@ -1,4 +1,4 @@
-# PUNCH-LIST — MicroRealEstate Round-2 Audit (HEAD f6f75966, branch nas)
+# PUNCH-LIST — MicroRealEstate Round-2 Audit (HEAD 2a48a511, branch nas)
 
 Deduped to **24 distinct root causes**. The PDF-VAT, multi-property-address, accounting-Owners-tab, incoming-tenants-date, settlements-CSV-date, typeless-payment-crash, month-locale, CSV-injection, surplus-badge, payment-toast, owner-toast, and emailer-Total findings each appeared 2-4x in the source set — collapsed to one entry apiece.
 
@@ -165,7 +165,7 @@ Deduped to **24 distinct root causes**. The PDF-VAT, multi-property-address, acc
 ### L7. Express settle records UTC date while drawer header shows LOCAL date — off-by-one near Athens midnight
 - **Root cause:** `ExpressPaymentDialog.js:219` shows `moment().format('DD/MM/YYYY')` (local); `rentmanager.ts:504` stamps `moment.utc().format('DD/MM/YYYY')` (used `:603`); response carries no date back.
 - **Trigger:** Record via Express at 01:30 Athens → header "16/06", payment persisted "15/06".
-- **Fix direction:** Align the dialog's `moment()` with `moment.utc()` (or return the stamped date and display it). (Same mixed-moment class as `a9d3fbab`.)
+- **Fix direction:** Align the dialog's `moment()` with `moment.utc()` (or return the stamped date and display it). (Same mixed-moment class as `35af8ec0`.)
 
 ### L8. DEH bill amount parser misreads a bare thousands-dot (no comma) as a decimal point
 - **Root cause:** `services/api/src/managers/billparser/deh.ts:5-8` — dot-thousands/comma-decimal normalization runs only `if (cleaned.includes(','))`; `parseFloat('1.234')` → 1.234.

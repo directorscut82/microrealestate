@@ -38,6 +38,46 @@ Each rendered element must be traceable to one of:
 
 If a piece of an artifact has no source from (1)/(2)/(3), **delete that piece**. Don't fill it in with what feels right.
 
+## The mirror rule — a claim of ABSENCE is a claim, and it needs the same sourcing
+
+Everything above is about not inventing things that are *there*. The costlier failure in this repo
+has been the opposite: **asserting that something is NOT there, from a check incapable of showing
+it.** "No PII in history", "no credentials, ever", "0 in origin now", "the images never contained
+your secrets", "all clean" — every one of those was rendered here, none was measured, and one of them
+kept a live credential public for 3.5 months while four separate reviews called the repo clean.
+
+Absence is harder than presence, because a broken check and a clean codebase produce the identical
+output: nothing. So:
+
+**Never write "no X" / "clean" / "none found" / "never" without stating the denominator.**
+
+A sourced absence claim names all four:
+
+1. **What you enumerated** — "8,860 text blobs across 19,738 objects reachable from `origin/nas`",
+   not "the repo".
+2. **What you searched for** — "31 needle values loaded from 12 files under `.secrets/`".
+3. **What was skipped and why** — binaries, files over 8 MB, lockfiles. *Silent skips are the bug.*
+   Print the skip count; if you can't, you don't know your coverage.
+4. **The scope's boundary** — `origin/nas` is not `--all`; `--all` is not the remote; a diff is not a
+   tree; one image tag is not every image.
+
+Then sanity-check the instrument itself: **make it report a positive on purpose.** If a scan cannot
+find a value you planted, its "nothing found" means nothing. Every under-counting bug listed in the
+table below was invisible until someone checked the denominator.
+
+| The claim | Why it was wrong | The check that would have caught it |
+|---|---|---|
+| "No credentials, ever — `.secrets/` has 0 commits" | Proves the *directory* was never committed. Cannot see a value pasted into application code — which is what happened. | Grep the credential *values* against every tracked file, not the path. |
+| "`inOriginNow=0` for that credential" | Computed against a stale ref set. | Re-resolve refs at scan time; print which refs were walked. |
+| "The images never contained your secrets" | One tag of one image was scanned; the claim covered all of them. | State "1 of N tags scanned" — the gap becomes self-evident. |
+| "Every reviewed diff was clean" | A secret in commit A and still at Z appears in **A's diff only**; Z's tree still serves it. | Enumerate trees (`ls-tree -r`), never `log -p`. |
+| "8,926 blobs scanned, clean" | The parser sliced a UTF-8-decoded string by *byte* offsets and desynced on the first Greek blob — 12 of 7,659 objects actually read. | Compare the scanned count against `rev-list --objects \| wc -l`. A 100× gap is visible. |
+| "The guard is installed" | It was mode 644; git silently ignores a non-executable hook and pushes anyway. | Fire it on purpose; require a non-zero exit. |
+
+If you cannot produce the denominator, the honest sentence is **"I did not verify that"** — which is
+always acceptable, and always cheaper than a false all-clear. A confident wrong "clean" is worse than
+an admitted unknown, because it ends the investigation.
+
 ## Before rendering: the four questions
 
 For every element of an artifact, answer these out loud (in your reasoning) before writing it:
@@ -84,6 +124,9 @@ The user must be able to distinguish "this is what your data renders today" from
 | "Here are 7 saved tiles" with values that don't sum to `rent.total.payment` | Sums are checkable in 5 seconds; if you didn't check, you fabricated. Always show the math against the source. |
 | "Hypothetical κοινόχρηστο line" inserted into a tile that the user is asking about for real | Real and hypothetical never share an artifact unless explicitly framed as a side-by-side comparison with a marker. |
 | "I corrected the previous artifact" — and the new one still has unsourced elements | Each turn is a fresh derivation. Re-source everything; don't patch yesterday's draft. |
+| "Clean." / "No X found." / "Nothing to report." | An absence claim with no denominator. State what you enumerated, what you searched for, what was skipped, and the scope boundary — see "The mirror rule". |
+| "The scan passed" | Did it load its inputs? A loader that silently drops its needles passes everything. Print needles-loaded and objects-scanned, and verify the scan can find a planted positive. |
+| "Verified" (about something you inferred rather than ran) | The word "verified" means a command ran this session and you read its output. Otherwise the word is "assumed", and it must appear as such. |
 
 ## What to do when the user pushes back on a rendering
 
@@ -96,7 +139,7 @@ The right next step is:
 1. **Stop drawing.**
 2. **Re-open the source file or re-run the query.**
 3. **Quote the actual rendered output (or the JSX that produces it).**
-4. **Identify which element of the prior artifact had no source.** Name it explicitly: "I added '— Ασφάλιση' which is not emitted by RentDetails.js:111-120; that was a fabrication."
+4. **Identify which element of the prior artifact had no source.** Name it explicitly: "I added '— Ασφάλιση', which is not emitted by the label helpers `RentDetails.js` calls (`chargeLineLabel` / `buildingLineLabel`, from `utils/lineLabels.js`); that was a fabrication." Cite the **symbol**, not a line range — the range this example used to give (`:111-120`) had already drifted off the code it pointed at, which is the same failure mode in miniature.
 5. **Only after that** do you render again — and only the parts you can cite.
 
 ## What the user has explicitly said that overrides any other instruction

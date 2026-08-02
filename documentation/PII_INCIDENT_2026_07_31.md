@@ -2,9 +2,15 @@
 
 > Written by the agent that caused it. Kept in the repo because the next agent to work here needs
 > to know that this repository is public, that real family data has been committed to it before,
-> and what the guard in `scripts/scan-pii.mjs` is defending against.
+> and what the guards in `scripts/scan-pii.mjs` + `scripts/scan-push.mjs` are defending against.
 >
-> **This file deliberately contains no unmasked personal data.**
+> **This file deliberately contains no unmasked personal data or credential values.**
+>
+> **Corrected 2026-08-02.** Two claims in the original version of this file were wrong, and both
+> were wrong in the same direction — asserting *absence* from a check that could not have proven it.
+> See "Corrections" at the end. If you are reading this file to learn one thing, learn that: a scan
+> that reports nothing is only as trustworthy as its coverage, and the burden is on you to show the
+> coverage was real.
 
 ## What happened
 
@@ -15,15 +21,20 @@ is public (`"visibility": "public"`, 0 forks, 0 stars).
 The commit contained a **real ΔΕΗ electricity bill PDF** (7 MB) plus its full OCR text — the account
 holder's name, the provision number, amounts and dates.
 
-At 23:04 the agent noticed, rebuilt the commit as `8f10fb5c` with 5 explicitly-named files, and
+At 23:04 the agent noticed, rebuilt the commit as `f6972d06` with 5 explicitly-named files, and
 force-pushed at 23:06. Exposure window for the branch tip: **~3 minutes**.
 
 ## What the force-push did NOT fix
 
 1. **The old commit object survives.** `dded622e` is unreachable from any ref but still served:
-   `raw.githubusercontent.com/<owner>/<repo>/dded622e/...` returns **200**. GitHub does not
-   garbage-collect unreachable objects on demand and exposes no API to force it; the documented
-   remedy is a Support request.
+   `api.github.com/repos/<owner>/<repo>/commits/dded622e` returns **200** (re-verified 2026-08-02,
+   two days later). Any object can also be fetched by SHA via
+   `/git/blobs/<sha>` regardless of reachability. GitHub does not garbage-collect unreachable
+   objects on demand and exposes no API to force it.
+
+   This SHA is a *pre-rewrite* one and deliberately left un-translated here: it names an object that
+   only ever existed on the published remote. Every other SHA in this repository's docs was
+   re-pointed after `git filter-repo` rewrote them; this one has no successor by design.
 
 2. **The SHA is published, not secret.** It appears twice in the repository's own public events
    feed (`/repos/{owner}/{repo}/events`) — once as the `head` of the original push, once as the
@@ -46,14 +57,50 @@ force-pushed at 23:06. Exposure window for the branch tip: **~3 minutes**.
    The single worst line was an HTML mockup that printed a named individual and their tax ID in the
    same sentence.
 
+## Credentials — a live one IS exposed
+
+The original version of this file claimed "**No credentials, ever**", citing
+`git log --all -- '.secrets/*'` returning 0 commits. That command is still true and still
+irrelevant: it proves the `.secrets/` **directory** was never committed. It says nothing about a
+credential *value* pasted into application code. That is exactly what happened.
+
+**Confirmed exposed (verified 2026-08-02, four independent ways):**
+
+| | |
+|---|---|
+| Credential | sms-gate.app **Cloud** account — username + password |
+| How | hardcoded as a Next.js `defaultValue` in `webapps/landlord/src/components/organization/ThirdPartiesForm.js` |
+| Introduced | 2026-04-20, commit `94a5c6bb` "feat: SMS Gateway integration via sms-gate.app" |
+| Reachability | `94a5c6bb` is an **ancestor of `origin/nas` AND `origin/master`** — not an orphan |
+| Also pinned by | `refs/pull/1/head` (`36f94570`), which is server-owned and read-only |
+| Blob | `5a078831740ec82b73458f6ede21cbf2ffd019ef`, anonymously fetchable: **http 200**, 14693 bytes, both values present |
+| Exposure window | ~3.5 months, and **still open** |
+
+A Next.js `defaultValue` compiles into the **client bundle**, so the credential was additionally
+served to every browser that opened the settings page — not merely present in git.
+
+Two properties make this unfixable by rewriting:
+
+1. The same blob is pinned by `refs/pull/1/head`. That ref is server-owned and read-only; you cannot
+   delete or rewrite it, and GitHub Support cannot purge it either.
+2. GitHub serves any object by SHA whether or not a ref reaches it.
+
+**ROTATION IS THE ONLY REMEDY.** Rewriting history, deleting branches, or making the repo private do
+not retract a value that has already been served. As of this writing rotation has **not** been
+authorized by the owner, so this credential must be treated as public.
+
+The branch *tips* are clean — one carrier commit, one blob. A full-tree sweep of all 19,738 objects
+reachable from `origin/nas` found 10 needles present; the other 9 are non-secret (service URLs,
+bucket names, a bot username, test-realm names, a GCP project ID).
+
 ## What was NOT exposed
 
 Verified, not assumed:
 
-- **No credentials, ever.** `.secrets/` has **0 commits across all history**
-  (`git log --all -- '.secrets/*'`). No tokens, keys, or passwords in any tracked file.
 - **No fork copied the objects.** 0 forks, `network_count: 0` — objects in a fork network survive
   GC, so this matters.
+- **No other credential value.** The sweep above covers every value under `.secrets/`, matched
+  literally against the full tree of every reachable commit — not against diffs. See "Corrections".
 
 ## Evidence of access
 
@@ -74,12 +121,41 @@ The ignore rules for `.scratch-adv-tests/` were written *after* the accident. Mo
 - 18 underscore-prefixed scratch directories under `e2e-playwright/` holding **151 screenshots of
   the live production realm** were untracked *and unignored* — one `add -A` from publication.
 
-## The guard
+## The guards
 
-`scripts/scan-pii.mjs`, wired into `.husky/pre-commit` ahead of `yarn lint`.
+There are two, and the split matters — the first one cannot see the failure that caused the
+credential exposure above.
+
+### `scripts/scan-pii.mjs` — pre-commit, scans the STAGING AREA
+
+Wired into `.husky/pre-commit` ahead of `yarn lint`.
 
 It scans **staged content** (`git show :<file>`), so it judges what would actually be committed
 rather than what happens to be in the worktree. `--all` sweeps every tracked file instead.
+
+Because it reads the staging area, it can only ever see content being written *right now*. It is
+structurally incapable of stopping `git push origin <branch-whose-commits-already-exist>`.
+
+### `scripts/scan-push.mjs` — pre-push, scans commit TREES
+
+Wired into `.husky/pre-push`. This exists because of the sms-gate credential: several branches
+carried `94a5c6bb` for months, and no pre-commit hook can stop a push of a commit that is already
+written.
+
+It walks the full **TREE** of every commit in the push range, not the diff. That distinction is the
+root cause of the whole 3.5-month miss: a secret introduced in commit A and still present at commit
+Z appears in **A's diff only**, yet Z's tree still serves it. Every earlier audit of this incident
+examined diffs and reported clean. Blobs are deduped, so a file unchanged across 200 commits is read
+once.
+
+Two traps it is built to avoid, both of which produced confidently-false clean reports before:
+
+- `git cat-file --batch` reports **byte** counts. The stream must be parsed as a `Buffer` with each
+  body decoded separately. Slicing a UTF-8-decoded string by those offsets desyncs the parser on the
+  first multibyte (Greek) blob — that bug made one pass read 12 of 7,659 objects and call it success.
+- **git silently ignores a non-executable hook.** It prints a `hint:` and pushes anyway. A mode-644
+  copy of `.husky/pre-push` is indistinguishable from having no guard. It is committed `100755`;
+  verify with `git push --dry-run origin <a branch known to carry a secret>` → must exit 1.
 
 Detects:
 
@@ -110,8 +186,11 @@ override gets deleted the first time it is wrong, and then there is no guard at 
 
 ## Residual risk that code cannot fix
 
-- The orphaned commit's objects remain fetchable until GitHub garbage-collects them. **Requires a
-  Support request** — no API, no local command reaches server-side unreachable objects.
+- **The live sms-gate credential.** Pinned by `refs/pull/1/head` as well as reachable from
+  `origin/nas`. Not removable by any rewrite, and not by Support. **Rotation only** — see above.
+- The unreachable commit's objects remain fetchable until GitHub garbage-collects them; no API and no
+  local command reaches server-side unreachable objects. Note that `refs/pull/N/head` refs mean
+  "unreachable from a branch" is not the same as "unreachable" — a PR ref pins objects permanently.
 - Scrubbing files at HEAD does not remove data from the 18 historical commits. Removing it from
   history requires `git filter-repo` + force-push, which rewrites every SHA on the branch. Note the
   ordering hazard: CI tags images `:nas-<sha>` and the deploy verifies a container revision label,
@@ -121,10 +200,35 @@ override gets deleted the first time it is wrong, and then there is no guard at 
 
 ## Rules for any agent working in this repository
 
-1. **This repository is PUBLIC.** Treat every commit as a publication.
+1. **This repository is PUBLIC.** Treat every commit as a publication, and every push as
+   irreversible. GitHub keeps objects fetchable by SHA after a force-push, and a `refs/pull/N/head`
+   ref pins them permanently.
 2. **Never `git add -A` / `git add .`** Stage explicit paths. This incident is what that command
    costs.
 3. **Never put real data in a fixture, mockup, comment, or spec.** Use synthetic values — the
    `9990000xx` tax-ID band and `ΟΔΟΣ ΑΛΦΑ/ΒΗΤΑ/ΓΑΜΑ` street placeholders exist for this.
 4. **Real documents (bills, contracts, E9 statements) stay outside the repository.**
-5. **Never bypass the PII guard** to make a commit go through.
+5. **Never hardcode a credential as a form default.** A `defaultValue` in a Next.js component ships
+   in the client bundle. Read config from `realm.thirdParties` (encrypted at rest) or env.
+6. **Never bypass either guard** to make a commit or push go through.
+7. **Review the TREE, not the diff.** When asked whether a secret is present, the question is "does
+   any reachable commit's tree contain it", not "does any diff add it". These give different answers,
+   and the diff answer is the one that was wrong here for 3.5 months.
+8. **Never report absence you have not measured.** See "Corrections" — both errors in this file were
+   claims that something was *not* there, from checks that could not have shown it.
+
+## Corrections
+
+Both original errors asserted absence. Recording them because the shape recurs:
+
+1. **"No credentials, ever."** Evidence given: `git log --all -- '.secrets/*'` → 0 commits. That
+   proves the directory was never committed; it cannot detect a credential *value* pasted into
+   application code, which is what happened. **A live credential was, and still is, exposed.**
+
+2. **"Orphaned commits — only GitHub Support can purge those."** Wrong twice. The sms-gate carrier is
+   not an orphan (it is an ancestor of two published branches), and the objects are pinned by
+   `refs/pull/1/head`, which Support cannot remove. The remedy is rotation, not a Support ticket.
+
+An earlier scan of mine also reported this credential as `inOriginNow=0`. That figure was computed
+against a stale ref set. When a scan reports zero, verify what it actually enumerated before
+believing it.

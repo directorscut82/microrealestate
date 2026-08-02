@@ -59,17 +59,27 @@ The gateway (`services/gateway`) acts as the single entry point. It proxies requ
 
 ### Mongoose Collections
 
-Defined in `services/common/src/collections/`:
+**12 collections**, all exported from `services/common/src/collections/index.ts` (regenerate this list
+with `ls services/common/src/collections/` — do not trust a hand-maintained copy):
+
 - `Account` — user accounts (email, password hash)
 - `Realm` — organizations with members, addresses, bank info, third-party configs
 - `Tenant` (model name: `Occupant`) — tenant records with contract details and rent history
 - `Property` — rental properties
 - `Lease` — lease templates (duration, time range)
 - `Building` — polykatoikia with units[], expenses[], contractors[], repairs[], ownerMonthlyExpenses[]
-- `Bill` — utility bill records (DEH, EYDAP, etc.) linked to building expenses, with IRIS QR codes
+- `Bill` — utility bill records (ΔΕΗ, ΕΥΔΑΠ, etc.) linked to building expenses, with IRIS QR codes
+- `InboxItem` — bills that arrived via the Telegram bot, awaiting confirmation (backs `/api/v2/inbox`)
+- `TelegramOffset` — the Telegram poller's `update_id` cursor, so restarts don't re-ingest
 - `Document` — generated documents (contracts, notices)
 - `Template` — document templates (HTML/text)
 - `Email` — email sending records
+
+⚠️ **`InboxItem` and `TelegramOffset` are NOT in `COLLECTIONS_TO_BACKUP`**
+(`services/api/src/managers/databasemanager.ts:13` — it names 10 of the 12, and `accounts` is
+deliberately emptied for per-realm backups since it has no `realmId`, so 9 are really captured). A
+backup/restore cycle silently drops every pending Telegram-inbox bill and resets the poller cursor,
+which then re-ingests old messages. Check that list before relying on a backup.
 
 Types are defined in `types/src/common/collections.ts` as `CollectionTypes` namespace.
 
@@ -101,12 +111,28 @@ The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('O
 - **Dashboard has two modes**: First-connection (wizard with steps) and normal (shortcut bar). `shortcutAddProperty`/`shortcutAddTenant`/`shortcutCreateContract` exist in BOTH modes. `isFirstConnection` is true when any of: no leases, no properties, no tenants.
 - **Presence awareness**: API routes `POST/GET /api/v2/presence/:type/:id` store viewer info in Redis with 60s TTL. Frontend `usePresence` hook polls every 30s. `PresenceBanner` component shows on tenant/property/contract detail pages.
 
-#### Referential Integrity (verified working)
-- **Property deletion**: API returns 422 when property is occupied by a tenant. UI shows toast error.
-- **Contract deletion**: API returns 422 when contract is used by tenants. UI shows toast error.
-- **Tenant deletion**: API returns 422 when tenant has recorded payments, active lease, or unpaid balance. UI shows options dialog with archive/force-delete.
-- **Realm deletion**: API returns 422 when child records exist (tenants, properties, leases, buildings). Returns counts in error.
-- **Duplicate names**: API allows duplicate property and lease names (no unique constraint).
+#### Referential Integrity
+
+Re-measured 2026-08-02 against the handlers. The previous version of this block was headed "verified
+working" and was **wrong on three of its five claims** — the heading invited trust without checking.
+Cite the handler, not this list, if it matters:
+
+- **Property deletion** (`propertymanager.ts:297`) — 422 on **two** blockers, reported together in one
+  message: a tenant referencing it (`properties.propertyId`) **and/or** a building unit linking it
+  (`units.propertyId`, "detach the unit first"). The building-unit blocker was missing from this doc.
+  404 if nothing matched.
+- **Contract/lease deletion** (`leasemanager.ts:235`) — 422 `Contract is used by tenants`. ✓
+- **Tenant deletion** (`occupantmanager.ts:~1726`) — 422 only when the tenant has **recorded money**:
+  a rent payment `> 0`, a `settlement`-origin discount, or a `settlement`-origin debt `> 0`. It is
+  **not** blocked by "active lease" or "unpaid balance" as this doc used to claim. `?force=true`
+  **archives** instead of deleting (sets `terminationDate` + `archived=true`) so `rents[]` survives as
+  the audit trail.
+- **Realm deletion** (`realmmanager.ts:650`) — `administrator` role only (403 otherwise), then 422 with
+  counts of tenants / properties / leases / buildings. On success it cascade-deletes Template,
+  Document, Email, **Bill** — but **not `InboxItem` or `TelegramOffset`**, which are left orphaned.
+- **Duplicate names** — split, not uniform: **lease** names ARE refused case-insensitively within the
+  realm on both add and update (`leasemanager.ts:77` / `:159`, Wave-24 B11); **property** names have no
+  such check. The old blanket "API allows duplicate property and lease names" was half wrong.
 
 #### Test Infrastructure (resetservice extensions)
 
@@ -153,7 +179,15 @@ TypeScript services build chain: types → common → service (in that order).
 ## Security Middleware
 
 - `express-mongo-sanitize` — strips `$` from request bodies/params/query to prevent NoSQL injection
-- Rate limiting on auth endpoints (signin, signup, forgot-password)
+- **Rate limiting on auth endpoints** — hand-rolled `authRateLimit` (an in-memory `Map` in
+  `services/authenticator/src/routes/index.ts`), **not** a library: `express-rate-limit` has never
+  been a dependency here. 20 attempts / 60 s; bucket keyed `email:` → `clientId:` → `ip:` (IP last
+  because behind the gateway every request shares one `remoteAddress`); **only failures count**
+  (increment deferred to `res.on('finish')`, skipped for `statusCode < 400`); process-local, resets on
+  restart. Guards landlord `/signup` `/signin` `/apptoken` `/forgotpassword` and tenant `/signin`
+  `/signedin` — deliberately **not** `/refreshtoken` or `/session`, so an attacker can't lock out
+  active users. Grep `authRateLimit` for current call sites; the old "(signin, signup,
+  forgot-password)" parenthetical was already three routes short.
 - `organizationId` header validated as valid MongoDB ObjectId format before query
 - Input validation: percentage sums, enum/range checks, NaN guards on financial fields
 - **CSV formula-injection guard** (`accountingmanager.ts:_sanitizeCsvText`): prefixes leading `= + - @ \t \r` with a single quote on free-text fields (description / notepromo / noteextracharge) flowing into rawData JSON. Mitigates the Excel/Sheets formula-execution vector for spreadsheet-readable exports. json2csv handles the standard quote/newline escaping but does NOT handle formula prefix; this is the workaround.
@@ -162,7 +196,7 @@ TypeScript services build chain: types → common → service (in that order).
 
 ### CORS allowlist — how the origin regex is built
 
-The gateway's `configureCORS()` (in `services/gateway/src/index.ts`) builds its allowlist from two sources (as of `9e44d57c`): the comma-separated `APP_DOMAIN` list **plus** `new URL(config.DOMAIN_URL).host` — which **preserves the port**. Each host is regex-escaped and turned into an exact-match origin regex `^https?://<host>$` (no subdomain-capture group). `URLUtils.destructUrl()` is only reached in the `catch` fallback for a malformed `DOMAIN_URL`.
+The gateway's `configureCORS()` (in `services/gateway/src/index.ts`) builds its allowlist from two sources (as of `2fdedd13`): the comma-separated `APP_DOMAIN` list **plus** `new URL(config.DOMAIN_URL).host` — which **preserves the port**. Each host is regex-escaped and turned into an exact-match origin regex `^https?://<host>$` (no subdomain-capture group). `URLUtils.destructUrl()` is only reached in the `catch` fallback for a malformed `DOMAIN_URL`.
 
 **For any non-default port:** set `APP_DOMAIN` to the full `host:port` string (e.g., `APP_DOMAIN=localhost:8080`). It's used as-is in the regex and supports comma-separated lists for multi-origin deploys (LAN + Tailscale). (Historically `destructUrl()` stripped the port on the fallback path, causing `CORS blocked origin: http://localhost:8080` 500s; that was fixed in `59e37bda` — `destructUrl` now returns `url.host` with the port.)
 

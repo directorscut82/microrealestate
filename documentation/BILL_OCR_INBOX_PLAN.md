@@ -889,13 +889,13 @@ Slices 1–6 are all in. Commit trail (`git log --grep`):
 
 | Slice | Commits |
 |---|---|
-| 1 — image import + in-process OCR | `df869d8b`, `48f09d5e` (ExpenseFormDialog extract) |
-| 2 — no-match confirm + charge bridge | `5d75483f` (2d), `28628a3a` (2e bridge), `3f6b482f` (2f scanned-PDF via pdfium) |
-| — review rounds on 1–2 | `cf276bff`, `8e512923`, `89a9094e` |
-| 4 — Telegram inbox + bell | `c52e9540` |
-| 5 — B2 archival | `304a32ee` |
-| 6 — απόδειξη matching | `44a5bff0`, `4d37e135` (Tier-2 re-capture), `a5e5389b` (αριθμός-παροχής pre-fill) |
-| post-ship reviews | `93d8ebb0` (5 HIGH adversarial), `d6cb8376` (20 write-through-integrity bugs), `24033841` (resilience) |
+| 1 — image import + in-process OCR | `36a29f01`, `b540b7cd` (ExpenseFormDialog extract) |
+| 2 — no-match confirm + charge bridge | `75e8f9b1` (2d), `1fd3b33d` (2e bridge), `b24ac171` (2f scanned-PDF via pdfium) |
+| — review rounds on 1–2 | `7b7ee745`, `fcc62a0e`, `49d302d9` |
+| 4 — Telegram inbox + bell | `9dffa425` |
+| 5 — B2 archival | `86f78f4f` |
+| 6 — απόδειξη matching | `f826d929`, `2a63d744` (Tier-2 re-capture), `fc2caebc` (αριθμός-παροχής pre-fill) |
+| post-ship reviews | `2963e86f` (5 HIGH adversarial), `47f11072` (20 write-through-integrity bugs), `24033841` (resilience) |
 
 **Slice 3 (providers) is NOT shipped** and is still blocked on §14 — no ΕΥΔΑΠ Αττικής or
 ΕΠΑ sample bills. This is the only planned slice with no code.

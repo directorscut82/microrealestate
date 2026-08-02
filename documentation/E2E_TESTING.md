@@ -277,7 +277,7 @@ The form-side and server-side date guards both convert `'YYYY-MM-DD'` strings to
 The June 2026 instance:
 
 - `services/api/src/managers/rentmanager.ts` F3 guard — `parsed = moment.utc(p.date,'DD/MM/YYYY',true)` ✓
-- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` — pre-`a9d3fbab` had `_parsed = moment(...)` while `_termFirstDay = moment.utc(...)` — bug. Fixed to `moment.utc(...)`. Symptom: every payment dialog test fired a "Payment date is before this rent month" toast and the PATCH never reached the server.
+- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` — pre-`35af8ec0` had `_parsed = moment(...)` while `_termFirstDay = moment.utc(...)` — bug. Fixed to `moment.utc(...)`. Symptom: every payment dialog test fired a "Payment date is before this rent month" toast and the PATCH never reached the server.
 - `e2e-playwright/tests/lib/api.ts` `ensureSeedLeasedTenantWithPayment` — uses `getMonth()` / `getFullYear()` (LOCAL) so the URL term matches the test's UI navigation (also LOCAL). Don't change to UTC.
 
 **Rule:** when reviewing a spec or a guard, grep for `moment\(` next to `moment\.utc\(` in the same function. They MUST match.

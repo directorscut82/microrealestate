@@ -4,6 +4,44 @@
 
 > **Single source of truth.** Agent-readable docs live in `.kiro/steering/`. Other tools read the same content via symlinks (`CLAUDE.md` → this file; `wasabi-toolbag/content/0N-*.md` → the 7 steering files). When updating documentation, edit the steering file. Never edit a symlink.
 
+## STOP — THIS REPOSITORY IS PUBLIC
+
+`github.com/directorscut82/microrealestate` is a **public** repo. Every commit you push is a
+publication, and **pushing is irreversible**: GitHub keeps objects fetchable by SHA after a
+force-push, and a `refs/pull/N/head` ref pins them permanently — no rewrite and no Support request
+removes them. This repo has already published a landlord's family PII and a live third-party
+credential. Both incidents were caused by an agent.
+
+Non-negotiable, before any `git` write:
+
+1. **Never `git add -A` / `git add .` / `git commit -a`.** Stage explicit paths. One `add -A` swept a
+   real ΔΕΗ bill PDF (7 MB, named account holder, provision number) into a public commit.
+2. **Never put real data in a fixture, mockup, comment, spec or doc.** Synthetic values exist for
+   this: the `9990000xx` ΑΦΜ band and `ΟΔΟΣ ΑΛΦΑ/ΒΗΤΑ/ΓΑΜΑ` street placeholders.
+3. **Never hardcode a credential**, and specifically never as a form `defaultValue` — Next.js
+   compiles it into the **client bundle**, so it is served to every browser. That is how a live
+   sms-gate.app password went out for 3.5 months. Config belongs in `realm.thirdParties` (AES-256-GCM
+   encrypted at rest) or env; real values live only in `.secrets/` (gitignored, never committed).
+4. **Real documents (bills, contracts, E9 statements) stay outside the repository.**
+5. **Two guards are wired in and must not be bypassed** — `PII_SCAN_SKIP=1` exists but using it to
+   make a commit go through is prohibited:
+   - `.husky/pre-commit` → `scripts/scan-pii.mjs` scans the **staging area**
+   - `.husky/pre-push` → `scripts/scan-push.mjs` scans the **commit trees** being pushed
+6. **When asked whether a secret or PII is present, examine the TREE, not the diff.** A secret
+   introduced in commit A and still present at Z appears in **A's diff only**, yet Z's tree still
+   serves it. Every audit that looked at diffs reported clean while the credential was live. This
+   single distinction is why the exposure lasted months.
+7. **Never report absence you have not measured.** "No credentials in history" was asserted from
+   `git log -- '.secrets/*'`, which can only prove the *directory* was never committed — it cannot
+   see a value pasted into application code. State what you enumerated, or say you don't know.
+
+Full incident record, the corrected facts, and what is still exposed:
+[`documentation/PII_INCIDENT_2026_07_31.md`](documentation/PII_INCIDENT_2026_07_31.md).
+
+**Currently unresolved:** a live sms-gate.app credential remains fetchable from `origin/nas`,
+`origin/master` and `refs/pull/1/head`. Rotation is the only remedy and has not been authorized. Do
+not describe it as fixed.
+
 ## STOP — fix discipline applies on every bug report
 
 If the user is reporting a bug or asking for a fix in this session, the FIRST thing to load and follow is [`.kiro/steering/fix-discipline-do-not-skip.md`](.kiro/steering/fix-discipline-do-not-skip.md). Not this section, not the steering docs, not the test-running guide — that document. It exists because the agent has a documented multi-day track record of skipping the read-existing-system step, proposing options that silently regress prior work, and deploying without authorization. Read it. Follow Step 0. Don't propose anything before you've shown your reading.
@@ -67,14 +105,14 @@ The Playwright suite, the seed helpers, the form-side date guards, and the serve
 **Rule:** if you see two `moment(...)` calls in the same comparison, BOTH must use `moment.utc(...)` OR neither — never mix. Anchors:
 
 - `services/api/src/managers/rentmanager.ts` F3 guard — uses `moment.utc(p.date, 'DD/MM/YYYY', true)` AND `moment.utc(termFirstDay,'YYYY-MM-DD', true)` — consistent ✓
-- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` (now ~line 457; `_parsed = moment.utc(...)` ~503, `_termFirstDay = moment.utc(...)` ~489) — fixed in `a9d3fbab`: both sides UTC ✓
+- `webapps/landlord/src/components/payment/PaymentTabs.js` `_handleSubmit` — fixed in `35af8ec0`: both sides UTC ✓. Anchors as of 2026-08-02: `_handleSubmit` at `:459`, `_parsed = moment.utc(...)` at `:506`, `_termFirstDay` at `:495`, the comparison at `:508-511`. These have drifted every time the file was touched (previously cited 457/503/489) — `grep -n '_termFirstDay\|_parsed = moment' <file>` instead of trusting the numbers.
 - `e2e-playwright/tests/lib/api.ts` `ensureSeedLeasedTenantWithPayment` — uses `getMonth()` / `getFullYear()` (LOCAL) so the URL term matches the test's UI navigation (also LOCAL) ✓
 
 If any of those drift back to mismatch, **every payment dialog test will time out at 15-22s** because the client-side guard fires a "Payment date is before this rent month" toast and the PATCH never goes out. That's exactly what happened in suites #7-#10 (June 1).
 
-### The `b6165824 → dbf79562 → d5a5cb13` saga (do NOT repeat)
+### The `64da4117 → ee4a4b10 → 76fd42e6` saga (do NOT repeat)
 
-The dialog has a `submittingRef` with an 80ms `setTimeout` fallback that resets the ref if `formRef.isSubmitting()` is false. The intent is to recover from zod-rejected submits where neither `onSubmit` nor `onError` would fire. **Do not "tighten" or remove this timeout** — every attempt has broken the entire dialog flow. The 80ms value was load-bearing in the working-suite-6 baseline. The double-click race that C28 catches is a known edge case; accept the flake rather than drag the rest of the form down with you.
+The `submittingRef` + 80ms `setTimeout` fallback lives in **`webapps/landlord/src/components/payment/NewPaymentDialog.js:79-94`** — the OUTER dialog, *not* `PaymentTabs.js` (grep confirms `submittingRef` appears nowhere in PaymentTabs; the docs have implied otherwise). It resets the ref if `formRef.isSubmitting()` reports false, to recover from zod-rejected submits where neither `onSubmit` nor `onError` fires and the button would sit in "Saving" forever. **Do not "tighten" or remove this timeout** — every attempt has broken the entire dialog flow. The 80ms value was load-bearing in the working-suite-6 baseline. The double-click race that C28 catches is a known edge case; accept the flake rather than drag the rest of the form down with you. `UncollectedPaymentDialog.js:35` carries the same guard — a sibling to check if you touch this pattern.
 
 ### Test seed leakage cascade
 
@@ -98,61 +136,52 @@ curl -s "http://192.168.0.96:9000/api/endpoints/3/docker/containers/json?all=tru
 
 Run that to confirm NAS is on the commit you pushed BEFORE running tests.
 
-### Current state (July 31, 2026)
+### Current state (August 2, 2026)
 
-- **jest baseline: 875 passed / 17 skipped / 892 total, 54 suites + 1 skipped suite, 0 failed** (node@20, ~13s). Every older figure below (~628, 644) is a point-in-time snapshot — **re-run, don't quote**. A count that DROPS is a deleted/skipped test, not a pass.
-- **NAS is UNREACHABLE** as of this date (`landlord/el/signin` → `000`, `portainer` → `000`). So no Playwright gate and no Greek-screen UI review can run; anything needing them is OWED, not done.
+- **jest baseline: 883 passed / 17 skipped / 900 total, 54 of 55 suites passed + 1 skipped, 0 failed** (node@20, ~12.7s; 55 api test files on disk). Every older figure below (431, 609, ~628, 644, 875) is a point-in-time snapshot — **re-run, don't quote**. A count that DROPS is a deleted/skipped test, not a pass.
+- **NAS is UP** (measured 2026-08-02: `landlord/el/signin` → 200, portainer → 200; 15/16 containers running, all 8 app containers on revision `752e6e20`). **The July-31 "NAS is UNREACHABLE, anything needing it is OWED" line is withdrawn** — it had become a standing excuse to skip the Playwright gate and the Greek-screen UI review. Both gates are runnable; run them.
+- **History was rewritten 2026-08-01** (`git filter-repo`, PII scrub) — every commit SHA changed. SHA citations in these docs were re-pointed on 2026-08-02, but any SHA in an older commit message, memory file, or transcript is suspect. Verify with `git cat-file -e <sha>^{commit}`; an abbreviated SHA may now resolve to a *different* object.
+- **⚠️ A live sms-gate.app credential is still public** — reachable from `origin/nas`, `origin/master`, and pinned permanently by `refs/pull/1/head`. No rewrite and no Support ticket can retract it; rotation is the only remedy and has **not** been authorized. Do not describe it as fixed. See [`documentation/PII_INCIDENT_2026_07_31.md`](documentation/PII_INCIDENT_2026_07_31.md).
 - **Bill-OCR branch: Slices 1–6 shipped; Slice 3 (ΕΥΔΑΠ/ΕΠΑ providers) blocked on sample bills.** A 2026-07 audit of the shipped code produced **7 fixes, code-complete + tested + mutation-verified, sitting UNCOMMITTED in the working tree** (18 modified + 3 new files). Three of the seven were the same bug in three places: **an idempotency key containing a server-defaultable field.** One (OVERPAY) was an *absent representation* — no enum value, a `Math.max(0,…)` clamp, and two `status:{$in:[...]}` filters meant overpaid money left no trace on any surface. Full record + the design-was-wrong notes: `documentation/BILL_OCR_INBOX_PLAN.md` §16. Rules extracted into `documentation/MONEY_SURFACE_MATRIX.md` (absent representation, idempotency keys, directional tolerances) and `.kiro/steering/test-running-guide.md` (mutation-test your own tests, mock-factory `...real` trap).
 
-### Current state (July 13, 2026)
+### Shipped-work archive (June 1 – July 13, 2026) — collapsed 2026-08-02
 
-- **Production NAS revision**: `4847faf3` (`nas`). Health: `curl -s http://192.168.0.96:1350/landlord/el/signin` → 200; 10/10 containers running. jest: **~628 passed / 0 failed** (node@20, 47 suite files) — superseded, see above.
-- **Recent shipped work (July 1–13 2026) — third-party services stood up + verified end-to-end, plus a 4th notification channel:**
-  - **All external services LIVE on NAS**, each proven end-to-end (not just "saved"): **Email** (Gmail SMTP, real `250 OK`), **SMS** (sms-gate.app **Cloud** mode — real message `Delivered` via `POST /api/v2/emails/sms`), **Backblaze B2** (bucket `MicroRealEstateDocuments` — real app upload `201`+`versionId` via `POST /api/v2/documents/upload`), **mail-reader OAuth** (Gmail API refresh token → access_token `200`, app Published so permanent). Config is in `realm.thirdParties`, all secrets AES-256-GCM encrypted at rest; live creds in `.secrets/`. Runbook: `documentation/THIRD_PARTY_SERVICES_SETUP.md` (incl. a disaster-recovery back-fill section — agent-autonomous if `.secrets/` + `CIPHER_KEY` intact).
-  - **Telegram notification channel (`4847faf3`)** — the 4th delivery channel (bot **@MicroRealEstateBot**), mirroring the smsGateway channel across all 9 surfaces (schema/types/realmmanager encrypt+redact/emailer `sendTelegram`+`/emailer/telegram`/api `sendTelegramNotification`+`/emails/telegram`/store `canSendTelegram`/Settings form/`/rents` banner/i18n×6). `botToken` encrypted at rest. Scope: admin/self-notifications to `adminChatId` + plumbing; per-tenant delivery + automated triggers are future. Real `sendMessage` verified delivered. See [[project_telegram_notification_channel]].
-  - **i18n fix (`abdfaa82`):** "SMS Country Code" was raw English in all 6 locales → translated.
-  - **thirdParties providers now:** gmail, smtp, mailgun, b2, smsGateway, **telegram**, mailReaders[].
+This section used to be ~50 lines of dated release notes: NAS revisions, jest counts, and
+per-batch changelogs for the June money/building work, the July 1 money-UI + PDF bundle, and the
+July 1–13 third-party-services run. It was **stale by construction** — every revision and count in
+it was superseded by the block above, and it sat *above* the reference sections, so it was the
+first thing read every session. Collapsed; the durable content lives where it can't rot:
 
-### Milestone — July 1, 2026 (`f2486244`)
+| What was recorded here | Where it lives now |
+|---|---|
+| Money-surface invariants, dual-role rule, per-surface query keys | `documentation/MONEY_SURFACE_MATRIX.md` |
+| jest node@20 + `.cjs` mock infra, the `unstable_mockModule` must-mock-every-export trap | `.kiro/steering/test-running-guide.md` § "Running unit tests" |
+| Behaviours confirmed correct that must not be "fixed" (`_isFrozen`, `submittingRef`, `destructUrl`, pie math, allocation order) | `.kiro/steering/test-running-guide.md` § "Behaviours verified correct as-is" |
+| Third-party channel config + disaster-recovery back-fill | `documentation/THIRD_PARTY_SERVICES_SETUP.md` |
+| Bill-OCR slices + the 2026-07 audit's 7 fixes | `documentation/BILL_OCR_INBOX_PLAN.md` §16 |
+| Open items, per-phase status | `.kiro/steering/roadmap-hardening.md` § "What is actually still open" |
 
-- **Production NAS revision at that point**: `f2486244` (`nas`). jest: **644 passed / 0 failed** (node@20). The money-UI + PDF-breakdown bundle (see "Recent shipped work — July 1" below) was live.
-- **Earlier milestone — audit-2026-06 campaign** (was `ae31de3b`): 33 findings fixed across 4 batches (3bd3ee52 → c0a1772d → 51eda92a → ae31de3b), 15 Step-7 self-bugs caught. jest at that point: 609 passed / 0 failed.
-- **Jest now requires node@20.** `services/api` is `type: module`; the system node drifted to v25 which breaks the suite (`ERR_REQUIRE_ESM` on the winston mock). node@20 lives at `/usr/local/opt/node@20/bin/node`. Run the suite as:
-  ```bash
-  export PATH="/usr/local/opt/node@20/bin:$PATH"
-  cd services/api && node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --no-coverage
-  ```
-  The winston / express-winston / jsonwebtoken mocks are now `.cjs` (`src/__mocks__/*.cjs`) mapped via `moduleNameMapper`; `jest.mock`-using suites need `import { jest } from '@jest/globals'`; `realmmanager.test.js` + `propertymanager.classifyExpense.test.js` use `jest.unstable_mockModule` + dynamic `import()`. Full suite: **644 passed, 17 skipped, 1 skipped suite** (e9parser /tmp fixtures), 0 failed. Grown 431 (May) → 609 (June) → 644 (July 2026). Repaired in `6cf15c26`. **Gotcha (July 2026):** the 7 suites that `jest.unstable_mockModule('@microrealestate/common', …)` must include EVERY export the code-under-test imports — when `1_base.ts` began importing `ShareBasis` from common, those mocks needed `ShareBasis` added (else `SyntaxError: does not provide an export named 'ShareBasis'`, 92 failures). See [`project_jest_node20_cjs_mocks` in memory] and `documentation/E2E_TESTING.md`.
-- **Recent shipped work (July 1 2026) — money-surface UI review + PDF Οφειλές breakdown (on `nas`, deployed `3fe5f8b3` → `546193ec` → `f2486244`):** an 8-item review of the owner/property/dashboard money surfaces, all confirmed from code + user screenshots before touching anything.
-  - **owner-detail charge line** (`webapps/landlord/src/pages/[organization]/owners/[id].js`) — unpaid → amount only (was amount PLUS a redundant «Οφειλές X» pill showing the same number), partial → «X πληρωμένο / Y οφειλή», paid → «Εξοφλημένο». Building ΑΠΟ-ΑΡΧΗΣ bars relabeled «Ανεξόφλητο» (rent) / «Οφειλές ιδιοκτητών» (owner) so the two no longer both read «Οφειλές».
-  - **property «Έξοδα ακινήτου» card** (`PropertyExpensesCard.js`) — grouped-by-category: a single-line category is one row, a 2+ line category shows a subtotal + indented members (killed the "ΑΝΑ ΚΑΤΗΓΟΡΙΑ rollup AND flat list" double-vision); strips the legacy English «Repair:» prefix.
-  - **harsh teal-blue ΧΡΕΩΣΕΙΣ table header → warm `bark` token** (new CSS var, `BuildingExpensePanel.js`); the `sea` accent is untouched everywhere else.
-  - **dashboard «Έξοδα ιδιοκτήτη» chart tooltip** (`ExpensesYearFigures.js`) — cap the per-owner breakdown at 10 rows with a «+N ακόμη» summary so a long list no longer overflows above the viewport (it clipped at y≈−191).
-  - **PDF per-charge calc-basis (item 6)** — **relocated the share-basis builder** (`shareBasis`/`equalPartyCount`) from the api rent-engine into **`services/common/src/utils/sharebasis.ts`** (new, moment-free) so the pdfgenerator (a separate service depending on `common`, not `api`) renders the SAME per-unit equation the on-screen ΧΡΕΩΣΕΙΣ panel shows. `1_base.ts` imports them back via thin aliases (zero behavior change — jest proved it). Added `ownerChargeBasis()` for the owner statement; the tenant receipt enriches each charge in `getRentsData`, gated by `_basisReconciles` (correct-or-nothing). A muted calc-basis sub-line renders under each charge in the shared `invoicebody.ejs`; 11 basis strings × 6 pdf locales.
-  - **Step-7 caught two real bugs the unit tests missed, BOTH found by reading the actual rendered artifact:** (1) tenant receipt would print an arithmetically-false equal-split («100 € ÷ 4 = 33,33 €») for a multi-unit tenant because the PDF's building snapshot lacks `_tenantGroups` → fixed with `_basisReconciles`; (2) the owner statement printed «κόστος 100 € × μερίδιο ιδιοκτητών 50% = 25,00 €» (should be 50) because `buildOwnerStatement` passes a co-owner's SLICE as the amount and `ownerChargeBasis` used it as the equation RHS → fixed so every equation's RHS is computed from its own LHS (the co-owner suffix «(Name 50% = €25)» bridges to the slice), plus an internal-consistency backstop in `invoicebody.ejs formatBasis` that renders NO sub-line rather than a false one (`f2486244`). **Lesson reinforced: generate + READ the real PDF/xlsx; a green unit suite and a static-HTML mock both missed these.**
-  - **New doc**: `documentation/MONEY_SURFACE_MATRIX.md` — every money-reading surface + its React Query keys + the write-side invalidation set + a fixed re-test checklist. **Includes the dual-role invariant** (a person can be a TENANT of unit X AND an OWNER/co-owner of unit Y; recipient is per-unit/per-term by propertyId, never per-person; the rent ledger and owner ledger are never netted). A July-1 dual-role audit (4-dimension workflow + adversarial verify) returned **19 findings / 0 real** — the invariant holds; one latent note: `unit.tenant` is attached date-blind in `_toBuildingData` and only nulled per-term by the two breakdown consumers, so a FUTURE consumer of `unit.tenant` must re-derive per-term occupancy.
-- **Recent shipped work (June 9-13 2026) — building-domain / money-correctness / vacant-owner billing (all on `nas`, deployed at `4a55ddc4`):**
-  - **Owner-billing for vacant units** (`978bf92b` → `4a55ddc4`) — an empty managed unit's building-expense share now routes to the OWNER when the expense has `chargeOwnerWhenVacant=true` (was a "coming soon" stub for months). `equal` allocation now counts vacant units as parties (`1_base.ts`); `OwnerMonthlyExpenseSchema` gained `source: 'repair-vacant'` (distinct from `'vacant'`) + `paid`/`paidDate`. Five workflow-confirmed money bugs fixed across the batch + three adversarial-round follow-ups: fixed-zero server guard (`5a14bee6`), method-flip bypass (`42b7860e`), single_unit/sub-cent (`182c3d4d`), duplicate-propertyId (`4a55ddc4`). New `validateSingleUnitAllocations` + duplicate-propertyId rejection in `validators.ts`.
-  - **Owner-expenses paid/unpaid tile** (`6cf15c26`) — building Overview shows a paid-vs-outstanding progress tile under the income tile; each owner-side charge has a paid checkbox in the Expenses breakdown. New route `PATCH /buildings/:id/owner-expense/:ownerExpenseId/paid` → `setOwnerExpensePaid`.
-  - **Eksoda 'who is charged' breakdown** (`6211dc9f`/`61963e71`) — the month-picker breakdown shows renter / owner(vacant-billed) / uncollected / owner-direct sections with per-unit calc basis + Greek naming.
-  - **kymainomeno (variable) statement amount eroding to zero on re-save — FIXED** (`22316220`) — `MonthlyChargeSchema` gained `inputAmount` to preserve the landlord-typed full statement figure across recompute (the per-unit shares no longer sum-erode).
-  - **'huge pills' root cause — FIXED** (`77a9e921`, supporting `620a4a64`/`f3f47614`/`9b65b157`) — stock tailwind-merge silently DROPPED the custom font-size tokens (`text-label` etc.) when combined with a colour via `cn()`, rendering at the 16px browser default. Fix is contained to `badge.js` (arbitrary-value size) — do NOT extend `cn()` globally (it made the whole app tiny once; see the comment in `webapps/landlord/src/utils/index.js`).
-  - **Unified building-expense tile + audit batches** (`39a91cbd`/`5d19f0b2`/`243db1e7`) — merged the side-by-side monthly-statement/history split into one calendar-driven tile, fixed the Όροφος-printed-3× label dup and double-eksoda, building-domain audit batches 1-3.
-  - **Building overview repairs/scheduled-work tile** (`b218f09f`) + **vacant-owner lifecycle trigger + dashboard double-count fix + browse i18n** (`bba9c74c`).
-  - **New NAS specs**: `48_building_expense_panel`, `49_vacant_owner_money` (BUG1 equal-vacant party, BUG2 repair-vacant survives recompute, BUG3 method-flip 422, BUG5 cancel strips orphan), `50_owner_expenses_paid_tile`.
-- **Recent shipped work (June 2-8 2026):**
-  - **`__v` concurrency hardening** (`f15949f0` / `fd6040bb` / `e8cbd830`) — building/property/sibling-recompute paths now use optimistic-lock + retry; closed the Dokimasti-June drift class of bugs. Building schema has `optimisticConcurrency:true`.
-  - **Receipt PDF rebrand + per-line label rule** (`f15949f0`/`57495a09`/`fd6040bb`) — Πρόγραμμα tile, saved-tile bullets, AllocationBlock dropdown/preview, PDF body all use the same `Ενοίκιο/Δαπάνη επί του ενοικίου/<TypeLabel>` rule. Receipt = "ΑΠΟΔΕΙΞΗ ΕΙΣΠΡΑΞΗΣ" (no tonos), excludes rent.charges, includes ΑΦΜ + property address.
-  - **May 2026 audit batches A–H** (`f315a66b` and predecessors) — 41 audit findings from the may-2026 audit fixed: PII redaction, rentcall label gate, locale gaps, `__v` hardening, optimistic-concurrency on Building, recompute retry budget, et al.
-  - **Search/filter scenario catalog** (`88587d13`) — specs 25–29, 40 scenarios, with the test-side mop-up at `5d038e4a`/`a3b71056`.
-  - **Import-PDF audit fixes — tenant-import** (`b0dece06` → `57de51aa`) — 23 findings reproduced on real AADE PDFs: H1 dehNumber dropped no-energy-cert, H2 multi-property merge, M2 atakPrefix collision recovery, M4 mark-past-paid `/rents/tenant/:id`, M6 non-AADE rejection, M7 Αποθήκη→storage, M8 company-tenant detection, N4 `parsed.landlords` → `units[].owners[]`, plus i18n + plural fixes.
-  - **Import-PDF audit fixes — E9 / building-import** (`231aff39` → `58f94315`) — 47 findings across T0–T3 + L tiers: owner.name compose, multi-PDF preview dedup, storage classification, auxSurface guard, yearBuilt 1600-2099, full cache invalidation, Promise.allSettled batch, AbortController cancel, co-owners + rightType, ΠΕΡΙΟΧΗ ΘΗΤΑ block-plot pattern, `force=false` for property overwrites, jest e9parser fixture suite (42 tests). The L7 marker gate accepts genitive `ΠΕΡΙΟΥΣΙΑΚΗΣ` (the hotfix at `58f94315`).
+Four mechanisms from that run are load-bearing and are documented **in the code itself**, so a
+future change has to read past the comment to break them:
 
-- App-side bugs from earlier sessions still relevant:
-  - `7d888322` — TenantPropertyList missing `useTranslation` (tenants page error boundary)
-  - `69e98638` — FormatMenu missing `useTranslation` (RichTextEditor crash)
-  - `669d8d75` — `frontdata.toRentData` JSON.parse undefined when PATCH-ing future term with no rent record (500 → graceful empty)
-  - `a9d3fbab` — PaymentTabs date guard timezone mismatch (the load-bearing fix; 36 dialog tests recovered)
+- **`inputAmount`** — the landlord-typed statement figure, kept beside the per-unit `amount` so
+  repeated saves can't sum-erode a variable expense toward zero. Schema comment:
+  `services/common/src/collections/building.ts:28-37`.
+- **Stock tailwind-merge stays stock** — the "huge pills" fix is an arbitrary-value size class in
+  `webapps/landlord/src/components/ui/badge.js:24-31`; the app-wide blast radius of teaching `cn()`
+  the custom tokens is written up at the top of `webapps/landlord/src/utils/index.js:5-14`.
+- **`optimisticConcurrency: true`** on Building / Realm / Tenant (`grep -rn optimisticConcurrency
+  services/common/src/collections/`) — the correctness mechanism standing in for MongoDB
+  transactions, which the single-node NAS deployment cannot provide.
+- **The PDF calc-basis is correct-or-absent** — `services/common/src/utils/sharebasis.ts` (shared by
+  api and pdfgenerator, moment-free) plus the internal-consistency backstop in
+  `services/pdfgenerator/templates/partials/invoicebody.ejs:53` (`formatBasis`), which renders NO
+  sub-line rather than a false equation. Two arithmetically-false equations shipped past a green
+  jest suite AND a static-HTML mock here; both were caught only by generating and reading the real
+  PDF. See [[project_pdf_basis_render_real_artifact]].
+
+Everything else is recoverable from `git log`. Do not re-expand this section — a changelog in an
+always-loaded steering doc is a changelog nobody can trust.
 
 ## Table of Contents
 
@@ -243,7 +272,9 @@ Gateway routing order (first match wins):
 
 ## Data Layer
 
-**Collections** (in `services/common/src/collections/`): Account, Realm, Tenant (Occupant), Property, Lease, Template, Document, Email.
+**Collections — 12** (in `services/common/src/collections/`, all re-exported from `index.ts`): Account, Realm, Tenant (Occupant), Property, Lease, **Building**, **Bill**, **InboxItem**, **TelegramOffset**, Template, Document, Email. Regenerate with `ls services/common/src/collections/` rather than trusting this line — it was missing four of them for months, including the two that back the Telegram bill inbox.
+
+**Backup gap:** `COLLECTIONS_TO_BACKUP` (`services/api/src/managers/databasemanager.ts:13`) names 10 of the 12 — `InboxItem` and `TelegramOffset` are absent, and `accounts` is intentionally emptied for per-realm backups (no `realmId`). A restore therefore loses pending Telegram-inbox bills and resets the poller cursor.
 
 **Critical naming gotcha:** The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('Occupant', ...)`), but TypeScript types and API routes use `Tenant`. When querying MongoDB directly, use `Occupant`.
 
@@ -280,8 +311,9 @@ For the complete endpoint reference, read `services/api/src/routes.ts` and the m
 
 ## Authentication
 
-- **Landlord:** JWT access token (Bearer header) + refresh token (cookie). Access tokens ~5min, refresh tokens in Redis.
-- **Tenant:** OTP via email → `sessionToken` cookie.
+- **Landlord:** JWT access token (Bearer header, **15m**) + refresh token (cookie, **1h in production / 12h in dev**), refresh tokens stored in Redis with a matching TTL. Both HS256, algorithm pinned explicitly. The refresh path does an **atomic GET+DEL** to close the concurrent-refresh replay race. (`services/authenticator/src/routes/landlord.ts` `_generateTokens`.) The `300s` / `5m` figures elsewhere are the **app M2M token** and the reset-password token — not the user access token.
+- **Tenant:** OTP via email → `sessionToken` cookie (**30m** in production / 12h dev).
+- **Rate limiting:** `authRateLimit` — 20 failed attempts / 60s, keyed `email:` → `clientId:` → `ip:`. Successful sign-ins don't consume budget. Applied to landlord `/signup` `/signin` `/apptoken` `/forgotpassword` and tenant `/signin` `/signedin`; deliberately NOT to `/refreshtoken` or `/session`. In-memory and process-local — see tech-stack.md.
 - **Middleware chain:** `needAccessToken` → `checkOrganization` → role checks.
 - **Principal types:** `user`, `application`, `service`. **Roles:** `administrator`, `renter`, `tenant`.
 
@@ -302,9 +334,12 @@ For the complete endpoint reference, read `services/api/src/routes.ts` and the m
 - `docker-compose.microservices.test.yml` — adds resetservice
 - `docker-compose.yml` — standalone with Caddy (auto HTTPS)
 
-**CI** — two workflows build images to GHCR (9 each, parallel matrix: gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice, landlord-frontend, tenant-frontend):
-- `.github/workflows/ci.yml` — push to `master` → lint → build & push the 9 images tagged `:<sha>` + `:latest`. The fork strips upstream's deploy → health-check → Cypress E2E jobs.
-- `.github/workflows/nas-ci.yml` ("NAS Branch CI") — push to **`nas`** → lint → build the same 9 images tagged `:nas` (always-latest) + `:nas-<sha>` (pinned for rollback). **This — not ci.yml — is the workflow that produces the images the NAS deploy pulls** (`scripts/deploy-nas.sh` waits on it). Other workflows present: `pr-ci.yml`, `release.yml`, `codeql-analysis.yml`.
+**CI** — **four** workflows build the 9-image matrix (gateway, api, tenantapi, authenticator, pdfgenerator, emailer, resetservice, landlord-frontend, tenant-frontend); **three of them push to GHCR**:
+- `.github/workflows/nas-ci.yml` ("NAS Branch CI") — push to **`nas`** → lint → build & push `:nas` (always-latest) + `:nas-<sha>` (pinned for rollback). **This is the workflow that produces the images the NAS deploy pulls** (`scripts/deploy-nas.sh` waits on it).
+- `.github/workflows/ci.yml` — push to `master` → lint → build & push `:<sha>` + `:latest`. The fork strips upstream's deploy → health-check → Cypress E2E jobs.
+- `.github/workflows/release.yml` — on `release` → build & push `:<release-tag>` **and overwrite `:latest`**. Easy to miss when reasoning "only master and nas publish".
+- `.github/workflows/pr-ci.yml` — on `pull_request` → builds the same matrix with `push: false`; never publishes.
+- `.github/workflows/codeql-analysis.yml` — analysis only, builds no images.
 
 **E2E on this fork** is Playwright at `e2e-playwright/`, runs against the live NAS (not CI) — see [`documentation/E2E_TESTING.md`](documentation/E2E_TESTING.md).
 

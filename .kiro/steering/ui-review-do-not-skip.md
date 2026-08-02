@@ -65,14 +65,19 @@ REAL Greek data. Seconds per look, not minutes. Deploy to NAS ONCE at the end.
 ### Why it's safe
 The local server runs on your machine (`localhost:8180`); it only READS NAS data
 through a proxy. It cannot write to or break production. The proxy is env-gated
-(`LOCAL_UI_PROXY` unset in CI/prod → no effect) and the `next.config.js` rewrite
-block + the `impeccable` devDep stay LOCAL (do not commit them to a NAS deploy).
+(`LOCAL_UI_PROXY` unset in CI/prod → no effect) and deliberately stays LOCAL —
+do not commit the rewrite block to a NAS deploy.
 
 ### Setup (one time per session)
-1. `next.config.js` has an env-gated `rewrites()` that proxies `/api/*` +
-   `/tenantapi/*` to the NAS gateway when `LOCAL_UI_PROXY` is set. The rewrite
-   rules MUST carry `basePath: false` — the app's `basePath:/landlord` would
-   otherwise turn `/api/...` into `/landlord/api/...` and the browser's real
+1. ⚠️ **The rewrite is NOT in the working tree** (verified 2026-08-02:
+   `next.config.js` contains no `rewrites()` and no `LOCAL_UI_PROXY`). It lives
+   only in **`stash@{1}` — "On nas: local-dev LOCAL_UI_PROXY rewrite (not for
+   NAS)"**. Apply it first (`git stash apply stash@{1}`) or the dev server will
+   serve the UI with every API call 404ing, which looks exactly like an app bug.
+   Never commit it. This doc read as if the config were already in place, which
+   turns a 10-second setup step into a fake bug hunt.
+   The rewrite rules MUST carry `basePath: false` — the app's `basePath:/landlord`
+   would otherwise turn `/api/...` into `/landlord/api/...` and the browser's real
    `/api/v2` call (fetch.js builds `window.location.origin + /api/v2`) 404s.
 2. Start the dev server (reads live source, hot-reloads on save):
    ```bash
@@ -95,7 +100,15 @@ authenticates on load.
 
 ### Capture harness
 `e2e-playwright/tests/_local_capture_all.spec.ts` does exactly this against the
-real `landlord` realm + real Greek buildings (ΟΔΟΣ ΕΨΙΛΟΝ 28 etc.). It:
+real `landlord` realm + real Greek buildings (ΟΔΟΣ ΕΨΙΛΟΝ 28 etc.).
+
+⚠️ **It is gitignored and has never been committed** — `.gitignore:53` excludes
+`e2e-playwright/tests/_*.spec.ts`, deliberately (these specs sign in with the real
+account and screenshot real tenants' data into a public repo). So it exists on
+*this* machine only: if it's gone, re-author it, and never `git add -f` it. That
+also means it cannot rot in review — nothing gates it.
+
+It: 
 fresh-cookie per page, navigates, RETRIES if it lands on the error overlay, and
 tags any shot that's the overlay/signin `_BROKEN_` so a crashed capture can
 never be mistaken for a reviewed surface. Writes to `e2e-playwright/_ui/`.
@@ -143,14 +156,20 @@ at `.secrets/ui_critique.js` (Workflow tool). This is the `impeccable critique`
 methodology; run it on the `_ui/` captures, not by hand.
 
 Tooling notes:
-- `impeccable detect` (the deterministic 27-pattern scanner) is the npm package
-  `impeccable@3.1.0` — installed as a LOCAL devDep in `webapps/landlord` (do NOT
-  ship it to NAS). `yarn impeccable detect --json <files>` scans SOURCE for
-  static slop patterns (nested cards, side-stripes, gradient text, hero-metric).
-- `impeccable detect <URL>` (live browser scan) does NOT work in this env: its
-  bundled Puppeteer can't launch Chrome (x64 Node on arm64 Mac → Rosetta
-  timeout) and can't auth. Use the agent critique + Playwright capture for
-  rendered-pixel review instead.
+- ⚠️ **`impeccable` is NOT installed** (verified 2026-08-02): it is absent from every
+  `package.json` in the monorepo, absent from `yarn.lock`, absent from
+  `node_modules/`, and there is no `node_modules/.bin/impeccable`. This section
+  used to claim `impeccable@3.1.0` was "installed as a LOCAL devDep in
+  `webapps/landlord`" — a command that does not run reads as a control that
+  exists, so treat the deterministic scanner as **unavailable** until someone
+  actually installs it. Don't report "impeccable detect found no issues"; that
+  output would be the shell failing, not a clean scan.
+- Even when it was available, `impeccable detect <URL>` (live browser scan) did
+  NOT work in this env: its bundled Puppeteer can't launch Chrome (x64 Node on
+  arm64 Mac → Rosetta timeout) and can't auth.
+- **What actually works today:** the agent critique workflow
+  (`.secrets/ui_critique.js`, present) over Playwright screenshot captures. That
+  is the rendered-pixel review, and it is the one that is mandatory.
 
 For a single sub-state (a dialog, a specific tab, a breakdown panel), capture
 that element: click into it, `scrollIntoViewIfNeeded`, screenshot. Empty tabs

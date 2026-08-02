@@ -1,8 +1,8 @@
 # Overnight work report — 2026-06-21
 
 Branch `nas` (fast-forwarded from `fix/ui-consistency-overnight`), **deployed to NAS
-and live-verified**. Production NAS revision: **`3d857ac9`** (app images); test-only
-fixes through **`edfe02ac`**.
+and live-verified**. Production NAS revision: **`ff2c030d`** (app images); test-only
+fixes through **`bb1ec14b`**.
 
 ## TL;DR
 - **Deployed + Playwright-verified on the live NAS.** Lawnmower (regression backstop) + the
@@ -58,10 +58,10 @@ fixes through **`edfe02ac`**.
 - **Spec 31** (`31_building_dashboard_owner_totals`) is `test.fixme` with a full reason: A5 changed the owner-expenses headline contract (Popover removed; figure now includes vacant/owner-resident shares = 1.653€ not 1.013€ on the rich-building seed — the 640€ delta is genuine owner cost the old headline omitted, NOT a regression). The spec needs reseeding to separate fixed-owner from vacant-share; its H5 prior-year-exclusion property is still covered by the api jest `ownerYearScope` suite.
 
 ## Commits (on `nas`)
-`0656a06a` exceljs · `c75a8cf4`+`ba9ba3ef`+`c8700385` owners+Step-7 · `d04d8ca0` tooltips ·
-`1fecb9d5`+`8c2c690d`+`78449e11`+`916af7fc` BuildingDashboard+Step-7 · `ee4e6eff` §3 ·
-`ae65fac7` flag-gating · `5403738c` xlsx · `937429ab` H8 xlsx test · `3d857ac9` pay-date hardening ·
-`edfe02ac` spec 51/52 fixes.
+`9c554d2c` exceljs · `35a0085c`+`26623c89`+`12c4cc1f` owners+Step-7 · `6ac17451` tooltips ·
+`ad96cb23`+`cf1b5671`+`66e120f9`+`0d618e53` BuildingDashboard+Step-7 · `48798d40` §3 ·
+`9569258b` flag-gating · `1dc8f1c9` xlsx · `74a76acd` H8 xlsx test · `ff2c030d` pay-date hardening ·
+`bb1ec14b` spec 51/52 fixes.
 
 ## The one thing you decide
 Everything above is deployed and verified to the extent automatable. The deferred items
@@ -72,7 +72,7 @@ to take next and I'll do them one batch at a time with the same Step-7 disciplin
 
 # Continuation session — 2026-06-21 (later) — §2 + inert-credit + §1 + §4
 
-Production NAS revision advanced to **`a9aff646`** (app images). All money work
+Production NAS revision advanced to **`c8317636`** (app images). All money work
 went through build → jest → **Step-7 (5 rounds for the credit model)** → deploy →
 live Playwright.
 
@@ -121,8 +121,8 @@ so every confirmed finding was verified against the actual code before fixing.
   deterministically. (test-isolation debt, per CLAUDE.md's "seed leakage cascade".)
 
 ## Commits
-`5273d4e2`+`fb330cbf` credit preservation+surfacing · `59b36000` §2+inert-credit+netting (5 Step-7 rounds) ·
-`2689e6e5` specs (51 unit-aware + new 54) · `a9aff646` §4 tab move + §1 repair basis.
+`67ad4028`+`3eb7413d` credit preservation+surfacing · `2b9a8229` §2+inert-credit+netting (5 Step-7 rounds) ·
+`b89b1a36` specs (51 unit-aware + new 54) · `c8317636` §4 tab move + §1 repair basis.
 
 ## Deferred (NOT faked — need a user decision / new server payload / larger engine change)
 - **§5 Αχρέωτα tracking + voluntary payment** — new subdocument + route + payment-dialog bucket + receipt label.

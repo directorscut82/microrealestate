@@ -1,0 +1,1 @@
+../../.kiro/steering/ui-review-do-not-skip.md

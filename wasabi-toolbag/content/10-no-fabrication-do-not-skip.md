@@ -1,0 +1,1 @@
+../../.kiro/steering/no-fabrication-do-not-skip.md

@@ -1,6 +1,6 @@
-# Audit 2026-06 — Fix Log (branch nas, base HEAD f6f75966)
+# Audit 2026-06 — Fix Log (branch nas, base HEAD 2a48a511)
 
-> Status: DEPLOYED to NAS as commit 3bd3ee52 (2026-06-17) + live-verified on the real
+> Status: DEPLOYED to NAS as commit 62f8ad95 (2026-06-17) + live-verified on the real
 > account — see "DEPLOYED + LIVE-VERIFIED" at the end of this file.
 > Discipline: every fix has a failing-test proof BEFORE the fix, re-verified green AFTER,
 > then adversarially re-challenged (Step 7) until the round comes back clean.
@@ -114,17 +114,17 @@
   "never drop recorded payments") — same bug class, new triggers.
 
 ## DEPLOYED + LIVE-VERIFIED (2026-06-17)
-- Commit `3bd3ee52` deployed to NAS; all 9 app containers verified on revision 3bd3ee52 (independent Portainer poll); landlord HTTP 200.
+- Commit `62f8ad95` deployed to NAS; all 9 app containers verified on revision 62f8ad95 (independent Portainer poll); landlord HTTP 200.
 - Live Playwright `_verify_money_batch.spec.ts` on the REAL `landlord` account PASSED: Accounting page renders (no ErrorBoundary blank — H7/H5-acc crash class confirmed fixed); 4 owners checked, every owner totalPaid ≤ totalAmount (C2 no-over-pay invariant holds on real data); dashboard/owners/accounting XHR all 200; no NaN/undefined/{{}} leak in rendered text; M4 incoming-tenants show no fabricated today-end-date. Screenshots read + confirmed.
 - mongodump backup taken pre-verify: e2e-playwright/backup/mredb_pre_test_20260617_214627.archive.
 
-## HIGH BATCH (post-3bd3ee52, base 87399bce) — round-1 + round-2 HIGH findings
+## HIGH BATCH (post-62f8ad95, base 2885c54a) — round-1 + round-2 HIGH findings
 
 > Re-verified every open HIGH against current code first (workflow): R2-H1
-> FIXED-ALREADY by 3bd3ee52; R1-H2 NOT-A-BUG (ledger/statement/PDF already
+> FIXED-ALREADY by 62f8ad95; R1-H2 NOT-A-BUG (ledger/statement/PDF already
 > agree on payments[]-only — the finding misread which surface was the
 > outlier; only the dashboard tile bridges the legacy flag by design); R1-H13
-> mostly fixed by 3bd3ee52's M5/H5 (residual demoted to LOW). The rest were
+> mostly fixed by 62f8ad95's M5/H5 (residual demoted to LOW). The rest were
 > STILL-BROKEN and are fixed below, each jest red→green, then Step-7'd.
 
 ### Fixed + proven (jest):
@@ -155,7 +155,7 @@
 - **Known sibling (logged, not in this batch):** `BuildingExpensePanel.js:91` has the same full-granularity `isExpenseActiveForTerm` as the old tile helper — a display-only breakdown divergence for recurring mid-month-startTerm expenses. Queued.
 - Deploy + live-verify: PENDING user authorization.
 
-## MEDIUM BATCH (base c0a1772d) — round-1 + round-2 MEDIUM findings
+## MEDIUM BATCH (base bcfb93b5) — round-1 + round-2 MEDIUM findings
 
 > Re-verified every open MEDIUM against current code first (workflow): all 14
 > STILL-BROKEN. Fixed the tractable ones; deferred 2 infra/concurrency-bound.
@@ -180,7 +180,7 @@
 
 ### Verification: api jest **610 passed / 0 failed** (+11 over the HIGH-batch 599). common+api+emailer build OK; landlord lint OK.
 
-## LOW BATCH (base 51eda92a) — selected round-1 + round-2 LOW findings
+## LOW BATCH (base 4db27c46) — selected round-1 + round-2 LOW findings
 
 > Fixed the LOWs that are real crash-guards / money-correctness / cross-surface
 > consistency; the rest (pure cosmetic / UI-binding / legal-question) are noted
@@ -188,7 +188,7 @@
 
 ### Already fixed by earlier batches (no action):
 - **R2-L1** (add() currency validation) — fixed with R2-H6.
-- **R2-L5** (toOccupantData no-expenses crash) — fixed in 3bd3ee52.
+- **R2-L5** (toOccupantData no-expenses crash) — fixed in 62f8ad95.
 - **R2-L14** (English "Total"/"Building charges" in Greek email) — fixed with R2-M3 (added Σύνολο/Έκπτωση/ΦΠΑ/… to all 6 emailer locales).
 - **R1-L4** (auto-spread phantom discount owed-line) — display-only, same root as the shipped express/H1 discount fix.
 - **R1-L9 ≡ R2-M2** (express drawer page-bound) — deferred frontend (queued).

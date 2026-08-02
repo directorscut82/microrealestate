@@ -9,7 +9,7 @@ commits. Do all work directly on `nas`.
 | Branch | Purpose | Who pulls it |
 |--------|---------|--------------|
 | `nas` | The fork's trunk. All feature work + the NAS production stack. | You, locally via `yarn dev`. NAS CI builds `:nas` images; Portainer on the NAS pulls them. |
-| `master` | **Frozen** at `231aff39` (2026-06-07). Kept only as the upstream-shaped baseline; do NOT develop here. | CI builds `:latest` but nothing deploys it. |
+| `master` | **Frozen** at `9de4b64b` (2026-06-07). Kept only as the upstream-shaped baseline; do NOT develop here. | CI builds `:latest` but nothing deploys it. |
 
 > Historically `nas` began as a thin CORS/cookie/fetch layer over `master`
 > (multi-origin CORS in `services/gateway/src/index.ts`, host-only cookies in

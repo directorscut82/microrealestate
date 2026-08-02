@@ -50,13 +50,39 @@ All packages are scoped under `@microrealestate/*`:
 - `yarn ci` — Start in CI mode (for automated testing)
 - `yarn lint` — Lint all workspaces
 - `yarn format` — Format all workspaces with Prettier
-- `yarn e2e:nas` — Backup NAS Mongo + run Playwright suite against the live NAS (see `documentation/E2E_TESTING.md`)
-- `yarn deploy:nas` — Merge master → nas, push (GHCR builds `:nas` images), optionally trigger Portainer redeploy on the Synology NAS (self-hosted fork only)
+- `yarn e2e:nas` — Backup NAS Mongo + run Playwright suite against the live NAS (see `documentation/E2E_TESTING.md`).
+  From the repo root this is the alias; **inside `e2e-playwright/` the script is named `test:nas`** (the
+  root `e2e:nas` just delegates to it). Both names are real — `E2E_TESTING.md` documents the in-workspace
+  form, so don't "correct" either one to match the other.
+- `yarn deploy:nas` — Push `nas` (GHCR builds `:nas` images), optionally trigger Portainer redeploy on the
+  Synology NAS (self-hosted fork only). It **used to** merge `master` → `nas` first; that step is now
+  conditional on a local `master` existing (`scripts/deploy-nas.sh:123-140`) and is **skipped in the normal
+  case**, since local `master` was deleted 2026-08-02 and all work lands directly on `nas`. Before that
+  guard, a deleted `master` made `git merge master` fail and the script reported it as a *merge conflict* —
+  a wrong diagnosis for a branch that simply isn't there.
 
 ## Branches
 
-- `master` — mirrors upstream in spirit (same source code), used for local dev. Authorship on commits was rewritten for the fork so git sees no common ancestor with `microrealestate/microrealestate` anymore — upstream changes can only be pulled via `git cherry-pick`, not `git merge`.
-- `nas` — the active self-hosted deployment branch for the directorscut82 fork, and where nearly all current work lands. As of HEAD `f2486244` (July 1 2026) it carries the entire building-domain / vacant-owner-billing / owner-expenses work, the api jest-infra `.cjs`-mock migration, the search/filter spec catalog, multi-origin support (LAN + Tailscale), and the July money-UI + PDF-Οφειλές-breakdown bundle (share-basis relocated to `common/utils/sharebasis.ts`). (It is many commits ahead of `master`, 0 behind; run `git rev-list --count master..nas` for the exact number — it drifts every push.) `.github/workflows/nas-ci.yml` builds `:nas` + `:nas-<sha>` images to GHCR on push. The `docker-compose.nas.yml` stack file is the NAS deploy target. Deployment is automated via `scripts/deploy-nas.sh` (non-interactive: `printf 'n\ny\n' | bash scripts/deploy-nas.sh`; also aliased `yarn deploy:nas`). See `documentation/DEV_AND_DEPLOY.md` for the full workflow.
+**History was rewritten with `git filter-repo` on 2026-08-01** (the PII scrub). Every commit SHA on the
+branch changed. Any SHA quoted in a doc, a commit message, or an agent memory file from before that
+date is suspect — and an abbreviated one may now resolve to a *different* object, which is worse than
+failing outright. Verify with `git cat-file -e <sha>^{commit}` before citing.
+
+- `nas` — **the only branch that matters.** It is the self-hosted deployment branch and where all work
+  lands. `origin/master` and `origin/nas` are currently **the same commit** (`752e6e20`), 887 commits
+  ahead of `upstream/master`. Do not develop on `master`; see `documentation/DEV_AND_DEPLOY.md`.
+  `.github/workflows/nas-ci.yml` builds `:nas` + `:nas-<sha>` images to GHCR on push, and
+  `docker-compose.nas.yml` is the deploy target. Deployment is automated via `scripts/deploy-nas.sh`
+  (non-interactive: `printf 'n\ny\n' | bash scripts/deploy-nas.sh`; aliased `yarn deploy:nas`).
+- **A merge-base with upstream DOES exist** — `git merge-base nas upstream/master` resolves to
+  `88ad6787` (upstream/master itself), so `git merge` works. An earlier version of this doc claimed
+  authorship rewriting had destroyed the common ancestor and that only `git cherry-pick` was possible;
+  that is not true today. Check before assuming either way.
+- Local branches: only `nas` exists. The 8 stale ones (`main`, `style_experiments`, and 6 merged
+  feature branches) were deleted 2026-08-02; their tips are recorded in
+  `~/mre-pii-backup-2026-08-01/deleted-local-branch-tips-2026-08-02.txt` if one is ever needed back.
+  `origin` still carries `e2e-hardening`, `feat/bill-ocr-import`, `master`, `nas`, and the
+  server-owned `refs/pull/1/head`.
 
 ## Environment Configuration
 
@@ -73,16 +99,25 @@ This repo uses a single source of truth for agent-readable documentation: the st
 |------|-----------|-----------|
 | Kiro | `.kiro/steering/*.md` (auto-loaded) | original |
 | Claude Code | `CLAUDE.md` at repo root | symlink → `AGENTS.md` |
-| Generic agents | `AGENTS.md` at repo root | original (lightweight pointer to steering) |
-| Wasabi (Amazon Q) | `wasabi-toolbag/content/*.md` | symlinks → the 7 steering files |
+| Generic agents | `AGENTS.md` at repo root | original (~380 lines — a reference, not a pointer) |
+| Wasabi (Amazon Q) | `wasabi-toolbag/content/0N-*.md` | symlinks → **all 10** steering files |
 
-The other steering files (loaded automatically alongside this one) cover:
+All 10 steering files are `inclusion: always` and load automatically alongside this one. The three
+`*-do-not-skip.md` files are the behavioural gates — they exist because the listed failure modes
+actually happened, repeatedly:
+
 - `tech-stack.md` — runtime, package versions, backend/frontend libraries
 - `architecture-patterns.md` — service bootstrap, auth flow, multi-tenancy, frontend gotchas (Tenant=Occupant, store reactivity, etc.)
 - `architecture-diagrams.md` — Mermaid diagrams of system, service dependencies, auth flow, ER, CI
 - `frontend-patterns.md` — UI/state/forms patterns + SSR gotchas for the landlord app
 - `roadmap-hardening.md` — what's done, what's pending, in what order
 - `test-running-guide.md` — Playwright + jest commands, discipline rules, container management, disk reclaim
+- **`fix-discipline-do-not-skip.md`** — read FIRST on any bug report. Read the system before proposing;
+  artifacts not claims; adversarially refute your own fix before the word "fixed".
+- **`ui-review-do-not-skip.md`** — no UI work is done until you have screenshotted the rendered **Greek**
+  screen and read the image. A green API-assertion suite is not a UI review.
+- **`no-fabrication-do-not-skip.md`** — never render an unsourced number, label, or element; and never
+  report an **absence** you did not measure.
 
 Non-steering documentation (read on-demand):
 - `AGENTS.md` (repo root) — first-read reference for new agents/contributors
