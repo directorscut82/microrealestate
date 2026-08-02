@@ -72,8 +72,8 @@ export interface NoticeDeps {
   insertNotice?: (doc: Record<string, any>) => Promise<any>;
   notifyTelegram?: typeof notifyTelegram;
   now?: () => Date;
-  // Seams for resolveStaleNotices (same rationale as insertNotice).
-  findPendingNotices?: (filter: Record<string, any>) => Promise<any[]>;
+  // Bulk-dismiss seam used by noticeScanner.resolveResolvedConditions (same
+  // rationale as insertNotice: tests drive it without mongo).
   resolveNotices?: (ids: any[]) => Promise<any>;
 }
 
@@ -143,66 +143,4 @@ export async function pushNotice(
     input.message
   );
   return { created: true, telegramDelivered: result.delivered };
-}
-
-/**
- * Auto-resolve notices whose condition no longer holds.
- *
- * Without this a notice is immortal until the 30-day TTL: the ONLY other write
- * of status:'dismissed' in the API is the user-driven dismiss route. Because
- * each scan fires at several windows (bill-due at 7/1/0/-3 days, lease-expiry
- * at 30/7/1, …), one unpaid bill accumulates a separate pending item per window
- * — so paying it on day 2 left the day-1 and day-0 notices still asserting
- * «εκκρεμεί 200,00 €» and still counted in the bell badge. The badge measured
- * "notices ever generated", not "things needing attention".
- *
- * Called by each scan with the dedupeKey PREFIXES whose conditions it has just
- * re-evaluated, plus the set of prefixes still live. Anything pending under a
- * scanned prefix but absent from the live set is resolved. Never throws.
- */
-export async function resolveStaleNotices(
-  realmId: string,
-  // e.g. 'bill-due:B1:' — matches every window of ONE condition instance.
-  scannedPrefixes: string[],
-  liveDedupeKeys: Set<string>,
-  deps: NoticeDeps = {}
-): Promise<{ resolved: number }> {
-  if (!scannedPrefixes.length) return { resolved: 0 };
-  const now = deps.now ? deps.now() : new Date();
-  try {
-    const find =
-      deps.findPendingNotices ||
-      (async (filter: Record<string, any>) =>
-        Collections.InboxItem.find(filter, { dedupeKey: 1 }).lean());
-    const resolve =
-      deps.resolveNotices ||
-      (async (ids: any[]) =>
-        Collections.InboxItem.updateMany(
-          { _id: { $in: ids } },
-          { $set: { status: 'dismissed', updatedDate: now } }
-        ));
-    // Regex-escape each prefix — dedupeKeys embed ObjectIds and ':' only, but
-    // an unescaped prefix would still be a latent injection into the query.
-    const escaped = scannedPrefixes.map((p) =>
-      p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    );
-    const pending: any[] = await find({
-      realmId,
-      kind: 'notice',
-      status: 'pending',
-      dedupeKey: { $regex: `^(${escaped.join('|')})` }
-    });
-    const stale = pending.filter(
-      (d) => !liveDedupeKeys.has(String(d.dedupeKey))
-    );
-    if (!stale.length) return { resolved: 0 };
-    await resolve(stale.map((d) => d._id));
-    logger.info(
-      `resolveStaleNotices: cleared ${stale.length} notice(s) whose condition no longer holds (realm ${realmId})`
-    );
-    return { resolved: stale.length };
-  } catch (err: any) {
-    logger.error(`resolveStaleNotices failed: ${err?.message || err}`);
-    return { resolved: 0 };
-  }
 }

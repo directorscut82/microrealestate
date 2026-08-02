@@ -532,6 +532,20 @@ async function _syncOccupancyForProperties(
       // rolled-back state. Best-effort and NEVER past the lifecycle write
       // (same rule as the repair recompute: a notification failure must not
       // fail the tenant update).
+      //
+      // ORDERING, deliberately accepted (destructive-write audit 2026-08-03):
+      // this runs BEFORE the caller's _recomputeVacantOwnerForProperties, which
+      // is what actually materialises the owner charge rows. So a landlord who
+      // opens the notice's /buildings/{id} link within the same request may not
+      // see the new owner charge yet. That is acceptable and NOT worth fixing
+      // by moving the notice after the recompute:
+      //   - the notice is fire-and-forget, so it does not delay the response;
+      //   - the recompute is best-effort too and can legitimately no-op, so
+      //     gating the notice on it would DROP alerts for a real vacancy;
+      //   - the condition being reported ("this unit is now vacant and its
+      //     koinochrista fall to the owner") is true at save time regardless of
+      //     whether the derived rows have been written yet.
+      // The wrong fix would be to make the notice conditional on the rebuild.
       for (const unit of wentVacant) {
         _notifyUnitVacant(realmId, building, unit).catch((err) =>
           logger.warn(

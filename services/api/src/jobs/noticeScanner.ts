@@ -695,7 +695,29 @@ export async function resolveResolvedConditions(
     (async (ids: any[]) =>
       Collections.InboxItem.updateMany(
         { _id: { $in: ids } },
-        { $set: { status: 'dismissed', updatedDate: now } }
+        {
+          // $unset the dedupeKey as well as flipping status.
+          //
+          // A dismissed notice KEEPS its key (that is deliberate for a
+          // USER-dismissed one: "I've seen it, stop telling me"). But an
+          // AUTO-resolved one is different — the condition genuinely ended, and
+          // if it comes BACK the landlord must hear about it again. A bill's
+          // receipt can be reversed by a corrective re-import; a guaranty can be
+          // re-flagged. With the key retained, createNotice would hit E11000,
+          // report {created:false}, and the money would be silently invisible —
+          // the absent-representation trap from MONEY_SURFACE_MATRIX.md.
+          //
+          // Safe against the unique index: partialFilterExpression only indexes
+          // docs whose dedupeKey is a string, so unset rows leave the index
+          // entirely and any number of them can coexist (verified against the
+          // live mongo 4.4). `resolvedKey` preserves the audit trail.
+          $set: {
+            status: 'dismissed',
+            updatedDate: now,
+            autoResolved: true
+          },
+          $rename: { dedupeKey: 'resolvedKey' }
+        }
       ));
   for (const [realmId, ids] of byRealm) {
     try {

@@ -53,7 +53,13 @@ describe('noticeHelpers', () => {
       code: 11000
     });
     const r = await createNotice(
-      { realmId: 'r1', code: 'bill-due', message: 'm', link: '', dedupeKey: 'k' },
+      {
+        realmId: 'r1',
+        code: 'bill-due',
+        message: 'm',
+        link: '',
+        dedupeKey: 'k'
+      },
       { insertNotice: jest.fn(async () => Promise.reject(dup)) }
     );
     expect(r).toEqual({ created: false });
@@ -92,7 +98,13 @@ describe('noticeHelpers', () => {
 
   test('createNotice swallows arbitrary insert failures (never throws past the caller)', async () => {
     const r = await createNotice(
-      { realmId: 'r1', code: 'bill-due', message: 'm', link: '', dedupeKey: 'k' },
+      {
+        realmId: 'r1',
+        code: 'bill-due',
+        message: 'm',
+        link: '',
+        dedupeKey: 'k'
+      },
       { insertNotice: jest.fn(async () => Promise.reject(new Error('boom'))) }
     );
     expect(r).toEqual({ created: false });
@@ -100,7 +112,13 @@ describe('noticeHelpers', () => {
 
   test('pushNotice: telegram failure still reports created:true (bell is channel of record)', async () => {
     const r = await pushNotice(
-      { realmId: 'r1', code: 'bill-due', message: 'm', link: '', dedupeKey: 'k' },
+      {
+        realmId: 'r1',
+        code: 'bill-due',
+        message: 'm',
+        link: '',
+        dedupeKey: 'k'
+      },
       'http://test/emailer',
       async () => 'tok',
       {
@@ -121,7 +139,13 @@ describe('noticeHelpers', () => {
       notConfigured: false
     }));
     const r = await pushNotice(
-      { realmId: 'r1', code: 'bill-due', message: 'm', link: '', dedupeKey: 'k' },
+      {
+        realmId: 'r1',
+        code: 'bill-due',
+        message: 'm',
+        link: '',
+        dedupeKey: 'k'
+      },
       'http://test/emailer',
       async () => 'tok',
       {
@@ -253,7 +277,8 @@ describe('checkUnpaidRentsMonthly', () => {
             debts: 0,
             payments: payment
           },
-          payments: payment > 0 ? [{ amount: payment, date: '01/06/2026' }] : [],
+          payments:
+            payment > 0 ? [{ amount: payment, date: '01/06/2026' }] : [],
           preTaxAmounts: [],
           charges: [],
           debts: [],
@@ -280,10 +305,25 @@ describe('checkUnpaidRentsMonthly', () => {
     const { deps, pushed } = makeDeps({
       now: () => MONTH_END,
       findTenants: jest.fn(async () => [
-        tenantWithRent({ _id: 't1', name: 'ΑΛΦΑ', grandTotal: 100, payment: 0 }),
-        tenantWithRent({ _id: 't2', name: 'ΒΗΤΑ', grandTotal: 900, payment: 0 }),
+        tenantWithRent({
+          _id: 't1',
+          name: 'ΑΛΦΑ',
+          grandTotal: 100,
+          payment: 0
+        }),
+        tenantWithRent({
+          _id: 't2',
+          name: 'ΒΗΤΑ',
+          grandTotal: 900,
+          payment: 0
+        }),
         // Fully paid → excluded.
-        tenantWithRent({ _id: 't3', name: 'ΓΑΜΑ', grandTotal: 300, payment: 300 })
+        tenantWithRent({
+          _id: 't3',
+          name: 'ΓΑΜΑ',
+          grandTotal: 300,
+          payment: 300
+        })
       ])
     });
     const r = await checkUnpaidRentsMonthly(deps);
@@ -338,7 +378,12 @@ describe('checkUnpaidRentsMonthly', () => {
       now: () => MONTH_END,
       findTenants: jest.fn(async () => [
         broken,
-        tenantWithRent({ _id: 'tok', name: 'ΚΑΛΟ', grandTotal: 300, payment: 0 })
+        tenantWithRent({
+          _id: 'tok',
+          name: 'ΚΑΛΟ',
+          grandTotal: 300,
+          payment: 0
+        })
       ])
     });
     const r = await checkUnpaidRentsMonthly(deps);
@@ -390,7 +435,9 @@ describe('checkUnpaidRentsMonthly', () => {
     expect(r.created).toBe(2);
     expect(pushed.map((p) => p.realmId).sort()).toEqual(['r1', 'r2']);
     // No cross-realm leakage of names.
-    const byRealm = Object.fromEntries(pushed.map((p) => [p.realmId, p.message]));
+    const byRealm = Object.fromEntries(
+      pushed.map((p) => [p.realmId, p.message])
+    );
     expect(byRealm.r1).toContain('ΑΛΦΑ');
     expect(byRealm.r1).not.toContain('ΒΗΤΑ');
     expect(byRealm.r2).toContain('ΒΗΤΑ');
@@ -399,7 +446,13 @@ describe('checkUnpaidRentsMonthly', () => {
 });
 
 describe('checkDepositsUnreturned', () => {
-  function tenant({ _id, daysPast, guaranty = 500, guarantyPayback = 0, terminated }) {
+  function tenant({
+    _id,
+    daysPast,
+    guaranty = 500,
+    guarantyPayback = 0,
+    terminated
+  }) {
     const end = moment.utc(FIXED_NOW).startOf('day').subtract(daysPast, 'days');
     return {
       _id,
@@ -407,7 +460,9 @@ describe('checkDepositsUnreturned', () => {
       realmId: 'r1',
       guaranty,
       guarantyPayback,
-      ...(terminated ? { terminationDate: end.toDate() } : { endDate: end.toDate() })
+      ...(terminated
+        ? { terminationDate: end.toDate() }
+        : { endDate: end.toDate() })
     };
   }
 
@@ -434,8 +489,18 @@ describe('checkDepositsUnreturned', () => {
   test('a fully returned deposit is silent; a partial one still fires for the remainder', async () => {
     const { deps, pushed } = makeDeps({
       findTenants: jest.fn(async () => [
-        tenant({ _id: 'back', daysPast: 14, guaranty: 500, guarantyPayback: 500 }),
-        tenant({ _id: 'part', daysPast: 14, guaranty: 500, guarantyPayback: 200 })
+        tenant({
+          _id: 'back',
+          daysPast: 14,
+          guaranty: 500,
+          guarantyPayback: 500
+        }),
+        tenant({
+          _id: 'part',
+          daysPast: 14,
+          guaranty: 500,
+          guarantyPayback: 200
+        })
       ])
     });
     const r = await checkDepositsUnreturned(deps);
@@ -448,7 +513,9 @@ describe('checkDepositsUnreturned', () => {
     const t = tenant({ _id: 'trm', daysPast: 14, terminated: true });
     // A much older endDate must NOT be the anchor.
     t.endDate = moment.utc(FIXED_NOW).subtract(200, 'days').toDate();
-    const { deps, pushed } = makeDeps({ findTenants: jest.fn(async () => [t]) });
+    const { deps, pushed } = makeDeps({
+      findTenants: jest.fn(async () => [t])
+    });
     const r = await checkDepositsUnreturned(deps);
     expect(r.created).toBe(1);
     expect(pushed[0].dedupeKey).toBe('deposit:trm:20260526:14');
@@ -483,7 +550,10 @@ describe('checkHoldoverLeases', () => {
     });
     const r = await checkHoldoverLeases(deps);
     expect(r.created).toBe(2);
-    expect(pushed.map((p) => p.code)).toEqual(['holdover-lease', 'holdover-lease']);
+    expect(pushed.map((p) => p.code)).toEqual([
+      'holdover-lease',
+      'holdover-lease'
+    ]);
     expect(pushed.map((p) => p.dedupeKey).sort()).toEqual([
       'holdover:h30:20260510:30',
       'holdover:h7:20260602:7'
@@ -607,9 +677,21 @@ describe('resolveResolvedConditions', () => {
     const r = await resolveResolvedConditions({
       now: () => FIXED_NOW,
       findInboxItems: jest.fn(async () => [
-        notice({ _id: 'term', code: 'holdover-lease', key: 'holdover:T1:20260601:7' }),
-        notice({ _id: 'ext', code: 'holdover-lease', key: 'holdover:T2:20260601:7' }),
-        notice({ _id: 'still', code: 'holdover-lease', key: 'holdover:T3:20260601:7' })
+        notice({
+          _id: 'term',
+          code: 'holdover-lease',
+          key: 'holdover:T1:20260601:7'
+        }),
+        notice({
+          _id: 'ext',
+          code: 'holdover-lease',
+          key: 'holdover:T2:20260601:7'
+        }),
+        notice({
+          _id: 'still',
+          code: 'holdover-lease',
+          key: 'holdover:T3:20260601:7'
+        })
       ]),
       findTenants: jest.fn(async () => [
         {
@@ -617,12 +699,53 @@ describe('resolveResolvedConditions', () => {
           terminationDate: moment.utc(FIXED_NOW).subtract(1, 'day').toDate()
         },
         { _id: 'T2', endDate: moment.utc(FIXED_NOW).add(90, 'days').toDate() },
-        { _id: 'T3', endDate: moment.utc(FIXED_NOW).subtract(7, 'days').toDate() }
+        {
+          _id: 'T3',
+          endDate: moment.utc(FIXED_NOW).subtract(7, 'days').toDate()
+        }
       ]),
       resolveNotices: jest.fn(async (ids) => resolved.push(...ids))
     });
     expect(r.resolved).toBe(2);
     expect(resolved.sort()).toEqual(['ext', 'term']);
+  });
+
+  test('resolution FREES the dedupeKey so a returning condition can re-notify', async () => {
+    // A user-dismissed notice keeps its key ("stop telling me"). An
+    // AUTO-resolved one must not: a bill's receipt can be reversed by a
+    // corrective re-import, and with the key retained createNotice would hit
+    // E11000, report created:false, and the money would be silently invisible.
+    // Drive the REAL default resolver by intercepting the collection call, so
+    // the assertion is on the update document itself — passing only the ids to
+    // a stub would not have caught the retained key.
+    const calls = [];
+    const { Collections } = await import('@microrealestate/common');
+    const orig = Collections.InboxItem.updateMany;
+    Collections.InboxItem.updateMany = async (filter, update) => {
+      calls.push({ filter, update });
+      return { modifiedCount: 1 };
+    };
+    try {
+      await resolveResolvedConditions({
+        now: () => FIXED_NOW,
+        findInboxItems: jest.fn(async () => [
+          notice({ _id: 'n', code: 'bill-due', key: 'bill-due:B1:7' })
+        ]),
+        findBills: jest.fn(async () => [
+          { _id: 'B1', totalAmount: 100, receipts: [{ amount: 100 }] }
+        ])
+        // NO resolveNotices override — exercise the production path.
+      });
+    } finally {
+      Collections.InboxItem.updateMany = orig;
+    }
+    expect(calls).toHaveLength(1);
+    expect(calls[0].filter).toEqual({ _id: { $in: ['n'] } });
+    expect(calls[0].update.$set.status).toBe('dismissed');
+    expect(calls[0].update.$set.autoResolved).toBe(true);
+    // The load-bearing assertion: the key is RENAMED away, not kept.
+    expect(calls[0].update.$rename).toEqual({ dedupeKey: 'resolvedKey' });
+    expect(calls[0].update.$set.dedupeKey).toBeUndefined();
   });
 
   test('nothing pending → no update call at all', async () => {
