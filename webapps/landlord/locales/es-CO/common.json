@@ -160,6 +160,7 @@
   "Central Oil": "Aceite central",
   "Charge Month": "Mes del cargo",
   "Charge owner for vacant units": "Cobrar al propietario por unidades vacantes",
+  "Charges": "Cargos",
   "Schema captures the intent today but the rent pipeline does not yet route the vacant share to the owner. Toggling this flag has no effect until the integration lands.": "El esquema registra la intención, pero el cálculo de arriendo aún no enruta la parte de la unidad vacante al propietario. Activar esta opción no tiene efecto hasta que se complete la integración.",
   "Charged to": "Cargado a",
   "Check your email": "Revisa tu correo electrónico",

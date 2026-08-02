@@ -160,6 +160,7 @@
   "Central Oil": "Chauffage central au fioul",
   "Charge Month": "Mois d'imputation",
   "Charge owner for vacant units": "Facturer le propriétaire pour les unités vacantes",
+  "Charges": "Charges",
   "Schema captures the intent today but the rent pipeline does not yet route the vacant share to the owner. Toggling this flag has no effect until the integration lands.": "Le schéma enregistre l'intention, mais le pipeline de loyer ne dirige pas encore la part de l'unité vacante vers le propriétaire. Activer cette option n'a aucun effet tant que l'intégration n'est pas livrée.",
   "Charged to": "Imputé à",
   "Check your email": "Vérifiez votre courriel",

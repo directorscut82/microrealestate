@@ -160,6 +160,7 @@
   "Central Oil": "Zentralheizung Öl",
   "Charge Month": "Buchungsmonat",
   "Charge owner for vacant units": "Eigentümer für leere Einheiten belasten",
+  "Charges": "Belastungen",
   "Schema captures the intent today but the rent pipeline does not yet route the vacant share to the owner. Toggling this flag has no effect until the integration lands.": "Das Schema erfasst die Absicht, der Mietberechnungs-Pipeline leitet den Anteil der leeren Einheit jedoch noch nicht an den Eigentümer weiter. Das Umschalten dieser Option hat keine Wirkung, bis die Integration umgesetzt ist.",
   "Charged to": "Berechnet an",
   "Check your email": "Überprüfen Sie Ihren Posteingang",

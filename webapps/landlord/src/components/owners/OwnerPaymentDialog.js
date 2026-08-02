@@ -5,7 +5,12 @@ import {
   DrawerHeader,
   DrawerTitle
 } from '../ui/drawer';
-import { LuPlus, LuTrash2 } from 'react-icons/lu';
+import {
+  LuChevronLeft,
+  LuChevronRight,
+  LuPlus,
+  LuTrash2
+} from 'react-icons/lu';
 import { payOwner, QueryKeys } from '../../utils/restcalls';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
@@ -96,6 +101,37 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
     }
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
   }, [outstandingCharges]);
+
+  // ONE month at a time, with ‹ MM/YYYY › arrows — same treatment the owner
+  // detail page's ΧΡΕΩΣΕΙΣ got. Before this the dialog dumped EVERY outstanding
+  // month in one scroll (user screenshot 2026-08-02: 15+ rows and still
+  // scrolling), which made it impossible to see what a given month owed.
+  const [viewTerm, setViewTerm] = useState(null);
+
+  // Which months actually have outstanding charges — the arrows step through
+  // THESE, not the calendar, so you can never land on an empty month.
+  const monthTerms = useMemo(
+    () => chargesByMonth.map(([term]) => term),
+    [chargesByMonth]
+  );
+
+  // Default to the OLDEST outstanding month: that is the one the auto
+  // allocation settles first (oldest-first), so the figures on screen match
+  // what an auto payment would actually pay off.
+  useEffect(() => {
+    if (!monthTerms.length) {
+      setViewTerm(null);
+      return;
+    }
+    // Keep the current month if it still has charges (a payment may have
+    // settled another month); otherwise fall back to the oldest.
+    setViewTerm((prev) =>
+      prev != null && monthTerms.includes(prev) ? prev : monthTerms[0]
+    );
+  }, [monthTerms]);
+
+  const viewIdx = viewTerm == null ? -1 : monthTerms.indexOf(viewTerm);
+  const visibleCharges = viewIdx >= 0 ? chargesByMonth[viewIdx][1] : [];
 
   // Reset on (re)open.
   useEffect(() => {
@@ -617,19 +653,51 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
         <div className="p-4 overflow-y-auto scrollbar-branded mx-auto w-full max-w-screen-lg space-y-4">
           {/* Per-charge summary — every outstanding eksoda type + επισκευή,
               grouped by month, with Οφειλόμενο / Καταβολή / Υπόλοιπο. */}
-          {chargesByMonth.length > 0 ? (
-            chargesByMonth.map(([term, charges]) => (
-              <div
-                key={term}
-                className="rounded-md border border-stone-line/60 bg-muted/20 p-3"
-              >
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-1">
-                  {_termLabel(term)}
+          {viewIdx >= 0 ? (
+            <div className="rounded-md border border-stone-line/60 bg-muted/20 p-3">
+              {/* ‹ MM/YYYY › — one month at a time. The arrows step through the
+                  months that HAVE outstanding charges, so they can never land
+                  on an empty month, and they disable at the ends. */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {t('Charges')}
+                  {monthTerms.length > 1 ? (
+                    <span className="ml-2 normal-case font-normal">
+                      ({viewIdx + 1}/{monthTerms.length})
+                    </span>
+                  ) : null}
                 </div>
-                {renderChargeHeader()}
-                {charges.map(renderChargeRow)}
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={viewIdx <= 0}
+                    onClick={() => setViewTerm(monthTerms[viewIdx - 1])}
+                    aria-label={t('Previous month')}
+                  >
+                    <LuChevronLeft className="size-4" />
+                  </Button>
+                  <span className="text-sm font-mono tabular-nums px-2">
+                    {_termLabel(monthTerms[viewIdx])}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={viewIdx >= monthTerms.length - 1}
+                    onClick={() => setViewTerm(monthTerms[viewIdx + 1])}
+                    aria-label={t('Next month')}
+                  >
+                    <LuChevronRight className="size-4" />
+                  </Button>
+                </div>
               </div>
-            ))
+              {renderChargeHeader()}
+              {visibleCharges.map(renderChargeRow)}
+            </div>
           ) : (
             <div className="p-2 rounded border border-stone-line/40 bg-muted/30 text-muted-foreground text-sm">
               {t('No outstanding owner charges.')}
