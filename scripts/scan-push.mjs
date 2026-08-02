@@ -156,6 +156,30 @@ function loadNeedles() {
         key
       );
     if (value.length < 10 && !keyNamesACredential) return;
+    // PUBLIC IDENTIFIERS — must match scan-pii.mjs's list exactly.
+    //
+    // Some fields in a credential file are not credentials: a bot's public
+    // @handle, a bucket name, a cloud project id, a test-realm display name.
+    // They grant nothing alone, they are MEANT to appear in setup docs and in
+    // the ~30 e2e specs that scope writes to the test realm by name, and they
+    // are >=10 chars so the length rule above cannot filter them.
+    //
+    // This exemption was added to scan-pii.mjs (the pre-COMMIT hook) on
+    // 2026-08-02 but NOT here, so the pre-PUSH hook kept reporting them: 5 of
+    // its 6 findings on the very next push were this class. A guard that is
+    // 83% noise is a guard that gets bypassed with PII_SCAN_SKIP by reflex,
+    // and the 6th finding on that run was real. Precision is a security
+    // property — keep the two loaders in sync.
+    //
+    // Deliberately NOT exempted: anything matching the credential-key regex
+    // above. BOT_USERNAME is a public @handle but BOT_TOKEN is the secret, and
+    // CLOUD_USERNAME stays a needle because half a credential pair is still
+    // worth withholding.
+    const keyIsPublicIdentifier =
+      /^(BOT_USERNAME|PROJECT_ID|BUCKET|BUCKET_ID|ENDPOINT|ORG_NAME|REALM|REALM_NAME|LOCALE|CURRENCY|FROM|REPLY_?TO|URL|HOST|PORT|COUNTRY_?CODE)$/i.test(
+        key
+      );
+    if (keyIsPublicIdentifier) return;
     if (seen.has(value)) return;
     seen.add(value);
     out.push({ label: `${file}:${key}`, value });
