@@ -570,24 +570,41 @@ export async function runOncePerUtcDay(
   }
 }
 
+// Delay before the LEADING tick. Long enough for mongo/redis to be connected
+// and for migratedb() to have finished (onStartUp awaits it before calling us,
+// but the connection pool warms lazily), short enough that a deploy does not
+// silently swallow a day's notices.
+const LEADING_TICK_MS = 30 * 1000;
+
 export function startLeaseExpiryCron(): void {
   if (cronTimer) {
     return;
   }
-  cronTimer = setInterval(() => {
+  const tick = () => {
     // Fire-and-forget — runOncePerUtcDay logs its own errors and never
     // throws past this boundary. We deliberately don't await: setInterval
     // expects sync callbacks, and errors here would crash the process.
     runOncePerUtcDay().catch((err) => {
       logger.error(
-        `lease-expiry-scanner: unexpected rejection: ${
-          err?.message || err
-        }`
+        `lease-expiry-scanner: unexpected rejection: ${err?.message || err}`
       );
     });
-  }, HOURLY_MS);
+  };
+
+  // LEADING TICK. setInterval alone fires first after a FULL HOUR, and
+  // `lastRunUtcDate` is module state that resets on every restart — so a deploy
+  // (or a crash-restart) at 00:05 meant the day's notices did not go out until
+  // 01:05, and a container that restarted hourly could starve them entirely.
+  // The once-per-UTC-day guard inside runOncePerUtcDay makes this leading tick
+  // idempotent: if today's scan already ran in this process it returns null.
+  const leading = setTimeout(tick, LEADING_TICK_MS);
+  leading.unref();
+
+  cronTimer = setInterval(tick, HOURLY_MS);
   cronTimer.unref();
-  logger.info('lease-expiry-scanner: hourly tick installed');
+  logger.info(
+    `lease-expiry-scanner: leading tick in ${LEADING_TICK_MS / 1000}s, then hourly`
+  );
 }
 
 export function stopLeaseExpiryCron(): void {
