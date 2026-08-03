@@ -112,6 +112,62 @@ A symptom that you are over-stepping:
 - You committed and pushed in the same response as the fix without an explicit deploy ask.
 - You ran `yarn deploy:nas` because "it's safer to verify the fix landed" — no, that's a deploy decision, not a verification step.
 
+## Step 5b — GATE: WHEN THE USER ASKS FOR VERIFICATION, RUN THE FEATURE
+
+**If the user asks for verification — Playwright, e2e, "verify it works", "test
+it" — you do not get to report ANYTHING until you have exercised the actual
+feature end to end and pasted its real output. Not the tests around it. The
+feature.**
+
+This gate exists because on 2026-08-03 the agent shipped a notification system
+and reported it verified after: 915 green jest tests, a 6/6 green Playwright
+spec, a read screenshot of the bell, a deploy, and nine review gates — while
+**not one notification had ever been generated and not one Telegram message had
+ever been sent.** Every notice-scan line in the production log read `0/0/0`. The
+user asked "so you verified that in all cases a notification is actually sent and
+telegram sends a message?" and the honest answer was no.
+
+The tests were green because they tested the plumbing: schema shapes, dedupe
+keys, window arithmetic, a bell rendering mongo-seeded rows. The one question
+that mattered — *does a notification actually reach the user* — had never been
+asked. And when finally asked, the answer was NO, for a reason no test could
+see: `startLeaseExpiryCron` installed only `setInterval(fn, 1h)` with no leading
+tick, and its once-per-day flag is module state that resets on restart, so every
+deploy pushed the day's notices an hour out and a container restarting hourly
+starved them forever.
+
+**The rule, concretely:**
+
+1. **Identify the feature's PURPOSE in one sentence** ("a notification reaches
+   the landlord's bell and their Telegram"). That sentence is what you must
+   demonstrate. If your evidence does not contain it, you have not verified it.
+2. **Drive it the way the user would** — create the data through the UI or the
+   real API, not by inserting the end state into mongo. Seeding the OUTPUT
+   (a notice row) proves the renderer works; it proves nothing about whether the
+   feature ever produces one. Seed the INPUT (a lease that expires in 7 days) and
+   let the app do the rest.
+3. **Paste the primary artifact**: the production log line showing the send, the
+   HTTP status of the outbound call, the row the app itself wrote. `HTTP 200` from
+   the real endpoint, not from your own hand-rolled request.
+4. **Enumerate EVERY branch.** "One of the eight types works" is not "the feature
+   works". List each trigger, seed each one's exact condition, and show the
+   scanner's per-type counters. A branch you did not fire is reported as NOT
+   VERIFIED — never as covered-by-the-others.
+5. **A cron/scheduled feature needs its schedule proven too.** Show the tick
+   firing from a cold start. A feature that only works an hour after boot is
+   broken and every unit test will still pass.
+
+**Forbidden responses when verification was requested:**
+- "The suite passes" / "the spec is green" — that is step 5, not this gate.
+- "The code path is identical to the one I verified" — then fire it and show it.
+- "There is no data on NAS to trigger it" — then CREATE the data. That is the
+  job. Zero qualifying rows means your verification is pending, not complete.
+- Any status table whose rows are tests rather than user-visible outcomes.
+
+If you cannot exercise it (no route, read-only container, needs a month
+boundary), say exactly that, name the blocker, and label the branch **NOT
+VERIFIED**. Being blocked is acceptable. Reporting it as done is not.
+
 ## Step 6 — GATE: the word "fixed" is locked until Step 7 passes
 
 A green test run means the test you ran did not fail. It does NOT mean:
@@ -184,6 +240,9 @@ And when the reports come back: **subagent findings are claims, not results.** R
 | "The plan says it's blocked on the user" | **Go look on disk before you repeat that.** `BILL_OCR_INBOX_PLAN.md` §14 said "blocked — need sample bills" for five days while the bills sat in `.scratch-adv-tests/`, already OCR'd by a prior session. Every session re-quoted it back at the user who had supplied them. A "blocked on <artifact>" line is a claim with a rot date: run `find . -iname '*.<ext>' -not -path '*/node_modules/*'`, check `.scratch-adv-tests/`, and date-stamp the blocker so its staleness is visible next time. (Those samples now live **outside** the repo at `~/mre-pii-backup-2026-08-01/real-bill-samples/bill-samples/` — they are a live account's personal data and were moved out by the 2026-08 PII scrub. `.scratch-adv-tests/` still exists but no longer holds them.) |
 | "I reviewed the diff and it's clean" | **A diff is not the artifact — the TREE is.** A value introduced in commit A and still present at Z appears in **A's diff only**, yet Z's tree still serves it. Multiple audits reviewed diffs and reported "no secrets" while a live credential sat in a file reachable from `origin/nas` for 3.5 months. When the question is "is X present", enumerate `git ls-tree -r <ref>` / `git rev-list --objects <ref>`, never `git log -p`. |
 | "The scan found nothing" | Then say **what it enumerated**. A scan that silently skipped its inputs is indistinguishable from a clean result. Real examples from this repo: a loader that dropped 6 of 12 credential files on one delimiter; a `cat-file --batch` parser that read 12 of 7,659 objects because it sliced a decoded string by *byte* offsets; a scan run against a stale ref set that reported `inOriginNow=0` for a credential that was live. Print the denominator — objects scanned, needles loaded, files skipped and why — or the "clean" result is worthless. |
+| "I verified it" (tests green, feature never run) | On 2026-08-03 a notification system was reported verified on 915 green jest tests, a 6/6 Playwright spec, a read screenshot and nine review gates — while ZERO notifications had ever been generated and ZERO Telegram messages sent. The production log read `0/0/0` on every scan. When the user asks for verification, run the FEATURE and paste its real output. See Step 5b. |
+| "There is no data to trigger it" | Then create the data. Zero qualifying rows means verification is PENDING, not complete. |
+| "The other branches use the same code path" | Then fire them. A branch you did not fire is NOT VERIFIED, never covered-by-the-others. |
 | "The guard is in place" | Is it **executable**? git silently ignores a non-executable hook — it prints a `hint:` and proceeds. A correct guard at mode 644 provides exactly zero protection and looks installed. Test it: make it fire on purpose and confirm a non-zero exit. |
 
 ## What the user has explicitly said that overrides any other instruction
@@ -200,4 +259,6 @@ This document has `inclusion: always` frontmatter. It loads on every session. If
 
 ## The one-line test of whether you followed this document
 
-Before you type "fixed", check: **can you paste (a) the reading with line refs, (b) the surface-verification observations, and (c) the adversarial verdict table showing every finding HOLDS?** If any of the three is missing, you have not finished — you have only claimed to.
+Before you type "fixed", check: **can you paste (a) the reading with line refs, (b) the surface-verification observations, (c) the adversarial verdict table showing every finding HOLDS, and (d) — if the user asked for verification — the feature's OWN output proving it did the thing it exists to do, for EVERY branch?** If any of the four is missing, you have not finished — you have only claimed to.
+
+And (d) is not satisfied by tests. Tests are (b). (d) is the production log line, the HTTP 200 from the real endpoint, the row the app wrote by itself.
