@@ -451,15 +451,16 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                     </Button>
                   </div>
                   {/* Contact row — powers owner notifications (email/SMS with
-                      the owner-statement PDF) + IBAN for payment instructions. */}
-                  <div className="flex items-start gap-2">
+                      the owner-statement PDF) + IBAN for payment instructions.
+                      It wraps because fixed phone + IBAN widths otherwise starve the flexible email field. */}
+                  <div className="flex flex-wrap items-start gap-2">
                     <Input
-                      className="w-40"
+                      className="w-40 shrink-0"
                       type="tel"
                       placeholder={t('Phone')}
                       {...register(`owners.${idx}.phone`)}
                     />
-                    <div className="flex-1 space-y-1">
+                    <div className="min-w-0 flex-1 basis-48 space-y-1">
                       <Input
                         type="email"
                         placeholder={t('Email')}
@@ -472,7 +473,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                       )}
                     </div>
                     <Input
-                      className="w-56"
+                      className="w-56 max-w-full shrink-0"
                       placeholder="IBAN"
                       {...register(`owners.${idx}.iban`)}
                     />
