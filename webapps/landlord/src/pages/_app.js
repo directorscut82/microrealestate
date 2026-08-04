@@ -23,6 +23,37 @@ import { ThemeProvider } from 'next-themes';
 import { useEffect } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 
+// moment's bundled Greek locale has three defects in its relative-time table
+// that surface verbatim in the notification bell («σε ένας μήνας», «a week»):
+//   • `M` / `y` are NOMINATIVE («ένας μήνας»), but `future: 'σε %s'` needs the
+//     ACCUSATIVE — «σε ένα μήνα» / «σε έναν χρόνο». The nominative reads as
+//     broken Greek to a native speaker.
+//   • `w` / `ww` were never translated at all and return the English
+//     "a week" / "%d weeks".
+// Patched here, beside the locale imports, so every `fromNow()` in the app is
+// correct. `updateLocale` MERGES, so the keys not listed keep moment's values.
+// Upstream: moment is in maintenance mode, so don't wait for a fix.
+moment.updateLocale('el', {
+  relativeTime: {
+    future: 'σε %s',
+    past: 'πριν από %s',
+    s: 'λίγα δευτερόλεπτα',
+    ss: '%d δευτερόλεπτα',
+    m: 'ένα λεπτό',
+    mm: '%d λεπτά',
+    h: 'μία ώρα',
+    hh: '%d ώρες',
+    d: 'μία μέρα',
+    dd: '%d μέρες',
+    w: 'μία εβδομάδα',
+    ww: '%d εβδομάδες',
+    M: 'ένα μήνα',
+    MM: '%d μήνες',
+    y: 'έναν χρόνο',
+    yy: '%d χρόνια'
+  }
+});
+
 const queryClient = new QueryClient();
 
 const APP_TITLE = [config.APP_NAME, 'Landlord'];

@@ -11,7 +11,10 @@ import NumberFormat from '../../../components/NumberFormat';
 import OwnerContactCard from '../../../components/owners/OwnerContactCard';
 import OwnerPaymentDialog from '../../../components/owners/OwnerPaymentDialog';
 import Page from '../../../components/Page';
-import { ownerChargeLabel } from '../../../utils/lineLabels';
+import {
+  ownerChargeLabel,
+  ownerChargeScopeLabel
+} from '../../../utils/lineLabels';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/router';
@@ -37,19 +40,9 @@ const _paymentTypeLabel = (map, type) => map?.[type]?.label || type || '';
 // (Ισόγειο / Όροφος N), suffixed ΚΕΝΟ when the unit is vacant (the case where a
 // vacant unit's tenant-share routes to the owner). Returns '' when not a unit
 // scope with known floor, so the caller can omit the suffix entirely.
-const _unitScopeLabel = (t, c) => {
-  if (c.scope === 'building') return t('Whole building');
-  if (c.scope !== 'unit') return '';
-  let floorLabel = '';
-  if (c.unitFloor === 0) floorLabel = t('Ground floor');
-  else if (typeof c.unitFloor === 'number')
-    floorLabel = `${t('Floor')} ${c.unitFloor}`;
-  if (c.unitVacant) {
-    // ΚΕΝΟ (neuter) per user. With a known floor: "Ισόγειο — ΚΕΝΟ".
-    return floorLabel ? `${floorLabel} — ${t('Vacant unit')}` : t('Vacant unit');
-  }
-  return floorLabel;
-};
+// The local `_unitScopeLabel` that used to live here was a byte-for-byte
+// duplicate of `ownerChargeScopeLabel` in utils/lineLabels — deleted so this
+// page and the owner-payment dialog cannot drift apart on the same label.
 
 // Group charges by month+building so the owner sees one block per
 // (term, building) with the co-owner split shown ONCE in the header (not
@@ -411,7 +404,16 @@ function OwnerDetail() {
                     )}
                     <div className="space-y-0.5 pl-3">
                       {g.lines.map((c) => {
-                        const scopeLabel = _unitScopeLabel(t, c);
+                        const scopeLabel = ownerChargeScopeLabel(t, c);
+                        // WHICH unit this charge bills. Floor alone is not
+                        // unique — a building can hold several units on the same
+                        // floor, so «Θέρμανση — Όροφος -1 — ΚΕΝΟ» repeated
+                        // identically per unit and the landlord could not tell
+                        // them apart. The server already sends
+                        // unitName/unitAtak; the owner-payment dialog reads it
+                        // (OwnerPaymentDialog renderChargeRow) and this page
+                        // did not.
+                        const unitId = c.unitName || c.unitAtak || '';
                         // Step-7 BROKEN 6: when the group's co-owned lines have
                         // DIFFERENT splits, the header split is suppressed and
                         // each co-owned line shows its OWN split inline instead.
@@ -434,6 +436,7 @@ function OwnerDetail() {
                             <span className="truncate text-muted-foreground">
                               {ownerChargeLabel(t, c)}
                               {scopeLabel ? ` — ${scopeLabel}` : ''}
+                              {unitId ? ` — ${unitId}` : ''}
                               {perLineSplit ? (
                                 <span className="text-muted-foreground/60">
                                   {' '}

@@ -1372,6 +1372,7 @@
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "Η φωτογραφία δεν διαβάστηκε: {{error}}. Στείλτε καθαρότερη λήψη στο bot ή καταχωρήστε τον λογαριασμό χειροκίνητα.",
   "Unreadable": "Μη αναγνώσιμο",
   "{{count}} pending": "{{count}} εκκρεμούν",
+  "{{count}} pending_one": "1 εκκρεμεί",
   "Record bill": "Καταχώρηση",
   "Match payment receipt": "Αντιστοίχιση απόδειξης πληρωμής",
   "Receipt details": "Στοιχεία απόδειξης",

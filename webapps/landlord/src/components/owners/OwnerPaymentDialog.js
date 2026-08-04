@@ -642,7 +642,7 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
   return (
     <Drawer open={open} onOpenChange={setOpen}>
       <DrawerContent className="h-full w-full">
-        <DrawerHeader className="mx-auto w-full max-w-screen-lg text-lg md:text-xl font-semibold leading-none tracking-tight px-4">
+        <DrawerHeader className="mx-auto w-full max-w-screen-lg shrink-0 text-lg md:text-xl font-semibold leading-none tracking-tight px-4">
           <DrawerTitle>
             {owner?.name
               ? `${t('Enter an owner expense settlement')} — ${owner.name}`
@@ -650,7 +650,8 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
           </DrawerTitle>
         </DrawerHeader>
 
-        <div className="p-4 overflow-y-auto scrollbar-branded mx-auto w-full max-w-screen-lg space-y-4">
+        {/* flex-1 min-h-0 caps the scroll area so the footer stays on screen. */}
+        <div className="flex-1 min-h-0 p-4 overflow-y-auto scrollbar-branded mx-auto w-full max-w-screen-lg space-y-4">
           {/* Per-charge summary — every outstanding eksoda type + επισκευή,
               grouped by month, with Οφειλόμενο / Καταβολή / Υπόλοιπο. */}
           {viewIdx >= 0 ? (
@@ -726,7 +727,7 @@ export default function OwnerPaymentDialog({ open, setOpen, owner }) {
           </div>
         </div>
 
-        <DrawerFooter className="mx-auto w-full max-w-screen-lg">
+        <DrawerFooter className="mx-auto w-full max-w-screen-lg shrink-0 border-t border-stone-line/60 bg-background">
           <div className="flex flex-col md:flex-row md:justify-end sm:gap-2">
             <Button variant="outline" onClick={() => setOpen(false)}>
               {t('Cancel')}

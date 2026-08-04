@@ -1352,6 +1352,7 @@
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.",
   "Unreadable": "Unreadable",
   "{{count}} pending": "{{count}} pending",
+  "{{count}} pending_one": "1 pending",
   "Record bill": "Record bill",
   "Match payment receipt": "Match payment receipt",
   "Receipt details": "Receipt details",

@@ -113,6 +113,18 @@ function NoticeCard({ item, onGone, onNavigate }) {
   });
 
   const Icon = NOTICE_ICON[item.notice?.code] || LuBell;
+  // The server composes ONE Greek string per notice and sends it to BOTH
+  // Telegram and this bell. Telegram has no icon column, so the writers prefix
+  // an emoji (⏱ 💰 ⚠️ 💶 🔴 🗑 ⏳ 📜) to carry the same signal there. In the
+  // bell that emoji lands right next to NOTICE_ICON's own glyph and reads as
+  // two clocks side by side (user-reported). Strip a LEADING pictograph here —
+  // client-side, so Telegram keeps its prefix — and let the icon do the work.
+  // Anchored to the start and bounded to the first few chars so an emoji inside
+  // the sentence (or a Greek/€ character) is never touched.
+  const message = String(item.notice?.message || '').replace(
+    /^[⌚-⏿■-➿⬀-⯿️\u{1F300}-\u{1FAFF}]{1,3}\s*/u,
+    ''
+  );
   // notice.link comes off a server document and is interpolated into an href.
   // Today every writer builds it from an ObjectId or a formatted term
   // (`/tenants/{id}`, `/rents/2026.07`) and no HTTP route can write a notice —
@@ -135,8 +147,14 @@ function NoticeCard({ item, onGone, onNavigate }) {
           It now shares the action row, which is otherwise empty on the left. */}
       <div className="flex items-start gap-2.5">
         <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
-        <div className="min-w-0 flex-1 text-sm text-ink">
-          {item.notice?.message}
+        {/* `leading-relaxed` + `break-words`: a digest notice is one long
+            server-composed sentence («Απλήρωτα ενοίκια … : 8 — ΝΑΜΕ (524,00 €),
+            …») that wrapped to 7 tight lines and read as a wall of text. The
+            looser line-height makes it scannable; break-words stops a long
+            unspaced token (an ΑΤΑΚ, an IBAN) from overflowing the 420px
+            popover. */}
+        <div className="min-w-0 flex-1 text-sm leading-relaxed text-ink break-words">
+          {message}
         </div>
       </div>
       {error && (
