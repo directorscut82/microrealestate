@@ -277,6 +277,7 @@ export default function BuildingExpensePanel({ building }) {
     []
   );
   const [selectedTerm, setSelectedTerm] = useState(currentTerm);
+  const isPastTerm = Number(selectedTerm) < Number(currentTerm);
   const [visibleYear, setVisibleYear] = useState(() =>
     moment().format('YYYY')
   );
@@ -549,6 +550,27 @@ export default function BuildingExpensePanel({ building }) {
           <NumberFormat value={tenantTotal + ownerTotal} />
         </span>
       </div>
+
+      {/* A past month is CLOSED for tenant billing: Contract.update clones every
+          rent with term < currentTerm verbatim (contract.ts:152), so a charge
+          saved here persists and RENDERS in the breakdown below but can never
+          reach a rent bill — a phantom receivable. saveMonthlyStatement has no
+          frozen-term guard (the repair path has one, _assertChargeTermNotFrozen).
+          Owner-side entries are unaffected, so this warns rather than blocks. */}
+      {isPastTerm && (
+        <div className="mb-4 rounded-md border border-oxide/40 bg-oxide-tint/40 p-3 text-sm text-ink">
+          <div className="font-medium">
+            {t('{{month}} is closed for tenant billing', {
+              month: monthLabel
+            })}
+          </div>
+          <div className="mt-1 text-label text-ink-muted">
+            {t(
+              'A tenant charge saved for a past month is not added to any rent — it will show in the breakdown below but bill nobody. Enter it in the current month instead. Owner charges are not affected.'
+            )}
+          </div>
+        </div>
+      )}
 
       {tenantRows.length === 0 && ownerRows.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-6">

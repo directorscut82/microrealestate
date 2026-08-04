@@ -731,6 +731,49 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
 
   const unitsWithProperty = units.filter((u) => u.propertyId);
 
+  // Denominators MUST mirror 1_base.computeBuildingChargeForProperty exactly:
+  // the ‰ branches reduce over ALL building.units (:598), surface/equal use
+  // managedUnits = units with a propertyId (:590, :762). Getting this wrong in
+  // either direction is a false positive or a missed warning.
+  const _sum = (list, f) => list.reduce((s, u) => s + (Number(u?.[f]) || 0), 0);
+  const allocationBlocker = (() => {
+    const m = allocationMethod;
+    if (!m) return null;
+    // single_unit bills one named unit and is already handled: its picker is
+    // hidden when nothing is linked, so zod's «Pick a unit to bill» fires.
+    if (m === 'single_unit') return null;
+    if (unitsWithProperty.length === 0) {
+      return {
+        title: t('No unit in this building is linked to a property'),
+        detail: t(
+          'This expense would be charged to nobody. Link the units to properties on the Units tab first.'
+        )
+      };
+    }
+    const THOUSANDTHS = {
+      general_thousandths: 'generalThousandths',
+      heating_thousandths: 'heatingThousandths',
+      elevator_thousandths: 'elevatorThousandths'
+    };
+    if (THOUSANDTHS[m] && _sum(units, THOUSANDTHS[m]) === 0) {
+      return {
+        title: t('The units have no thousandths for this method'),
+        detail: t(
+          'Every unit would compute a zero share, so no amount is charged to anyone — in any month. Set the thousandths on the Units tab, or choose «Equal».'
+        )
+      };
+    }
+    if (m === 'by_surface' && _sum(unitsWithProperty, 'surface') === 0) {
+      return {
+        title: t('The linked units have no surface (m²)'),
+        detail: t(
+          'Every unit would compute a zero share, so no amount is charged to anyone — in any month. Set the unit m² on the Units tab, or choose «Equal».'
+        )
+      };
+    }
+    return null;
+  })();
+
   return (
     <ResponsiveDialog
       open={open}
@@ -807,6 +850,20 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                 <p className="text-sm text-destructive">
                   {errors.allocationMethod.message}
                 </p>
+              )}
+              {/* Zero-denominator pre-flight. The server's 422
+                  (_assertThousandthsAvailable) covers ONLY the three ‰ methods
+                  AND only when amount > 0 — so a variable expense (amount 0) or
+                  by_surface bypasses it entirely and every unit's share computes
+                  to 0: no rent line, no breakdown row, no owner row, every month,
+                  with a success toast. */}
+              {allocationBlocker && (
+                <div className="mt-2 rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                  <div className="font-medium">{allocationBlocker.title}</div>
+                  <div className="mt-1 text-label text-ink-muted">
+                    {allocationBlocker.detail}
+                  </div>
+                </div>
               )}
             </div>
 

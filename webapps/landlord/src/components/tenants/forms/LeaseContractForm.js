@@ -142,11 +142,30 @@ function Section({ label, visible = true, children }) {
 //     card now).
 //   - Closed by default. Auto-opens only when current values differ from
 //     the lease's own begin/end (i.e. there's actually a handover gap).
-function PropertyHandoverDates({ index, property, beginDate, endDate, readOnly, register, t }) {
+function PropertyHandoverDates({ index, property, beginDate, endDate, readOnly, register, setValue, t }) {
   const custom =
     (property.entryDate && property.entryDate !== beginDate) ||
     (property.exitDate && property.exitDate !== endDate);
   const [open, setOpen] = useState(!!custom);
+
+  // The engine bills each term against the PER-PROPERTY window, not the lease
+  // window (1_base.ts:1003). So a lease date moved outward while entry/exit
+  // stays put produces months that are created, shown as «paid», and billed
+  // €0 — invisible everywhere because countMonthNotPaid stays 0. Only
+  // onPropertyChange syncs the pair; onLeaseChange and the raw endDate input
+  // do not. A SHORTER window is legitimate (mid-lease handover), so warn +
+  // offer the fix rather than forcing it.
+  const _m = (d) => (d ? moment(d) : null);
+  const lateEntry =
+    property.entryDate && beginDate && _m(property.entryDate).isAfter(_m(beginDate), 'month');
+  const earlyExit =
+    property.exitDate && endDate && _m(property.exitDate).isBefore(_m(endDate), 'month');
+  const unbilledMonths = (() => {
+    let n = 0;
+    if (lateEntry) n += _m(property.entryDate).diff(_m(beginDate), 'months');
+    if (earlyExit) n += _m(endDate).diff(_m(property.exitDate), 'months');
+    return n;
+  })();
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -156,6 +175,33 @@ function PropertyHandoverDates({ index, property, beginDate, endDate, readOnly, 
           {t('Mid-lease handover dates')}
         </Button>
       </CollapsibleTrigger>
+      {unbilledMonths > 0 && !readOnly && (
+        <div className="mb-2 ml-1 rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+          <div className="font-medium">
+            {t('{{count}} month(s) of this lease will be billed 0 €', {
+              count: unbilledMonths
+            })}
+          </div>
+          <div className="mt-1 text-label text-ink-muted">
+            {t(
+              "This property's occupancy window is narrower than the lease, so months outside it produce a rent of 0 € and still show as paid. Correct if this is not a mid-lease handover."
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => {
+              setValue(`properties.${index}.entryDate`, beginDate);
+              setValue(`properties.${index}.exitDate`, endDate);
+              setOpen(true);
+            }}
+          >
+            {t('Match the lease dates')}
+          </Button>
+        </div>
+      )}
       <CollapsibleContent>
         <p className="text-xs text-muted-foreground mb-2 ml-1">
           {t(
@@ -488,6 +534,7 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
               endDate={endDate}
               readOnly={readOnly}
               register={register}
+              setValue={setValue}
               t={t}
             />
 

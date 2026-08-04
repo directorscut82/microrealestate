@@ -210,9 +210,16 @@ export default function ThirdPartiesForm({ organization }) {
           replyToEmail: values.replyToEmail
         };
       } else {
-        formData.thirdParties.gmail = null;
-        formData.thirdParties.smtp = null;
-        formData.thirdParties.mailgun = null;
+        // Turning a provider OFF must DISABLE it, not erase it. Sending `null`
+        // made realmmanager's shallow spread overwrite the provider key, and
+        // every secret-carry-forward branch there is gated on truthiness
+        // (`if (req.body.thirdParties?.X)`), so the AES ciphertext was deleted
+        // from the database and could only be recovered from the provider.
+        // Every reader gates on `selected === true`, so `selected: false`
+        // disables the channel just as completely while keeping the credential.
+        formData.thirdParties.gmail = { selected: false };
+        formData.thirdParties.smtp = { selected: false };
+        formData.thirdParties.mailgun = { selected: false };
       }
       if (values.b2Active) {
         formData.thirdParties.b2 = {
@@ -224,7 +231,8 @@ export default function ThirdPartiesForm({ organization }) {
           bucket: values.bucket
         };
       } else {
-        formData.thirdParties.b2 = null;
+        // Disable, don't erase — see the note on the email providers above.
+        formData.thirdParties.b2 = { selected: false };
       }
       if (values.smsActive) {
         formData.thirdParties.smsGateway = {
@@ -236,7 +244,8 @@ export default function ThirdPartiesForm({ organization }) {
           countryCode: values.smsCountryCode
         };
       } else {
-        formData.thirdParties.smsGateway = null;
+        // Disable, don't erase — see the note on the email providers above.
+        formData.thirdParties.smsGateway = { selected: false };
       }
       if (values.telegramActive) {
         formData.thirdParties.telegram = {
@@ -247,7 +256,8 @@ export default function ThirdPartiesForm({ organization }) {
           adminChatId: values.telegramAdminChatId
         };
       } else {
-        formData.thirdParties.telegram = null;
+        // Disable, don't erase — see the note on the email providers above.
+        formData.thirdParties.telegram = { selected: false };
       }
       if (values.mailReadersActive) {
         // A1 (audit-2026-07): match each row to its PREVIOUS state by EMAIL,

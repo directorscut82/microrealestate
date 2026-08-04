@@ -2,6 +2,7 @@ import {
   addBuildingRepair,
   deleteDocumentByKey,
   fetchProperties,
+  fetchTenants,
   QueryKeys,
   removeBuildingRepair,
   updateBuildingRepair
@@ -325,6 +326,28 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
   const contractorId = watch('contractorId');
   const affectedUnitIds = watch('affectedUnitIds') || [];
   const invoiceDocumentId = watch('invoiceDocumentId');
+  const chargeOwnerWhenVacant = watch('chargeOwnerWhenVacant');
+  const estimatedCostW = watch('estimatedCost');
+  const actualCostW = watch('actualCost');
+  const tenantSharePercentageW = watch('tenantSharePercentage');
+
+  // MUST mirror the server's repairTenantSharePercentage (1_base.ts:943):
+  // chargeableTo wins; the stored % is meaningful only for 'split'. Reading the
+  // schema-default 0 for a 'tenants' repair inverts the split.
+  const repairTenantShare = useMemo(() => {
+    if (chargeableTo === 'tenants') return 100;
+    if (chargeableTo === 'owners') return 0;
+    const p = Number(tenantSharePercentageW);
+    return Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
+  }, [chargeableTo, tenantSharePercentageW]);
+
+  // Same precedence as the writer: actualCost wins when set, else estimated.
+  const repairCost = useMemo(() => {
+    const a = Number(actualCostW);
+    if (Number.isFinite(a) && a > 0) return a;
+    const e = Number(estimatedCostW);
+    return Number.isFinite(e) && e > 0 ? e : 0;
+  }, [actualCostW, estimatedCostW]);
 
   // Tier I-3.b: any chargeableTo value (owners / tenants / split) opens the
   // allocation picker + chargeTerm. Owner-side now persists via
@@ -355,6 +378,33 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
     return map;
   }, [allProperties]);
 
+  // Αχρέωτα pre-flight: a tenant-borne share on a unit vacant for the charge
+  // term with the vacant→owner switch OFF is billed to NOBODY —
+  // _distributeRepairCharge (buildingmanager ~6059) writes no row and the money
+  // exists only as a computed total. Correct, but it was silent. Warn, don't change it.
+  const { data: tenantsPage } = useQuery({
+    queryKey: [QueryKeys.TENANTS],
+    queryFn: () => fetchTenants(),
+    staleTime: 60_000
+  });
+  const occupiedPropertyIds = useMemo(() => {
+    const list = Array.isArray(tenantsPage)
+      ? tenantsPage
+      : tenantsPage?.pages?.flatMap((p) => p.data || p) ||
+        tenantsPage?.items ||
+        [];
+    const out = new Set();
+    for (const tn of list) {
+      // Drives a WARNING only; the server stays authoritative.
+      if (tn?.terminated || tn?.terminationDate) continue;
+      for (const p of tn?.properties || []) {
+        const pid = p?.propertyId || p?.property?._id;
+        if (pid) out.add(String(pid));
+      }
+    }
+    return out;
+  }, [tenantsPage]);
+
   const buildingUnits = useMemo(() => {
     return (building?.units || []).map((u) => ({
       ...u,
@@ -375,6 +425,29 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
           : '')
     }));
   }, [building?.units, propertyNameById]);
+
+  // Empty selection = all units, matching the writer's rule.
+  const targetedUnits = useMemo(() => {
+    if (!affectedUnitIds.length) return buildingUnits;
+    const sel = new Set(affectedUnitIds.map(String));
+    return buildingUnits.filter((u) => sel.has(String(u._id)));
+  }, [buildingUnits, affectedUnitIds]);
+
+  // Owner-occupied units DO get an owner row, so they are not uncovered.
+  const uncoveredUnits = useMemo(() => {
+    if (chargeOwnerWhenVacant) return [];
+    if (repairTenantShare <= 0) return [];
+    return targetedUnits.filter(
+      (u) =>
+        u.occupancyType !== 'owner_occupied' &&
+        !occupiedPropertyIds.has(String(u.propertyId))
+    );
+  }, [
+    targetedUnits,
+    occupiedPropertyIds,
+    chargeOwnerWhenVacant,
+    repairTenantShare
+  ]);
 
   // Tier I-3.f upload state: tracks the in-flight invoice upload so we can
   // disable the submit button + show progress in the helper text.
@@ -844,6 +917,40 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                           "When a unit is vacant, charge its tenant-share of this repair to the owner. Off: it stays uncollected (Αχρέωτα)."
                         )}
                       </p>
+                      {uncoveredUnits.length > 0 && (
+                        <div className="mt-2 rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                          <div className="font-medium">
+                            {t(
+                              '{{count}} of the selected units are vacant this month',
+                              { count: uncoveredUnits.length }
+                            )}
+                          </div>
+                          <div className="mt-1 text-label text-ink-muted">
+                            {t(
+                              'Their share of this repair will NOT be charged to anyone — it stays uncollected (Αχρέωτα) and appears only in the ΧΡΕΩΣΕΙΣ panel total. Turn the switch above on to charge it to the owner instead.'
+                            )}
+                          </div>
+                          {repairCost > 0 && repairTenantShare > 0 ? (
+                            <div className="mt-1.5 text-label text-ink-muted">
+                              {t('Uncollected amount')}:{' '}
+                              <span className="font-medium text-oxide tabular-nums">
+                                <NumberFormat
+                                  value={
+                                    // Estimate: the server allocates by the
+                                    // repair's real method. Labelled «περίπου».
+                                    ((repairCost * repairTenantShare) / 100) *
+                                    (uncoveredUnits.length /
+                                      Math.max(1, targetedUnits.length))
+                                  }
+                                />
+                              </span>{' '}
+                              <span className="opacity-70">
+                                ({t('approximately')})
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
                   )}
 

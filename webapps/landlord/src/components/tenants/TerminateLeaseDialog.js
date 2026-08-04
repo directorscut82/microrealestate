@@ -127,9 +127,17 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
       handleClose();
     } catch (error) {
       const status = error?.response?.status;
+      // The server's 422 here is ACTIONABLE — it names the months with recorded
+      // payments that a termination would orphan ("Some payments will be lost
+      // because they are out of the contract time frame: 2025040100 500 …").
+      // Mapping it to «Λείπει το όνομα ενοικιαστή» was doubly wrong: this dialog
+      // has no name field, and it threw away the one message that tells the
+      // landlord what to do. Surface apiMessage like the sibling dialogs
+      // (NewTenantDialog, tenants/[id]) already do.
+      const apiMessage = error?.response?.data?.message;
       switch (status) {
         case 422:
-          return toast.error(t('Tenant name is missing'));
+          return toast.error(apiMessage || t('Cannot terminate the lease'));
         case 403:
           return toast.error(t('You are not allowed to update the tenant'));
         case 409:

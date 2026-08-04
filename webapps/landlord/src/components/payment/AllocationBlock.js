@@ -123,6 +123,28 @@ export default function AllocationBlock({
     0
   );
 
+  // applyAllocation derives creditToNextMonth from allocSum − owedTotal, but
+  // autoSpreadAllocation CAPS every line at its owed (paymentAllocation.js:156),
+  // so in auto mode allocSum can never exceed owedTotal and the credit line is
+  // structurally unreachable: typing 5000 against 500 owed rendered a preview
+  // byte-identical to typing 500 (verified against the real functions). That
+  // contradicts this file's own contract above — "Overpayment surfaces a Credit
+  // to next month line so the surplus is visible, never silent". Measure the
+  // surplus from the TYPED amount so every mode reports it.
+  const typedSurplus = Math.round(Math.max(0, amount - owedTotal) * 100) / 100;
+  const surplusToShow = Math.max(creditToNextMonth, typedSurplus);
+
+  const selectedLineOwed =
+    mode === 'specific' && specificLineKey
+      ? Number(
+          payableLines.find((l) => l.lineKey === specificLineKey)?.amount
+        ) || 0
+      : 0;
+  const specificOverclaim =
+    mode === 'specific' && specificLineKey && selectedLineOwed > 0
+      ? Math.round(Math.max(0, amount - selectedLineOwed) * 100) / 100
+      : 0;
+
   // Wave-26 round-3u: route per-line labels through the shared rule so
   // the dropdown options + Πριν/Μετά table match the Πρόγραμμα row and
   // the saved-tile bullet paren exactly.
@@ -199,6 +221,22 @@ export default function AllocationBlock({
                     ))}
                   </SelectContent>
                 </Select>
+                {/* Specific mode sends the TYPED amount uncapped, so it can
+                    over-claim the chosen line while others stay owed. The
+                    preview then UNDER-states (applyAllocation caps the take and
+                    breaks), showing the remainder as still-owed when the term is
+                    actually settled — which invites a second payment. */}
+                {specificOverclaim > 0 && (
+                  <div className="mt-1.5 rounded-md border border-oxide/40 bg-oxide-tint/40 p-2 text-xs text-ink">
+                    {t(
+                      'This payment exceeds the selected line ({{owed}}) by {{over}}. Use Custom split or Auto-spread so the rest lands on the other lines.',
+                      {
+                        owed: fmt(selectedLineOwed),
+                        over: fmt(specificOverclaim)
+                      }
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -253,15 +291,22 @@ export default function AllocationBlock({
                 >
                   {t('Allocated')}: {fmt(customSum)} /{' '}
                   {fmt(amount)}
-                  {Math.abs(customDelta) >= 0.005 &&
-                    ' — ' +
-                      (customDelta > 0
-                        ? t('{{amount}} unallocated', {
-                            amount: fmt(customDelta)
-                          })
-                        : t('{{amount}} over', {
-                            amount: fmt(-customDelta)
-                          }))}
+                  {/* An ALL-zero custom map sends no allocation at all
+                      (PaymentTabs strips zero rows, then `if (allocation.length)`),
+                      so the server auto-spreads and nothing is unallocated —
+                      the old text claimed the whole payment was stranded. */}
+                  {customSum < 0.005
+                    ? ' — ' + t('auto-spread will be applied')
+                    : Math.abs(customDelta) >= 0.005
+                      ? ' — ' +
+                        (customDelta > 0
+                          ? t('{{amount}} unallocated', {
+                              amount: fmt(customDelta)
+                            })
+                          : t('{{amount}} over', {
+                              amount: fmt(-customDelta)
+                            }))
+                      : ''}
                 </div>
               </div>
             )}
@@ -321,12 +366,28 @@ export default function AllocationBlock({
             </tbody>
           </table>
         )}
-        {creditToNextMonth > 0 && (
+        {surplusToShow > 0 && (
           <div
-            className="text-xs text-blue-700 mt-2"
+            className="mt-2 rounded-md border border-sea/40 bg-sea-tint/40 p-2 text-xs text-ink"
             data-cy={`allocCredit-${index}`}
           >
-            {t('Credit to next month')}: {fmt(creditToNextMonth)}
+            <span className="font-medium">
+              {t('Credit to next month')}: {fmt(surplusToShow)}
+            </span>
+            {owedTotal > 0 ? (
+              <div className="mt-0.5 text-ink-muted">
+                {t(
+                  'This payment exceeds the total owed ({{owed}}) — the surplus carries forward.',
+                  { owed: fmt(owedTotal) }
+                )}
+              </div>
+            ) : (
+              <div className="mt-0.5 text-ink-muted">
+                {t(
+                  'Nothing is owed this month, so the whole amount carries forward and is attributed to no category.'
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

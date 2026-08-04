@@ -376,11 +376,28 @@ export async function update(req: Req, res: Res) {
   // only `thirdParties.gmail = {...}` would replace the whole subtree and
   // erase smtp/mailgun/b2/smsGateway settings that the user never touched.
   const previousObj = previousRealm.toObject();
+  // Per-PROVIDER merge, not a top-level spread. The client disables a channel by
+  // sending just `{selected:false}`; a shallow spread would replace the whole
+  // provider object and delete its stored AES ciphertext, which is recoverable
+  // only from the provider. Merging per key keeps the credential while the
+  // channel goes dark (every reader gates on `selected === true`).
+  // mailReaders is an ARRAY — replace it wholesale, never key-merge.
+  const _mergeThirdParties = (prev: AnyRecord, next: AnyRecord): AnyRecord => {
+    const out: AnyRecord = { ...(prev || {}) };
+    for (const [k, v] of Object.entries(next || {})) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object' && !Array.isArray(out[k])) {
+        out[k] = { ...out[k], ...v };
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  };
   const updatedRealm: AnyRecord = {
     ...previousObj,
     ...req.body,
     thirdParties: req.body.thirdParties
-      ? { ...(previousObj.thirdParties || {}), ...req.body.thirdParties }
+      ? _mergeThirdParties(previousObj.thirdParties || {}, req.body.thirdParties)
       : previousObj.thirdParties
   };
 

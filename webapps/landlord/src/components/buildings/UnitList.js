@@ -222,6 +222,15 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
     (s, o) => s + (Number(o?.percentage) || 0),
     0
   );
+  // A named owner at 0% flips ownerSlicesOf to an equal split (its
+  // everyDeclaredInRange test requires p > 0), silently re-dividing the other
+  // owners' shares. Only counts an owner that is otherwise filled in — a blank
+  // row the user just added is not yet a mistake.
+  const ownersHaveZeroPct = (ownersValue || []).some(
+    (o) =>
+      (Number(o?.percentage) || 0) === 0 &&
+      (String(o?.name || '').trim() || String(o?.taxId || '').trim())
+  );
 
   const handleClose = useCallback(() => {
     setOpen(false);
@@ -403,6 +412,29 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                   {t('Total')}: {Math.round(ownersPctSum * 10) / 10}%
                 </span>
               </div>
+              {/* Two distinct failure modes, both silent until now. Order
+                  matters: the 0% case is the destructive one. */}
+              {ownersHaveZeroPct && (
+                <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                  {t(
+                    'A co-owner at 0% makes the percentages be ignored — the charge is split EQUALLY between all owners instead. Set a real percentage.'
+                  )}
+                </div>
+              )}
+              {!ownersHaveZeroPct &&
+                ownerFields.length > 0 &&
+                ownersPctSum > 0.5 &&
+                ownersPctSum < 99.5 && (
+                  <div className="rounded-md border border-stone-line bg-muted/40 p-2.5 text-sm text-ink-muted">
+                    {t(
+                      'Percentages total {{sum}}% — the remaining {{rest}}% is billed to «Λοιποί ιδιοκτήτες», which cannot be invoiced to a named person.',
+                      {
+                        sum: Math.round(ownersPctSum * 10) / 10,
+                        rest: Math.round((100 - ownersPctSum) * 10) / 10
+                      }
+                    )}
+                  </div>
+                )}
               {ownerFields.length === 0 && (
                 <p className="text-label text-ink-muted">
                   {t('No owners recorded yet.')}
@@ -485,7 +517,19 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                 variant="outline"
                 size="sm"
                 onClick={() =>
-                  appendOwner({ name: '', taxId: '', percentage: 0, phone: '', email: '', iban: '' })
+                  // Default to the REMAINING share, not 0. A co-owner left at 0%
+                  // makes ownerSlicesOf's `everyDeclaredInRange` (p > 0) false,
+                  // which drops it to an EQUAL split: naming the co-owner of a
+                  // 75% owner silently moved €50 of that owner's liability onto
+                  // the new one (verified against the compiled function).
+                  appendOwner({
+                    name: '',
+                    taxId: '',
+                    percentage: Math.max(0, Math.round((100 - ownersPctSum) * 10) / 10),
+                    phone: '',
+                    email: '',
+                    iban: ''
+                  })
                 }
               >
                 + {t('Add co-owner')}
