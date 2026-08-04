@@ -231,8 +231,15 @@ export default function ThirdPartiesForm({ organization }) {
           bucket: values.bucket
         };
       } else {
-        // Disable, don't erase — see the note on the email providers above.
-        formData.thirdParties.b2 = { selected: false };
+        // B2 is the ONE provider that must still be nulled. Its sub-schema has
+        // no `selected` field (realm.ts:117-122 — compare smsGateway right
+        // below it), so Mongoose STRIPS an unknown `selected` key and the doc is
+        // byte-identical to before. And `billstorage.isEnabled` gates on the
+        // four credentials being present, not on a flag — so `{selected:false}`
+        // would leave B2 live and every bill PDF would keep uploading to a
+        // bucket the landlord believes they disconnected. Credential-presence IS
+        // the gate here, so disabling necessarily means clearing them.
+        formData.thirdParties.b2 = null;
       }
       if (values.smsActive) {
         formData.thirdParties.smsGateway = {

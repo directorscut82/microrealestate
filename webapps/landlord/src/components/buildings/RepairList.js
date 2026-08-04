@@ -42,6 +42,7 @@ import ResponsiveDialog from '../ResponsiveDialog';
 import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
+import moment from 'moment';
 import { toast } from 'sonner';
 import { apiFetcher, uploadDocument } from '../../utils/fetch';
 import FileDownload from 'js-file-download';
@@ -411,23 +412,46 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
     queryFn: () => fetchTenants(),
     staleTime: 60_000
   });
+  // TERM-AWARE, mirroring the server's _occupiedFromOccupancyRows
+  // (buildingmanager.ts:6137) at YYYYMM granularity: the lease window AND the
+  // per-property entry/exit window must both cover the charge term. The first
+  // version dropped any tenant with `terminated || terminationDate` and ignored
+  // chargeTerm entirely, which diverged FOUR ways — a future-start lease and a
+  // past per-property exitDate both read as occupied (no banner on the exact
+  // silent-money case), while a backdated repair on a since-terminated tenant
+  // and an archived-but-in-window tenant both fired the banner on money the
+  // server does bill.
   const occupiedPropertyIds = useMemo(() => {
     const list = Array.isArray(tenantsPage)
       ? tenantsPage
       : tenantsPage?.pages?.flatMap((p) => p.data || p) ||
         tenantsPage?.items ||
         [];
+    const ymTerm = Math.floor(Number(chargeTerm || getCurrentTerm()) / 10000);
+    const toYM = (d) => {
+      if (!d) return null;
+      const m = moment(d);
+      return m.isValid() ? m.year() * 100 + (m.month() + 1) : null;
+    };
     const out = new Set();
     for (const tn of list) {
-      // Drives a WARNING only; the server stays authoritative.
-      if (tn?.terminated || tn?.terminationDate) continue;
+      const begin = toYM(tn?.beginDate);
+      // terminationDate wins over endDate, exactly as the server does.
+      const end = toYM(tn?.terminationDate || tn?.endDate);
+      if (begin !== null && ymTerm < begin) continue;
+      if (end !== null && ymTerm > end) continue;
       for (const p of tn?.properties || []) {
         const pid = p?.propertyId || p?.property?._id;
-        if (pid) out.add(String(pid));
+        if (!pid) continue;
+        const pEntry = toYM(p?.entryDate);
+        const pExit = toYM(p?.exitDate);
+        if (pEntry !== null && ymTerm < pEntry) continue;
+        if (pExit !== null && ymTerm > pExit) continue;
+        out.add(String(pid));
       }
     }
     return out;
-  }, [tenantsPage]);
+  }, [tenantsPage, chargeTerm]);
 
   const buildingUnits = useMemo(() => {
     return (building?.units || []).map((u) => ({
@@ -962,25 +986,20 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                               'Their share of this repair will NOT be charged to anyone — it stays uncollected (Αχρέωτα) and appears only in the ΧΡΕΩΣΕΙΣ panel total. Turn the switch above on to charge it to the owner instead.'
                             )}
                           </div>
-                          {repairCost > 0 && repairTenantShare > 0 ? (
-                            <div className="mt-1.5 text-label text-ink-muted">
-                              {t('Uncollected amount')}:{' '}
-                              <span className="font-medium text-oxide tabular-nums">
-                                <NumberFormat
-                                  value={
-                                    // Estimate: the server allocates by the
-                                    // repair's real method. Labelled «περίπου».
-                                    ((repairCost * repairTenantShare) / 100) *
-                                    (uncoveredUnits.length /
-                                      Math.max(1, targetedUnits.length))
-                                  }
-                                />
-                              </span>{' '}
-                              <span className="opacity-70">
-                                ({t('approximately')})
-                              </span>
-                            </div>
-                          ) : null}
+                          {/* NO € figure here, deliberately. The first version
+                              estimated it as (cost x tenantShare) x
+                              (uncovered / targeted) — a unit-COUNT ratio, which
+                              is only right for `equal`. The server divides by
+                              the method's own denominator (SIGMA-permille over ALL
+                              units, or SIGMA m2 over managed ones), so for 10 units
+                              at 100permille with one affected the banner said EUR1000
+                              where the server bills EUR100: a 10x over-statement,
+                              measured against the compiled allocator. On a
+                              banner whose whole purpose is to quantify money at
+                              risk, "approximately" does not cover an order of
+                              magnitude. Reimplementing five allocation methods
+                              client-side would just drift from the engine, so
+                              the count is stated and the amount is not. */}
                         </div>
                       )}
                     </div>

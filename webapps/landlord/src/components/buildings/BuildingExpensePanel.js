@@ -272,12 +272,26 @@ export default function BuildingExpensePanel({ building }) {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
 
+  // moment.UTC, not local. The authority this mirrors is UTC throughout —
+  // Contract._isFrozen -> _currentTermFor uses moment.utc (contract.ts:499) and
+  // _frozenPropertyIdsForTerm likewise (buildingmanager.ts:7639). With local
+  // time, for the first ~3h of a month on Athens (UTC+3) the client called the
+  // new month "current" while the server's freeze boundary was still the old
+  // one — so a charge entered for the old month read as NOT past here and was
+  // silently frozen there. The documented moment.utc-vs-local trap.
   const currentTerm = useMemo(
-    () => moment().startOf('month').format('YYYYMMDDHH'),
+    () => moment.utc().startOf('month').format('YYYYMMDDHH'),
     []
   );
   const [selectedTerm, setSelectedTerm] = useState(currentTerm);
   const isPastTerm = Number(selectedTerm) < Number(currentTerm);
+  // Contract._isFrozen ALSO freezes the CURRENT term once a tenant's rent for it
+  // is fully paid (contract.ts:475 -> _isFullyPaid), so the phantom-receivable
+  // case is not past-only — settling this month then entering a late κοινόχρηστα
+  // figure hits it, which is the likeliest real sequence. Per-tenant paid status
+  // is not in the breakdown payload, so rather than assert a certainty we cannot
+  // compute, the current month carries a conditional note.
+  const isCurrentTerm = Number(selectedTerm) === Number(currentTerm);
   const [visibleYear, setVisibleYear] = useState(() =>
     moment().format('YYYY')
   );
@@ -568,6 +582,13 @@ export default function BuildingExpensePanel({ building }) {
             {t(
               'A tenant charge saved for a past month is not added to any rent — it will show in the breakdown below but bill nobody. Enter it in the current month instead. Owner charges are not affected.'
             )}
+      {isCurrentTerm && (
+        <div className="mb-4 rounded-md border border-stone-line bg-muted/40 p-3 text-sm text-ink-muted">
+          {t(
+            'If a tenant has already paid this month in full, their month is closed too — a charge added now will not reach that tenant. Check before entering a late figure.'
+          )}
+        </div>
+      )}
           </div>
         </div>
       )}

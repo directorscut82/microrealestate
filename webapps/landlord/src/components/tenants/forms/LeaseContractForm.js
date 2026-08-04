@@ -156,14 +156,27 @@ function PropertyHandoverDates({ index, property, beginDate, endDate, readOnly, 
   // do not. A SHORTER window is legitimate (mid-lease handover), so warn +
   // offer the fix rather than forcing it.
   const _m = (d) => (d ? moment(d) : null);
+  // Count months ARITHMETICALLY. `diff(…,'months')` counts whole ELAPSED months
+  // and loses one whenever the day-of-month doesn't reach — and month-end lease
+  // dates are the norm here, because onLeaseChange computes
+  // `endDate = beginDate + duration − 1 second`. Measured: begin 2026-01-31 with
+  // entry 2026-02-01 gave diff=0, so the banner rendered NOTHING while January
+  // genuinely bills €0; (endDate 2027-01-30, exit 2026-10-31) said 2 when 3
+  // months are unbilled. The engine filters per term at MONTH granularity
+  // (1_base.ts:1008 `isBetween(entry, exit, 'months', '[]')`), so the calendar-
+  // month gap is the right unit.
+  const _monthIndex = (d) => {
+    const m = _m(d);
+    return m ? m.year() * 12 + m.month() : null;
+  };
   const lateEntry =
     property.entryDate && beginDate && _m(property.entryDate).isAfter(_m(beginDate), 'month');
   const earlyExit =
     property.exitDate && endDate && _m(property.exitDate).isBefore(_m(endDate), 'month');
   const unbilledMonths = (() => {
     let n = 0;
-    if (lateEntry) n += _m(property.entryDate).diff(_m(beginDate), 'months');
-    if (earlyExit) n += _m(endDate).diff(_m(property.exitDate), 'months');
+    if (lateEntry) n += _monthIndex(property.entryDate) - _monthIndex(beginDate);
+    if (earlyExit) n += _monthIndex(endDate) - _monthIndex(property.exitDate);
     return n;
   })();
 

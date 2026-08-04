@@ -467,12 +467,20 @@ export async function update(req: Req, res: Res) {
   if (req.body.thirdParties?.smsGateway) {
     const smsPasswordUpdated = !!req.body.thirdParties.smsGateway.passwordUpdated;
     const previousSmsPassword = previousRealm.thirdParties?.smsGateway?.password;
-    if (smsPasswordUpdated || !previousSmsPassword) {
-      updatedRealm.thirdParties.smsGateway.password = Crypto.encrypt(
-        req.body.thirdParties.smsGateway.password
-      );
+    const incomingSmsPassword = req.body.thirdParties.smsGateway.password;
+    // Only encrypt when there is actually something to encrypt.
+    // Crypto.encrypt(undefined) throws a raw TypeError from cipher.update
+    // (crypto.ts:34) — NOT a ServiceError — so it surfaced as a 500 and made the
+    // whole Third-Parties tab unsaveable. Reachable since the form began sending
+    // `{selected:false}` instead of `null` on switch-off: the `if` above is now
+    // truthy for a realm that has no stored SMS password, while `password` is
+    // undefined. Sibling providers already guard this (telegram tests `botToken
+    // ? … : ''`); this one did not because the old `null` made it unreachable.
+    if (smsPasswordUpdated || (!previousSmsPassword && incomingSmsPassword)) {
+      updatedRealm.thirdParties.smsGateway.password =
+        Crypto.encrypt(incomingSmsPassword);
     } else {
-      updatedRealm.thirdParties.smsGateway.password = previousSmsPassword;
+      updatedRealm.thirdParties.smsGateway.password = previousSmsPassword || '';
     }
   }
 

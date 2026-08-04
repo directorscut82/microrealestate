@@ -429,6 +429,21 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                   )}
                 </div>
               )}
+              {/* Over-declared: ownerSlicesOf's `overCovers = sum > 101`
+                  (ownerstatement.ts:329) makes useDeclared FALSE, so the
+                  declared shares are DISCARDED for an equal split — the same
+                  destructive outcome as the 0% case. Verified: A=60,B=60 on €200
+                  renders A 50%/€100, B 50%/€100. The server also 422s above
+                  100.5, so the 100.5–101 band saves fine AND equal-splits.
+                  Neither of the other two banners covered this. */}
+              {!ownersHaveZeroPct && ownersPctSum > 100.5 && (
+                <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                  {t(
+                    'Percentages total {{sum}}%, over 100%. The declared shares are then ignored and the charge is split EQUALLY. Fix the percentages.',
+                    { sum: Math.round(ownersPctSum * 10) / 10 }
+                  )}
+                </div>
+              )}
               {!ownersHaveZeroPct &&
                 ownerFields.length > 0 &&
                 ownersPctSum > 0.5 &&
