@@ -671,6 +671,14 @@ export default function BillImportDialog({ open, setOpen, building }) {
     resolvedAssignment,
     replaceFlags,
     chargeFlags,
+    // Was MISSING: effectiveAmount() reads amountOverrides, so without it the
+    // memoised callback closed over the pre-edit map and a corrected OCR amount
+    // was silently discarded — the misread figure was saved and bridged into
+    // every tenant's rent, while the input kept showing the correction and the
+    // toast reported success. This defeated the whole point of the editable
+    // amount field. (assignments is reached via resolvedAssignment, which
+    // already depends on it.)
+    amountOverrides,
     buildings,
     building,
     handleClose,

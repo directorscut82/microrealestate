@@ -799,8 +799,11 @@ export default function ImportTenantDialog({ open, setOpen }) {
           // over-recorded collected N-fold (the ΟΔΟΣ ΗΤΑ 24 garbage). Only the
           // createTenant (strategy 'new') server path threads this; extend/
           // replace still use the loop until their handlers thread it too.
+          // Must use the SAME predicate as the checkbox and the replace/extend
+          // loop below (`=== true`), or the box reads unchecked while the server
+          // still seeds the past ledger as settled.
           markPastPaid:
-            markPaidFlags[idx] !== false && matchInfo?.pastMonths > 0
+            markPaidFlags[idx] === true && matchInfo?.pastMonths > 0
         };
 
         let tenant;
@@ -930,7 +933,12 @@ export default function ImportTenantDialog({ open, setOpen }) {
         // re-fetches and pays each term's residual owed.
         if (
           strategy !== 'new' &&
-          markPaidFlags[idx] !== false &&
+          // Opt-IN. This synthesises `transfer` payments for each past term's
+          // residual owed — for a tenant genuinely in arrears that FABRICATES
+          // money never received and erases the debt from every surface. It was
+          // pre-checked (`!== false` on an empty map is true), so the
+          // destructive path was the default.
+          markPaidFlags[idx] === true &&
           matchInfo?.pastMonths > 0
         ) {
           // P1.2 / M4: previously hit `/rents/:year` which is not a
@@ -1467,7 +1475,7 @@ export default function ImportTenantDialog({ open, setOpen }) {
                       <div className="flex items-center gap-2 pt-2 p-2 bg-muted/50 rounded-md">
                         <Checkbox
                           id={`markPaid-${idx}`}
-                          checked={markPaidFlags[idx] !== false}
+                          checked={markPaidFlags[idx] === true}
                           onCheckedChange={(checked) =>
                             setMarkPaidFlags((prev) => ({
                               ...prev,
@@ -1475,10 +1483,17 @@ export default function ImportTenantDialog({ open, setOpen }) {
                             }))
                           }
                         />
-                        <label htmlFor={`markPaid-${idx}`} className="text-sm flex items-center gap-1.5 cursor-pointer">
-                          <LuCalendarClock className="size-4" />
-                          {t('Mark {{count}} past months as paid', { count: info.pastMonths })}
-                        </label>
+                        <div className="min-w-0">
+                          <label htmlFor={`markPaid-${idx}`} className="text-sm flex items-center gap-1.5 cursor-pointer">
+                            <LuCalendarClock className="size-4 shrink-0" />
+                            {t('Mark {{count}} past months as paid', { count: info.pastMonths })}
+                          </label>
+                          <p className="mt-1 text-label text-ink-muted">
+                            {t(
+                              'Records a payment for each of those months. Leave off unless they really were paid — for a tenant in arrears this erases the debt.'
+                            )}
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>

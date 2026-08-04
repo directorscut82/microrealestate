@@ -123,8 +123,32 @@ export default function NewPropertyDialog({ open, setOpen }) {
         };
 
         if (propertyPart.isCopyFrom) {
-          const { _id, ...originalProperty } =
-            propertyItems.find(({ _id }) => propertyPart.copyFrom === _id) || {};
+          const {
+            _id,
+            // Identity + per-property facts that must NEVER be copied:
+            //  • buildingId — the source building's units[] does not contain the
+            //    new property, so _toPropertiesData DISPLAYS that building while
+            //    computeBuildingChargeForProperty finds no unit and returns 0
+            //    (1_base.ts:577). The property shows a building it gets no
+            //    κοινόχρηστα from, and _autoLinkPropertiesToBuildings only fills
+            //    a MISSING buildingId, so the bogus link is never repaired.
+            //  • energyCertificate — a copied ΠΕΑ generates expiry notices for a
+            //    certificate this property does not have.
+            //  • atakNumber — unique index; the copy 409s with «already exists»,
+            //    a message pointing at the wrong cause.
+            //  • deh/eydap supply numbers — per-property utility identities.
+            buildingId: _copiedBuildingId,
+            energyCertificate: _copiedCert,
+            atakNumber: _copiedAtak,
+            dehNumber: _copiedDeh,
+            eydapNumber: _copiedEydap,
+            ...originalProperty
+          } = propertyItems.find(({ _id }) => propertyPart.copyFrom === _id) || {};
+          void _copiedBuildingId;
+          void _copiedCert;
+          void _copiedAtak;
+          void _copiedDeh;
+          void _copiedEydap;
           // Address typed in dialog wins; `address` from copy source is
           // intentionally overridden so the new property gets the address
           // the user just typed.
@@ -263,6 +287,13 @@ export default function NewPropertyDialog({ open, setOpen }) {
                     {t('Copy from an existing property')}
                   </Label>
                 </div>
+                {isCopyFrom && (
+                  <p className="mt-1.5 text-label text-ink-muted">
+                    {t(
+                      'Copies general details (type, surface, rent). ΑΤΑΚ, utility supply numbers, the energy certificate and the building link are not copied — they are unique to each property.'
+                    )}
+                  </p>
+                )}
                 <div className="space-y-2 mt-4">
                   <Label>{t('Property')}</Label>
                   <Select

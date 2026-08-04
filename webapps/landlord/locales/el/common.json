@@ -1428,5 +1428,9 @@
   "{{count}} month(s) of this lease will be billed 0 €_one": "1 μήνας αυτής της μίσθωσης θα χρεωθεί 0 €",
   "This property's occupancy window is narrower than the lease, so months outside it produce a rent of 0 € and still show as paid. Correct if this is not a mid-lease handover.": "Το διάστημα εγκατάστασης του ακινήτου είναι στενότερο από τη μίσθωση, άρα οι μήνες εκτός του διαστήματος παράγουν ενοίκιο 0 € και εμφανίζονται ως εξοφλημένοι. Διορθώστε το αν δεν πρόκειται για μεταβίβαση εντός μίσθωσης.",
   "Match the lease dates": "Εξίσωση με τις ημερομηνίες μίσθωσης",
-  "Cannot terminate the lease": "Δεν είναι δυνατός ο τερματισμός της μίσθωσης"
+  "Cannot terminate the lease": "Δεν είναι δυνατός ο τερματισμός της μίσθωσης",
+  "Records a payment for each of those months. Leave off unless they really were paid — for a tenant in arrears this erases the debt.": "Καταχωρεί πληρωμή για κάθε έναν από αυτούς τους μήνες. Αφήστε το ανενεργό εκτός αν έχουν πράγματι πληρωθεί — για ενοικιαστή με οφειλή, εξαφανίζει το χρέος.",
+  "A co-owner at 0% receives nothing. Remove the row, or give it a real percentage.": "Συνιδιοκτήτης με 0% δεν χρεώνεται τίποτα. Αφαιρέστε τη γραμμή ή ορίστε πραγματικό ποσοστό.",
+  "Overwrite the electricity supply number, surface, ΚΑΕΚ and the NAME of properties that already exist. Any property names you typed yourself will be replaced by the address-derived name. Off by default so re-imports preserve fields you have edited.": "Αντικατάσταση του αριθμού παροχής ΔΕΗ, της επιφάνειας, του ΚΑΕΚ και της ΟΝΟΜΑΣΙΑΣ των ακινήτων που υπάρχουν ήδη. Ονόματα που έχετε δώσει εσείς θα αντικατασταθούν από την ονομασία που παράγεται από τη διεύθυνση. Ανενεργό εξ ορισμού, ώστε οι επαναλαμβανόμενες εισαγωγές να διατηρούν τα πεδία που έχετε επεξεργαστεί.",
+  "Copies general details (type, surface, rent). ΑΤΑΚ, utility supply numbers, the energy certificate and the building link are not copied — they are unique to each property.": "Αντιγράφει γενικά στοιχεία (τύπος, επιφάνεια, ενοίκιο). Ο ΑΤΑΚ, οι αριθμοί παροχής, το ενεργειακό πιστοποιητικό και η σύνδεση με κτίριο ΔΕΝ αντιγράφονται — είναι μοναδικά για κάθε ακίνητο."
 }

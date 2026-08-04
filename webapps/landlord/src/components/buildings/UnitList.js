@@ -413,11 +413,19 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                 </span>
               </div>
               {/* Two distinct failure modes, both silent until now. Order
-                  matters: the 0% case is the destructive one. */}
+                  matters: the 0% case is the destructive one.
+                  The 0% owner only triggers the EQUAL-SPLIT re-division when the
+                  declared set does NOT already sum to ~100 — ownerSlicesOf's
+                  useDeclared has a second arm (|fullPctSum − 100| <= 1) that
+                  keeps declared shares. Verified against the compiled function:
+                  A=75,B=0 → A €100/B €100 (money MOVED), but A=100,B=0 →
+                  A 100%/B 0% (nothing moved). Two texts so neither overclaims. */}
               {ownersHaveZeroPct && (
                 <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
                   {t(
-                    'A co-owner at 0% makes the percentages be ignored — the charge is split EQUALLY between all owners instead. Set a real percentage.'
+                    ownersPctSum > 99 && ownersPctSum <= 101
+                      ? 'A co-owner at 0% receives nothing. Remove the row, or give it a real percentage.'
+                      : 'A co-owner at 0% makes the percentages be ignored — the charge is split EQUALLY between all owners instead. Set a real percentage.'
                   )}
                 </div>
               )}

@@ -140,8 +140,16 @@ export default function AllocationBlock({
           payableLines.find((l) => l.lineKey === specificLineKey)?.amount
         ) || 0
       : 0;
+  // Only meaningful when OTHER lines are still owed — that is the misattribution
+  // (this line over-claimed while siblings stay unpaid, and the preview then
+  // under-states). When the selected line is the ONLY owed line, the excess is a
+  // plain overpay that the credit line above already states, and showing both
+  // gave two banners for one condition.
   const specificOverclaim =
-    mode === 'specific' && specificLineKey && selectedLineOwed > 0
+    mode === 'specific' &&
+    specificLineKey &&
+    selectedLineOwed > 0 &&
+    owedTotal - selectedLineOwed > 0.005
       ? Math.round(Math.max(0, amount - selectedLineOwed) * 100) / 100
       : 0;
 

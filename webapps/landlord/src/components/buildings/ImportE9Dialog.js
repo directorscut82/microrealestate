@@ -611,8 +611,14 @@ export default function ImportE9Dialog({ open, setOpen }) {
                     {t('Update existing properties')}
                   </Label>
                   <p className="text-xs text-muted-foreground">
+                    {/* The old text named only the supply number and surface.
+                        buildingmanager.ts:1885 also rewrites `name` (the guard
+                        `/^\d{11}$/.test(name) || forceOverwrite` is bypassed
+                        wholesale) and `kaek` at :1894 — so a landlord-typed
+                        property name is replaced by the derived «ΟΔΟΣ … -
+                        Όροφος N» with no diff and no undo. */}
                     {t(
-                      'Overwrite electricity supply numbers and surface area on properties that already exist. Off by default so re-imports preserve fields you have edited.'
+                      'Overwrite the electricity supply number, surface, ΚΑΕΚ and the NAME of properties that already exist. Any property names you typed yourself will be replaced by the address-derived name. Off by default so re-imports preserve fields you have edited.'
                     )}
                   </p>
                 </div>
