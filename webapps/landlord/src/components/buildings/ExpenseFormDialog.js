@@ -729,6 +729,24 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
     [expense, addMutation, updateMutation, handleClose, onCreated, building, t]
   );
 
+  // A SOFT-deleted expense (ExpenseList's «Τερματισμός από τον τρέχοντα μήνα»)
+  // keeps living in building.expenses with endTerm = last month, and the list
+  // renders it identically to an active one. Opening it and pressing Update
+  // CLEARS that endTerm (this file's own payload branch says it "effectively
+  // always revives on edit") and _recomputeTenantsForBuilding re-bills every
+  // tenant from the current month. There is no dirty check, so opening and
+  // confirming is enough. Disclose it before the save.
+  const _currentMonthTerm = Number(
+    `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}0100`
+  );
+  const isTerminatedExpense =
+    !!expense?._id &&
+    !!expense?.endTerm &&
+    Number(expense.endTerm) < _currentMonthTerm;
+  const terminatedFrom = isTerminatedExpense
+    ? `${String(expense.endTerm).slice(4, 6)}/${String(expense.endTerm).slice(0, 4)}`
+    : '';
+
   const unitsWithProperty = units.filter((u) => u.propertyId);
 
   // Denominators MUST mirror 1_base.computeBuildingChargeForProperty exactly:
@@ -857,6 +875,20 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                   by_surface bypasses it entirely and every unit's share computes
                   to 0: no rent line, no breakdown row, no owner row, every month,
                   with a success toast. */}
+              {isTerminatedExpense && (
+                <div className="mt-2 rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                  <div className="font-medium">
+                    {t('This expense was ended in {{month}}', {
+                      month: terminatedFrom
+                    })}
+                  </div>
+                  <div className="mt-1 text-label text-ink-muted">
+                    {t(
+                      'Saving RE-ACTIVATES it — the end date is cleared and it will be charged to tenants again from the current month. Cancel if you only wanted to look.'
+                    )}
+                  </div>
+                </div>
+              )}
               {allocationBlocker && (
                 <div className="mt-2 rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
                   <div className="font-medium">{allocationBlocker.title}</div>

@@ -208,8 +208,12 @@ function DatabaseSettings() {
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-medium">{t('Save backup')}</h3>
             <p className="text-sm text-muted-foreground">
+              {/* "complete backup of all your data" was false: `accounts` is
+                  force-emptied for a per-realm backup (databasemanager.ts:89),
+                  so user logins/passwords are NOT in the file. inboxitems and
+                  telegramoffsets are now included; accounts still is not. */}
               {t(
-                'Download a complete backup of all your data including tenants, properties, leases, rents, and settings'
+                "Download a backup of this organisation's data — tenants, properties, leases, rents, bills, the pending inbox and settings. User accounts and passwords are NOT included."
               )}
             </p>
             <div className="mt-2">
@@ -264,7 +268,7 @@ function DatabaseSettings() {
             <AlertDialogTitle>{t('Are you sure?')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t(
-                'This will replace ALL current data with the backup file. This action cannot be undone. Make sure you have saved a backup of your current data first.'
+                'This will replace this organisation\u2019s data with the backup file — tenants, properties, leases, rents, bills and the pending inbox. User accounts and passwords are not touched. This action cannot be undone: save a backup of the current data first.'
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

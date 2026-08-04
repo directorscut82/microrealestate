@@ -5503,7 +5503,7 @@ export async function _distributeRepairCharge(
   // refundable credit. Default false → the edit path keeps its existing,
   // multi-round-stabilised drop behaviour untouched.
   preserveOverpayAsCredit = false
-): Promise<void> {
+): Promise<{ skipped?: 'equal-frozen' } | void> {
   // Cancelled repairs must not retain monthly charges. Wipe any prior
   // distribution for this repair and bail out before re-creating.
   if (repair.status === 'cancelled') {
@@ -5630,7 +5630,13 @@ export async function _distributeRepairCharge(
     if (frozenEq.size > 0) {
       building.updatedDate = new Date();
       await _saveBuildingWithVersionCheck(building);
-      return;
+      // REPORT the skip. The bail is correct — a partial re-division would break
+      // Σ(shares)=cost — but it was SILENT: updateRepair still returned 200 and
+      // the UI toasted «Repair updated», so an edit from €600 to €900 left the
+      // subdoc reading 900 while every tenant charge and owner row still totalled
+      // 600. The landlord saw the new figure confirmed by a success toast with
+      // €300 billed to nobody. Signalling lets the caller say so instead.
+      return { skipped: 'equal-frozen' as const };
     }
   }
 
@@ -7961,9 +7967,22 @@ export async function updateRepair(req: Req, res: Res) {
   // Single-save: _distributeRepairCharge mutates + saves the building itself.
   // Removing the prior separate save eliminates the same race as addRepair
   // (stranded repair with zero billing on 409 between two saves).
-  await _distributeRepairCharge(building as any, repair, realm!._id);
+  const distribution = await _distributeRepairCharge(
+    building as any,
+    repair,
+    realm!._id
+  );
 
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
+  // Surface the equal-frozen skip so the client can warn instead of toasting
+  // success. The repair's own fields DID save; only the money re-distribution was
+  // deliberately left alone, so this is a 200 with a caveat, not an error.
+  if (distribution && (distribution as any).skipped === 'equal-frozen') {
+    return res.json({
+      ...result[0],
+      billingSkipped: 'equal-frozen'
+    });
+  }
   return res.json(result[0]);
 }
 

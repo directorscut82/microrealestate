@@ -146,6 +146,13 @@ export default function LandlordForm({ organization, firstAccess }) {
   const isCompany = watch('isCompany');
   const locale = watch('locale');
   const currency = watch('currency');
+  // Compare against the SAVED name (organization), not initialValues — the
+  // latter is fed back through `values:` on every organization change, so it
+  // tracks the edit and the comparison would always be false.
+  const initialName = organization?.name || '';
+  const nameValue = watch('name');
+  const nameChanged =
+    !!initialName && !!nameValue && nameValue.trim() !== initialName.trim();
 
   const onSubmit = useCallback(
     async (landlord) => {
@@ -237,6 +244,23 @@ export default function LandlordForm({ organization, firstAccess }) {
           <Input id="name" {...register('name')} />
           {errors.name && (
             <p className="text-sm text-destructive">{errors.name.message}</p>
+          )}
+          {/* Storage keys embed the SANITISED ORG NAME:
+              `${sanitize(realm.name)}-${sanitize(realm._id)}/…`
+              (pdfgenerator uploadmiddelware.ts:57, billstorage.ts:11). The
+              download route rebuilds that prefix from the CURRENT name and 403s
+              anything that doesn't match, so a rename makes every previously
+              uploaded repair invoice and archived bill unreachable — and a
+              future storage reconcile would class them as unreferenced. Warn at
+              the moment of the edit; renaming back to the byte-exact old name is
+              the only recovery, and nothing else records it. */}
+          {nameChanged && (
+            <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+              {t(
+                'Renaming the organisation changes where uploaded files are stored. Repair invoices and archived bills already uploaded will become unreachable in the app. Keep the exact previous name («{{oldName}}») if you need them.',
+                { oldName: initialName }
+              )}
+            </div>
           )}
         </div>
         <div className="space-y-2">

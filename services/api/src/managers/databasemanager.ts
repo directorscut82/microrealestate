@@ -10,6 +10,18 @@ import {
   logger
 } from '@microrealestate/common';
 
+// All 12 realm-scoped collections. `inboxitems` and `telegramoffsets` were
+// ABSENT while the UI promised "a complete backup of all your data" and the
+// restore confirm said it would "replace ALL current data" — both false for
+// these two. The consequence was worse than a gap: on restore, `inboxitems` was
+// neither wiped nor restored, so every pending Telegram bill survived pointing
+// at buildings/expenses that no longer existed (and there is no un-confirm
+// route), while `telegramoffsets` kept a cursor HIGHER than the restored data
+// warranted — and Telegram long-polling is consume-once, so any un-recorded
+// message below that offset was gone for good.
+// Both carry `realmId` (inboxItem.ts:11, telegramOffset.ts:11), so both are
+// per-realm safe. Names verified against the live db, not inferred from the
+// Mongoose model name.
 const COLLECTIONS_TO_BACKUP = [
   'accounts',
   'realms',
@@ -20,7 +32,9 @@ const COLLECTIONS_TO_BACKUP = [
   'templates',
   'documents',
   'emails',
-  'bills'
+  'bills',
+  'inboxitems',
+  'telegramoffsets'
 ];
 
 function requireAdmin(req: any, res: Express.Response, next: Express.NextFunction) {

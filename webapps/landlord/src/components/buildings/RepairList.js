@@ -269,8 +269,23 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
 
   const updateMutation = useMutation({
     mutationFn: (data) => updateBuildingRepair(building._id, data),
-    onSuccess: () => {
+    onSuccess: (data) => {
       _invalidateAllRepairDependents();
+      // The server reports `billingSkipped:'equal-frozen'` when an `equal`
+      // repair's re-distribution was deliberately left alone because a tenant has
+      // already fully paid the charge month (a partial re-division would break
+      // Σ(shares)=cost). The repair's own fields DID save, so this is a 200 —
+      // but toasting plain success let the table show a new cost while the
+      // ledger kept the old one, with the difference billed to nobody.
+      if (data?.billingSkipped === 'equal-frozen') {
+        toast.warning(
+          t(
+            'Saved, but the charges were NOT recalculated: a tenant has already paid this charge month and «Equal» allocation cannot be split part-way. Use a different charge month, or another allocation method.'
+          ),
+          { duration: 12000 }
+        );
+        return;
+      }
       toast.success(t('Repair updated'));
     }
   });
