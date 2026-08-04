@@ -70,14 +70,21 @@ const repairUrgencies = ['emergency', 'normal', 'low'];
 
 const chargeableToOptions = ['owners', 'tenants', 'split'];
 
+// custom_ratio / custom_percentage are DELIBERATELY absent. Both allocators read
+// `customAllocations`, and RepairSchema has no such field (BuildingExpenseSchema
+// does — building.ts:132). So the allocator's `totalRatio === 0` / `!allocation`
+// branches (1_base.ts:818, :857) return 0 for every unit, ownerPortion is 0 for a
+// 'tenants' repair, and the Αχρέωτα net drops the row at :465 — the whole cost is
+// billed to nobody and appears on NO surface. Measured with the compiled
+// allocator: a €1000 repair traced €0. The expense dialog rejects the same two
+// values via zod (ExpenseFormDialog.js:127); repairs have no equivalent, so the
+// only safe fix is not to offer them.
 const allocationMethods = [
   { id: 'general_thousandths', labelId: 'General Thousandths' },
   { id: 'heating_thousandths', labelId: 'Heating Thousandths' },
   { id: 'elevator_thousandths', labelId: 'Elevator Thousandths' },
   { id: 'equal', labelId: 'Equal' },
-  { id: 'by_surface', labelId: 'By Surface' },
-  { id: 'custom_ratio', labelId: 'Custom Ratio' },
-  { id: 'custom_percentage', labelId: 'Custom Percentage' }
+  { id: 'by_surface', labelId: 'By Surface' }
 ];
 
 const schema = z.object({
@@ -327,6 +334,23 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
   const affectedUnitIds = watch('affectedUnitIds') || [];
   const invoiceDocumentId = watch('invoiceDocumentId');
   const chargeOwnerWhenVacant = watch('chargeOwnerWhenVacant');
+  // A repair ALREADY SAVED with custom_ratio/custom_percentage must still render
+  // a labelled option (a controlled Select with no matching SelectItem goes
+  // blank — the same trap already solved for chargeTerm above), but it is marked
+  // and warned so the user changes it rather than re-saving a method that bills
+  // nobody.
+  const UNSUPPORTED_METHODS = ['custom_ratio', 'custom_percentage'];
+  const isUnsupportedMethod = UNSUPPORTED_METHODS.includes(allocationMethod);
+  const methodOptions = useMemo(() => {
+    if (!allocationMethod) return allocationMethods;
+    if (allocationMethods.some((m) => m.id === allocationMethod)) {
+      return allocationMethods;
+    }
+    return [
+      ...allocationMethods,
+      { id: allocationMethod, labelId: allocationMethod, unsupported: true }
+    ];
+  }, [allocationMethod]);
   const estimatedCostW = watch('estimatedCost');
   const actualCostW = watch('actualCost');
   const tenantSharePercentageW = watch('tenantSharePercentage');
@@ -864,13 +888,21 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {allocationMethods.map((m) => (
+                          {methodOptions.map((m) => (
                             <SelectItem key={m.id} value={m.id}>
                               {t(m.labelId)}
+                              {m.unsupported ? ' ⚠' : ''}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
+                      {isUnsupportedMethod && (
+                        <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                          {t(
+                            'This allocation method does not work for repairs — the cost is charged to nobody and appears on no surface. Pick another method.'
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-2 flex-1">
