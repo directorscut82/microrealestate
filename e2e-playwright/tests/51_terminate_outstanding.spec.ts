@@ -141,7 +141,7 @@ test('T1 terminating with unpaid rent shows the open money and offers a write-of
   await dialog.locator('#terminationDate').fill(`${y}-06-30`);
   await page.waitForTimeout(1200);
 
-  await expect(dialog.getByText(/Χρήματα που παραμένουν ανοιχτά/)).toBeVisible({ timeout: 10000 });
+  await expect(dialog.getByText(/Οφειλές που παραμένουν/)).toBeVisible({ timeout: 10000 });
   await expect(dialog.getByText(/ανεξόφλητοι μήνες έως τον τερματισμό/)).toBeVisible();
   await expect(dialog.getByText(/ΜΕΤΑ την ημερομηνία τερματισμού/)).toBeVisible();
   await expect(dialog.getByText(/Εγγύηση που κρατείται/)).toBeVisible();
