@@ -1447,5 +1447,6 @@
   "{{count}} unpaid month(s) AFTER the termination date — {{amount}}. Terminating DELETES these from the rent ledger with no record.": "{{count}} ανεξόφλητοι μήνες ΜΕΤΑ την ημερομηνία τερματισμού — {{amount}}. Ο τερματισμός τους ΔΙΑΓΡΑΦΕΙ από το ιστορικό ενοικίων χωρίς καμία καταγραφή.",
   "Write off the {{amount}} still claimable as a recorded discount before terminating, so it leaves a trace instead of sitting as a debt nobody will collect.": "Διαγραφή των {{amount}} που παραμένουν διεκδικήσιμα, ως καταγεγραμμένη έκπτωση πριν τον τερματισμό, ώστε να αφήσουν ίχνος αντί να μείνουν οφειλή που δεν θα εισπραχθεί.",
   "Deposit still held: {{amount}}. After termination the deposit amount is LOCKED — only the refund stays editable.": "Εγγύηση που κρατείται: {{amount}}. Μετά τον τερματισμό το ποσό της εγγύησης ΚΛΕΙΔΩΝΕΙ — μόνο η επιστροφή παραμένει επεξεργάσιμη.",
-  "Written off on lease termination": "Διαγραφή οφειλής κατά τον τερματισμό μίσθωσης"
+  "Written off on lease termination": "Διαγραφή οφειλής κατά τον τερματισμό μίσθωσης",
+  "Each written-off month is settled, but the running balance carried by later months is not rebuilt — closed months are immutable in this app, so the tenant's trailing total may still show the old figure.": "Κάθε μήνας που διαγράφεται εξοφλείται, όμως το μεταφερόμενο υπόλοιπο των επόμενων μηνών δεν ανακαθορίζεται — οι κλεισμένοι μήνες είναι αμετάβλητοι, οπότε το συνολικό υπόλοιπο του ενοικιαστή μπορεί να εμφανίζει ακόμη το παλιό ποσό."
 }

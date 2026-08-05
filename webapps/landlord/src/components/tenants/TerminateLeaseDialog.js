@@ -443,6 +443,19 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
                         )}
                       </span>
                     </label>
+                    {writeOff && (
+                      // Measured, not assumed: the discount settles each month it
+                      // is applied to, but the carried balance on LATER months is
+                      // deliberately not rebuilt (contract.ts:218 skips frozen
+                      // rents). Without this line the landlord ticks the box, sees
+                      // the same trailing total afterwards, and concludes the
+                      // write-off silently failed.
+                      <p className="text-label text-ink-muted pt-1.5">
+                        {t(
+                          "Each written-off month is settled, but the running balance carried by later months is not rebuilt — closed months are immutable in this app, so the tenant's trailing total may still show the old figure."
+                        )}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

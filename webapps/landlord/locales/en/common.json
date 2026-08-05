@@ -1426,5 +1426,6 @@
   "{{count}} unpaid month(s) AFTER the termination date — {{amount}}. Terminating DELETES these from the rent ledger with no record.": "{{count}} unpaid month(s) AFTER the termination date — {{amount}}. Terminating DELETES these from the rent ledger with no record.",
   "Write off the {{amount}} still claimable as a recorded discount before terminating, so it leaves a trace instead of sitting as a debt nobody will collect.": "Write off the {{amount}} still claimable as a recorded discount before terminating, so it leaves a trace instead of sitting as a debt nobody will collect.",
   "Deposit still held: {{amount}}. After termination the deposit amount is LOCKED — only the refund stays editable.": "Deposit still held: {{amount}}. After termination the deposit amount is LOCKED — only the refund stays editable.",
-  "Written off on lease termination": "Written off on lease termination"
+  "Written off on lease termination": "Written off on lease termination",
+  "Each written-off month is settled, but the running balance carried by later months is not rebuilt — closed months are immutable in this app, so the tenant's trailing total may still show the old figure.": "Each written-off month is settled, but the running balance carried by later months is not rebuilt — closed months are immutable in this app, so the tenant's trailing total may still show the old figure."
 }
