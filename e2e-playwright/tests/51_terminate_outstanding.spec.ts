@@ -144,8 +144,8 @@ test('T1 terminating with unpaid rent shows the open money and offers a write-of
   await expect(dialog.getByText(/Οφειλές που παραμένουν/)).toBeVisible({ timeout: 10000 });
   await expect(dialog.getByText(/ανεξόφλητοι μήνες έως τον τερματισμό/)).toBeVisible();
   await expect(dialog.getByText(/ΜΕΤΑ την ημερομηνία τερματισμού/)).toBeVisible();
-  await expect(dialog.getByText(/Εγγύηση που κρατείται/)).toBeVisible();
-  await expect(dialog.getByText(/Διαγραφή των/)).toBeVisible();
+  await expect(dialog.getByText(/Παρακρατούμενη εγγύηση/)).toBeVisible();
+  await expect(dialog.getByText(/Λογιστική διαγραφή των/)).toBeVisible();
 
   // The FIGURE must be right, not merely present. `totalToPay` includes the
   // carried balance, so a naive per-month sum overstates the debt (measured
