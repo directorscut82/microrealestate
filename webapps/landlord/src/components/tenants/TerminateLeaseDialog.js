@@ -310,6 +310,20 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
           }
           await payRent({ term, payment });
         }
+
+        // Each write-off PATCH bumps the tenant's __v, which the terminate PATCH
+        // pins for its optimistic lock (occupantmanager.ts:1509 — a missing or
+        // stale __v is refused, by design). `updatedTenant` was built from the
+        // pre-write-off object, so after N months written off it is N versions
+        // behind and the termination died with "Update conflict: tenant was
+        // modified simultaneously" while the discounts had already landed —
+        // measured in the api log: 4x PATCH 200 then the 409. Re-read the fresh
+        // version before terminating.
+        const reread = await fetchTenantRents(tenant._id);
+        const freshVersion = Number(reread?.occupant?.__v);
+        if (Number.isFinite(freshVersion)) {
+          updatedTenant.__v = freshVersion;
+        }
       }
 
       await terminateMutation.mutateAsync(updatedTenant);

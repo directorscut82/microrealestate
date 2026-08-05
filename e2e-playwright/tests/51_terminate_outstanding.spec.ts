@@ -151,3 +151,106 @@ test('T1 terminating with unpaid rent shows the open money and offers a write-of
 
   await page.screenshot({ path: '/tmp/t1-terminate-open-money.png' });
 });
+
+test('T2 the write-off records a settlement discount and clears the arrears', async ({
+  page
+}) => {
+  // Independent fixture: T1's tenant is untouched so its panel assertions stay
+  // reproducible. Same shape — a year-long unpaid lease with a deposit.
+  const prop = await api('POST', '/properties', {
+    name: `E2E-WOFF-PROP-${STAMP}`,
+    type: 'apartment', surface: 55, rent: 300,
+    address: { street1: 'ΟΔΟΣ ΒΗΤΑ 3', zipCode: '11111', city: 'ΔΟΚΙΜΗ' }
+  });
+  expect(prop.status, JSON.stringify(prop.json)).toBe(200);
+  propIds.push(prop.json._id);
+
+  const y = new Date().getFullYear();
+  const tenant = await api('POST', '/tenants', {
+    name: `E2E-WOFF-${STAMP}`,
+    isCompany: false, firstName: 'E2E', lastName: `WOFF-${STAMP}`,
+    taxId: syntheticTaxId(),
+    beginDate: `01/01/${y}`,
+    endDate: `31/12/${y}`,
+    guaranty: 300,
+    properties: [{ propertyId: prop.json._id, rent: 300 }]
+  });
+  expect(tenant.status, JSON.stringify(tenant.json)).toBe(200);
+  tenantIds.push(tenant.json._id);
+
+  const cutTerm = Number(`${y}04`);
+  const before = await api('GET', `/rents/tenant/${tenant.json._id}`);
+  const bRents = (before.json?.rents || [])
+    .slice()
+    .sort((a: any, b: any) => a.term - b.term)
+    .filter((r: any) => Math.floor(Number(r.term) / 10000) <= cutTerm);
+  const engineBefore =
+    Math.round(
+      Math.max(0, -(Number(bRents[bRents.length - 1]?.newBalance) || 0)) * 100
+    ) / 100;
+  expect(engineBefore, 'the fixture must owe money up to the cut').toBeGreaterThan(0);
+  console.log('ARREARS_BEFORE', engineBefore);
+
+  await page.goto(`${BASE}/landlord/el/signin`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel(/Email/i).fill(EMAIL);
+  await page.locator('input[type="password"]').fill(PASSWORD);
+  await page.getByRole('button', { name: /Σύνδεση/ }).click();
+  await page.waitForURL(/\/landlord\/el\/(?!signin)/, { timeout: 45000 });
+
+  await page.goto(`${BASE}/landlord/el/${REALM}/tenants/${tenant.json._id}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: /Τερματισμός/ }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible({ timeout: 15000 });
+  await dialog.locator('#terminationDate').fill(`${y}-04-30`);
+  await page.waitForTimeout(1200);
+
+  // Tick the write-off, then terminate.
+  const box = dialog.locator('input[type="checkbox"]').first();
+  await expect(box).toBeVisible({ timeout: 10000 });
+  await box.check();
+  await dialog.getByRole('button', { name: /^Τερματισμός$/ }).click();
+
+  await expect(dialog).toBeHidden({ timeout: 30000 });
+  await page.waitForTimeout(2500);
+
+  // PRIMARY ARTIFACT: the ledger the server wrote.
+  const after = await api('GET', `/rents/tenant/${tenant.json._id}`);
+  const aRents = (after.json?.rents || [])
+    .slice()
+    .sort((a: any, b: any) => a.term - b.term);
+
+  // 1. The termination landed.
+  expect(after.json?.occupant?.terminationDate, 'termination must be recorded').toBeTruthy();
+
+  // 2. Months after the cut are gone (Contract.create truncates at the cut).
+  const past = aRents.filter(
+    (r: any) => Math.floor(Number(r.term) / 10000) > cutTerm
+  );
+  console.log('MONTHS_AFTER_CUT_REMAINING', past.length);
+  expect(past.length, 'terminating truncates the series at the cut').toBe(0);
+
+  // 3. The write-off is RECORDED as a discount, not silently dropped.
+  const discounted = aRents.filter((r: any) => Number(r.discount) > 0);
+  const totalDiscount =
+    Math.round(
+      discounted.reduce((s: number, r: any) => s + (Number(r.discount) || 0), 0) * 100
+    ) / 100;
+  console.log(
+    'DISCOUNTED_MONTHS', discounted.length,
+    'TOTAL_DISCOUNT', totalDiscount,
+    'NOTES', JSON.stringify(aRents.map((r: any) => r.notepromo).filter(Boolean))
+  );
+  expect(discounted.length, 'the write-off must record a discount').toBeGreaterThan(0);
+
+  // 4. The arrears are actually cleared — the whole point of the write-off.
+  const last = aRents[aRents.length - 1];
+  const engineAfter =
+    Math.round(Math.max(0, -(Number(last?.newBalance) || 0)) * 100) / 100;
+  console.log('ARREARS_AFTER', engineAfter);
+  expect(engineAfter, 'the write-off must clear the kept arrears').toBeLessThan(0.02);
+
+  await page.screenshot({ path: '/tmp/t2-writeoff-done.png' });
+});
