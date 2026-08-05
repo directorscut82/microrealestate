@@ -316,3 +316,76 @@ test('T2 the write-off records a settlement discount and clears the arrears', as
 
   await page.screenshot({ path: '/tmp/t2-writeoff-done.png' });
 });
+
+test('T3 a single unpaid month renders GREEK SINGULAR, not "1 ανεξόφλητοι μήνες"', async ({
+  page
+}) => {
+  // Regression for a defect proven in the browser: the count strings had no
+  // _one sibling, so next-translate fell through to the plural and rendered
+  // «1 ανεξόφλητοι μήνες» — a numeral 1 against a plural adjective+noun. The app
+  // already had 15 _one/_other families; these two keys just ignored the
+  // convention. A 2-month lease cut after month 1 gives exactly one kept month
+  // and one dropped month, exercising BOTH singular branches at once.
+  const prop = await api('POST', '/properties', {
+    name: `E2E-SING-PROP-${STAMP}`,
+    type: 'apartment', surface: 45, rent: 250,
+    address: { street1: 'ΟΔΟΣ ΑΛΦΑ 1', zipCode: '11111', city: 'ΔΟΚΙΜΗ' }
+  });
+  expect(prop.status, JSON.stringify(prop.json)).toBe(200);
+  propIds.push(prop.json._id);
+
+  // The lease must still be RUNNING: a lease whose endDate is in the past shows
+  // «Τερματισμένο» and has no Τερματισμός button at all (observed on screen).
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yy = now.getFullYear();
+  const nextMonth = new Date(yy, now.getMonth() + 2, 0); // last day of next month
+  const endDate = `${String(nextMonth.getDate()).padStart(2, '0')}/${String(
+    nextMonth.getMonth() + 1
+  ).padStart(2, '0')}/${nextMonth.getFullYear()}`;
+
+  const tenant = await api('POST', '/tenants', {
+    name: `E2E-SING-${STAMP}`,
+    isCompany: false, firstName: 'E2E', lastName: `SING-${STAMP}`,
+    taxId: syntheticTaxId(),
+    beginDate: `01/${mm}/${yy}`,
+    endDate,
+    guaranty: 250,
+    properties: [{ propertyId: prop.json._id, rent: 250 }]
+  });
+  expect(tenant.status, JSON.stringify(tenant.json)).toBe(200);
+  tenantIds.push(tenant.json._id);
+
+  await page.goto(`${BASE}/landlord/el/signin`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel(/Email/i).fill(EMAIL);
+  await page.locator('input[type="password"]').fill(PASSWORD);
+  await page.getByRole('button', { name: /Σύνδεση/ }).click();
+  await page.waitForURL(/\/landlord\/el\/(?!signin)/, { timeout: 45000 });
+  await page.goto(`${BASE}/landlord/el/${REALM}/tenants/${tenant.json._id}`, {
+    waitUntil: 'domcontentloaded'
+  });
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: /Τερματισμός/ }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible({ timeout: 15000 });
+
+  // Cut at the end of the CURRENT month → 1 kept, 1 dropped.
+  const lastDayThis = new Date(yy, now.getMonth() + 1, 0).getDate();
+  await dialog.locator('#terminationDate').fill(`${yy}-${mm}-${lastDayThis}`);
+  await page.waitForTimeout(1500);
+
+  const panelText = await dialog
+    .locator('div')
+    .filter({ hasText: /ανεξόφλητ/ })
+    .last()
+    .innerText();
+  console.log('SINGULAR_PANEL', JSON.stringify(panelText));
+
+  // The bug, stated as an assertion: a plural noun must never follow "1".
+  expect(panelText, 'plural must not follow the numeral 1').not.toMatch(
+    /\b1 ανεξόφλητοι μήνες/
+  );
+  expect(panelText).toMatch(/1 ανεξόφλητος μήνας/);
+
+  await page.screenshot({ path: '/tmp/t3-singular.png' });
+});

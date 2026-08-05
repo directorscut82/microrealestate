@@ -220,7 +220,7 @@ test('B1 a soft-ended expense warns that saving RE-ACTIVATES it', async ({
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible({ timeout: 15000 });
 
-  await expect(dialog.getByText(/είχε τερματιστεί τον/)).toBeVisible({
+  await expect(dialog.getByText(/είχε τερματιστεί:/)).toBeVisible({
     timeout: 10000
   });
   await expect(dialog.getByText(/ΕΠΑΝΕΝΕΡΓΟΠΟΙΕΙ/)).toBeVisible();
