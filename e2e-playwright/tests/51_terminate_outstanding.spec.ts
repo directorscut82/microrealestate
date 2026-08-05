@@ -61,7 +61,34 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  // T2's write-off leaves a recorded discount on 4 months, and DELETE /tenants
+  // refuses a tenant whose rents carry money ("some rents have been paid") —
+  // that guard is correct, so the first version of this teardown leaked 5
+  // tenants + 5 properties into the live realm. Strip every promo/discount and
+  // payment first, then delete; properties only release once no tenant refers
+  // to them.
   for (const id of tenantIds) {
+    const ledger = await api('GET', `/rents/tenant/${id}`);
+    const dirty = (ledger.json?.rents || []).filter(
+      (r: any) =>
+        Number(r.discount) > 0 ||
+        Number(r.promo) > 0 ||
+        (r.payments || []).length > 0
+    );
+    for (const r of dirty) {
+      const term = String(r.term);
+      await api('PATCH', `/rents/payment/${id}/${term}`, {
+        _id: id,
+        month: Number(term.slice(4, 6)),
+        year: Number(term.slice(0, 4)),
+        payments: [],
+        description: '',
+        extracharge: 0,
+        noteextracharge: '',
+        promo: 0,
+        notepromo: ''
+      });
+    }
     const r = await api('DELETE', `/tenants/${id}`);
     if (r.status !== 200) console.log('CLEANUP tenant', r.status, JSON.stringify(r.json).slice(0, 90));
   }
