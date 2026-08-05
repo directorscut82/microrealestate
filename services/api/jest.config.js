@@ -18,6 +18,8 @@ export default {
     '^winston$': '<rootDir>/src/__mocks__/winston.cjs',
     '^express-winston$': '<rootDir>/src/__mocks__/express-winston.cjs',
     '^jsonwebtoken$': '<rootDir>/src/__mocks__/jsonwebtoken.cjs',
+    // nanoid@5 is ESM-only and occupantmanager imports customAlphabet from it.
+    '^nanoid$': '<rootDir>/src/__mocks__/nanoid.cjs',
     '^(\\.{1,2}/.*)\\.js$': '$1'
   },
   transform: {
