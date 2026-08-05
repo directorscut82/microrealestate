@@ -734,7 +734,7 @@
   "Recorded {{count}} payments": "Καταχωρήθηκαν {{count}} καταβολές",
   "Recorded {{recorded}} of {{total}} payments ({{failed}} failed)": "Καταχωρήθηκαν {{recorded}} από {{total}} πληρωμές ({{failed}} απέτυχαν)",
   "Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)": "Καταχωρήθηκαν {{recorded}} από {{total}} πληρωμές ({{skipped}} ήδη εξοφλημένες)",
-  "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.": "Καταγραφή προκαταβολής για μήνα {{count}} μήνα/ες στο μέλλον. Βεβαιωθείτε ότι ο μήνας είναι σωστός πριν αποθηκεύσετε.",
+  "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.": "Καταγραφή προκαταβολής για μήνα που απέχει {{count}} μήνα/ες στο μέλλον. Βεβαιωθείτε ότι ο μήνας είναι σωστός πριν αποθηκεύσετε.",
   "Recurring": "Επαναλαμβανόμενη",
   "Recurring Expense": "Επαναλαμβανόμενη Δαπάνη",
   "Recurring expense": "Πάγιο έξοδο",
