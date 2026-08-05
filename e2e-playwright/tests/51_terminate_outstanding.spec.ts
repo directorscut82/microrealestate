@@ -211,6 +211,13 @@ test('T2 the write-off records a settlement discount and clears the arrears', as
   const box = dialog.locator('input[type="checkbox"]').first();
   await expect(box).toBeVisible({ timeout: 10000 });
   await box.check();
+  // Ticking it must disclose the limit measured below: the discount settles each
+  // month, but later months keep their carried balance. Without this on screen the
+  // landlord reads the unchanged trailing total as a failed write-off.
+  await expect(
+    dialog.getByText(/το μεταφερόμενο υπόλοιπο των επόμενων μηνών δεν ανακαθορίζεται/)
+  ).toBeVisible({ timeout: 10000 });
+  await page.screenshot({ path: '/tmp/t2-writeoff-caveat.png' });
   await dialog.getByRole('button', { name: /^Τερματισμός$/ }).click();
 
   await expect(dialog).toBeHidden({ timeout: 30000 });
