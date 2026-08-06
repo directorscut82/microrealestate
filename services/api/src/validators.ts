@@ -546,13 +546,28 @@ export function sanitizeMongoObject(
  */
 export function isValidGreekAFM(value: unknown): boolean {
   if (typeof value !== 'string') return false;
-  if (!/^[0-9]{9}$/.test(value)) return false;
+  // TRIM first. A pasted ΑΦΜ carries a trailing space or NBSP more often than not
+  // (copying from a PDF or an E9 statement), and rejecting it as "not a valid ΑΦΜ"
+  // reads to the landlord as the app refusing a number they can see is correct.
+  // \u00a0 is NBSP, written as an escape: a literal NBSP in source trips eslint
+  // no-irregular-whitespace and is invisible to a reviewer.
+  const afm = value.replace(/[\s\u00a0]+/g, '');
+  if (!/^[0-9]{9}$/.test(afm)) return false;
+  // 000000000 satisfies the checksum arithmetically (sum 0 → check 0 → digit 0) but
+  // is NOT an issued ΑΦΜ. It was accepted and PERSISTED on the live realm (measured
+  // via POST /tenants), while the sibling copy in greekleaseparser.ts:15 rejects it
+  // explicitly — two validators, divergent behaviour, and the permissive one is the
+  // one wired into the write path (occupantmanager.ts:1163). An all-zero tax id
+  // silently becomes a real owner/tenant identity key: it is what `_markAlsoRents`
+  // and the E9 owner matcher compare on, so two different people both carrying it
+  // are merged into one. Reject it here so the two copies agree.
+  if (afm === '000000000') return false;
   let sum = 0;
   for (let i = 0; i < 8; i++) {
-    sum += parseInt(value[i], 10) * Math.pow(2, 8 - i);
+    sum += parseInt(afm[i], 10) * Math.pow(2, 8 - i);
   }
   const check = (sum % 11) % 10;
-  return check === parseInt(value[8], 10);
+  return check === parseInt(afm[8], 10);
 }
 
 export function validateGreekAFM(

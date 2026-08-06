@@ -512,6 +512,73 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
     repairTenantShare
   ]);
 
+  // «Μοιρασμένο» (split) whose percentage is 0 or 100 is NOT a split at all — it
+  // is silently the same as picking «Ιδιοκτήτες» or «Ενοικιαστές», while the badge
+  // on the list and the dropdown both keep saying "shared". Measured on the live
+  // realm: a €100 split-at-0% repair put 100,00 € on the OWNERS and 0 € on the
+  // tenants. Nothing was lost, but nothing was shared either, and no surface said
+  // so. The degenerate ends need naming, not blocking — 0 % is a legitimate way to
+  // express "owner pays it all", it just must not masquerade as a split.
+  const degenerateSplit = useMemo(() => {
+    if (chargeableTo !== 'split') return null;
+    const p = Number(tenantSharePercentageW);
+    if (!Number.isFinite(p)) return null;
+    if (p <= 0) return 'owners';
+    if (p >= 100) return 'tenants';
+    return null;
+  }, [chargeableTo, tenantSharePercentageW]);
+
+  // The allocation method can be undividable for THIS building, exactly as in the
+  // expense dialog — which has had this guard since ExpenseFormDialog.js:756-792
+  // while the repair dialog never got it. A ‰ method whose denominator sums to 0,
+  // or by_surface with no surfaces, divides by zero: every unit computes a 0 share
+  // and the whole cost is billed to nobody. Same three checks, same denominators as
+  // the engine (‰ over ALL units, by_surface over units with a propertyId).
+  const allocationBlocker = useMemo(() => {
+    const m = allocationMethod;
+    if (!m) return null;
+    const _sum = (list, f) =>
+      list.reduce((s, u) => s + (Number(u?.[f]) || 0), 0);
+    const unitsWithProperty = buildingUnits.filter((u) => u.propertyId);
+    if (unitsWithProperty.length === 0) {
+      return t(
+        'This repair would be charged to nobody. Link the units to properties on the Units tab first.'
+      );
+    }
+    const THOUSANDTHS = {
+      general_thousandths: 'generalThousandths',
+      heating_thousandths: 'heatingThousandths',
+      elevator_thousandths: 'elevatorThousandths'
+    };
+    if (THOUSANDTHS[m] && _sum(buildingUnits, THOUSANDTHS[m]) === 0) {
+      return t(
+        'The units have no thousandths for this method. Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the thousandths on the Units tab.'
+      );
+    }
+    if (m === 'by_surface' && _sum(unitsWithProperty, 'surface') === 0) {
+      return t(
+        'The linked units have no surface (m²). Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the surfaces first.'
+      );
+    }
+    return null;
+  }, [allocationMethod, buildingUnits, t]);
+
+  // The OWNER side of a repair ignores affectedUnitIds: _allocateOwnerAmountPerUnit
+  // (buildingmanager.ts:2818) reduces over EVERY managed unit and takes no unit
+  // filter, while the TENANT side honours the selection. Measured on the live
+  // realm: 3 units ticked, the €100 owner portion split across all 11 (9,09 € each).
+  // Warn whenever an owner portion exists AND the selection is a strict subset, so
+  // the landlord is not misled into thinking the tick-boxes scoped the owner charge.
+  const ownerIgnoresSelection = useMemo(() => {
+    if (repairTenantShare >= 100) return null; // no owner portion at all
+    const managedCount = buildingUnits.filter((u) => u.propertyId).length;
+    const selectedManaged = targetedUnits.filter((u) => u.propertyId).length;
+    if (!affectedUnitIds?.length) return null; // empty = "all units", no mismatch
+    if (selectedManaged === 0 || managedCount === 0) return null;
+    if (selectedManaged >= managedCount) return null;
+    return { selectedManaged, managedCount };
+  }, [repairTenantShare, buildingUnits, targetedUnits, affectedUnitIds]);
+
   // Tier I-3.f upload state: tracks the in-flight invoice upload so we can
   // disable the submit button + show progress in the helper text.
   const [invoiceUploading, setInvoiceUploading] = useState(false);
@@ -909,6 +976,20 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                     max="100"
                     {...register('tenantSharePercentage')}
                   />
+                  {degenerateSplit === 'owners' && (
+                    <p className="text-label text-oxide">
+                      {t(
+                        'A 0% tenant share is not a split: the WHOLE cost goes to the owners and nothing is charged to any tenant. The repair will still be labelled «Shared». Pick «Owners» to say this plainly, or enter a share above 0.'
+                      )}
+                    </p>
+                  )}
+                  {degenerateSplit === 'tenants' && (
+                    <p className="text-label text-oxide">
+                      {t(
+                        'A 100% tenant share is not a split: the WHOLE cost goes to the tenants and nothing is charged to any owner. The repair will still be labelled «Shared». Pick «Tenants» to say this plainly, or enter a share below 100.'
+                      )}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -940,6 +1021,11 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                           {t(
                             'This allocation method does not work for repairs — the cost is charged to nobody and appears on no surface. Pick another method.'
                           )}
+                        </div>
+                      )}
+                      {!isUnsupportedMethod && allocationBlocker && (
+                        <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-2.5 text-sm text-ink">
+                          {allocationBlocker}
                         </div>
                       )}
                     </div>
@@ -1034,6 +1120,17 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                           'Affected units (optional — leave empty to charge all units)'
                         )}
                       </p>
+                      {ownerIgnoresSelection && (
+                        <p className="text-label text-oxide">
+                          {t(
+                            'This selection scopes the TENANT share only. The owner share of this repair is always spread over all {{total}} managed units of the building, not just the {{selected}} ticked here.',
+                            {
+                              selected: ownerIgnoresSelection.selectedManaged,
+                              total: ownerIgnoresSelection.managedCount
+                            }
+                          )}
+                        </p>
+                      )}
                       <div className="grid sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto border border-stone-line rounded-md p-2">
                         {buildingUnits.map((u) => {
                           const uid = String(u._id);
