@@ -537,6 +537,21 @@ function LeaseContractForm({ tenant, leases = [], properties: propertyItems = []
               <div className="space-y-2 md:w-1/6">
                 <Label htmlFor={`properties.${index}.rent`}>{t('Rent')}</Label>
                 <Input id={`properties.${index}.rent`} type="number" disabled={!properties?.[index]?._id || readOnly} {...register(`properties.${index}.rent`)} />
+                {/* Rent 0 is the SCHEMA DEFAULT here (`z.coerce.number().min(0)`),
+                    and the server also permits it (occupantmanager.ts:896, min 0).
+                    Measured on the live realm: a tenant created with rent 0 comes
+                    back with an EMPTY rents array — the lease silently bills
+                    nothing for its whole duration and no surface says why. A €0
+                    caretaker/family lease is legitimate, so warn rather than block,
+                    but state the consequence. */}
+                {properties?.[index]?._id &&
+                  Number(properties?.[index]?.rent) === 0 && (
+                    <p className="text-label text-oxide">
+                      {t(
+                        'Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.'
+                      )}
+                    </p>
+                  )}
               </div>
             </div>
 

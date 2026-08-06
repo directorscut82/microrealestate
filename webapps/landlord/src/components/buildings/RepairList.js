@@ -355,7 +355,13 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
   // blank — the same trap already solved for chargeTerm above), but it is marked
   // and warned so the user changes it rather than re-saving a method that bills
   // nobody.
-  const UNSUPPORTED_METHODS = ['custom_ratio', 'custom_percentage'];
+  // 'fixed' belongs here for the SAME reason as the custom_* pair: its allocator
+  // reads `customAllocations` (1_base.ts:796-808) and RepairSchema has none, so every
+  // unit resolves to 0. Measured live via the API: a €1000 repair at
+  // allocationMethod:'fixed' traced tenants 0 / owners 0 — the whole cost vanished.
+  // It is not in the dropdown, so it is only reachable through the API or a stored
+  // legacy value; the banner exists to name it when a legacy row is opened.
+  const UNSUPPORTED_METHODS = ['custom_ratio', 'custom_percentage', 'fixed'];
   const isUnsupportedMethod = UNSUPPORTED_METHODS.includes(allocationMethod);
   const methodOptions = useMemo(() => {
     if (!allocationMethod) return allocationMethods;

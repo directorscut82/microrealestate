@@ -7711,6 +7711,25 @@ async function _assertChargeTermNotFrozen(
   }
 }
 
+// Allocation methods a REPAIR may use. Deliberately NARROWER than
+// ALLOCATION_METHODS: 'fixed', 'custom_ratio', 'custom_percentage' and 'single_unit'
+// all resolve the per-unit share from `customAllocations` (1_base.ts:796 'fixed',
+// :810 custom_ratio, :857 custom_percentage), and RepairSchema carries NO
+// customAllocations field — BuildingExpenseSchema does (building.ts:132). So every
+// unit resolves to 0 and the whole repair cost is billed to NOBODY. Measured against
+// the live API: a repair posted with allocationMethod:'fixed' and actualCost 1000
+// traced tenants 0 / owners 0 — the money vanished. The dialog had stopped OFFERING
+// custom_ratio/custom_percentage, but the API still accepted all four: the dropdown
+// was the only guard and the API is callable directly. The EXPENSE path (:4501) keeps
+// the full list — expenses do carry customAllocations.
+const REPAIR_ALLOCATION_METHODS = [
+  'general_thousandths',
+  'heating_thousandths',
+  'elevator_thousandths',
+  'equal',
+  'by_surface'
+] as const;
+
 export async function addRepair(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
@@ -7744,7 +7763,7 @@ export async function addRepair(req: Req, res: Res) {
   if (req.body.allocationMethod) {
     validateEnum(
       req.body.allocationMethod,
-      ALLOCATION_METHODS,
+      REPAIR_ALLOCATION_METHODS,
       'allocationMethod'
     );
   }
@@ -7857,7 +7876,7 @@ export async function updateRepair(req: Req, res: Res) {
   if (req.body.allocationMethod) {
     validateEnum(
       req.body.allocationMethod,
-      ALLOCATION_METHODS,
+      REPAIR_ALLOCATION_METHODS,
       'allocationMethod'
     );
   }
