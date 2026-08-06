@@ -734,7 +734,7 @@
   "Recorded {{count}} payments": "Καταχωρήθηκαν {{count}} καταβολές",
   "Recorded {{recorded}} of {{total}} payments ({{failed}} failed)": "Καταχωρήθηκαν {{recorded}} από {{total}} πληρωμές ({{failed}} απέτυχαν)",
   "Recorded {{recorded}} of {{total}} payments ({{skipped}} already settled)": "Καταχωρήθηκαν {{recorded}} από {{total}} πληρωμές ({{skipped}} ήδη εξοφλημένες)",
-  "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.": "Καταγραφή προκαταβολής για μήνα που απέχει {{count}} μήνα/ες στο μέλλον. Βεβαιωθείτε ότι ο μήνας είναι σωστός πριν αποθηκεύσετε.",
+  "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving.": "Καταγραφή προκαταβολής για μήνα που απέχει {{count}} μήνες στο μέλλον. Βεβαιωθείτε ότι ο μήνας είναι σωστός πριν αποθηκεύσετε.",
   "Recurring": "Επαναλαμβανόμενη",
   "Recurring Expense": "Επαναλαμβανόμενη Δαπάνη",
   "Recurring expense": "Πάγιο έξοδο",
@@ -1189,8 +1189,8 @@
   "{{amount}}€ owed": "Οφείλονται {{amount}}€",
   "{{amount}}€ of this payment is unallocated and will not be recorded.": "{{amount}}€ αυτής της καταβολής είναι αδιάθετα και δεν θα καταγραφούν.",
   "{{beginDate}} to {{endDate}}": "{{beginDate}} έως {{endDate}}",
-  "{{count}} bill(s) imported successfully": "{{count}} λογαριασμός/οί εισήχθησαν με επιτυχία",
-  "{{count}} bill(s) marked as paid": "{{count}} λογαριασμός/οί σημειώθηκαν ως πληρωμένοι",
+  "{{count}} bill(s) imported successfully": "{{count}} λογαριασμοί εισήχθησαν με επιτυχία",
+  "{{count}} bill(s) marked as paid": "{{count}} λογαριασμοί σημειώθηκαν ως πληρωμένοι",
   "{{count}} buildings": "{{count}} κτήρια",
   "{{count}} buildings_one": "1 κτήριο",
   "{{name}} {{pct}}% = {{amount}}": "{{name}} {{pct}}% = {{amount}}",
@@ -1450,5 +1450,8 @@
   "Written off on lease termination": "Λογιστική διαγραφή οφειλής κατά τον τερματισμό μίσθωσης",
   "Each written-off month is settled, but the running balance carried by later months is not rebuilt — closed months are immutable in this app, so the tenant's trailing total may still show the old figure.": "Κάθε μήνας που διαγράφεται εξοφλείται, όμως το μεταφερόμενο υπόλοιπο των επόμενων μηνών δεν ανακαθορίζεται — οι κλεισμένοι μήνες είναι αμετάβλητοι, οπότε το συνολικό υπόλοιπο του ενοικιαστή μπορεί να εμφανίζει ακόμη το παλιό ποσό.",
   "{{count}} unpaid month(s) up to the termination — {{amount}}. These stay on the ledger and remain claimable._one": "1 ανεξόφλητος μήνας έως τον τερματισμό — {{amount}}. Παραμένει καταγεγραμμένος στα ενοίκια και μπορεί να διεκδικηθεί.",
-  "{{count}} unpaid month(s) AFTER the termination date — {{amount}}. Terminating DELETES these from the rent ledger with no record._one": "1 ανεξόφλητος μήνας ΜΕΤΑ την ημερομηνία τερματισμού — {{amount}}. Με τον τερματισμό ΔΙΑΓΡΑΦΕΤΑΙ από τα ενοίκια, χωρίς καμία καταγραφή."
+  "{{count}} unpaid month(s) AFTER the termination date — {{amount}}. Terminating DELETES these from the rent ledger with no record._one": "1 ανεξόφλητος μήνας ΜΕΤΑ την ημερομηνία τερματισμού — {{amount}}. Με τον τερματισμό ΔΙΑΓΡΑΦΕΤΑΙ από τα ενοίκια, χωρίς καμία καταγραφή.",
+  "Recording an advance payment for a term {{count}} month(s) in the future. Make sure the term is correct before saving._one": "Καταγραφή προκαταβολής για μήνα που απέχει 1 μήνα στο μέλλον. Βεβαιωθείτε ότι ο μήνας είναι σωστός πριν αποθηκεύσετε.",
+  "{{count}} bill(s) imported successfully_one": "1 λογαριασμός εισήχθη με επιτυχία",
+  "{{count}} bill(s) marked as paid_one": "1 λογαριασμός σημειώθηκε ως πληρωμένος"
 }
