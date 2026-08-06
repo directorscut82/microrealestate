@@ -7,6 +7,12 @@ on:
   push:
     branches:
       - nas
+  # Manual trigger. A push to nas on 2026-08-06 (4618e930) landed on the remote
+  # but GitHub created NO workflow run for it, so the deploy script polled a run
+  # that did not exist and sat at status=queued for 17+ minutes. With push as the
+  # only trigger there was no way to start CI for an already-pushed commit short of
+  # an empty commit. workflow_dispatch makes that recoverable.
+  workflow_dispatch:
 
 jobs:
   setup:
