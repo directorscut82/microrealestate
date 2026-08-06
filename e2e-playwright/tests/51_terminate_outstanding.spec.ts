@@ -389,3 +389,87 @@ test('T3 a single unpaid month renders GREEK SINGULAR, not "1 ανεξόφλητ
 
   await page.screenshot({ path: '/tmp/t3-singular.png' });
 });
+
+test('T4 the advance-payment warning renders a real Greek plural, not «1 μήνα/ες»', async ({
+  page
+}) => {
+  // The banner is gated to monthsAhead 1..3 (PaymentTabs.js:712), so count=1 —
+  // paying NEXT month in advance — is the common case, and it used to render
+  // «απέχει 1 μήνα/ες στο μέλλον». «/ες» is not a valid ending for μήνας at any
+  // count, so this string was never grammatical. Drive the real dialog at
+  // count=1 and read what the landlord sees.
+  const prop = await api('POST', '/properties', {
+    name: `E2E-ADV-PROP-${STAMP}`,
+    type: 'apartment', surface: 40, rent: 200,
+    address: { street1: 'ΟΔΟΣ ΓΑΜΑ 5', zipCode: '11111', city: 'ΔΟΚΙΜΗ' }
+  });
+  expect(prop.status, JSON.stringify(prop.json)).toBe(200);
+  propIds.push(prop.json._id);
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const tenant = await api('POST', '/tenants', {
+    name: `E2E-ADV-${STAMP}`,
+    isCompany: false, firstName: 'E2E', lastName: `ADV-${STAMP}`,
+    taxId: syntheticTaxId(),
+    beginDate: `01/01/${y}`,
+    endDate: `31/12/${y + 1}`,
+    properties: [{ propertyId: prop.json._id, rent: 200 }]
+  });
+  expect(tenant.status, JSON.stringify(tenant.json)).toBe(200);
+  tenantIds.push(tenant.json._id);
+
+  await page.goto(`${BASE}/landlord/el/signin`, { waitUntil: 'domcontentloaded' });
+  await page.getByLabel(/Email/i).fill(EMAIL);
+  await page.locator('input[type="password"]').fill(PASSWORD);
+  await page.getByRole('button', { name: /Σύνδεση/ }).click();
+  await page.waitForURL(/\/landlord\/el\/(?!signin)/, { timeout: 45000 });
+
+  // The banner lives inside PaymentTabs, which renders in the payment DIALOG —
+  // not a page route. Open next month's rents grid and launch the payment drawer
+  // for this tenant, which is what a landlord actually does. It carries a
+  // data-cy="futureTermBanner" hook, so assert on that rather than scraping body
+  // text (a body-text 'not.toContain' would pass vacuously if the banner never
+  // rendered — which is exactly what the first version of this test did).
+  const next = new Date(y, now.getMonth() + 1, 1);
+  const nm = String(next.getMonth() + 1).padStart(2, '0');
+  await page.goto(
+    `${BASE}/landlord/el/${REALM}/rents/${next.getFullYear()}.${nm}`,
+    { waitUntil: 'domcontentloaded' }
+  );
+  await page.waitForLoadState('networkidle');
+
+  // Rows are flex DIVs, not table rows (RentTable.js:532), so scope to the
+  // smallest div that contains BOTH the tenant name and the trigger. The trigger
+  // itself is aria-label={t('Record payment')} = «Καταχώρηση πληρωμής»
+  // (RentTable.js:538) — «Καταβολή» in the grid is only a column label.
+  const row = page
+    .locator('div')
+    .filter({ hasText: `E2E-ADV-${STAMP}` })
+    .filter({ has: page.getByRole('button', { name: 'Καταχώρηση πληρωμής' }) })
+    .last();
+  await expect(row, 'the tenant must appear in next month grid').toBeVisible({
+    timeout: 25000
+  });
+  await row
+    .getByRole('button', { name: 'Καταχώρηση πληρωμής' })
+    .first()
+    .click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible({ timeout: 15000 });
+
+  const banner = dialog.locator('[data-cy="futureTermBanner"]');
+  await expect(banner, 'the advance-payment banner must render at count=1').toBeVisible({
+    timeout: 15000
+  });
+  const text = await banner.innerText();
+  console.log('ADVANCE_BANNER', JSON.stringify(text));
+
+  // The defect, as an assertion — plus the positive form so this cannot pass
+  // vacuously.
+  expect(text, 'the slash-inflection hack must be gone').not.toContain('μήνα/ες');
+  expect(text).toMatch(/απέχει 1 μήνα στο μέλλον/);
+
+  await page.screenshot({ path: '/tmp/t4-advance.png' });
+});
