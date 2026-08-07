@@ -11,6 +11,8 @@ import {
   validateStringField,
   validateFiniteNumber,
   validateCurrency,
+  isValidIBAN,
+  isValidGreekPostalCode,
   LOCALES
 } from '../validators.js';
 
@@ -278,6 +280,36 @@ export async function update(req: Req, res: Res) {
         if (typeof m.email !== 'string' || !EMAIL_RE.test(m.email.trim())) {
           throw new ServiceError(
             `members[${i}].email is not a valid email`,
+            422
+          );
+        }
+      }
+    }
+  }
+
+  // The BILLING identity fields reached Mongoose completely unvalidated. Measured
+  // against the live API before this guard: POST /buildings persisted
+  // iban "NOTANIBAN", phone "abc-not-a-phone" and a non-numeric postcode, and the
+  // realm's own billing block had the same hole. It matters most for the IBAN: it
+  // renders as the pay-to account on every receipt and invoice PDF, so a garbage
+  // value means the tenant pays into nothing and the landlord finds out from the
+  // missing money. The client now refuses these too (utils/fieldvalidators.js),
+  // but the client is not the boundary — this endpoint is callable directly.
+  if (
+    req.body.bankInfo?.iban !== undefined &&
+    req.body.bankInfo.iban !== null &&
+    String(req.body.bankInfo.iban).trim() !== '' &&
+    !isValidIBAN(String(req.body.bankInfo.iban).trim())
+  ) {
+    throw new ServiceError('bankInfo.iban is not a valid IBAN', 422);
+  }
+  if (Array.isArray(req.body.addresses)) {
+    for (let i = 0; i < req.body.addresses.length; i++) {
+      const zip = req.body.addresses[i]?.zipCode;
+      if (zip !== undefined && zip !== null && String(zip).trim() !== '') {
+        if (!isValidGreekPostalCode(String(zip).trim())) {
+          throw new ServiceError(
+            `addresses[${i}].zipCode must be 5 digits`,
             422
           );
         }

@@ -1460,5 +1460,8 @@
   "This repair would be charged to nobody. Link the units to properties on the Units tab first.": "Αυτή η επισκευή δεν θα χρεωθεί σε κανέναν. Συνδέστε πρώτα τις μονάδες με ακίνητα στην καρτέλα Μονάδες.",
   "The units have no thousandths for this method. Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the thousandths on the Units tab.": "Οι μονάδες δεν έχουν χιλιοστά για αυτή τη μέθοδο. Κάθε μονάδα θα υπολογίζει μηδενικό μερίδιο, οπότε ΟΛΟ το κόστος δεν θα χρεωθεί σε κανέναν. Επιλέξτε άλλη μέθοδο ή ορίστε τα χιλιοστά στην καρτέλα Μονάδες.",
   "The linked units have no surface (m²). Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the surfaces first.": "Οι συνδεδεμένες μονάδες δεν έχουν επιφάνεια (m²). Κάθε μονάδα θα υπολογίζει μηδενικό μερίδιο, οπότε ΟΛΟ το κόστος δεν θα χρεωθεί σε κανέναν. Επιλέξτε άλλη μέθοδο ή ορίστε πρώτα τις επιφάνειες.",
-  "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.": "Ενοίκιο 0 — αυτή η μίσθωση δεν θα χρεώσει τίποτα για όλη τη διάρκειά της και δεν παράγονται εγγραφές ενοικίου. Ορίστε ενοίκιο, εκτός αν αυτό είναι σκόπιμο."
+  "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.": "Ενοίκιο 0 — αυτή η μίσθωση δεν θα χρεώσει τίποτα για όλη τη διάρκειά της και δεν παράγονται εγγραφές ενοικίου. Ορίστε ενοίκιο, εκτός αν αυτό είναι σκόπιμο.",
+  "This is not a valid IBAN": "Μη έγκυρος IBAN",
+  "This is not a valid phone number": "Μη έγκυρος αριθμός τηλεφώνου",
+  "Postal code must be 5 digits": "Ο Τ.Κ. πρέπει να έχει 5 ψηφία"
 }

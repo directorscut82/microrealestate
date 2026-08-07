@@ -3,6 +3,12 @@ import { QueryKeys, updateOrganization } from '../../utils/restcalls';
 import { useCallback, useContext, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import {
+  isValidGreekPostalCode,
+  isValidIBAN,
+  isValidPhone,
+  optionalFormat
+} from '../../utils/fieldvalidators';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
@@ -47,21 +53,55 @@ export default function BillingForm({ organization }) {
 
   const schema = useMemo(
     () =>
+      // Every string is .trim()'d before .min(1): without it a single space
+      // satisfied "required" and the field persisted as effectively blank while
+      // the form reported success — the PDF letterhead then rendered an empty
+      // contact block. And the three FORMAT fields are checked against the same
+      // rules the server owns (see utils/fieldvalidators.js): a garbage IBAN is
+      // the pay-to account printed on every receipt, so the tenant would pay
+      // into nothing.
       z.object({
-        vatNumber: isCompany ? z.string().min(1) : z.string().optional(),
-        bankName: isCompany ? z.string().min(1) : z.string().optional(),
-        iban: isCompany ? z.string().min(1) : z.string().optional(),
-        contact: z.string().min(1),
-        email: z.string().email().min(1),
-        phone1: z.string().min(1),
-        phone2: z.string().optional(),
+        vatNumber: isCompany
+          ? z.string().trim().min(1)
+          : z.string().trim().optional(),
+        bankName: isCompany
+          ? z.string().trim().min(1)
+          : z.string().trim().optional(),
+        iban: (isCompany
+          ? z.string().trim().min(1)
+          : z.string().trim().optional()
+        ).refine(optionalFormat(isValidIBAN), {
+          message: 'This is not a valid IBAN'
+        }),
+        contact: z.string().trim().min(1),
+        email: z.string().trim().email().min(1),
+        phone1: z
+          .string()
+          .trim()
+          .min(1)
+          .refine(optionalFormat(isValidPhone), {
+            message: 'This is not a valid phone number'
+          }),
+        phone2: z
+          .string()
+          .trim()
+          .optional()
+          .refine(optionalFormat(isValidPhone), {
+            message: 'This is not a valid phone number'
+          }),
         address: z.object({
-          street1: z.string().min(1),
-          street2: z.string().optional(),
-          city: z.string().min(1),
-          zipCode: z.string().min(1),
-          state: z.string().optional(),
-          country: z.string().min(1)
+          street1: z.string().trim().min(1),
+          street2: z.string().trim().optional(),
+          city: z.string().trim().min(1),
+          zipCode: z
+            .string()
+            .trim()
+            .min(1)
+            .refine(optionalFormat(isValidGreekPostalCode), {
+              message: 'Postal code must be 5 digits'
+            }),
+          state: z.string().trim().optional(),
+          country: z.string().trim().min(1)
         })
       }),
     [isCompany]

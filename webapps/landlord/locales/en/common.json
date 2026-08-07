@@ -1439,5 +1439,8 @@
   "This repair would be charged to nobody. Link the units to properties on the Units tab first.": "This repair would be charged to nobody. Link the units to properties on the Units tab first.",
   "The units have no thousandths for this method. Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the thousandths on the Units tab.": "The units have no thousandths for this method. Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the thousandths on the Units tab.",
   "The linked units have no surface (m²). Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the surfaces first.": "The linked units have no surface (m²). Every unit would compute a zero share, so the whole cost would be charged to nobody. Pick another method or set the surfaces first.",
-  "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.": "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate."
+  "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.": "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.",
+  "This is not a valid IBAN": "This is not a valid IBAN",
+  "This is not a valid phone number": "This is not a valid phone number",
+  "Postal code must be 5 digits": "Postal code must be 5 digits"
 }

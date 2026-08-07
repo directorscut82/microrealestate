@@ -25,6 +25,7 @@ import {
   validateSingleUnitAllocations,
   isValidGreekPostalCode,
   isValidIBAN,
+  validateGreekAFM,
   EXPENSE_TYPES,
   ALLOCATION_METHODS,
   REPAIR_STATUSES,
@@ -1016,6 +1017,32 @@ export async function update(req: Req, res: Res) {
     ) {
       throw new ServiceError('ATAK prefix is missing', 422);
     }
+  }
+  // ASYMMETRY FIX. add() validates address.zipCode against isValidGreekPostalCode
+  // (:871) and bankInfo.iban against isValidIBAN (:914), but update() validated
+  // NEITHER — it assigned `address` and `bankInfo` wholesale. So every guard could
+  // be walked straight past by creating a building cleanly and then editing it, and
+  // measured against the live API a building persisted iban "NOTANIBAN", taxId
+  // "NOT-AN-AFM" and phone "abc-not-a-phone". The IBAN is the pay-to account on
+  // every receipt/invoice PDF, and a bad manager ΑΦΜ corrupts an identity key the
+  // owner matcher compares on. Apply the SAME rules add() uses, on the same fields.
+  if (req.body.address?.zipCode !== undefined) {
+    const zip = String(req.body.address.zipCode ?? '').trim();
+    if (zip && !isValidGreekPostalCode(zip)) {
+      throw new ServiceError('address.zipCode must be 5 digits', 422);
+    }
+  }
+  if (req.body.bankInfo?.iban !== undefined) {
+    const iban = String(req.body.bankInfo.iban ?? '').trim();
+    if (iban && !isValidIBAN(iban)) {
+      throw new ServiceError('bankInfo.iban is not a valid IBAN', 422);
+    }
+  }
+  // The manager subdoc was never validated on either path. Only check when a
+  // non-empty value is supplied — both fields are optional by design.
+  if (req.body.manager?.taxId !== undefined) {
+    const t = String(req.body.manager.taxId ?? '').trim();
+    if (t) validateGreekAFM(t, 'manager.taxId');
   }
   if (req.body.yearBuilt !== undefined) {
     validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
@@ -4809,6 +4836,20 @@ const VALID_CONTRACTOR_SPECIALTIES = [
   'other'
 ];
 
+// Contractor identity fields. Measured against the live API: POST
+// /buildings/:id/contractors persisted taxId "NOT-AN-AFM" and phone
+// "letters-only" — `req.body` is pushed wholesale into the subdoc array, so
+// nothing but `specialty` and `name` was ever checked. A contractor's ΑΦΜ ends up
+// on repair invoices and in the owner statement, and a non-phone "phone" is a
+// contact nobody can call. Only validate a NON-EMPTY value: both fields are
+// optional by design.
+function _validateContractorIdentity(body: Record<string, any>) {
+  if (body?.taxId !== undefined) {
+    const t = String(body.taxId ?? '').trim();
+    if (t) validateGreekAFM(t, 'contractor taxId');
+  }
+}
+
 export async function addContractor(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
@@ -4825,6 +4866,8 @@ export async function addContractor(req: Req, res: Res) {
   if (!req.body.name?.trim()) {
     throw new ServiceError('Contractor name is required', 422);
   }
+
+  _validateContractorIdentity(req.body);
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -4855,6 +4898,8 @@ export async function updateContractor(req: Req, res: Res) {
       throw new ServiceError(`invalid specialty: ${req.body.specialty}`, 422);
     }
   }
+
+  _validateContractorIdentity(req.body);
 
   const building = await Collections.Building.findOne({
     _id: id,
