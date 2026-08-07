@@ -27,7 +27,23 @@ const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_WINDOW_MS = 60_000; // 1 minute
 const RATE_MAX_ATTEMPTS = 20; // bumped from 10 — was too tight for parallel legit users
 
-export function authRateLimit(req: Request, res: Response, next: NextFunction) {
+/**
+ * `countEvery` — count the attempt regardless of status code.
+ *
+ * The default (count only >= 400) is right for sign-in: a SUCCESSFUL login must not
+ * consume the budget. It is wrong for /forgotpassword, which deliberately returns 204
+ * for every input so it cannot be used to enumerate accounts. That combination meant
+ * the bucket NEVER filled: the limiter was mounted (landlord.ts:462) but every request
+ * finished at 204, so the increment below was skipped and a victim's mailbox could be
+ * flooded without limit — each hit also writing a fresh 1h reset token into Redis.
+ * Measured: landlord.ts:510 is an unconditional res.sendStatus(204).
+ */
+function _authRateLimit(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  countEvery = false
+) {
   const key =
     req.body?.email && typeof req.body.email === 'string'
       ? `email:${req.body.email.toLowerCase()}`
@@ -48,7 +64,7 @@ export function authRateLimit(req: Request, res: Response, next: NextFunction) {
   // Defer the increment until we know whether the call actually failed.
   // Successful sign-ins (status < 400) MUST NOT consume the budget.
   res.on('finish', () => {
-    if (res.statusCode < 400) {
+    if (!countEvery && res.statusCode < 400) {
       return;
     }
     const tNow = Date.now();
@@ -72,6 +88,22 @@ setInterval(() => {
     }
   }
 }, 5 * 60_000); // every 5 minutes
+
+// The default export keeps every existing call site behaving exactly as before:
+// a successful call does not consume the budget.
+export function authRateLimit(req: Request, res: Response, next: NextFunction) {
+  return _authRateLimit(req, res, next, false);
+}
+
+// For endpoints that answer with the SAME status whatever the input (anti-enumeration
+// 204s), where "only count failures" means "never count anything".
+export function authRateLimitCountEvery(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  return _authRateLimit(req, res, next, true);
+}
 
 export default function (): Router {
   const router = express.Router();

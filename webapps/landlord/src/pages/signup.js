@@ -18,7 +18,16 @@ const schema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   email: z.string().email().min(1),
-  password: z.string().min(1)
+  // Mirror the SERVER's real rule (MIN/MAX_PASSWORD_LENGTH, authenticator
+  // landlord.ts:19-20). At .min(1) the form happily submitted a 1-char password and
+  // the resulting 422 was shown as "some fields are missing".
+  password: z.string().min(8, 'Password must be at least 8 characters').max(128),
+  confirmPassword: z.string().min(1)
+}).refine((d) => d.password === d.confirmPassword, {
+  // The form has ONE masked password box, so a typo becomes the account hash and the
+  // landlord is locked out of an account that was just created successfully.
+  message: 'Passwords do not match',
+  path: ['confirmPassword']
 });
 
 export default function SignUp() {
@@ -47,7 +56,7 @@ export default function SignUp() {
 
   const signUp = async ({ firstName, lastName, email, password }) => {
     try {
-      const status = await store.user.signUp(
+      const [status, apiMessage] = await store.user.signUp(
         firstName,
         lastName,
         email,
@@ -56,16 +65,32 @@ export default function SignUp() {
       if (status !== 200) {
         switch (status) {
           case 422:
-            toast.error(t('Some fields are missing'));
+            // Prefer the server's reason. The blanket "some fields are missing"
+            // contradicted a fully-filled form.
+            toast.error(apiMessage || t('Some fields are missing'));
             return;
-          case 409:
-            toast.error(t('This user is already registered'));
+          case 429:
+            // authRateLimit sends Retry-After: 60 and a message; this used to fall
+            // into `default` and read as a server fault, so the landlord retried
+            // immediately and kept the bucket full.
+            toast.error(
+              apiMessage || t('Too many attempts, please try again in a minute')
+            );
             return;
           default:
-            toast.error(t('Something went wrong'));
+            toast.error(apiMessage || t('Something went wrong'));
             return;
         }
       }
+      // The server answers 201 for an ALREADY-REGISTERED email on purpose, to block
+      // account enumeration, so a silent redirect looked like "account created" when
+      // it may not have been. Say something true for both cases. (The old `case 409`
+      // was dead code — grep finds no 409 anywhere in services/authenticator.)
+      toast.success(
+        t(
+          'If this email was new, your account is ready — otherwise sign in or reset your password'
+        )
+      );
       router.push('/signin');
     } catch (error) {
       console.error(error);
@@ -130,7 +155,21 @@ export default function SignUp() {
           />
           {errors.password && (
             <p className="text-label text-oxide">
-              {errors.password.message}
+              {t(errors.password.message)}
+            </p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="confirmPassword">{t('Confirm password')}</Label>
+          <Input
+            id="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            {...register('confirmPassword')}
+          />
+          {errors.confirmPassword && (
+            <p className="text-label text-oxide">
+              {t(errors.confirmPassword.message)}
             </p>
           )}
         </div>

@@ -5,7 +5,7 @@ import {
   Service,
   ServiceError
 } from '@microrealestate/common';
-import { authRateLimit } from './index.js';
+import { authRateLimit, authRateLimitCountEvery } from './index.js';
 import { redactEmail } from '../utils/redact.js';
 import axios from 'axios';
 import bcrypt from 'bcrypt';
@@ -459,7 +459,10 @@ export default function (): Router {
 
   landlordRouter.post(
     '/forgotpassword',
-    authRateLimit,
+    // countEvery: this route ALWAYS answers 204 (anti-enumeration), so the default
+    // "only count failures" limiter never incremented and the mailbox of any known
+    // address could be flooded without limit.
+    authRateLimitCountEvery,
     Middlewares.asyncWrapper(async (req: Request, res: Response) => {
       const { email } = req.body;
       if (typeof email !== 'string') {

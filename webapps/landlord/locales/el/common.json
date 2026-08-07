@@ -1489,5 +1489,10 @@
   "Postal code must be 5 digits": "Ο Τ.Κ. πρέπει να έχει 5 ψηφία",
   "Thousandths are a share of the building total, not of 1000": "Τα χιλιοστά είναι μερίδιο του συνόλου του κτηρίου, όχι του 1000",
   "{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.": "{{label}}: {{typed}}‰ σε σύνολο κτηρίου {{total}}‰ — αυτή η μονάδα θα χρεωθεί {{pct}}% αυτών των δαπανών.",
-  "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.": "Συμπληρώστε τα χιλιοστά των υπόλοιπων μονάδων ώστε το κτήριο να αθροίζει 1000‰, διαφορετικά τα μερίδια παραμένουν μεγαλύτερα από το επιθυμητό."
+  "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.": "Συμπληρώστε τα χιλιοστά των υπόλοιπων μονάδων ώστε το κτήριο να αθροίζει 1000‰, διαφορετικά τα μερίδια παραμένουν μεγαλύτερα από το επιθυμητό.",
+  "Password must be at least 8 characters": "Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες",
+  "Passwords do not match": "Οι κωδικοί δεν ταιριάζουν",
+  "Confirm password": "Επιβεβαίωση κωδικού",
+  "Too many attempts, please try again in a minute": "Πολλές προσπάθειες — δοκιμάστε ξανά σε ένα λεπτό",
+  "If this email was new, your account is ready — otherwise sign in or reset your password": "Αν το email ήταν καινούριο, ο λογαριασμός σας είναι έτοιμος — διαφορετικά συνδεθείτε ή επαναφέρετε τον κωδικό σας"
 }

@@ -16,7 +16,9 @@ import useTranslation from 'next-translate/useTranslation';
 
 const schema = z.object({
   email: z.string().email().min(1),
-  password: z.string().min(1)
+  // .max mirrors the server's MAX_PASSWORD_LENGTH so a password-manager value
+  // errors inline instead of returning a 422 shown as "some fields are missing".
+  password: z.string().min(1).max(128)
 });
 
 export default function SignIn() {
@@ -57,7 +59,13 @@ export default function SignIn() {
             case 422:
               toast.error(t('Some fields are missing'));
               return;
-            case 401:
+            case 429:
+            // Retry-After: 60 from authRateLimit. This used to fall into `default`
+            // and show "something went wrong", so the landlord kept retrying and
+            // kept the bucket full — locking themselves out for longer.
+            toast.error(t('Too many attempts, please try again in a minute'));
+            return;
+          case 401:
               toast.error(t('Incorrect email or password'));
               return;
             default:

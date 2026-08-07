@@ -45,14 +45,23 @@ export default class User {
     this._store.notify();
   }
 
+  // Returns [status, message]. The message is the SERVER's explanation and callers
+  // must prefer it: mapping every 422 to a blanket "some fields are missing" told the
+  // landlord their form was incomplete when the real cause was e.g. a password under
+  // 8 chars, with every field filled in. `error.response` is also absent on a network
+  // failure, where the old `error.response.status` threw a SECOND error inside the
+  // catch and lost the original.
   async signUp(firstname, lastname, email, password) {
     try {
       await apiFetcher().post('/authenticator/landlord/signup', {
         firstname, lastname, email, password
       });
-      return 200;
+      return [200, null];
     } catch (error) {
-      return error.response.status;
+      return [
+        error?.response?.status ?? 0,
+        error?.response?.data?.message ?? null
+      ];
     }
   }
 

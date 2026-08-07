@@ -1468,5 +1468,10 @@
   "Postal code must be 5 digits": "Postal code must be 5 digits",
   "Thousandths are a share of the building total, not of 1000": "Thousandths are a share of the building total, not of 1000",
   "{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.": "{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.",
-  "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.": "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended."
+  "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.": "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.",
+  "Password must be at least 8 characters": "Password must be at least 8 characters",
+  "Passwords do not match": "Passwords do not match",
+  "Confirm password": "Confirm password",
+  "Too many attempts, please try again in a minute": "Too many attempts, please try again in a minute",
+  "If this email was new, your account is ready — otherwise sign in or reset your password": "If this email was new, your account is ready — otherwise sign in or reset your password"
 }

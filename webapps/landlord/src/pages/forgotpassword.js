@@ -40,6 +40,14 @@ export default function ForgotPassword() {
           case 422:
             toast.error(t('Some fields are missing'));
             return;
+          case 429:
+            // The limiter on this route now COUNTS every call (it always answers 204,
+            // so "count only failures" meant it never counted at all and a mailbox
+            // could be flooded). That makes 429 reachable here for the first time, so
+            // it needs a message that tells the user to wait rather than one that
+            // reads as a server fault.
+            toast.error(t('Too many attempts, please try again in a minute'));
+            return;
           default:
             toast.error(t('Something went wrong'));
             return;
