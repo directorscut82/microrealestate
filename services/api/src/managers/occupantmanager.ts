@@ -18,7 +18,9 @@ import {
   validateFiniteNumber,
   validateStringField,
   validateArrayMaxLength,
-  validateGreekAFM
+  validateGreekAFM,
+  isValidPhone,
+  isValidEmail
 } from '../validators.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -860,7 +862,10 @@ function _propertiesHaveRentData(properties?: AnyRecord[]): boolean {
 // (PATCH had guaranty validators but POST didn't) and A5 (negative
 // properties[].rent slipping through). Centralizing makes future drift
 // impossible.
-function _validateOccupantPayload(body: AnyRecord): void {
+function _validateOccupantPayload(
+  body: AnyRecord,
+  opts: { isCreate?: boolean } = {}
+): void {
   // Wave-24 A1: deposit field validators on add(). PATCH already had these
   // (wave-21 C28-B1/B2); POST silently persisted negatives.
   if (body.guaranty !== undefined) {
@@ -875,17 +880,32 @@ function _validateOccupantPayload(body: AnyRecord): void {
       max: 10000000
     });
   }
-  // If both are present, the per-property guard mirroring update() catches
-  // payback > guaranty before save. Skip when only one is present (the other
-  // is loaded later for the effective comparison in update()).
+  // Compare EFFECTIVE payback against EFFECTIVE guaranty. On create there is
+  // no persisted document, so an absent guaranty is 0 — the copy-from-tenant
+  // flow used to send guarantyPayback WITHOUT guaranty and the old
+  // both-must-be-present condition let it through, producing a tenant whose
+  // accounting row refunded a deposit it never received. On update() an
+  // absent guaranty means "keep the persisted one", which is resolved against
+  // the stored doc further down; skip it here.
+  const effectiveGuaranty =
+    body.guaranty !== undefined
+      ? Number(body.guaranty)
+      : opts.isCreate
+        ? 0
+        : undefined;
   if (
-    body.guaranty !== undefined &&
+    effectiveGuaranty !== undefined &&
     body.guarantyPayback !== undefined &&
-    Number.isFinite(Number(body.guaranty)) &&
+    Number.isFinite(effectiveGuaranty) &&
     Number.isFinite(Number(body.guarantyPayback)) &&
-    Number(body.guarantyPayback) > Number(body.guaranty)
+    Number(body.guarantyPayback) > effectiveGuaranty
   ) {
-    throw new ServiceError('guarantyPayback cannot exceed guaranty', 422);
+    // Name both figures: "cannot exceed guaranty" alone left the landlord guessing
+    // which number was wrong when the deposit had already been partly refunded.
+    throw new ServiceError(
+      `guarantyPayback (${Number(body.guarantyPayback)}) cannot exceed guaranty (${effectiveGuaranty})`,
+      422
+    );
   }
 
   // Wave-24 A5: negative properties[].rent silently produced negative
@@ -900,6 +920,49 @@ function _validateOccupantPayload(body: AnyRecord): void {
       }
     });
   }
+
+  _validateContacts(body.contacts);
+}
+
+// contacts[] carries the phone numbers and e-mail addresses the SMS / e-mail
+// / Telegram channels actually dial (emailmanager._sendSms reads
+// contacts[].phone1/phone2; frontdata.toOccupantData reads contacts[].email).
+// The Mongoose subdoc types every field as a bare String and no manager
+// validated any of it, so a direct POST/PATCH persisted "abc-not-a-phone" and
+// it only failed months later at delivery time.
+function _validateContacts(contacts: unknown): void {
+  if (contacts === undefined || contacts === null) return;
+  validateArrayMaxLength(contacts, 20, 'contacts');
+  (contacts as AnyRecord[]).forEach((c: AnyRecord, i: number) => {
+    if (c === null || typeof c !== 'object' || Array.isArray(c)) {
+      throw new ServiceError(`contacts[${i}] must be an object`, 422);
+    }
+    validateStringField(c.contact, `contacts[${i}].contact`, { max: 200 });
+    validateStringField(c.notes, `contacts[${i}].notes`, { max: 2000 });
+    // Empty string is the "no channel on file" representation the form sends
+    // for a co-tenant the landlord only has a name for — legitimate, so only
+    // a NON-empty value is format-checked.
+    ['phone', 'phone1', 'phone2'].forEach((field) => {
+      const raw = validateStringField(c[field], `contacts[${i}].${field}`, {
+        max: 30
+      });
+      if (raw && !isValidPhone(raw)) {
+        throw new ServiceError(
+          `contacts[${i}].${field} is not a valid phone number`,
+          422
+        );
+      }
+    });
+    const email = validateStringField(c.email, `contacts[${i}].email`, {
+      max: 200
+    });
+    if (email && !isValidEmail(email)) {
+      throw new ServiceError(
+        `contacts[${i}].email is not a valid email address`,
+        422
+      );
+    }
+  });
 }
 
 // Cross-tenant double-occupancy guard. For every propertyId in the incoming
@@ -1075,7 +1138,7 @@ export async function add(req: Req, res: Res) {
   }
 
   // Wave-24 A1+A5: shared body-shape validators (deposit + per-property rent).
-  _validateOccupantPayload(req.body);
+  _validateOccupantPayload(req.body, { isCreate: true });
 
   // Tenant-import directive (NOT a Tenant schema field): "mark all past months
   // paid". Capture it from the raw body BEFORE formatting, then ensure it never

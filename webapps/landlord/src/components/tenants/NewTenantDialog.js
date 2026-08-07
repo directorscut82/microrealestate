@@ -148,14 +148,39 @@ export default function NewTenantDialog({ open, setOpen }) {
             properties,
             discount,
             guaranty,
+            // `guaranty` alone is not enough: copying guarantyPayback without
+            // its guaranty creates a tenant whose accounting row shows a
+            // refunded deposit it never received (accountingmanager
+            // finalBalance = payment + 0 − payback − grandTotal).
+            guarantyPayback,
+            // `properties` is stripped above, so a copied lease would make the
+            // server 422 ("Tenant with a lease must have at least one
+            // property") on a dialog that has no property field — the stepper
+            // assigns the lease + properties in the next step instead.
+            lease,
+            leaseId,
+            // AADE declaration identity belongs to the SOURCE lease, not to a
+            // brand-new tenant. Copying these made the new tenant claim
+            // another person's ΑΡ. ΔΗΛΩΣΗΣ and carry their co-tenants' ΑΦΜ.
+            declarationNumber,
+            amendsDeclaration,
+            originalLeaseStartDate,
+            leaseNotes,
+            coTenants,
+            leaseHistory,
             ...originalTenant
           } = source;
           tenant = { ...originalTenant, ...tenant };
-          if (originalTenant.lease) {
-            const lease = leases.find(({ _id }) => _id === originalTenant.lease._id);
-            if (lease) {
-              const newEndDate = contractEndMoment(moment().startOf('day'), lease);
-              tenant.endDate = newEndDate.format('DD/MM/YYYY');
+          // Pre-fill the end date from the source's lease DURATION only. The
+          // leaseId itself is deliberately not copied (see above); the stepper
+          // picks the lease and re-derives this date.
+          if (lease?._id) {
+            const sourceLease = leases.find(({ _id: id }) => id === lease._id);
+            if (sourceLease) {
+              tenant.endDate = contractEndMoment(
+                moment().startOf('day'),
+                sourceLease
+              ).format('DD/MM/YYYY');
             }
           }
         }
@@ -198,6 +223,21 @@ export default function NewTenantDialog({ open, setOpen }) {
         .map(({ _id, name }) => ({ id: _id, label: name, value: _id })),
     [allTenants]
   );
+
+  // Two tenants sharing an ΑΦΜ merge on every surface that keys identity on
+  // it (the owner/E9 matcher, _markAlsoRents). Warn — don't block: a landlord
+  // legitimately re-registers the same person on a second lease, and the
+  // server decides whether the create is allowed.
+  const typedTaxId = watch('taxId');
+  const duplicateTaxIdTenant = useMemo(() => {
+    const value = (typedTaxId || '').trim();
+    if (value.length !== 9) return null;
+    return (
+      allTenants.find(
+        (candidate) => String(candidate.taxId || '').trim() === value
+      ) || null
+    );
+  }, [allTenants, typedTaxId]);
 
   return (
     <ResponsiveDialog
@@ -250,6 +290,20 @@ export default function NewTenantDialog({ open, setOpen }) {
               />
               {errors.taxId && (
                 <p className="text-sm text-destructive">{errors.taxId.message}</p>
+              )}
+              {!errors.taxId && duplicateTaxIdTenant && (
+                <div className="text-sm text-ink">
+                  <div className="font-medium text-warning">
+                    {t('This Tax ID already belongs to {{name}}', {
+                      name: duplicateTaxIdTenant.name
+                    })}
+                  </div>
+                  <div className="text-label text-ink-muted">
+                    {t(
+                      'Two tenants sharing a Tax ID are treated as the same person on the owner and money screens.'
+                    )}
+                  </div>
+                </div>
               )}
             </div>
             <div className={tenants?.length ? '' : 'hidden'}>

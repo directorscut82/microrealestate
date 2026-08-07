@@ -7,6 +7,7 @@ import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Separator } from '../../ui/separator';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
+import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
 const PHONE_REGEX = /^[+0-9\s()-]{6,30}$/;
@@ -51,40 +52,68 @@ function isValidAFM(value) {
   return ((sum % 11) % 10) === parseInt(value[8], 10);
 }
 
-const schema = z.object({
-  firstName: z.string().trim().min(1).max(120),
-  lastName: z.string().trim().min(1).max(120),
-  // Tier D-Q1 + Tier C1: AFM required at full save and must pass the
-  // checksum. The stepper auto-graduates to Tabs only when this validates.
-  taxId: z
-    .string()
-    .trim()
-    .regex(AFM_REGEX, 'AFM must be 9 digits')
-    .refine(isValidAFM, { message: 'Invalid AFM checksum' }),
-  phone: optionalPhone,
-  email: z
-    .string()
-    .trim()
-    .email()
-    .max(200)
-    .or(z.literal(''))
-    .optional(),
-  isCompany: z.string().min(1),
-  legalRepresentative: z.string().trim().max(200).optional(),
-  legalStructure: z.string().trim().max(120).optional(),
-  ein: z.string().trim().max(60).optional(),
-  dos: z.string().trim().max(120).optional(),
-  capital: z.string().trim().max(60).optional(),
-  contacts: z.array(contactSchema)
-});
+const schema = z
+  .object({
+    // firstName/lastName carry no min() here: a BUSINESS has neither, only an
+    // επωνυμία (companyName). The per-account-type requirements live in the
+    // superRefine below — see the comment there before re-adding min(1).
+    firstName: z.string().trim().max(120),
+    lastName: z.string().trim().max(120),
+    companyName: z.string().trim().max(200),
+    // Tier D-Q1 + Tier C1: AFM required at full save and must pass the
+    // checksum. The stepper auto-graduates to Tabs only when this validates.
+    taxId: z
+      .string()
+      .trim()
+      .regex(AFM_REGEX, 'AFM must be 9 digits')
+      .refine(isValidAFM, { message: 'Invalid AFM checksum' }),
+    phone: optionalPhone,
+    email: z
+      .string()
+      .trim()
+      .email()
+      .max(200)
+      .or(z.literal(''))
+      .optional(),
+    isCompany: z.string().min(1),
+    legalRepresentative: z.string().trim().max(200).optional(),
+    legalStructure: z.string().trim().max(120).optional(),
+    ein: z.string().trim().max(60).optional(),
+    dos: z.string().trim().max(120).optional(),
+    capital: z.string().trim().max(60).optional(),
+    contacts: z.array(contactSchema)
+  })
+  // Per-account-type requirements. A business identifies by a SINGLE επωνυμία
+  // (which may legitimately be one word) plus a legal form — the latter is
+  // hard-required by the server (occupantmanager.add: "legalForm is required
+  // for legal-entity tenants"), so requiring it here turns an untranslated
+  // 422 toast into an inline Greek field error.
+  .superRefine((data, ctx) => {
+    const required = (path) =>
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [path],
+        message: 'Required'
+      });
+    if (data.isCompany === 'true') {
+      if (!data.companyName) required('companyName');
+      if (!data.legalStructure) required('legalStructure');
+    } else {
+      if (!data.firstName) required('firstName');
+      if (!data.lastName) required('lastName');
+    }
+  });
 
 const emptyContact = { contact: '', email: '', phone1: '', phone2: '', notes: '' };
 
 const initValues = (tenant) => {
-  // Parse existing 'name' into firstName/lastName for backward compat
+  const isCompany = !!tenant?.isCompany;
+  // Parse existing 'name' into firstName/lastName for backward compat.
+  // Never split a company's name — an επωνυμία is one field, and splitting it
+  // is what made a one-word business name unsavable.
   let firstName = tenant?.firstName || '';
   let lastName = tenant?.lastName || '';
-  if (!firstName && !lastName && tenant?.name) {
+  if (!isCompany && !firstName && !lastName && tenant?.name) {
     const parts = tenant.name.trim().split(/\s+/);
     firstName = parts[0] || '';
     lastName = parts.slice(1).join(' ') || '';
@@ -93,6 +122,7 @@ const initValues = (tenant) => {
   return {
     firstName,
     lastName,
+    companyName: isCompany ? tenant?.company || tenant?.name || '' : '',
     taxId: tenant?.taxId || '',
     phone: tenant?.phone || '',
     email: tenant?.email || '',
@@ -210,19 +240,22 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
 
   // Auto-prefill contact #1 with the primary tenant's name as the user
   // types it. Only runs when contact[0].contact is currently empty so we
-  // never clobber a user edit (e.g. "Maria Dokimi (mother)"). Skipped
-  // for company accounts — businesses identify by `company` not first/last.
+  // never clobber a user edit (e.g. "Maria Dokimi (mother)"). For a business
+  // the source is the επωνυμία, not first/last (which a business has none of).
   const watchedFirstName = watch('firstName');
   const watchedLastName = watch('lastName');
+  const watchedCompanyName = watch('companyName');
   const watchedContact0 = watch('contacts.0.contact');
   useEffect(() => {
-    if (isCompany === 'true') return;
     if (watchedContact0 && watchedContact0.trim().length > 0) return;
-    const fullName = `${watchedFirstName || ''} ${watchedLastName || ''}`.trim();
+    const fullName =
+      isCompany === 'true'
+        ? (watchedCompanyName || '').trim()
+        : `${watchedFirstName || ''} ${watchedLastName || ''}`.trim();
     if (!fullName) return;
     setValue('contacts.0.contact', fullName, { shouldDirty: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchedFirstName, watchedLastName, isCompany]);
+  }, [watchedFirstName, watchedLastName, watchedCompanyName, isCompany]);
 
   // Wave-26 round-3m: deduplicate the co-tenants list against the primary
   // tenant before rendering, so a single-renter case doesn't show the
@@ -249,35 +282,40 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
     });
   }, [tenant?.coTenants, tenant?.name, tenant?.firstName, tenant?.lastName, tenant?.taxId]);
 
+  const _isCompanyAccount = isCompany === 'true';
+
   const _onSubmit = async (data) => {
-    const fullName = `${data.firstName} ${data.lastName}`.trim();
+    const isBusiness = data.isCompany === 'true';
+    // A business is identified by its επωνυμία alone; a natural person by
+    // first + last name. Never rebuild a company name out of firstName +
+    // lastName — that is what forced a one-word επωνυμία through a
+    // two-field min(1) gate it could never satisfy.
+    const fullName = isBusiness
+      ? data.companyName.trim()
+      : `${data.firstName} ${data.lastName}`.trim();
     await onSubmit({
       name: fullName,
-      firstName: data.firstName,
-      lastName: data.lastName,
+      firstName: isBusiness ? '' : data.firstName,
+      lastName: isBusiness ? '' : data.lastName,
       taxId: data.taxId || '',
       phone: data.phone || '',
       email: data.email || '',
-      isCompany: data.isCompany === 'true',
-      company: data.isCompany === 'true' ? fullName : '',
-      manager: data.isCompany === 'true' ? data.legalRepresentative : fullName,
-      legalForm: data.isCompany === 'true' ? data.legalStructure : '',
-      siret: data.isCompany === 'true' ? data.ein : '',
-      rcs: data.isCompany === 'true' ? data.dos : '',
-      capital: data.isCompany === 'true' ? data.capital : '',
-      // Wave-26: Drop placeholder co-tenant contact rows the user never
-      // touched. A row counts as "filled in" if the user added an email,
-      // any phone, or notes beyond the auto-generated ΑΦΜ hint.
+      isCompany: isBusiness,
+      company: isBusiness ? fullName : '',
+      manager: isBusiness ? data.legalRepresentative : fullName,
+      legalForm: isBusiness ? data.legalStructure : '',
+      siret: isBusiness ? data.ein : '',
+      rcs: isBusiness ? data.dos : '',
+      capital: isBusiness ? data.capital : '',
+      // Wave-26: drop only rows the user never touched at all. A row that
+      // carries a NAME is kept even with no channel — dropping it silently
+      // (while the form re-prefills the name from firstName/lastName on the
+      // next render) made the row look persisted when contacts[] was empty.
       contacts: data.contacts
-        .filter(({ contact, email, phone1, phone2, notes }) => {
-          if (!contact) return false;
-          // First-class contact (always kept): has email.
-          if (email) return true;
-          // Auto-prefilled co-tenant placeholder: keep only if user filled
-          // any contact channel or wrote a substantive note.
-          const noteIsHint = (notes || '').trim().startsWith('ΑΦΜ:');
-          return !!(phone1 || phone2 || (notes && !noteIsHint));
-        })
+        .filter(
+          ({ contact, email, phone1, phone2, notes }) =>
+            !!(contact || email || phone1 || phone2 || notes)
+        )
         .map(({ contact, email, phone1, phone2, notes }) => ({
           contact,
           email,
@@ -288,8 +326,16 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
     });
   };
 
+  // Any zodResolver rejection on a field whose error node is off-screen (the
+  // business branch collapses when isCompany flips, contacts sit far below the
+  // fold) used to make Αποθήκευση a silent no-op: no toast, no scroll, no red
+  // text. Surface one toast so the click is never swallowed.
+  const _onInvalid = () => {
+    toast.error(t('Please correct the highlighted fields'));
+  };
+
   return (
-    <form onSubmit={handleSubmit(_onSubmit)} autoComplete="off">
+    <form onSubmit={handleSubmit(_onSubmit, _onInvalid)} autoComplete="off">
       {!stepperMode && (
         <div className="pb-4">
           <div className="text-xl">{t('Tenant information')}</div>
@@ -297,21 +343,33 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
         </div>
       )}
       <div className="space-y-4">
-        <div className="sm:flex sm:gap-2">
-          <div className="space-y-2 flex-1">
-            <Label htmlFor="firstName">{t('First name')}</Label>
-            <Input id="firstName" disabled={readOnly} {...register('firstName')} />
-            {errors.firstName && <p className="text-sm text-destructive">{errors.firstName.message}</p>}
+        {_isCompanyAccount ? (
+          // A business has ONE name (επωνυμία). Asking a company for a
+          // "first" and "last" name both contradicted the label and made a
+          // one-word επωνυμία unsavable.
+          <div className="space-y-2">
+            <Label htmlFor="companyName">{t('Company name')}</Label>
+            <Input id="companyName" disabled={readOnly} {...register('companyName')} />
+            {errors.companyName && <p className="text-sm text-destructive">{t(errors.companyName.message)}</p>}
           </div>
-          <div className="space-y-2 flex-1">
-            <Label htmlFor="lastName">{t('Last name')}</Label>
-            <Input id="lastName" disabled={readOnly} {...register('lastName')} />
-            {errors.lastName && <p className="text-sm text-destructive">{errors.lastName.message}</p>}
+        ) : (
+          <div className="sm:flex sm:gap-2">
+            <div className="space-y-2 flex-1">
+              <Label htmlFor="firstName">{t('First name')}</Label>
+              <Input id="firstName" disabled={readOnly} {...register('firstName')} />
+              {errors.firstName && <p className="text-sm text-destructive">{t(errors.firstName.message)}</p>}
+            </div>
+            <div className="space-y-2 flex-1">
+              <Label htmlFor="lastName">{t('Last name')}</Label>
+              <Input id="lastName" disabled={readOnly} {...register('lastName')} />
+              {errors.lastName && <p className="text-sm text-destructive">{t(errors.lastName.message)}</p>}
+            </div>
           </div>
-        </div>
+        )}
         <div className="space-y-2 sm:w-1/2">
           <Label htmlFor="taxId">{t('Tax ID')}</Label>
           <Input id="taxId" disabled={readOnly} {...register('taxId')} />
+          {errors.taxId && <p className="text-sm text-destructive">{t(errors.taxId.message)}</p>}
         </div>
         {visibleCoTenants.length > 0 && (
           <div className="space-y-2">
@@ -352,7 +410,7 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
         {isCompany === 'true' && (
           <>
             <div className="space-y-2"><Label htmlFor="legalRepresentative">{t('Legal representative')}</Label><Input id="legalRepresentative" disabled={readOnly} {...register('legalRepresentative')} /></div>
-            <div className="space-y-2"><Label htmlFor="legalStructure">{t('Legal structure')}</Label><Input id="legalStructure" disabled={readOnly} {...register('legalStructure')} /></div>
+            <div className="space-y-2"><Label htmlFor="legalStructure">{t('Legal structure')}</Label><Input id="legalStructure" disabled={readOnly} {...register('legalStructure')} />{errors.legalStructure && <p className="text-sm text-destructive">{t(errors.legalStructure.message)}</p>}</div>
             <div className="space-y-2"><Label htmlFor="ein">{t('Employer Identification Number')}</Label><Input id="ein" disabled={readOnly} {...register('ein')} /></div>
             <div className="space-y-2"><Label htmlFor="dos">{t('Administrative jurisdiction')}</Label><Input id="dos" disabled={readOnly} {...register('dos')} /></div>
             <div className="space-y-2"><Label htmlFor="capital">{t('Capital')}</Label><Input id="capital" disabled={readOnly} {...register('capital')} /></div>
@@ -377,11 +435,13 @@ const TenantForm = ({ tenant, readOnly, onSubmit }) => {
                 <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)} aria-label={t('Delete')}><LuTrash2 className="size-4" /></Button>
               )}
             </div>
-            <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.contact`}>{t('Contact')}</Label><Input id={`contacts.${index}.contact`} disabled={readOnly} {...register(`contacts.${index}.contact`)} />{errors.contacts?.[index]?.contact && <p className="text-sm text-destructive">{errors.contacts[index].contact.message}</p>}</div>
-            <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.email`}>{t('Email')}</Label><Input id={`contacts.${index}.email`} disabled={readOnly} {...register(`contacts.${index}.email`)} />{errors.contacts?.[index]?.email && <p className="text-sm text-destructive">{errors.contacts[index].email.message}</p>}</div>
+            <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.contact`}>{t('Contact')}</Label><Input id={`contacts.${index}.contact`} disabled={readOnly} {...register(`contacts.${index}.contact`)} />{errors.contacts?.[index]?.contact && <p className="text-sm text-destructive">{t(errors.contacts[index].contact.message)}</p>}</div>
+            <div className="space-y-2 mb-2"><Label htmlFor={`contacts.${index}.email`}>{t('Email')}</Label><Input id={`contacts.${index}.email`} disabled={readOnly} {...register(`contacts.${index}.email`)} />{errors.contacts?.[index]?.email && <p className="text-sm text-destructive">{t(errors.contacts[index].email.message)}</p>}</div>
+            {/* The phone refine had no error node at all, so a bad phone made
+                Αποθήκευση a silent no-op. Render both. */}
             <div className="sm:flex sm:gap-2 mb-2">
-              <div className="space-y-2 flex-1"><Label htmlFor={`contacts.${index}.phone1`}>{t('Phone 1')}</Label><Input id={`contacts.${index}.phone1`} disabled={readOnly} {...register(`contacts.${index}.phone1`)} /></div>
-              <div className="space-y-2 flex-1"><Label htmlFor={`contacts.${index}.phone2`}>{t('Phone 2')}</Label><Input id={`contacts.${index}.phone2`} disabled={readOnly} {...register(`contacts.${index}.phone2`)} /></div>
+              <div className="space-y-2 flex-1"><Label htmlFor={`contacts.${index}.phone1`}>{t('Phone 1')}</Label><Input id={`contacts.${index}.phone1`} disabled={readOnly} {...register(`contacts.${index}.phone1`)} />{errors.contacts?.[index]?.phone1 && <p className="text-sm text-destructive">{t(errors.contacts[index].phone1.message)}</p>}</div>
+              <div className="space-y-2 flex-1"><Label htmlFor={`contacts.${index}.phone2`}>{t('Phone 2')}</Label><Input id={`contacts.${index}.phone2`} disabled={readOnly} {...register(`contacts.${index}.phone2`)} />{errors.contacts?.[index]?.phone2 && <p className="text-sm text-destructive">{t(errors.contacts[index].phone2.message)}</p>}</div>
             </div>
             <div className="space-y-2">
               <Label htmlFor={`contacts.${index}.notes`}>{t('Notes')}</Label>
