@@ -15,43 +15,91 @@ import { StoreContext } from '../../store';
 import { useForm } from 'react-hook-form';
 import { useContext, useMemo } from 'react';
 import useTranslation from 'next-translate/useTranslation';
+import {
+  isValidAFM,
+  isValidGreekPostalCode,
+  isValidIBAN,
+  isValidPhone,
+  optionalFormat
+} from '../../utils/fieldvalidators';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
-const schema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  atakPrefix: z.string().min(1),
-  yearBuilt: z.union([z.string(), z.number()]).optional(),
-  totalFloors: z.union([z.string(), z.number()]).optional(),
-  hasElevator: z.boolean(),
-  hasCentralHeating: z.boolean(),
-  heatingType: z.string().optional(),
-  address: z.object({
-    street1: z.string().optional(),
-    street2: z.string().optional(),
-    city: z.string().optional(),
-    zipCode: z.string().optional(),
-    state: z.string().optional(),
-    country: z.string().optional()
-  }),
-  manager: z
-    .object({
-      name: z.string().optional(),
-      phone: z.string().optional(),
-      email: z.string().optional(),
-      taxId: z.string().optional(),
-      company: z.string().optional()
-    })
-    .optional(),
-  bankInfo: z
-    .object({
-      name: z.string().optional(),
-      iban: z.string().optional()
-    })
-    .optional(),
-  notes: z.string().optional()
-});
+// The ΑΤΑΚ *prefix*: the 6-digit building-level part of an 11-digit ΑΤΑΚ. Do NOT
+// swap in isValidATAK from utils/fieldvalidators — that checks the full 11 digits
+// and would reject every legitimate prefix. 6 is the length e9parser and
+// occupantmanager both slice and compare, so any other length means imported
+// properties silently never link to this building.
+const ATAK_PREFIX_REGEX = /^[0-9]{6}$/;
+
+// Format rules mirror the server (services/api/src/validators.ts) via
+// utils/fieldvalidators.js. All of these fields are OPTIONAL — optionalFormat
+// treats empty as valid, so nothing here makes a field newly mandatory. That
+// matters on the EDIT form: existing buildings already hold an empty zipCode, and
+// a bare .refine() would have made them unsavable until refilled.
+//
+// Built per-building rather than as a module constant so the ΑΤΑΚ-prefix rule can
+// grandfather `currentAtakPrefix` — see the atakPrefix field below.
+const buildSchema = (currentAtakPrefix) =>
+  z.object({
+    name: z.string().trim().min(1),
+    description: z.string().optional(),
+    // The 6-digit rule is NEW, and this input is disabled once the building has
+    // units, so an older building holding a malformed prefix would resubmit it
+    // unchanged and be blocked from saving anything at all — address, IBAN and
+    // manager included — with the offending field greyed out. Accept the stored
+    // value as-is and only enforce the format on a value the landlord CHANGED.
+    // The server applies the same grandfathering.
+    atakPrefix: z
+      .string()
+      .trim()
+      .refine(
+        (v) =>
+          ATAK_PREFIX_REGEX.test(v) ||
+          (!!currentAtakPrefix && v === String(currentAtakPrefix).trim()),
+        { message: 'ATAK prefix must be exactly 6 digits' }
+      ),
+    yearBuilt: z.union([z.string(), z.number()]).optional(),
+    totalFloors: z.union([z.string(), z.number()]).optional(),
+    hasElevator: z.boolean(),
+    hasCentralHeating: z.boolean(),
+    heatingType: z.string().optional(),
+    address: z.object({
+      street1: z.string().optional(),
+      street2: z.string().optional(),
+      city: z.string().optional(),
+      zipCode: z
+        .string()
+        .optional()
+        .refine(optionalFormat(isValidGreekPostalCode), {
+          message: 'Postal code must be 5 digits'
+        }),
+      state: z.string().optional(),
+      country: z.string().optional()
+    }),
+    manager: z
+      .object({
+        name: z.string().optional(),
+        phone: z.string().optional().refine(optionalFormat(isValidPhone), {
+          message: 'This is not a valid phone number'
+        }),
+        email: z.string().optional(),
+        taxId: z.string().optional().refine(optionalFormat(isValidAFM), {
+          message: 'Invalid AFM checksum'
+        }),
+        company: z.string().optional()
+      })
+      .optional(),
+    bankInfo: z
+      .object({
+        name: z.string().optional(),
+        iban: z.string().optional().refine(optionalFormat(isValidIBAN), {
+          message: 'This is not a valid IBAN'
+        })
+      })
+      .optional(),
+    notes: z.string().optional()
+  });
 
 function Section({ label, children }) {
   return (
@@ -108,6 +156,13 @@ export default function BuildingForm({ building, onSubmit }) {
     [building]
   );
 
+  // Keyed on the building's STORED prefix so an existing malformed value stays
+  // savable (see buildSchema).
+  const schema = useMemo(
+    () => buildSchema(building?.atakPrefix),
+    [building?.atakPrefix]
+  );
+
   const {
     register,
     handleSubmit,
@@ -147,10 +202,12 @@ export default function BuildingForm({ building, onSubmit }) {
               id="atakPrefix"
               {...register('atakPrefix')}
               disabled={hasUnits}
+              inputMode="numeric"
+              maxLength={6}
             />
             {errors.atakPrefix && (
               <p className="text-sm text-destructive">
-                {errors.atakPrefix.message}
+                {t(errors.atakPrefix.message)}
               </p>
             )}
           </div>
@@ -238,7 +295,17 @@ export default function BuildingForm({ building, onSubmit }) {
         <div className="sm:flex sm:gap-2 mt-2">
           <div className="space-y-2 flex-1">
             <Label htmlFor="address.zipCode">{t('Zip code')}</Label>
-            <Input id="address.zipCode" {...register('address.zipCode')} />
+            <Input
+              id="address.zipCode"
+              {...register('address.zipCode')}
+              inputMode="numeric"
+              maxLength={5}
+            />
+            {errors.address?.zipCode && (
+              <p className="text-sm text-destructive">
+                {t(errors.address.zipCode.message)}
+              </p>
+            )}
           </div>
           <div className="space-y-2 flex-1">
             <Label htmlFor="address.city">{t('City')}</Label>
@@ -271,9 +338,16 @@ export default function BuildingForm({ building, onSubmit }) {
             const contact = org?.contacts?.[0] || {};
             setValue(
               'manager.name',
-              contact.name || (org?.isCompany ? org?.companyInfo?.legalRepresentative : org?.name) || ''
+              contact.name ||
+                (org?.isCompany
+                  ? org?.companyInfo?.legalRepresentative
+                  : org?.name) ||
+                ''
             );
-            setValue('manager.company', org?.isCompany ? org?.companyInfo?.name || org?.name || '' : '');
+            setValue(
+              'manager.company',
+              org?.isCompany ? org?.companyInfo?.name || org?.name || '' : ''
+            );
             setValue('manager.phone', contact.phone1 || contact.phone2 || '');
             setValue('manager.email', contact.email || '');
             setValue('manager.taxId', org?.companyInfo?.vatNumber || '');
@@ -295,6 +369,11 @@ export default function BuildingForm({ building, onSubmit }) {
           <div className="space-y-2 flex-1">
             <Label htmlFor="manager.phone">{t('Phone')}</Label>
             <Input id="manager.phone" {...register('manager.phone')} />
+            {errors.manager?.phone && (
+              <p className="text-sm text-destructive">
+                {t(errors.manager.phone.message)}
+              </p>
+            )}
           </div>
           <div className="space-y-2 flex-1">
             <Label htmlFor="manager.email">{t('Email')}</Label>
@@ -308,6 +387,11 @@ export default function BuildingForm({ building, onSubmit }) {
         <div className="space-y-2 mt-2">
           <Label htmlFor="manager.taxId">{t('Tax ID')}</Label>
           <Input id="manager.taxId" {...register('manager.taxId')} />
+          {errors.manager?.taxId && (
+            <p className="text-sm text-destructive">
+              {t(errors.manager.taxId.message)}
+            </p>
+          )}
         </div>
       </Section>
 
@@ -320,6 +404,11 @@ export default function BuildingForm({ building, onSubmit }) {
           <div className="space-y-2 flex-1">
             <Label htmlFor="bankInfo.iban">{t('IBAN')}</Label>
             <Input id="bankInfo.iban" {...register('bankInfo.iban')} />
+            {errors.bankInfo?.iban && (
+              <p className="text-sm text-destructive">
+                {t(errors.bankInfo.iban.message)}
+              </p>
+            )}
           </div>
         </div>
       </Section>

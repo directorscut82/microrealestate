@@ -8,19 +8,36 @@ const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 const TERM_RE = /^\d{10}$/;
 
 const EXPENSE_TYPES = [
-  'heating', 'elevator', 'cleaning', 'water_common',
-  'electricity_common', 'insurance', 'management_fee',
-  'garden', 'repairs_fund', 'pest_control', 'other'
+  'heating',
+  'elevator',
+  'cleaning',
+  'water_common',
+  'electricity_common',
+  'insurance',
+  'management_fee',
+  'garden',
+  'repairs_fund',
+  'pest_control',
+  'other'
 ] as const;
 
 const ALLOCATION_METHODS = [
-  'general_thousandths', 'heating_thousandths', 'elevator_thousandths',
-  'equal', 'by_surface', 'fixed', 'custom_ratio', 'custom_percentage',
+  'general_thousandths',
+  'heating_thousandths',
+  'elevator_thousandths',
+  'equal',
+  'by_surface',
+  'fixed',
+  'custom_ratio',
+  'custom_percentage',
   'single_unit'
 ] as const;
 
 const REPAIR_STATUSES = [
-  'planned', 'in_progress', 'completed', 'cancelled'
+  'planned',
+  'in_progress',
+  'completed',
+  'cancelled'
 ] as const;
 
 const CHARGEABLE_TO = ['owners', 'tenants', 'split'] as const;
@@ -111,10 +128,7 @@ export function validateObjectId(
   }
 }
 
-export function validateTerm(
-  term: unknown,
-  fieldName = 'term'
-): number {
+export function validateTerm(term: unknown, fieldName = 'term'): number {
   const s = String(term);
   if (!TERM_RE.test(s)) {
     throw new ServiceError(
@@ -146,16 +160,10 @@ export function validateFiniteNumber(
     throw new ServiceError(`${fieldName} must be a valid number`, 422);
   }
   if (min != null && n < min) {
-    throw new ServiceError(
-      `${fieldName} must be at least ${min}`,
-      422
-    );
+    throw new ServiceError(`${fieldName} must be at least ${min}`, 422);
   }
   if (max != null && n > max) {
-    throw new ServiceError(
-      `${fieldName} must be at most ${max}`,
-      422
-    );
+    throw new ServiceError(`${fieldName} must be at most ${max}`, 422);
   }
   return n;
 }
@@ -306,15 +314,19 @@ export function validateDateString(
   }
   const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
   if (!m) {
-    throw new ServiceError(
-      `${fieldName} must be in DD/MM/YYYY format`,
-      422
-    );
+    throw new ServiceError(`${fieldName} must be in DD/MM/YYYY format`, 422);
   }
   const day = Number(m[1]);
   const month = Number(m[2]);
   const year = Number(m[3]);
-  if (year < 1900 || year > 2999 || month < 1 || month > 12 || day < 1 || day > 31) {
+  if (
+    year < 1900 ||
+    year > 2999 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
     throw new ServiceError(`${fieldName} is not a valid date`, 422);
   }
   // Cross-check using Date — catches 31/02 etc.
@@ -368,10 +380,7 @@ export function validatePercentageAllocations(
       422
     );
   }
-  const sum = allocations.reduce(
-    (s, a) => s + (Number(a.value) || 0),
-    0
-  );
+  const sum = allocations.reduce((s, a) => s + (Number(a.value) || 0), 0);
   if (Math.abs(sum - 100) > 0.01) {
     throw new ServiceError(
       `Percentage allocations must sum to 100% (currently ${sum.toFixed(2)}%)`,
@@ -389,10 +398,7 @@ export function validateRatioAllocations(
 ): void {
   if (allocationMethod !== 'custom_ratio') return;
   if (!allocations || allocations.length === 0) return;
-  const total = allocations.reduce(
-    (s, a) => s + (Number(a.value) || 0),
-    0
-  );
+  const total = allocations.reduce((s, a) => s + (Number(a.value) || 0), 0);
   if (total <= 0) {
     throw new ServiceError(
       'custom_ratio requires at least one non-zero ratio value',
@@ -570,10 +576,7 @@ export function isValidGreekAFM(value: unknown): boolean {
   return check === parseInt(afm[8], 10);
 }
 
-export function validateGreekAFM(
-  value: unknown,
-  fieldName = 'taxId'
-): string {
+export function validateGreekAFM(value: unknown, fieldName = 'taxId'): string {
   if (!isValidGreekAFM(value)) {
     throw new ServiceError(
       `${fieldName} is not a valid Greek AFM (9 digits + checksum)`,
@@ -590,6 +593,27 @@ export function validateGreekAFM(
  */
 export function isValidATAK(value: unknown): boolean {
   return typeof value === 'string' && /^[0-9]{11}$/.test(value);
+}
+
+/**
+ * ΑΤΑΚ *prefix*: the first 6 digits of an 11-digit ΑΤΑΚ — the building-level
+ * part, shared by every unit in the building.
+ *
+ * DO NOT wire `isValidATAK` (above) here: that is the FULL 11-digit number and
+ * would reject every legitimate prefix. This is a separate rule, and 6 is not a
+ * guess — three consumers slice exactly 6 characters and compare for equality:
+ *   - e9parser.ts (`u.atakNumber.substring(0, 6)`) derives the building's
+ *     prefix from the imported units.
+ *   - occupantmanager.ts (`prefixMap.get(p.atakNumber.substring(0, 6))`) links
+ *     an imported property to its building by that exact key.
+ * So a prefix of any other length — or one carrying whitespace — never matches
+ * and the import silently links nothing, with no error anywhere. Trim before
+ * testing for the same reason `isValidGreekAFM` does: a value pasted out of an
+ * E9 statement routinely carries a trailing space or NBSP.
+ */
+export function isValidATAKPrefix(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  return /^[0-9]{6}$/.test(value.replace(/[\s\u00a0]+/g, ''));
 }
 
 /**
@@ -635,21 +659,36 @@ export function isValidIBAN(value: unknown): boolean {
 }
 
 /**
- * Phone number — accept country-code prefix + digits/spaces/parens/hyphens.
- * Length 6..30 chars total.
+ * Phone number — deliberately PERMISSIVE, and kept in sync with the client
+ * mirror in webapps/landlord/src/utils/fieldvalidators.js.
+ *
+ * This function had NO callers until a manager.phone guard was wired to it, so
+ * its original rule ("every character must be one of +0-9()- or space") had
+ * never been measured against real data. It rejects «210 1234567 εσωτ. 5» — a
+ * normal Greek entry naming an extension — and the client mirror was already
+ * loosened for exactly that false positive. Shipping the strict version as a
+ * 422 would have made the server refuse a value the form accepts.
+ *
+ * The DEFECT being closed is a field that accepted "abc-not-a-phone": letters
+ * with no usable number in them. So the rule is "enough digits, and digits
+ * dominate the content", which admits «εσωτ.»/«κιν.» notes and still rejects
+ * pure letters. A false positive on real data is worse than the hole.
  */
 export function isValidPhone(value: unknown): boolean {
-  return typeof value === 'string' && /^[+0-9\s()-]{6,30}$/.test(value);
+  if (typeof value !== 'string') return false;
+  const s = value.trim();
+  if (!s) return false;
+  const digits = (s.match(/[0-9]/g) || []).length;
+  if (digits < 8) return false;
+  const nonSpace = s.replace(/\s/g, '').length;
+  return digits >= Math.ceil(nonSpace * 0.4);
 }
 
 /**
  * Email — RFC-ish but pragmatic. Mirrors zod's email regex shape.
  */
 export function isValidEmail(value: unknown): boolean {
-  return (
-    typeof value === 'string' &&
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-  );
+  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 // Re-export constants for use in managers

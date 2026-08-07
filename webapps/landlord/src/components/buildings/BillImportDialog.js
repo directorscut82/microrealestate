@@ -184,11 +184,20 @@ function ResultCard({
                 <SelectValue placeholder={t('Select a building')} />
               </SelectTrigger>
               <SelectContent>
-                {(buildings || []).map((b) => (
-                  <SelectItem key={b._id} value={String(b._id)}>
-                    {b.name}
-                  </SelectItem>
-                ))}
+                {/* Label with the street (or, failing that, the ΑΤΑΚ prefix) as
+                    well as the name. Two buildings may legitimately share a name
+                    — only atakPrefix is de-duped — and on `b.name` alone this
+                    dropdown rendered two IDENTICAL options, so the landlord could
+                    not tell which building the bill would be charged to. A select
+                    with indistinguishable options is a shipped bug. */}
+                {(buildings || []).map((b) => {
+                  const qualifier = b.address?.street1 || b.atakPrefix;
+                  return (
+                    <SelectItem key={b._id} value={String(b._id)}>
+                      {qualifier ? `${b.name} — ${qualifier}` : b.name}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>

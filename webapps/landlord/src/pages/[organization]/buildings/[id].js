@@ -114,9 +114,16 @@ function Building() {
         await saveMutation.mutateAsync(data);
       } catch (error) {
         const status = error?.response?.status;
+        const serverMessage =
+          error?.response?.data?.error || error?.response?.data?.message;
         switch (status) {
           case 422:
-            return toast.error(t('Building name is missing'));
+            // Same label-contradicts defect the create dialog had: EVERY 422 was
+            // reported as "Building name is missing", including a duplicate ATAK
+            // prefix, a malformed IBAN, a bad manager ΑΦΜ and yearBuilt out of
+            // range. Prefer the server's own reason; keep the old string only as
+            // the fallback when the server sent none.
+            return toast.error(serverMessage || t('Building name is missing'));
           case 403:
             return toast.error(t('You are not allowed to update the building'));
           case 409:
@@ -138,7 +145,12 @@ function Building() {
       loading={isLoading}
       ActionBar={
         <div className="flex items-center justify-between gap-2">
-          <Button variant="ghost" size="sm" onClick={handleBack} className="gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleBack}
+            className="gap-2"
+          >
             <LuArrowLeft className="size-4" />
             {t('Back')}
           </Button>
@@ -163,9 +175,14 @@ function Building() {
       <Tabs
         defaultValue={
           typeof router.query.tab === 'string' &&
-          ['overview', 'units', 'expenses', 'contractors', 'documents', 'settings'].includes(
-            router.query.tab
-          )
+          [
+            'overview',
+            'units',
+            'expenses',
+            'contractors',
+            'documents',
+            'settings'
+          ].includes(router.query.tab)
             ? router.query.tab
             : 'overview'
         }
@@ -243,7 +260,9 @@ function Building() {
           <DocumentsPanel
             entity={{ buildingId: building?._id }}
             folder={`buildings/${building?.name || building?._id || ''}`}
-            description={t('Documents about this building (permits, invoices, certificates)')}
+            description={t(
+              'Documents about this building (permits, invoices, certificates)'
+            )}
           />
         </TabsContent>
         <TabsContent value="settings">
@@ -256,7 +275,10 @@ function Building() {
         title={t('Are you sure to definitely remove this building?')}
         subTitle={
           building?.units?.length
-            ? t('This will also remove {{count}} units. Occupied units will block deletion.', { count: building.units.length })
+            ? t(
+                'This will also remove {{count}} units. Occupied units will block deletion.',
+                { count: building.units.length }
+              )
             : building?.name
         }
         open={openConfirmDeleteBuilding}

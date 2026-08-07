@@ -25,6 +25,8 @@ import {
   validateSingleUnitAllocations,
   isValidGreekPostalCode,
   isValidIBAN,
+  isValidATAKPrefix,
+  isValidPhone,
   validateGreekAFM,
   EXPENSE_TYPES,
   ALLOCATION_METHODS,
@@ -822,6 +824,29 @@ export async function one(req: Req, res: Res) {
   return res.json(buildings[0]);
 }
 
+// The building `manager` subdoc — validated and normalised in ONE place because
+// add() and update() both assign it wholesale, and the whole class of hole this
+// closes was a guard that existed on one path only. Both fields are OPTIONAL by
+// design (a building with no named manager is normal), so an empty value is left
+// alone and only a NON-EMPTY one is format-checked. Returns the trimmed subdoc to
+// persist — testing `.trim()` while storing the raw value is what let a padded
+// ΑΦΜ through as a distinct identity from the same number unpadded.
+function _validateBuildingManager(manager: unknown) {
+  if (manager == null || typeof manager !== 'object') return manager;
+  const m = { ...(manager as Record<string, any>) };
+  if (typeof m.taxId === 'string') {
+    m.taxId = m.taxId.trim();
+    if (m.taxId) validateGreekAFM(m.taxId, 'manager.taxId');
+  }
+  if (typeof m.phone === 'string') {
+    m.phone = m.phone.trim();
+    if (m.phone && !isValidPhone(m.phone)) {
+      throw new ServiceError('manager.phone is not a valid phone number', 422);
+    }
+  }
+  return m;
+}
+
 export async function add(req: Req, res: Res) {
   const realm = req.realm;
   // Wave-21 C30-B5: strip server-owned identity fields from the payload.
@@ -838,6 +863,21 @@ export async function add(req: Req, res: Res) {
   }
   if (!req.body.atakPrefix?.trim()) {
     throw new ServiceError('ATAK prefix is missing', 422);
+  }
+  // NORMALISE, don't just test. The emptiness check above already read
+  // `.trim()`, but the value PERSISTED was `req.body.atakPrefix` verbatim, so a
+  // direct POST with " 005578 " stored the surrounding spaces. That is not
+  // cosmetic: the E9/tenant import links a property to its building with
+  // `prefixMap.get(atakNumber.substring(0, 6))` (occupantmanager.ts), an exact
+  // string compare against this field — a padded prefix never matches, so the
+  // import silently links nothing and reports success. Same reasoning for name
+  // and address.*, which are compared on the E9 building-consolidation path.
+  req.body.atakPrefix = req.body.atakPrefix.trim();
+  req.body.name = req.body.name.trim();
+  // 6 digits exactly — the length e9parser and occupantmanager both slice. See
+  // isValidATAKPrefix; this is NOT the 11-digit isValidATAK.
+  if (!isValidATAKPrefix(req.body.atakPrefix)) {
+    throw new ServiceError('atakPrefix must be exactly 6 digits', 422);
   }
 
   // Tier A3 — Building minimum-required at creation. Address fields
@@ -872,6 +912,19 @@ export async function add(req: Req, res: Res) {
   if (!isValidGreekPostalCode(addr.zipCode.trim())) {
     throw new ServiceError('address.zipCode must be 5 digits', 422);
   }
+  // Persist the TRIMMED address, for the same reason as atakPrefix above: every
+  // check here reads `.trim()` but `address` was assigned wholesale below, so a
+  // padded street1 was stored and then failed the exact-string compare the E9
+  // building-consolidation path does on `address.street1`.
+  req.body.address = {
+    ...addr,
+    street1: addr.street1.trim(),
+    city: addr.city.trim(),
+    zipCode: addr.zipCode.trim(),
+    ...(typeof addr.street2 === 'string' && { street2: addr.street2.trim() }),
+    ...(typeof addr.state === 'string' && { state: addr.state.trim() }),
+    ...(typeof addr.country === 'string' && { country: addr.country.trim() })
+  };
   validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
     min: 1800,
     max: 2099
@@ -916,16 +969,14 @@ export async function add(req: Req, res: Res) {
     throw new ServiceError('bankInfo.iban is not a valid IBAN', 422);
   }
 
-  // manager.taxId, same rule as update(). MEASURED against the deployed API: zipCode
-  // and iban were already refused here (422 each), but POST /buildings with
-  // manager.taxId "NOT-AN-AFM" returned 200 and PERSISTED it. The first version of
-  // this fix added the guard to update() only — the exact create/update asymmetry
-  // the same commit was written to close. A manager ΑΦΜ is an identity key the owner
-  // matcher compares on, so a malformed one merges distinct people.
-  const mgrTaxId = req.body?.manager?.taxId;
-  if (typeof mgrTaxId === 'string' && mgrTaxId.trim()) {
-    validateGreekAFM(mgrTaxId.trim(), 'manager.taxId');
-  }
+  // manager.taxId + manager.phone, same rule as update(). MEASURED against the
+  // deployed API: zipCode and iban were already refused here (422 each), but POST
+  // /buildings with manager.taxId "NOT-AN-AFM" returned 200 and PERSISTED it. The
+  // first version of this fix added the guard to update() only — the exact
+  // create/update asymmetry the same commit was written to close. A manager ΑΦΜ is
+  // an identity key the owner matcher compares on, so a malformed one merges
+  // distinct people. Use the ONE helper both paths call so they cannot drift again.
+  req.body.manager = _validateBuildingManager(req.body.manager);
 
   const existing = await Collections.Building.findOne({
     realmId: realm!._id,
@@ -1020,6 +1071,7 @@ export async function update(req: Req, res: Res) {
     if (typeof req.body.name !== 'string' || !req.body.name.trim()) {
       throw new ServiceError('Building name is missing', 422);
     }
+    req.body.name = req.body.name.trim();
   }
   if (req.body.atakPrefix !== undefined) {
     if (
@@ -1027,6 +1079,30 @@ export async function update(req: Req, res: Res) {
       !req.body.atakPrefix.trim()
     ) {
       throw new ServiceError('ATAK prefix is missing', 422);
+    }
+    // Trim BEFORE the duplicate lookup below as well as before persisting: an
+    // untrimmed " 005578 " both dodged the dup check (different string) and
+    // broke the substring(0,6) import link. Same rule add() applies.
+    req.body.atakPrefix = req.body.atakPrefix.trim();
+    if (!isValidATAKPrefix(req.body.atakPrefix)) {
+      // GRANDFATHER an unchanged legacy value. The 6-digit rule is new, so a
+      // building created before it may already hold a malformed prefix — and the
+      // edit form DISABLES this input once the building has units, so it resubmits
+      // the stored value unchanged. Rejecting that would make the whole building
+      // permanently unsavable: the landlord could not fix its address, IBAN or
+      // manager either, and nothing on screen would explain why. Only refuse a
+      // prefix the request is actually CHANGING. (Measured 2026-08-07: all 5
+      // buildings on the live realm are already 6-digit, so this path is for
+      // safety, not for known data.)
+      const current = await Collections.Building.findOne(
+        { _id: req.params.id, realmId: realm!._id },
+        { atakPrefix: 1 }
+      ).lean();
+      const unchanged =
+        current && (current as any).atakPrefix === req.body.atakPrefix;
+      if (!unchanged) {
+        throw new ServiceError('atakPrefix must be exactly 6 digits', 422);
+      }
     }
   }
   // ASYMMETRY FIX. add() validates address.zipCode against isValidGreekPostalCode
@@ -1043,17 +1119,28 @@ export async function update(req: Req, res: Res) {
       throw new ServiceError('address.zipCode must be 5 digits', 422);
     }
   }
+  if (req.body.address !== undefined && req.body.address !== null) {
+    // Persist the trimmed address here too — add() now does the same. Untrimmed
+    // street1 breaks the exact-string compare the E9 consolidation path uses.
+    const a = req.body.address as Record<string, any>;
+    req.body.address = Object.fromEntries(
+      Object.entries(a).map(([k, v]) => [
+        k,
+        typeof v === 'string' ? v.trim() : v
+      ])
+    );
+  }
   if (req.body.bankInfo?.iban !== undefined) {
     const iban = String(req.body.bankInfo.iban ?? '').trim();
     if (iban && !isValidIBAN(iban)) {
       throw new ServiceError('bankInfo.iban is not a valid IBAN', 422);
     }
+    req.body.bankInfo = { ...req.body.bankInfo, iban };
   }
-  // The manager subdoc was never validated on either path. Only check when a
-  // non-empty value is supplied — both fields are optional by design.
-  if (req.body.manager?.taxId !== undefined) {
-    const t = String(req.body.manager.taxId ?? '').trim();
-    if (t) validateGreekAFM(t, 'manager.taxId');
+  // The manager subdoc was never validated on either path. The ONE helper add()
+  // also calls — both fields optional, only a non-empty value is format-checked.
+  if (req.body.manager !== undefined) {
+    req.body.manager = _validateBuildingManager(req.body.manager);
   }
   if (req.body.yearBuilt !== undefined) {
     validateFiniteNumber(req.body.yearBuilt, 'yearBuilt', {
