@@ -116,3 +116,6 @@ __pycache__/
 # Ad-hoc driver scripts at the e2e root (same rationale as tests/_*.spec.ts:
 # throwaway probes that hardcode realm data while debugging a live surface).
 e2e-playwright/_*.mjs
+
+# Audit spec hand-off files for implementation agents (never commit — they quote live data)
+.audit-specs/
