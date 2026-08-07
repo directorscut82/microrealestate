@@ -1463,5 +1463,8 @@
   "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.": "Ενοίκιο 0 — αυτή η μίσθωση δεν θα χρεώσει τίποτα για όλη τη διάρκειά της και δεν παράγονται εγγραφές ενοικίου. Ορίστε ενοίκιο, εκτός αν αυτό είναι σκόπιμο.",
   "This is not a valid IBAN": "Μη έγκυρος IBAN",
   "This is not a valid phone number": "Μη έγκυρος αριθμός τηλεφώνου",
-  "Postal code must be 5 digits": "Ο Τ.Κ. πρέπει να έχει 5 ψηφία"
+  "Postal code must be 5 digits": "Ο Τ.Κ. πρέπει να έχει 5 ψηφία",
+  "Thousandths are a share of the building total, not of 1000": "Τα χιλιοστά είναι μερίδιο του συνόλου του κτηρίου, όχι του 1000",
+  "{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.": "{{label}}: {{typed}}‰ σε σύνολο κτηρίου {{total}}‰ — αυτή η μονάδα θα χρεωθεί {{pct}}% αυτών των δαπανών.",
+  "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.": "Συμπληρώστε τα χιλιοστά των υπόλοιπων μονάδων ώστε το κτήριο να αθροίζει 1000‰, διαφορετικά τα μερίδια παραμένουν μεγαλύτερα από το επιθυμητό."
 }

@@ -1442,5 +1442,8 @@
   "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.": "Rent 0 — this lease will bill nothing for its whole duration and no rent rows are produced. Set a rent unless this is deliberate.",
   "This is not a valid IBAN": "This is not a valid IBAN",
   "This is not a valid phone number": "This is not a valid phone number",
-  "Postal code must be 5 digits": "Postal code must be 5 digits"
+  "Postal code must be 5 digits": "Postal code must be 5 digits",
+  "Thousandths are a share of the building total, not of 1000": "Thousandths are a share of the building total, not of 1000",
+  "{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.": "{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.",
+  "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.": "Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended."
 }

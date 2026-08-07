@@ -90,7 +90,7 @@ const unitSchema = z.object({
 // an ObjectId which they had no way to find from the UI.
 const UNLINKED_VALUE = '__unlinked__';
 
-function UnitFormDialog({ open, setOpen, unit, buildingId }) {
+function UnitFormDialog({ open, setOpen, unit, buildingId, allUnits }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
@@ -194,6 +194,52 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
   const occupancyType = watch('occupancyType');
   const propertyIdValue = watch('propertyId');
   const ownersValue = watch('owners');
+  const generalThousandthsValue = watch('generalThousandths');
+  const heatingThousandthsValue = watch('heatingThousandths');
+  const elevatorThousandthsValue = watch('elevatorThousandths');
+
+  // ‰ IS A SHARE OF THE ACTUAL SUM, NOT OF 1000. The engine divides by the sum
+  // across ALL building.units (1_base.ts:598 general, :605 heating, :612 elevator)
+  // — NOT by 1000. Only sum > 1000 is rejected (buildingmanager.ts:2320), so a
+  // building where ONE unit carries 500‰ and the rest are blank passes validation
+  // and then bills that single unit 500/500 = 100% of every shared expense. The
+  // landlord who typed "500" reasonably believes they set half.
+  // Show the share that will ACTUALLY be charged whenever the building's ‰ are
+  // materially incomplete. WARN only — a part-filled building mid-setup is a
+  // legitimate state, and blocking it would trap the landlord halfway.
+  const thousandthsShares = useMemo(() => {
+    const others = (allUnits || []).filter((u) => u._id !== unit?._id);
+    const fields = [
+      { key: 'generalThousandths', typed: generalThousandthsValue, label: t('General Thousandths') },
+      { key: 'heatingThousandths', typed: heatingThousandthsValue, label: t('Heating Thousandths') },
+      { key: 'elevatorThousandths', typed: elevatorThousandthsValue, label: t('Elevator Thousandths') }
+    ];
+    const out = [];
+    for (const f of fields) {
+      const mine = Number(f.typed) || 0;
+      if (!(mine > 0)) continue;
+      const othersSum = others.reduce((s2, u) => s2 + (Number(u[f.key]) || 0), 0);
+      const total = mine + othersSum;
+      if (total <= 0) continue;
+      // Only surface it when the building's ‰ are materially short of 1000 — at a
+      // full 1000 the typed value already IS the share and a note would be noise.
+      if (total >= 995) continue;
+      out.push({
+        label: f.label,
+        typed: mine,
+        total,
+        pct: Math.round((mine / total) * 1000) / 10
+      });
+    }
+    return out;
+  }, [
+    allUnits,
+    unit?._id,
+    generalThousandthsValue,
+    heatingThousandthsValue,
+    elevatorThousandthsValue,
+    t
+  ]);
 
   // Occupancy detection: is THIS unit's property rented by an active tenant?
   // Same rule the dashboard uses (BuildingDashboard tenantByPropertyId): skip
@@ -325,6 +371,31 @@ function UnitFormDialog({ open, setOpen, unit, buildingId }) {
                 {...register('elevatorThousandths')}
               />
             </div>
+            {thousandthsShares.length > 0 && (
+              <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-3 text-label text-ink space-y-1">
+                <div className="font-medium">
+                  {t('Thousandths are a share of the building total, not of 1000')}
+                </div>
+                {thousandthsShares.map((sh) => (
+                  <div key={sh.label}>
+                    {t(
+                      '{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.',
+                      {
+                        label: sh.label,
+                        typed: sh.typed,
+                        total: sh.total,
+                        pct: sh.pct
+                      }
+                    )}
+                  </div>
+                ))}
+                <div className="text-ink-muted">
+                  {t(
+                    'Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.'
+                  )}
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Switch
                 id="isManaged"
@@ -758,6 +829,7 @@ export default function UnitList({ building }) {
         setOpen={setOpenUnitDialog}
         unit={selectedUnit}
         buildingId={building?._id}
+        allUnits={units}
       />
 
       <ConfirmDialog
