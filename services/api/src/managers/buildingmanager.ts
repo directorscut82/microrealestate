@@ -916,6 +916,17 @@ export async function add(req: Req, res: Res) {
     throw new ServiceError('bankInfo.iban is not a valid IBAN', 422);
   }
 
+  // manager.taxId, same rule as update(). MEASURED against the deployed API: zipCode
+  // and iban were already refused here (422 each), but POST /buildings with
+  // manager.taxId "NOT-AN-AFM" returned 200 and PERSISTED it. The first version of
+  // this fix added the guard to update() only — the exact create/update asymmetry
+  // the same commit was written to close. A manager ΑΦΜ is an identity key the owner
+  // matcher compares on, so a malformed one merges distinct people.
+  const mgrTaxId = req.body?.manager?.taxId;
+  if (typeof mgrTaxId === 'string' && mgrTaxId.trim()) {
+    validateGreekAFM(mgrTaxId.trim(), 'manager.taxId');
+  }
+
   const existing = await Collections.Building.findOne({
     realmId: realm!._id,
     atakPrefix: req.body.atakPrefix
