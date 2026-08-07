@@ -1128,6 +1128,31 @@ async function _updateByTerm(
         _targetRent || {}
       );
 
+      // Decrement _runningOwedLines by an allocation batch. Match by
+      // lineKey when present; fall back to deducting from the first line
+      // of the same category for legacy {category, amount} allocations.
+      const _consumeOwed = (
+        entries: { category: string; lineKey?: string; amount: number }[]
+      ) => {
+        entries.forEach((entry) => {
+          const ek = entry.lineKey;
+          const ec = entry.category;
+          const eAmt = Number(entry.amount) || 0;
+          if (eAmt <= 0) return;
+          let toApply = eAmt;
+          for (const line of _runningOwedLines) {
+            if (toApply <= 0.005) break;
+            if (line.amount <= 0.005) continue;
+            const matches = ek ? line.lineKey === ek : line.category === ec;
+            if (!matches) continue;
+            const take = _round(Math.min(toApply, line.amount));
+            line.amount = _round(line.amount - take);
+            toApply = _round(toApply - take);
+            if (ek) break; // exact-match lineKey: only one line should match
+          }
+        });
+      };
+
       settlements.payments = paymentData.payments
         .filter(({ amount }: AnyRecord) =>
           Number.isFinite(Number(amount)) && Number(amount) >= 0.01
@@ -1153,34 +1178,48 @@ async function _updateByTerm(
               lineKey: a.lineKey ? String(a.lineKey) : undefined,
               amount: Number(a.amount)
             }));
+            _consumeOwed(allocation);
+            // A caller-supplied allocation that sums to LESS than the
+            // payment amount used to persist verbatim, so the difference
+            // was recorded as money attributed to NO line: it showed up
+            // in rent.total.payment but on no bullet, no pie bucket and no
+            // owed-line decrement (the Custom-split dialog let a 200€
+            // payment ship an allocation of 50€). Top the shortfall up by
+            // auto-spreading it over whatever is still owed; a genuine
+            // surplus (nothing left owed) allocates to nothing and remains
+            // the pre-existing credit-carry, which 5_balance represents.
+            // Do NOT "simplify" this away — the shortfall is silent money.
+            const explicitSum = _round(
+              allocation.reduce((s, a) => s + (Number(a.amount) || 0), 0)
+            );
+            const shortfall = _round(amt - explicitSum);
+            if (shortfall > 0.005) {
+              const topUp = _computeAutoSpreadLines(
+                shortfall,
+                _runningOwedLines
+              );
+              if (topUp.length) {
+                _consumeOwed(topUp);
+                // Fold a top-up into the explicit entry for the same line
+                // so the saved tile renders one bullet per line, not two.
+                topUp.forEach((up) => {
+                  const existing = allocation.find(
+                    (a) => a.lineKey && a.lineKey === up.lineKey
+                  );
+                  if (existing) {
+                    existing.amount = _round(existing.amount + up.amount);
+                  } else {
+                    allocation.push(up);
+                  }
+                });
+              }
+            }
           } else {
             // Auto-spread against per-line owed. Emits {category,
             // lineKey, amount} per consumed line.
             allocation = _computeAutoSpreadLines(amt, _runningOwedLines);
+            _consumeOwed(allocation);
           }
-          // Decrement _runningOwedLines per allocation entry. Match
-          // by lineKey when present; fall back to deducting from the
-          // first line of the same category for legacy {category,
-          // amount} allocations.
-          allocation.forEach((entry) => {
-            const ek = entry.lineKey;
-            const ec = entry.category;
-            const eAmt = Number(entry.amount) || 0;
-            if (eAmt <= 0) return;
-            let toApply = eAmt;
-            for (const line of _runningOwedLines) {
-              if (toApply <= 0.005) break;
-              if (line.amount <= 0.005) continue;
-              const matches = ek
-                ? line.lineKey === ek
-                : line.category === ec;
-              if (!matches) continue;
-              const take = _round(Math.min(toApply, line.amount));
-              line.amount = _round(line.amount - take);
-              toApply = _round(toApply - take);
-              if (ek) break; // exact-match lineKey: only one line should match
-            }
-          });
           return {
             date: payment.date || '',
             amount: amt,

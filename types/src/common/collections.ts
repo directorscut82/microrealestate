@@ -565,6 +565,11 @@ export namespace CollectionTypes {
     payerId?: string;
     date: Date;
     reference?: string;
+    // Client idempotency key of the submit these rows belong to —
+    // addUncollectedPayment skips a submit whose key already landed, because
+    // the endpoint is append-only and a duplicate cannot be undone from the
+    // UI. Legacy rows have none.
+    txnId?: string | null;
   };
 
   export type OwnerMonthlyExpense = {

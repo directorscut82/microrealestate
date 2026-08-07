@@ -299,18 +299,25 @@ export default function AllocationBlock({
                 >
                   {t('Allocated')}: {fmt(customSum)} /{' '}
                   {fmt(amount)}
-                  {/* An ALL-zero custom map sends no allocation at all
-                      (PaymentTabs strips zero rows, then `if (allocation.length)`),
-                      so the server auto-spreads and nothing is unallocated —
-                      the old text claimed the whole payment was stranded. */}
+                  {/* Three distinct states, and conflating them was the bug:
+                      · all-zero custom map -> PaymentTabs strips zero rows and
+                        `if (allocation.length)` sends NOTHING, so the server
+                        auto-spreads. Nothing is stranded.
+                      · under-allocated -> the server tops the shortfall up over
+                        whatever is still owed and carries any surplus as credit
+                        (rentmanager.ts:1195 `shortfall`). Verified in the engine,
+                        not assumed. Saying merely "unallocated" implied the euros
+                        vanished.
+                      · over-allocated -> genuinely more than the payment. */}
                   {customSum < 0.005
                     ? ' — ' + t('auto-spread will be applied')
                     : Math.abs(customDelta) >= 0.005
                       ? ' — ' +
                         (customDelta > 0
-                          ? t('{{amount}} unallocated', {
-                              amount: fmt(customDelta)
-                            })
+                          ? t(
+                              '{{amount}} not allocated — spread over any remaining debt, surplus carried as credit',
+                              { amount: fmt(customDelta) }
+                            )
                           : t('{{amount}} over', {
                               amount: fmt(-customDelta)
                             }))

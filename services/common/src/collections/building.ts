@@ -323,7 +323,14 @@ const UncollectedPaymentSchema = new mongoose.Schema(
     paidByType: { type: String, enum: ['renter', 'owner'] },
     payerId: { type: String },
     date: { type: Date, required: true },
-    reference: { type: String, default: '' }
+    reference: { type: String, default: '' },
+    // Client idempotency key of the submit these rows belong to. The endpoint
+    // is APPEND-ONLY with no DELETE/PATCH, so a duplicate cannot be undone
+    // from the UI — a retry after a timeout that actually persisted silently
+    // doubled the building's covered figure. addUncollectedPayment skips a
+    // submit whose txnId already appears here. Optional: legacy rows and API
+    // callers that omit it keep the previous behavior.
+    txnId: { type: String, default: null }
   },
   { _id: false }
 );

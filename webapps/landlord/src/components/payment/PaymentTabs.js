@@ -519,6 +519,59 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
           return;
         }
       }
+      // The two date guards above walk the form DRAFTS only. An EDITED saved
+      // tile never passes through them (SavedPaymentEditForm only checks the
+      // date parses), so an out-of-range date on a saved tile reached the
+      // server and 422'd the whole PATCH — taking every other staged
+      // edit/delete in the dialog down with it, with the raw English server
+      // message in the Greek UI. Run the same two checks over savedPayments.
+      // Their dates are already in the persisted DD/MM/YYYY format, and both
+      // sides are parsed in UTC to match the server (mixing LOCAL here is the
+      // off-by-one class documented in CLAUDE.md).
+      for (const _saved of savedPayments) {
+        if (!_saved?.date || Number(_saved?.amount) <= 0) continue;
+        const _parsedSaved = moment.utc(_saved.date, 'DD/MM/YYYY', true);
+        if (!_parsedSaved.isValid()) continue;
+        if (
+          _termFirstDay &&
+          _termFirstDay.isValid() &&
+          _parsedSaved.isBefore(_termFirstDay)
+        ) {
+          toast.error(
+            t(
+              'Payment date is before this rent month. Switch to that month’s rents page to record against it.'
+            )
+          );
+          onError?.();
+          return;
+        }
+        if (_parsedSaved.isAfter(moment.utc().add(7, 'days'))) {
+          toast.error(t('Payment date cannot be more than 7 days in the future'));
+          onError?.();
+          return;
+        }
+      }
+      // A draft whose amount is empty/0 is dropped by the `amount > 0` filter
+      // below — silently taking its discount / extra charge / note with it,
+      // with no toast at all (_sum stays 0 and _savedTilesChanged stays false,
+      // so the dialog closes as if it saved). Block instead: those fields only
+      // reach the server attached to a payment.
+      const _orphanDraft = _draftValues.find(
+        (d) =>
+          !(Number(d?.amount) > 0) &&
+          (Number(d?.promo) > 0 ||
+            Number(d?.extracharge) > 0 ||
+            String(d?.description || '').trim() !== '' ||
+            String(d?.notepromo || '').trim() !== '' ||
+            String(d?.noteextracharge || '').trim() !== '')
+      );
+      if (_orphanDraft) {
+        toast.error(
+          t('Add an amount, or clear the discount, extra charge and note.')
+        );
+        onError?.();
+        return;
+      }
       const clonedValues = _.cloneDeep(values);
       // Wave-26 round-3f: drafts come from the form (clonedValues.payments).
       // Existing/saved payments come from `savedPayments` state. We merge
@@ -579,6 +632,35 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
           // auto-spreads.
           return payment;
         });
+      // An over-allocated custom split (line inputs summing to MORE than the
+      // payment amount) was only styled red — submit went out and the server
+      // answered 422 'allocation total X exceeds payment amount Y', which the
+      // catch below toasts VERBATIM: raw English in the Greek UI. Short-circuit
+      // with a translated message. Derived from the resolved payload (not the
+      // raw custom map) so the check and the request can't disagree. The server
+      // 422 stays as the backstop for direct API callers.
+      const _overAllocated = [...savedPayments, ...drafts].find((p) => {
+        if (!Array.isArray(p?.allocation) || p.allocation.length === 0)
+          return false;
+        const allocSum = p.allocation.reduce(
+          (s, a) => s + (Number(a?.amount) || 0),
+          0
+        );
+        return allocSum > (Number(p.amount) || 0) + 0.005;
+      });
+      if (_overAllocated) {
+        const _allocSum = _overAllocated.allocation.reduce(
+          (s, a) => s + (Number(a?.amount) || 0),
+          0
+        );
+        toast.error(
+          t('Over-allocated by {{amount}}', {
+            amount: formatNumber(_allocSum - (Number(_overAllocated.amount) || 0))
+          })
+        );
+        onError?.();
+        return;
+      }
       // savedPayments dates are already in DD/MM/YYYY (the persisted
       // format); drafts were converted above. Both are now in the
       // server-expected shape.
@@ -678,8 +760,10 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
       rent.term,
       rent.year,
       t,
+      formatNumber,
       fields,
       allocState,
+      owedLines,
       savedPayments
     ]
   );

@@ -4371,6 +4371,18 @@ export async function addUncollectedPayment(req: Req, res: Res) {
     });
   }
   const payerId = String(req.body?.payerId || '').trim();
+  // Optional client idempotency key (see the txnId note on
+  // UncollectedPaymentSchema). Constrained to a safe charset so a hostile
+  // value can't smuggle anything into the ledger — mirrors ownermanager.pay().
+  validateStringField(req.body?.txnId, 'txnId', { max: 80, required: false });
+  const txnId =
+    typeof req.body?.txnId === 'string' &&
+    /^[A-Za-z0-9._-]{8,80}$/.test(req.body.txnId)
+      ? req.body.txnId
+      : null;
+  if (req.body?.txnId && !txnId) {
+    throw new ServiceError('txnId must be 8-80 chars of [A-Za-z0-9._-]', 422);
+  }
 
   const building = await Collections.Building.findOne({
     _id: id,
@@ -4382,6 +4394,26 @@ export async function addUncollectedPayment(req: Req, res: Res) {
   const year = Math.floor(Number(term) / 1000000);
   (building as any).uncollectedPayments =
     (building as any).uncollectedPayments || [];
+
+  // DEDUPE: this endpoint is append-only (routes.ts exposes no DELETE/PATCH for
+  // uncollectedPayments), so a duplicate cannot be undone from the UI — it just
+  // doubles the building's covered figure. A retry carrying a key that already
+  // landed is answered idempotently: nothing is written, and `alreadyRecorded`
+  // tells the dialog to warn rather than report a fresh success. Unlike
+  // ownermanager.pay() there is no partial-commit remainder to reconcile — the
+  // whole submit lands in ONE building.save(), so a key that appears at all
+  // means the whole amount landed.
+  if (txnId) {
+    const alreadyLanded = (building as any).uncollectedPayments.some(
+      (p: any) => p?.txnId && String(p.txnId) === txnId
+    );
+    if (alreadyLanded) {
+      const dupResult = await _toBuildingData(realm!._id, [
+        building!.toObject()
+      ]);
+      return res.json({ ...dupResult[0], alreadyRecorded: true });
+    }
+  }
 
   // Per-term OUTSTANDING gross = gross − already-recorded coverage for that term.
   const grossByTerm = await _uncollectedGrossByTerm(

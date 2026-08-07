@@ -75,6 +75,25 @@ export default function SavedPaymentEditForm({
     !!date &&
     moment(date, 'YYYY-MM-DD', true).isValid();
 
+  // A legacy stored type ('levy' — dropped from the dropdown but still in the
+  // zod enum and PAYMENT_TYPES so old records re-save) has no matching
+  // SelectItem, and Radix renders an EMPTY trigger for a value it can't find:
+  // the read-only tile above said «Εισφορά» while the control showed nothing.
+  // Append the current type as a disabled option so the trigger renders its
+  // label. Disabled because it must not become a NEW choice — it is only here
+  // to describe what is already stored.
+  const typeItems = paymentTypes.itemList.some((pt) => pt.value === type)
+    ? paymentTypes.itemList
+    : [
+        ...paymentTypes.itemList,
+        {
+          id: `legacy-${type}`,
+          value: type,
+          label: t(type ? type[0].toUpperCase() + type.slice(1) : 'Type'),
+          disabled: true
+        }
+      ];
+
   return (
     <div>
       <div className="text-sm text-amber-700 mb-2">
@@ -103,7 +122,7 @@ export default function SavedPaymentEditForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {paymentTypes.itemList.map((pt) => (
+              {typeItems.map((pt) => (
                 <SelectItem
                   key={pt.id}
                   value={pt.value}

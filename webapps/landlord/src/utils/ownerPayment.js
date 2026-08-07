@@ -2,6 +2,8 @@
  * Owner-καταβολή helpers shared by the OwnerPaymentDialog and its tests.
  */
 
+import { digest64 } from './txnId';
+
 const _round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
@@ -39,23 +41,7 @@ export function stableOwnerTxnId(ownerKey, payload) {
     (payload?.reference || '').trim(),
     alloc
   ].join('|');
-  // TWO independent 32-bit passes (djb2-xor and FNV-1a) → a 64-bit combined
-  // digest. One 32-bit hash is thin for money: with a few hundred payments per
-  // owner, birthday collisions (~n²/2³³) reach the 0.01% band, and a collision
-  // with an OLD payment silently shrinks a new payment's allocation (Step-7
-  // round-6). At 64 bits the same band needs ~10⁹ payments — unreachable.
-  let h1 = 5381;
-  let h2 = 0x811c9dc5;
-  for (let i = 0; i < basis.length; i++) {
-    const c = basis.charCodeAt(i);
-    // eslint-disable-next-line no-bitwise
-    h1 = ((h1 << 5) + h1) ^ c;
-    // eslint-disable-next-line no-bitwise
-    h2 = Math.imul(h2 ^ c, 0x01000193);
-  }
-  // eslint-disable-next-line no-bitwise
-  const hex1 = (h1 >>> 0).toString(16).padStart(8, '0');
-  // eslint-disable-next-line no-bitwise
-  const hex2 = (h2 >>> 0).toString(16).padStart(8, '0');
-  return `own-${hex1}${hex2}`;
+  // 64-bit two-pass digest — see utils/txnId.js for why 32 bits is too thin
+  // for money. Shared with the building-coverage key so the two can't drift.
+  return `own-${digest64(basis)}`;
 }
