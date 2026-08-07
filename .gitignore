@@ -119,3 +119,8 @@ e2e-playwright/_*.mjs
 
 # Audit spec hand-off files for implementation agents (never commit — they quote live data)
 .audit-specs/
+
+# Throwaway root-level probe scripts (.ct/.mg2/.zt style): one-off node snippets used
+# to exercise a real decrypt / Mongoose schema / zod schema while debugging a live
+# surface. Same rationale as e2e-playwright/_*.mjs — they hardcode realm data.
+/.[a-z]*.cjs
