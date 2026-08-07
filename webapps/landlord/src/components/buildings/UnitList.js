@@ -372,12 +372,12 @@ function UnitFormDialog({ open, setOpen, unit, buildingId, allUnits }) {
               />
             </div>
             {thousandthsShares.length > 0 && (
-              <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-3 text-label text-ink space-y-1">
+              <div className="rounded-md border border-oxide/40 bg-oxide-tint/40 p-3 text-sm text-ink space-y-1">
                 <div className="font-medium">
                   {t('Thousandths are a share of the building total, not of 1000')}
                 </div>
                 {thousandthsShares.map((sh) => (
-                  <div key={sh.label}>
+                  <div key={sh.label} className="text-label">
                     {t(
                       '{{label}}: {{typed}}‰ of a building total of {{total}}‰ — this unit will be charged {{pct}}% of these expenses.',
                       {
@@ -389,7 +389,7 @@ function UnitFormDialog({ open, setOpen, unit, buildingId, allUnits }) {
                     )}
                   </div>
                 ))}
-                <div className="text-ink-muted">
+                <div className="text-label text-ink-muted">
                   {t(
                     'Fill in the other units’ thousandths so the building totals 1000‰, otherwise these shares stay higher than intended.'
                   )}
