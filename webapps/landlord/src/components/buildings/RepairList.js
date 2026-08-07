@@ -65,6 +65,17 @@ const repairCategories = [
   'other'
 ];
 
+// `name (specialty)` alone rendered two IDENTICAL options when a building held
+// two contractors of the same trade with the same name, so the landlord could
+// not tell which one a repair's cost would be attributed to. Append the first
+// available discriminator (company, then phone, then Tax ID) — never invent one
+// and never drop the trade, which is the primary way the list is scanned.
+function _contractorLabel(c, t) {
+  const base = `${c.name} (${t(c.specialty)})`;
+  const extra = c.company || c.phone || c.taxId;
+  return extra ? `${base} — ${extra}` : base;
+}
+
 const repairStatuses = ['planned', 'in_progress', 'completed', 'cancelled'];
 
 const repairUrgencies = ['emergency', 'normal', 'low'];
@@ -1228,7 +1239,7 @@ const RepairList = forwardRef(function RepairList({ building }, ref) {
                       <SelectItem value="__none__">{t('None')}</SelectItem>
                       {contractors.map((c) => (
                         <SelectItem key={c._id} value={c._id}>
-                          {c.name} ({t(c.specialty)})
+                          {_contractorLabel(c, t)}
                         </SelectItem>
                       ))}
                     </SelectContent>

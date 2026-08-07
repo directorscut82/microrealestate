@@ -77,10 +77,12 @@ export function DatePickerInput({
           mode="single"
           selected={parsed || undefined}
           onSelect={(d) => {
-            if (d) {
-              onChange?.(moment(d).format(format));
-              setOpen(false);
-            }
+            // react-day-picker emits `undefined` when the already-selected day
+            // is clicked again (deselect). Ignoring it made clearing a date
+            // impossible AND left the popover open, which read as a dead click.
+            // Every consumer's onChange already handles the empty string.
+            onChange?.(d ? moment(d).format(format) : '');
+            setOpen(false);
           }}
           initialFocus
         />

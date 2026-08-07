@@ -4948,6 +4948,46 @@ function _validateContractorIdentity(body: Record<string, any>) {
   }
 }
 
+// Two contractors sharing name+specialty+company are indistinguishable in the
+// repair-assignment dropdown (RepairList renders `name (specialty)`), so the
+// landlord cannot tell which one a repair's cost is attributed to. Reject the
+// duplicate on BOTH add and update — the client refine is convenience only,
+// this endpoint is callable directly. A shared taxId is rejected on its own:
+// one ΑΦΜ is one legal contractor.
+//
+// Deliberately NOT a uniqueness rule on name alone: two different trades can
+// legitimately share a name, and so can two firms of the same trade when the
+// company differs.
+function _assertContractorNotDuplicate(
+  contractors: any[],
+  candidate: { name?: unknown; specialty?: unknown; company?: unknown; taxId?: unknown },
+  excludeId?: string
+): void {
+  const _norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
+  const others = (contractors || []).filter(
+    (c: any) => String(c?._id) !== String(excludeId)
+  );
+  const sameIdentity = others.some(
+    (c: any) =>
+      _norm(c.name) === _norm(candidate.name) &&
+      _norm(c.specialty) === _norm(candidate.specialty) &&
+      _norm(c.company) === _norm(candidate.company)
+  );
+  if (sameIdentity) {
+    throw new ServiceError(
+      'A contractor with this name and specialty already exists on this building',
+      422
+    );
+  }
+  const taxId = _norm(candidate.taxId);
+  if (taxId && others.some((c: any) => _norm(c.taxId) === taxId)) {
+    throw new ServiceError(
+      'A contractor with this Tax ID already exists',
+      422
+    );
+  }
+}
+
 export async function addContractor(req: Req, res: Res) {
   const realm = req.realm;
   const { id } = req.params;
@@ -4973,6 +5013,8 @@ export async function addContractor(req: Req, res: Res) {
   });
 
   _findBuilding(building, id);
+
+  _assertContractorNotDuplicate((building as any).contractors, req.body);
 
   (building as any).contractors.push(req.body);
   (building as any).updatedDate = new Date();
@@ -5010,6 +5052,24 @@ export async function updateContractor(req: Req, res: Res) {
   if (!contractor) {
     throw new ServiceError('Contractor does not exist', 404);
   }
+
+  // Compare the POST-PATCH identity, not the raw body — a PATCH that only
+  // sends `phone` would otherwise be checked against an undefined name and
+  // could rename a contractor onto its twin field-by-field.
+  const _pick = (field: string) =>
+    Object.prototype.hasOwnProperty.call(req.body, field)
+      ? req.body[field]
+      : contractor[field];
+  _assertContractorNotDuplicate(
+    (building as any).contractors,
+    {
+      name: _pick('name'),
+      specialty: _pick('specialty'),
+      company: _pick('company'),
+      taxId: _pick('taxId')
+    },
+    contractorId
+  );
 
   contractor.set(req.body);
   (building as any).updatedDate = new Date();

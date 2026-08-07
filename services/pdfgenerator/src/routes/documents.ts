@@ -1125,6 +1125,46 @@ export default function () {
         throw new ServiceError('templateId required for non-file documents', 422);
       }
 
+      // A template with hasExpiryDate=true declares that this document expires.
+      // Persisting it with NO expiryDate makes it count as PERMANENTLY
+      // satisfying the requirement — occupantmanager's filesToUpload scan reads
+      // a missing expiryDate as never-expires (`expiryDate ? … : true`), so the
+      // expired scan never resurfaces as missing. Require the date the template
+      // asked for. Scoped to a resolved fileDescriptor template, so the
+      // template-less direct uploads (E9 / lease-PDF import, DocumentsPanel)
+      // are unaffected.
+      //
+      // Deliberately NOT rejecting a PAST expiryDate: back-filing an
+      // already-expired scan for the record is a legitimate workflow. The
+      // landlord UI warns at entry instead.
+      if (
+        template &&
+        template.type === 'fileDescriptor' &&
+        template.hasExpiryDate === true
+      ) {
+        if (!dataSet.expiryDate) {
+          throw new ServiceError(
+            'expiryDate is required for this document template',
+            422
+          );
+        }
+      }
+      // An unparseable expiryDate would reach the Date-typed schema field and
+      // surface as an opaque Mongoose CastError 500. Validate explicitly.
+      if (dataSet.expiryDate) {
+        const _expiry = moment.utc(
+          String(dataSet.expiryDate),
+          ['YYYY-MM-DD', 'DD/MM/YYYY', moment.ISO_8601],
+          true
+        );
+        if (!_expiry.isValid()) {
+          throw new ServiceError(
+            `expiryDate is not a valid date: ${String(dataSet.expiryDate)}`,
+            422
+          );
+        }
+      }
+
       const documentToCreate: any = {
         realmId: (req as any).realm._id,
         ...(dataSet.tenantId
