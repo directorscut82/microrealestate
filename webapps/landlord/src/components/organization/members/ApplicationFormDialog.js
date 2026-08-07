@@ -46,8 +46,16 @@ export default function ApplicationFormDialog({
   const { mutateAsync: mutateAppCredzAsync, isError: isAppCredzError } =
     useMutation({ mutationFn: createAppCredentials });
 
+  // Normalized so " Backup " cannot become a second row that renders as the
+  // identical «Backup» in the list — the landlord would then have no way to
+  // tell which credential the trash button revokes.
   const existingNames = useMemo(
-    () => organization?.applications.map(({ name }) => name) || [],
+    () =>
+      organization?.applications.map(({ name }) =>
+        String(name || '')
+          .trim()
+          .toLowerCase()
+      ) || [],
     [organization?.applications]
   );
 
@@ -56,9 +64,11 @@ export default function ApplicationFormDialog({
       z.object({
         name: z
           .string()
-          .min(1)
-          .refine((val) => !existingNames.includes(val), {
-            message: 'Name already exists'
+          .trim()
+          .min(1, { message: 'Name is required' })
+          .max(200, { message: 'Too long' })
+          .refine((val) => !existingNames.includes(val.toLowerCase()), {
+            message: 'An application with this name already exists'
           }),
         expiryDate: z.string().min(1).refine(
           (val) => moment(val).isValid() && moment(val).isAfter(moment(), 'days'),
@@ -105,13 +115,24 @@ export default function ApplicationFormDialog({
   const _onSubmit = useCallback(
     async (app) => {
       if (!store.user.isAdministrator) return;
+      // The picker names the LAST day the credential should work, so expiry is
+      // the END of that day. `moment('YYYY-MM-DD')` is local midnight, which
+      // killed the token at 00:00 of the very date Members.js prints as the
+      // expiry date. `.milliseconds(0)` keeps the JWT `exp` a whole number of
+      // seconds. Both the signed token and the stored row get the SAME instant
+      // — otherwise the list shows «Token is expired» while the token still
+      // works (or the reverse).
+      const expiry = moment(app.expiryDate).endOf('day').milliseconds(0);
       const appCredz = await mutateAppCredzAsync({
         organization,
-        expiryDate: moment(app.expiryDate)
+        expiryDate: expiry
       });
       await mutateAsync(
         mergeOrganization(organization, {
-          applications: [...organization.applications, { ...app, ...appCredz }]
+          applications: [
+            ...organization.applications,
+            { ...app, expiryDate: expiry.toDate(), ...appCredz }
+          ]
         })
       );
       handleClose(appCredz);
@@ -135,7 +156,7 @@ export default function ApplicationFormDialog({
             <div className="space-y-2">
               <Label htmlFor="name">{t('Name')}</Label>
               <Input id="name" {...register('name')} />
-              {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+              {errors.name && <p className="text-sm text-destructive">{t(errors.name.message)}</p>}
             </div>
             <div className="space-y-2">
               <Label>{t('Role')}</Label>
@@ -156,7 +177,7 @@ export default function ApplicationFormDialog({
                 min={moment().add(1, 'day').format('YYYY-MM-DD')}
                 {...register('expiryDate')}
               />
-              {errors.expiryDate && <p className="text-sm text-destructive">{errors.expiryDate.message}</p>}
+              {errors.expiryDate && <p className="text-sm text-destructive">{t(errors.expiryDate.message)}</p>}
             </div>
           </div>
         </form>

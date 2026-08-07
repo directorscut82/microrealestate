@@ -38,8 +38,19 @@ export default function MemberFormDialog({
     }
   });
 
+  // Normalized (trimmed + lowercased) so the duplicate check below matches the
+  // server's own dedupe key (realmmanager.update: email.trim().toLowerCase()).
+  // An exact comparison let "Admin@x.com" through while "admin@x.com" already
+  // existed; the server then collapsed the pair and resolved the role by rank,
+  // so the dialog closed with no error while either the submitted row vanished
+  // or the existing renter was silently promoted to administrator.
   const existingEmails = useMemo(
-    () => organization?.members.map(({ email }) => email) || [],
+    () =>
+      organization?.members.map(({ email }) =>
+        String(email || '')
+          .trim()
+          .toLowerCase()
+      ) || [],
     [organization?.members]
   );
 
@@ -48,10 +59,10 @@ export default function MemberFormDialog({
       z.object({
         email: z
           .string()
-          .email()
-          .min(1)
-          .refine((val) => !existingEmails.includes(val), {
-            message: 'Email already exists'
+          .trim()
+          .email({ message: 'Invalid email' })
+          .refine((val) => !existingEmails.includes(val.toLowerCase()), {
+            message: 'This email is already a collaborator (case is ignored)'
           }),
         role: z.string().min(1)
       }),
@@ -116,7 +127,9 @@ export default function MemberFormDialog({
               <Label htmlFor="email">{t('Email')}</Label>
               <Input id="email" {...register('email')} />
               {errors.email && (
-                <p className="text-sm text-destructive">{errors.email.message}</p>
+                <p className="text-sm text-destructive">
+                  {t(errors.email.message)}
+                </p>
               )}
             </div>
             <div className="space-y-2">

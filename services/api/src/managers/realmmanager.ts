@@ -117,6 +117,56 @@ function _isNameAlreadyTaken(realm: AnyRecord, realms: AnyRecord[] = []): void {
   }
 }
 
+// audit-2026-08: applications[].name was never validated — update() checked
+// only realm.name. A whitespace-only name persisted verbatim and rendered as a
+// nameless row in Settings → Access, and two rows with the same trimmed name
+// were indistinguishable, so revoking picked the wrong credential.
+//
+// Only rows NEW to the realm are validated. An already-known clientId has its
+// incoming version replaced by the stored one further down in update() (names
+// are not editable through this endpoint), so validating those could only
+// 422-lock a realm that already carries a legacy blank/duplicate name and never
+// let the admin save anything again.
+function _validateApplicationNames(
+  applications: unknown,
+  storedApplications: AnyRecord[] = []
+): void {
+  if (!Array.isArray(applications)) return;
+  const storedNameByClientId = new Map<unknown, string>(
+    storedApplications.map((a: AnyRecord) => [
+      a?.clientId,
+      String(a?.name || '')
+        .trim()
+        .toLowerCase()
+    ])
+  );
+  const seenNames = new Set<string>(); // trimmed + lowercased
+  applications.forEach((app: AnyRecord, i: number) => {
+    if (!app) return;
+    if (storedNameByClientId.has(app.clientId)) {
+      // A pre-existing credential: keep its STORED name in the taken-names set
+      // (not the payload's — that copy is discarded further down) so a new row
+      // cannot claim a name the list already shows.
+      const stored = storedNameByClientId.get(app.clientId);
+      if (stored) seenNames.add(stored);
+      return;
+    }
+    app.name = validateStringField(app.name, `applications[${i}].name`, {
+      min: 1,
+      max: 200,
+      required: true
+    });
+    const key = String(app.name).toLowerCase();
+    if (seenNames.has(key)) {
+      throw new ServiceError(
+        `applications[${i}].name is already used by another application`,
+        422
+      );
+    }
+    seenNames.add(key);
+  });
+}
+
 function _escapeSecrets(realm: AnyRecord): AnyRecord {
   if (realm.thirdParties?.gmail?.appPassword) {
     realm.thirdParties.gmail.appPassword = SECRET_PLACEHOLDER;
@@ -187,6 +237,11 @@ export async function add(req: Req, res: Res) {
   if (req.body.currency !== undefined) {
     validateCurrency(req.body.currency, 'currency');
   }
+
+  // Same applications[].name guard as update(). A brand-new realm has no
+  // stored applications, so every row in the payload counts as new.
+  // (members needs no dedupe guard here — it is force-injected above.)
+  _validateApplicationNames(req.body.applications, []);
 
   const newRealm: any = new Collections.Realm(req.body);
 
@@ -320,6 +375,7 @@ export async function update(req: Req, res: Res) {
   // Wave-21 C29-B2: dedupe members by email (case-insensitive). Without
   // this, a payload [{X,admin},{X,admin}] persists both rows, polluting
   // the access list. Conflicting roles resolve to administrator > renter.
+  const memberRoleCollisions = new Set<string>();
   if (Array.isArray(req.body.members)) {
     const ROLE_RANK: Record<string, number> = {
       administrator: 2,
@@ -336,6 +392,15 @@ export async function update(req: Req, res: Res) {
         byEmail.set(key, { ...member, email: member.email.trim() });
         continue;
       }
+      // audit-2026-08: the rank collapse below is a silent ROLE CHANGE when the
+      // two colliding rows disagree. "ADMIN@x" as administrator landing next to
+      // the stored "admin@x" as renter promoted that renter with no error and no
+      // new row in the list; the reverse order discarded the submitted row and
+      // still looked like a success. Record the collision — it is rejected after
+      // the realm is loaded, unless the realm already stores both variants.
+      if (String(existing.role || '') !== String(member.role || '')) {
+        memberRoleCollisions.add(key);
+      }
       const existingRank = ROLE_RANK[String(existing.role || '')] ?? -1;
       const incomingRank = ROLE_RANK[String(member.role || '')] ?? -1;
       if (incomingRank > existingRank) {
@@ -344,6 +409,8 @@ export async function update(req: Req, res: Res) {
     }
     req.body.members = Array.from(byEmail.values());
   }
+
+  _validateApplicationNames(req.body.applications, req.realm?.applications || []);
   if (req.body.name !== undefined) {
     req.body.name = validateStringField(req.body.name, 'name', {
       min: 1,
@@ -401,6 +468,34 @@ export async function update(req: Req, res: Res) {
 
   if (!previousRealm) {
     throw new ServiceError('organization not found', 404);
+  }
+
+  // audit-2026-08 (paired with the collision bookkeeping above): reject a
+  // payload that names the same person twice in different case with different
+  // roles, rather than letting the rank collapse promote or demote them
+  // silently. Collisions the realm ALREADY stores are exempt — a legacy realm
+  // holding both 'a@x' and 'A@x' would otherwise 422-lock on every unrelated
+  // settings save; those keep collapsing as before, which cleans the row up.
+  if (memberRoleCollisions.size) {
+    const preExisting = new Set<string>();
+    const seen = new Set<string>();
+    for (const m of (previousRealm.members || []) as AnyRecord[]) {
+      const key = String(m?.email || '')
+        .trim()
+        .toLowerCase();
+      if (!key) continue;
+      if (seen.has(key)) preExisting.add(key);
+      seen.add(key);
+    }
+    const introduced = Array.from(memberRoleCollisions).filter(
+      (key) => !preExisting.has(key)
+    );
+    if (introduced.length) {
+      throw new ServiceError(
+        `members contains the same email more than once with different roles (email addresses are case-insensitive): ${introduced.join(', ')}`,
+        422
+      );
+    }
   }
 
   // Deep-merge thirdParties so a PATCH that touches a single provider does

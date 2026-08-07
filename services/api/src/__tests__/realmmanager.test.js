@@ -15,7 +15,9 @@ const m = {
   documentDelete: jest.fn(),
   emailDelete: jest.fn(),
   billDelete: jest.fn(),
-  realmDelete: jest.fn()
+  realmDelete: jest.fn(),
+  realmFindOne: jest.fn(),
+  accountFind: jest.fn()
 };
 
 let realmManager;
@@ -37,7 +39,11 @@ beforeAll(async () => {
       Document: { deleteMany: (...args) => m.documentDelete(...args) },
       Email: { deleteMany: (...args) => m.emailDelete(...args) },
       Bill: { deleteMany: (...args) => m.billDelete(...args) },
-      Realm: { deleteOne: (...args) => m.realmDelete(...args) }
+      Realm: {
+        deleteOne: (...args) => m.realmDelete(...args),
+        findOne: (...args) => m.realmFindOne(...args)
+      },
+      Account: { find: (...args) => m.accountFind(...args) }
     },
     ServiceError,
     Crypto: { encrypt: (v) => `enc_${v}`, decrypt: (v) => v },
@@ -249,6 +255,209 @@ describe('realmmanager currency whitelist (round-2 H6)', () => {
     };
     await expect(realmManager.add(addReq, makeRes())).rejects.toThrow(
       /Invalid currency/
+    );
+  });
+});
+
+// ── audit-2026-08 (org batch): the member dedupe collapse and the total
+//    absence of an applications[].name check. Both let a PATCH look like a
+//    success while it either changed a role nobody asked to change or wrote a
+//    row the collaborator list cannot render distinguishably.
+describe('realmmanager members case-collision + applications[].name (audit-2026-08)', () => {
+  // A stored realm whose only member is the caller. previousRealm must expose
+  // toObject()/set()/save() the way a Mongoose doc does.
+  function mockStoredRealm(overrides = {}) {
+    const stored = {
+      _id: 'realm123',
+      name: 'Test Org',
+      locale: 'en',
+      currency: 'EUR',
+      members: [{ email: 'admin@x.com', role: 'administrator' }],
+      applications: [],
+      thirdParties: {},
+      ...overrides
+    };
+    const doc = {
+      ...stored,
+      toObject: () => JSON.parse(JSON.stringify(stored)),
+      set: jest.fn(),
+      save: jest.fn().mockResolvedValue(stored)
+    };
+    return doc;
+  }
+
+  function updateReq(bodyPart, realmPart = {}) {
+    return {
+      realm: {
+        _id: 'realm123',
+        name: 'Test Org',
+        applications: [],
+        ...realmPart
+      },
+      realms: [{ _id: { toString: () => 'realm123' }, name: 'Test Org' }],
+      user: { email: 'admin@x.com', role: 'administrator' },
+      body: {
+        _id: 'realm123',
+        name: 'Test Org',
+        locale: 'en',
+        currency: 'EUR',
+        members: [{ email: 'admin@x.com', role: 'administrator' }],
+        applications: [],
+        ...bodyPart
+      }
+    };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    m.realmFindOne.mockResolvedValue(mockStoredRealm());
+    m.accountFind.mockReturnValue({ lean: () => Promise.resolve([]) });
+  });
+
+  it('REJECTS the same email in different case with DIFFERENT roles (was a silent role escalation)', async () => {
+    // The UI sends the whole realm plus the new row. "ADMIN@x.com" as
+    // administrator next to the stored "admin@x.com" as renter used to collapse
+    // by ROLE_RANK, promoting the renter with no error and no new list row.
+    const req = updateReq({
+      members: [
+        { email: 'admin@x.com', role: 'renter' },
+        { email: 'ADMIN@x.com', role: 'administrator' }
+      ]
+    });
+    await expect(realmManager.update(req, makeRes())).rejects.toThrow(
+      /same email more than once with different roles/
+    );
+  });
+
+  it('REJECTS the reverse order too (the submitted row used to be silently discarded)', async () => {
+    const req = updateReq({
+      members: [
+        { email: 'Admin@X.com', role: 'renter' },
+        { email: 'admin@x.com', role: 'administrator' }
+      ]
+    });
+    await expect(realmManager.update(req, makeRes())).rejects.toThrow(/422|same email/);
+  });
+
+  it('ALLOWS a case collision when both rows carry the SAME role (idempotent resend, not a role change)', async () => {
+    const req = updateReq({
+      members: [
+        { email: 'admin@x.com', role: 'administrator' },
+        { email: 'ADMIN@X.com', role: 'administrator' }
+      ]
+    });
+    const res = makeRes();
+    await realmManager.update(req, res);
+    expect(res.json).toHaveBeenCalled();
+    expect(req.body.members).toHaveLength(1);
+  });
+
+  it('does NOT 422-lock a realm that ALREADY stores both case variants', async () => {
+    // Legacy data written before the dedupe existed. Blocking here would make
+    // every unrelated settings save fail forever; the collapse cleans it up.
+    m.realmFindOne.mockResolvedValue(
+      mockStoredRealm({
+        members: [
+          { email: 'admin@x.com', role: 'administrator' },
+          { email: 'ADMIN@x.com', role: 'renter' }
+        ]
+      })
+    );
+    const req = updateReq({
+      members: [
+        { email: 'admin@x.com', role: 'administrator' },
+        { email: 'ADMIN@x.com', role: 'renter' }
+      ]
+    });
+    const res = makeRes();
+    await realmManager.update(req, res);
+    expect(res.json).toHaveBeenCalled();
+  });
+
+  it('leaves a plain single-administrator payload untouched (no false positive)', async () => {
+    const req = updateReq({});
+    const res = makeRes();
+    await realmManager.update(req, res);
+    expect(res.json).toHaveBeenCalled();
+    // update() also stamps name/registered from the accounts lookup, so assert
+    // on the identity fields the guard could have changed.
+    expect(req.body.members).toHaveLength(1);
+    expect(req.body.members[0]).toMatchObject({
+      email: 'admin@x.com',
+      role: 'administrator'
+    });
+  });
+
+  it('REJECTS a whitespace-only applications[].name (used to persist a nameless row)', async () => {
+    const req = updateReq({
+      applications: [{ name: '   ', role: 'renter', clientId: 'c-new' }]
+    });
+    await expect(realmManager.update(req, makeRes())).rejects.toThrow(
+      /applications\[0\]\.name is required/
+    );
+  });
+
+  it('TRIMS a valid applications[].name', async () => {
+    const req = updateReq({
+      applications: [{ name: '  Backup  ', role: 'renter', clientId: 'c-new' }]
+    });
+    const res = makeRes();
+    await realmManager.update(req, res);
+    expect(req.body.applications[0].name).toBe('Backup');
+  });
+
+  it('REJECTS a new application whose trimmed/cased name duplicates an EXISTING credential', async () => {
+    const req = updateReq(
+      {
+        applications: [
+          { name: 'Backup', role: 'renter', clientId: 'c-old' },
+          { name: 'backup ', role: 'renter', clientId: 'c-new' }
+        ]
+      },
+      { applications: [{ name: 'Backup', clientId: 'c-old' }] }
+    );
+    await expect(realmManager.update(req, makeRes())).rejects.toThrow(
+      /applications\[1\]\.name is already used/
+    );
+  });
+
+  it('REJECTS two NEW applications submitted with the same name in one payload', async () => {
+    const req = updateReq({
+      applications: [
+        { name: 'Backup', role: 'renter', clientId: 'c-a' },
+        { name: ' BACKUP', role: 'renter', clientId: 'c-b' }
+      ]
+    });
+    await expect(realmManager.update(req, makeRes())).rejects.toThrow(
+      /applications\[1\]\.name is already used/
+    );
+  });
+
+  it('does NOT 422-lock a realm carrying a legacy blank application name', async () => {
+    // The stored row is skipped by clientId, so an unrelated save still goes
+    // through — otherwise the admin could never fix anything again.
+    const req = updateReq(
+      { applications: [{ name: '  ', role: 'renter', clientId: 'c-legacy' }] },
+      { applications: [{ name: '  ', clientId: 'c-legacy' }] }
+    );
+    const res = makeRes();
+    await realmManager.update(req, res);
+    expect(res.json).toHaveBeenCalled();
+  });
+
+  it('add() validates applications[].name too (create/update symmetry)', async () => {
+    const addReq = {
+      user: { email: 'admin@x.com', role: 'administrator' },
+      realms: [],
+      body: {
+        name: 'New Org',
+        locale: 'en',
+        currency: 'EUR',
+        applications: [{ name: '  ', role: 'renter', clientId: 'c-new' }]
+      }
+    };
+    await expect(realmManager.add(addReq, makeRes())).rejects.toThrow(
+      /applications\[0\]\.name is required/
     );
   });
 });
