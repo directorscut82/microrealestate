@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -90,6 +90,15 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
   });
 
   const tenantId = watch('tenantId');
+
+  // Same leak WITHIN one open dialog: the dashboard entry point renders a tenant
+  // Select, so the landlord can tick the write-off for tenant A and then switch
+  // the dropdown to tenant B without closing. The figures below recompute for B,
+  // but the ticked box would carry A's intent onto B's arrears. Untick whenever
+  // the subject changes — the landlord must opt in per tenant.
+  useEffect(() => {
+    setWriteOff(false);
+  }, [tenantId]);
 
   const tenants = useMemo(() => {
     if (tenantList) {
@@ -207,6 +216,13 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
   const handleClose = () => {
     setOpen(false);
     reset();
+    // `writeOff` is component state, and this dialog is MOUNTED ONCE by the
+    // dashboard shortcut (Shortcuts.js:154) and reused for whichever tenant is
+    // picked next. reset() only clears the react-hook-form fields, so a ticked
+    // write-off box survived a close and applied to a DIFFERENT tenant on the
+    // next open — silently discounting that tenant's arrears to zero. Clear it
+    // with the form.
+    setWriteOff(false);
   };
 
   const _onSubmit = async (tenantPart) => {
