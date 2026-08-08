@@ -371,7 +371,32 @@ export default function () {
     Middlewares.asyncWrapper(async (req, res) => {
       try {
         logger.debug(`generate pdf file for ${JSON.stringify(req.params)}`);
-        const realm = (req as any).realm;
+        let realm = (req as any).realm;
+
+        // TENANT SESSIONS CANNOT SUPPLY A REALM. checkOrganization resolves the realm
+        // for a cookie request from the organizationid header (middlewares.ts:238) —
+        // but the tenant app never sends one, and it CANNOT: the tenantapi payload
+        // deliberately omits the realm id (controllers/tenants.ts:147 exposes only
+        // landlord name/addresses/contacts/currency/locale). So every tenant invoice
+        // download 404'd on `organization required` — measured live: a valid, redis-
+        // registered tenant session got 404 for its OWN invoice.
+        // Resolve the realm from the TENANT instead, which is strictly safer than a
+        // client-supplied header: it cannot be spoofed. The ownership check below then
+        // binds that tenant to the session email.
+        if (!realm?._id && (req as any).user?.role === 'tenant') {
+          const idParam = req.params.id;
+          if (OBJECT_ID_RE.test(String(idParam))) {
+            const owner = await Collections.Tenant.findOne({ _id: idParam })
+              .populate('realmId')
+              .lean();
+            const resolved = (owner as any)?.realmId;
+            if (resolved?._id) {
+              realm = resolved;
+              (req as any).realm = resolved;
+            }
+          }
+        }
+
         if (!realm?._id) {
           throw new ServiceError('organization required', 404);
         }
