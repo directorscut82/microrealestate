@@ -350,9 +350,19 @@ export default function AllocationBlock({
               </tr>
             </thead>
             <tbody>
-              {visibleLines.map((l, i) => {
+              {visibleLines.map((l) => {
                 const before = l.amount;
-                const after = Number(remainingLines?.[i]?.amount) || 0;
+                // Match by lineKey, NOT by index. `remainingLines` mirrors
+                // payableLines, but this table iterates visibleLines — which FILTERS
+                // OUT zero-owed lines — so every row after a filtered one read a
+                // different line's remaining amount. Caught by screenshotting the
+                // deployed dialog: the «Μετά» column repeated «Πριν» verbatim
+                // (204,00 -> 204,00) while the credit line correctly showed the
+                // surplus, so a full payment looked like it settled nothing.
+                const rem = (remainingLines || []).find(
+                  (r) => r?.lineKey === l.lineKey
+                );
+                const after = Number(rem?.amount) || 0;
                 const delta = before - after;
                 return (
                   <tr key={l.lineKey}>
