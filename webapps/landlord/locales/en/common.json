@@ -1476,5 +1476,7 @@
   "If this email was new, your account is ready — otherwise sign in or reset your password": "If this email was new, your account is ready — otherwise sign in or reset your password",
   "ATAK must be exactly 11 digits": "ATAK must be exactly 11 digits",
   "DEH number must be 9 digits": "DEH number must be 9 digits",
-  "Rent is required": "Rent is required"
+  "Rent is required": "Rent is required",
+  "Must be at least 1": "Must be at least 1",
+  "Must be 1000 or less": "Must be 1000 or less"
 }

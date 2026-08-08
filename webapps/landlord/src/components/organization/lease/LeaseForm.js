@@ -24,7 +24,13 @@ function initValues(lease) {
     description: lease?.description || '',
     numberOfTerms: lease?.numberOfTerms || '',
     timeRange: lease?.timeRange || '',
-    active: lease?.active || true
+    // `lease?.active || true` is ALWAYS true — false || true === true. This form
+    // exposes no active control, so editing a description on a DEACTIVATED contract
+    // silently reactivated it: the card un-greyed and the contract reappeared as
+    // selectable in the tenant contract picker with no warning. ?? keeps a stored
+    // false, and the submit path below omits `active` entirely so the PATCH cannot
+    // flip a state this form does not own.
+    active: lease?.active ?? true
   };
 }
 
@@ -33,13 +39,37 @@ function getSchema(newLease, existingLeases) {
     .filter(({ _id }) => newLease?._id !== _id)
     .map(({ name }) => name);
 
+  // The server compares names TRIMMED and LOWERCASED (leasemanager.ts:67-80). An
+  // exact includes() let "  Basic" and "basic" through the client, and the resulting
+  // 422 rendered as "Some fields are missing", so the landlord retried the same input.
+  const normalized = existingNames.map((n) => String(n).trim().toLowerCase());
+
+  // numberOfTerms/timeRange are DISABLED when the contract is in use, and a legacy
+  // in-use contract with a missing numberOfTerms coerced '' -> 0 and failed min(1)
+  // under a field that cannot be edited — making name/description edits permanently
+  // impossible. The server protects both fields anyway (leasemanager.ts:174-187), so
+  // drop them from validation when they are not editable.
+  const usedByTenants = !!newLease?.usedByTenants;
+
   return z.object({
-    name: z.string().min(1).refine((val) => !existingNames.includes(val), {
-      message: 'Name already exists'
-    }),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .refine((val) => !normalized.includes(String(val).trim().toLowerCase()), {
+        message: 'Name already exists'
+      }),
     description: z.string().optional(),
-    numberOfTerms: z.coerce.number().int().min(1),
-    timeRange: z.string().min(1),
+    numberOfTerms: usedByTenants
+      ? z.any().optional()
+      : z.coerce
+          .number({ invalid_type_error: 'Must be at least 1' })
+          .int()
+          .min(1, { message: 'Must be at least 1' })
+          // The server caps at 1000 (leasemanager.ts:57-61); without a client max the
+          // rejection came back as "Some fields are missing".
+          .max(1000, { message: 'Must be 1000 or less' }),
+    timeRange: usedByTenants ? z.any().optional() : z.string().min(1),
     active: z.boolean()
   });
 }

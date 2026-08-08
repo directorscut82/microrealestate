@@ -11,7 +11,9 @@ import useTranslation from 'next-translate/useTranslation';
 
 const schema = z.object({
   _id: z.string().optional(),
-  name: z.string().min(1),
+  // Untrimmed, "   " satisfied min(1) and persisted a nameless descriptor that renders
+  // as a blank row and a blank select option.
+  name: z.string().trim().min(1),
   description: z.string().optional(),
   hasExpiryDate: z.boolean(),
   required: z.string()

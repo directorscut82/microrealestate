@@ -31,7 +31,10 @@ const _checkTemplateParameters = ({
   html
 }: Record<string, any>): string[] => {
   const errors: string[] = [];
-  if (!name) {
+  // `!name` accepts "   ". A whitespace-only name persists a NAMELESS descriptor: the
+  // document list renders an empty row and the upload dialog's template select shows a
+  // blank option — two such descriptors are indistinguishable from each other.
+  if (!name || !String(name).trim()) {
     errors.push('template name is missing');
   }
   if (!type) {

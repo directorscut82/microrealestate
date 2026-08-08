@@ -24,8 +24,15 @@ import useTranslation from 'next-translate/useTranslation';
 const TIME_RANGES = ['days', 'weeks', 'months', 'years'];
 
 const schema = z.object({
-  name: z.string().min(1),
-  numberOfTerms: z.coerce.number().int().min(1),
+  name: z.string().trim().min(1),
+  // Without an explicit message, an emptied field coerces to 0 and zodErrorMap maps
+  // every non-string too_small to «Πολύ μικρό» ("Too short") — a string-length message
+  // under a count field, with no hint that the minimum is 1.
+  numberOfTerms: z.coerce
+    .number({ invalid_type_error: 'Must be at least 1' })
+    .int()
+    .min(1, { message: 'Must be at least 1' })
+    .max(1000, { message: 'Must be 1000 or less' }),
   timeRange: z.enum(['days', 'weeks', 'months', 'years'])
 });
 
@@ -92,11 +99,17 @@ export default function NewLeaseDialog({ open, setOpen }) {
         const message = error?.response?.data?.message;
         switch (status) {
           case 422:
+            // A duplicate name is a 422 here, NOT a 409 — leasemanager.add throws
+            // ServiceError(422) at :76-79 and grep finds no 409 anywhere in the api.
+            // So the `case 409` branch below was dead and the translated «Η σύμβαση
+            // υπάρχει ήδη» could never render; the raw English server string showed on
+            // the Greek UI instead. Detect the duplicate and use the translation.
+            if (message && /already exists/i.test(message)) {
+              return toast.error(t('The contract already exists'));
+            }
             return toast.error(message || t('Contract name is missing'));
           case 403:
             return toast.error(t('You are not allowed to create a contract'));
-          case 409:
-            return toast.error(t('The contract already exists'));
           default:
             return toast.error(message || t('Something went wrong'));
         }

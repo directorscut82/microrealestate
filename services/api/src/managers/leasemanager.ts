@@ -80,7 +80,15 @@ export async function add(req: ReqNoParams, res: Res) {
   }
   const dbLease: any = new Collections.Lease({
     ...lease,
-    active: !!lease.active && !!lease.numberOfTerms && !!lease.timeRange,
+    // A brand-new contract created through NewLeaseDialog sends no `active` field, so
+    // `!!lease.active` made EVERY new contract active:false — it landed greyed out in
+    // the list and rendered `disabled` in the tenant contract picker with nothing
+    // explaining why it could not be used. Default a well-formed new lease to ACTIVE;
+    // only an explicit `active: false` deactivates.
+    active:
+      (lease.active === undefined ? true : !!lease.active) &&
+      !!lease.numberOfTerms &&
+      !!lease.timeRange,
     realmId: realm!._id
   });
   const savedLease: any = await dbLease.save();

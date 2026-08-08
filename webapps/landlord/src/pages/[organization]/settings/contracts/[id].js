@@ -68,14 +68,25 @@ function Contract() {
 
   const onLeaseAddUpdate = useCallback(
     async (leasePart) => {
-      const data = { ...lease, ...leasePart };
+      // Strip `active` from the form payload. This form has no active control, so its
+      // value is only ever the initValues default — and merging it over the stored
+      // lease silently REACTIVATED a deactivated contract on any unrelated edit. The
+      // active state is owned by the toggle on the contracts list page, which sends it
+      // deliberately.
+      const { active: _ignoredActive, ...editableLeasePart } = leasePart || {};
+      const data = { ...lease, ...editableLeasePart };
       try {
         await saveMutation.mutateAsync(data);
       } catch (error) {
         const status = error?.response?.status;
+        // The server says WHICH rule failed ("lease with name 'X' already exists",
+        // numberOfTerms out of range). «Λείπουν κάποια πεδία» on a filled form made the
+        // landlord retry the same input.
+        const apiMessage =
+          error?.response?.data?.message || error?.response?.data?.error;
         switch (status) {
           case 422:
-            return toast.error(t('Some fields are missing'));
+            return toast.error(apiMessage || t('Some fields are missing'));
           case 403:
             return toast.error(t('You are not allowed to update the contract'));
           case 404:
