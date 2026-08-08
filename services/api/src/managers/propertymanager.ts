@@ -13,6 +13,9 @@ import {
   validateEnum,
   sanitizeMongoObject,
   isValidGreekPostalCode,
+  isValidATAK,
+  isValidDEH,
+  isValidPhone,
   PROPERTY_TYPES
 } from '../validators.js';
 import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
@@ -151,6 +154,10 @@ export async function add(req: Req, res: Res) {
       422
     );
   }
+  // atakNumber / dehNumber / phone were never validated on EITHER path, though the
+  // first two are identity keys. Reuse the same helper update() calls so the two
+  // paths cannot drift apart again.
+  _validatePropertyFormats(req.body);
   validateFiniteNumber(req.body.landSurface, 'landSurface', {
     min: 0,
     max: 1000000
@@ -186,12 +193,59 @@ export async function add(req: Req, res: Res) {
   return res.json(properties[0]);
 }
 
+/**
+ * Identity + format fields shared by add() and update().
+ *
+ * WHY BOTH PATHS: add() has validated address.zipCode since :148, but update()
+ * validated NO address field at all, so every guard could be walked past by creating
+ * a property cleanly and then editing it. Same asymmetry as buildings.
+ *
+ * atakNumber and dehNumber are IDENTITY KEYS, not cosmetic text:
+ *   · atakNumber carries a unique partial index (common/collections/property.ts:61)
+ *     and the building auto-link is keyed on its first 6 chars
+ *     (occupantmanager.ts:634) — a malformed value silently attaches the property to
+ *     whichever building shares that prefix, or to none, and later E9 imports cannot
+ *     match it.
+ *   · dehNumber is an E9-import matching key, so garbage can match the wrong unit.
+ * Only non-empty values are checked: all three fields are optional by design.
+ */
+function _validatePropertyFormats(body: Record<string, any>) {
+  const addr = body?.address;
+  if (addr && typeof addr === 'object') {
+    if (addr.zipCode !== undefined) {
+      const zip = String(addr.zipCode ?? '').trim();
+      if (!zip || !isValidGreekPostalCode(zip)) {
+        throw new ServiceError('address.zipCode must be 5 digits', 422);
+      }
+    }
+  }
+  if (body?.atakNumber !== undefined) {
+    const v = String(body.atakNumber ?? '').trim();
+    if (v && !isValidATAK(v)) {
+      throw new ServiceError('atakNumber must be 11 digits', 422);
+    }
+  }
+  if (body?.dehNumber !== undefined) {
+    const v = String(body.dehNumber ?? '').trim();
+    if (v && !isValidDEH(v)) {
+      throw new ServiceError('dehNumber must be 9 digits', 422);
+    }
+  }
+  if (body?.phone !== undefined) {
+    const v = String(body.phone ?? '').trim();
+    if (v && !isValidPhone(v)) {
+      throw new ServiceError('phone is not a valid phone number', 422);
+    }
+  }
+}
+
 export async function update(req: Req, res: Res) {
   const realm = req.realm;
   const property = req.body;
 
   validateObjectId(property._id, 'property id');
   validateFiniteNumber(property.price, 'price', { min: 0, max: 10000000 });
+  _validatePropertyFormats(property);
   if (property.type !== undefined) {
     validateEnum(property.type, PROPERTY_TYPES, 'type');
   }

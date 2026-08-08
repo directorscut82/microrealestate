@@ -78,6 +78,12 @@ beforeAll(async () => {
     validateEnum: jest.fn(),
     sanitizeMongoObject: jest.fn((v) => v),
     isValidGreekPostalCode: jest.fn(() => true),
+    // unstable_mockModule REPLACES the module wholesale, so every export the module
+    // under test imports must be listed here or the import throws SyntaxError. These
+    // three were added to propertymanager alongside the create/update format guards.
+    isValidATAK: jest.fn(() => true),
+    isValidDEH: jest.fn(() => true),
+    isValidPhone: jest.fn(() => true),
     PROPERTY_TYPES: ['apartment', 'store', 'office', 'storage', 'parking']
   }));
   // Stub occupantmanager.js — it imports axios/nanoid and is irrelevant to a

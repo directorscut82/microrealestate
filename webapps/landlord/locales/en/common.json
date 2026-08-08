@@ -1473,5 +1473,8 @@
   "Passwords do not match": "Passwords do not match",
   "Confirm password": "Confirm password",
   "Too many attempts, please try again in a minute": "Too many attempts, please try again in a minute",
-  "If this email was new, your account is ready — otherwise sign in or reset your password": "If this email was new, your account is ready — otherwise sign in or reset your password"
+  "If this email was new, your account is ready — otherwise sign in or reset your password": "If this email was new, your account is ready — otherwise sign in or reset your password",
+  "ATAK must be exactly 11 digits": "ATAK must be exactly 11 digits",
+  "DEH number must be 9 digits": "DEH number must be 9 digits",
+  "Rent is required": "Rent is required"
 }

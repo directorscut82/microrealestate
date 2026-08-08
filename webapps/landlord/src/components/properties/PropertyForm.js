@@ -16,6 +16,13 @@ import {
 import PropertyIcon from './PropertyIcon';
 import types from './types';
 import useTranslation from 'next-translate/useTranslation';
+import {
+  isValidATAK,
+  isValidDEH,
+  isValidGreekPostalCode,
+  isValidPhone,
+  optionalFormat
+} from '../../utils/fieldvalidators';
 
 const optionalNumber = z.preprocess(
   (v) => (v === '' || v == null ? undefined : v),
@@ -28,10 +35,36 @@ const schema = z.object({
   description: z.string().trim().max(2000).optional(),
   surface: optionalNumber,
   landSurface: optionalNumber,
-  phone: z.string().trim().max(60).optional(),
+  phone: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .refine(optionalFormat(isValidPhone), {
+      message: 'This is not a valid phone number'
+    }),
   digicode: z.string().trim().max(60).optional(),
-  atakNumber: z.string().trim().max(60).optional(),
-  dehNumber: z.string().trim().max(60).optional(),
+  // ΑΤΑΚ is an IDENTITY KEY: it carries a unique partial index and the building
+  // auto-link matches on its first 6 characters, so a malformed value silently
+  // attaches the property to the wrong building — or to none — and later E9 imports
+  // cannot find it.
+  atakNumber: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .refine(optionalFormat(isValidATAK), {
+      message: 'ATAK must be exactly 11 digits'
+    }),
+  // ΔΕΗ number is an E9-import matching key — garbage here matches the wrong unit.
+  dehNumber: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .refine(optionalFormat(isValidDEH), {
+      message: 'DEH number must be 9 digits'
+    }),
   eydapNumber: z.string().trim().max(60).optional(),
   energyClass: z.string().trim().max(60).optional(),
   energyCertNumber: z.string().trim().max(60).optional(),
@@ -44,11 +77,28 @@ const schema = z.object({
     street1: z.string().trim().max(200).optional(),
     street2: z.string().trim().max(200).optional(),
     city: z.string().trim().max(120).optional(),
-    zipCode: z.string().trim().max(30).optional(),
+    zipCode: z
+      .string()
+      .trim()
+      .max(30)
+      .optional()
+      .refine(optionalFormat(isValidGreekPostalCode), {
+        message: 'Postal code must be 5 digits'
+      }),
     state: z.string().trim().max(120).optional(),
     country: z.string().trim().max(120).optional()
   }),
-  rent: z.coerce.number().min(0).max(10000000).finite()
+  // An EMPTY rent box coerced to 0 and saved silently as price 0, then re-rendered
+  // blank (property?.price || ''), so the landlord could not see that the rent had
+  // been zeroed. Treat '' as missing and say so instead.
+  rent: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.coerce
+      .number({ required_error: 'Rent is required' })
+      .min(0)
+      .max(10000000)
+      .finite({ message: 'Rent is required' })
+  )
 });
 
 function Section({ label, children }) {

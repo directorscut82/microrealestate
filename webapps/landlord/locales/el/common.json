@@ -1494,5 +1494,8 @@
   "Passwords do not match": "Οι κωδικοί δεν ταιριάζουν",
   "Confirm password": "Επιβεβαίωση κωδικού",
   "Too many attempts, please try again in a minute": "Πολλές προσπάθειες — δοκιμάστε ξανά σε ένα λεπτό",
-  "If this email was new, your account is ready — otherwise sign in or reset your password": "Αν το email ήταν καινούριο, ο λογαριασμός σας είναι έτοιμος — διαφορετικά συνδεθείτε ή επαναφέρετε τον κωδικό σας"
+  "If this email was new, your account is ready — otherwise sign in or reset your password": "Αν το email ήταν καινούριο, ο λογαριασμός σας είναι έτοιμος — διαφορετικά συνδεθείτε ή επαναφέρετε τον κωδικό σας",
+  "ATAK must be exactly 11 digits": "Το ΑΤΑΚ πρέπει να έχει ακριβώς 11 ψηφία",
+  "DEH number must be 9 digits": "Ο αριθμός ΔΕΗ πρέπει να έχει 9 ψηφία",
+  "Rent is required": "Το ενοίκιο είναι υποχρεωτικό"
 }

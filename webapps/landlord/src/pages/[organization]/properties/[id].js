@@ -197,9 +197,15 @@ function Property() {
         }
       } catch (error) {
         const status = error?.response?.status;
+        // The server names the field it rejected ("address.zipCode must be 5 digits",
+        // "atakNumber must be 11 digits", "price must be <= 10000000"). Hardcoding
+        // «Λείπει το όνομα του ακινήτου» told the landlord the NAME was missing while
+        // the name was filled and the real cause was the postcode, surface or price.
+        const apiMessage =
+          error?.response?.data?.message || error?.response?.data?.error;
         switch (status) {
           case 422:
-            return toast.error(t('Property name is missing'));
+            return toast.error(apiMessage || t('Property name is missing'));
           case 403:
             return toast.error(
               t('You are not allowed to update the property')
