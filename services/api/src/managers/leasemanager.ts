@@ -135,8 +135,17 @@ export async function update(req: ReqWithId, res: Res) {
     });
   }
 
+  // DO NOT default `active` on the update path. This computed a value from
+  // numberOfTerms/timeRange whenever the field was absent, so a PATCH that never
+  // mentions `active` — e.g. fixing a typo in the description — REVIVED a deliberately
+  // deactivated contract. Measured on the live API after the client-side fix alone:
+  //   create -> active=true; deactivate -> false; edit description -> active=TRUE again.
+  // The client no longer sends `active` from the edit form precisely so the stored state
+  // is preserved, and :213 already resolves `lease.active ?? existingLease?.active`,
+  // which keeps the persisted value when the key is absent. Deleting the key here is
+  // what makes that fallback reachable.
   if (lease.active === undefined) {
-    lease.active = lease.numberOfTerms > 0 && !!lease.timeRange;
+    delete lease.active;
   }
 
   // Fetch the existing lease BEFORE the in-use guard so we can compare the
