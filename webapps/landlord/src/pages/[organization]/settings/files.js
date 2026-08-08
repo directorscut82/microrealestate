@@ -103,6 +103,33 @@ function FileRow({ doc, entityLabel, onRename, onDelete }) {
                 ? ` · ${moment(doc.createdDate).format('DD/MM/YYYY')}`
                 : ''}
             </div>
+            {/* expiryDate was never read on this page, so on the ONLY realm-wide file
+                surface an EXPIRED document looked identical to a valid one — while the
+                tenant-side row (UploadFileItem.js:40-56) flagged it. Same 30-day
+                threshold as that component so the two surfaces agree. */}
+            {(() => {
+              if (!doc.expiryDate) return null;
+              const exp = moment(doc.expiryDate);
+              if (!exp.isValid()) return null;
+              const days = moment.duration(exp - moment()).asDays();
+              if (days >= 30) return null;
+              const expired = days < 0;
+              return (
+                <div
+                  className={
+                    expired
+                      ? 'text-label font-medium text-oxide'
+                      : 'text-label text-ink-muted'
+                  }
+                >
+                  {expired
+                    ? t('This document has expired')
+                    : t('This document will expire {{relativeDate}}', {
+                        relativeDate: exp.fromNow()
+                      })}
+                </div>
+              );
+            })()}
           </>
         )}
       </div>

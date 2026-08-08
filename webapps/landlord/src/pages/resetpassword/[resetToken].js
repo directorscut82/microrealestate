@@ -14,11 +14,17 @@ import useTranslation from 'next-translate/useTranslation';
 
 const schema = z
   .object({
-    password: z.string().min(1),
+    // Mirror the SERVER's MIN/MAX_PASSWORD_LENGTH (landlord.ts:523,529). At .min(1) the
+    // form submitted a 3-char password and the 422 surfaced as "some fields are missing".
+    password: z
+      .string()
+      .min(8, 'Password must be at least 8 characters')
+      .max(128, 'Password is too long'),
     confirmationPassword: z.string().min(1)
   })
   .refine((data) => data.password === data.confirmationPassword, {
-    message: 'Passwords must match',
+    // Rendered through t() below — this was a raw English literal on an all-Greek page.
+    message: 'Passwords do not match',
     path: ['confirmationPassword']
   });
 
@@ -40,11 +46,19 @@ export default function ResetPassword() {
 
   const resetPassword = async ({ password }) => {
     try {
-      const status = await store.user.resetPassword(resetToken, password);
+      const [status, apiMessage] = await store.user.resetPassword(
+        resetToken,
+        password
+      );
       if (status !== 200) {
         switch (status) {
           case 422:
-            toast.error(t('Some fields are missing'));
+            toast.error(apiMessage || t('Some fields are missing'));
+            return;
+          case 429:
+            toast.error(
+              apiMessage || t('Too many attempts, please try again in a minute')
+            );
             return;
           case 403:
             toast.error(t('Invalid reset link'));
@@ -82,7 +96,7 @@ export default function ResetPassword() {
               />
               {errors.password && (
                 <p className="text-sm text-destructive">
-                  {errors.password.message}
+                  {t(errors.password.message)}
                 </p>
               )}
             </div>
@@ -98,7 +112,7 @@ export default function ResetPassword() {
               />
               {errors.confirmationPassword && (
                 <p className="text-sm text-destructive">
-                  {errors.confirmationPassword.message}
+                  {t(errors.confirmationPassword.message)}
                 </p>
               )}
             </div>

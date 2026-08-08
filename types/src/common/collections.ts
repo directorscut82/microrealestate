@@ -38,6 +38,10 @@ export namespace CollectionTypes {
     email: string;
     password: string;
     createdDate?: Date;
+    // Set on every password change after creation. The refresh path rejects any token
+    // issued before this moment, which is how a password reset ends other sessions —
+    // Redis keys refresh tokens by their own value, so they cannot be enumerated.
+    passwordChangedAt?: Date;
   };
 
   export type Realm = {

@@ -147,14 +147,21 @@ export default class User {
     }
   }
 
+  // [status, message], matching signUp. The bare status meant every 422 rendered as
+  // «Λείπουν κάποια πεδία» on a fully-filled form when the real cause was a password
+  // under 8 or over 128 chars. `error.response` is also absent on a network failure,
+  // where `error.response.status` threw a second error and lost the original.
   async resetPassword(resetToken, password) {
     try {
       await apiFetcher().patch('/authenticator/landlord/resetpassword', {
         resetToken, password
       });
-      return 200;
+      return [200, null];
     } catch (error) {
-      return error.response.status;
+      return [
+        error?.response?.status ?? 0,
+        error?.response?.data?.message ?? null
+      ];
     }
   }
 }

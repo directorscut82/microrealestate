@@ -10,7 +10,7 @@ import {
   QueryKeys,
   updateLease
 } from '../../../../utils/restcalls';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../../../components/ui/button';
 import { cn } from '../../../../utils';
@@ -57,13 +57,21 @@ function LeasesSettings() {
     [leaseMutation]
   );
 
-  if (leasesQuery.isError) {
-    toast.error(t('Error fetching organizations'));
-  }
+  // These two toasts used to sit in the RENDER BODY, so they re-fired on every
+  // re-render for as long as isError held — a stack of duplicates. And the fetch error
+  // named "organizations" on the contracts page. Both moved into effects keyed on the
+  // error so each failure toasts exactly once.
+  useEffect(() => {
+    if (leasesQuery.isError) {
+      toast.error(t('Error fetching contracts'));
+    }
+  }, [leasesQuery.isError, t]);
 
-  if (leaseMutation.isError) {
-    toast.error(t('Error updating lease'));
-  }
+  useEffect(() => {
+    if (leaseMutation.isError) {
+      toast.error(t('Error updating lease'));
+    }
+  }, [leaseMutation.isError, t]);
 
   return (
     <Page
@@ -128,12 +136,12 @@ function LeasesSettings() {
                 <div className="flex items-center justify-end gap-2 mt-4">
                   <Label
                     className="text-xs text-muted-foreground font-normal"
-                    htmlFor="contract-active"
+                    htmlFor={`contract-active-${lease._id}`}
                   >
                     {t('Activate contract')}
                   </Label>
                   <Switch
-                    id="contract-active"
+                    id={`contract-active-${lease._id}`}
                     checked={lease.active}
                     onCheckedChange={(checked) =>
                       handleLeaseChange(checked, lease)

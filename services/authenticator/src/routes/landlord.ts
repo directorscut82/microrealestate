@@ -98,6 +98,32 @@ const _refreshTokens = async (oldRefreshToken: string): Promise<{ refreshToken?:
     return {};
   }
 
+  // REVOKE-ON-PASSWORD-CHANGE. Redis keys refresh tokens by the token value, so an
+  // account's live sessions cannot be enumerated and /resetpassword could not delete
+  // them — a stolen refresh token kept minting access tokens forever after the victim
+  // reset their password, while the UI implied the reset had ended other sessions.
+  // Compare the token's issued-at against the account's passwordChangedAt instead: any
+  // token minted BEFORE the last password change is dead. Accounts that have never
+  // changed a password have no stamp and are unaffected.
+  try {
+    const dbAccount = await Collections.Account.findOne({
+      email: String(account.email || '').toLowerCase()
+    });
+    const changedAt = (dbAccount as any)?.passwordChangedAt;
+    if (changedAt) {
+      const payload = jwt.decode(oldRefreshToken) as jwt.JwtPayload | null;
+      const iat = payload?.iat ? payload.iat * 1000 : 0;
+      if (iat && iat < new Date(changedAt).getTime()) {
+        logger.warn('refresh token predates the last password change — revoked');
+        return {};
+      }
+    }
+  } catch (exc) {
+    logger.error('passwordChangedAt check failed', {
+      error: (exc as Error)?.message
+    });
+  }
+
   return await _generateTokens(account);
 };
 

@@ -25,7 +25,14 @@ const AccountSchema = new mongoose.Schema<CollectionTypes.Account>({
     trim: true,
     required: true
   },
-  createdDate: { type: Date, default: () => new Date(), required: true }
+  createdDate: { type: Date, default: () => new Date(), required: true },
+  // Stamped whenever the password changes. A refresh token carries the account in its
+  // JWT payload and Redis keys it BY THE TOKEN VALUE, so there is no way to enumerate
+  // (and therefore revoke) an account's live sessions. Comparing this timestamp against
+  // the token's issued-at in the refresh path is what makes a password reset actually
+  // end other sessions — previously a stolen refresh token kept minting fresh access
+  // tokens indefinitely after the victim reset their password.
+  passwordChangedAt: { type: Date }
 });
 
 AccountSchema.index({ email: 1 }, { unique: true });
@@ -43,6 +50,12 @@ AccountSchema.pre('save', function (next) {
   // incident captured in CLAUDE.md.
   if (this.isModified('password')) {
     this.password = bcrypt.hashSync(this.password, 10);
+    // Only stamp on a REAL change, and never on the initial create (there are no
+    // sessions to revoke yet, and stamping would invalidate the token issued moments
+    // later by signup).
+    if (!this.isNew) {
+      this.passwordChangedAt = new Date();
+    }
   }
   next();
 });
