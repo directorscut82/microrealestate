@@ -62,11 +62,33 @@ export default function OTP({
         '/api/v2/authenticator/tenant/signedin',
         { otp: values.otp }
       );
-      if (response.status === 200 || response.status === 201) {
+      // Any 2xx is success — /signedin answers 204 on some paths, exactly like
+      // /signin did before that regression was fixed.
+      if (response.status >= 200 && response.status < 300) {
         return window.location.replace(`${getEnv('BASE_PATH')}/dashboard`);
       }
     } catch (error) {
       console.error(error);
+      // Only a 401 means the CODE is wrong. Every other failure (500, gateway down,
+      // network error) previously showed «Λανθασμένος κωδικός», so the tenant retyped
+      // a code that was actually valid until the 5-minute OTP window expired and they
+      // were locked out of a working credential by a misleading message.
+      const status = (error as { response?: { status?: number } })?.response
+        ?.status;
+      const isWrongCode = status === 401;
+      toast({
+        variant: 'destructive',
+        title: isWrongCode ? t('Invalid code') : t('Something went wrong'),
+        description: isWrongCode
+          ? t('The code entered is not valid.')
+          : t('Could not verify the code right now. Please try again.')
+      });
+      // Do NOT clear a code that may well be correct — only reset on a real 401.
+      if (isWrongCode) {
+        form.reset();
+      }
+      setLoading(false);
+      return;
     }
     toast({
       variant: 'destructive',

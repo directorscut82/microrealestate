@@ -57,5 +57,6 @@
   "transfer": "μεταφορά",
   "unpaid": "απλήρωτο",
   "Verification": "Επαλήθευση",
-  "Your email": "Το email σας"
+  "Your email": "Το email σας",
+  "Could not verify the code right now. Please try again.": "Δεν ήταν δυνατή η επαλήθευση του κωδικού αυτή τη στιγμή. Δοκιμάστε ξανά."
 }

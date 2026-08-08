@@ -62,6 +62,10 @@ export function InvoiceTable({ lease }: { lease: Lease }) {
       return lease.invoices.filter((invoice) => {
         let match = false;
         const mTerm = moment(String(invoice.term), 'YYYYMMDDHH');
+        // A DateRangePicker mid-selection has `from` set and `to` still undefined.
+        // Requiring BOTH meant every invoice vanished between the two clicks, with no
+        // empty-state, reading as "you have no invoices for this period". Treat a
+        // from-only range as an open-ended lower bound instead.
         if (filter.from && filter.to) {
           if (
             mTerm.isSameOrAfter(filter.from) &&
@@ -69,6 +73,12 @@ export function InvoiceTable({ lease }: { lease: Lease }) {
           ) {
             match = true;
           }
+        } else if (filter.from) {
+          if (mTerm.isSameOrAfter(filter.from)) {
+            match = true;
+          }
+        } else {
+          match = true;
         }
         return match;
       });

@@ -417,6 +417,34 @@ export default function () {
         if (!tenant) {
           throw new ServiceError('tenant not found', 404);
         }
+
+        // CROSS-TENANT AUTHORIZATION. The realm scoping above is NOT sufficient when
+        // the caller is a TENANT: needAccessToken accepts the tenant sessionToken
+        // (middlewares.ts:135) and checkOrganization resolves the realm from the
+        // CLIENT-SUPPLIED organizationid header for cookie requests, so a tenant could
+        // swap the id in /documents/invoice/<id>/<term> and receive ANOTHER tenant's
+        // invoice PDF — name, address, ΑΦΜ, rent and payment history.
+        // The tenant sessionToken carries { email, role: 'tenant' }
+        // (authenticator/routes/tenant.ts:162), so bind the requested tenant to that
+        // email. A landlord principal (role administrator/renter, or an application
+        // token) is unaffected: managing every tenant in the realm is the point.
+        const principal = (req as any).user;
+        if (principal?.role === 'tenant') {
+          const sessionEmail = String(principal.email || '')
+            .trim()
+            .toLowerCase();
+          const tenantEmails = ((tenant as any).contacts || [])
+            .map((c: any) => String(c?.email || '').trim().toLowerCase())
+            .filter(Boolean);
+          if (!sessionEmail || !tenantEmails.includes(sessionEmail)) {
+            // Log the ATTEMPT without the address itself — logs are shipped and this
+            // is a real person's email.
+            logger.warn(
+              `tenant session denied documents for tenant ${tenantId} (session email does not match tenant contacts)`
+            );
+            throw new ServiceError('forbidden', 403);
+          }
+        }
         // Pre-flight: at least ONE sub-term must have a matching rent
         // across all rents. The data picker at pdfgenerator/data/
         // index.js uses `terms.some(t => String(rent.term).startsWith(t))`
