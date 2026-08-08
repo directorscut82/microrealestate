@@ -24,8 +24,16 @@ import {
   optionalFormat
 } from '../../utils/fieldvalidators';
 
+// Same NaN trap as `rent` below: z.coerce.number() maps 'abc' to NaN and zod then
+// prints «Expected number, received nan» in English on the Greek UI. Typing letters in
+// Surface / Land surface hit exactly that. Non-numeric -> undefined, which for an
+// OPTIONAL field means "not provided" and passes, matching prior behaviour for empty.
 const optionalNumber = z.preprocess(
-  (v) => (v === '' || v == null ? undefined : v),
+  (v) => {
+    if (v === '' || v == null) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  },
   z.coerce.number().min(0).max(1000000).optional()
 );
 
@@ -91,13 +99,24 @@ const schema = z.object({
   // An EMPTY rent box coerced to 0 and saved silently as price 0, then re-rendered
   // blank (property?.price || ''), so the landlord could not see that the rent had
   // been zeroed. Treat '' as missing and say so instead.
+  // z.coerce.number() turns '' and 'abc' into NaN BEFORE required_error can fire, so
+  // the field rendered zod's raw English internals — «Expected number, received nan» —
+  // on the Greek UI. Reject non-numerics in the preprocessor instead, so both empty
+  // and garbage produce the translated message. Verified against real zod:
+  //   ''/null/'abc' -> «Το ενοίκιο είναι υποχρεωτικό»; '400' -> 400; 0 -> 0
   rent: z.preprocess(
-    (v) => (v === '' || v == null ? undefined : v),
-    z.coerce
-      .number({ required_error: 'Rent is required' })
+    (v) => {
+      if (v === '' || v == null) return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    },
+    z
+      .number({
+        required_error: 'Rent is required',
+        invalid_type_error: 'Rent is required'
+      })
       .min(0)
       .max(10000000)
-      .finite({ message: 'Rent is required' })
   )
 });
 
