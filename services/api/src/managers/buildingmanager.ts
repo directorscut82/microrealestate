@@ -4966,13 +4966,10 @@ const VALID_CONTRACTOR_SPECIALTIES = [
   'other'
 ];
 
-// Contractor identity fields. Measured against the live API: POST
-// /buildings/:id/contractors persisted taxId "NOT-AN-AFM" and phone
-// "letters-only" — `req.body` is pushed wholesale into the subdoc array, so
-// nothing but `specialty` and `name` was ever checked. A contractor's ΑΦΜ ends up
-// on repair invoices and in the owner statement, and a non-phone "phone" is a
-// contact nobody can call. Only validate a NON-EMPTY value: both fields are
-// optional by design.
+// Contractor identity fields. `req.body` is pushed wholesale into the subdoc
+// array, so only specialty and name were ever checked — yet a contractor's ΑΦΜ
+// reaches repair invoices and the owner statement. Non-empty values only: both
+// fields are optional by design.
 function _validateContractorIdentity(body: Record<string, any>) {
   if (body?.taxId !== undefined) {
     const t = String(body.taxId ?? '').trim();

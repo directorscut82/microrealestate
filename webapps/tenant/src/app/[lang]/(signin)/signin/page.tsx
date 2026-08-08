@@ -52,12 +52,10 @@ export default function SignIn() {
             email: values.email
           }
         );
-        // The endpoint answers 204 on EVERY success path — both the
-        // tenant-found and the tenant-not-found branch, deliberately, so the two
-        // are indistinguishable (services/authenticator/src/routes/tenant.ts:56
-        // and :98; measured live: POST returns 204). Testing for 200/201 therefore
-        // never matched: a tenant typed a valid email, the request succeeded, and
-        // the page just sat there with no redirect and no error. Accept any 2xx.
+        // The endpoint answers 204 on EVERY success path — tenant-found and
+        // tenant-not-found alike, deliberately, so the two are indistinguishable
+        // (authenticator/routes/tenant.ts:56 and :98). Testing for 200/201 matched
+        // neither, so a valid email succeeded and the page just sat there.
         if (response.status >= 200 && response.status < 300) {
           return router.replace(`/otp/${encodeURIComponent(values.email)}`);
         }

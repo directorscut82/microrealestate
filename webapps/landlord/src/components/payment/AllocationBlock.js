@@ -299,16 +299,11 @@ export default function AllocationBlock({
                 >
                   {t('Allocated')}: {fmt(customSum)} /{' '}
                   {fmt(amount)}
-                  {/* Three distinct states, and conflating them was the bug:
-                      · all-zero custom map -> PaymentTabs strips zero rows and
-                        `if (allocation.length)` sends NOTHING, so the server
-                        auto-spreads. Nothing is stranded.
-                      · under-allocated -> the server tops the shortfall up over
-                        whatever is still owed and carries any surplus as credit
-                        (rentmanager.ts:1195 `shortfall`). Verified in the engine,
-                        not assumed. Saying merely "unallocated" implied the euros
-                        vanished.
-                      · over-allocated -> genuinely more than the payment. */}
+                  {/* Three states that must not be conflated:
+                      · all-zero  -> PaymentTabs sends no allocation, server auto-spreads
+                      · under      -> server tops up the shortfall, surplus becomes credit
+                                      (rentmanager.ts:1195); nothing is stranded
+                      · over       -> genuinely more than the payment */}
                   {customSum < 0.005
                     ? ' — ' + t('auto-spread will be applied')
                     : Math.abs(customDelta) >= 0.005
@@ -352,13 +347,9 @@ export default function AllocationBlock({
             <tbody>
               {visibleLines.map((l) => {
                 const before = l.amount;
-                // Match by lineKey, NOT by index. `remainingLines` mirrors
-                // payableLines, but this table iterates visibleLines — which FILTERS
-                // OUT zero-owed lines — so every row after a filtered one read a
-                // different line's remaining amount. Caught by screenshotting the
-                // deployed dialog: the «Μετά» column repeated «Πριν» verbatim
-                // (204,00 -> 204,00) while the credit line correctly showed the
-                // surplus, so a full payment looked like it settled nothing.
+                // Match by lineKey, NOT by index: `remainingLines` mirrors
+                // payableLines while this table iterates visibleLines, which filters
+                // out zero-owed rows. Indexing here reported the wrong line as settled.
                 const rem = (remainingLines || []).find(
                   (r) => r?.lineKey === l.lineKey
                 );

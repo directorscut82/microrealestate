@@ -4,6 +4,7 @@ import {
   QueryKeys
 } from '../../utils/restcalls';
 import { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { isValidGreekPostalCode } from '../../utils/fieldvalidators';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -17,8 +18,6 @@ import useTranslation from 'next-translate/useTranslation';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
-// Greek postal code: 5 digits.
-const POSTAL_REGEX = /^[0-9]{5}$/;
 // The ΑΤΑΚ *prefix* is the 6-digit building-level part of an 11-digit ΑΤΑΚ. NOT
 // isValidATAK from utils/fieldvalidators — that is the full 11 digits and would
 // reject every legitimate prefix. 6 is the length three consumers slice and
@@ -34,7 +33,7 @@ const schema = z.object({
     .regex(ATAK_PREFIX_REGEX, 'ATAK prefix must be exactly 6 digits'),
   street1: z.string().trim().min(1),
   city: z.string().trim().min(1),
-  zipCode: z.string().trim().regex(POSTAL_REGEX, 'Postal code must be 5 digits')
+  zipCode: z.string().trim().refine(isValidGreekPostalCode, 'Postal code must be 5 digits')
 });
 
 export default function NewBuildingDialog({ open, setOpen }) {

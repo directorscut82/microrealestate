@@ -146,13 +146,10 @@ function Row({ children }) {
   );
 }
 
-// `Field` now renders the field's validation error itself. Before this, ONLY `rent`
-// had an error node (grep: 6 `errors.` refs, all rent/type), so atakNumber, dehNumber,
-// phone, address.zipCode, surface and landSurface had validation RULES with nowhere to
-// display them — the form just refused to save with nothing on screen. That is the
-// worst kind of validation, and reading the deployed Greek page is what exposed it:
-// «NOT-AN-ATAK» and a 3-digit ΤΚ sat in the form with no complaint.
-// `name` is a path ('address.zipCode' resolves through the nested errors object).
+// `Field` renders its own validation error, so a rule can never exist without a
+// place to show it — a form that refuses to save while displaying nothing is the
+// worst failure mode here. `name` is a path: 'address.zipCode' resolves through the
+// nested errors object.
 function Field({ children, name, errors, t }) {
   const err = name
     ? String(name)

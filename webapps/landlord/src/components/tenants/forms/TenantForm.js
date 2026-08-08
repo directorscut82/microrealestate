@@ -9,6 +9,7 @@ import { Separator } from '../../ui/separator';
 import { LuPlus, LuTrash2 } from 'react-icons/lu';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
+import { isValidAFM } from '../../../utils/fieldvalidators';
 
 const PHONE_REGEX = /^[+0-9\s()-]{6,30}$/;
 const optionalPhone = z
@@ -40,17 +41,6 @@ const contactSchema = z.object({
   notes: z.string().trim().max(2000).optional()
 });
 
-// Greek AFM checksum (modulo-11). Mirrors the server validator at
-// services/api/src/validators.ts isValidGreekAFM.
-const AFM_REGEX = /^[0-9]{9}$/;
-function isValidAFM(value) {
-  if (typeof value !== 'string' || !AFM_REGEX.test(value)) return false;
-  let sum = 0;
-  for (let i = 0; i < 8; i++) {
-    sum += parseInt(value[i], 10) * Math.pow(2, 8 - i);
-  }
-  return ((sum % 11) % 10) === parseInt(value[8], 10);
-}
 
 const schema = z
   .object({
@@ -65,7 +55,7 @@ const schema = z
     taxId: z
       .string()
       .trim()
-      .regex(AFM_REGEX, 'AFM must be 9 digits')
+      .regex(/^[0-9]{9}$/, 'AFM must be 9 digits')
       .refine(isValidAFM, { message: 'Invalid AFM checksum' }),
     phone: optionalPhone,
     email: z

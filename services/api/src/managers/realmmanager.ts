@@ -117,10 +117,9 @@ function _isNameAlreadyTaken(realm: AnyRecord, realms: AnyRecord[] = []): void {
   }
 }
 
-// audit-2026-08: applications[].name was never validated — update() checked
-// only realm.name. A whitespace-only name persisted verbatim and rendered as a
-// nameless row in Settings → Access, and two rows with the same trimmed name
-// were indistinguishable, so revoking picked the wrong credential.
+// applications[].name: a whitespace-only name renders as a nameless row in
+// Settings → Access, and two rows with the same trimmed name are
+// indistinguishable — so revoking picks the wrong credential.
 //
 // Only rows NEW to the realm are validated. An already-known clientId has its
 // incoming version replaced by the stored one further down in update() (names
@@ -392,7 +391,7 @@ export async function update(req: Req, res: Res) {
         byEmail.set(key, { ...member, email: member.email.trim() });
         continue;
       }
-      // audit-2026-08: the rank collapse below is a silent ROLE CHANGE when the
+      // The rank collapse below is a silent ROLE CHANGE when the
       // two colliding rows disagree. "ADMIN@x" as administrator landing next to
       // the stored "admin@x" as renter promoted that renter with no error and no
       // new row in the list; the reverse order discarded the submitted row and
@@ -470,7 +469,7 @@ export async function update(req: Req, res: Res) {
     throw new ServiceError('organization not found', 404);
   }
 
-  // audit-2026-08 (paired with the collision bookkeeping above): reject a
+  // Paired with the collision bookkeeping above: reject a
   // payload that names the same person twice in different case with different
   // roles, rather than letting the rank collapse promote or demote them
   // silently. Collisions the realm ALREADY stores are exempt — a legacy realm
