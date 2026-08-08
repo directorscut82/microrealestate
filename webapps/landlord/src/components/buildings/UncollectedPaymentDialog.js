@@ -1,5 +1,6 @@
 import ResponsiveDialog from '../ResponsiveDialog';
 import { addUncollectedPayment, QueryKeys } from '../../utils/restcalls';
+import { stableUncollectedTxnId } from '../../utils/txnId';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -82,12 +83,29 @@ export default function UncollectedPaymentDialog({
     submittingRef.current = true;
     setSaving(true);
     try {
-      await mutation.mutateAsync({
+      // IDEMPOTENCY. The server already dedupes on txnId (buildingmanager
+      // addUncollectedPayment) and answers a repeat with `alreadyRecorded`, but this
+      // dialog never SENT one, so the protection was dead code. That matters more here
+      // than elsewhere: the endpoint is append-only — routes.ts exposes no DELETE or
+      // PATCH for uncollectedPayments — so a duplicate cannot be undone from the UI, it
+      // just doubles the building's covered figure and drops «Ακάλυπτα» to 0.
+      // The key is derived from what the CLIENT sends (amount/date/reference), never
+      // from a server-defaulted field.
+      const payload = {
         term: currentTerm,
         amount: amt,
         date,
         reference
+      };
+      const result = await mutation.mutateAsync({
+        ...payload,
+        txnId: stableUncollectedTxnId(building._id, payload)
       });
+      if (result?.alreadyRecorded) {
+        toast.warning(t('This coverage payment was already recorded'), {
+          duration: 10000
+        });
+      }
       queryClient.invalidateQueries({ queryKey: [QueryKeys.BUILDINGS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       toast.success(
