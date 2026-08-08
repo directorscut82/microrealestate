@@ -146,8 +146,27 @@ function Row({ children }) {
   );
 }
 
-function Field({ children }) {
-  return <div className="space-y-1.5">{children}</div>;
+// `Field` now renders the field's validation error itself. Before this, ONLY `rent`
+// had an error node (grep: 6 `errors.` refs, all rent/type), so atakNumber, dehNumber,
+// phone, address.zipCode, surface and landSurface had validation RULES with nowhere to
+// display them — the form just refused to save with nothing on screen. That is the
+// worst kind of validation, and reading the deployed Greek page is what exposed it:
+// «NOT-AN-ATAK» and a 3-digit ΤΚ sat in the form with no complaint.
+// `name` is a path ('address.zipCode' resolves through the nested errors object).
+function Field({ children, name, errors, t }) {
+  const err = name
+    ? String(name)
+        .split('.')
+        .reduce((acc, k) => (acc ? acc[k] : undefined), errors)
+    : undefined;
+  return (
+    <div className="space-y-1.5">
+      {children}
+      {err?.message && (
+        <p className="text-label text-oxide">{t ? t(err.message) : err.message}</p>
+      )}
+    </div>
+  );
 }
 
 const PropertyForm = ({ property, onSubmit }) => {
@@ -269,7 +288,7 @@ const PropertyForm = ({ property, onSubmit }) => {
               <p className="text-label text-oxide">{errors.type.message}</p>
             )}
           </Field>
-          <Field>
+          <Field name="name" errors={errors} t={t}>
             <Label htmlFor="name">{t('Name')}</Label>
             <Input id="name" {...register('name')} />
             {errors.name && (
@@ -277,7 +296,7 @@ const PropertyForm = ({ property, onSubmit }) => {
             )}
           </Field>
         </Row>
-        <Field>
+        <Field name="description" errors={errors} t={t}>
           <Label htmlFor="description">{t('Description')}</Label>
           <Input id="description" {...register('description')} />
         </Field>
@@ -287,11 +306,11 @@ const PropertyForm = ({ property, onSubmit }) => {
             fields that don't apply to parking or mailboxes. */}
         {typeValue !== 'letterbox' && (
           <Row>
-            <Field>
+            <Field name="surface" errors={errors} t={t}>
               <Label htmlFor="surface">{t('Surface')}</Label>
               <Input id="surface" type="number" {...register('surface')} />
             </Field>
-            <Field>
+            <Field name="landSurface" errors={errors} t={t}>
               <Label htmlFor="landSurface">{t('Land Surface')}</Label>
               <Input id="landSurface" type="number" {...register('landSurface')} />
             </Field>
@@ -301,44 +320,44 @@ const PropertyForm = ({ property, onSubmit }) => {
           typeValue
         ) && (
           <Row>
-            <Field>
+            <Field name="phone" errors={errors} t={t}>
               <Label htmlFor="phone">{t('Phone')}</Label>
               <Input id="phone" {...register('phone')} />
             </Field>
-            <Field>
+            <Field name="digicode" errors={errors} t={t}>
               <Label htmlFor="digicode">{t('Digicode')}</Label>
               <Input id="digicode" {...register('digicode')} />
             </Field>
           </Row>
         )}
         <Row>
-          <Field>
+          <Field name="atakNumber" errors={errors} t={t}>
             <Label htmlFor="atakNumber">{t('ATAK Number')}</Label>
             <Input id="atakNumber" {...register('atakNumber')} />
           </Field>
         </Row>
         <Row>
-          <Field>
+          <Field name="dehNumber" errors={errors} t={t}>
             <Label htmlFor="dehNumber">{t('DEH Number')}</Label>
             <Input id="dehNumber" {...register('dehNumber')} />
           </Field>
-          <Field>
+          <Field name="eydapNumber" errors={errors} t={t}>
             <Label htmlFor="eydapNumber">{t('EYDAP Number')}</Label>
             <Input id="eydapNumber" {...register('eydapNumber')} />
           </Field>
         </Row>
         <Row>
-          <Field>
+          <Field name="energyClass" errors={errors} t={t}>
             <Label htmlFor="energyClass">{t('Energy Class')}</Label>
             <Input id="energyClass" {...register('energyClass')} />
           </Field>
-          <Field>
+          <Field name="energyCertNumber" errors={errors} t={t}>
             <Label htmlFor="energyCertNumber">{t('Energy Certificate')}</Label>
             <Input id="energyCertNumber" {...register('energyCertNumber')} />
           </Field>
         </Row>
         <Row>
-          <Field>
+          <Field name="energyCertIssueDate" errors={errors} t={t}>
             <Label htmlFor="energyCertIssueDate">
               {t('Energy Certificate Issue Date')}
             </Label>
@@ -355,7 +374,7 @@ const PropertyForm = ({ property, onSubmit }) => {
               {...register('energyCertIssueDate')}
             />
           </Field>
-          <Field>
+          <Field name="energyCertInspectorNumber" errors={errors} t={t}>
             <Label htmlFor="energyCertInspectorNumber">
               {t('Energy Inspector Number')}
             </Label>
@@ -367,42 +386,39 @@ const PropertyForm = ({ property, onSubmit }) => {
         </Row>
       </Section>
       <Section label={t('Address')}>
-        <Field>
+        <Field name="address.street1" errors={errors} t={t}>
           <Label htmlFor="address.street1">{t('Street 1')}</Label>
           <Input id="address.street1" {...register('address.street1')} />
         </Field>
-        <Field>
+        <Field name="address.street2" errors={errors} t={t}>
           <Label htmlFor="address.street2">{t('Street 2')}</Label>
           <Input id="address.street2" {...register('address.street2')} />
         </Field>
         <Row>
-          <Field>
+          <Field name="address.zipCode" errors={errors} t={t}>
             <Label htmlFor="address.zipCode">{t('Zip code')}</Label>
             <Input id="address.zipCode" {...register('address.zipCode')} />
           </Field>
-          <Field>
+          <Field name="address.city" errors={errors} t={t}>
             <Label htmlFor="address.city">{t('City')}</Label>
             <Input id="address.city" {...register('address.city')} />
           </Field>
         </Row>
         <Row>
-          <Field>
+          <Field name="address.state" errors={errors} t={t}>
             <Label htmlFor="address.state">{t('State')}</Label>
             <Input id="address.state" {...register('address.state')} />
           </Field>
-          <Field>
+          <Field name="address.country" errors={errors} t={t}>
             <Label htmlFor="address.country">{t('Country')}</Label>
             <Input id="address.country" {...register('address.country')} />
           </Field>
         </Row>
       </Section>
       <Section label={t('Rent')}>
-        <Field>
+        <Field name="rent" errors={errors} t={t}>
           <Label htmlFor="rent">{t('Rent excluding tax and expenses')}</Label>
           <Input id="rent" type="number" {...register('rent')} />
-          {errors.rent && (
-            <p className="text-label text-oxide">{errors.rent.message}</p>
-          )}
         </Field>
       </Section>
       <div className="flex justify-end">
