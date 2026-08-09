@@ -21,6 +21,7 @@ import { Label } from '../ui/label';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import { parseGreekMoney } from '../../utils/numberformat';
+import { isValidIBAN, isValidRF } from '../../utils/rfIban';
 import ResponsiveDialog from '../ResponsiveDialog';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -95,6 +96,16 @@ function RecaptureField({ target, value, onEdit, onRecovered }) {
 
   const label = target === 'iban' ? 'IBAN' : 'RF';
 
+  // This field exists BECAUSE the OCR'd code failed its checksum, so a typed
+  // replacement has to clear the same bar. The value is appended to the stored
+  // ocrText, and the matcher rebuilds its element bag from ocrText
+  // (billmanager.ts:1168) — an unchecked typo becomes a permanent match key that
+  // silently attaches future receipts to the wrong bill.
+  const typed = String(value ?? '').trim();
+  const typedInvalid =
+    typed.length > 0 &&
+    !(target === 'iban' ? isValidIBAN(typed) : isValidRF(typed));
+
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
@@ -102,10 +113,22 @@ function RecaptureField({ target, value, onEdit, onRecovered }) {
         value={value ?? ''}
         onChange={(e) => onEdit(e.target.value)}
         className={`font-mono text-xs ${
-          phase === 'recovered' ? 'border-success' : 'border-destructive'
+          typedInvalid
+            ? 'border-destructive'
+            : phase === 'recovered'
+              ? 'border-success'
+              : 'border-destructive'
         }`}
         placeholder={t('Type the correct code or re-photograph')}
       />
+      {typedInvalid && (
+        <div className="text-[11px] text-destructive flex items-center gap-1">
+          <LuAlertTriangle className="size-3" />
+          {target === 'iban'
+            ? t('This is not a valid IBAN')
+            : t('This is not a valid RF code')}
+        </div>
+      )}
       {phase === 'idle' && (
         <div className="text-[11px] text-destructive flex items-center gap-1">
           <LuAlertTriangle className="size-3" />

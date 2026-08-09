@@ -1481,5 +1481,6 @@
   "Must be 1000 or less": "Must be 1000 or less",
   "Password is too long": "Password is too long",
   "Error fetching contracts": "Error fetching contracts",
-  "This coverage payment was already recorded": "This coverage payment was already recorded"
+  "This coverage payment was already recorded": "This coverage payment was already recorded",
+  "This is not a valid RF code": "This is not a valid RF code"
 }

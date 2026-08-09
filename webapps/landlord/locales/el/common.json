@@ -1502,5 +1502,6 @@
   "Must be 1000 or less": "Πρέπει να είναι 1000 ή λιγότερο",
   "Password is too long": "Ο κωδικός είναι πολύ μεγάλος",
   "Error fetching contracts": "Σφάλμα κατά την ανάκτηση των συμβολαίων",
-  "This coverage payment was already recorded": "Αυτή η καταβολή κάλυψης έχει ήδη καταγραφεί"
+  "This coverage payment was already recorded": "Αυτή η καταβολή κάλυψης έχει ήδη καταγραφεί",
+  "This is not a valid RF code": "Μη έγκυρος κωδικός πληρωμής (RF)"
 }

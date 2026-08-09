@@ -18,6 +18,8 @@ import {
 import {
   computeIdf,
   extractElements,
+  isValidIBAN,
+  isValidRF,
   repairMatchKeys,
   scoreTokens,
   type BillElements
@@ -502,6 +504,15 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       }
 
       // Verify expense exists on this building
+      // Name the MISSING field when there is no id at all. Without this the row
+      // reported «Η δαπάνη undefined δεν βρέθηκε στο κτίριο» — the landlord reads
+      // that as "the expense vanished" when in fact no expense was ever selected.
+      if (!expenseId) {
+        throw new ServiceError(
+          'Δεν επιλέχθηκε δαπάνη για αυτόν τον λογαριασμό.',
+          422
+        );
+      }
       const expenseExists = (building as any).expenses?.some(
         (e: any) => String(e._id) === expenseId
       );
@@ -1407,6 +1418,35 @@ export async function confirmPayment(req: Req, res: Res): Promise<void> {
       'Κάθε πληρωμή πρέπει να έχει ποσό μεγαλύτερο του μηδενός. Συμπληρώστε το ποσό της απόδειξης.',
       422
     );
+  }
+
+  // A MANUALLY TYPED RF/IBAN must clear the same checksum the OCR'd one had to.
+  // The receipt dialog only offers that field because the scanned code FAILED
+  // isValidRF, and the typed replacement is appended to the stored ocrText — from
+  // which the matcher rebuilds its element bag (:1168). An unchecked typo becomes a
+  // permanent, wrong match key that silently attaches later receipts to the wrong
+  // bill. Only inspect codes that are actually RF/IBAN-shaped: ocrText is mostly
+  // free OCR text and must not be rejected wholesale.
+  for (const p of payments as any[]) {
+    const text = String(p?.ocrText || '');
+    for (const m of text.match(/\bRF[0-9]{2}[A-Z0-9]{1,21}\b/gi) || []) {
+      if (!isValidRF(m)) {
+        throw new ServiceError(
+          `Ο κωδικός πληρωμής «${m}» δεν είναι έγκυρος (λάθος ψηφίο ελέγχου). Ελέγξτε τον κωδικό της απόδειξης.`,
+          422
+        );
+      }
+    }
+    for (const m of text.match(/\b[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}\b/g) || []) {
+      // Skip anything that is an RF (handled above) — RF is not an IBAN.
+      if (/^RF/i.test(m)) continue;
+      if (!isValidIBAN(m)) {
+        throw new ServiceError(
+          `Ο IBAN «${m}» δεν είναι έγκυρος. Ελέγξτε τον IBAN της απόδειξης.`,
+          422
+        );
+      }
+    }
   }
 
   const mkReceipt = (p: any) => ({
