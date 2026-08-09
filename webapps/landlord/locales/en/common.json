@@ -1483,5 +1483,12 @@
   "Error fetching contracts": "Error fetching contracts",
   "This coverage payment was already recorded": "This coverage payment was already recorded",
   "This is not a valid RF code": "This is not a valid RF code",
-  "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0.": "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0."
+  "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0.": "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0.",
+  "This file is too large to upload": "This file is too large to upload",
+  "The file uploaded but could not be saved — please try again": "The file uploaded but could not be saved — please try again",
+  "The file could not be uploaded": "The file could not be uploaded",
+  "You are restoring from this file": "You are restoring from this file",
+  "Backup date": "Backup date",
+  "unknown": "unknown",
+  "Organisation in the file": "Organisation in the file"
 }

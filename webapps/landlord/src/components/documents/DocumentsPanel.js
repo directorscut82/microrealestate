@@ -10,7 +10,8 @@ import {
   deleteDocuments,
   fetchDocuments,
   QueryKeys,
-  updateDocument
+  updateDocument,
+  deleteDocumentByKey
 } from '../../utils/restcalls';
 import { downloadDocument, uploadDocument } from '../../utils/fetch';
 import {
@@ -99,6 +100,12 @@ export default function DocumentsPanel({
       event.target.value = '';
       if (!file) return;
       setUploading(true);
+      // Two calls with no rollback: the bytes land in storage first, then the
+      // Document record is created. If the second fails the file is orphaned —
+      // paid-for storage holding a file the app can never show or delete. Track
+      // the key so the catch can clean up, the same way RepairList does for a
+      // repair invoice (RepairList.js:636).
+      let uploadedKey = null;
       try {
         const baseName = file.name.replace(/\.[^.]+$/, '');
         const response = await uploadDocument({
@@ -107,6 +114,7 @@ export default function DocumentsPanel({
           file,
           folder
         });
+        uploadedKey = response?.data?.key || null;
         await createDocument({
           ...entity,
           type: 'file',
@@ -120,7 +128,22 @@ export default function DocumentsPanel({
         toast.success(t('Document uploaded'));
       } catch (error) {
         console.error(error);
-        toast.error(t('Something went wrong'));
+        // The upload succeeded but the record did not — remove the orphaned file
+        // rather than leave bytes nothing references.
+        if (uploadedKey) {
+          deleteDocumentByKey(uploadedKey).catch(() => {});
+        }
+        // Say WHICH step failed. «Something went wrong» gave the landlord no way
+        // to tell a rejected file from a lost record, so they re-tried an upload
+        // that had already stored its bytes.
+        const status = error?.response?.status;
+        toast.error(
+          status === 413
+            ? t('This file is too large to upload')
+            : uploadedKey
+              ? t('The file uploaded but could not be saved — please try again')
+              : t('The file could not be uploaded')
+        );
       } finally {
         setUploading(false);
       }

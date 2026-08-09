@@ -34,6 +34,7 @@ function DatabaseSettings() {
   const [restoring, setRestoring] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [backupMeta, setBackupMeta] = useState(null);
   const fileInputRef = useRef(null);
 
   const handleSave = useCallback(async () => {
@@ -62,7 +63,7 @@ function DatabaseSettings() {
   }, [t]);
 
   const handleFileSelect = useCallback(
-    (event) => {
+    async (event) => {
       const file = event.target.files?.[0];
       if (!file) return;
 
@@ -71,6 +72,35 @@ function DatabaseSettings() {
         return;
       }
 
+      // Read the header BEFORE opening the confirm dialog. The dialog used to know
+      // only the filename, so «Yes, restore» was approved blind: a file named
+      // backup.json could be last week's, or another organisation's. The server
+      // aborts a cross-realm restore before deleting anything
+      // (databasemanager.ts:188) and rejects a bad version, but the landlord should
+      // see WHAT they are about to overwrite their data with, not find out after.
+      let meta = null;
+      try {
+        const parsed = JSON.parse(await file.text());
+        meta = {
+          exportDate:
+            typeof parsed?.exportDate === 'string' ? parsed.exportDate : '',
+          realmId: typeof parsed?.realmId === 'string' ? parsed.realmId : '',
+          version: parsed?.version,
+          counts: Object.entries(parsed?.collections || {})
+            .filter(([, v]) => Array.isArray(v) && v.length)
+            .map(([k, v]) => `${k}: ${v.length}`)
+        };
+      } catch {
+        toast.error(t('Invalid backup file format'));
+        event.target.value = '';
+        return;
+      }
+      if (!meta.version || !meta.counts.length) {
+        toast.error(t('Invalid backup file format'));
+        event.target.value = '';
+        return;
+      }
+      setBackupMeta(meta);
       setSelectedFile(file);
       setConfirmOpen(true);
       event.target.value = '';
@@ -271,6 +301,30 @@ function DatabaseSettings() {
                 'This will replace this organisation\u2019s data with the backup file — tenants, properties, leases, rents, bills and the pending inbox. User accounts and passwords are not touched. This action cannot be undone: save a backup of the current data first.'
               )}
             </AlertDialogDescription>
+            {backupMeta && (
+              <div className="mt-3 rounded-md border border-oxide/40 bg-oxide-tint/40 p-3 text-sm text-ink space-y-1">
+                <div className="font-medium">
+                  {t('You are restoring from this file')}
+                </div>
+                <div className="text-label">
+                  {t('Backup date')}:{' '}
+                  <span className="font-mono">
+                    {backupMeta.exportDate
+                      ? moment(backupMeta.exportDate).format('DD/MM/YYYY HH:mm')
+                      : t('unknown')}
+                  </span>
+                </div>
+                {backupMeta.realmId && (
+                  <div className="text-label text-ink-muted">
+                    {t('Organisation in the file')}:{' '}
+                    <span className="font-mono">{backupMeta.realmId}</span>
+                  </div>
+                )}
+                <div className="text-label text-ink-muted">
+                  {backupMeta.counts.join(' · ')}
+                </div>
+              </div>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
