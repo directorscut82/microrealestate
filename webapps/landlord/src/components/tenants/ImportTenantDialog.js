@@ -1462,12 +1462,27 @@ export default function ImportTenantDialog({ open, setOpen }) {
                             }))
                           }
                         />
-                        <label
-                          htmlFor={`updateProp-${idx}`}
-                          className="text-sm flex items-center gap-1.5 cursor-pointer"
-                        >
-                          {t('Update property fields from PDF')}
-                        </label>
+                        <div className="min-w-0">
+                          <label
+                            htmlFor={`updateProp-${idx}`}
+                            className="text-sm flex items-center gap-1.5 cursor-pointer"
+                          >
+                            {t('Update property fields from PDF')}
+                          </label>
+                          {/* The label said nothing about WHAT it overwrites, while the
+                              sibling toggle below carries full helper text. This one
+                              replaces name, surface, RENT, address, ΑΤΑΚ, ΔΕΗ number and
+                              the energy certificate. The rent matters most: the parser's
+                              extractMoney returns 0 when the ΜΗΝΙΑΙΟ ΜΙΣΘΩΜΑ pattern does
+                              not match (greekleaseparser.ts:136), and propertyData sends
+                              `prop.monthlyRent || 0` — so a PDF whose rent line differs
+                              silently overwrites a real rent with 0. */}
+                          <p className="mt-1 text-label text-ink-muted">
+                            {t(
+                              'Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0.'
+                            )}
+                          </p>
+                        </div>
                       </div>
                     )}
 

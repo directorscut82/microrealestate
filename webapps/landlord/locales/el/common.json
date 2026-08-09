@@ -1503,5 +1503,6 @@
   "Password is too long": "Ο κωδικός είναι πολύ μεγάλος",
   "Error fetching contracts": "Σφάλμα κατά την ανάκτηση των συμβολαίων",
   "This coverage payment was already recorded": "Αυτή η καταβολή κάλυψης έχει ήδη καταγραφεί",
-  "This is not a valid RF code": "Μη έγκυρος κωδικός πληρωμής (RF)"
+  "This is not a valid RF code": "Μη έγκυρος κωδικός πληρωμής (RF)",
+  "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0.": "Αντικαθιστά το όνομα, την επιφάνεια, το ενοίκιο, τη διεύθυνση, τον ΑΤΑΚ, τον αριθμό ΔΕΗ και το ενεργειακό πιστοποιητικό του υπάρχοντος ακινήτου με τις τιμές του PDF. Όσα έχετε διορθώσει χειροκίνητα χάνονται. Αν το PDF δεν έχει αναγνώσιμο ενοίκιο, το ενοίκιο γίνεται 0."
 }

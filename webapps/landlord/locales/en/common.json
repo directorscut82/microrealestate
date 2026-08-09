@@ -1482,5 +1482,6 @@
   "Password is too long": "Password is too long",
   "Error fetching contracts": "Error fetching contracts",
   "This coverage payment was already recorded": "This coverage payment was already recorded",
-  "This is not a valid RF code": "This is not a valid RF code"
+  "This is not a valid RF code": "This is not a valid RF code",
+  "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0.": "Replaces the name, surface, rent, address, ΑΤΑΚ, ΔΕΗ number and energy certificate of the existing property with the values read from this PDF. Any manual corrections are lost. If the PDF has no readable rent, the rent becomes 0."
 }
