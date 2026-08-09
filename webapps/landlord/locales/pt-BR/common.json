@@ -1264,5 +1264,18 @@
   "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "O valor total da despesa será cobrado desta unidade. Se a unidade não tiver inquilino em um mês, esse mês é cobrado do proprietário quando «Cobrar do proprietário por unidades vazias» está ativo, e de ninguém quando está inativo.",
   "Notifications": "Notificações",
   "No pending notifications.": "Nenhuma notificação pendente.",
-  "Bills sent to the Telegram bot and app alerts appear here.": "As contas enviadas ao bot do Telegram e os alertas do aplicativo aparecem aqui."
+  "Bills sent to the Telegram bot and app alerts appear here.": "As contas enviadas ao bot do Telegram e os alertas do aplicativo aparecem aqui.",
+  "Issue date": "Data de emissão",
+  "Read from the document": "Lido do documento",
+  "Not read": "Não lido",
+  "This supply number already belongs to an expense": "Este número de fornecimento já corresponde a uma despesa",
+  "Fix the amount or period on that expense by hand — this file could not be read in full.": "Corrija o valor ou o período nessa despesa manualmente — este arquivo não pôde ser lido por completo.",
+  "This bill could not be matched automatically. Register it by hand:": "Esta fatura não pôde ser associada automaticamente. Registre-a manualmente:",
+  "OCR text": "Texto OCR",
+  "Reading {{count}} file(s)…": "Lendo {{count}} arquivos…",
+  "Reading {{count}} file(s)…_one": "Lendo 1 arquivo…",
+  "Text recognition takes about a minute per file. Do not close this window.": "O reconhecimento de texto leva cerca de um minuto por arquivo. Não feche esta janela.",
+  "{{count}} failed": "{{count}} falharam",
+  "{{count}} failed_one": "1 falhou",
+  "Expense created": "Despesa criada"
 }

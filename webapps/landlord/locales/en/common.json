@@ -1490,5 +1490,18 @@
   "You are restoring from this file": "You are restoring from this file",
   "Backup date": "Backup date",
   "unknown": "unknown",
-  "Organisation in the file": "Organisation in the file"
+  "Organisation in the file": "Organisation in the file",
+  "Issue date": "Issue date",
+  "Read from the document": "Read from the document",
+  "Not read": "Not read",
+  "This supply number already belongs to an expense": "This supply number already belongs to an expense",
+  "Fix the amount or period on that expense by hand — this file could not be read in full.": "Fix the amount or period on that expense by hand — this file could not be read in full.",
+  "This bill could not be matched automatically. Register it by hand:": "This bill could not be matched automatically. Register it by hand:",
+  "OCR text": "OCR text",
+  "Reading {{count}} file(s)…": "Reading {{count}} files…",
+  "Reading {{count}} file(s)…_one": "Reading 1 file…",
+  "Text recognition takes about a minute per file. Do not close this window.": "Text recognition takes about a minute per file. Do not close this window.",
+  "{{count}} failed": "{{count}} failed",
+  "{{count}} failed_one": "1 failed",
+  "Expense created": "Expense created"
 }

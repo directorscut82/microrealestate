@@ -12,7 +12,7 @@ import {
   LuPlusCircle,
   LuReceipt
 } from 'react-icons/lu';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Select,
   SelectContent,
@@ -50,6 +50,16 @@ const PROVIDER_TYPE = {
 // both bills to the same expense. `_uid` is stamped on each result at parse time.
 const keyOf = (result) => result._uid;
 
+// Server-emitted field CODES (billparser PartialBillFields.missingFields) → the
+// i18n keys this dialog already uses for the same fields on the success card, so
+// the «Not read» list renders in the operator's locale. An unknown code falls
+// through to its raw value rather than rendering blank.
+const MISSING_FIELD_LABEL = {
+  billingId: 'Billing ID',
+  totalAmount: 'Amount',
+  period: 'Period'
+};
+
 function ResultCard({
   result,
   buildings,
@@ -67,15 +77,194 @@ function ResultCard({
   const { t, lang } = useTranslation('common');
 
   if (!result.success) {
+    // PARSE-FAIL SURFACE (2026-08-09). This card used to be the filename plus a
+    // one-line error, discarding everything the OCR had read: three real ΔΕΗ
+    // bills failed on the παροχή alone after ~51s each while their amount,
+    // period, dates and RF were all parsed correctly. It now shows what WAS
+    // read, names what was not, and — only when the bill did NOT match an
+    // already-configured έξοδο — offers to create one.
+    const p = result.partial || {};
+    const salvaged = [
+      p.totalAmount !== undefined && p.totalAmount !== null
+        ? {
+            label: t('Amount'),
+            // showZero: a genuine «*0,00€» bill (fully credited) parses to 0, and
+            // without this NumberFormat renders «—» — the SAME glyph as "not
+            // read", while the «Δεν διαβάστηκαν» list correctly omits the field.
+            // Both surfaces would then disagree about whether the OCR read it.
+            value: <NumberFormat value={p.totalAmount} showZero />
+          }
+        : null,
+      p.periodStart && p.periodEnd
+        ? {
+            label: t('Period'),
+            value: `${moment(p.periodStart).format('L')} – ${moment(
+              p.periodEnd
+            ).format('L')}`
+          }
+        : null,
+      p.issueDate
+        ? { label: t('Issue date'), value: moment(p.issueDate).format('L') }
+        : null,
+      p.dueDate
+        ? { label: t('Due Date'), value: moment(p.dueDate).format('L') }
+        : null,
+      p.billingId
+        ? {
+            label: t('Billing ID'),
+            value: <span className="font-mono text-xs">{p.billingId}</span>
+          }
+        : null,
+      p.rfCode
+        ? {
+            label: t('RF Code'),
+            value: <span className="font-mono text-xs">{p.rfCode}</span>
+          }
+        : null
+    ].filter(Boolean);
+
+    const selectedBuildingForFail = buildings?.find(
+      (b) => String(b._id) === String(assignment?.buildingId || '')
+    );
+    // Was an expense already created (or picked) for this failed row? Resolved
+    // from the freshly-refetched buildings list, so it reflects the server.
+    const createdExpenseName = assignment?.expenseId
+      ? (selectedBuildingForFail?.expenses || []).find(
+          (e) => String(e._id) === String(assignment.expenseId)
+        )?.name
+      : undefined;
+
     return (
-      <div className="border rounded-md p-4 space-y-2 border-destructive/30 bg-destructive/5">
+      <div className="border rounded-md p-4 space-y-3 border-destructive/30 bg-destructive/5">
         <div className="flex items-start gap-2">
           <LuFileWarning className="size-5 text-destructive shrink-0 mt-0.5" />
-          <div>
+          <div className="min-w-0">
             <div className="font-medium text-sm">{result.filename}</div>
             <div className="text-sm text-destructive">{result.error}</div>
           </div>
         </div>
+
+        {salvaged.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-ink-muted uppercase tracking-wide">
+              {t('Read from the document')}
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              {salvaged.map((f) => (
+                <Fragment key={f.label}>
+                  <div className="text-muted-foreground">{f.label}</div>
+                  <div className="font-medium">{f.value}</div>
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {p.missingFields?.length > 0 && (
+          <div className="space-y-1">
+            <div className="text-xs font-medium text-ink-muted uppercase tracking-wide">
+              {t('Not read')}
+            </div>
+            <ul className="text-sm text-muted-foreground list-disc list-inside">
+              {p.missingFields.map((f) => (
+                <li key={f}>{MISSING_FIELD_LABEL[f] ? t(MISSING_FIELD_LABEL[f]) : f}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* The bill's παροχή IS already configured on an expense — so this is a
+            parse problem on a KNOWN bill, not an unknown one. Creating a second
+            έξοδο here would duplicate it, so we name the existing one instead
+            (per the user's instruction: offer create ONLY when unmatched). */}
+        {result.match ? (
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+            {t('This supply number already belongs to an expense')}:{' '}
+            <span className="font-medium">{result.match.expenseName}</span>
+            {result.match.buildingName ? ` — ${result.match.buildingName}` : ''}
+            <div className="text-xs text-muted-foreground mt-1">
+              {t(
+                'Fix the amount or period on that expense by hand — this file could not be read in full.'
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+            <div className="text-sm text-muted-foreground">
+              {t(
+                'This bill could not be matched automatically. Register it by hand:'
+              )}
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">
+                {t('Building')}
+              </label>
+              <Select
+                value={assignment?.buildingId || undefined}
+                onValueChange={(val) => onAssignBuilding(keyOf(result), val)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t('Select a building')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(buildings || []).map((b) => {
+                    const qualifier = b.address?.street1 || b.atakPrefix;
+                    return (
+                      <SelectItem key={b._id} value={String(b._id)}>
+                        {qualifier ? `${b.name} — ${qualifier}` : b.name}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Once an expense HAS been created from this card, show it instead of
+                the button.
+
+                The button gave no feedback at all: ExpenseFormDialog emits no
+                success toast, this branch never read `assignment.expenseId`, and
+                `results` is not refetched — so the card re-rendered byte-identically
+                and the click looked like it had done nothing. Pressing again created
+                a SECOND identical expense (buildingmanager.addExpense has no
+                duplicate guard and `billingId` carries no unique index), both
+                active and recurring, so every tenant in the building would be
+                charged twice, every month. Naming the created expense both confirms
+                the action and removes the double-press bait. */}
+            {createdExpenseName ? (
+              <div className="flex items-center gap-1.5 text-sm">
+                <LuCheckCircle className="size-3.5 text-primary shrink-0" />
+                <span>
+                  {t('Expense created')}:{' '}
+                  <span className="font-medium">{createdExpenseName}</span>
+                </span>
+              </div>
+            ) : (
+              assignment?.buildingId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    onCreateExpense(keyOf(result), selectedBuildingForFail)
+                  }
+                >
+                  <LuPlusCircle className="size-3.5 mr-1.5" />
+                  {t('Create new expense')}
+                </Button>
+              )
+            )}
+          </div>
+        )}
+
+        {result.ocrText ? (
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground">
+              {t('OCR text')}
+            </summary>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-[0.6875rem] scrollbar-branded">
+              {result.ocrText}
+            </pre>
+          </details>
+        ) : null}
       </div>
     );
   }
@@ -404,7 +593,16 @@ export default function BillImportDialog({ open, setOpen, building }) {
       // only the expense left to create/pick.
       const seededAssign = {};
       for (const r of rows) {
-        if (r.success && !r.match && r.unitMatch?.buildingId) {
+        // NOT gated on `r.success` (adversarial review): a FAILED row can also
+        // carry a unitMatch now, and `createPrefill` reads that unitMatch
+        // ungated to build a `single_unit` allocation. With seeding gated but the
+        // prefill not, a failed row had NO pre-selected building — so picking any
+        // other building shipped the identified building's propertyId into a
+        // DIFFERENT building's expense: the unit picker rendered blank, zod passed
+        // (it only checks the id is truthy), and the server 422'd as the generic
+        // «Κάτι πήγε λάθος». Seeding both branches keeps the default and the
+        // prefill talking about the same building.
+        if (!r.match && r.unitMatch?.buildingId) {
           seededAssign[r._uid] = {
             buildingId: r.unitMatch.buildingId,
             expenseId: ''
@@ -450,10 +648,31 @@ export default function BillImportDialog({ open, setOpen, building }) {
     if (!createFor) return null;
     const result = results.find((r) => r._uid === createFor.uid);
     const parsed = result?.parsed;
-    const unitMatch = result?.unitMatch;
+    // Only use the identified unit when the expense is being created on the SAME
+    // building that unit belongs to. The operator can pick any building in the
+    // select, and a `single_unit` allocation pointing at another building's
+    // propertyId fails the server's cross-building guard with an undiagnosable
+    // generic toast (and renders a blank unit picker on the way there). Falling
+    // back to an equal split is the honest default for the wrong building.
+    const rawUnitMatch = result?.unitMatch;
+    const unitMatch =
+      rawUnitMatch &&
+      String(rawUnitMatch.buildingId) === String(createFor.building?._id)
+        ? rawUnitMatch
+        : null;
+    // A FAILED parse has no `parsed`, but may carry `partial` (what the OCR did
+    // read) and `detectedProvider`. Without this fallback the create-expense form
+    // opened blank for exactly the files that need it most — the whole point of
+    // the parse-fail surface is that the salvaged data is reusable.
+    const partial = result?.success ? null : result?.partial;
+    const provider = parsed?.provider || result?.detectedProvider || '';
     return {
-      name: parsed?.provider ? parsed.provider.toUpperCase() : '',
-      type: PROVIDER_TYPE[parsed?.provider] || 'other',
+      name: provider ? provider.toUpperCase() : '',
+      type: PROVIDER_TYPE[provider] || 'other',
+      // The amount is left at 0 deliberately: on a failed parse it is a SALVAGED
+      // figure, and a salvaged total may be a prior-balance-inclusive number
+      // (BILL_OCR_INBOX_PLAN §17.5.2). It is displayed on the card for the
+      // operator to read off the document and type in — never pre-committed.
       amount: 0,
       allocationMethod: unitMatch ? 'single_unit' : 'equal',
       customAllocations: unitMatch
@@ -461,7 +680,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
         : [],
       isRecurring: true,
       chargeOwnerWhenVacant: true,
-      billingId: parsed?.billingId || ''
+      billingId: parsed?.billingId || partial?.billingId || ''
     };
   }, [createFor, results]);
 
@@ -741,6 +960,26 @@ export default function BillImportDialog({ open, setOpen, building }) {
               />
             )}
 
+            {/* OCR is SLOW and the wait is otherwise unexplained: measured
+                ~51s for a single scanned A4 page on the NAS (weak CPU; WASM
+                threading verified working — 3 threads pinned at 100%). Without
+                this the operator sees a spinner for minutes on a 7-file batch
+                and reasonably concludes the app has hung. The count is real; a
+                per-file bar is not possible because the batch is ONE request
+                that returns all results together. */}
+            {state === 'loading' && files.length > 0 && (
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <div className="font-medium">
+                  {t('Reading {{count}} file(s)…', { count: files.length })}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {t(
+                    'Text recognition takes about a minute per file. Do not close this window.'
+                  )}
+                </div>
+              </div>
+            )}
+
             {state === 'preview' && results.length > 0 && (
               <div className="space-y-4 max-h-[60vh] overflow-y-auto">
                 <div className="flex gap-2 flex-wrap">
@@ -759,7 +998,12 @@ export default function BillImportDialog({ open, setOpen, building }) {
                   {failedCount > 0 && (
                     <Badge variant="destructive" className="gap-1">
                       <LuFileWarning className="size-3" />
-                      {failedCount} {t('failed')}
+                      {/* Greek needs the VERB to agree with the count: «1
+                          απέτυχε» but «2 απέτυχαν». The bare `t('failed')` key
+                          is an adjective/verb fragment shared with other
+                          surfaces, and rendering "2 απέτυχε" is a visible
+                          grammar error on the screen the landlord reads. */}
+                      {t('{{count}} failed', { count: failedCount })}
                     </Badge>
                   )}
                 </div>

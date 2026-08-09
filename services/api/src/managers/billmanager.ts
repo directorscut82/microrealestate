@@ -314,10 +314,69 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     }
 
     if (!parseResult.success || !parseResult.bill) {
+      // PARSE-FAIL SURFACE (2026-08-09): report what the OCR DID read, not just
+      // the error. Three real ΔΕΗ bills failed on the παροχή alone while their
+      // amount, period, dates and RF were parsed correctly and thrown away — the
+      // landlord waited ~51s per file for a bare «Δεν βρέθηκε αριθμός παροχής».
+      //
+      // `partial` is diagnostic/prefill ONLY (see PartialBillFields). It is NOT
+      // a bill: there is no `parsed` key here, so nothing downstream can confirm
+      // it — the confirm path requires `parsed`, and a partial by definition
+      // lacks a field the ledger needs.
+      const partial = (parseResult as any).partial;
+      // If the παροχή WAS recovered, we can still answer the question the
+      // create-expense offer depends on: does this supply number already belong
+      // to an expense? The offer is only made when it does NOT (per the user's
+      // instruction), so an unparseable bill for an ALREADY-CONFIGURED expense
+      // must say so instead of inviting a duplicate έξοδο.
+      let existingMatch = null;
+      let unitMatch = null;
+      // These two lookups hit Mongo, and they run INSIDE the per-file loop but
+      // OUTSIDE the try/catch above (which closes at the parse). Unwrapped, a DB
+      // fault here would propagate to asyncWrapper and 500 the WHOLE batch —
+      // discarding every sibling file's successful parse plus minutes of OCR, and
+      // defeating the per-file isolation this loop exists to provide. Both
+      // variables are already initialised to null, so degrading to "no match
+      // information" is the correct fallback: the card then offers the manual
+      // path, which is what it would offer anyway for an unmatched bill.
+      if (partial?.billingIdNormalized) {
+        try {
+          const m = await findExpenseByBillingId(
+            realmId,
+            partial.billingIdNormalized
+          );
+          existingMatch = m
+            ? {
+                buildingId: String(m.building._id),
+                buildingName: m.building.name,
+                expenseId: String(m.expense._id),
+                expenseName: m.expense.name
+              }
+            : null;
+          if (!m) {
+            unitMatch = await findUnitBySupplyNumber(
+              realmId,
+              partial.billingIdNormalized
+            );
+          }
+        } catch (err: any) {
+          logger.error(
+            `parse-fail match lookup failed for ${file.originalname}: ${err?.message || err}`
+          );
+        }
+      }
       results.push({
         filename: file.originalname,
         success: false,
-        error: parseResult.error
+        error: parseResult.error,
+        detectedProvider: (parseResult as any).detectedProvider,
+        partial,
+        // The already-configured expense this failed bill belongs to, if any.
+        match: existingMatch,
+        // The building/apartment its παροχή identifies, so a hand-created έξοδο
+        // starts on the right building.
+        unitMatch,
+        ocrText: ((parseResult as any).rawText || '').slice(0, 4000)
       });
       continue;
     }

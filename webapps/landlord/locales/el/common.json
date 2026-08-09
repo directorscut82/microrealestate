@@ -1511,5 +1511,18 @@
   "You are restoring from this file": "Επαναφορά από αυτό το αρχείο",
   "Backup date": "Ημερομηνία αντιγράφου",
   "unknown": "άγνωστη",
-  "Organisation in the file": "Οργανισμός στο αρχείο"
+  "Organisation in the file": "Οργανισμός στο αρχείο",
+  "Issue date": "Ημερομηνία έκδοσης",
+  "Read from the document": "Διαβάστηκαν από το έγγραφο",
+  "Not read": "Δεν διαβάστηκαν",
+  "This supply number already belongs to an expense": "Ο αριθμός παροχής αντιστοιχεί ήδη σε δαπάνη",
+  "Fix the amount or period on that expense by hand — this file could not be read in full.": "Συμπληρώστε χειροκίνητα το ποσό ή την περίοδο στη δαπάνη· το αρχείο δεν διαβάστηκε πλήρως.",
+  "This bill could not be matched automatically. Register it by hand:": "Ο λογαριασμός δεν αντιστοιχίστηκε αυτόματα. Καταχωρίστε τον χειροκίνητα:",
+  "OCR text": "Κείμενο OCR",
+  "Reading {{count}} file(s)…": "Ανάγνωση {{count}} αρχείων…",
+  "Reading {{count}} file(s)…_one": "Ανάγνωση 1 αρχείου…",
+  "Text recognition takes about a minute per file. Do not close this window.": "Η αναγνώριση κειμένου διαρκεί περίπου ένα λεπτό ανά αρχείο. Μην κλείσετε το παράθυρο.",
+  "{{count}} failed": "{{count}} απέτυχαν",
+  "{{count}} failed_one": "1 απέτυχε",
+  "Expense created": "Η δαπάνη δημιουργήθηκε"
 }

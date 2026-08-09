@@ -428,15 +428,24 @@ export default function routes(): express.Router {
 
   // Bills
   // Bill-specific multer: accepts PDF + images (separate from the E9/AADE
-  // `upload` instance which must stay PDF-only). 6MB per file is generous for
-  // phone photos (the tested bill was 212KB) while keeping the batch buffer
-  // stack bounded (20 × 6MB = 120MB worst-case on top of OCR's ~273MB peak).
+  // `upload` instance which must stay PDF-only). 15MB per file admits a
+  // multi-page CamScanner bundle (the real 14-page scan is ~7MB; the largest
+  // single split bill is ~845KB).
+  //
+  // AGGREGATE CAP IS SEPARATE AND NECESSARY. multer's `fileSize` is enforced
+  // PER PART — it has no total-request option — so `fileSize × files` alone
+  // permits 20 × 15MB = 300MB of memoryStorage buffering in ONE request, and the
+  // api container is capped at 384MiB while the warm OCR session is ~239MB
+  // resident (billparser/ocr.ts). That combination OOM-kills the container, which
+  // takes down rents/tenants/dashboard for every realm and produces no 413 and no
+  // log line. `billBatchByteCap` below rejects the request up-front instead.
   const uploadBill = multer({
     storage: multer.memoryStorage(),
-    // fileSize bounds memory (20×6MB max); files bounds the OCR fan-out (each
-    // file can be a multi-page scan → per-page rasterize+OCR). Per-page work is
-    // additionally capped in rasterizePdfToImages (MAX_PDF_PAGES).
-    limits: { fileSize: 6 * 1024 * 1024, files: 20 },
+    // fileSize bounds a SINGLE part; the batch total is bounded by
+    // billBatchByteCap. files bounds the OCR fan-out (each file can be a
+    // multi-page scan → per-page rasterize+OCR). Per-page work is additionally
+    // capped in rasterizePdfToImages (MAX_PDF_PAGES).
+    limits: { fileSize: 15 * 1024 * 1024, files: 20 },
     fileFilter: (_req: any, file: any, cb: any) => {
       const allowed = [
         'application/pdf',
@@ -448,6 +457,33 @@ export default function routes(): express.Router {
       else cb(new ServiceError('Only PDF or image files allowed', 422));
     }
   });
+
+  // Reject an oversized BATCH before multer buffers a byte of it.
+  //
+  // multer enforces `fileSize` per PART only (it has no total-request option), so
+  // the per-file cap alone permits 20 × 15MB = 300MB of memoryStorage in one
+  // request. The api container is capped at 384MiB and the warm OCR session is
+  // ~239MB resident, so that combination OOM-kills the container — killing every
+  // realm's API, with no 413 and no log line, because the process dies rather
+  // than erroring. Content-Length is checked first (cheap, and the browser always
+  // sends it for a multipart upload); the real bill corpus is ~845KB per file and
+  // ~7MB for a 14-page bundle, so 45MB leaves ample room for legitimate use while
+  // keeping peak buffering well inside the container budget.
+  const MAX_BILL_BATCH_BYTES = 45 * 1024 * 1024;
+  function billBatchByteCap(req: any, _res: any, next: any) {
+    const declared = Number(req.headers['content-length'] || 0);
+    if (declared && declared > MAX_BILL_BATCH_BYTES) {
+      return next(
+        new ServiceError(
+          `Ο συνολικός όγκος των αρχείων υπερβαίνει τα ${Math.floor(
+            MAX_BILL_BATCH_BYTES / (1024 * 1024)
+          )}MB. Ανεβάστε λιγότερα αρχεία τη φορά.`,
+          413
+        )
+      );
+    }
+    next();
+  }
 
   function verifyBillContent(req: any, _res: any, next: any) {
     const files = req.file ? [req.file] : req.files || [];
@@ -477,6 +513,7 @@ export default function routes(): express.Router {
   billsRouter.post(
     '/parse',
     uploadRateLimit,
+    billBatchByteCap,
     uploadBill.array('bills', 20) as any,
     verifyBillContent,
     Middlewares.asyncWrapper(billManager.parseBills as any)
@@ -490,6 +527,7 @@ export default function routes(): express.Router {
   billsRouter.post(
     '/payment-receipt',
     uploadRateLimit,
+    billBatchByteCap,
     uploadBill.array('bills', 10) as any,
     verifyBillContent,
     Middlewares.asyncWrapper(billManager.parsePaymentReceipts as any)
@@ -514,6 +552,7 @@ export default function routes(): express.Router {
   billsRouter.post(
     '/:id/attach-source',
     uploadRateLimit,
+    billBatchByteCap,
     uploadBill.single('source') as any,
     verifyBillContent,
     Middlewares.asyncWrapper(billManager.attachBillSource as any)

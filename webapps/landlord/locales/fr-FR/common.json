@@ -1264,5 +1264,18 @@
   "The full expense amount will be billed to this unit. If the unit has no tenant for a month, that month is billed to the owner when «Charge owner for vacant units» is on, and to nobody when it is off.": "Le montant total de la dépense sera facturé à ce lot. Si le lot n'a pas de locataire pour un mois, ce mois est facturé au propriétaire lorsque « Facturer le propriétaire pour les lots vacants » est activé, et à personne sinon.",
   "Notifications": "Notifications",
   "No pending notifications.": "Aucune notification en attente.",
-  "Bills sent to the Telegram bot and app alerts appear here.": "Les factures envoyées au bot Telegram et les alertes de l’application apparaissent ici."
+  "Bills sent to the Telegram bot and app alerts appear here.": "Les factures envoyées au bot Telegram et les alertes de l’application apparaissent ici.",
+  "Issue date": "Date d'émission",
+  "Read from the document": "Lu dans le document",
+  "Not read": "Non lu",
+  "This supply number already belongs to an expense": "Ce numéro de fourniture correspond déjà à une dépense",
+  "Fix the amount or period on that expense by hand — this file could not be read in full.": "Corrigez le montant ou la période sur cette dépense manuellement — ce fichier n'a pas pu être lu entièrement.",
+  "This bill could not be matched automatically. Register it by hand:": "Cette facture n'a pas pu être associée automatiquement. Enregistrez-la manuellement :",
+  "OCR text": "Texte OCR",
+  "Reading {{count}} file(s)…": "Lecture de {{count}} fichiers…",
+  "Reading {{count}} file(s)…_one": "Lecture d'un fichier…",
+  "Text recognition takes about a minute per file. Do not close this window.": "La reconnaissance de texte prend environ une minute par fichier. Ne fermez pas cette fenêtre.",
+  "{{count}} failed": "{{count}} en échec",
+  "{{count}} failed_one": "1 en échec",
+  "Expense created": "Dépense créée"
 }

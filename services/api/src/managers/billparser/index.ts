@@ -1,9 +1,14 @@
 import { logger, ServiceError } from '@microrealestate/common';
-import type { BillParseResult } from './types.js';
+import type { BillParseResult, PartialBillFields } from './types.js';
+import { isValidRF } from './matching.js';
 import { parseDehBill } from './deh.js';
 
 export { normalizeBillingId } from './types.js';
-export type { ParsedBill, BillParseResult } from './types.js';
+export type {
+  ParsedBill,
+  BillParseResult,
+  PartialBillFields
+} from './types.js';
 
 type Provider = 'deh' | 'eydap' | 'epa' | 'other';
 
@@ -122,6 +127,141 @@ export async function generateIrisQr(
   }
 }
 
+/**
+ * Provider-agnostic best-effort field recovery for a document that could NOT be
+ * parsed (unknown provider, or a known-but-unimplemented one like ΕΥΔΑΠ).
+ *
+ * Purely so the operator can SEE what the OCR read and hand-create the έξοδο
+ * from it. Strictly diagnostic:
+ *  - no `billingId` is guessed — the provision number is provider-specific and a
+ *    wrong one would silently match the bill to the wrong expense;
+ *  - the amount is taken ONLY from an unambiguous total label. A bill states
+ *    several euro figures (per-charge lines, prior balance, VAT), and picking the
+ *    largest is exactly the prior-balance double-count trap recorded in
+ *    BILL_OCR_INBOX_PLAN §17.5.2 — so if no total label is found, no amount is
+ *    reported, and the operator types it from the document.
+ */
+export function salvageGenericFields(text: string): PartialBillFields {
+  const out: PartialBillFields = {};
+  if (!text) return out;
+
+  // Total: only from an explicit "amount payable"-class label, same-line or on
+  // the immediately following line (the scan layout). Greek decimal comma.
+  const AMOUNT = /(\d{1,3}(?:[.\s]\d{3})*|\d+)[,.](\d{2})/;
+  //
+  // TWO TIERS, and the ORDER IS LOAD-BEARING (adversarial-review finding).
+  // ΕΥΔΑΠ prints BOTH «ΜΕΡΙΚΟ ΣΥΝΟΛΟ» (current charges only) and «ΠΛΗΡΩΤΕΟ»
+  // (what is actually owed, prior balances included) — and the subtotal comes
+  // FIRST in the document. A single alternation scanned top-down therefore
+  // returned the SUBTOTAL, so on a bill carrying a prior balance the card showed
+  // LESS than the landlord owes; they would type that figure and the difference
+  // would leave no trace on any surface. Silent UNDER-reporting reads as correct
+  // everywhere (MONEY_SURFACE_MATRIX "absent representation").
+  //
+  // So: try the PAYABLE labels across the whole document first, and fall back to
+  // a subtotal only when no payable label exists at all. §17.5.2's warning about
+  // the prior-balance DOUBLE-count still holds — that trap is picking the largest
+  // arbitrary figure, which this never does; it reads only labelled values.
+  const PAYABLE_LABELS =
+    /(?:Συνολικό\s+ποσό\s+πληρωμής|Συνολικ[όο]\s+ποσ[όο]\s+πληρωμ[ήη]ς|ΠΟΣΟ\s+ΠΛΗΡΩΜΗΣ|ΠΛΗΡΩΤΕΟ|Πληρωτέο\s+ποσ[όο]|Συνολικ[όο]\s+ποσ[όο])/i;
+  const SUBTOTAL_LABELS = /(?:ΜΕΡΙΚΟ\s+ΣΥΝΟΛΟ)/i;
+  const lines = text.split('\n');
+
+  const amountNear = (label: RegExp): number | undefined => {
+    for (let i = 0; i < lines.length; i++) {
+      if (!label.test(lines[i])) continue;
+      const candidates = [lines[i].replace(label, ' ')];
+      for (let j = i + 1; j <= i + 2 && j < lines.length; j++) {
+        candidates.push(lines[j]);
+      }
+      for (const c of candidates) {
+        // A DOT-formatted date reads as money to the amount pattern:
+        // "23.06.2026" yields 23.06 and "1.4.2026" yields 4.2 (found by
+        // self-probe). ΔΕΗ and ΕΥΔΑΠ both print dot-dates, and a total label
+        // sitting above one would put a DATE in the amount field of the card the
+        // operator reads. Strip every date-shaped run before matching.
+        const withoutDates = c
+          .replace(/\d{1,2}[./]\d{1,2}[./]\d{2,4}/g, ' ')
+          .replace(/\d{4}[./]\d{1,2}[./]\d{1,2}/g, ' ');
+        const m = withoutDates.match(AMOUNT);
+        if (m) {
+          const n = parseFloat(`${m[1].replace(/[.\s]/g, '')}.${m[2]}`);
+          if (!isNaN(n) && n > 0) return n;
+        }
+      }
+    }
+    return undefined;
+  };
+
+  out.totalAmount = amountNear(PAYABLE_LABELS) ?? amountNear(SUBTOTAL_LABELS);
+
+  // Dates: report only labelled ones, never a bare date found anywhere.
+  const labelledDate = (label: RegExp): Date | undefined => {
+    for (let i = 0; i < lines.length; i++) {
+      if (!label.test(lines[i])) continue;
+      for (let j = i; j <= i + 2 && j < lines.length; j++) {
+        // On the label's OWN line take only the text AFTER the label. Using
+        // `replace(label,' ')` kept the rest of the line, and the date pattern is
+        // unanchored — so on the pdfjs digital path, where a whole page is joined
+        // into ONE line, this returned the first date anywhere on the page. On the
+        // real ΕΥΔΑΠ bill that reported the ISSUE date (07/05) as the payment
+        // DEADLINE, a month early, on the card the operator reads. Same bug and
+        // same fix as findLabelledValue in deh.ts.
+        let subject: string;
+        if (j === i) {
+          const hit = lines[i].match(label);
+          subject =
+            hit && hit.index !== undefined
+              ? lines[i].slice(hit.index + hit[0].length)
+              : '';
+        } else {
+          subject = lines[j];
+        }
+        const m = subject.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (m) {
+          const [, d, mo, y] = m;
+          const dt = new Date(
+            Date.UTC(parseInt(y), parseInt(mo) - 1, parseInt(d))
+          );
+          // Reject a rolled-over invalid OCR date (e.g. 31/02) rather than
+          // reporting a date the document never stated.
+          if (
+            dt.getUTCFullYear() === parseInt(y) &&
+            dt.getUTCMonth() === parseInt(mo) - 1 &&
+            dt.getUTCDate() === parseInt(d)
+          ) {
+            return dt;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+  // NOTE on the 2-line lookahead: it is deliberately too short for a fully
+  // COLUMNAR bill. On the real ΕΥΔΑΠ scan, «ΛΗΞΗ ΠΡΟΘΕΣΜΙΑΣ ΠΛΗΡΩΜΗΣ» is
+  // followed by three MORE labels before any value, so its date is 4 lines away
+  // and this returns undefined — correct, because the first date-shaped line
+  // within reach belongs to a different column. Reporting no date beats
+  // reporting another field's date. (BILL_OCR_INBOX_PLAN §17.4: ΕΥΔΑΠ needs
+  // positional column pairing, which is Slice 3 work, not salvage's job.)
+  out.dueDate = labelledDate(
+    /(?:ΕΞΟΦΛΗΣΗ\s+ΕΩΣ|Εξόφληση\s+έως|ΛΗΞΗ\s+ΠΡΟΘΕΣΜΙΑΣ(?:\s+ΠΛΗΡΩΜΗΣ)?|ΗΜ\.?\/?ΝΙΑ\s+ΛΗ[ΞΕ]?[ΕΩ]?ΩΣ|Ημερομηνία\s+λήξης)\s*:?/i
+  );
+  // `ΗΜΝΙΑ` (no slash) and `ΗΜ/ΝΙΑ` both occur in ONE real ΕΥΔΑΠ scan — the OCR
+  // drops the slash in the top block and keeps it in the payment stub. The
+  // stub's copy sits directly above its value, which is the one this finds.
+  out.issueDate = labelledDate(
+    /(?:Ημ\.?\/?νία\s+[ΈΕ]κδοσης|ΗΜ\.?\/?ΝΙΑ\s+[ΈΕ]ΚΔΟΣΗΣ|ΗΜΕΡΟΜΗΝΙΑ\s+[ΈΕ]ΚΔΟΣΗΣ|Ημερομηνία\s+[ΈΕ]κδοσης)\s*:?/i
+  );
+
+  // RF: only if the ISO-11649 checksum passes — an OCR'd RF with a dropped digit
+  // would otherwise be shown as if it were a usable payment reference.
+  const rf = text.match(/(RF\d{15,30})/);
+  if (rf && isValidRF(rf[1])) out.rfCode = rf[1];
+
+  return out;
+}
+
 export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
   let text: string;
 
@@ -161,7 +301,12 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
     return {
       success: false,
       error: 'Δεν αναγνωρίστηκε ο πάροχος',
-      rawText: text
+      rawText: text,
+      // Even with no provider marker, generic money/date/RF shapes are usually
+      // readable and are what let the operator create the έξοδο by hand instead
+      // of being told only that the parse failed. Measured on the three real
+      // NOVA bills, which have no marker in detectProvider at all.
+      partial: salvageGenericFields(text)
     };
   }
 
@@ -176,24 +321,32 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
       // detectedProvider + rawText so a caller can tell this IS a utility bill
       // — the recapture gate needs that to avoid swallowing it (Step-7), and
       // carrying rawText avoids a redundant second OCR downstream.
+      // `partial` lets the operator create the έξοδο from what WAS read while
+      // Slice 3's ΕΥΔΑΠ parser does not exist yet. NOTE: ΕΥΔΑΠ bills state a
+      // 3-month consumption period and a prior-balance line (plan §17.5) — which
+      // is exactly why no period is salvaged and the amount comes only from an
+      // explicit total label.
       return {
         success: false,
         error: 'Ο πάροχος ΕΥΔΑΠ δεν υποστηρίζεται ακόμα',
         rawText: text,
-        detectedProvider: 'eydap'
+        detectedProvider: 'eydap',
+        partial: salvageGenericFields(text)
       };
     case 'epa':
       return {
         success: false,
         error: 'Ο πάροχος ΕΠΑ δεν υποστηρίζεται ακόμα',
         rawText: text,
-        detectedProvider: 'epa'
+        detectedProvider: 'epa',
+        partial: salvageGenericFields(text)
       };
     default:
       return {
         success: false,
         error: 'Μη υποστηριζόμενος πάροχος',
-        rawText: text
+        rawText: text,
+        partial: salvageGenericFields(text)
       };
   }
 }
