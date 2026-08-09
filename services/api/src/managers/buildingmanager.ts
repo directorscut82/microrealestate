@@ -3183,26 +3183,36 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
 
   // Validate every referenced expenseId exists on the building before we
   // mutate any unit. Silently accepting unknown ids leaves orphan charges.
-  if (expensesProvided) {
-    for (const entry of expenseEntries || []) {
-      if (entry?.expenseId) {
-        const exp = (building as any).expenses.id(entry.expenseId);
-        if (!exp) {
-          throw new ServiceError(`Unknown expenseId: ${entry.expenseId}`, 422);
-        }
+  //
+  // AND validate the AMOUNT. This endpoint sets the monthly figure for every
+  // VARIABLE building expense, which flows straight into each tenant's rent — yet
+  // it was the only money endpoint with no amount check at all. Measured on the
+  // live API: amount -500, "abc", null and 99999999999 each returned 200. Nothing
+  // corrupt persisted (the values were discarded further down), but that was luck,
+  // not a guard: the request was accepted, the landlord was told it saved, and the
+  // figure they typed was silently thrown away — so a real correction could look
+  // applied while the old amount stayed on the statement. Same bounds as the
+  // building-expense writer (validateFiniteNumber min 0 max 1e7).
+  const _checkEntryAmounts = (entries: any[], label: string) => {
+    for (let i = 0; i < (entries || []).length; i++) {
+      const entry = entries[i];
+      if (!entry?.expenseId) continue;
+      const exp = (building as any).expenses.id(entry.expenseId);
+      if (!exp) {
+        throw new ServiceError(`Unknown expenseId: ${entry.expenseId}`, 422);
+      }
+      // An omitted amount means "leave this row alone"; only a PRESENT value is
+      // checked, so the panel can post a partial set without inventing zeros.
+      if (entry.amount !== undefined && entry.amount !== null) {
+        validateFiniteNumber(entry.amount, `${label}[${i}].amount`, {
+          min: 0,
+          max: 10000000
+        });
       }
     }
-  }
-  if (ownerExpensesProvided) {
-    for (const entry of ownerExpenses || []) {
-      if (entry?.expenseId) {
-        const exp = (building as any).expenses.id(entry.expenseId);
-        if (!exp) {
-          throw new ServiceError(`Unknown expenseId: ${entry.expenseId}`, 422);
-        }
-      }
-    }
-  }
+  };
+  if (expensesProvided) _checkEntryAmounts(expenseEntries, 'expenses');
+  if (ownerExpensesProvided) _checkEntryAmounts(ownerExpenses, 'ownerExpenses');
 
   // For each unit, remove existing monthly charges for this term, then add new ones
   for (const unit of units) {
