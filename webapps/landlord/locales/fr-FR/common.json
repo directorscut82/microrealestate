@@ -1225,6 +1225,8 @@
   "Dismiss": "Ignorer",
   "Matches": "Correspond à",
   "No expense found with this billing ID": "Aucune dépense trouvée avec ce numéro de facturation",
+  "This billing ID is on more than one expense — pick which one, or remove the duplicate": "Ce numéro de facturation figure sur plusieurs dépenses — choisissez laquelle ou supprimez le doublon",
+  "This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details": "Ce numéro de compteur est enregistré comme compteur commun sur plusieurs immeubles — corrigez le doublon dans les données de l'immeuble",
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "La photo n’a pas pu être lue : {{error}}. Envoyez une prise plus nette au bot ou saisissez la facture manuellement.",
   "Unreadable": "Illisible",
   "{{count}} pending": "{{count}} en attente",

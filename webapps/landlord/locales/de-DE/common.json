@@ -1225,6 +1225,8 @@
   "Dismiss": "Verwerfen",
   "Matches": "Zuordnung",
   "No expense found with this billing ID": "Keine Ausgabe mit dieser Vertragsnummer gefunden",
+  "This billing ID is on more than one expense — pick which one, or remove the duplicate": "Diese Vertragsnummer ist mehreren Ausgaben zugeordnet — wählen Sie die richtige oder entfernen Sie das Duplikat",
+  "This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details": "Diese Zählernummer ist in mehreren Gebäuden als Gemeinschaftszähler eingetragen — beheben Sie das Duplikat in den Gebäudedaten",
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "Das Foto konnte nicht gelesen werden: {{error}}. Senden Sie eine schärfere Aufnahme an den Bot oder erfassen Sie die Rechnung manuell.",
   "Unreadable": "Nicht lesbar",
   "{{count}} pending": "{{count}} ausstehend",

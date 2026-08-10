@@ -29,8 +29,18 @@ import {
 } from '../managers/billparser/index.js';
 
 const POLL_MS = 60_000;
-// A Telegram photo of a bill is a few MB; documents are bounded by the same
-// 6MB cap the upload route enforces (routes.ts uploadBill limits.fileSize).
+// A Telegram photo of a bill is a few MB. This bound is now DELIBERATELY
+// INDEPENDENT of the upload route's per-file cap (routes.ts raised that to 15MB to
+// admit a multi-page CamScanner bundle) — the two are different risks: an upload
+// is one operator action the landlord is waiting on, whereas the poller ingests
+// unattended, one file per message, into a 384MiB container that also holds the
+// ~239MB warm OCR session. 6MB comfortably covers a phone photo of a bill and
+// keeps a single stray Telegram document from squeezing the OCR heap.
+//
+// The comment this replaces claimed parity with the upload route ("the same 6MB
+// cap"), which stopped being true the moment that cap moved — the same drift that
+// let the duplicated matcher below rot. Asserted parity needs a shared constant,
+// not a sentence.
 const MAX_TG_FILE_BYTES = 6 * 1024 * 1024;
 
 // How many consecutive ticks an update may fail before we declare it poison and
@@ -71,15 +81,29 @@ export interface InboxScanDeps {
   ) => Promise<{ buffer: Buffer; fileName: string } | null>;
   /** The bill parse pipeline (parseBillPdf) — injected for tests. */
   parseBill: (buffer: Buffer) => Promise<any>;
-  /** Find the building/expense whose billingId matches (suggestedMatch). */
+  /**
+   * Find where the bill belongs (→ InboxItem.suggestedMatch). Three shapes:
+   *  · a full hit (expense configured): buildingId + expenseId set.
+   *  · a partial hit (κοινόχρηστος meter or apartment meter): the building is
+   *    known, expenseId is '' so the UI offers «Νέα δαπάνη»; the shared- and
+   *    unit-prefixed fields say which kind, so the prefill picks the right
+   *    allocation.
+   *  · `{ambiguous}`: several candidates claim this παροχή. No target is proposed,
+   *    but the card must say THAT rather than «δεν βρέθηκε δαπάνη».
+   */
   findMatch: (
     realmId: string,
     billingIdNormalized: string
   ) => Promise<{
-    buildingId: string;
-    buildingName: string;
-    expenseId: string;
-    expenseName: string;
+    buildingId?: string;
+    buildingName?: string;
+    expenseId?: string;
+    expenseName?: string;
+    sharedProvider?: string;
+    sharedLabel?: string;
+    unitPropertyId?: string;
+    unitLabel?: string;
+    ambiguous?: string;
   } | null>;
   /** True if this telegramMessageId was already ingested for the realm. */
   hasInboxItem: (
@@ -247,30 +271,84 @@ async function _downloadFile(
   };
 }
 
+/**
+ * Suggest where an ingested bill belongs, by CALLING the canonical matchers
+ * rather than reimplementing them.
+ *
+ * This function used to hold a hand-copied reimplementation of
+ * `findExpenseByBillingId`, carrying a comment that asserted "same matching rule
+ * as parseBills". That was true on the day it was written (2026-07-25, Slice 4)
+ * and silently became false when the upload path learned to compare the 9-digit
+ * body of a ΔΕΗ παροχή: a bill photographed to the bot then failed to match an
+ * expense the SAME bill matched when uploaded. Duplicated money-routing logic
+ * drifts, and a comment claiming parity is what stops the next reader from
+ * checking. Both surfaces now share one implementation.
+ *
+ * Also gains what the copy never had: κοινόχρηστοι (shared) meters. A shared
+ * supply is looked up FIRST — as on the upload path — because a shared bill and
+ * an apartment's own bill mean opposite things for allocation, and it returns the
+ * building WITHOUT an expenseId so the UI offers the create-expense path instead
+ * of asserting a match that does not exist yet.
+ */
 async function _findMatch(realmId: string, billingIdNormalized: string) {
-  // Same matching rule as parseBills (billmanager.findExpenseByBillingId):
-  // billingId equality after normalization, skipping soft-deleted expenses.
-  const { normalizeBillingId } = await import(
-    '../managers/billparser/index.js'
+  const { findExpenseMatch, findSharedMeterMatch, findUnitBySupplyNumber } =
+    await import('../managers/billmanager.js');
+  const { status, hit: expenseHit } = await findExpenseMatch(
+    realmId,
+    billingIdNormalized
   );
-  const buildings = await Collections.Building.find({ realmId }).lean();
-  const now = new Date();
-  const currentTerm = Number(
-    `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}0100`
-  );
-  for (const building of buildings as any[]) {
-    for (const expense of building.expenses || []) {
-      if (!expense.billingId) continue;
-      if (expense.endTerm && Number(expense.endTerm) < currentTerm) continue;
-      if (normalizeBillingId(expense.billingId) === billingIdNormalized) {
-        return {
-          buildingId: String(building._id),
-          buildingName: building.name,
-          expenseId: String(expense._id),
-          expenseName: expense.name
-        };
-      }
-    }
+  if (expenseHit) {
+    return {
+      buildingId: String(expenseHit.building._id),
+      buildingName: expenseHit.building.name,
+      expenseId: String(expenseHit.expense._id),
+      expenseName: expenseHit.expense.name
+    };
+  }
+  // AMBIGUOUS ≠ unmatched. Several expenses claim this παροχή, so the operator
+  // must decide; proposing a shared meter here would pre-attribute the bill to
+  // weaker evidence than the candidates just refused. Suggest no target — but SAY
+  // SO, because the card's only other message is «δεν βρέθηκε δαπάνη», the exact
+  // opposite of the truth. A landlord reading that reasonably creates ANOTHER
+  // δαπάνη for the same παροχή, which deepens the ambiguity permanently.
+  if (status === 'ambiguous') return { ambiguous: 'expense' };
+  // No configured δαπάνη. A shared meter still tells us the BUILDING, which is
+  // the slow half of what the landlord would otherwise pick by hand. `expenseId`
+  // stays empty: InboxBell renders the no-match card (building/expense selects +
+  // «Νέα δαπάνη») whenever expenseId is absent, which is exactly the right
+  // affordance here. `provider`/`label` ride along so the create-expense prefill
+  // can pick the χιλιοστά split a κοινόχρηστο needs (see sharedExpensePrefill).
+  const shared = await findSharedMeterMatch(realmId, billingIdNormalized);
+  if (shared.hit) {
+    return {
+      buildingId: shared.hit.buildingId,
+      buildingName: shared.hit.buildingName,
+      expenseId: '',
+      expenseName: '',
+      sharedProvider: shared.hit.provider,
+      sharedLabel: shared.hit.label || ''
+    };
+  }
+  // Two meters claim this παροχή — suggest no target rather than fall through to
+  // the unit tier below, which would propose `single_unit` and bill the building's
+  // whole shared supply to one apartment. Reported, not silent (see above).
+  if (shared.status === 'ambiguous') return { ambiguous: 'sharedMeter' };
+  // THIRD TIER, same order as the upload path (parseBills): a παροχή recorded on
+  // an APARTMENT identifies that unit. This is the commonest case — it is how the
+  // reported ΔΕΗ bill resolves — and the bot lacked it entirely, so that bill
+  // arrived unmatched by Telegram while matching on upload. Tried LAST because a
+  // shared meter and a unit meter mean opposite things for allocation, and shared
+  // must win.
+  const unit = await findUnitBySupplyNumber(realmId, billingIdNormalized);
+  if (unit) {
+    return {
+      buildingId: unit.buildingId,
+      buildingName: unit.buildingName,
+      expenseId: '',
+      expenseName: '',
+      unitPropertyId: unit.propertyId,
+      unitLabel: unit.unitLabel
+    };
   }
   return null;
 }
@@ -457,7 +535,14 @@ async function _sendReply(
   }
 }
 
-function _defaultDeps(): InboxScanDeps {
+/**
+ * EXPORTED so the REAL implementations can be tested, not just the injected
+ * stubs. The existing suite passes `findMatch: async () => matchResult`, which
+ * exercises the plumbing and is blind to the matcher itself — exactly how this
+ * file's hand-copied matcher was free to drift out of step with the upload path
+ * for weeks without a single test going red.
+ */
+export function _defaultDeps(): InboxScanDeps {
   return {
     now: () => new Date(),
     findTelegramRealms: _findTelegramRealms,

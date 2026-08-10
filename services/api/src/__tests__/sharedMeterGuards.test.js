@@ -93,6 +93,20 @@ describe('validateSharedMeters', () => {
     ]);
   });
 
+  it('validates the CREATE path against the units in the same request', () => {
+    // add() previously neither validated nor persisted sharedMeters — a POST
+    // carrying them dropped them silently. It now runs THIS validator against
+    // req.body.units, so a create cannot smuggle in a meter that collides with an
+    // apartment it is creating in the same payload.
+    const e = errOf(
+      [{ provider: 'deh', supplyNumber: '999935585-016' }],
+      // Same shape add() passes: the units from the request body.
+      [{ name: 'Α2', electricitySupplyNumber: '999935585' }]
+    );
+    expect(e?.statusCode).toBe(422);
+    expect(e.message).toMatch(/Α2/);
+  });
+
   it('allows the SAME number on two DIFFERENT buildings (no cross-building block)', () => {
     // Units passed empty = a different building. The realm-wide ambiguity refusal
     // lives in findSharedMeter; this validator is per-building by design.

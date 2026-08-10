@@ -978,6 +978,18 @@ export async function add(req: Req, res: Res) {
   // distinct people. Use the ONE helper both paths call so they cannot drift again.
   req.body.manager = _validateBuildingManager(req.body.manager);
 
+  // Κοινόχρηστοι μετρητές on the CREATE path. Previously `add()` neither validated
+  // nor destructured `sharedMeters`, so a POST carrying them silently dropped them
+  // — no error, no rows, and the landlord discovers it only when a κοινόχρηστο bill
+  // fails to match. Same validator as update(), so the two cannot drift; the
+  // collision check reads the units being created in this same request.
+  if (req.body.sharedMeters !== undefined) {
+    req.body.sharedMeters = validateSharedMeters(
+      req.body.sharedMeters,
+      req.body.units || []
+    );
+  }
+
   const existing = await Collections.Building.findOne({
     realmId: realm!._id,
     atakPrefix: req.body.atakPrefix
@@ -1009,6 +1021,7 @@ export async function add(req: Req, res: Res) {
     expenses,
     contractors,
     repairs,
+    sharedMeters,
     notes
   } = req.body;
   // O10 (audit-2026-07): bulk building-create persisted units[].owners[]
@@ -1041,6 +1054,7 @@ export async function add(req: Req, res: Res) {
     expenses: expenses || [],
     contractors: contractors || [],
     repairs: repairs || [],
+    sharedMeters: sharedMeters || [],
     notes,
     realmId: realm!._id,
     createdDate: now,

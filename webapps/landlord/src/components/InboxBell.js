@@ -31,6 +31,7 @@ import {
 } from './ui/select';
 import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { buildExpensePrefill } from '../utils/billExpensePrefill';
 import { Button } from './ui/button';
 import { ExpenseFormDialog } from './buildings/ExpenseFormDialog';
 import { Label } from './ui/label';
@@ -57,13 +58,9 @@ import useTranslation from 'next-translate/useTranslation';
  * item stays pending so nothing is lost.
  */
 
-// Provider → building expense `type` suggestion for the pre-filled form
-// (same map as BillImportDialog).
-const PROVIDER_TYPE = {
-  deh: 'electricity_common',
-  eydap: 'water_common',
-  epa: 'heating'
-};
+// Provider → expense `type` used to live here as a second copy of
+// BillImportDialog's map, beside a second copy of its allocation logic. Both now
+// come from utils/billExpensePrefill.
 
 // Provider code → display name. These are Greek utility brands; the Greek
 // name is the correct render in every locale (approved mock shows «ΔΕΗ»,
@@ -204,9 +201,23 @@ function InboxCard({ item, buildings, onGone }) {
   const [createOpen, setCreateOpen] = useState(false);
 
   const parsed = useMemo(() => item.parsed || {}, [item.parsed]);
-  const match = item.suggestedMatch;
-  const buildingId = match?.buildingId || assignment?.buildingId || '';
-  const expenseId = match?.expenseId || assignment?.expenseId || '';
+  // A suggestion is only a MATCH when it names an expense. A κοινόχρηστος
+  // shared-meter hit identifies the BUILDING but has no δαπάνη yet (the poller
+  // returns expenseId:''), so it must render the no-match card — which offers the
+  // building/expense selects and «Νέα δαπάνη» — rather than a green «Αντιστοιχεί»
+  // with an empty expense name. `buildingId` below still consumes the suggestion,
+  // so the building arrives pre-selected either way.
+  const rawSuggestion = item.suggestedMatch;
+  const match = rawSuggestion?.expenseId ? rawSuggestion : null;
+  // ASSIGNMENT FIRST, suggestion second. The suggestion is a PROPOSAL; once the
+  // landlord touches the select, their choice is the answer. Reading the
+  // suggestion first made the shared-meter building unoverridable: picking
+  // building C left `buildingId` on the suggested B, the select still listed B's
+  // expenses, and confirm posted {buildingId: B, expenseId: <B's>} — the bill
+  // charged a building the landlord never chose.
+  const buildingId =
+    assignment?.buildingId || rawSuggestion?.buildingId || '';
+  const expenseId = assignment?.expenseId || match?.expenseId || '';
   const selectedBuilding = (buildings || []).find(
     (b) => String(b._id) === String(buildingId)
   );
@@ -276,17 +287,37 @@ function InboxCard({ item, buildings, onGone }) {
   });
 
   // Pre-filled synthetic expense for «➕ Νέα δαπάνη» (NO _id → add mode).
+  //
+  // This used to hardcode `allocationMethod: 'equal'` while the upload dialog ran a
+  // thousandths-aware three-way for the SAME bills — so a κοινόχρηστο routed
+  // through the bell split equally instead of by χιλιοστά (€50/50/50/50 where the
+  // correct split over 400/300/200/100‰ is €80/60/40/20), silently, every month.
+  // Both surfaces now call one helper; the reasoning lives there.
   const createPrefill = useMemo(
-    () => ({
-      name: parsed.provider ? parsed.provider.toUpperCase() : '',
-      type: PROVIDER_TYPE[parsed.provider] || 'other',
-      amount: 0,
-      allocationMethod: 'equal',
-      isRecurring: true,
-      chargeOwnerWhenVacant: true,
-      billingId: parsed.billingId || ''
-    }),
-    [parsed]
+    () =>
+      buildExpensePrefill({
+        building: selectedBuilding,
+        provider: parsed.provider,
+        billingId: parsed.billingId,
+        // A κοινόχρηστος hit carries no expense (expenseId:''), and the poller
+        // sends the meter's own provider/label alongside it.
+        sharedMatch: rawSuggestion?.sharedProvider
+          ? {
+              provider: rawSuggestion.sharedProvider,
+              label: rawSuggestion.sharedLabel
+            }
+          : null,
+        // An APARTMENT-meter hit targets that single flat (`single_unit`). Scoped
+        // to the resolved building: a propertyId from another building fails the
+        // server's cross-building guard with an undiagnosable toast, so if the
+        // landlord overrides the building, fall back to an equal split.
+        unitMatch:
+          rawSuggestion?.unitPropertyId &&
+          String(rawSuggestion.buildingId) === String(buildingId)
+            ? { propertyId: rawSuggestion.unitPropertyId }
+            : null
+      }),
+    [parsed, selectedBuilding, rawSuggestion, buildingId]
   );
 
   const handleExpenseCreated = useCallback(
@@ -440,11 +471,27 @@ function InboxCard({ item, buildings, onGone }) {
         <>
           <div className="flex items-center gap-1.5 rounded-md bg-destructive/5 text-destructive text-xs px-2.5 py-1.5">
             <LuAlertTriangle className="size-3.5 shrink-0" />
-            {t('No expense found with this billing ID')}
+            {/* AMBIGUOUS is not "not found" — saying «δεν βρέθηκε» when several
+                δαπάνες DO carry this παροχή invites the landlord to create yet
+                another one, which makes the collision permanent on every ingest
+                path. Name the real problem and the real remedy. */}
+            {rawSuggestion?.ambiguous === 'expense'
+              ? t(
+                  'This billing ID is on more than one expense — pick which one, or remove the duplicate'
+                )
+              : rawSuggestion?.ambiguous === 'sharedMeter'
+                ? t(
+                    'This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details'
+                  )
+                : t('No expense found with this billing ID')}
           </div>
           <div className="flex gap-2">
             <Select
-              value={assignment?.buildingId || undefined}
+              // Show the resolved building, not just the touched one — a
+              // κοινόχρηστος shared-meter hit pre-selects it, and a select that
+              // silently drives a hidden value is how the wrong building gets
+              // charged.
+              value={buildingId || undefined}
               onValueChange={(val) =>
                 setAssignment({ buildingId: val, expenseId: '' })
               }
@@ -461,13 +508,20 @@ function InboxCard({ item, buildings, onGone }) {
               </SelectContent>
             </Select>
             <Select
-              value={assignment?.expenseId || undefined}
+              value={expenseId || undefined}
               disabled={!buildingId}
               onValueChange={(val) => {
                 if (val === '__new__') {
                   setCreateOpen(true);
                 } else {
-                  setAssignment((prev) => ({ ...prev, expenseId: val }));
+                  // Carry the RESOLVED buildingId: when the building came from
+                  // the suggestion, `prev` is null, so spreading it alone would
+                  // post an expense with no building.
+                  setAssignment((prev) => ({
+                    ...prev,
+                    buildingId: prev?.buildingId || buildingId,
+                    expenseId: val
+                  }));
                 }
               }}
             >

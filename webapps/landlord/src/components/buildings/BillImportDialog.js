@@ -21,6 +21,7 @@ import {
   SelectValue
 } from '../ui/select';
 import { Badge } from '../ui/badge';
+import { buildExpensePrefill } from '../../utils/billExpensePrefill';
 import { Button } from '../ui/button';
 import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
@@ -35,14 +36,6 @@ import { termMonthYearAccusative } from '../../utils/greekMonths';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
-
-// Provider → building expense `type` enum (services/common/.../building.ts).
-// A SUGGESTION for the pre-filled new-expense form; the user can change it.
-const PROVIDER_TYPE = {
-  deh: 'electricity_common',
-  eydap: 'water_common',
-  epa: 'heating'
-};
 
 // H4: key per-result state by a stable synthetic uid, NOT filename. Two uploaded
 // files can share a name (the server keeps both), and a filename key made their
@@ -644,10 +637,10 @@ export default function BillImportDialog({ open, setOpen, building }) {
   }, []);
 
   // The pre-filled synthetic expense (NO _id → add mode in ExpenseFormDialog).
-  // When the αριθμός παροχής identified a specific apartment (unitMatch), target
-  // that single unit (single_unit allocation) so the landlord only confirms;
-  // otherwise default to an equal split. billingId + provider→type are
-  // suggested from the parsed bill.
+  // The allocation three-way (shared → χιλιοστά, unit → single_unit, else equal)
+  // and every reason each branch matters live in ONE place, shared with InboxBell:
+  // utils/billExpensePrefill.js. It used to live only here, so the same bill routed
+  // through the Telegram bell got a flat equal split and mis-billed every unit.
   const createPrefill = useMemo(() => {
     if (!createFor) return null;
     const result = results.find((r) => r._uid === createFor.uid);
@@ -678,75 +671,13 @@ export default function BillImportDialog({ open, setOpen, building }) {
     // opened blank for exactly the files that need it most — the whole point of
     // the parse-fail surface is that the salvaged data is reusable.
     const partial = result?.success ? null : result?.partial;
-    const provider = parsed?.provider || result?.detectedProvider || '';
-    // On a shared-meter hit the provider is known from the STORED meter, which is
-    // more reliable than the parse (it is what the landlord recorded) and is also
-    // available when the parse failed entirely.
-    const effectiveProvider = sharedMatch?.provider || provider;
-    // Which χιλιοστά vector this utility should split by, and whether the target
-    // building actually HAS it. `heating` (gas) must use heatingThousandths —
-    // general_thousandths is not even offered for that expense type. When the
-    // vector sums to zero the split is unrepresentable, so degrade to an equal
-    // split rather than persisting an expense that charges nobody.
-    const sharedType = PROVIDER_TYPE[effectiveProvider] || 'other';
-    const thousandthsField =
-      sharedType === 'heating' ? 'heatingThousandths' : 'generalThousandths';
-    const thousandthsTotal = (createFor.building?.units || []).reduce(
-      (sum, u) => sum + (Number(u?.[thousandthsField]) || 0),
-      0
-    );
-    const sharedThousandthsMethod =
-      thousandthsTotal > 0
-        ? sharedType === 'heating'
-          ? 'heating_thousandths'
-          : 'general_thousandths'
-        : 'equal';
-    return {
-      // A shared meter's own label («Κλιμακοστάσιο») names the expense far better
-      // than the bare provider; fall back to the provider when it has none.
-      name: sharedMatch?.label || (provider ? provider.toUpperCase() : ''),
-      type: PROVIDER_TYPE[effectiveProvider] || 'other',
-      // The amount is left at 0 deliberately: on a failed parse it is a SALVAGED
-      // figure, and a salvaged total may be a prior-balance-inclusive number
-      // (BILL_OCR_INBOX_PLAN §17.5.2). It is displayed on the card for the
-      // operator to read off the document and type in — never pre-committed.
-      amount: 0,
-      // THREE-WAY, and the order matters. A shared meter is billed to the whole
-      // building by χιλιοστά; a unit's own meter is billed entirely to that
-      // apartment; anything unidentified falls back to an equal split. Putting
-      // `single_unit` on a shared meter would charge one flat for the building's
-      // whole supply while every other unit paid zero (1_base.ts single_unit).
-      // THREE-WAY, and each branch is load-bearing (all three were found broken
-      // by adversarial review):
-      //
-      // · A shared meter splits across the building by χιλιοστά — but WHICH
-      //   χιλιοστά depends on the utility. Gas (ΕΠΑ) maps to expense type
-      //   `heating`, and `ALLOCATION_METHODS_BY_TYPE.heating` does NOT include
-      //   `general_thousandths` (ExpenseFormDialog) — pairing them produced a
-      //   combination the picker itself forbids, and the form's auto-correct
-      //   declines to repair a value it believes was persisted. Gas would then
-      //   split by GENERAL thousandths, billing unheated units for heating.
-      // · …and χιλιοστά are OPTIONAL: an E9-imported building has none, so
-      //   `Σ generalThousandths === 0`. `1_base.ts` returns a 0 share for every
-      //   unit, no monthlyCharge row is written, and the amount lands on NO
-      //   surface at all — invisible money (MONEY_SURFACE_MATRIX). The server's
-      //   `_assertThousandthsAvailable` cannot catch it either: it is gated on
-      //   `amount > 0` and this prefill deliberately sends 0. So fall back to an
-      //   equal split when the chosen building has no thousandths for the method.
-      // · A unit's own meter is billed entirely to that apartment.
-      allocationMethod: sharedMatch
-        ? sharedThousandthsMethod
-        : unitMatch
-          ? 'single_unit'
-          : 'equal',
-      customAllocations:
-        unitMatch && !sharedMatch
-          ? [{ propertyId: unitMatch.propertyId, value: 0 }]
-          : [],
-      isRecurring: true,
-      chargeOwnerWhenVacant: true,
-      billingId: parsed?.billingId || partial?.billingId || ''
-    };
+    return buildExpensePrefill({
+      building: createFor.building,
+      provider: parsed?.provider || result?.detectedProvider || '',
+      billingId: parsed?.billingId || partial?.billingId || '',
+      sharedMatch,
+      unitMatch
+    });
   }, [createFor, results]);
 
   // After the new expense is created, the server returns the updated building.

@@ -60,7 +60,25 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
       buildingId: String,
       buildingName: String,
       expenseId: String,
-      expenseName: String
+      expenseName: String,
+      // Set ONLY when the παροχή matched a building's κοινόχρηστος meter (then
+      // expenseId is '' — there is no δαπάνη yet). These two drive the
+      // create-expense prefill: a shared bill splits across the building by
+      // χιλιοστά, and WHICH vector depends on the utility (gas → heating). An
+      // unlisted field is dropped by Mongoose without a word, which is why the
+      // prefill previously fell back to an equal split and mis-billed every unit.
+      sharedProvider: String,
+      sharedLabel: String,
+      // Set ONLY when the παροχή is recorded on an APARTMENT (expenseId is ''
+      // here too). The prefill then proposes `single_unit` — the whole amount to
+      // that flat — instead of splitting it across the building.
+      unitPropertyId: String,
+      unitLabel: String,
+      // 'expense' | 'sharedMeter': several candidates claim this παροχή, so no
+      // target is proposed. Recorded because the card's only other message is
+      // «δεν βρέθηκε δαπάνη» — the opposite of the truth, and acting on it (create
+      // another δαπάνη for the same παροχή) makes the ambiguity permanent.
+      ambiguous: String
     },
     default: null
   },

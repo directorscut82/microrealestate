@@ -231,13 +231,41 @@ export function sameSupply(a: string, b: string): boolean {
   return !!ba && !!bb && ba === bb;
 }
 
-async function findExpenseByBillingId(
+/**
+ * THE canonical bill→expense matcher. EXPORTED because more than one ingest
+ * surface needs it: the upload dialog (parseBills, below) and the Telegram
+ * poller (jobs/telegramInboxScanner). The poller used to carry a hand-copied
+ * reimplementation whose comment claimed "same matching rule as parseBills" —
+ * true the day it was written, false the moment this function learned to compare
+ * the 9-digit body, and nothing failed to say so. One function, one rule.
+ */
+export async function findExpenseByBillingId(
   realmId: string,
   normalizedBillingId: string
 ): Promise<{
   building: any;
   expense: any;
 } | null> {
+  const { hit } = await findExpenseMatch(realmId, normalizedBillingId);
+  return hit;
+}
+
+/**
+ * The same lookup, but it distinguishes AMBIGUOUS from NOTHING-MATCHED.
+ *
+ * Both collapse to `null` above, and a caller that treats them alike makes a bad
+ * decision: when two expenses share a παροχή, the two strongest candidates are
+ * discarded and a WEAKER source (a shared meter, a unit) gets proposed instead —
+ * pre-attributing the bill to a building the evidence did not point at. Ambiguity
+ * means "ask the operator", so it must stop the fallthrough, not feed it.
+ */
+export async function findExpenseMatch(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<{
+  status: 'match' | 'ambiguous' | 'none';
+  hit: { building: any; expense: any } | null;
+}> {
   const buildings = await Collections.Building.find({ realmId }).lean();
 
   // Compute the current YYYYMMDDHH term — soft-deleted expenses carry
@@ -267,7 +295,7 @@ async function findExpenseByBillingId(
       }
     }
   }
-  if (exact.length === 1) return exact[0];
+  if (exact.length === 1) return { status: 'match', hit: exact[0] };
   // More than one expense carries the SAME παροχή: the realm is ambiguous and
   // guessing would charge the wrong expense. Report no match so the operator
   // chooses, which is the same path an unknown bill already takes.
@@ -275,15 +303,16 @@ async function findExpenseByBillingId(
     logger.warn(
       `bill match ambiguous: ${exact.length} expenses share this παροχή — asking the operator`
     );
-    return null;
+    return { status: 'ambiguous', hit: null };
   }
-  if (byBody.length === 1) return byBody[0];
+  if (byBody.length === 1) return { status: 'match', hit: byBody[0] };
   if (byBody.length > 1) {
     logger.warn(
       `bill match ambiguous on the 9-digit body: ${byBody.length} expenses — asking the operator`
     );
+    return { status: 'ambiguous', hit: null };
   }
-  return null;
+  return { status: 'none', hit: null };
 }
 
 /**
@@ -296,16 +325,38 @@ async function findExpenseByBillingId(
  * a shared-meter match must be split across the building (χιλιοστά). Conflating
  * them would bill the entire building's shared electricity to a single flat.
  */
-async function findSharedMeter(
-  realmId: string,
-  normalizedBillingId: string
-): Promise<{
+// EXPORTED for the same reason as findExpenseByBillingId: every ingest surface
+// must recognise a κοινόχρηστος meter identically, or a shared bill is matched on
+// one path and left unmatched on another.
+export type SharedMeterHit = {
   buildingId: string;
   buildingName: string;
   provider: string;
   label?: string;
-} | null> {
-  if (!normalizedBillingId) return null;
+};
+
+/** Convenience wrapper for callers that don't distinguish ambiguous from none. */
+export async function findSharedMeter(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<SharedMeterHit | null> {
+  const { hit } = await findSharedMeterMatch(realmId, normalizedBillingId);
+  return hit;
+}
+
+/**
+ * Three-state, for the same reason `findExpenseMatch` is: a caller that reads
+ * ambiguous as "nothing here" proceeds to WEAKER evidence. One tier down is the
+ * per-unit lookup, which bills the whole shared supply to a single apartment.
+ */
+export async function findSharedMeterMatch(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<{
+  status: 'match' | 'ambiguous' | 'none';
+  hit: SharedMeterHit | null;
+}> {
+  if (!normalizedBillingId) return { status: 'none', hit: null };
   const buildings = await Collections.Building.find({ realmId }).lean();
   const hits: {
     buildingId: string;
@@ -328,13 +379,21 @@ async function findSharedMeter(
       }
     }
   }
-  if (hits.length === 1) return hits[0];
+  if (hits.length === 1) return { status: 'match', hit: hits[0] };
   if (hits.length > 1) {
     logger.warn(
       `shared-meter match ambiguous: ${hits.length} meters — asking the operator`
     );
+    // AMBIGUOUS, and it must NOT read as "no shared meter". Collapsing the two
+    // into null let the caller fall through to the per-unit tier, which proposes
+    // `single_unit` — the whole building's shared supply billed to ONE flat while
+    // every other unit pays zero. That is the precise outcome the shared-meter
+    // feature exists to prevent, and the write-time collision guard cannot cover
+    // it: that guard is per-building and order-dependent (record the meter first,
+    // let the E9 import write the unit's supply after, and it never re-runs).
+    return { status: 'ambiguous', hit: null };
   }
-  return null;
+  return { status: 'none', hit: null };
 }
 
 /**
@@ -348,7 +407,12 @@ async function findSharedMeter(
  * Returns null when no unit carries that supply number (common — many bills are
  * building-level, or the unit's number was never imported).
  */
-async function findUnitBySupplyNumber(
+// EXPORTED for the same reason as the two matchers above: the Telegram poller
+// needs the SAME third tier the upload path has. Without it the bot resolved only
+// expense + shared meters, so a bill whose παροχή identifies an APARTMENT — the
+// commonest case, and the exact shape of the ΔΕΗ bill reported on 2026-08-09 —
+// arrived unmatched by bot while matching on upload.
+export async function findUnitBySupplyNumber(
   realmId: string,
   normalizedBillingId: string
 ): Promise<{
@@ -478,7 +542,7 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       // path, which is what it would offer anyway for an unmatched bill.
       if (partial?.billingIdNormalized) {
         try {
-          const m = await findExpenseByBillingId(
+          const { status, hit: m } = await findExpenseMatch(
             realmId,
             partial.billingIdNormalized
           );
@@ -490,14 +554,21 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
                 expenseName: m.expense.name
               }
             : null;
-          if (!m) {
+          // `status === 'ambiguous'` means several expenses claim this παροχή. Do
+          // NOT fall through: proposing a shared meter or a unit would pre-attribute
+          // the bill to weaker evidence than the candidates just rejected.
+          if (status === 'none') {
             // Shared meter first, for the same reason as the success path: a
             // κοινόχρηστο must never be prefilled as `single_unit`.
-            sharedMeterMatch = await findSharedMeter(
+            const sm = await findSharedMeterMatch(
               realmId,
               partial.billingIdNormalized
             );
-            if (!sharedMeterMatch) {
+            sharedMeterMatch = sm.hit;
+            // Only a genuine absence may fall through to the unit tier. An
+            // AMBIGUOUS shared meter falling through here would propose
+            // `single_unit` for a building-wide supply.
+            if (sm.status === 'none') {
               unitMatch = await findUnitBySupplyNumber(
                 realmId,
                 partial.billingIdNormalized
@@ -532,7 +603,7 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     const { bill } = parseResult;
 
     // Try to match billing ID to an expense
-    const match = await findExpenseByBillingId(
+    const { status: matchStatus, hit: match } = await findExpenseMatch(
       realmId,
       bill.billingIdNormalized
     );
@@ -545,13 +616,21 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     // in one field would let a whole building's shared electricity land on one
     // flat. Only computed for the no-match case (a matched bill already knows its
     // building/expense).
-    const sharedMeterMatch = match
-      ? null
-      : await findSharedMeter(realmId, bill.billingIdNormalized);
+    // AMBIGUOUS is not the same as unmatched: several expenses claim this παροχή,
+    // so the operator must choose. Falling through would propose a shared meter or
+    // an apartment — weaker evidence than the candidates just refused.
+    const sharedResult =
+      matchStatus === 'none'
+        ? await findSharedMeterMatch(realmId, bill.billingIdNormalized)
+        : { status: 'skip' as const, hit: null };
+    const sharedMeterMatch = sharedResult.hit;
+    // The unit tier is reached ONLY when both stronger tiers found nothing at all.
+    // 'ambiguous' from either one means the operator must choose, and proposing a
+    // `single_unit` charge would be a worse guess than proposing nothing.
     const unitMatch =
-      match || sharedMeterMatch
-        ? null
-        : await findUnitBySupplyNumber(realmId, bill.billingIdNormalized);
+      matchStatus === 'none' && sharedResult.status === 'none'
+        ? await findUnitBySupplyNumber(realmId, bill.billingIdNormalized)
+        : null;
 
     // Generate IRIS QR from RF code + payment code (verified approach).
     // C2 fix: generate regardless of match — the QR is about the bill's

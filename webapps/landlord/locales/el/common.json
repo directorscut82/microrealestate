@@ -1392,6 +1392,8 @@
   "Dismiss": "Απόρριψη",
   "Matches": "Αντιστοιχεί",
   "No expense found with this billing ID": "Δεν βρέθηκε δαπάνη με αυτόν τον αριθμό παροχής",
+  "This billing ID is on more than one expense — pick which one, or remove the duplicate": "Αυτός ο αριθμός παροχής υπάρχει σε περισσότερες από μία δαπάνες — επιλέξτε ποια ισχύει ή διαγράψτε τη διπλή",
+  "This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details": "Αυτός ο αριθμός παροχής είναι καταχωρισμένος ως κοινόχρηστος μετρητής σε περισσότερα από ένα κτίρια — διορθώστε τη διπλή καταχώριση στα στοιχεία του κτιρίου",
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "Η φωτογραφία δεν διαβάστηκε: {{error}}. Στείλτε καθαρότερη λήψη στο bot ή καταχωρήστε τον λογαριασμό χειροκίνητα.",
   "Unreadable": "Μη αναγνώσιμο",
   "{{count}} pending": "{{count}} εκκρεμούν",

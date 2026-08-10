@@ -1225,6 +1225,8 @@
   "Dismiss": "Descartar",
   "Matches": "Coincide con",
   "No expense found with this billing ID": "No se encontró un gasto con este número de facturación",
+  "This billing ID is on more than one expense — pick which one, or remove the duplicate": "Este número de facturación está en más de un gasto — elija cuál o elimine el duplicado",
+  "This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details": "Este número de suministro está registrado como contador comunitario en más de un edificio — corrija el duplicado en los datos del edificio",
   "The photo could not be read: {{error}}. Send a clearer shot to the bot or record the bill manually.": "No se pudo leer la foto: {{error}}. Envíe una toma más clara al bot o registre la factura manualmente.",
   "Unreadable": "Ilegible",
   "{{count}} pending": "{{count}} pendientes",

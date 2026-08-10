@@ -800,10 +800,26 @@ export namespace CollectionTypes {
     };
     parseError?: string;
     suggestedMatch?: {
-      buildingId: string;
-      buildingName: string;
-      expenseId: string;
-      expenseName: string;
+      // All optional: an `ambiguous` suggestion names no target at all, and a
+      // meter-only hit has expenseId '' with no expenseName.
+      buildingId?: string;
+      buildingName?: string;
+      expenseId?: string;
+      expenseName?: string;
+      // Set ONLY for a κοινόχρηστος shared-meter hit, where expenseId is '' (no
+      // δαπάνη exists yet). They drive the create-expense prefill's χιλιοστά
+      // split — see webapps/landlord/src/utils/billExpensePrefill.js. Must stay in
+      // step with the Mongoose sub-schema in
+      // services/common/src/collections/inboxItem.ts.
+      sharedProvider?: string;
+      sharedLabel?: string;
+      // Set ONLY for an APARTMENT-meter hit (expenseId '' as well) — drives the
+      // `single_unit` prefill. Mutually exclusive with the shared* pair.
+      unitPropertyId?: string;
+      unitLabel?: string;
+      // 'expense' | 'sharedMeter' — the παροχή matched several candidates, so
+      // nothing is proposed and the UI must say so explicitly.
+      ambiguous?: string;
     } | null;
     warnings: InboxItemWarning[] | [];
     sourceFileName?: string;
