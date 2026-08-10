@@ -409,6 +409,46 @@ const OwnerMonthlyExpenseSchema = new mongoose.Schema({
   paidDate: { type: Date, default: null }
 });
 
+/**
+ * A SHARED (κοινόχρηστος) utility meter belonging to the BUILDING, not to any one
+ * apartment — the στάσιμο/κλιμακοστάσιο ΔΕΗ meter, the lift's meter, the common
+ * ΕΥΔΑΠ supply.
+ *
+ * WHY THIS EXISTS: `electricitySupplyNumber` lives only on BuildingUnitSchema, so
+ * before this there was NOWHERE to record a shared meter. The bill importer keys
+ * on the αριθμός παροχής, so a κοινόχρηστο bill could never match — and the only
+ * workaround (putting the shared παροχή on some unit) is actively dangerous: the
+ * importer would propose `single_unit` and bill the whole building's shared
+ * electricity to that ONE apartment while every other unit paid zero.
+ *
+ * A LIST, not a pair of strings: a polykatoikia routinely has several shared
+ * meters (stairwell + lift + pump), and `provider` per row means a new utility
+ * never needs a schema change.
+ */
+const SharedMeterSchema = new mongoose.Schema(
+  {
+    // Which utility issues the bill. Drives the proposed expense `type` on import
+    // (deh → electricity_common, eydap → water_common, epa → heating). Must stay in
+    // step with billmanager's VALID_PROVIDERS and the dialog's PROVIDER_TYPE map —
+    // a provider valid for a BILL but not for a shared METER means a real
+    // κοινόχρηστο gas supply cannot be recorded at all.
+    provider: {
+      type: String,
+      enum: ['deh', 'eydap', 'epa', 'other'],
+      required: true
+    },
+    // The αριθμός παροχής as PRINTED on the bill, spacing and check-suffix
+    // included. Stored verbatim so it can be read back against a paper bill; all
+    // comparison is on the normalised digits (billparser normalizeBillingId).
+    supplyNumber: { type: String, required: true },
+    // Operator-facing name for this meter («Κλιμακοστάσιο», «Ανελκυστήρας»). Two
+    // shared ΔΕΗ meters are otherwise indistinguishable in the UI, and this label
+    // pre-fills the created expense's name.
+    label: String
+  },
+  { _id: false }
+);
+
 const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>(
   {
     realmId: { type: String, ref: Realm },
@@ -426,6 +466,9 @@ const BuildingSchema = new mongoose.Schema<CollectionTypes.Building>(
     },
     blockNumber: String,
     blockStreets: [String],
+
+    // Shared (κοινόχρηστοι) utility meters — see SharedMeterSchema.
+    sharedMeters: { type: [SharedMeterSchema], default: [] },
 
     atakPrefix: { type: String, required: true },
     yearBuilt: Number,

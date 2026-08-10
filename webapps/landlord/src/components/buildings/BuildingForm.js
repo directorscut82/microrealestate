@@ -12,7 +12,7 @@ import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import { Textarea } from '../ui/textarea';
 import { StoreContext } from '../../store';
-import { useForm } from 'react-hook-form';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { useContext, useMemo } from 'react';
 import useTranslation from 'next-translate/useTranslation';
 import {
@@ -98,6 +98,19 @@ const buildSchema = (currentAtakPrefix) =>
         })
       })
       .optional(),
+    // Shared (κοινόχρηστοι) utility meters. A LIST because a polykatoikia
+    // routinely has several (stairwell + lift + pump). Rows the landlord has
+    // started but not filled are dropped on submit rather than rejected — see
+    // onSubmit — so an empty trailing row never blocks saving the whole form.
+    sharedMeters: z
+      .array(
+        z.object({
+          provider: z.string().optional(),
+          supplyNumber: z.string().optional(),
+          label: z.string().optional()
+        })
+      )
+      .optional(),
     notes: z.string().optional()
   });
 
@@ -151,6 +164,13 @@ export default function BuildingForm({ building, onSubmit }) {
         name: '',
         iban: ''
       },
+      sharedMeters: building?.sharedMeters?.length
+        ? building.sharedMeters.map((m) => ({
+            provider: m.provider || 'deh',
+            supplyNumber: m.supplyNumber || '',
+            label: m.label || ''
+          }))
+        : [],
       notes: building?.notes || ''
     }),
     [building]
@@ -168,6 +188,7 @@ export default function BuildingForm({ building, onSubmit }) {
     handleSubmit,
     watch,
     setValue,
+    control,
     formState: { errors, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
@@ -179,9 +200,42 @@ export default function BuildingForm({ building, onSubmit }) {
   const hasCentralHeating = watch('hasCentralHeating');
   const heatingType = watch('heatingType');
   const hasUnits = building?.units?.length > 0;
+  // useFieldArray, NOT watch+setValue.
+  //
+  // This form is constructed with the `values` prop (see useForm above), which
+  // re-syncs from `initialValues` — and `initialValues` is a useMemo on
+  // `building`, which react-query hands back as a NEW OBJECT on every background
+  // refetch (the QueryClient is created with no options, so refetchOnWindowFocus
+  // is on and staleTime is 0). A hand-rolled array in form state is therefore at
+  // risk of being reset mid-edit by nothing more than the operator switching tabs
+  // — and `supplyNumber` is a money-routing key, so a silently dropped row means
+  // a bill that stops matching. `useFieldArray` owns its own keyed rows and is the
+  // idiom already used for repeatable lists here (UnitList.js, ThirdPartiesForm.js);
+  // its `key={field.id}` also avoids the index-keyed-input bug where removing row
+  // N makes row N+1 display the wrong value.
+  const {
+    fields: sharedMeterFields,
+    append: appendSharedMeter,
+    remove: removeSharedMeter
+  } = useFieldArray({ control, name: 'sharedMeters' });
+
+  // Drop rows with no supply number before submitting: an empty row the landlord
+  // added and left blank is not a meter, and the server requires supplyNumber.
+  // Silently pruning beats a validation error on a field they never filled.
+  const submit = (data) =>
+    onSubmit({
+      ...data,
+      sharedMeters: (data.sharedMeters || [])
+        .filter((m) => String(m?.supplyNumber || '').trim())
+        .map((m) => ({
+          provider: m.provider || 'deh',
+          supplyNumber: String(m.supplyNumber).trim(),
+          label: String(m.label || '').trim()
+        }))
+    });
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+    <form onSubmit={handleSubmit(submit)} autoComplete="off">
       <Section label={t('Building information')}>
         {hasUnits && (
           <div className="text-sm text-warning mb-4">
@@ -281,6 +335,101 @@ export default function BuildingForm({ building, onSubmit }) {
             </Select>
           </div>
         )}
+
+        {/* Shared (κοινόχρηστοι) utility meters.
+            The bill importer matches an incoming λογαριασμός on its αριθμός
+            παροχής. Before this, that number could only be recorded on a UNIT, so
+            a κοινόχρηστο bill matched nothing — and recording it on a unit anyway
+            would make the importer bill the building's whole shared supply to that
+            single apartment. A building-level entry makes the importer propose a
+            κοινόχρηστο expense split by χιλιοστά instead. */}
+        <div className="mt-8 space-y-2">
+          <Label>{t('Shared meters')}</Label>
+          <p className="text-sm text-muted-foreground">
+            {t(
+              'Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.'
+            )}
+          </p>
+          {sharedMeterFields.length > 0 && (
+            <div className="space-y-2">
+              {sharedMeterFields.map((field, idx) => (
+                <div
+                  key={field.id}
+                  className="sm:flex sm:gap-2 sm:items-end space-y-2 sm:space-y-0"
+                >
+                  <div className="space-y-1 sm:w-40">
+                    <Label
+                      htmlFor={`sharedMeters.${idx}.provider`}
+                      className="text-sm text-muted-foreground"
+                    >
+                      {t('Provider')}
+                    </Label>
+                    <Select
+                      value={watch(`sharedMeters.${idx}.provider`) || 'deh'}
+                      onValueChange={(val) =>
+                        setValue(`sharedMeters.${idx}.provider`, val)
+                      }
+                    >
+                      <SelectTrigger id={`sharedMeters.${idx}.provider`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="deh">{t('DEH')}</SelectItem>
+                        <SelectItem value="eydap">{t('EYDAP')}</SelectItem>
+                        <SelectItem value="epa">{t('EPA')}</SelectItem>
+                        <SelectItem value="other">{t('Other')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <Label
+                      htmlFor={`sharedMeters.${idx}.supplyNumber`}
+                      className="text-sm text-muted-foreground"
+                    >
+                      {t('Supply number')}
+                    </Label>
+                    <Input
+                      id={`sharedMeters.${idx}.supplyNumber`}
+                      {...register(`sharedMeters.${idx}.supplyNumber`)}
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <Label
+                      htmlFor={`sharedMeters.${idx}.label`}
+                      className="text-sm text-muted-foreground"
+                    >
+                      {t('Description')}
+                    </Label>
+                    <Input
+                      id={`sharedMeters.${idx}.label`}
+                      {...register(`sharedMeters.${idx}.label`)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeSharedMeter(idx)}
+                    aria-label={t('Remove')}
+                  >
+                    {t('Remove')}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              appendSharedMeter({ provider: 'deh', supplyNumber: '', label: '' })
+            }
+          >
+            {t('Add meter')}
+          </Button>
+        </div>
       </Section>
 
       <Section label={t('Address')}>

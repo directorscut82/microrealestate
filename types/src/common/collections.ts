@@ -655,6 +655,16 @@ export namespace CollectionTypes {
     address: PartAddress;
     blockNumber?: string;
     blockStreets: string[] | [];
+    // Shared (κοινόχρηστοι) utility meters belonging to the BUILDING rather than
+    // to a single apartment — the stairwell/lift ΔΕΗ supply, the common ΕΥΔΑΠ
+    // supply. A list because a polykatoikia routinely has several. The bill
+    // importer matches on `supplyNumber`; `provider` drives the proposed expense
+    // type and `label` its name. See SharedMeterSchema in collections/building.ts.
+    sharedMeters?: {
+      provider: 'deh' | 'eydap' | 'epa' | 'other';
+      supplyNumber: string;
+      label?: string;
+    }[];
     atakPrefix: string;
     yearBuilt?: number;
     totalFloors?: number;

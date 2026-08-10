@@ -1277,5 +1277,13 @@
   "Text recognition takes about a minute per file. Do not close this window.": "O reconhecimento de texto leva cerca de um minuto por arquivo. Não feche esta janela.",
   "{{count}} failed": "{{count}} falharam",
   "{{count}} failed_one": "1 falhou",
-  "Expense created": "Despesa criada"
+  "Expense created": "Despesa criada",
+  "Shared meters": "Medidores comuns",
+  "Supply number": "Número de fornecimento",
+  "Provider": "Fornecedor",
+  "Add meter": "Adicionar medidor",
+  "DEH": "DEH",
+  "EYDAP": "EYDAP",
+  "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Números de fornecimento cobrados de todo o edifício. Uma fatura correspondente é proposta como despesa comum.",
+  "EPA": "EPA"
 }

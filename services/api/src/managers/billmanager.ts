@@ -196,6 +196,41 @@ async function bridgeChargeToStatement(
   );
 }
 
+/**
+ * The 9-digit BODY of a ΔΕΗ αριθμός παροχής, or null when the value isn't that
+ * shape.
+ *
+ * WHY: a ΔΕΗ bill prints the παροχή as a 9-digit body plus a 3-digit check
+ * suffix («9 99935585-016» → 999935585 + 016), but the same meter is routinely
+ * RECORDED without the suffix — every one of the supply numbers in the live realm
+ * is stored as the bare 9 digits (measured 2026-08-10). Strict equality therefore
+ * matched nothing: a real ΔΕΗ bill could never link to the apartment it belongs
+ * to, which is exactly the symptom reported on 2026-08-09.
+ */
+export function supplyBody(normalized: string): string | null {
+  if (!normalized) return null;
+  if (!/^\d{9,12}$/.test(normalized)) return null;
+  return normalized.slice(0, 9);
+}
+
+/**
+ * Do two supply numbers denote the same meter?
+ *
+ * Exact match, else same 9-digit body — because one side may carry the printed
+ * check suffix and the other may not. This is a MONEY-ROUTING decision (it picks
+ * which expense a bill charges), so the loosening is bounded: it only ignores a
+ * SUFFIX, never a prefix, and callers must additionally refuse when the body is
+ * ambiguous within the realm (see the collision guards below). The live realm
+ * already contains two units sharing one body, so ambiguity is not theoretical.
+ */
+export function sameSupply(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ba = supplyBody(a);
+  const bb = supplyBody(b);
+  return !!ba && !!bb && ba === bb;
+}
+
 async function findExpenseByBillingId(
   realmId: string,
   normalizedBillingId: string
@@ -213,6 +248,12 @@ async function findExpenseByBillingId(
     `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}0100`
   );
 
+  // Collect EVERY candidate rather than returning the first, so an ambiguous
+  // suffix-insensitive match can be refused instead of silently resolved to
+  // whichever building happened to be iterated first. An exact match always wins
+  // over a body-only match — a fully-written παροχή is stronger evidence.
+  const exact: { building: any; expense: any }[] = [];
+  const byBody: { building: any; expense: any }[] = [];
   for (const building of buildings) {
     for (const expense of building.expenses || []) {
       if (!expense.billingId) continue;
@@ -220,9 +261,78 @@ async function findExpenseByBillingId(
       if (expense.endTerm && Number(expense.endTerm) < currentTerm) continue;
       const expenseNormalized = normalizeBillingId(expense.billingId);
       if (expenseNormalized === normalizedBillingId) {
-        return { building, expense };
+        exact.push({ building, expense });
+      } else if (sameSupply(expenseNormalized, normalizedBillingId)) {
+        byBody.push({ building, expense });
       }
     }
+  }
+  if (exact.length === 1) return exact[0];
+  // More than one expense carries the SAME παροχή: the realm is ambiguous and
+  // guessing would charge the wrong expense. Report no match so the operator
+  // chooses, which is the same path an unknown bill already takes.
+  if (exact.length > 1) {
+    logger.warn(
+      `bill match ambiguous: ${exact.length} expenses share this παροχή — asking the operator`
+    );
+    return null;
+  }
+  if (byBody.length === 1) return byBody[0];
+  if (byBody.length > 1) {
+    logger.warn(
+      `bill match ambiguous on the 9-digit body: ${byBody.length} expenses — asking the operator`
+    );
+  }
+  return null;
+}
+
+/**
+ * Match a bill's αριθμός παροχής against the BUILDING's shared (κοινόχρηστοι)
+ * meters — the stairwell/lift ΔΕΗ supply, the common ΕΥΔΑΠ supply.
+ *
+ * Tried BEFORE the per-unit lookup, and returns a deliberately DIFFERENT shape,
+ * because the two mean opposite things for the money: a unit match is one
+ * apartment's own bill (`single_unit`, the whole amount to that apartment), while
+ * a shared-meter match must be split across the building (χιλιοστά). Conflating
+ * them would bill the entire building's shared electricity to a single flat.
+ */
+async function findSharedMeter(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<{
+  buildingId: string;
+  buildingName: string;
+  provider: string;
+  label?: string;
+} | null> {
+  if (!normalizedBillingId) return null;
+  const buildings = await Collections.Building.find({ realmId }).lean();
+  const hits: {
+    buildingId: string;
+    buildingName: string;
+    provider: string;
+    label?: string;
+  }[] = [];
+  for (const building of buildings as any[]) {
+    for (const meter of building.sharedMeters || []) {
+      if (!meter?.supplyNumber) continue;
+      if (
+        sameSupply(normalizeBillingId(String(meter.supplyNumber)), normalizedBillingId)
+      ) {
+        hits.push({
+          buildingId: String(building._id),
+          buildingName: building.name || '',
+          provider: String(meter.provider || 'other'),
+          label: meter.label || undefined
+        });
+      }
+    }
+  }
+  if (hits.length === 1) return hits[0];
+  if (hits.length > 1) {
+    logger.warn(
+      `shared-meter match ambiguous: ${hits.length} meters — asking the operator`
+    );
   }
   return null;
 }
@@ -249,20 +359,46 @@ async function findUnitBySupplyNumber(
 } | null> {
   if (!normalizedBillingId) return null;
   const buildings = await Collections.Building.find({ realmId }).lean();
+  type Hit = {
+    buildingId: string;
+    buildingName: string;
+    propertyId: string;
+    unitLabel: string;
+  };
+  const exact: Hit[] = [];
+  const byBody: Hit[] = [];
   for (const building of buildings as any[]) {
     for (const unit of building.units || []) {
       const supply = unit.electricitySupplyNumber;
       if (!supply) continue;
-      if (normalizeBillingId(String(supply)) === normalizedBillingId) {
-        return {
-          buildingId: String(building._id),
-          buildingName: building.name || '',
-          propertyId: String(unit.propertyId || unit._id),
-          unitLabel:
-            unit.name || unit.unitLabel || unit.atakNumber || 'Διαμέρισμα'
-        };
-      }
+      const stored = normalizeBillingId(String(supply));
+      const hit: Hit = {
+        buildingId: String(building._id),
+        buildingName: building.name || '',
+        propertyId: String(unit.propertyId || unit._id),
+        unitLabel:
+          unit.name || unit.unitLabel || unit.atakNumber || 'Διαμέρισμα'
+      };
+      if (stored === normalizedBillingId) exact.push(hit);
+      else if (sameSupply(stored, normalizedBillingId)) byBody.push(hit);
     }
+  }
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) {
+    logger.warn(
+      `unit match ambiguous: ${exact.length} units share this supply number — asking the operator`
+    );
+    return null;
+  }
+  // A body-only match is accepted ONLY when it is unique. The live realm already
+  // has two units sharing one 9-digit body (ΟΔΟΣ ΒΗΤΑ, measured 2026-08-10),
+  // and `single_unit` bills 100% of the amount to the chosen apartment — so
+  // picking one arbitrarily would put the whole bill on the wrong flat.
+  if (byBody.length === 1) return byBody[0];
+  if (byBody.length > 1) {
+    logger.warn(
+      `unit match ambiguous on the 9-digit body: ${byBody.length} units — asking the operator`
+    );
   }
   return null;
 }
@@ -331,6 +467,7 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       // must say so instead of inviting a duplicate έξοδο.
       let existingMatch = null;
       let unitMatch = null;
+      let sharedMeterMatch = null;
       // These two lookups hit Mongo, and they run INSIDE the per-file loop but
       // OUTSIDE the try/catch above (which closes at the parse). Unwrapped, a DB
       // fault here would propagate to asyncWrapper and 500 the WHOLE batch —
@@ -354,10 +491,18 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
               }
             : null;
           if (!m) {
-            unitMatch = await findUnitBySupplyNumber(
+            // Shared meter first, for the same reason as the success path: a
+            // κοινόχρηστο must never be prefilled as `single_unit`.
+            sharedMeterMatch = await findSharedMeter(
               realmId,
               partial.billingIdNormalized
             );
+            if (!sharedMeterMatch) {
+              unitMatch = await findUnitBySupplyNumber(
+                realmId,
+                partial.billingIdNormalized
+              );
+            }
           }
         } catch (err: any) {
           logger.error(
@@ -376,6 +521,9 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         // The building/apartment its παροχή identifies, so a hand-created έξοδο
         // starts on the right building.
         unitMatch,
+        // The building's SHARED meter, when the παροχή is a κοινόχρηστος one.
+        // Mutually exclusive with unitMatch (see the success path).
+        sharedMeterMatch,
         ocrText: ((parseResult as any).rawText || '').slice(0, 4000)
       });
       continue;
@@ -389,13 +537,21 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       bill.billingIdNormalized
     );
 
-    // No existing δαπάνη? Try to identify the BUILDING + APARTMENT by the
-    // αριθμός παροχής (unit.electricitySupplyNumber) so the create-expense
-    // pre-fill can select the building + target that single unit. Only computed
-    // for the no-match case (a matched bill already knows its building/expense).
-    const unitMatch = match
+    // No existing δαπάνη? Identify where the bill belongs from its αριθμός
+    // παροχής. SHARED METERS ARE TRIED FIRST and reported separately, because the
+    // two outcomes mean opposite things for the money: a shared (κοινόχρηστος)
+    // meter must be split across the building by χιλιοστά, while a unit's own
+    // meter is billed entirely to that apartment (`single_unit`). Returning them
+    // in one field would let a whole building's shared electricity land on one
+    // flat. Only computed for the no-match case (a matched bill already knows its
+    // building/expense).
+    const sharedMeterMatch = match
       ? null
-      : await findUnitBySupplyNumber(realmId, bill.billingIdNormalized);
+      : await findSharedMeter(realmId, bill.billingIdNormalized);
+    const unitMatch =
+      match || sharedMeterMatch
+        ? null
+        : await findUnitBySupplyNumber(realmId, bill.billingIdNormalized);
 
     // Generate IRIS QR from RF code + payment code (verified approach).
     // C2 fix: generate regardless of match — the QR is about the bill's
@@ -483,6 +639,11 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
       // existing δαπάνη — drives the create-expense pre-fill (building selected
       // + single_unit targeting this apartment). Null when nothing matched.
       unitMatch,
+      // The building's SHARED (κοινόχρηστος) meter this bill belongs to, when it
+      // is not one apartment's own supply. Mutually exclusive with `unitMatch` by
+      // construction above. Drives a κοινόχρηστο pre-fill: expense type from the
+      // provider and χιλιοστά allocation — never single_unit.
+      sharedMeterMatch,
       existingAmount,
       // BILL-IDENTITY: `{term, totalAmount, matchedOn}` when this same physical
       // bill is already stored under a DIFFERENT term, else undefined. Optional

@@ -1503,5 +1503,13 @@
   "Text recognition takes about a minute per file. Do not close this window.": "Text recognition takes about a minute per file. Do not close this window.",
   "{{count}} failed": "{{count}} failed",
   "{{count}} failed_one": "1 failed",
-  "Expense created": "Expense created"
+  "Expense created": "Expense created",
+  "Shared meters": "Shared meters",
+  "Supply number": "Supply number",
+  "Provider": "Provider",
+  "Add meter": "Add meter",
+  "DEH": "DEH",
+  "EYDAP": "EYDAP",
+  "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.",
+  "EPA": "EPA"
 }

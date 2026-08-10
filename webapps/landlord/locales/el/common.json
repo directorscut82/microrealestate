@@ -1524,5 +1524,13 @@
   "Text recognition takes about a minute per file. Do not close this window.": "Η αναγνώριση κειμένου διαρκεί περίπου ένα λεπτό ανά αρχείο. Μην κλείσετε το παράθυρο.",
   "{{count}} failed": "{{count}} απέτυχαν",
   "{{count}} failed_one": "1 απέτυχε",
-  "Expense created": "Η δαπάνη δημιουργήθηκε"
+  "Expense created": "Η δαπάνη δημιουργήθηκε",
+  "Shared meters": "Κοινόχρηστοι μετρητές",
+  "Supply number": "Αριθμός παροχής",
+  "Provider": "Πάροχος",
+  "Add meter": "Προσθήκη μετρητή",
+  "DEH": "ΔΕΗ",
+  "EYDAP": "ΕΥΔΑΠ",
+  "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Αριθμοί παροχής που χρεώνονται σε όλο το κτίριο. Λογαριασμός που αντιστοιχεί σε έναν από αυτούς προτείνεται ως κοινόχρηστη δαπάνη.",
+  "EPA": "ΕΠΑ"
 }

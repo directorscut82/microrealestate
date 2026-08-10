@@ -1277,5 +1277,13 @@
   "Text recognition takes about a minute per file. Do not close this window.": "Die Texterkennung dauert etwa eine Minute pro Datei. Schließen Sie dieses Fenster nicht.",
   "{{count}} failed": "{{count}} fehlgeschlagen",
   "{{count}} failed_one": "1 fehlgeschlagen",
-  "Expense created": "Ausgabe erstellt"
+  "Expense created": "Ausgabe erstellt",
+  "Shared meters": "Gemeinschaftszähler",
+  "Supply number": "Zählernummer",
+  "Provider": "Versorger",
+  "Add meter": "Zähler hinzufügen",
+  "DEH": "DEH",
+  "EYDAP": "EYDAP",
+  "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Zählernummern, die dem gesamten Gebäude berechnet werden. Eine passende Rechnung wird als Gemeinschaftsausgabe vorgeschlagen.",
+  "EPA": "EPA"
 }

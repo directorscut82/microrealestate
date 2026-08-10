@@ -1063,6 +1063,98 @@ export async function add(req: Req, res: Res) {
   return res.json(buildings[0]);
 }
 
+/**
+ * Validate + normalise a building's shared (κοινόχρηστοι) utility meters.
+ *
+ * PURE and exported so the guards below are unit-testable — each one is a defect
+ * adversarial review found in this very feature, and each routes money.
+ *
+ * Returns the cleaned array (blank rows dropped, values trimmed, provider
+ * defaulted). Throws ServiceError(422) on anything that would save data the bill
+ * importer cannot use, or worse, silently mis-route.
+ */
+export function validateSharedMeters(
+  input: unknown,
+  units: any[] = []
+): { provider: string; supplyNumber: string; label: string }[] {
+  if (!Array.isArray(input)) {
+    throw new ServiceError('sharedMeters must be an array', 422);
+  }
+  // The 9-digit body — the SAME discriminator billmanager's `sameSupply` uses to
+  // decide whether two supply numbers denote one meter. Duplicate detection must
+  // never be narrower than matching (see the key comment below).
+  const bodyOf = (digitsOnly: string): string =>
+    /^\d{9,12}$/.test(digitsOnly) ? digitsOnly.slice(0, 9) : digitsOnly;
+  const digitsOf = (v: string): string => v.replace(/[\s.-]/g, '');
+  // Mirrors billmanager's VALID_PROVIDERS: a provider accepted for a BILL must be
+  // recordable as a shared METER, or a κοινόχρηστο ΕΠΑ (gas) supply has nowhere
+  // to live.
+  const ALLOWED_PROVIDERS = ['deh', 'eydap', 'epa', 'other'];
+  const cleaned: { provider: string; supplyNumber: string; label: string }[] = [];
+  const seen = new Set<string>();
+  for (const raw of input as any[]) {
+    const supplyNumber = String(raw?.supplyNumber ?? '').trim();
+    if (!supplyNumber) continue; // blank row the landlord added and abandoned
+    // Require the DIGITS the matcher needs, not merely characters from the
+    // allowed set. A `[\d\s.-]{6,32}` check admitted «------» and «1 2 3 4 5 6»:
+    // both saved, both rendered as configured meters, and neither could ever match
+    // a bill — so the landlord's conclusion when matching fails is "the importer
+    // is broken", which is the exact symptom this feature exists to remove.
+    const digits = digitsOf(supplyNumber);
+    if (!/^\d{9,12}$/.test(digits)) {
+      throw new ServiceError(
+        `sharedMeters: «${supplyNumber}» is not a valid supply number (9-12 digits expected)`,
+        422
+      );
+    }
+    const provider = String(raw?.provider ?? 'deh').trim() || 'deh';
+    if (!ALLOWED_PROVIDERS.includes(provider)) {
+      throw new ServiceError(`sharedMeters: unknown provider «${provider}»`, 422);
+    }
+    // Duplicate check keyed on the BODY. This guard used to be strictly narrower
+    // than the matcher, and the gap was a money bug: the schema tells the operator
+    // to store the παροχή "as printed" (with the `-016` check suffix) while
+    // E9-imported unit values are bare 9 digits, so «999935585» and
+    // «999935585-016» are two spellings of ONE meter. The old key saw them as
+    // different and saved BOTH; findSharedMeter then found 2 hits, correctly
+    // refused as ambiguous, and the caller fell through to the per-unit lookup —
+    // which proposes `single_unit` and bills the building's whole shared supply to
+    // ONE apartment. Precisely what this feature exists to prevent.
+    const key = bodyOf(digits);
+    if (seen.has(key)) {
+      throw new ServiceError(
+        `sharedMeters: «${supplyNumber}» is already listed (same supply number)`,
+        422
+      );
+    }
+    // …and it must not collide with a UNIT's own meter. Same fall-through, and it
+    // is the state a landlord migrating to this feature is already in, because
+    // putting the shared παροχή on a unit was the only prior workaround.
+    const unitCollision = (units || []).find((u: any) => {
+      const s = digitsOf(String(u?.electricitySupplyNumber ?? ''));
+      return s && bodyOf(s) === key;
+    });
+    if (unitCollision) {
+      throw new ServiceError(
+        `sharedMeters: «${supplyNumber}» is already the supply number of apartment «${
+          unitCollision.name ||
+          unitCollision.unitLabel ||
+          unitCollision.atakNumber ||
+          '—'
+        }». A shared meter cannot be the same as an apartment's meter.`,
+        422
+      );
+    }
+    seen.add(key);
+    cleaned.push({
+      provider,
+      supplyNumber,
+      label: String(raw?.label ?? '').trim()
+    });
+  }
+  return cleaned;
+}
+
 export async function update(req: Req, res: Res) {
   const realm = req.realm;
 
@@ -1137,6 +1229,23 @@ export async function update(req: Req, res: Res) {
     }
     req.body.bankInfo = { ...req.body.bankInfo, iban };
   }
+  // Shared (κοινόχρηστοι) meters. Validated here rather than trusted from the
+  // client because the supplyNumber is a MONEY-ROUTING key: the bill importer
+  // matches an incoming λογαριασμός on it and proposes which expense to charge.
+  // Rows are normalised (trimmed, provider defaulted) and empty ones dropped so a
+  // blank row the landlord added and abandoned cannot fail the whole save.
+  if (req.body.sharedMeters !== undefined) {
+    // Units are needed to reject a shared meter that duplicates an APARTMENT's
+    // meter; the building document is not loaded until later in this handler.
+    const existingForMeters: any = await Collections.Building.findOne(
+      { _id: req.params.id, realmId: realm!._id },
+      { units: 1 }
+    ).lean();
+    req.body.sharedMeters = validateSharedMeters(
+      req.body.sharedMeters,
+      existingForMeters?.units || []
+    );
+  }
   // The manager subdoc was never validated on either path. The ONE helper add()
   // also calls — both fields optional, only a non-empty value is format-checked.
   if (req.body.manager !== undefined) {
@@ -1193,6 +1302,13 @@ export async function update(req: Req, res: Res) {
         }),
         ...(req.body.blockStreets !== undefined && {
           blockStreets: req.body.blockStreets
+        }),
+        // Shared (κοινόχρηστοι) meters. This `$set` is an explicit allowlist, so
+        // a field absent from it is silently DROPPED however correct the schema
+        // and the form are — the field must be named here or the landlord's entry
+        // vanishes on save with no error.
+        ...(req.body.sharedMeters !== undefined && {
+          sharedMeters: req.body.sharedMeters
         }),
         ...(req.body.atakPrefix !== undefined && {
           atakPrefix: req.body.atakPrefix
