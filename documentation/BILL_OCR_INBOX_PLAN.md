@@ -1196,24 +1196,45 @@ as a real control («Κυμαινόμενο ποσό») that disables/annotates 
 a NON-recurring €0 expense is NOT variable; every money surface renders the variable state distinctly
 from €0; mutation-test by reverting the predicate in each consumer.
 
-### T2 — a per-apartment utility bill has no correct expense `type`
+### T2 — ✅ DECIDED 2026-08-12: add private (per-apartment) and telecom expense types
 
 **Measured:** the enum is `heating, elevator, cleaning, water_common, electricity_common, insurance,
 management_fee, garden, repairs_fund, pest_control, other`. Every utility value is a *κοινόχρηστο*
 one. `PROVIDER_TYPE` maps `deh → electricity_common` **unconditionally**, including when the παροχή
-identified ONE apartment — which is precisely this bill.
+identified ONE apartment — which is precisely the bill in this session. The landlord corrected it to
+`other` by hand, which was the only honest option available.
 
-**Why it matters:** the prefill would have typed an apartment's own electricity bill as *common-area*
-electricity. The landlord corrected it to `other` by hand. Left alone, the type is a lie, and type
-drives which allocation methods the picker offers.
+**Landlord's decision (verbatim):** *"in general yes, I might want to add for whatever reason a per
+apartment utility type, not only koinoxrhsta exist. It shouild work as before (you can choose if you
+will charge the owner etc etc, the same options we already have). Also add telecommunication private
+and common"*
 
-**Decision needed (do not guess):** either (a) add `electricity_private` / `water_private` /
-`gas_private` to the enum and map to them when `unitMatch` is set, or (b) keep the enum and make the
-prefill choose `other` whenever `unitMatch` (not `sharedMeterMatch`) identified the bill. (b) is
-smaller and ships today; (a) reads better on statements and PDFs forever.
+**Do — add five enum values** to `services/common/src/collections/building.ts`:
+`electricity_private`, `water_private`, `gas_private`, `telecom_private`, `telecom_common`.
 
-**Tests:** provider × (unitMatch | sharedMeterMatch | neither) → expected type, all nine cells; the
-chosen type must be offered by `ALLOCATION_METHODS_BY_TYPE` for the paired allocation method.
+Each one must behave EXACTLY like an existing type — no reduced feature set:
+- listed in `EXPENSE_TYPES` (`ExpenseFormDialog.js:140-150`) with a Greek label in all six locales
+  («Ρεύμα διαμερίσματος», «Νερό διαμερίσματος», «Φυσικό αέριο διαμερίσματος»,
+  «Τηλεπικοινωνίες διαμερίσματος», «Τηλεπικοινωνίες κοινόχρηστες»);
+- an entry in `ALLOCATION_METHODS_BY_TYPE` carrying the SAME method set the landlord already has,
+  with `single_unit` the sensible DEFAULT for the `_private` ones;
+- `chargeOwnerWhenVacant`, `trackOwnerExpense`/`ownerAmount`, `isRecurring`, the variable-amount flag
+  (T1) and every owner/tenant routing option keep working unchanged;
+- `PROVIDER_TYPE` becomes **match-aware**: `unitMatch` → the `_private` value, `sharedMeterMatch` →
+  the `_common` value, neither → `other`.
+
+**Side benefit:** `telecom_*` unblocks the NOVA bills — 3 of the 7 sample bills, previously blocked
+in §17 precisely because no expense type fitted telecoms.
+
+**Watch out (money):** the `_private` types must NOT be offered `*_thousandths` as a DEFAULT — one
+apartment's own bill split by χιλιοστά charges the whole building for it. And the owner-statement /
+PDF surfaces (`sharebasis.ts`, `invoicebody.ejs`) must render the new types; an unmapped type there
+is the absent-representation shape again.
+
+**Tests:** provider × (unitMatch | sharedMeterMatch | neither) → expected type, all nine cells; each
+new type round-trips through create + update + monthly statement + owner statement + PDF; each new
+type's default allocation method is offered by its own `ALLOCATION_METHODS_BY_TYPE` entry; all six
+locales have a label (no key may render English — see T11).
 
 ### T3 — the OCR result never tells you WHICH apartment (or building) it identified
 
@@ -1253,9 +1274,10 @@ override. Nothing warned.
 **Why it matters:** the expense does not exist in the month its own bill is for. A June statement can
 never show it. This is the quiet twin of the €0 problem: the row exists, the money does not land.
 
-**Do:** default the created expense's start to the bill's term when the import dialog created it, or
-block confirm with «Η δαπάνη ξεκινά τον Αύγουστο αλλά ο λογαριασμός αφορά τον Ιούνιο». Prefer the
-former, warn on the latter.
+**Do — ✅ DECIDED 2026-08-12: WARN, do not auto-correct.** The landlord's call: *"yes about t5 just
+warn"*. So show «Η δαπάνη ξεκινά τον Αύγουστο αλλά ο λογαριασμός αφορά τον Ιούνιο» and leave the
+start term alone — silently moving a δαπάνη's start date is a write the landlord did not ask for, and
+it would change which months every OTHER bill on that expense lands in.
 
 **Tests:** bill term < expense startTerm → warned/corrected; equal → silent; a back-dated bill for a
 terminated expense (`endTerm < term`) → refused with a reason.
@@ -1312,3 +1334,75 @@ One real interaction surfaced T1–T8. The dialog has never been driven input-by
 
 **Gate:** per `documentation/E2E_TESTING.md`, none of this counts until it runs green on the live NAS
 against real data, with the Greek screens read as images.
+
+### T10 — the building dropdown renders the name TWICE («ΟΔΟΣ ΑΛΦΑ 1 — ΟΔΟΣ ΑΛΦΑ 1»)
+
+**Measured, landlord-reported.** `BillImportDialog.js:379` renders
+`` `${b.name} — ${qualifier}` `` where `qualifier = b.address?.street1 || b.atakPrefix`. In this realm
+`building.name === building.address.street1` for **both** buildings checked (verified in `mredb`), so
+the qualifier repeats the name verbatim.
+
+The qualifier was added deliberately — its own comment says two buildings may share a name and an
+undistinguished dropdown is a shipped bug. That reasoning is right; the implementation just never
+considered that the name IS the street, which is the normal Greek convention.
+
+**Do:** only append the qualifier when it differs from the name (normalised: trim + case + accents);
+otherwise fall through to the ΑΤΑΚ prefix, and only then to the bare name.
+
+**Tests:** name === street1 → renders once; name ≠ street1 → renders both; two buildings sharing a
+name but differing in street → two DISTINGUISHABLE options; two sharing name AND street → falls
+through to ΑΤΑΚ and stays distinguishable (this is the case the qualifier existed for).
+
+### T11 — Latin/test strings in a Greek expense dropdown
+
+Two separate leaks, both landlord-reported after seeing them in the live expense select.
+
+**(a) A test artifact in live data.** The building carries an expense literally named
+**«Θέρμανση (test-overview)»** — `type: heating`, `amount: 100`, `isRecurring: true`,
+`startTerm: 2026010100`. **Measured:** `grep` finds NO reference to `test-overview` anywhere in the
+repo (no spec, no seeder), so it is an orphan — created by hand or by a since-deleted spec. It has
+**0 monthlyCharge rows**, so it has never actually posted to a statement; but at €100 recurring from
+January it WOULD charge the moment a statement is saved for any term from then on. A landmine, not a
+live leak — and either way the landlord should not be reading `test-overview` in a production
+dropdown. **Needs the landlord's call: rename or delete.** Do not touch their data unasked.
+
+**(b) The import prefill names expenses in LATIN.**
+`billExpensePrefill.js:91` does `effectiveProvider.toUpperCase()` → **«DEH»**, which is why this
+building now has an expense called `DEH` sitting among Greek names. A Greek display map already
+exists — `PROVIDER_LABEL` in `InboxBell.js:68` (`deh → «ΔΕΗ»`) — but it lives in one component, is
+used only for a badge, and the prefill cannot see it. **The same unshared-map shape as the bill
+matcher and the `isVariable` predicate.** Move `PROVIDER_LABEL` next to `PROVIDER_TYPE` in
+`utils/billExpensePrefill.js`, have both surfaces import it, and name the expense «ΔΕΗ» / «ΕΥΔΑΠ» /
+«ΕΠΑ» — falling back to the shared meter's own label when it has one.
+
+**Tests:** each provider prefills its Greek name; an unknown provider does not crash and does not
+render a raw code; a Greek-screen screenshot of the expense dropdown containing no Latin option; a
+guard test asserting no expense name in a seeded realm matches `/test[-_]/i`.
+
+### T12 — «Χρέωση ενοικιαστών» is one toggle, but you cannot see WHAT it will do
+
+**The landlord's question:** *"why «Χρέωση ενοικιαστών» exist and not the identical options we have
+when adding a dapanh were not presented?"*
+
+**The answer, from the code — the single toggle is correct, but it is blind.** Confirming a bill does
+NOT create an expense; it attaches a `Bill` to an expense that already exists. Every option the
+expense form offers — `allocationMethod`, `customAllocations`, `chargeOwnerWhenVacant`,
+`trackOwnerExpense`/`ownerAmount`, `isRecurring` — is stored ON THAT EXPENSE, and
+`bridgeChargeToStatement` → `saveMonthlyStatement` applies them. The bill contributes only the
+AMOUNT for one term. Duplicating the controls at confirm time would mean two places that own the same
+money rule — the exact defect this branch has spent two commits removing. So: not duplicated, by
+design.
+
+**But the toggle is unlabelled in substance.** The landlord is asked to authorise a charge without
+being shown how it will be split, whether the owner is charged for a vacant unit, or which units are
+affected. That is a real gap, and it is why the question got asked.
+
+**Do:** next to the toggle, render the target expense's settings READ-ONLY — allocation method in
+words («ανά χιλιοστά», «εξ ίσου», «σε ένα διαμέρισμα: Α2»), `chargeOwnerWhenVacant`, and the
+resulting per-unit split of THIS amount — plus a link to edit the expense. Show it only when the
+toggle is on.
+
+**Tests:** each allocation method renders its correct human phrasing and per-unit split; the preview
+sums to the bill total (or explains the remainder); a zero-χιλιοστά building shows the invisible-money
+warning rather than a silent €0 split; `single_unit` names the apartment.
+
