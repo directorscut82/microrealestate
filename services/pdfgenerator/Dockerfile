@@ -36,9 +36,9 @@ FROM base AS deps
 # --production` actually runs, node-gyp finds no compiler, and the build dies on a
 # package the service never calls. Measured 2026-08-12 (CI red on canvas for api,
 # then bcrypt for pdfgenerator).
-# The five bookworm-slim services need nothing here: glibc prebuilds resolve, which
-# is why their build stages install no toolchain either. Adding `apk` to them broke
-# the emailer image outright (`apk: not found`).
+# The five bookworm-slim services need the SAME fix with apt-get, not apk — I first
+# assumed they had glibc prebuilds and skipped them, and tenantapi then failed on
+# bcrypt for exactly this reason.
 RUN apk --no-cache add build-base python3
 WORKDIR /usr/app
 COPY --from=build /usr/app/package.json .
