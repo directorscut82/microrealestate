@@ -1282,12 +1282,36 @@ it would change which months every OTHER bill on that expense lands in.
 **Tests:** bill term < expense startTerm → warned/corrected; equal → silent; a back-dated bill for a
 terminated expense (`endTerm < term`) → refused with a reason.
 
-### T6 — «did not appear in the table below»
+### T6 — ✅ REPRODUCED AND ROOT-CAUSED 2026-08-13: two reasons, not one
 
-**Unverified — needs the landlord to point at the table.** The δαπάνη is on ΟΔΟΣ ΑΛΦΑ 1 while the open
-page was ΟΔΟΣ ΒΗΤΑ 2, which alone explains an empty list; but €0 + August `startTerm` would ALSO
-hide it from a June or amount-filtered view, and those are three different bugs. **Do not fix by
-guessing.** Reproduce on ΟΔΟΣ ΑΛΦΑ 1 for June and for August, screenshot both, and only then decide.
+The task said not to fix this by guessing, because three different causes could each
+produce an empty row. Measured against the deployed NAS (`b8e07eed`) via
+`GET /buildings/<id>/expense-breakdown?term=…` on the CORRECT building, for BOTH months:
+
+| term | expenses in the breakdown | the imported δαπάνη present? |
+|---|---|---|
+| `2026060100` (the bill's own month) | 7 | **no** |
+| `2026080100` (the δαπάνη's start month) | 5 | **no** |
+
+Two independent causes, both confirmed:
+
+1. **June** — the δαπάνη's `startTerm` is August, so it does not exist in the month its
+   own bill covers. This is exactly T5, and T5's warning now says so before confirm.
+2. **August** — `amount: 0` with `single_unit`. `1_base.ts` skips an expense whose total
+   is `<= 0` for every method except `fixed`, so it charges nobody and appears on no
+   surface. That is CORRECT for a κυμαινόμενο expense: the monthly figure is meant to be
+   typed on the monthly statement, which is how the landlord's own
+   «Πετρέλαιο (κυμαινόμενο)» behaves — it appears in the June breakdown (a figure was
+   entered for June) and not in August (none was).
+
+**So nothing is broken in the breakdown itself.** The two things that made it feel broken
+were the missing warning (T5) and the fact that «κυμαινόμενο» had no representation
+(T1) — a €0 expense looked identical to an unfinished one, on every surface.
+
+One consequence worth stating: an imported bill's δαπάνη will show no charge until BOTH
+its `startTerm` covers the month AND a figure exists for that month. With T1's flag,
+`MonthlyStatement` now lists κυμαινόμενα through the shared predicate, so such an expense
+appears in the list where the figure is typed instead of silently sitting at €0.
 
 ### T7 — result-card layout, fonts, and the QR
 
