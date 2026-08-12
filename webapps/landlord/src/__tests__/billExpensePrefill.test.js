@@ -315,3 +315,36 @@ describe('the new private types keep full parity', () => {
     }
   });
 });
+
+describe('the prefill must not arrive pre-marked κυμαινόμενο', () => {
+  it('leaves isVariable UNSET — the form decides, and only for existing rows', () => {
+    // THE BUG (adversarial review, 2026-08-12): the prefill is deliberately
+    // `amount: 0, isRecurring: true`, which the LEGACY inference reads as "variable".
+    // The form seeded its switch from that inference for NEW rows too, so «Κυμαινόμενο
+    // ποσό» came up ON; the operator then typed the bill's amount and saved
+    // `isVariable: true` WITH an amount — billed to tenants by the allocation engine,
+    // excluded from the owner projection, and impossible to enter on the monthly
+    // statement. The prefill itself must stay silent about the flag.
+    for (const args of [
+      { building: BUILDING, provider: 'deh', billingId: 'x' },
+      {
+        building: BUILDING,
+        provider: 'deh',
+        billingId: 'x',
+        sharedMatch: { provider: 'deh' }
+      },
+      {
+        building: BUILDING,
+        provider: 'deh',
+        billingId: 'x',
+        unitMatch: { propertyId: 'u1' }
+      }
+    ]) {
+      const p = buildExpensePrefill(args);
+      expect('isVariable' in p).toBe(false);
+      expect(p.isVariable).toBeUndefined();
+      // …and it still carries the deliberate zero amount for the operator to fill.
+      expect(p.amount).toBe(0);
+    }
+  });
+});

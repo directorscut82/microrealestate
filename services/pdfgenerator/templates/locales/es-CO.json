@@ -78,5 +78,10 @@
   "cost {{total}} € × owner share {{pct}}% = {{share}} €": "cost {{total}} € × owner share {{pct}}% = {{share}} €",
   "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "cost {{total}} € × tenants share {{pct}}% = {{pool}} €",
   "The total amount of {{amount}} must be paid before the end of the month.": "El monto total de {{amount}} debe pagarse antes del fin de mes.",
-  "Please contact the property manager or landlord regarding rent payment.": "Comuníquese con el administrador o propietario respecto al pago del arriendo."
+  "Please contact the property manager or landlord regarding rent payment.": "Comuníquese con el administrador o propietario respecto al pago del arriendo.",
+  "Electricity Private": "Electricidad del apartamento",
+  "Water Private": "Agua del apartamento",
+  "Gas Private": "Gas del apartamento",
+  "Telecom Private": "Telecomunicaciones del apartamento",
+  "Telecom Common": "Telecomunicaciones comunes"
 }

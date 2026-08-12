@@ -42,6 +42,15 @@ export type ExpenseType =
   | 'cleaning'
   | 'water_common'
   | 'electricity_common'
+  // PRIVATE (per-apartment) utilities + telecoms. Must stay in step with
+  // BuildingExpenseSchema.type (services/common/src/collections/building.ts): this is
+  // the shared WIRE contract, and a TypeScript reader who cannot see the new values
+  // reaches for an inline workaround instead.
+  | 'electricity_private'
+  | 'water_private'
+  | 'gas_private'
+  | 'telecom_private'
+  | 'telecom_common'
   | 'insurance'
   | 'management_fee'
   | 'garden'

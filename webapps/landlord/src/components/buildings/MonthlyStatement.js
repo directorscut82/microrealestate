@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { isVariableExpense } from '../../utils/variableExpense';
 import { LuInfo } from 'react-icons/lu';
 import {
   Tooltip,
@@ -122,7 +123,13 @@ export default function MonthlyStatement({ building }) {
 
   // Variable recurring tenant expenses (isRecurring + no fixed amount)
   const tenantExpenses = useMemo(
-    () => (building?.expenses || []).filter((e) => e.isRecurring && !e.amount),
+    // ONE shared rule (utils/variableExpense) — this was a surviving inline copy of
+    // `recurring && !amount`, so an expense the landlord marked κυμαινόμενο WITH a
+    // figure vanished from this list and no monthly amount could ever be typed for it.
+    () =>
+      (building?.expenses || []).filter((e) =>
+        isVariableExpense(e, Number(e?.amount ?? 0) || 0)
+      ),
     [building?.expenses]
   );
 

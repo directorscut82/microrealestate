@@ -132,7 +132,14 @@ const BuildingExpenseSchema = new mongoose.Schema({
   // separate places before this flag, which is how a money rule gets three
   // different answers. Absent on every pre-existing row, and the predicate's
   // legacy fallback is what keeps those rows behaving as before.
-  isVariable: { type: Boolean, default: false },
+  // `default: undefined`, NOT false. This is the FIRST field on this schema where
+  // absent !== false: absent means "legacy row, use the old inference", while false
+  // means "explicitly NOT variable". MEASURED with this repo's mongoose 6.13.6 —
+  // with `default: false`, hydration stamps false onto every legacy subdoc, and
+  // `expenses.pull()` of a non-LAST element emits a whole-array $set that persists
+  // it. Deleting one unrelated expense therefore reclassified every κυμαινόμενο row
+  // in the building for good, and the owner-expense projection dropped their money.
+  isVariable: { type: Boolean, default: undefined },
   allocationMethod: {
     type: String,
     enum: [

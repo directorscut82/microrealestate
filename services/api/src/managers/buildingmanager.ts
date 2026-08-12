@@ -17,6 +17,7 @@ import {
   validateFiniteNumber,
   validateStringField,
   validateBooleanField,
+  validateTypeAllocationCompatible,
   validateEnum,
   validateArrayMaxLength,
   validateAllocationValues,
@@ -954,6 +955,8 @@ export async function add(req: Req, res: Res) {
   // ratio expense here too. Each validator is a no-op for other methods.
   if (Array.isArray(req.body.expenses)) {
     for (const e of req.body.expenses) {
+      validateBooleanField(e?.isVariable, 'expenses[].isVariable');
+      validateTypeAllocationCompatible(e?.type, e?.allocationMethod);
       validateAllocationValues(e?.customAllocations);
       validateFixedAllocations(e?.customAllocations, e?.allocationMethod);
       validatePercentageAllocations(e?.customAllocations, e?.allocationMethod);
@@ -4652,6 +4655,7 @@ export async function addExpense(req: Req, res: Res) {
   // or "not filled in yet". Mongoose would cast "no"/[]/0 to a boolean, so a typo
   // in the payload would silently set it. Reject anything non-boolean.
   validateBooleanField(req.body.isVariable, 'isVariable');
+  validateTypeAllocationCompatible(req.body.type, req.body.allocationMethod);
   if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
     req.body.isRecurring = req.body.recurring;
     delete req.body.recurring;
@@ -4779,6 +4783,7 @@ export async function updateExpense(req: Req, res: Res) {
   // or "not filled in yet". Mongoose would cast "no"/[]/0 to a boolean, so a typo
   // in the payload would silently set it. Reject anything non-boolean.
   validateBooleanField(req.body.isVariable, 'isVariable');
+  validateTypeAllocationCompatible(req.body.type, req.body.allocationMethod);
   if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
     req.body.isRecurring = req.body.recurring;
     delete req.body.recurring;

@@ -180,6 +180,37 @@ export function validateFiniteNumber(
  * `isVariable` decides whether a €0 expense means «κυμαινόμενο» or «unfinished».
  * Absent is fine (the schema default applies); present-but-not-boolean is not.
  */
+/**
+ * A `_private` (per-apartment) expense must NEVER be split by χιλιοστά.
+ *
+ * The browser filters the method list per type, but it also deliberately RE-APPENDS a
+ * persisted method so a saved value is never hidden, and the repair effect declines to
+ * rewrite a value it believes was persisted. Both are correct alone; together they let
+ * an existing `electricity_common + general_thousandths` expense be switched to
+ * `electricity_private` while KEEPING the χιλιοστά split — and the server validated
+ * `type` and `allocationMethod` against two independent enums with no compatibility
+ * check. One apartment's €87,40 then kept splitting across the other flats, every
+ * month, on the very type introduced to prevent that.
+ *
+ * A client-side filter cannot bind a value that is already in the database, so the rule
+ * lives here.
+ */
+export function validateTypeAllocationCompatible(
+  type: unknown,
+  allocationMethod: unknown,
+  fieldName = 'allocationMethod'
+): void {
+  if (typeof type !== 'string' || typeof allocationMethod !== 'string') return;
+  if (!type.endsWith('_private')) return;
+  if (allocationMethod.endsWith('_thousandths')) {
+    throw new ServiceError(
+      `${fieldName}: a per-apartment expense (${type}) cannot be split by χιλιοστά — ` +
+        'that would charge the whole building for one apartment\'s bill',
+      422
+    );
+  }
+}
+
 export function validateBooleanField(
   value: unknown,
   fieldName: string

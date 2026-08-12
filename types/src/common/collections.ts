@@ -532,6 +532,10 @@ export namespace CollectionTypes {
     name: string;
     type: ExpenseType;
     amount: number;
+    // κυμαινόμενο: the amount differs every month, so €0 means "not known yet".
+    // ABSENT on legacy rows and that is meaningful — read it through the shared
+    // predicate (Utils VariableExpense), never as `!isVariable`.
+    isVariable?: boolean;
     allocationMethod: AllocationMethod;
     customAllocations: CustomAllocation[] | [];
     isRecurring: boolean;

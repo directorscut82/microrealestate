@@ -81,5 +81,10 @@
   "cost {{total}} € × owner share {{pct}}% = {{share}} €": "κόστος {{total}} € × μερίδιο ιδιοκτητών {{pct}}% = {{share}} €",
   "cost {{total}} € × tenants share {{pct}}% = {{pool}} €": "κόστος {{total}} € × μερίδιο ενοικιαστών {{pct}}% = {{pool}} €",
   "The total amount of {{amount}} must be paid before the end of the month.": "Το συνολικό ποσό των {{amount}} οφείλει να καταβληθεί πριν το τέλος του μήνα.",
-  "Please contact the property manager or landlord regarding rent payment.": "Επικοινωνήστε με τον διαχειριστή ή τον ιδιοκτήτη για την εξόφληση του ενοικίου."
+  "Please contact the property manager or landlord regarding rent payment.": "Επικοινωνήστε με τον διαχειριστή ή τον ιδιοκτήτη για την εξόφληση του ενοικίου.",
+  "Electricity Private": "Ρεύμα διαμερίσματος",
+  "Water Private": "Νερό διαμερίσματος",
+  "Gas Private": "Φυσικό αέριο διαμερίσματος",
+  "Telecom Private": "Τηλεπικοινωνίες διαμερίσματος",
+  "Telecom Common": "Τηλεπικοινωνίες κοινόχρηστες"
 }

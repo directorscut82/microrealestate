@@ -36,7 +36,9 @@ const expenseSchema = z
     // κυμαινόμενο: the amount genuinely differs every month. Explicit, because
     // before this flag the ONLY way to say it was to leave `amount` at 0 — which
     // made a variable expense indistinguishable from an unfinished one.
-    isVariable: z.boolean().optional().default(false),
+    // NO `.default(false)`: sending an explicit false for a row the landlord never
+    // touched would overwrite the legacy "absent" state that still governs old rows.
+    isVariable: z.boolean().optional(),
     trackOwnerExpense: z.boolean().optional().default(false),
     ownerAmount: z.coerce.number().min(0).max(10000000).optional().default(0),
     chargeOwnerWhenVacant: z.boolean().optional().default(false),
@@ -518,7 +520,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
       amount: 0,
       allocationMethod: '',
       isRecurring: true,
-      isVariable: false,
+      isVariable: undefined,
       trackOwnerExpense: false,
       ownerAmount: 0,
       chargeOwnerWhenVacant: false,
@@ -533,10 +535,16 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
           ownerAmount: expense.ownerAmount ?? 0,
           chargeOwnerWhenVacant: expense.chargeOwnerWhenVacant ?? false,
           isRecurring: expense.isRecurring ?? true,
-          // Legacy rows have no flag; derive it from the shared rule so an
-          // existing «Πετρέλαιο (κυμαινόμενο)» opens with the switch already on
-          // rather than looking like an unfinished expense.
-          isVariable: isVariableExpense(expense),
+          // Only derive for a row that EXISTS (has an _id): a legacy
+          // «Πετρέλαιο (κυμαινόμενο)» should open with the switch on. For a NEW row
+          // the derivation is wrong — the bill-import prefill is deliberately
+          // `amount: 0, isRecurring: true`, which the legacy rule reads as variable,
+          // so the switch came up ON and typing the bill's amount saved
+          // `isVariable: true` WITH an amount: charged to tenants, excluded from the
+          // projection, and unenterable on the monthly statement.
+          isVariable: expense?._id
+            ? isVariableExpense(expense)
+            : (expense?.isVariable ?? false),
           startFromCurrentMonth: !expense.startTerm,
           // single_unit stores exactly one {propertyId,value} target (read as
           // customAllocations[0]); do NOT expand it across all units, or the
@@ -560,6 +568,8 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   // server reads. This line used to be a third independent copy of
   // `recurring && amount === 0`.
   const isVariableFlag = watch('isVariable');
+  // The amount cleared by turning «Κυμαινόμενο ποσό» on, so turning it off restores it.
+  const clearedAmountRef = useRef(0);
   const isVariable = isVariableExpense({
     isVariable: isVariableFlag,
     isRecurring,
@@ -1109,11 +1119,17 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
                   checked={!!isVariableFlag}
                   onCheckedChange={(checked) => {
                     setValue('isVariable', checked, { shouldDirty: true });
-                    // A variable expense carries no fixed amount: clear it so the
-                    // monthly figure comes from each bill/statement instead of a
-                    // stale number nobody meant to keep.
+                    // A variable expense carries no fixed amount, so clear it — but
+                    // REMEMBER it, because flipping the switch back must not have
+                    // silently destroyed a €300 figure the landlord came here to keep.
                     if (checked) {
+                      clearedAmountRef.current = Number(watch('amount')) || 0;
                       setValue('amount', 0, { shouldDirty: true });
+                    } else if (clearedAmountRef.current) {
+                      setValue('amount', clearedAmountRef.current, {
+                        shouldDirty: true
+                      });
+                      clearedAmountRef.current = 0;
                     }
                   }}
                 />

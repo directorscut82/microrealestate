@@ -16,6 +16,7 @@ import { Card } from '../ui/card';
 import { cn } from '../../utils';
 import { LuArchive, LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
+import { isVariableExpense } from '../../utils/variableExpense';
 import NumberFormat from '../NumberFormat';
 import { Button } from '../ui/button';
 import UncollectedPaymentDialog from './UncollectedPaymentDialog';
@@ -828,7 +829,7 @@ export default function BuildingDashboard({ building }) {
     // fallback of summing the per-unit shares when inputAmount is absent. Mirrors
     // BuildingExpensePanel's per-term variable read so the two never disagree.
     const _isVariableExpense = (e) =>
-      (e.isRecurring ?? e.recurring) && _expenseMonthlyCost(e) === 0;
+      isVariableExpense(e, _expenseMonthlyCost(e));
     // Κυμαινόμενα (variable): each month's amount is landlord-typed per term, so
     // FUTURE months can't be known — they are ESTIMATED. Per expense:
     //   actual  = Σ the real typed amounts for months already entered this year
