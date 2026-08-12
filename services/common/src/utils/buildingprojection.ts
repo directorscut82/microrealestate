@@ -10,6 +10,8 @@
  *   the existing client code is the reference implementation and will be replaced
  *   by consuming the server payload once this ships).
  */
+
+import { isRecurringExpense, isVariableExpense } from './variableexpense.js';
 // IMPORTANT: `common` has NO moment dependency (see ownerstatement.ts /
 // sharebasis.ts). All date math here is moment-free — DD/MM/YYYY strings are
 // parsed to {month, year} and compared as year*100+month integers.
@@ -73,6 +75,7 @@ interface BuildingLike {
     status?: string;
   }>;
 }
+
 
 export interface BuildingProjectionResult {
   annualIncome: number;
@@ -247,9 +250,13 @@ export function computeBuildingProjection(
 
   // ── Owner expenses projection ──────────────────────────────────────────
   // Fixed recurring owner-tracked × active months
+  // "Fixed" is the complement of κυμαινόμενο, via the ONE shared predicate — not
+  // `cost > 0`, which silently reclassified a variable expense the moment its
+  // amount happened to be non-zero.
   const _recurringFixed = (building.expenses || []).filter(
     (e) =>
-      (e.isRecurring ?? e.recurring) &&
+      isRecurringExpense(e) &&
+      !isVariableExpense(e, expenseMonthlyCost(e)) &&
       expenseMonthlyCost(e) > 0 &&
       isExpenseActiveForTerm(e, currentTerm)
   );
@@ -281,7 +288,7 @@ export function computeBuildingProjection(
   let variableOwnerYtd = 0;
   let variableOwnerProjected = 0;
   const _isVariableExpense = (e: ExpenseLike): boolean =>
-    !!(e.isRecurring ?? e.recurring) && expenseMonthlyCost(e) === 0;
+    isVariableExpense(e, expenseMonthlyCost(e));
   for (const e of (building.expenses || []).filter(_isVariableExpense)) {
     if (!e.trackOwnerExpense) continue;
     const perTerm = new Map<number, number>();
@@ -328,8 +335,8 @@ export function computeBuildingProjection(
   for (const row of ownerLedgerThisYear) {
     if (row.source !== 'vacant' && row.source !== 'owner-resident') continue;
     const exp = row.expenseId ? _expByIdMap.get(String(row.expenseId)) : null;
-    const isRecurring = exp && (exp.isRecurring ?? exp.recurring);
-    const isVariable = isRecurring && expenseMonthlyCost(exp!) === 0;
+    const isRecurring = !!exp && isRecurringExpense(exp);
+    const isVariable = !!exp && isVariableExpense(exp, expenseMonthlyCost(exp));
     const months =
       isRecurring && !isVariable ? expenseActiveMonths(exp!, currentYear) : 1;
     vacantOwnerResidentEksoda += (Number(row.amount) || 0) * months;

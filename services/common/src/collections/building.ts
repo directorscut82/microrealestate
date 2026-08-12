@@ -98,6 +98,18 @@ const BuildingExpenseSchema = new mongoose.Schema({
       'cleaning',
       'water_common',
       'electricity_common',
+      // PRIVATE (per-apartment) utilities + telecoms, added 2026-08-12. Not every
+      // utility bill is κοινόχρηστο: an apartment's own ΔΕΗ/ΕΥΔΑΠ/gas/telecom bill
+      // needs a type that says so, or it gets filed as common-area cost and split
+      // across the whole building. Every consumer of this enum must map these:
+      // api/validators.ts, propertymanager._classifyExpenseType,
+      // pdfgenerator invoicebody.ejs, ExpenseFormDialog (labels + allocation
+      // methods) and all six locales. An unmapped type is invisible money.
+      'electricity_private',
+      'water_private',
+      'gas_private',
+      'telecom_private',
+      'telecom_common',
       'insurance',
       'management_fee',
       'garden',
@@ -108,6 +120,19 @@ const BuildingExpenseSchema = new mongoose.Schema({
     required: true
   },
   amount: { type: Number, default: 0 },
+  // κυμαινόμενο: the amount genuinely differs every month (electricity, water),
+  // so €0 here means "not known yet", NOT "free". Added 2026-08-12 because until
+  // then the ONLY way to express this was to leave `amount` at 0 — which made a
+  // variable expense indistinguishable from one the landlord had not finished
+  // filling in, on every surface. The landlord had been writing «(κυμαινόμενο)»
+  // into the expense NAME to work around it.
+  //
+  // Read it through `Utils.isVariableExpense` (utils/variableexpense.ts) — never
+  // re-derive `recurring && amount === 0` inline. That inference existed in three
+  // separate places before this flag, which is how a money rule gets three
+  // different answers. Absent on every pre-existing row, and the predicate's
+  // legacy fallback is what keeps those rows behaving as before.
+  isVariable: { type: Boolean, default: false },
   allocationMethod: {
     type: String,
     enum: [

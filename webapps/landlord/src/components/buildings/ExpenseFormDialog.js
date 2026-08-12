@@ -22,6 +22,7 @@ import { Textarea } from '../ui/textarea';
 import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import useTranslation from 'next-translate/useTranslation';
+import { isVariableExpense } from '../../utils/variableExpense';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 
@@ -32,6 +33,10 @@ const expenseSchema = z
     amount: z.coerce.number().min(0).max(10000000).optional().default(0),
     allocationMethod: z.string().min(1),
     isRecurring: z.boolean(),
+    // κυμαινόμενο: the amount genuinely differs every month. Explicit, because
+    // before this flag the ONLY way to say it was to leave `amount` at 0 — which
+    // made a variable expense indistinguishable from an unfinished one.
+    isVariable: z.boolean().optional().default(false),
     trackOwnerExpense: z.boolean().optional().default(false),
     ownerAmount: z.coerce.number().min(0).max(10000000).optional().default(0),
     chargeOwnerWhenVacant: z.boolean().optional().default(false),
@@ -142,6 +147,13 @@ const expenseTypes = [
   { id: 'cleaning', labelId: 'Cleaning' },
   { id: 'water_common', labelId: 'Water Common' },
   { id: 'electricity_common', labelId: 'Electricity Common' },
+  // PRIVATE (per-apartment) utilities + telecoms. Not every utility bill is
+  // κοινόχρηστο — an apartment's own bill must not be filed as a common cost.
+  { id: 'electricity_private', labelId: 'Electricity Private' },
+  { id: 'water_private', labelId: 'Water Private' },
+  { id: 'gas_private', labelId: 'Gas Private' },
+  { id: 'telecom_private', labelId: 'Telecom Private' },
+  { id: 'telecom_common', labelId: 'Telecom Common' },
   { id: 'insurance', labelId: 'Insurance' },
   { id: 'management_fee', labelId: 'Management Fee' },
   { id: 'garden', labelId: 'Garden' },
@@ -213,6 +225,55 @@ const ALLOCATION_METHODS_BY_TYPE = {
     'single_unit'
   ],
   electricity_common: [
+    'general_thousandths',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage',
+    'single_unit'
+  ],
+  // PRIVATE types: `single_unit` FIRST because an apartment's own bill belongs to
+  // that apartment, and the first entry is what the picker offers first. The rest
+  // of the set is kept intact — the landlord was explicit that these must work
+  // exactly like any other expense (owner charging, recurring, etc.). Thousandths
+  // methods are deliberately ABSENT: splitting one flat's bill by χιλιοστά charges
+  // the whole building for it, which is the bug this type set exists to prevent.
+  electricity_private: [
+    'single_unit',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage'
+  ],
+  water_private: [
+    'single_unit',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage'
+  ],
+  gas_private: [
+    'single_unit',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage'
+  ],
+  telecom_private: [
+    'single_unit',
+    'equal',
+    'by_surface',
+    'fixed',
+    'custom_ratio',
+    'custom_percentage'
+  ],
+  // A κοινόχρηστη telecom line (building internet, entry-phone line) splits like
+  // any other common cost.
+  telecom_common: [
     'general_thousandths',
     'equal',
     'by_surface',
@@ -457,6 +518,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
       amount: 0,
       allocationMethod: '',
       isRecurring: true,
+      isVariable: false,
       trackOwnerExpense: false,
       ownerAmount: 0,
       chargeOwnerWhenVacant: false,
@@ -471,6 +533,10 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
           ownerAmount: expense.ownerAmount ?? 0,
           chargeOwnerWhenVacant: expense.chargeOwnerWhenVacant ?? false,
           isRecurring: expense.isRecurring ?? true,
+          // Legacy rows have no flag; derive it from the shared rule so an
+          // existing «Πετρέλαιο (κυμαινόμενο)» opens with the switch already on
+          // rather than looking like an unfinished expense.
+          isVariable: isVariableExpense(expense),
           startFromCurrentMonth: !expense.startTerm,
           // single_unit stores exactly one {propertyId,value} target (read as
           // customAllocations[0]); do NOT expand it across all units, or the
@@ -490,7 +556,15 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   const trackOwnerExpense = watch('trackOwnerExpense');
   const ownerAmount = watch('ownerAmount');
 
-  const isVariable = isRecurring && (Number(amount) || 0) === 0;
+  // ONE shared rule (utils/variableExpense), pinned to the same truth table the
+  // server reads. This line used to be a third independent copy of
+  // `recurring && amount === 0`.
+  const isVariableFlag = watch('isVariable');
+  const isVariable = isVariableExpense({
+    isVariable: isVariableFlag,
+    isRecurring,
+    amount
+  });
   const filteredMethods = useMemo(() => {
     const methods = getAllocationMethodsForType(
       expenseType,
@@ -1021,6 +1095,38 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
               />
               <Label htmlFor="isRecurring">{t('Recurring Expense')}</Label>
             </div>
+
+            {/* κυμαινόμενο. Before this existed the landlord had to leave the
+                amount at 0 to mean "varies every month", which is the same state
+                as "I have not typed it yet" — so a half-finished expense and a
+                deliberate variable one were indistinguishable on every surface.
+                Only offered for recurring expenses: a one-off has a known amount
+                by definition (and the zod refine already requires one). */}
+            {isRecurring && (
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="isVariable"
+                  checked={!!isVariableFlag}
+                  onCheckedChange={(checked) => {
+                    setValue('isVariable', checked, { shouldDirty: true });
+                    // A variable expense carries no fixed amount: clear it so the
+                    // monthly figure comes from each bill/statement instead of a
+                    // stale number nobody meant to keep.
+                    if (checked) {
+                      setValue('amount', 0, { shouldDirty: true });
+                    }
+                  }}
+                />
+                <Label htmlFor="isVariable">{t('Variable amount')}</Label>
+              </div>
+            )}
+            {isRecurring && isVariableFlag && (
+              <p className="text-xs text-muted-foreground ml-14 border-l-2 border-stone-line pl-4 py-1">
+                {t(
+                  'The amount comes from each month’s bill — leave it at 0 here'
+                )}
+              </p>
+            )}
 
             {isRecurring && amount > 0 && (
               <div className="flex items-center gap-2 ml-14 border-l-2 border-stone-line pl-4 py-1">

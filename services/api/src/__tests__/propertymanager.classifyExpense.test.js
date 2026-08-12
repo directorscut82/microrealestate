@@ -1,7 +1,8 @@
 // Tier I-3: lock the per-property expense panel category map.
 //
 // `_classifyExpenseType` (services/api/src/managers/propertymanager.ts) folds
-// the 11-value `BuildingExpenseSchema.type` enum into one of 7 panel headline
+// the `BuildingExpenseSchema.type` enum (16 values as of 2026-08-12) into one of
+// 7 panel headline
 // categories (heating / water / electricity / insurance / cleaning / repairs /
 // other). The function is the single point where elevator/garden/pest_control
 // expenses get rolled into a sensible bucket — a silent fall-through to
@@ -33,6 +34,12 @@
 // the mocked module already loaded). Use jest.unstable_mockModule + a dynamic
 // import() inside beforeAll so the mocks register first.
 import { jest } from '@jest/globals';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ESM: no __dirname. These suites run as modules (node --experimental-vm-modules).
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const warnMock = jest.fn();
 let _classifyExpenseType;
@@ -98,23 +105,67 @@ beforeAll(async () => {
   ({ _classifyExpenseType } = await import('../managers/propertymanager.js'));
 });
 
-// Mirror of services/common/src/collections/building.ts BuildingExpenseSchema.type.
-// If a new value lands in the schema and a developer forgets to update
-// _classifyExpenseType, item (1) below will catch it via the per-value
-// assertion AND item (4) will catch the runtime fall-through.
-const BUILDING_EXPENSE_SCHEMA_TYPES = [
-  'heating',
-  'elevator',
-  'cleaning',
-  'water_common',
-  'electricity_common',
-  'insurance',
-  'management_fee',
-  'garden',
-  'repairs_fund',
-  'pest_control',
-  'other'
-];
+// READ FROM THE SCHEMA, not mirrored.
+//
+// This used to be a hand-copied list, and on 2026-08-12 five new enum values
+// (electricity_private, water_private, gas_private, telecom_private,
+// telecom_common) were added to the schema while this suite stayed green —
+// because the copy did not know about them. A test that mirrors the thing it is
+// guarding cannot detect drift in the thing it is guarding. Parse the real enum
+// out of the schema source so a new value is IMPOSSIBLE to add without this
+// suite seeing it.
+const BUILDING_EXPENSE_SCHEMA_TYPES = (() => {
+  const schemaPath = path.resolve(
+    HERE,
+    '../../../common/src/collections/building.ts'
+  );
+  const src = fs.readFileSync(schemaPath, 'utf8');
+  // The `type` field of BuildingExpenseSchema: the FIRST `enum: [...]` that
+  // follows the marker below. Anchored on `amount:` (the field right after it in
+  // the schema) so a later enum in the same file cannot be picked up by mistake.
+  const start = src.indexOf('const BuildingExpenseSchema');
+  if (start < 0) throw new Error('BuildingExpenseSchema not found in schema');
+  const enumStart = src.indexOf('enum: [', start);
+  const enumEnd = src.indexOf(']', enumStart);
+  if (enumStart < 0 || enumEnd < 0) {
+    throw new Error('expense type enum not found in schema');
+  }
+  // Strip line comments BEFORE splitting: the schema's own comments contain
+  // commas, and splitting first mangled a comment fragment onto the value that
+  // followed it — which silently dropped `electricity_private` and still passed,
+  // because the old floor check was `< 11`. Comments out, then take every quoted
+  // literal, then assert nothing was lost.
+  const body = src
+    .slice(enumStart + 'enum: ['.length, enumEnd)
+    .replace(/\/\/[^\n]*/g, '');
+  const values = [...body.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  // A quoted literal count that disagrees with the value count means the parse
+  // lost something. Both must equal the number of `'…'` tokens present.
+  const quoted = (body.match(/'/g) || []).length / 2;
+  if (values.length !== quoted) {
+    throw new Error(
+      `parsed ${values.length} types but found ${quoted} quoted literals`
+    );
+  }
+  // Floor: the enum has never had fewer than 16 values since 2026-08-12. A lower
+  // number means the parse broke, not that the schema shrank.
+  if (values.length < 16) {
+    throw new Error(`parsed only ${values.length} expense types from the schema`);
+  }
+  for (const required of [
+    'electricity_common',
+    'electricity_private',
+    'water_private',
+    'gas_private',
+    'telecom_private',
+    'telecom_common'
+  ]) {
+    if (!values.includes(required)) {
+      throw new Error(`schema parse missed ${required}`);
+    }
+  }
+  return values;
+})();
 
 const EXPENSE_CATEGORIES = [
   'heating',

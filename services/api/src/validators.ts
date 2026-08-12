@@ -13,6 +13,12 @@ const EXPENSE_TYPES = [
   'cleaning',
   'water_common',
   'electricity_common',
+  // Must stay in step with BuildingExpenseSchema.type (services/common).
+  'electricity_private',
+  'water_private',
+  'gas_private',
+  'telecom_private',
+  'telecom_common',
   'insurance',
   'management_fee',
   'garden',
@@ -166,6 +172,23 @@ export function validateFiniteNumber(
     throw new ServiceError(`${fieldName} must be at most ${max}`, 422);
   }
   return n;
+}
+
+/**
+ * A strict boolean body field. Mongoose would happily CAST `"no"`, `"0"` and `[]`
+ * to a boolean, so a typo in a client payload becomes a silent money flag —
+ * `isVariable` decides whether a €0 expense means «κυμαινόμενο» or «unfinished».
+ * Absent is fine (the schema default applies); present-but-not-boolean is not.
+ */
+export function validateBooleanField(
+  value: unknown,
+  fieldName: string
+): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ServiceError(`${fieldName} must be true or false`, 422);
+  }
+  return value;
 }
 
 export function validateEnum<T extends string>(

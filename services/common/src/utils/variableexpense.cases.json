@@ -1,0 +1,89 @@
+{
+  "_comment": [
+    "THE truth table for «is this expense κυμαινόμενο?». One rule, two thin",
+    "implementations (services/common/src/utils/variableexpense.ts for the server,",
+    "webapps/landlord/src/utils/variableExpense.js for the browser, which cannot",
+    "import the server lib). BOTH test suites read this file, so the rule cannot be",
+    "changed on one side only.",
+    "Each case: expense fields + optional monthlyCost -> expected `variable`."
+  ],
+  "cases": [
+    {
+      "name": "explicit flag true, recurring, with an amount",
+      "expense": { "isVariable": true, "isRecurring": true, "amount": 120 },
+      "expected": true
+    },
+    {
+      "name": "explicit flag true at zero (the normal κυμαινόμενο row)",
+      "expense": { "isVariable": true, "isRecurring": true, "amount": 0 },
+      "expected": true
+    },
+    {
+      "name": "explicit flag FALSE at zero — an unfinished expense, NOT variable",
+      "expense": { "isVariable": false, "isRecurring": true, "amount": 0 },
+      "expected": false
+    },
+    {
+      "name": "explicit flag false with an amount",
+      "expense": { "isVariable": false, "isRecurring": true, "amount": 55 },
+      "expected": false
+    },
+    {
+      "name": "explicit flag true but NOT recurring — the flag still wins",
+      "expense": { "isVariable": true, "isRecurring": false, "amount": 0 },
+      "expected": true
+    },
+    {
+      "name": "legacy: recurring at zero -> variable (the pre-flag inference)",
+      "expense": { "isRecurring": true, "amount": 0 },
+      "expected": true
+    },
+    {
+      "name": "legacy: recurring with an amount -> fixed",
+      "expense": { "isRecurring": true, "amount": 100 },
+      "expected": false
+    },
+    {
+      "name": "legacy: NOT recurring at zero -> not variable",
+      "expense": { "isRecurring": false, "amount": 0 },
+      "expected": false
+    },
+    {
+      "name": "legacy: old `recurring` spelling at zero -> variable",
+      "expense": { "recurring": true, "amount": 0 },
+      "expected": true
+    },
+    {
+      "name": "legacy: isRecurring wins over the old recurring spelling",
+      "expense": { "isRecurring": false, "recurring": true, "amount": 0 },
+      "expected": false
+    },
+    {
+      "name": "legacy: monthlyCost overrides amount when supplied",
+      "expense": { "isRecurring": true, "amount": 0 },
+      "monthlyCost": 80,
+      "expected": false
+    },
+    {
+      "name": "legacy: monthlyCost zero with a non-zero amount -> variable",
+      "expense": { "isRecurring": true, "amount": 80 },
+      "monthlyCost": 0,
+      "expected": true
+    },
+    {
+      "name": "null flag is treated as absent (legacy path)",
+      "expense": { "isVariable": null, "isRecurring": true, "amount": 0 },
+      "expected": true
+    },
+    {
+      "name": "missing amount is zero",
+      "expense": { "isRecurring": true },
+      "expected": true
+    },
+    {
+      "name": "empty object is not variable",
+      "expense": {},
+      "expected": false
+    }
+  ]
+}

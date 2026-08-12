@@ -37,15 +37,67 @@
  * · Neither → an equal split, the honest default for an unidentified bill.
  */
 
-// Provider → building expense `type` enum (services/common/.../building.ts).
-// A SUGGESTION for the pre-filled form; the user can change it. Deliberately NOT
-// exported: it used to exist as two identical copies (here and in InboxBell), and
-// an unexported constant cannot grow a third.
-const PROVIDER_TYPE = {
+/**
+ * Provider → expense `type`, and it depends on WHOSE meter it is.
+ *
+ * The map used to be flat (`deh → electricity_common`), so an apartment's own ΔΕΗ
+ * bill was typed as COMMON-AREA electricity — a cost the whole building shares.
+ * The landlord caught it and corrected the type by hand. Since 2026-08-12 the
+ * schema has private counterparts, so the choice is made from the MATCH:
+ * a unit meter → the `_private` type, a κοινόχρηστος meter → the `_common` one.
+ *
+ * Deliberately not exported: these lived as two identical copies (here and in
+ * InboxBell) and an unexported constant cannot grow a third.
+ */
+const PROVIDER_TYPE_SHARED = {
   deh: 'electricity_common',
   eydap: 'water_common',
-  epa: 'heating'
+  epa: 'heating',
+  nova: 'telecom_common'
 };
+const PROVIDER_TYPE_PRIVATE = {
+  deh: 'electricity_private',
+  eydap: 'water_private',
+  epa: 'gas_private',
+  nova: 'telecom_private'
+};
+
+/**
+ * Provider code → the Greek brand name. The landlord's screens are Greek and the
+ * approved mock shows «ΔΕΗ», not the raw code «DEH» — yet the prefill named
+ * expenses `provider.toUpperCase()`, which is why a live building now has an
+ * expense called «DEH» sitting among Greek ones. This map already existed in
+ * InboxBell for a badge; it lives here now so both surfaces read the same one.
+ */
+const PROVIDER_LABEL = {
+  deh: 'ΔΕΗ',
+  eydap: 'ΕΥΔΑΠ',
+  epa: 'ΕΠΑ',
+  nova: 'NOVA'
+};
+
+/** The Greek display name for a provider code, or '' when unknown. */
+export function providerLabel(provider) {
+  const key = String(provider ?? '')
+    .trim()
+    .toLowerCase();
+  return PROVIDER_LABEL[key] || '';
+}
+
+/**
+ * The expense `type` for this bill. `kind` is 'private' for a unit-meter bill,
+ * 'shared' for a κοινόχρηστος one, and anything else falls back to `other` —
+ * guessing a utility type for an unidentified bill would file it against the wrong
+ * cost category.
+ */
+export function providerExpenseType(provider, kind) {
+  const key = String(provider ?? '')
+    .trim()
+    .toLowerCase();
+  const map = kind === 'private' ? PROVIDER_TYPE_PRIVATE : PROVIDER_TYPE_SHARED;
+  if (kind !== 'private' && kind !== 'shared') return 'other';
+  return map[key] || 'other';
+}
 
 /**
  * Which χιλιοστά vector a utility splits by, and whether `building` actually has
@@ -82,12 +134,20 @@ export function buildExpensePrefill({
   // On a shared hit the provider from the STORED meter is more reliable than the
   // parse (it is what the landlord recorded) and survives a failed parse.
   const effectiveProvider = sharedMatch?.provider || provider || '';
-  const type = PROVIDER_TYPE[effectiveProvider] || 'other';
+  // WHOSE meter decides the type: an apartment's own bill is a `_private` cost,
+  // a κοινόχρηστος one is `_common`. An unidentified bill gets `other` rather than
+  // a guessed utility type.
+  const kind = sharedMatch ? 'shared' : unitMatch ? 'private' : null;
+  const type = providerExpenseType(effectiveProvider, kind);
   return {
     // A shared meter's own label («Κλιμακοστάσιο») names the expense far better
-    // than the bare provider; fall back to the provider when it has none.
+    // than the bare provider. Otherwise the GREEK brand name — the screens are
+    // Greek, and `provider.toUpperCase()` is what put an expense called «DEH» in
+    // a live building. Falls back to the raw code only if the provider is unknown,
+    // which at least stays truthful about what was read.
     name:
       sharedMatch?.label ||
+      providerLabel(effectiveProvider) ||
       (effectiveProvider ? effectiveProvider.toUpperCase() : ''),
     type,
     // Left at 0 DELIBERATELY: on a failed parse the total is a SALVAGED figure and

@@ -16,6 +16,7 @@ import {
   validateTerm,
   validateFiniteNumber,
   validateStringField,
+  validateBooleanField,
   validateEnum,
   validateArrayMaxLength,
   validateAllocationValues,
@@ -4647,6 +4648,10 @@ export async function addExpense(req: Req, res: Res) {
   // Normalize alternate field name from older UI builds: `recurring` →
   // `isRecurring`. Without this, the schema default (true) silently kicks
   // in and a one-off expense becomes recurring forever.
+  // κυμαινόμενο is a money flag: it decides whether €0 means "varies every month"
+  // or "not filled in yet". Mongoose would cast "no"/[]/0 to a boolean, so a typo
+  // in the payload would silently set it. Reject anything non-boolean.
+  validateBooleanField(req.body.isVariable, 'isVariable');
   if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
     req.body.isRecurring = req.body.recurring;
     delete req.body.recurring;
@@ -4770,6 +4775,10 @@ export async function updateExpense(req: Req, res: Res) {
 
   // Normalize alternate field name from older UI builds: `recurring` →
   // `isRecurring`. See note in addExpense.
+  // κυμαινόμενο is a money flag: it decides whether €0 means "varies every month"
+  // or "not filled in yet". Mongoose would cast "no"/[]/0 to a boolean, so a typo
+  // in the payload would silently set it. Reject anything non-boolean.
+  validateBooleanField(req.body.isVariable, 'isVariable');
   if (req.body.isRecurring === undefined && req.body.recurring !== undefined) {
     req.body.isRecurring = req.body.recurring;
     delete req.body.recurring;

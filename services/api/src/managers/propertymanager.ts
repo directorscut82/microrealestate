@@ -519,8 +519,11 @@ function _zeroCategoryTotals(): CategoryTotals {
 
 // Map a building expense schema `type` to one of the 7 panel categories.
 // The schema enum (services/common/src/collections/building.ts BuildingExpenseSchema.type)
-// has 11 values: heating, elevator, cleaning, water_common, electricity_common,
-// insurance, management_fee, garden, repairs_fund, pest_control, other.
+// has 16 values: heating, elevator, cleaning, water_common, electricity_common,
+// electricity_private, water_private, gas_private, telecom_private,
+// telecom_common, insurance, management_fee, garden, repairs_fund, pest_control,
+// other. (The five private/telecom values were added 2026-08-12 — an apartment's
+// own utility bill is not a common-area cost.)
 // Every enum value MUST be mapped explicitly here — silent fall-through to
 // 'other' would make the panel undercounting visible only when the user
 // happens to add an elevator/garden/pest_control expense. The jest unit at
@@ -531,10 +534,18 @@ export function _classifyExpenseType(
 ): ExpenseCategory {
   switch (type) {
     case 'heating':
+    case 'gas_private':
+      // Gas to a single apartment is still a heating cost.
       return 'heating';
     case 'water_common':
+    case 'water_private':
       return 'water';
     case 'electricity_common':
+    case 'electricity_private':
+      // Same panel bucket whether the meter is the stairwell's or one flat's —
+      // the bucket answers "what kind of cost", the per-row description answers
+      // "whose". The ALLOCATION (single_unit vs χιλιοστά) is what differs, and
+      // that lives on the expense, not here.
       return 'electricity';
     case 'insurance':
       return 'insurance';
@@ -552,7 +563,13 @@ export function _classifyExpenseType(
       // upkeep on building infrastructure); roll into 'repairs' rather than
       // create a 4-row "elevator" category that doubles the panel size.
       return 'repairs';
+    // Telecoms have no panel category of their own. Grouped with 'other'
+    // EXPLICITLY rather than left to fall through the default, so the next reader
+    // can see the decision was made: an 8th bucket changes every category-keyed
+    // surface, and telecoms are rare enough that «Λοιπά (<name>)» reads correctly.
     case 'management_fee':
+    case 'telecom_private':
+    case 'telecom_common':
     case 'other':
     case undefined:
     case null:

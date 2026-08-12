@@ -11,4 +11,8 @@ export { default as ServiceError } from './utils/serviceerror.js';
 export * as Pagination from './utils/pagination.js';
 export * as OwnerStatement from './utils/ownerstatement.js';
 export * as ShareBasis from './utils/sharebasis.js';
+// THE κυμαινόμενο predicate. Import it rather than re-deriving
+// `recurring && amount === 0` — that inference lived in three places before the
+// flag existed, which is how one money rule gets three answers.
+export * as VariableExpense from './utils/variableexpense.js';
 export * as BuildingProjection from './utils/buildingprojection.js';

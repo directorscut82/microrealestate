@@ -21,7 +21,16 @@ import {
   SelectValue
 } from '../ui/select';
 import { Badge } from '../ui/badge';
-import { buildExpensePrefill } from '../../utils/billExpensePrefill';
+import {
+  buildExpensePrefill,
+  providerLabel
+} from '../../utils/billExpensePrefill';
+import {
+  billTargetLabel,
+  buildingLabel,
+  buildingOptionLabels,
+  unitLabel
+} from '../../utils/entityLabels';
 import { Button } from '../ui/button';
 import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
@@ -36,6 +45,22 @@ import { termMonthYearAccusative } from '../../utils/greekMonths';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
+
+// Allocation method → the same label keys ExpenseFormDialog uses, so the charge
+// preview names the split with the words the landlord already sees in the expense
+// form. Kept as a literal map (not imported) because ExpenseFormDialog does not
+// export it; the jest unit asserts the two lists agree.
+const ALLOCATION_METHOD_LABEL = {
+  general_thousandths: 'General Thousandths',
+  heating_thousandths: 'Heating Thousandths',
+  elevator_thousandths: 'Elevator Thousandths',
+  equal: 'Equal',
+  by_surface: 'By Surface',
+  fixed: 'Fixed',
+  custom_ratio: 'Custom Ratio',
+  custom_percentage: 'Custom Percentage',
+  single_unit: 'Single Unit'
+};
 
 // H4: key per-result state by a stable synthetic uid, NOT filename. Two uploaded
 // files can share a name (the server keeps both), and a filename key made their
@@ -56,6 +81,11 @@ const MISSING_FIELD_LABEL = {
 function ResultCard({
   result,
   buildings,
+  // The building whose page the dialog was opened from. Needed because a bill's
+  // παροχή can identify a DIFFERENT building, and until now that was re-pointed
+  // silently — the landlord created the δαπάνη on one building while looking at
+  // another, then went hunting for it.
+  openedFromBuilding,
   assignment,
   onAssignBuilding,
   onAssignExpense,
@@ -68,6 +98,11 @@ function ResultCard({
   onAmountChange
 }) {
   const { t, lang } = useTranslation('common');
+
+  // Shared by BOTH branches below (the parse-fail card returns early). Qualified
+  // only where two options would otherwise read the same — the old code appended
+  // the street to every option, which rendered «ΟΔΟΣ ΑΛΦΑ 1 — ΟΔΟΣ ΑΛΦΑ 1».
+  const buildingLabels = buildingOptionLabels(buildings);
 
   if (!result.success) {
     // PARSE-FAIL SURFACE (2026-08-09). This card used to be the filename plus a
@@ -200,14 +235,12 @@ function ResultCard({
                   <SelectValue placeholder={t('Select a building')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {(buildings || []).map((b) => {
-                    const qualifier = b.address?.street1 || b.atakPrefix;
-                    return (
-                      <SelectItem key={b._id} value={String(b._id)}>
-                        {qualifier ? `${b.name} — ${qualifier}` : b.name}
-                      </SelectItem>
-                    );
-                  })}
+                  {/* Same list-aware labels as the success card — never «X — X». */}
+                  {(buildings || []).map((b) => (
+                    <SelectItem key={b._id} value={String(b._id)}>
+                      {buildingLabels.get(String(b._id)) || buildingLabel(b)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -275,6 +308,64 @@ function ResultCard({
     // hide soft-deleted expenses (endTerm in the past)
     (e) => !e.endTerm
   );
+  // WHAT THE παροχή IDENTIFIED. The server returns these and the dialog used them
+  // only to preselect the building and seed the create-expense form — it never
+  // SHOWED them, so the landlord could not tell which apartment a bill was for
+  // without opening «Νέα δαπάνη».
+  const identifiedShared = result.sharedMeterMatch || null;
+  const identifiedUnit = result.unitMatch || null;
+  const identifiedBuildingId =
+    match?.buildingId ||
+    identifiedShared?.buildingId ||
+    identifiedUnit?.buildingId ||
+    '';
+  const identifiedBuilding = buildings?.find(
+    (b) => String(b._id) === String(identifiedBuildingId)
+  );
+  const identifiedUnitRow = identifiedUnit
+    ? (identifiedBuilding?.units || []).find(
+        (u) =>
+          String(u.propertyId ?? u._id) === String(identifiedUnit.propertyId)
+      )
+    : null;
+  const targetLabel = identifiedBuilding
+    ? billTargetLabel({
+        building: identifiedBuilding,
+        unit: identifiedUnitRow,
+        shared: !!identifiedShared
+      })
+    : '';
+  // The expense this bill will actually be charged against — needed so the charge
+  // toggle can SAY what it will do (T12) instead of asking blind.
+  const targetExpense =
+    (selectedBuilding?.expenses || []).find(
+      (e) => String(e._id) === String(expenseId)
+    ) || null;
+  // For a `single_unit` expense, WHICH apartment. Its customAllocations carry the
+  // propertyId; render the same `name (ΑΤΑΚ)` label used everywhere else.
+  const singleUnitTargetLabel = (() => {
+    if (targetExpense?.allocationMethod !== 'single_unit') return '';
+    const pid = (targetExpense.customAllocations || [])[0]?.propertyId;
+    if (!pid) return '';
+    const row = (selectedBuilding?.units || []).find(
+      (u) => String(u.propertyId ?? u._id) === String(pid)
+    );
+    return row ? unitLabel(row) : '';
+  })();
+
+  // The term this bill will be posted to (YYYYMMDDHH), and whether the target
+  // expense even exists that month.
+  const billTerm = parsed.proposedTerm ?? null;
+  const startsAfterBillTerm =
+    !!targetExpense?.startTerm &&
+    !!billTerm &&
+    Number(targetExpense.startTerm) > Number(billTerm);
+
+  // The bill belongs somewhere OTHER than the page we came from.
+  const wrongBuilding =
+    !!identifiedBuildingId &&
+    !!openedFromBuilding?._id &&
+    String(identifiedBuildingId) !== String(openedFromBuilding._id);
 
   return (
     <div className="border rounded-md p-4 space-y-3">
@@ -282,8 +373,10 @@ function ResultCard({
         <LuReceipt className="size-5 text-primary shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm">{result.filename}</div>
-          <div className="text-xs text-muted-foreground uppercase">
-            {parsed.provider}
+          {/* The GREEK brand name. `parsed.provider` is a lowercase code, and
+              rendering it uppercased put «DEH» on a Greek screen. */}
+          <div className="text-xs text-muted-foreground">
+            {providerLabel(parsed.provider) || parsed.provider}
           </div>
         </div>
         {match && (
@@ -293,7 +386,77 @@ function ResultCard({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+      {/* T3: name WHAT the παροχή identified. Per the landlord's rule a
+          κοινόχρηστος bill is identified by its address; an apartment bill must
+          also show the apartment's ΑΤΑΚ. */}
+      {targetLabel && (
+        <div className="rounded-md bg-primary/5 border border-primary/20 px-2.5 py-1.5 text-xs">
+          <span className="text-muted-foreground">
+            {identifiedShared
+              ? t('Shared meter')
+              : identifiedUnit
+                ? t('Apartment')
+                : t('Expense')}
+            {': '}
+          </span>
+          <span className="font-medium">{targetLabel}</span>
+          {identifiedShared?.label ? (
+            <span className="text-muted-foreground">
+              {' · '}
+              {identifiedShared.label}
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      {/* T4: the bill belongs to another building. This used to be silent — the
+          assignment was re-pointed and the δαπάνη landed on a building the
+          landlord was not looking at. */}
+      {wrongBuilding && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs dark:bg-amber-950/30 dark:border-amber-800">
+          <div className="flex items-start gap-1.5">
+            <LuAlertTriangle className="size-3.5 shrink-0 text-amber-600 mt-0.5" />
+            <div className="text-amber-800 dark:text-amber-200">
+              {t(
+                'This bill belongs to {{building}}, not the building you are viewing ({{current}}). It will be recorded there.',
+                {
+                  building: buildingLabel(identifiedBuilding),
+                  current: buildingLabel(openedFromBuilding)
+                }
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* T7 (landlord's spec): the IRIS QR on the LEFT at a readable size, the
+          parsed/OCR'd values on the RIGHT, and everything else underneath. It used
+          to be a 96px thumbnail centred BELOW every field and banner. */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        {parsed.irisCodeBase64 ? (
+          <div className="shrink-0 sm:w-44">
+            <div className="rounded-md border border-border bg-white p-2">
+              <img
+                src={`data:image/png;base64,${parsed.irisCodeBase64}`}
+                alt={t('IRIS payment QR code')}
+                className="w-40 h-40 mx-auto"
+              />
+            </div>
+            <div className="mt-1 text-center text-[0.6875rem] text-muted-foreground">
+              {t('Scan to pay (IRIS)')}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="min-w-0 flex-1">
+          <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-ink-muted mb-1">
+            {/* Say WHERE the values came from: a text PDF is parsed exactly, an
+                image is OCR'd and can misread. */}
+            {result.ocrText
+              ? t('Read from the image (OCR)')
+              : t('Read from the PDF')}
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
         <div className="text-muted-foreground">{t('Billing ID')}</div>
         <div className="font-mono text-xs">{parsed.billingId}</div>
 
@@ -345,6 +508,8 @@ function ResultCard({
             <div className="font-mono text-xs">{parsed.rfCode}</div>
           </>
         )}
+          </div>
+        </div>
       </div>
 
       {/* No exact match → let the user assign a building + expense in-dialog. */}
@@ -372,14 +537,11 @@ function ResultCard({
                     dropdown rendered two IDENTICAL options, so the landlord could
                     not tell which building the bill would be charged to. A select
                     with indistinguishable options is a shipped bug. */}
-                {(buildings || []).map((b) => {
-                  const qualifier = b.address?.street1 || b.atakPrefix;
-                  return (
-                    <SelectItem key={b._id} value={String(b._id)}>
-                      {qualifier ? `${b.name} — ${qualifier}` : b.name}
-                    </SelectItem>
-                  );
-                })}
+                {(buildings || []).map((b) => (
+                  <SelectItem key={b._id} value={String(b._id)}>
+                    {buildingLabels.get(String(b._id)) || buildingLabel(b)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -422,20 +584,88 @@ function ResultCard({
       )}
 
       {/* Once an expense is resolved (matched or assigned), offer to charge
-          tenants this month — this bridges the amount into the rent engine. */}
+          tenants this month — this bridges the amount into the rent engine.
+
+          T12: the toggle asks the landlord to AUTHORISE a charge, so it must say
+          what the charge will do. It deliberately does NOT duplicate the expense
+          form's controls: confirming a bill attaches it to an expense that already
+          owns allocationMethod / chargeOwnerWhenVacant / owner tracking, and
+          saveMonthlyStatement applies them. Two places owning one money rule is
+          the defect this whole branch removed. So: show the settings, don't
+          re-offer them.
+
+          It also does NOT compute a per-unit split. That arithmetic lives in the
+          server's allocation engine (1_base.ts), and a second implementation here
+          would eventually disagree with it — a preview that lies about money is
+          worse than no preview. The method is named instead, in words. */}
       {expenseId && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 p-3">
-          <Label
-            htmlFor={`charge-${keyOf(result)}`}
-            className="text-sm cursor-pointer"
-          >
-            {t('Charge tenants this month')}
-          </Label>
-          <Switch
-            id={`charge-${keyOf(result)}`}
-            checked={!!chargeFlags[keyOf(result)]}
-            onCheckedChange={() => onToggleCharge(keyOf(result))}
-          />
+        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <Label
+              htmlFor={`charge-${keyOf(result)}`}
+              className="text-sm cursor-pointer"
+            >
+              {t('Charge tenants this month')}
+            </Label>
+            <Switch
+              id={`charge-${keyOf(result)}`}
+              checked={!!chargeFlags[keyOf(result)]}
+              onCheckedChange={() => onToggleCharge(keyOf(result))}
+            />
+          </div>
+
+          {chargeFlags[keyOf(result)] && targetExpense && (
+            <div className="border-t border-border pt-2 text-xs space-y-1">
+              <div>
+                <span className="text-muted-foreground">
+                  {t('Split')}
+                  {': '}
+                </span>
+                <span className="font-medium">
+                  {ALLOCATION_METHOD_LABEL[targetExpense.allocationMethod]
+                    ? t(
+                        ALLOCATION_METHOD_LABEL[targetExpense.allocationMethod]
+                      )
+                    : targetExpense.allocationMethod}
+                </span>
+                {targetExpense.allocationMethod === 'single_unit' &&
+                singleUnitTargetLabel ? (
+                  <span className="text-muted-foreground">
+                    {' — '}
+                    {singleUnitTargetLabel}
+                  </span>
+                ) : null}
+              </div>
+              <div className="text-muted-foreground">
+                {targetExpense.chargeOwnerWhenVacant
+                  ? t('A vacant apartment is charged to its owner')
+                  : t('A vacant apartment is not charged')}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* T5 (landlord's decision: WARN, do not auto-correct). The expense form
+          defaults to «start from the current month», so an expense created today
+          for a June bill starts in August and does not exist in the month its own
+          bill covers — no statement for that month can show it. Silently moving the
+          start date would change which month every OTHER bill on that expense lands
+          in, so this only tells the truth and leaves the decision alone. */}
+      {startsAfterBillTerm && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs dark:bg-amber-950/30 dark:border-amber-800">
+          <div className="flex items-start gap-1.5">
+            <LuAlertTriangle className="size-3.5 shrink-0 text-amber-600 mt-0.5" />
+            <div className="text-amber-800 dark:text-amber-200">
+              {t(
+                'The expense starts in {{start}} but this bill is for {{bill}} — it will not appear on that month’s statement.',
+                {
+                  start: termMonthYearAccusative(targetExpense.startTerm, lang),
+                  bill: termMonthYearAccusative(billTerm, lang)
+                }
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -511,15 +741,6 @@ function ResultCard({
         </div>
       )}
 
-      {parsed.irisCodeBase64 && (
-        <div className="flex justify-center pt-2">
-          <img
-            src={`data:image/png;base64,${parsed.irisCodeBase64}`}
-            alt="IRIS QR"
-            className="w-24 h-24"
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -933,6 +1154,23 @@ export default function BillImportDialog({ open, setOpen, building }) {
   ).length;
   const isLoading = state === 'loading' || state === 'confirming';
 
+  // Elapsed seconds while parsing. Reset on each run; the interval is cleared on
+  // unmount and whenever the state leaves 'loading', so it cannot outlive the
+  // dialog or keep ticking behind a closed one.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (state !== 'loading') {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    const id = setInterval(
+      () => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000)),
+      1000
+    );
+    return () => clearInterval(id);
+  }, [state]);
+
   return (
     <>
       <ResponsiveDialog
@@ -965,8 +1203,17 @@ export default function BillImportDialog({ open, setOpen, building }) {
                 that returns all results together. */}
             {state === 'loading' && files.length > 0 && (
               <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-                <div className="font-medium">
-                  {t('Reading {{count}} file(s)…', { count: files.length })}
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="font-medium">
+                    {t('Reading {{count}} file(s)…', { count: files.length })}
+                  </div>
+                  {/* A LIVE counter, not just a sentence. The measured wait is
+                      ~50s for one page, and a static "about a minute" cannot tell
+                      the landlord whether the request is still alive at second 45
+                      — which is exactly when they start wondering if it hung. */}
+                  <div className="font-mono text-xs text-muted-foreground tabular-nums">
+                    {elapsedSeconds}s
+                  </div>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
                   {t(
@@ -1009,6 +1256,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
                     key={result._uid}
                     result={result}
                     buildings={buildings}
+                    openedFromBuilding={building}
                     assignment={assignments[result._uid]}
                     onAssignBuilding={assignBuilding}
                     onAssignExpense={assignExpense}

@@ -11,6 +11,8 @@
  */
 import {
   buildExpensePrefill,
+  providerExpenseType,
+  providerLabel,
   sharedThousandthsMethod
 } from '../utils/billExpensePrefill';
 
@@ -91,8 +93,11 @@ describe('buildExpensePrefill — shared (κοινόχρηστος) meter', () =
       billingId: 'x',
       sharedMatch: { provider: 'eydap' } // what the landlord recorded
     });
+    // GREEK brand name, not «EYDAP» — the screens are Greek and
+    // `provider.toUpperCase()` is what put an expense called «DEH» in a live
+    // building.
     expect({ name: p.name, type: p.type }).toEqual({
-      name: 'EYDAP',
+      name: 'ΕΥΔΑΠ',
       type: 'water_common'
     });
   });
@@ -108,7 +113,7 @@ describe('buildExpensePrefill — shared (κοινόχρηστος) meter', () =
     });
     expect({ type: p.type, name: p.name }).toEqual({
       type: 'water_common',
-      name: 'EYDAP'
+      name: 'ΕΥΔΑΠ'
     });
   });
 });
@@ -123,6 +128,10 @@ describe('buildExpensePrefill — apartment meter and fallback', () => {
     });
     expect(p.allocationMethod).toBe('single_unit');
     expect(p.customAllocations).toEqual([{ propertyId: 'u3', value: 0 }]);
+    // An apartment's own ΔΕΗ bill is a PRIVATE cost, not common-area electricity.
+    // Typing it `electricity_common` is what the landlord had to correct by hand.
+    expect(p.type).toBe('electricity_private');
+    expect(p.name).toBe('ΔΕΗ');
   });
 
   it('a SHARED hit wins over a unit hit — never single_unit for κοινόχρηστο', () => {
@@ -215,5 +224,94 @@ describe('sharedThousandthsMethod', () => {
     expect(sharedThousandthsMethod('heating', NO_THOUSANDTHS)).toBe('equal');
     // Defensive: a missing building must not throw on the create path.
     expect(sharedThousandthsMethod('other', undefined)).toBe('equal');
+  });
+});
+
+describe('providerLabel + providerExpenseType', () => {
+  it('gives the Greek brand name, case- and whitespace-tolerantly', () => {
+    for (const v of ['deh', 'DEH', ' Deh ']) {
+      expect(providerLabel(v)).toBe('ΔΕΗ');
+    }
+    expect(providerLabel('eydap')).toBe('ΕΥΔΑΠ');
+    expect(providerLabel('epa')).toBe('ΕΠΑ');
+    expect(providerLabel('nova')).toBe('NOVA');
+  });
+
+  it('returns empty (never «undefined») for an unknown or absent provider', () => {
+    for (const v of ['', null, undefined, 'wat', 0, false]) {
+      expect(providerLabel(v)).toBe('');
+    }
+  });
+
+  it('maps every provider × kind to the right type — all cells', () => {
+    const cells = [
+      ['deh', 'private', 'electricity_private'],
+      ['deh', 'shared', 'electricity_common'],
+      ['eydap', 'private', 'water_private'],
+      ['eydap', 'shared', 'water_common'],
+      ['epa', 'private', 'gas_private'],
+      ['epa', 'shared', 'heating'],
+      ['nova', 'private', 'telecom_private'],
+      ['nova', 'shared', 'telecom_common']
+    ];
+    for (const [provider, kind, expected] of cells) {
+      expect({ provider, kind, type: providerExpenseType(provider, kind) }).toEqual(
+        { provider, kind, type: expected }
+      );
+    }
+  });
+
+  it('an UNIDENTIFIED bill gets `other`, never a guessed utility type', () => {
+    // Guessing electricity_common for a bill we could not place would file it as a
+    // common-area cost on whatever building the landlord happens to pick.
+    for (const kind of [null, undefined, 'neither', '']) {
+      expect(providerExpenseType('deh', kind)).toBe('other');
+    }
+  });
+
+  it('an unknown provider is `other` even when the kind is known', () => {
+    expect(providerExpenseType('wat', 'private')).toBe('other');
+    expect(providerExpenseType('', 'shared')).toBe('other');
+  });
+});
+
+describe('the new private types keep full parity', () => {
+  it('a unit-meter bill is single_unit and targets that flat, for every provider', () => {
+    const expected = {
+      deh: 'electricity_private',
+      eydap: 'water_private',
+      epa: 'gas_private',
+      nova: 'telecom_private'
+    };
+    for (const [provider, type] of Object.entries(expected)) {
+      const p = buildExpensePrefill({
+        building: BUILDING,
+        provider,
+        billingId: 'x',
+        unitMatch: { propertyId: 'u2' }
+      });
+      expect({ provider, type: p.type, method: p.allocationMethod }).toEqual({
+        provider,
+        type,
+        method: 'single_unit'
+      });
+      expect(p.customAllocations).toEqual([{ propertyId: 'u2', value: 0 }]);
+      // Parity: the owner/recurring options must keep working on the new types.
+      expect(p.isRecurring).toBe(true);
+      expect(p.chargeOwnerWhenVacant).toBe(true);
+    }
+  });
+
+  it('a private type is NEVER given a χιλιοστά split', () => {
+    // One flat's bill split by χιλιοστά charges the whole building for it.
+    for (const provider of ['deh', 'eydap', 'epa', 'nova']) {
+      const p = buildExpensePrefill({
+        building: BUILDING,
+        provider,
+        billingId: 'x',
+        unitMatch: { propertyId: 'u1' }
+      });
+      expect(p.allocationMethod).not.toMatch(/thousandths/);
+    }
   });
 });
