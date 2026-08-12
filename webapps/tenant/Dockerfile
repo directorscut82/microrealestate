@@ -9,7 +9,14 @@ COPY .yarn/plugins .yarn/plugins
 COPY .yarn/releases .yarn/releases
 COPY types/package.json types/package.json
 COPY webapps/tenant/package.json webapps/tenant/package.json
-RUN --mount=type=cache,id=node_modules,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
+# Per-service cache id. All 9 image jobs run in PARALLEL from one matrix and every
+# Dockerfile used `id=node_modules`, so they raced on a single shared cache mount:
+# a partially-populated cache makes yarn report "must be built because the last one
+# failed", and in --production mode that is fatal. Measured 2026-08-12: the same
+# commit failed on canvas for api, then on bcrypt for pdfgenerator on the re-run —
+# a different service each time, which is the signature of contention rather than a
+# code defect.
+RUN --mount=type=cache,id=node_modules-tenant,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/tenant
 
 FROM base AS build
