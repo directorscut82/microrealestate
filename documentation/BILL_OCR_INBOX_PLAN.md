@@ -1138,3 +1138,177 @@ Ready to build now, no new inputs required:
 everything above — and per `.kiro/steering/`, no ΕΠΑ parser gets written from invented regexes.
 
 **Not startable until NAS returns:** the E2E gate + Greek-screen review for any of it.
+
+---
+
+## 18. Task list from the 2026-08-12 first-real-use session (ΔΕΗ 2, one real building)
+
+The landlord imported one real ΔΕΗ bill through the deployed dialog (NAS on `26446cdc`) and the
+single interaction produced the list below. **Every "why" here is measured** — from the api request
+log, the `mredb` documents the flow wrote, and the source at the deployed commit. Two items the
+first diagnosis called bugs were **not** bugs and are recorded as such, because getting that wrong
+is how a real defect gets buried under a false one.
+
+### What actually happened (the measured baseline)
+
+| Time | Request | Result |
+|---|---|---|
+| 17:10:21 | `POST /bills/parse` | 200, **50.0 s**, 1 file |
+| 17:13:24 | `POST /buildings/<bldgA>/expenses` | 200 — δαπάνη created by hand via «Προσθήκη δαπάνης» |
+| 17:13:38 | `POST /bills/confirm` | 200 — Bill `<billId>`, term **2026060100** (June), €120 |
+| 17:13:40 | `POST /bills/…/attach-source` | 200 — source PDF archived |
+| — | `POST /buildings/…/monthly-statement` | **never fired** → «Χρέωση ενοικιαστών» was off, so no tenant charge was ever requested |
+
+The δαπάνη that was created: `name:"DEH"`, `type:"other"`, `amount:0`, `allocationMethod:"single_unit"`,
+1 customAllocation, `isRecurring:true`, **`startTerm:2026080100`** (August).
+
+**The matcher worked.** παροχή `9 99935585-016` (printed with the ΔΕΗ check suffix) matched the unit
+storing it bare as `999935585` in **ΟΔΟΣ ΑΛΦΑ 1** — the suffix-tolerant fix doing its job on real data.
+
+**NOT bugs** (landlord's deliberate choices, recorded so nobody "fixes" them):
+- `type:"other"` — chosen manually, and **correct**: the expense-type enum has no per-apartment
+  electricity value, so `other` is the only honest option (see T2).
+- `amount:0` — deliberate, to mark the expense κυμαινόμενο (electricity is never the same twice).
+  The mechanism is the problem, not the choice (see T1).
+
+---
+
+### T1 — κυμαινόμενο needs a real flag; today it is `amount === 0` inferred in three places
+
+**Measured:** there is no `isVariable` field in the schema. It is DERIVED, independently, in three
+files: `ExpenseFormDialog.js:493` (`isRecurring && (Number(amount)||0) === 0`),
+`services/common/.../buildingprojection` `:190` and `:236` (same rule, re-spelled twice more).
+
+**Why it matters:** "κυμαινόμενο" and "I have not typed the amount yet" are the SAME state. A
+half-finished expense is indistinguishable from a deliberate variable one, on every surface, forever.
+It is also the [[absent-representation]] shape from `MONEY_SURFACE_MATRIX`: €0 renders as nothing, and
+nothing reads as correct. And a rule re-derived in three files is the exact duplication class that
+caused the bill-matcher drift — the moment one copy learns something the others do not, they disagree
+about money.
+
+**Do:** add an explicit persisted flag (`isVariable: Boolean`) to the expense schema; ONE exported
+predicate in `services/common` that every surface imports (no re-derivation); keep the legacy
+`recurring && 0` reading as a migration fallback so existing rows keep working; surface it in the form
+as a real control («Κυμαινόμενο ποσό») that disables/annotates the amount field instead of requiring 0.
+**Then** a variable expense with no amount can be shown as «Κυμαινόμενο — αναμένεται ποσό» rather than €0.
+
+**Tests:** persisted-flag round-trip; legacy rows (no flag, amount 0, recurring) still read as variable;
+a NON-recurring €0 expense is NOT variable; every money surface renders the variable state distinctly
+from €0; mutation-test by reverting the predicate in each consumer.
+
+### T2 — a per-apartment utility bill has no correct expense `type`
+
+**Measured:** the enum is `heating, elevator, cleaning, water_common, electricity_common, insurance,
+management_fee, garden, repairs_fund, pest_control, other`. Every utility value is a *κοινόχρηστο*
+one. `PROVIDER_TYPE` maps `deh → electricity_common` **unconditionally**, including when the παροχή
+identified ONE apartment — which is precisely this bill.
+
+**Why it matters:** the prefill would have typed an apartment's own electricity bill as *common-area*
+electricity. The landlord corrected it to `other` by hand. Left alone, the type is a lie, and type
+drives which allocation methods the picker offers.
+
+**Decision needed (do not guess):** either (a) add `electricity_private` / `water_private` /
+`gas_private` to the enum and map to them when `unitMatch` is set, or (b) keep the enum and make the
+prefill choose `other` whenever `unitMatch` (not `sharedMeterMatch`) identified the bill. (b) is
+smaller and ships today; (a) reads better on statements and PDFs forever.
+
+**Tests:** provider × (unitMatch | sharedMeterMatch | neither) → expected type, all nine cells; the
+chosen type must be offered by `ALLOCATION_METHODS_BY_TYPE` for the paired allocation method.
+
+### T3 — the OCR result never tells you WHICH apartment (or building) it identified
+
+**Measured:** `unitMatch` is read in exactly two places in `BillImportDialog.js` — to auto-select the
+building (`:601-604`) and to build the create-expense prefill (`:654-679`). It is **never rendered**.
+Same for `sharedMeterMatch`. The landlord had to open «Προσθήκη δαπάνης» to discover the apartment had
+been identified at all (it was correctly preselected in that nested dialog).
+
+**Do:** render the identification on the result card — «Αναγνωρίστηκε: ΟΔΟΣ ΑΛΦΑ 1 · διαμέρισμα Α2» for a
+unit hit, «Κοινόχρηστος μετρητής: <label>» for a shared hit, and the matched δαπάνη when there is one.
+Note the unit in this realm has `name: undefined`, so the label must fall through
+(`name || unitLabel || atakNumber`) and never render «undefined».
+
+**Tests:** all three hit kinds render their distinct line; a unit with no `name` renders its ATAK, not
+«undefined»; Greek screen screenshot.
+
+### T4 — importing from the WRONG building says nothing
+
+**Measured:** the dialog was opened from ΟΔΟΣ ΒΗΤΑ 2 (all `presence` calls, and the closing
+`expense-breakdown?term=2026080100`, are on `<bldgB>`), while the bill belonged to ΟΔΟΣ ΑΛΦΑ 1 (`<bldgA>`).
+The code silently re-points the assignment to the identified building (`:601-604`) and says nothing —
+so the landlord created the δαπάνη on one building while looking at another, then went hunting for it.
+
+**Do:** when the identified building ≠ the building the dialog was opened from, show an explicit
+notice: «Ο λογαριασμός ανήκει στο ΟΔΟΣ ΑΛΦΑ 1, όχι στο κτίριο που βλέπετε». Also state it after
+confirm, and offer a link to the building that received it.
+
+**Tests:** same-building (no notice), different-building (notice naming both), no-identification
+(no notice); assert the post-confirm link targets the receiving building.
+
+### T5 — the δαπάνη's `startTerm` need not cover the bill's own period
+
+**Measured:** the Bill's term is `2026060100` (June); the created expense's `startTerm` is
+`2026080100` (August) — the form's `startFromCurrentMonth: true` default, which the prefill does not
+override. Nothing warned.
+
+**Why it matters:** the expense does not exist in the month its own bill is for. A June statement can
+never show it. This is the quiet twin of the €0 problem: the row exists, the money does not land.
+
+**Do:** default the created expense's start to the bill's term when the import dialog created it, or
+block confirm with «Η δαπάνη ξεκινά τον Αύγουστο αλλά ο λογαριασμός αφορά τον Ιούνιο». Prefer the
+former, warn on the latter.
+
+**Tests:** bill term < expense startTerm → warned/corrected; equal → silent; a back-dated bill for a
+terminated expense (`endTerm < term`) → refused with a reason.
+
+### T6 — «did not appear in the table below»
+
+**Unverified — needs the landlord to point at the table.** The δαπάνη is on ΟΔΟΣ ΑΛΦΑ 1 while the open
+page was ΟΔΟΣ ΒΗΤΑ 2, which alone explains an empty list; but €0 + August `startTerm` would ALSO
+hide it from a June or amount-filtered view, and those are three different bugs. **Do not fix by
+guessing.** Reproduce on ΟΔΟΣ ΑΛΦΑ 1 for June and for August, screenshot both, and only then decide.
+
+### T7 — result-card layout, fonts, and the QR
+
+**Measured:** the IRIS QR renders `w-24 h-24` (96 px), centred, at the very BOTTOM of the card
+(`BillImportDialog.js:514-521`), after every field and banner.
+
+**Do (landlord's spec, treat as spec not suggestion):** two-column head — **QR larger, on the LEFT**;
+the parsed/OCR'd fields on the RIGHT; everything else (banners, duplicate warnings, actions)
+underneath. Distinct visual separation between the two columns. Fix the font/spacing inconsistency in
+this dialog. Label the right column by source: «Από το PDF» vs «Από OCR εικόνας».
+
+**Tests:** Greek screenshot at desktop and narrow widths; the QR must not be clipped or reflow into
+the field column; per `ui-review-do-not-skip.md` no information may be deleted to make it fit.
+
+### T8 — 50 s with no progress indication
+
+Already known (§16). One page, 50.0 s measured this session. The landlord asked for a progress
+message rather than multithreading. Still owed.
+
+---
+
+### T9 — the exhaustive dialog + money-surface test matrix (the landlord's standing requirement)
+
+> "you need correct tests, exhausting scenarios and filling up and testing all inputs in all this
+> dialog and how they affect the rest of the surfaces especially since money are involved"
+
+One real interaction surfaced T1–T8. The dialog has never been driven input-by-input. Required:
+
+1. **Enumerate every input** on the import dialog, the result card, and the nested expense form
+   (building select, expense select, «Νέα δαπάνη», amount, term/period, issue/due dates,
+   «Χρέωση ενοικιαστών», «Replace existing», per-file selection, type, allocationMethod,
+   customAllocations, isRecurring, chargeOwnerWhenVacant, trackOwnerExpense/ownerAmount, startTerm).
+2. **For each: valid / empty / zero / negative / huge / wrong-type / Greek-decimal-comma / whitespace**
+   — and assert the SERVER's response, not just the toast.
+3. **For each accepted combination, assert the downstream money surfaces** named in
+   `MONEY_SURFACE_MATRIX.md`: building expense list, monthly statement, expense-breakdown, tenant
+   rent rows, owner ledger, and the generated PDF. A value that lands nowhere is the bug class this
+   codebase keeps shipping.
+4. **Directional tolerances** — never assert `toBeVisible()` on a row also present unfiltered; use
+   `toHaveCount(N)` or a value delta.
+5. **Mutation-test the suite**: break each fix on purpose; a mutant that kills nothing means the test
+   is decoration.
+6. Seed real-data shapes via `mongoExec` direct insert (the API correctly rejects bad data).
+
+**Gate:** per `documentation/E2E_TESTING.md`, none of this counts until it runs green on the live NAS
+against real data, with the Greek screens read as images.
