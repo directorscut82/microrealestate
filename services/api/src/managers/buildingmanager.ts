@@ -1107,7 +1107,10 @@ export function validateSharedMeters(
   // Mirrors billmanager's VALID_PROVIDERS: a provider accepted for a BILL must be
   // recordable as a shared METER, or a κοινόχρηστο ΕΠΑ (gas) supply has nowhere
   // to live.
-  const ALLOWED_PROVIDERS = ['deh', 'eydap', 'epa', 'other'];
+  // 'nova' belongs here now that telecom_* expense types exist: without it a NOVA
+  // κοινόχρηστος line (building internet, entry-phone) could not be recorded at all,
+  // so the new types were unreachable for the provider they were added for.
+  const ALLOWED_PROVIDERS = ['deh', 'eydap', 'epa', 'nova', 'other'];
   const cleaned: { provider: string; supplyNumber: string; label: string }[] = [];
   const seen = new Set<string>();
   for (const raw of input as any[]) {

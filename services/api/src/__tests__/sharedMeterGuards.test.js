@@ -61,10 +61,16 @@ describe('validateSharedMeters', () => {
     }
   });
 
-  it('refuses an unknown provider but ACCEPTS epa (gas)', () => {
-    expect(errOf([{ provider: 'nova', supplyNumber: '999900001' }])?.statusCode).toBe(
-      422
-    );
+  it('refuses an unknown provider but ACCEPTS epa (gas) and nova (telecom)', () => {
+    // 'nova' was the refusal case here until the telecom_* expense types landed. It is
+    // now a legitimate provider — 3 of the 7 real sample bills are NOVA — so the
+    // refusal case needs a genuinely unknown value instead.
+    expect(
+      errOf([{ provider: 'wattever', supplyNumber: '999900001' }])?.statusCode
+    ).toBe(422);
+    // A κοινόχρηστη telecom line (building internet, entry-phone) must be recordable,
+    // or the telecom types are unreachable for the provider they were added for.
+    expect(errOf([{ provider: 'nova', supplyNumber: '999900005' }])).toBeNull();
     // ΕΠΑ must be accepted: bills already accept it, so a κοινόχρηστο gas supply
     // needs somewhere to live.
     expect(errOf([{ provider: 'epa', supplyNumber: '999900002' }])).toBeNull();

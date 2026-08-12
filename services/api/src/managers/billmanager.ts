@@ -917,7 +917,9 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       // either field would delete the existing Bill and then throw a Mongoose
       // ValidationError on save (the catch only handles duplicate-key 11000 and
       // rethrows everything else), leaving the period with NO bill at all.
-      const VALID_PROVIDERS = ['deh', 'eydap', 'epa', 'other'];
+      // 'nova' — 3 of the 7 real sample bills are NOVA, and without it confirming one
+      // was refused outright even though the parser recognises it.
+      const VALID_PROVIDERS = ['deh', 'eydap', 'epa', 'nova', 'other'];
       if (!provider || !VALID_PROVIDERS.includes(String(provider))) {
         throw new ServiceError(
           `Bill provider must be one of ${VALID_PROVIDERS.join(', ')} (got ${provider})`,

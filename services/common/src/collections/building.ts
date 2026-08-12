@@ -466,7 +466,7 @@ const SharedMeterSchema = new mongoose.Schema(
     // κοινόχρηστο gas supply cannot be recorded at all.
     provider: {
       type: String,
-      enum: ['deh', 'eydap', 'epa', 'other'],
+      enum: ['deh', 'eydap', 'epa', 'nova', 'other'],
       required: true
     },
     // The αριθμός παροχής as PRINTED on the bill, spacing and check-suffix
