@@ -1,6 +1,12 @@
 FROM node:20-bookworm-slim AS base
 
 FROM base AS build
+# TOOLCHAIN: bcrypt reaches almost every service transitively via
+# @microrealestate/common and has no prebuilt binary that resolves in these
+# images, so node-gyp compiles it in EVERY stage that runs a yarn install.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/app
 COPY package.json .
 COPY .yarnrc.yml .

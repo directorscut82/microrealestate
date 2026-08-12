@@ -20,6 +20,14 @@ RUN --mount=type=cache,id=node_modules-tenant,target=/root/.yarn YARN_CACHE_FOLD
     yarn workspaces focus @microrealestate/tenant
 
 FROM base AS build
+# TOOLCHAIN: these images do not pull bcrypt (they depend on commonui/types, not
+# common), but the per-service cache ids added alongside this cold-start every
+# cache once, and a cold install may have to compile a native dev dependency
+# (canvas, sharp). bookworm-slim has no compiler. Cheap insurance in an
+# intermediate stage; the runtime image copies artifacts only.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/app
 ENV BASE_PATH=/__MRE_BASE_PATH__
 ENV NEXT_TELEMETRY_DISABLED=1
