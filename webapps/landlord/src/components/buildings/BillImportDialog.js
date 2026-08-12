@@ -399,7 +399,15 @@ function ResultCard({
                 : t('Expense')}
             {': '}
           </span>
-          <span className="font-medium">{targetLabel}</span>
+          {/* For a MATCHED bill the identification is the δαπάνη itself — reading
+              «Έξοδο: ΟΔΟΣ ΑΛΦΑ 1» is a mislabel, since that names a building under
+              the word "expense" and never says which expense the money lands on.
+              Verified on the deployed Greek screen 2026-08-12. */}
+          <span className="font-medium">
+            {match?.expenseName
+              ? `${match.expenseName} · ${targetLabel}`
+              : targetLabel}
+          </span>
           {identifiedShared?.label ? (
             <span className="text-muted-foreground">
               {' · '}
