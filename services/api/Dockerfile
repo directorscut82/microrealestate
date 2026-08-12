@@ -28,13 +28,17 @@ RUN --mount=type=cache,id=node_modules-api,target=/root/.yarn YARN_CACHE_FOLDER=
     cp -r services/api/src/locales services/api/dist/locales
 
 FROM base AS deps
-# Native modules (bcrypt via @microrealestate/common, canvas, aws-sdk, puppeteer)
-# compile here. This stage previously had NO toolchain and only ever succeeded on a
-# warm yarn cache: any change to services/common busts the Docker layer cache for
-# this COPY, `yarn workspaces focus --production` then actually runs, node-gyp has
-# no compiler, and the build fails on a package the service does not even use
-# directly. Measured 2026-08-12 — CI went red on bcrypt for pdfgenerator and on
-# canvas for api, on a commit that touched no manifest and no lockfile.
+# ALPINE ONLY. Native modules (bcrypt arrives via @microrealestate/common, plus
+# canvas/aws-sdk/puppeteer) publish prebuilt binaries for glibc but not for musl, so
+# on Alpine they must COMPILE — and this stage installed no toolchain, only the
+# `build` stage did. It therefore succeeded solely on a warm yarn cache: any change
+# to services/common busts this stage's layer cache, `yarn workspaces focus
+# --production` actually runs, node-gyp finds no compiler, and the build dies on a
+# package the service never calls. Measured 2026-08-12 (CI red on canvas for api,
+# then bcrypt for pdfgenerator).
+# The five bookworm-slim services need nothing here: glibc prebuilds resolve, which
+# is why their build stages install no toolchain either. Adding `apk` to them broke
+# the emailer image outright (`apk: not found`).
 RUN apk --no-cache add build-base python3
 WORKDIR /usr/app
 COPY --from=build /usr/app/package.json .

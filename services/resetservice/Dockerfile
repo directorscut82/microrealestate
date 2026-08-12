@@ -24,14 +24,6 @@ RUN --mount=type=cache,id=node_modules-resetservice,target=/root/.yarn YARN_CACH
     yarn workspace @microrealestate/resetservice run build
 
 FROM base AS deps
-# Native modules (bcrypt via @microrealestate/common, canvas, aws-sdk, puppeteer)
-# compile here. This stage previously had NO toolchain and only ever succeeded on a
-# warm yarn cache: any change to services/common busts the Docker layer cache for
-# this COPY, `yarn workspaces focus --production` then actually runs, node-gyp has
-# no compiler, and the build fails on a package the service does not even use
-# directly. Measured 2026-08-12 — CI went red on bcrypt for pdfgenerator and on
-# canvas for api, on a commit that touched no manifest and no lockfile.
-RUN apk --no-cache add build-base python3
 WORKDIR /usr/app
 COPY --from=build /usr/app/package.json .
 COPY --from=build /usr/app/.yarnrc.yml .
