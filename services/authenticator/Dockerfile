@@ -1,9 +1,8 @@
 FROM node:20-bookworm-slim AS base
 
 FROM base AS build
-# TOOLCHAIN: bcrypt reaches almost every service transitively via
-# @microrealestate/common and has no prebuilt binary that resolves in these
-# images, so node-gyp compiles it in EVERY stage that runs a yarn install.
+# bcrypt has no prebuilt binary for this image, so node-gyp compiles it here, and
+# these base images ship no compiler. Needed in every stage that installs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 \
     && rm -rf /var/lib/apt/lists/*
@@ -16,13 +15,9 @@ COPY .yarn/releases .yarn/releases
 COPY types types
 COPY services/common services/common
 COPY services/authenticator services/authenticator
-# Per-service cache id. All 9 image jobs run in PARALLEL from one matrix and every
-# Dockerfile used `id=node_modules`, so they raced on a single shared cache mount:
-# a partially-populated cache makes yarn report "must be built because the last one
-# failed", and in --production mode that is fatal. Measured 2026-08-12: the same
-# commit failed on canvas for api, then on bcrypt for pdfgenerator on the re-run —
-# a different service each time, which is the signature of contention rather than a
-# code defect.
+# Cache id is per-service: 9 image jobs build in parallel from one matrix and a
+# shared mutable cache mount is not something to rely on. Hardening, not the fix
+# for the 2026-08-12 red builds — that was the missing compiler above.
 RUN --mount=type=cache,id=node_modules-authenticator,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/authenticator && \
     yarn workspace @microrealestate/types run build && \
@@ -30,15 +25,8 @@ RUN --mount=type=cache,id=node_modules-authenticator,target=/root/.yarn YARN_CAC
     yarn workspace @microrealestate/authenticator run transpile:service
 
 FROM base AS deps
-# bcrypt (pulled in via @microrealestate/common, even by services that never call
-# it) has NO prebuilt binary that resolves here, so node-gyp compiles it — and
-# bookworm-slim ships no compiler and no python3. This stage therefore only ever
-# succeeded on a warm Docker layer cache: any change to services/common busts the
-# COPY above, `yarn workspaces focus --production` actually runs, and the build dies.
-# Measured 2026-08-12 across three CI runs, on a commit that changed no manifest and
-# no lockfile: canvas for api, then bcrypt for pdfgenerator, then bcrypt for
-# tenantapi. `--production` makes a failed build script fatal, which is why the
-# non-production `build` stage above tolerates the same failure.
+# bcrypt has no prebuilt binary for this image, so node-gyp compiles it here, and
+# these base images ship no compiler. Needed in every stage that installs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 \
     && rm -rf /var/lib/apt/lists/*

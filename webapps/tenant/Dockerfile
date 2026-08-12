@@ -9,22 +9,15 @@ COPY .yarn/plugins .yarn/plugins
 COPY .yarn/releases .yarn/releases
 COPY types/package.json types/package.json
 COPY webapps/tenant/package.json webapps/tenant/package.json
-# Per-service cache id. All 9 image jobs run in PARALLEL from one matrix and every
-# Dockerfile used `id=node_modules`, so they raced on a single shared cache mount:
-# a partially-populated cache makes yarn report "must be built because the last one
-# failed", and in --production mode that is fatal. Measured 2026-08-12: the same
-# commit failed on canvas for api, then on bcrypt for pdfgenerator on the re-run —
-# a different service each time, which is the signature of contention rather than a
-# code defect.
+# Cache id is per-service: 9 image jobs build in parallel from one matrix and a
+# shared mutable cache mount is not something to rely on. Hardening, not the fix
+# for the 2026-08-12 red builds — that was the missing compiler above.
 RUN --mount=type=cache,id=node_modules-tenant,target=/root/.yarn YARN_CACHE_FOLDER=/root/.yarn \
     yarn workspaces focus @microrealestate/tenant
 
 FROM base AS build
-# TOOLCHAIN: these images do not pull bcrypt (they depend on commonui/types, not
-# common), but the per-service cache ids added alongside this cold-start every
-# cache once, and a cold install may have to compile a native dev dependency
-# (canvas, sharp). bookworm-slim has no compiler. Cheap insurance in an
-# intermediate stage; the runtime image copies artifacts only.
+# No bcrypt here (these depend on commonui/types, not common), but a cold cache may
+# still have to compile a native dev dependency, and bookworm-slim has no compiler.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential python3 \
     && rm -rf /var/lib/apt/lists/*
