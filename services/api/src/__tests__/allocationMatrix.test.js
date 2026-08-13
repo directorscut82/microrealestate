@@ -16,6 +16,8 @@
  * because "what does the engine return" and "does a charge row exist on the
  * bill" are different questions: taskBase gates every row behind `share > 0`.
  */
+import { jest } from '@jest/globals';
+import { logger } from '@microrealestate/common';
 import * as BL from '../businesslogic/index.js';
 import { computeBuildingChargeForProperty } from '../businesslogic/tasks/1_base.js';
 
@@ -806,4 +808,50 @@ describe('allocation matrix — building/unit lookup preconditions', () => {
       computeBuildingChargeForProperty({ _id: 'b', units: null }, 'pA', expense)
     ).toBe(0);
   });
+});
+
+describe('a zero χιλιοστά vector is DIAGNOSED, not just silently zero', () => {
+  // Before this, all three thousandths branches returned 0 on a zero vector with no
+  // log at all, while custom_ratio warned in the same situation. An E9-imported
+  // building has no χιλιοστά, so the whole expense was charged to nobody, written to
+  // no surface, and left no trace anywhere — absent representation. The share stays 0
+  // (that is correct: the split genuinely is unrepresentable); what was missing is any
+  // way to find out it happened.
+  const ZERO_BUILDING = {
+    _id: 'b-zero',
+    units: [
+      { propertyId: 'p1', generalThousandths: 0, heatingThousandths: 0, elevatorThousandths: 0 },
+      { propertyId: 'p2', generalThousandths: 0, heatingThousandths: 0, elevatorThousandths: 0 }
+    ]
+  };
+
+  for (const method of [
+    'general_thousandths',
+    'heating_thousandths',
+    'elevator_thousandths'
+  ]) {
+    it(`${method}: charges nobody AND warns with the building and the amount`, () => {
+      const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+      try {
+        // Signature is (building, propertyId, expense) — passing the expense as the
+        // propertyId makes the unit lookup fail and returns 0 from an EARLIER guard,
+        // which is how this test first "passed" its share assertion while proving
+        // nothing.
+        const share = computeBuildingChargeForProperty(
+          ZERO_BUILDING,
+          'p1',
+          { amount: 200, allocationMethod: method, customAllocations: [] }
+        );
+        expect({ method, share }).toEqual({ method, share: 0 });
+        const said = warn.mock.calls.map((c) => String(c[0])).join('\n');
+        expect(said).toContain(method);
+        expect(said).toContain('b-zero');
+        // The amount must be in the message: «charged to nobody» is only actionable
+        // if it says how much went missing.
+        expect(said).toContain('200');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
 });

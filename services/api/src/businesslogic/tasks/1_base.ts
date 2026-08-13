@@ -596,21 +596,57 @@ function _computeBuildingChargeRaw(
       // The vacant unit's share is implicitly absorbed by the owner — it is
       // never associated with a tenant property, so it never lands on a bill.
       const generalTotal = building.units.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
-      if (generalTotal === 0) return 0;
+      if (generalTotal === 0) {
+        // A zero vector means the split is unrepresentable: every unit gets 0, no
+        // monthlyCharge row is written, and the amount lands on NO surface — the
+        // absent-representation shape from MONEY_SURFACE_MATRIX. custom_ratio already
+        // warns in the same situation (see its branch below); these three did not, so
+        // an E9-imported building with no χιλιοστά swallowed the expense in silence.
+        // The RETURN VALUE is deliberately unchanged: this adds a diagnostic, not money.
+        logger.warn(
+          `general_thousandths allocation: every unit in building ${building._id} has 0 generalThousandths, so ` +
+            `€${amount} is charged to nobody. Set χιλιοστά or pick another method.`
+        );
+        return 0;
+      }
       return (amount * (Number(unit.generalThousandths) || 0)) / generalTotal;
     }
 
     case 'heating_thousandths': {
       // Wave-14 F2: see general_thousandths note.
       const heatingTotal = building.units.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
-      if (heatingTotal === 0) return 0;
+      if (heatingTotal === 0) {
+        // A zero vector means the split is unrepresentable: every unit gets 0, no
+        // monthlyCharge row is written, and the amount lands on NO surface — the
+        // absent-representation shape from MONEY_SURFACE_MATRIX. custom_ratio already
+        // warns in the same situation (see its branch below); these three did not, so
+        // an E9-imported building with no χιλιοστά swallowed the expense in silence.
+        // The RETURN VALUE is deliberately unchanged: this adds a diagnostic, not money.
+        logger.warn(
+          `heating_thousandths allocation: every unit in building ${building._id} has 0 heatingThousandths, so ` +
+            `€${amount} is charged to nobody. Set χιλιοστά or pick another method.`
+        );
+        return 0;
+      }
       return (amount * (Number(unit.heatingThousandths) || 0)) / heatingTotal;
     }
 
     case 'elevator_thousandths': {
       // Wave-14 F2: see general_thousandths note.
       const elevatorTotal = building.units.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
-      if (elevatorTotal === 0) return 0;
+      if (elevatorTotal === 0) {
+        // A zero vector means the split is unrepresentable: every unit gets 0, no
+        // monthlyCharge row is written, and the amount lands on NO surface — the
+        // absent-representation shape from MONEY_SURFACE_MATRIX. custom_ratio already
+        // warns in the same situation (see its branch below); these three did not, so
+        // an E9-imported building with no χιλιοστά swallowed the expense in silence.
+        // The RETURN VALUE is deliberately unchanged: this adds a diagnostic, not money.
+        logger.warn(
+          `elevator_thousandths allocation: every unit in building ${building._id} has 0 elevatorThousandths, so ` +
+            `€${amount} is charged to nobody. Set χιλιοστά or pick another method.`
+        );
+        return 0;
+      }
       return (amount * (Number(unit.elevatorThousandths) || 0)) / elevatorTotal;
     }
 
