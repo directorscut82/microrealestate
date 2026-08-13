@@ -1309,5 +1309,7 @@
   "EYDAP": "EYDAP",
   "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Números de fornecimento cobrados de todo o edifício. Uma fatura correspondente é proposta como despesa comum.",
   "EPA": "EPA",
-  "Telecommunications": "Telecomunicações"
+  "Telecommunications": "Telecomunicações",
+  "Details": "Detalhes",
+  "Documents about this apartment (private utility bills, certificates, photos)": "Documentos deste apartamento (contas privadas, certificados, fotos)"
 }

@@ -524,13 +524,15 @@ export default function () {
         throw new ServiceError('organization not resolved', 400);
       }
 
-      // Optional per-entity filters (?tenantId= / ?buildingId= / ?ownerKey=)
-      // so the tenant/building/owner document panels fetch only their own
-      // rows. No filter → the whole realm (legacy behavior).
+      // Optional per-entity filters (?tenantId= / ?buildingId= / ?propertyId= /
+      // ?ownerKey=) so the tenant/building/apartment/owner document panels fetch
+      // only their own rows. No filter → the whole realm (legacy behavior).
       const filter: Record<string, any> = { realmId: organizationId };
       if (req.query.tenantId) filter.tenantId = String(req.query.tenantId);
       if (req.query.buildingId)
         filter.buildingId = String(req.query.buildingId);
+      if (req.query.propertyId)
+        filter.propertyId = String(req.query.propertyId);
       if (req.query.ownerKey) filter.ownerKey = String(req.query.ownerKey);
 
       const documentsFound = await Collections.Document.find(filter);
@@ -1079,10 +1081,13 @@ export default function () {
       const entityCount = [
         dataSet.tenantId,
         dataSet.buildingId,
+        dataSet.propertyId,
         dataSet.ownerKey
       ].filter(Boolean).length;
       if (entityCount !== 1) {
-        logger.error('document requires exactly one of tenantId/buildingId/ownerKey');
+        logger.error(
+          'document requires exactly one of tenantId/buildingId/propertyId/ownerKey'
+        );
         throw new ServiceError('missing fields', 422);
       }
       if (dataSet.tenantId && !dataSet.leaseId) {
@@ -1129,6 +1134,18 @@ export default function () {
             'building not found in this organization',
             404
           );
+        }
+      }
+      if (dataSet.propertyId) {
+        // Same cross-realm guard as the building branch: the id came from the
+        // request body, so a document must not be minted against an apartment
+        // belonging to a different realm.
+        const _propertyExists = await Collections.Property.exists({
+          _id: dataSet.propertyId,
+          realmId
+        });
+        if (!_propertyExists) {
+          throw new ServiceError('property not found in this organization', 404);
         }
       }
       if (dataSet.ownerKey) {
@@ -1223,6 +1240,7 @@ export default function () {
           ? { tenantId: dataSet.tenantId, leaseId: dataSet.leaseId }
           : {}),
         ...(dataSet.buildingId ? { buildingId: dataSet.buildingId } : {}),
+        ...(dataSet.propertyId ? { propertyId: dataSet.propertyId } : {}),
         ...(dataSet.ownerKey ? { ownerKey: dataSet.ownerKey } : {}),
         templateId: dataSet.templateId,
         type: dataSet.type || template.type,

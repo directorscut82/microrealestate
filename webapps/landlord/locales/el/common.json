@@ -1556,5 +1556,7 @@
   "EYDAP": "ΕΥΔΑΠ",
   "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Αριθμοί παροχής που χρεώνονται σε όλο το κτίριο. Λογαριασμός που αντιστοιχεί σε έναν από αυτούς προτείνεται ως κοινόχρηστη δαπάνη.",
   "EPA": "ΕΠΑ",
-  "Telecommunications": "Τηλεπικοινωνίες"
+  "Telecommunications": "Τηλεπικοινωνίες",
+  "Details": "Στοιχεία",
+  "Documents about this apartment (private utility bills, certificates, photos)": "Έγγραφα του διαμερίσματος (ιδιωτικοί λογαριασμοί, βεβαιώσεις, φωτογραφίες)"
 }

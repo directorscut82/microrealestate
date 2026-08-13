@@ -8,6 +8,13 @@ import {
   updateProperty
 } from '../../../utils/restcalls';
 import { Card } from '../../../components/ui/card';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger
+} from '../../../components/ui/tabs';
+import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import ErrorPage from 'next/error';
 import { DashboardCard } from '../../../components/dashboard/DashboardCard';
@@ -257,9 +264,43 @@ function Property() {
       )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
-          <Card className="p-6">
-            <PropertyForm property={property} onSubmit={onSubmit} />
-          </Card>
+          {/* Tabs were removed from this page when it had only ONE — dead chrome.
+              They are back because there are genuinely two now: the apartment had
+              no documents surface at all, so a private ΔΕΗ bill or an energy
+              certificate had nowhere to live (only the BUILDING could hold files,
+              and those are the κοινόχρηστα papers). Don't collapse this back to a
+              bare form without checking the tab count first. */}
+          <Tabs
+            defaultValue={
+              router.query.tab === 'documents' ? 'documents' : 'details'
+            }
+            className="w-full"
+          >
+            <TabsList className="flex justify-start">
+              <TabsTrigger value="details" data-cy="detailsTab">
+                {t('Details')}
+              </TabsTrigger>
+              <TabsTrigger value="documents" data-cy="documentsTab">
+                {t('Documents')}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="details">
+              <Card className="p-6">
+                <PropertyForm property={property} onSubmit={onSubmit} />
+              </Card>
+            </TabsContent>
+            <TabsContent value="documents">
+              {/* propertyId ONLY — passing buildingId too would make the create
+                  carry two entity ids and 422 after the bytes had uploaded. */}
+              <DocumentsPanel
+                entity={{ propertyId: property?._id }}
+                folder={`properties/${property?.name || property?._id || ''}`}
+                description={t(
+                  'Documents about this apartment (private utility bills, certificates, photos)'
+                )}
+              />
+            </TabsContent>
+          </Tabs>
         </div>
         <div className="hidden md:grid grid-cols-1 gap-4 h-fit">
           <PropertyOverviewCard property={property} />

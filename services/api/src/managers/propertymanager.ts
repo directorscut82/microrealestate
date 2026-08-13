@@ -3,9 +3,11 @@ import {
   Collections,
   logger,
   Pagination,
+  Service,
   ServiceError
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import axios from 'axios';
 import moment from 'moment';
 import {
   validateObjectId,
@@ -387,6 +389,45 @@ export async function remove(req: Req, res: Res) {
       `Property cannot be deleted because it is still referenced by ${blockers.join(' AND ')}`,
       422
     );
+  }
+
+  // An apartment can hold its own documents since Document gained `propertyId`
+  // (private utility bills, energy certificates, photos). Delete them with the
+  // apartment, the same way tenant deletion does — otherwise the rows survive as
+  // unreachable records and the B2 objects behind them are paid-for bytes nothing
+  // references. The orphan reconcile would NOT collect them either: it treats any
+  // Document.url as "referenced", so a dangling row protects its own dead file
+  // forever. Delegated to pdfgenerator's DELETE /documents/:ids because that is
+  // the only place that removes the stored bytes as well as the record.
+  const propertyDocuments: any[] = await Collections.Document.find(
+    { realmId: realm!._id, propertyId: { $in: ids } },
+    { _id: 1 }
+  ).lean();
+  if (propertyDocuments.length) {
+    const { PDFGENERATOR_URL } = Service.getInstance().envConfig.getValues();
+    const documentIds = propertyDocuments.map(({ _id }: any) => _id).join(',');
+    try {
+      await axios.delete(`${PDFGENERATOR_URL}/documents/${documentIds}`, {
+        headers: {
+          authorization: req.headers.authorization as string,
+          organizationid:
+            (req.headers.organizationid as string) || String(realm!._id),
+          'Accept-Language': req.headers['accept-language'] as string
+        }
+      });
+    } catch (error: any) {
+      // Refuse the delete rather than orphan the files. The tenant path logs and
+      // reports a partial failure because it has already mutated other state by
+      // this point; here nothing has been deleted yet, so failing cleanly leaves
+      // the apartment and its documents consistent and the operator can retry.
+      const message = error.response?.data?.message || error.message;
+      logger.error(`DELETE documents failed for property ids ${ids.join(',')}`);
+      logger.error(String(message));
+      throw new ServiceError(
+        'Property documents could not be deleted, so the property was kept',
+        502
+      );
+    }
   }
 
   const result = await Collections.Property.deleteMany({

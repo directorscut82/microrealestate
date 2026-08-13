@@ -7,13 +7,19 @@ import Tenant from './tenant.js';
 
 const DocumentSchema = new mongoose.Schema<CollectionTypes.Document>({
   realmId: { type: String, ref: Realm, required: true },
-  // OWNER ENTITY — exactly one of tenantId / buildingId / ownerKey must be
-  // set (route-enforced). tenantId+leaseId were historically required; they
-  // are now optional so buildings and owners can hold documents too. Legacy
-  // tenant documents are untouched.
+  // OWNER ENTITY — exactly one of tenantId / buildingId / propertyId /
+  // ownerKey must be set (route-enforced). tenantId+leaseId were historically
+  // required; they are now optional so buildings, apartments and owners can hold
+  // documents too. Legacy tenant documents are untouched.
   tenantId: { type: String, ref: Tenant },
   leaseId: { type: String, ref: Lease },
   buildingId: { type: String },
+  // An APARTMENT's own documents — a private ΔΕΗ/ΕΥΔΑΠ bill, an energy
+  // certificate, photos. Distinct from buildingId: those are the κοινόχρηστα
+  // papers (permits, common-area invoices). Until this field existed an
+  // apartment document had nowhere to be stored, so the property page had no
+  // documents surface at all.
+  propertyId: { type: String },
   // canonical owner key (m:<memberId> | n:<name>|<taxId>) — a string, not a
   // ref; owners are embedded in buildings, not a collection.
   ownerKey: { type: String },
@@ -46,6 +52,7 @@ DocumentSchema.index({ realmId: 1 });
 DocumentSchema.index({ tenantId: 1 });
 DocumentSchema.index({ realmId: 1, tenantId: 1 });
 DocumentSchema.index({ realmId: 1, buildingId: 1 });
+DocumentSchema.index({ realmId: 1, propertyId: 1 });
 DocumentSchema.index({ realmId: 1, ownerKey: 1 });
 
 DocumentSchema.pre('save', function (next) {

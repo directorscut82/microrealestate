@@ -39,6 +39,7 @@ import useTranslation from 'next-translate/useTranslation';
  * mounted per entity:
  *   <DocumentsPanel entity={{ tenantId, leaseId }} folder="..."/>
  *   <DocumentsPanel entity={{ buildingId }} folder="..."/>
+ *   <DocumentsPanel entity={{ propertyId }} folder="..."/>
  *   <DocumentsPanel entity={{ ownerKey }} folder="..."/>
  *
  * Storage: POST /documents/upload (B2 when configured) then POST /documents
@@ -62,12 +63,29 @@ export default function DocumentsPanel({
   const [renameValue, setRenameValue] = useState('');
   const [toDelete, setToDelete] = useState(null);
 
+  // The order matters: `propertyId` is checked BEFORE `buildingId` because an
+  // apartment panel knows both (it renders inside a building) and must fetch the
+  // apartment's own papers, not the building's κοινόχρηστα ones.
   const entityFilter = useMemo(() => {
     if (entity?.tenantId) return { tenantId: entity.tenantId };
+    if (entity?.propertyId) return { propertyId: entity.propertyId };
     if (entity?.buildingId) return { buildingId: entity.buildingId };
     if (entity?.ownerKey) return { ownerKey: entity.ownerKey };
     return null;
   }, [entity]);
+
+  // POST /documents refuses anything but EXACTLY ONE entity id, and `entity` used
+  // to be spread into the create verbatim — so a caller that passed both
+  // `{ propertyId, buildingId }` (natural for an apartment, which sits inside a
+  // building) would upload its bytes successfully and then 422 on the record,
+  // orphaning the file. Send the same single entity the list is filtered by, plus
+  // `leaseId`, which the tenant branch additionally requires.
+  const createEntity = useMemo(() => {
+    if (!entityFilter) return null;
+    return entityFilter.tenantId
+      ? { ...entityFilter, leaseId: entity?.leaseId }
+      : entityFilter;
+  }, [entityFilter, entity]);
 
   const { data: documents = [], isLoading } = useQuery({
     queryKey: [QueryKeys.DOCUMENTS, entityFilter],
@@ -116,7 +134,7 @@ export default function DocumentsPanel({
         });
         uploadedKey = response?.data?.key || null;
         await createDocument({
-          ...entity,
+          ...createEntity,
           type: 'file',
           name: file.name,
           description: '',
@@ -148,7 +166,7 @@ export default function DocumentsPanel({
         setUploading(false);
       }
     },
-    [entity, folder, invalidate, t]
+    [createEntity, folder, invalidate, t]
   );
 
   const renameMutation = useMutation({

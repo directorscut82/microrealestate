@@ -155,12 +155,15 @@ export namespace CollectionTypes {
   export type Document = {
     _id: string;
     realmId: string;
-    // Exactly ONE of tenantId / buildingId / ownerKey identifies the entity
-    // the document belongs to (route-enforced). tenantId+leaseId were
-    // historically required (tenant docs); building/owner docs set neither.
+    // Exactly ONE of tenantId / buildingId / propertyId / ownerKey identifies
+    // the entity the document belongs to (route-enforced). tenantId+leaseId were
+    // historically required (tenant docs); the others set neither. `propertyId`
+    // is an APARTMENT's own papers (a private utility bill, an energy
+    // certificate) as opposed to `buildingId`'s κοινόχρηστα ones.
     tenantId?: string;
     leaseId?: string;
     buildingId?: string;
+    propertyId?: string;
     ownerKey?: string;
     templateId?: string;
     type: 'text' | 'file' | 'fileDescriptor';
