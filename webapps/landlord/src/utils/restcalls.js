@@ -337,12 +337,22 @@ export async function deleteDocumentByKey(key) {
 }
 
 export async function fetchDocuments(entityFilter) {
-  // entityFilter (optional): { tenantId } | { buildingId } | { ownerKey } —
-  // scopes the list to one entity's documents server-side.
+  // entityFilter (optional): { tenantId } | { buildingId } | { propertyId } |
+  // { ownerKey } — scopes the list to one entity's documents server-side.
+  //
+  // THIS IS AN ALLOW-LIST, AND AN UNKNOWN KEY FAILS OPEN. `propertyId` was added
+  // to the schema, the create guard, the list route and the panel, but not here —
+  // so the query string came out EMPTY and the request fell back to "every
+  // document in the realm". The apartment tab then listed every file the landlord
+  // owns, under one flat. Nothing errored; the list simply looked populated.
+  // Adding a filter key means adding it HERE too, or the scoping silently stops
+  // existing.
   const params = new URLSearchParams();
   if (entityFilter?.tenantId) params.set('tenantId', entityFilter.tenantId);
   if (entityFilter?.buildingId)
     params.set('buildingId', entityFilter.buildingId);
+  if (entityFilter?.propertyId)
+    params.set('propertyId', entityFilter.propertyId);
   if (entityFilter?.ownerKey) params.set('ownerKey', entityFilter.ownerKey);
   const qs = params.toString();
   const response = await apiFetcher().get(`/documents${qs ? `?${qs}` : ''}`);

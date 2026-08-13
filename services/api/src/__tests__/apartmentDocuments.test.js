@@ -122,6 +122,34 @@ describe('GET /documents — the list path', () => {
   });
 });
 
+describe('the CLIENT actually sends the filter', () => {
+  const RESTCALLS = read('../../../../webapps/landlord/src/utils/restcalls.js');
+
+  it('fetchDocuments forwards propertyId', () => {
+    // The route filter is useless if the query string never carries the key.
+    // `fetchDocuments` is an ALLOW-LIST and an unknown key FAILS OPEN: with
+    // propertyId missing the params came out empty and the request meant "every
+    // document in the realm", so the apartment tab listed every file the landlord
+    // owns under one flat. Nothing errored and the list looked populated — caught
+    // only by opening the screen and comparing it to what mongo held (0 documents
+    // with a propertyId, 1 file rendered).
+    const at = RESTCALLS.indexOf('export async function fetchDocuments');
+    const block = RESTCALLS.slice(at, RESTCALLS.indexOf('\n}', at));
+    expect(block).toContain("params.set('propertyId', entityFilter.propertyId)");
+  });
+
+  it('forwards all four entity keys — none may be dropped', () => {
+    const at = RESTCALLS.indexOf('export async function fetchDocuments');
+    const block = RESTCALLS.slice(at, RESTCALLS.indexOf('\n}', at));
+    for (const k of ['tenantId', 'buildingId', 'propertyId', 'ownerKey']) {
+      expect({ key: k, sent: block.includes(`params.set('${k}'`) }).toEqual({
+        key: k,
+        sent: true
+      });
+    }
+  });
+});
+
 describe('DocumentsPanel — the UI contract', () => {
   it('resolves propertyId BEFORE buildingId', () => {
     // An apartment panel legitimately knows both. If buildingId won, the tab

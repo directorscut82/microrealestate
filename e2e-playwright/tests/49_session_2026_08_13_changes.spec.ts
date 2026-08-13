@@ -58,6 +58,9 @@ const REALM = account.REALM || 'landlord';
 const BUILDING_ID = '6a5920fa1df21dc733133cbe';
 const EXP_FIXED = '6a5fc1292bdd999da0ff2b47'; // «Ηλεκτρικό κοινοχρ.», €35
 const EXP_VARIABLE = '6a5fde2cf95a14d14944c66e'; // «Πετρέλαιο (κυμαινόμενο)», €0
+// The expense the one real bill points at — active only from 2026-08, while the
+// bill's own term is 2026-06.
+const EXP_DEH = '6a7ca9b4a8c6d44c795e40f9';
 const JUNE_TERM = 2026060100;
 const B2_KEY =
   'landlord-6a00d7ce323739077de89e58/bills/6a7ca9c1a8c6d44c795e4924/bill-02-DEH-2026-06-120.00.pdf';
@@ -204,6 +207,11 @@ test('D · an archived bill shows a PDF pill that opens the document beside its 
   // link is seeded, because the real bill's own expense does not start until
   // August (see the header note).
   setIsVariable(EXP_FIXED, null);
+  // deleteOne FIRST. An insertOne alone hits E11000 on the second run and mongo
+  // keeps the row from the previous one — so the spec asserts against a stale
+  // fixture and fails while the code is correct. That is the seed-leakage trap the
+  // harness docs warn about, hit here on the very first re-run.
+  mongoExec(`db.bills.deleteOne({ _id: ObjectId("${SEEDED_BILL_ID}") });`);
   const seeded = mongoExec(
     `db.bills.insertOne({ _id: ObjectId("${SEEDED_BILL_ID}"), realmId: "6a00d7ce323739077de89e58", buildingId: "${BUILDING_ID}", expenseId: "${EXP_FIXED}", provider: "deh", billingId: "999935585", totalAmount: 35, periodStart: new Date("2026-05-01"), periodEnd: new Date("2026-05-31"), issueDate: new Date("2026-06-02"), dueDate: new Date("2026-06-20"), term: ${JUNE_TERM}, status: "pending", pdfUrl: "${B2_KEY}", rfCode: "RF99999000000000012345", ocrText: "E2E seeded — the archived source is the real one", createdDate: new Date(), updatedDate: new Date() });`
   );
@@ -342,6 +350,24 @@ test('F · an apartment has an Έγγραφα tab with its own upload surface', 
     page.getByText('Έγγραφα του διαμερίσματος', { exact: false }),
     'the panel names the apartment, not the building'
   ).toBeVisible({ timeout: 15_000 });
+
+  // AND IT MUST BE SCOPED. The first version of this test asserted only that the
+  // tab existed, and passed while the panel listed every file in the realm — the
+  // client dropped the propertyId from the query string, so the request meant
+  // "all documents". Count the rendered rows against what mongo actually holds
+  // for THIS apartment: an existence assertion cannot tell a scoped list from an
+  // unscoped one.
+  const owned = mongoExec(
+    `print(db.documents.count({ propertyId: "${propertyId}", type: "file" }));`
+  );
+  const expected = Number(String(owned).trim().split('\n').pop());
+  await expect(
+    page.locator('[data-cy=documentRow], li').filter({ has: page.getByRole('button', { name: 'Λήψη' }) }),
+    `exactly the apartment's own files (${expected}), not the realm's`
+  ).toHaveCount(expected, { timeout: 15_000 });
+  if (expected === 0) {
+    await expect(page.getByText('Δεν έχουν μεταφορτωθεί έγγραφα')).toBeVisible();
+  }
   await page.screenshot({
     path: 'test-results/49-F-apartment-documents.png',
     fullPage: true
@@ -357,8 +383,13 @@ test('G · the real ΔΕΗ bill lands on no surface, because its expense starts 
   // pill to attach to. If a future change makes `confirmBills` extend the
   // expense's startTerm (or refuse the mismatch), THIS test is the one that should
   // start failing.
+  // `x._id.valueOf()`, NOT `String(x._id)`. In the mongo 4.4 shell
+  // `String(someObjectId)` returns the 36-character literal `ObjectId("…")`, not the
+  // 24-char hex — so comparing it to a stored id STRING can never match. The first
+  // version of this query silently found nothing and threw on `e.startTerm`, which
+  // read like the expense had been deleted from the live building. It had not.
   const state = mongoExec(
-    `var b = db.bills.findOne({ _id: { $ne: ObjectId("${SEEDED_BILL_ID}") } }); var bl = db.buildings.findOne({_id: ObjectId(String(b.buildingId))}); var e = bl.expenses.filter(function(x){return String(x._id) === String(b.expenseId)})[0]; print("billTerm=" + b.term + " expenseStart=" + e.startTerm);`
+    `var b = db.bills.findOne({ _id: { $ne: ObjectId("${SEEDED_BILL_ID}") } }); var bl = db.buildings.findOne({_id: ObjectId(String(b.buildingId))}); var e = bl.expenses.filter(function(x){return x._id.valueOf() === String(b.expenseId)})[0]; print("billTerm=" + b.term + " expenseStart=" + e.startTerm);`
   );
   test.skip(!state, 'mongoExec unavailable');
   expect(state, 'the mismatch is still present in live data').toContain(
@@ -367,9 +398,16 @@ test('G · the real ΔΕΗ bill lands on no surface, because its expense starts 
 
   await signIn(page);
   await openJune(page);
-  // «DEH» must be absent from June — it is not active then.
+  // Absent from the JUNE STATEMENT, not from the page. The expense CATALOGUE at
+  // the top of the tab lists every expense of the building regardless of term —
+  // that is its job — so a page-wide text assertion here was simply wrong and
+  // failed against correct rendering. Scope to the month's statement rows.
   await expect(
-    page.getByText('DEH', { exact: true }),
-    '«DEH» is not active in June, so it must not be listed'
+    rowFor(page, EXP_DEH),
+    'not active in June → no statement row, so nowhere for its €120 to land'
   ).toHaveCount(0);
+  await expect(rowFor(page, EXP_DEH, 'owner')).toHaveCount(0);
+  // And the expense IS in the catalogue — proving the absence above is about the
+  // term, not about the expense having vanished.
+  await expect(page.getByText('DEH', { exact: true }).first()).toBeVisible();
 });
