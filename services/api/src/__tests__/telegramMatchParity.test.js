@@ -43,6 +43,30 @@ const DEFAULT_BUILDINGS = [
     ]
   },
   {
+    _id: 'bldg-4',
+    name: 'ΟΔΟΣ ΔΕΛΤΑ 7',
+    expenses: [],
+    // A telecom line and a water supply recorded on APARTMENTS. The matcher used to
+    // read `electricitySupplyNumber` alone, so a NOVA or ΕΥΔΑΠ bill for one flat was
+    // unmatchable and telecom_private / water_private could never be reached by a
+    // real bill — whatever the landlord typed on the apartment.
+    units: [
+      {
+        _id: 'u-tel',
+        propertyId: 'prop-tel',
+        name: 'Δ1',
+        telecomNumber: '999555111'
+      },
+      {
+        _id: 'u-wat',
+        propertyId: 'prop-wat',
+        name: 'Δ2',
+        eydapNumber: '999666222'
+      }
+    ],
+    sharedMeters: []
+  },
+  {
     _id: 'bldg-3',
     name: 'ΟΔΟΣ ΓΑΜΑ 12',
     expenses: [],
@@ -186,6 +210,31 @@ describe('Telegram ↔ upload match parity', () => {
     // And it must NOT be mistaken for a shared meter (that would split the flat's
     // own bill across the whole building).
     expect(hit.sharedProvider).toBeUndefined();
+  });
+
+  it('matches an apartment by its TELECOM number, not just the ΔΕΗ one', async () => {
+    const hit = await findMatch('r1', '999555111');
+    expect(hit).toMatchObject({
+      buildingId: 'bldg-4',
+      unitPropertyId: 'prop-tel',
+      unitLabel: 'Δ1'
+    });
+  });
+
+  it('matches an apartment by its ΕΥΔΑΠ number too', async () => {
+    const hit = await findMatch('r1', '999666222');
+    expect(hit).toMatchObject({
+      buildingId: 'bldg-4',
+      unitPropertyId: 'prop-wat',
+      unitLabel: 'Δ2'
+    });
+  });
+
+  it('a telecom number still matches suffix-tolerantly', async () => {
+    // Same body-vs-suffix rule as ΔΕΗ: the printed number may carry a check suffix.
+    await expect(findMatch('r1', '999555111004')).resolves.toMatchObject({
+      unitPropertyId: 'prop-tel'
+    });
   });
 
   it('prefers a configured expense over a shared meter', async () => {

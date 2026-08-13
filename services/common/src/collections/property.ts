@@ -33,6 +33,11 @@ const PropertySchema = new mongoose.Schema<CollectionTypes.Property>({
   dehNumber: String,
   // Water supply number (ΕΥΔΑΠ) — exact sibling of dehNumber (ΔΕΗ).
   eydapNumber: String,
+  // Telecom subscription/line number (NOVA and the like) — the third sibling.
+  // Added with the telecom_private expense type: without somewhere to record it, a
+  // per-apartment telecom bill could never be matched to its apartment, so the type
+  // was unusable for the one thing it was added for.
+  telecomNumber: String,
   buildingId: String,
   electricitySupplyNumber: String,
   energyCertificate: {

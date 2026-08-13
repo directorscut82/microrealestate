@@ -635,6 +635,9 @@ export function toProperty(
     buildingId: inputProperty.buildingId || null,
     dehNumber: inputProperty.dehNumber,
     eydapNumber: inputProperty.eydapNumber,
+    // Explicit projection: a field absent here never reaches the UI, so the form
+    // would render empty and every save would look like it wiped the value.
+    telecomNumber: inputProperty.telecomNumber,
     energyCertificate: inputProperty.energyCertificate,
     beginDate: '',
     endDate: '',

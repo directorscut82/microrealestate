@@ -433,9 +433,24 @@ export async function findUnitBySupplyNumber(
   const byBody: Hit[] = [];
   for (const building of buildings as any[]) {
     for (const unit of building.units || []) {
-      const supply = unit.electricitySupplyNumber;
-      if (!supply) continue;
-      const stored = normalizeBillingId(String(supply));
+      // EVERY identifier the apartment carries, not just the ΔΕΗ one. A NOVA or
+      // ΕΥΔΑΠ bill for one flat was unmatchable because this loop read
+      // `electricitySupplyNumber` alone — so telecom_private/water_private could
+      // never be reached by an actual bill, whatever the landlord typed on the
+      // apartment. Order is irrelevant: a hit on any of them identifies the flat.
+      const candidates = [
+        unit.electricitySupplyNumber,
+        unit.eydapNumber,
+        unit.telecomNumber,
+        unit.dehNumber
+      ].filter((v) => v != null && String(v).trim() !== '');
+      if (!candidates.length) continue;
+      const stored = candidates
+        .map((v) => normalizeBillingId(String(v)))
+        .find(
+          (v) => v === normalizedBillingId || sameSupply(v, normalizedBillingId)
+        );
+      if (!stored) continue;
       const hit: Hit = {
         buildingId: String(building._id),
         buildingName: building.name || '',

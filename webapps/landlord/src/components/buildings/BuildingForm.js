@@ -377,6 +377,11 @@ export default function BuildingForm({ building, onSubmit }) {
                         <SelectItem value="deh">{t('DEH')}</SelectItem>
                         <SelectItem value="eydap">{t('EYDAP')}</SelectItem>
                         <SelectItem value="epa">{t('EPA')}</SelectItem>
+                        {/* NOVA: a κοινόχρηστη telecom line (building internet,
+                            entry-phone). The server accepts it and telecom_common
+                            exists as an expense type, but this select did not offer
+                            it — so the type was unreachable from the UI. */}
+                        <SelectItem value="nova">{t('NOVA')}</SelectItem>
                         <SelectItem value="other">{t('Other')}</SelectItem>
                       </SelectContent>
                     </Select>

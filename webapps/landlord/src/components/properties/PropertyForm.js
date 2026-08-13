@@ -74,6 +74,7 @@ const schema = z.object({
       message: 'DEH number must be 9 digits'
     }),
   eydapNumber: z.string().trim().max(60).optional(),
+  telecomNumber: z.string().trim().max(60).optional(),
   energyClass: z.string().trim().max(60).optional(),
   energyCertNumber: z.string().trim().max(60).optional(),
   // Wave-24 A16: schema persists these fields but the UI never rendered
@@ -181,6 +182,7 @@ const PropertyForm = ({ property, onSubmit }) => {
       atakNumber: property?.atakNumber || '',
       dehNumber: property?.dehNumber || '',
       eydapNumber: property?.eydapNumber || '',
+      telecomNumber: property?.telecomNumber || '',
       energyClass: property?.energyCertificate?.energyClass || '',
       energyCertNumber: property?.energyCertificate?.number || '',
       energyCertIssueDate: property?.energyCertificate?.issueDate
@@ -236,6 +238,7 @@ const PropertyForm = ({ property, onSubmit }) => {
         atakNumber,
         dehNumber,
         eydapNumber,
+        telecomNumber,
         ...rest
       } = data;
       const hasEnergyData =
@@ -248,6 +251,7 @@ const PropertyForm = ({ property, onSubmit }) => {
         atakNumber,
         dehNumber,
         eydapNumber,
+        telecomNumber,
         energyCertificate: hasEnergyData
           ? {
               ...(property?.energyCertificate || {}),
@@ -341,6 +345,16 @@ const PropertyForm = ({ property, onSubmit }) => {
           <Field name="eydapNumber" errors={errors} t={t}>
             <Label htmlFor="eydapNumber">{t('EYDAP Number')}</Label>
             <Input id="eydapNumber" {...register('eydapNumber')} />
+          </Field>
+        </Row>
+        <Row>
+          {/* Telecom line (NOVA etc.), the third sibling of ΔΕΗ and ΕΥΔΑΠ. Added with
+              the telecom_private expense type: a per-apartment telecom bill had no
+              identifier on the apartment to match against, so that type could not be
+              used for the case it exists for. */}
+          <Field name="telecomNumber" errors={errors} t={t}>
+            <Label htmlFor="telecomNumber">{t('Telecom Number')}</Label>
+            <Input id="telecomNumber" {...register('telecomNumber')} />
           </Field>
         </Row>
         <Row>

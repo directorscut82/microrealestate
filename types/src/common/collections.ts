@@ -222,6 +222,10 @@ export namespace CollectionTypes {
     dehNumber?: string;
     // Water supply number (ΕΥΔΑΠ) — sibling of dehNumber (ΔΕΗ).
     eydapNumber?: string;
+    // Telecom line number (NOVA etc.) — the sibling of dehNumber/eydapNumber, added
+    // with the telecom_private expense type so a per-apartment telecom bill has an
+    // identifier to match on.
+    telecomNumber?: string;
     buildingId?: string | Building;
     electricitySupplyNumber?: string;
     energyCertificate?: {
