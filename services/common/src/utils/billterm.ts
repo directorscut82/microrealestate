@@ -76,3 +76,49 @@ export function billTermIsOutsideExpense(
 ): boolean {
   return !billTermFitsExpense(expense, billTerm).fits;
 }
+
+/**
+ * WHICH MONTH a bill's amount is charged in.
+ *
+ * THE RULE: the month the bill was ISSUED, falling back to the end of the period it
+ * covers when no issue date was read.
+ *
+ * WHY NOT periodEnd, which is what both copies of this used to do. A bill's period is
+ * what it MEASURES; its issue date is when it becomes something the landlord can act
+ * on. The two are routinely different months, and for ΕΥΔΑΠ they are always different
+ * — meters are read quarterly, so a bill measuring 28/04–23/07 is issued on 04/08 and
+ * payable by 01/09. Keying the term to periodEnd charged it to JULY: a month whose
+ * κοινόχρηστα statement may already be issued to the tenants, whose rents may already
+ * be paid, and which the engine may treat as frozen. The landlord receives it in
+ * August, pays it in August, and charges it in August.
+ *
+ * It also removes a whole failure class. `periodEnd` can precede the expense's
+ * `startTerm` while `issueDate` does not, which is the shape that put a June bill on
+ * an August expense and left €120 charged to nobody (see billTermFitsExpense above).
+ * The issue date is never earlier than the period it bills, so it can only ever
+ * propose a month at or after the one periodEnd would have.
+ *
+ * UTC throughout: the term is read back with getUTCMonth elsewhere, and an Athens
+ * summer local Date (UTC+3) turns a 01/08 boundary into July 31 21:00Z and charges
+ * the whole bill to the wrong month.
+ *
+ * This lived as TWO byte-identical private copies — `billmanager.ts` and
+ * `telegramInboxScanner.ts` — so the upload lane and the bot lane each decided the
+ * charge month for themselves. Exactly the shape of the duplicated bill matcher and
+ * the duplicated κυμαινόμενο inference before them.
+ */
+export function computeChargeTerm(bill: {
+  issueDate?: Date | string | null;
+  periodEnd?: Date | string | null;
+}): number | undefined {
+  const pick = (v: unknown): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(String(v));
+    return Number.isFinite(d.getTime()) ? d : null;
+  };
+  const anchor = pick(bill?.issueDate) || pick(bill?.periodEnd);
+  if (!anchor) return undefined;
+  const year = anchor.getUTCFullYear();
+  const month = anchor.getUTCMonth() + 1;
+  return year * 1000000 + month * 10000 + 100;
+}

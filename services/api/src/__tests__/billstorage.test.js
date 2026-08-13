@@ -8,6 +8,21 @@ import { jest } from '@jest/globals';
 // so a light mock keeps this suite free of the real cipher env.
 jest.unstable_mockModule('@microrealestate/common', () => ({
   Crypto: { decrypt: (v) => `dec(${v})` },
+      // billmanager + telegramInboxScanner now take the charge month and the
+      // bill-term fit from the shared rule, so this factory must provide it.
+      // unstable_mockModule replaces the WHOLE module: an export the graph consumes
+      // but the factory omits is `undefined` at call time, which surfaces as a
+      // TypeError deep inside rather than a resolution error.
+      BillTerm: {
+        billTermFitsExpense: () => ({ fits: true }),
+        billTermIsOutsideExpense: () => false,
+        computeChargeTerm: (b) => {
+          const d = new Date(b?.issueDate || b?.periodEnd);
+          return Number.isFinite(d.getTime())
+            ? d.getUTCFullYear() * 1000000 + (d.getUTCMonth() + 1) * 10000 + 100
+            : undefined;
+        }
+      },
   logger: { error: () => {}, warn: () => {}, info: () => {}, debug: () => {} }
 }));
 

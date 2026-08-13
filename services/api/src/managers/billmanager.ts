@@ -1,8 +1,9 @@
 import {
+  BillTerm,
   Collections,
   logger,
-  ServiceError,
-  Service
+  Service,
+  ServiceError
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
@@ -36,10 +37,18 @@ type Res = ServiceResponse;
 // Helpers
 // ---------------------------------------------------------------------------
 
-function computeDefaultTerm(periodEnd: Date): number {
-  const year = periodEnd.getUTCFullYear();
-  const month = periodEnd.getUTCMonth() + 1;
-  return year * 1000000 + month * 10000 + 100;
+/**
+ * The charge month. Delegates to the ONE shared rule — see
+ * `common/utils/billterm.computeChargeTerm`, which explains why it is the ISSUE
+ * month and not the end of the measured period. This wrapper exists only so the
+ * call sites read the same as before.
+ */
+function computeDefaultTerm(bill: {
+  issueDate?: Date | string | null;
+  periodEnd?: Date | string | null;
+}): number {
+  // A bill without either date cannot reach here: parse requires periodEnd.
+  return BillTerm.computeChargeTerm(bill) as number;
 }
 
 /**
@@ -492,6 +501,124 @@ export async function findUnitBySupplyNumber(
  * Accept multipart PDFs (field: "bills"), parse and return results
  * for user confirmation. Does NOT save anything.
  */
+/**
+ * Run the three-tier lookup over EVERY identifier a bill offers, in order.
+ *
+ * WHY MORE THAN ONE KEY. A bill prints several numbers and the landlord may have
+ * recorded any of them. ΕΥΔΑΠ prints an ΑΡΙΘΜΟΣ ΜΕΤΡΗΤΗ (the physical meter — the
+ * right key, and the parser's primary), an ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ and an ΑΡΙΘΜΟΣ
+ * ΜΗΤΡΩΟΥ. Rows entered before the meter was settled on hold one of the latter two,
+ * and matching only the primary would tell that landlord their own bill is
+ * unrecognised — a failure with no visible cause, since every number on the screen
+ * looks right.
+ *
+ * THE ORDER IS LOAD-BEARING, and it is tiers-within-key, not keys-within-tier: all
+ * three tiers are tried for the primary key before the next key is considered. The
+ * primary is the strongest evidence available; finding a weaker-tier hit on an
+ * ALTERNATE key while the primary had a stronger one would attribute the bill to the
+ * lesser match. Concretely: if the meter number matches a configured δαπάνη, that
+ * wins over the account number matching a bare shared meter.
+ *
+ * AMBIGUITY STOPS THE WALK. If any key produces `ambiguous` at any tier, resolution
+ * ends there and NO target is proposed — the same rule each tier already applies
+ * internally. Continuing to the next key would answer a question the operator has to
+ * answer, using evidence that was just refused for being unclear.
+ */
+export interface BillTargetResolution {
+  /** The key that actually resolved, so a caller can say which number matched. */
+  matchedKey?: string;
+  expenseStatus: 'match' | 'ambiguous' | 'none';
+  expenseHit: Awaited<ReturnType<typeof findExpenseMatch>>['hit'];
+  sharedStatus: 'match' | 'ambiguous' | 'none' | 'skip';
+  sharedHit: Awaited<ReturnType<typeof findSharedMeterMatch>>['hit'];
+  unitHit: Awaited<ReturnType<typeof findUnitBySupplyNumber>>;
+}
+
+export async function resolveBillTarget(
+  realmId: string,
+  keys: (string | undefined | null)[]
+): Promise<BillTargetResolution> {
+  const tried = new Set<string>();
+  let last: BillTargetResolution = {
+    expenseStatus: 'none',
+    expenseHit: null,
+    sharedStatus: 'none',
+    sharedHit: null,
+    unitHit: null
+  };
+  for (const raw of keys) {
+    const key = raw ? normalizeBillingId(String(raw)) : '';
+    // Skip blanks and repeats: the primary is often one of the alternates too, and
+    // re-querying it would double the DB work for the same answer.
+    if (!key || tried.has(key)) continue;
+    tried.add(key);
+
+    const expense = await findExpenseMatch(realmId, key);
+    if (expense.hit) {
+      return {
+        matchedKey: key,
+        expenseStatus: 'match',
+        expenseHit: expense.hit,
+        sharedStatus: 'skip',
+        sharedHit: null,
+        unitHit: null
+      };
+    }
+    if (expense.status === 'ambiguous') {
+      return {
+        matchedKey: key,
+        expenseStatus: 'ambiguous',
+        expenseHit: null,
+        sharedStatus: 'skip',
+        sharedHit: null,
+        unitHit: null
+      };
+    }
+
+    const shared = await findSharedMeterMatch(realmId, key);
+    if (shared.hit) {
+      return {
+        matchedKey: key,
+        expenseStatus: 'none',
+        expenseHit: null,
+        sharedStatus: 'match',
+        sharedHit: shared.hit,
+        unitHit: null
+      };
+    }
+    if (shared.status === 'ambiguous') {
+      return {
+        matchedKey: key,
+        expenseStatus: 'none',
+        expenseHit: null,
+        sharedStatus: 'ambiguous',
+        sharedHit: null,
+        unitHit: null
+      };
+    }
+
+    const unit = await findUnitBySupplyNumber(realmId, key);
+    if (unit) {
+      return {
+        matchedKey: key,
+        expenseStatus: 'none',
+        expenseHit: null,
+        sharedStatus: 'none',
+        sharedHit: null,
+        unitHit: unit
+      };
+    }
+    last = {
+      expenseStatus: 'none',
+      expenseHit: null,
+      sharedStatus: 'none',
+      sharedHit: null,
+      unitHit: null
+    };
+  }
+  return last;
+}
+
 export async function parseBills(req: Req, res: Res): Promise<void> {
   const realmId = req.realm?._id;
   if (!realmId) {
@@ -618,11 +745,16 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
 
     const { bill } = parseResult;
 
-    // Try to match billing ID to an expense
-    const { status: matchStatus, hit: match } = await findExpenseMatch(
-      realmId,
-      bill.billingIdNormalized
-    );
+    // Resolve the bill's target across EVERY identifier it printed, not just the
+    // primary — see resolveBillTarget. ΕΥΔΑΠ prints three, and a landlord who
+    // recorded the account number rather than the meter would otherwise be told
+    // their own bill is unrecognised.
+    const resolution = await resolveBillTarget(realmId, [
+      bill.billingIdNormalized,
+      ...(bill.alternateBillingIds || [])
+    ]);
+    const matchStatus = resolution.expenseStatus;
+    const match = resolution.expenseHit;
 
     // No existing δαπάνη? Identify where the bill belongs from its αριθμός
     // παροχής. SHARED METERS ARE TRIED FIRST and reported separately, because the
@@ -635,18 +767,15 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     // AMBIGUOUS is not the same as unmatched: several expenses claim this παροχή,
     // so the operator must choose. Falling through would propose a shared meter or
     // an apartment — weaker evidence than the candidates just refused.
-    const sharedResult =
-      matchStatus === 'none'
-        ? await findSharedMeterMatch(realmId, bill.billingIdNormalized)
-        : { status: 'skip' as const, hit: null };
+    const sharedResult = {
+      status: resolution.sharedStatus,
+      hit: resolution.sharedHit
+    };
     const sharedMeterMatch = sharedResult.hit;
     // The unit tier is reached ONLY when both stronger tiers found nothing at all.
     // 'ambiguous' from either one means the operator must choose, and proposing a
     // `single_unit` charge would be a worse guess than proposing nothing.
-    const unitMatch =
-      matchStatus === 'none' && sharedResult.status === 'none'
-        ? await findUnitBySupplyNumber(realmId, bill.billingIdNormalized)
-        : null;
+    const unitMatch = resolution.unitHit;
 
     // Generate IRIS QR from RF code + payment code (verified approach).
     // C2 fix: generate regardless of match — the QR is about the bill's
@@ -686,7 +815,7 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     // physical identity instead. Advisory only — see billidentity.ts.
     let duplicate: DuplicateBillMatch | undefined;
     if (match) {
-      const proposedTerm = computeDefaultTerm(bill.periodEnd);
+      const proposedTerm = computeDefaultTerm(bill);
       const existing = await Collections.Bill.findOne({
         realmId,
         buildingId: String(match.building._id),
@@ -736,7 +865,7 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         // 'qr' | 'barcode'. A Code 128 rendered in the QR's square box is squashed
         // unreadable, and an unreadable payment code is worse than none.
         paymentCodeKind,
-        proposedTerm: computeDefaultTerm(bill.periodEnd),
+        proposedTerm: computeDefaultTerm(bill),
         ocrText: (parseResult.rawText || '').slice(0, 4000)
       },
       match: match
@@ -747,6 +876,25 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
             expenseName: match.expense.name
           }
         : null,
+      /**
+       * WHY the target is empty, when it is: 'ambiguous' means several δαπάνες (or
+       * several shared meters) claim this παροχή and the operator must choose.
+       *
+       * The upload lane computed this and used it only to gate the lower tiers,
+       * never telling the card — so an ambiguous bill rendered exactly like an
+       * unmatched one, «δεν βρέθηκε δαπάνη», which is the opposite of the truth. A
+       * landlord reading that reasonably creates ANOTHER δαπάνη for the same παροχή
+       * and makes the ambiguity permanent. The bot lane has reported it since the
+       * matcher was unified; this closes the same gap on the upload lane.
+       */
+      matchAmbiguous:
+        matchStatus === 'ambiguous'
+          ? 'expense'
+          : sharedResult.status === 'ambiguous'
+            ? 'sharedMeter'
+            : undefined,
+      /** Which of the bill's identifiers resolved, so the card can name it. */
+      matchedKey: resolution.matchedKey,
       // Building + apartment identified by the αριθμός παροχής when there is no
       // existing δαπάνη — drives the create-expense pre-fill (building selected
       // + single_unit targeting this apartment). Null when nothing matched.

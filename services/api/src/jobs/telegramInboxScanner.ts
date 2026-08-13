@@ -93,7 +93,14 @@ export interface InboxScanDeps {
    */
   findMatch: (
     realmId: string,
-    billingIdNormalized: string
+    billingIdNormalized: string,
+    /**
+     * Every OTHER identifier the bill printed. Optional so the existing test stubs
+     * (`async () => matchResult`) keep type-checking, and because a ΔΕΗ bill has
+     * only one number — but a ΕΥΔΑΠ bill prints three and the landlord may have
+     * recorded any of them.
+     */
+    alternateBillingIds?: string[]
   ) => Promise<{
     buildingId?: string;
     buildingName?: string;
@@ -290,13 +297,21 @@ async function _downloadFile(
  * building WITHOUT an expenseId so the UI offers the create-expense path instead
  * of asserting a match that does not exist yet.
  */
-async function _findMatch(realmId: string, billingIdNormalized: string) {
-  const { findExpenseMatch, findSharedMeterMatch, findUnitBySupplyNumber } =
-    await import('../managers/billmanager.js');
-  const { status, hit: expenseHit } = await findExpenseMatch(
-    realmId,
-    billingIdNormalized
-  );
+async function _findMatch(
+  realmId: string,
+  billingIdNormalized: string,
+  // Every OTHER identifier the bill printed. ΕΥΔΑΠ prints three and the landlord
+  // may have recorded any of them; matching only the primary tells them their own
+  // bill is unrecognised, with no visible cause.
+  alternateBillingIds: string[] = []
+) {
+  const { resolveBillTarget } = await import('../managers/billmanager.js');
+  const resolution = await resolveBillTarget(realmId, [
+    billingIdNormalized,
+    ...alternateBillingIds
+  ]);
+  const status = resolution.expenseStatus;
+  const expenseHit = resolution.expenseHit;
   if (expenseHit) {
     return {
       buildingId: String(expenseHit.building._id),
@@ -318,7 +333,7 @@ async function _findMatch(realmId: string, billingIdNormalized: string) {
   // «Νέα δαπάνη») whenever expenseId is absent, which is exactly the right
   // affordance here. `provider`/`label` ride along so the create-expense prefill
   // can pick the χιλιοστά split a κοινόχρηστο needs (see sharedExpensePrefill).
-  const shared = await findSharedMeterMatch(realmId, billingIdNormalized);
+  const shared = { status: resolution.sharedStatus, hit: resolution.sharedHit };
   if (shared.hit) {
     return {
       buildingId: shared.hit.buildingId,
@@ -339,7 +354,7 @@ async function _findMatch(realmId: string, billingIdNormalized: string) {
   // arrived unmatched by Telegram while matching on upload. Tried LAST because a
   // shared meter and a unit meter mean opposite things for allocation, and shared
   // must win.
-  const unit = await findUnitBySupplyNumber(realmId, billingIdNormalized);
+  const unit = resolution.unitHit;
   if (unit) {
     return {
       buildingId: unit.buildingId,
@@ -586,11 +601,10 @@ export function _defaultDeps(): InboxScanDeps {
 
 // --- Core scan (exported for unit tests) ------------------------------------
 
-function computeDefaultTerm(periodEnd: Date): number {
-  const year = periodEnd.getUTCFullYear();
-  const month = periodEnd.getUTCMonth() + 1;
-  return year * 1000000 + month * 10000 + 100;
-}
+// The charge month comes from the ONE shared rule (common/utils/billterm) — the
+// month the bill was ISSUED, not the end of the period it measures. This file used
+// to carry its own byte-identical copy, so the bot lane and the upload lane each
+// decided the charge month independently.
 
 export async function scanTelegramInbox(
   overrides: Partial<InboxScanDeps> = {}
@@ -799,9 +813,8 @@ async function _handleUpdate(
         dueDate: bill.dueDate,
         rfCode: bill.rfCode,
         paymentCode: bill.paymentCode,
-        proposedTerm: bill.periodEnd
-          ? computeDefaultTerm(new Date(bill.periodEnd))
-          : undefined,
+        // Same anchor as the upload lane: issue month, period end as the fallback.
+        proposedTerm: BillTerm.computeChargeTerm(bill),
         // Carry the OCR text so the confirmed Bill stores it (capped, matching
         // the upload lane). WITHOUT this a Telegram-imported bill has empty
         // ocrText → parsePaymentReceipts rebuilds an empty token bag → the
@@ -812,7 +825,8 @@ async function _handleUpdate(
       if (bill.billingIdNormalized) {
         suggestedMatch = await deps.findMatch(
           realm.realmId,
-          bill.billingIdNormalized
+          bill.billingIdNormalized,
+          bill.alternateBillingIds || []
         );
         // The bot lane hardcoded `warnings: []`, so the ONE warning the upload lane
         // gives — "this bill's month is outside its expense's active range" — was

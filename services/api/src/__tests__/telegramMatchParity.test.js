@@ -350,3 +350,138 @@ describe('ambiguity must not fall through to weaker evidence', () => {
     });
   });
 });
+
+describe('a bill matches on ANY identifier it printed, not only the primary', () => {
+  // ΕΥΔΑΠ prints three numbers: the ΑΡΙΘΜΟΣ ΜΕΤΡΗΤΗ (the physical meter — the right
+  // key and the parser's primary), the ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ and the ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ.
+  // Rows entered before the meter was settled on hold one of the latter two. Matching
+  // only the primary told that landlord their own bill was unrecognised — a failure
+  // with no visible cause, because every number on the screen looks correct.
+  const METER = 'A99E90001';
+  const ACCOUNT = '99900011122003';
+  const REGISTRY = '999000133';
+
+  it('resolves on an ALTERNATE when the primary matches nothing', async () => {
+    BUILDINGS = [
+      {
+        _id: 'alt-1',
+        name: 'ΟΔΟΣ ΑΛΦΑ 1',
+        // The landlord recorded the ACCOUNT number, not the meter.
+        expenses: [{ _id: 'e-alt', name: 'Νερό κοινοχρήστων', billingId: ACCOUNT }],
+        units: [],
+        sharedMeters: []
+      }
+    ];
+    const bm = await import('../managers/billmanager.js');
+    const r = await bm.resolveBillTarget('r1', [METER, ACCOUNT, REGISTRY]);
+    expect(r.expenseStatus).toBe('match');
+    expect(String(r.expenseHit.expense._id)).toBe('e-alt');
+    // And it reports WHICH key resolved, so the card can say so.
+    expect(r.matchedKey).toBe(ACCOUNT);
+  });
+
+  it('the PRIMARY wins over an alternate, across tiers', async () => {
+    // The meter matches a configured δαπάνη; the account number matches a bare
+    // shared meter. Tiers-within-key means the δαπάνη wins — resolving the alternate
+    // first would attribute the bill to the weaker evidence.
+    BUILDINGS = [
+      {
+        _id: 'p-1',
+        name: 'ΟΔΟΣ ΒΗΤΑ 2',
+        expenses: [{ _id: 'e-primary', name: 'Νερό', billingId: METER }],
+        units: [],
+        sharedMeters: []
+      },
+      {
+        _id: 'p-2',
+        name: 'ΟΔΟΣ ΓΑΜΑ 3',
+        expenses: [],
+        units: [],
+        sharedMeters: [{ provider: 'eydap', supplyNumber: ACCOUNT }]
+      }
+    ];
+    const bm = await import('../managers/billmanager.js');
+    const r = await bm.resolveBillTarget('r1', [METER, ACCOUNT]);
+    expect(String(r.expenseHit.expense._id)).toBe('e-primary');
+    expect(r.matchedKey).toBe(METER);
+    // The shared meter is never even consulted for the primary key.
+    expect(r.sharedHit).toBeNull();
+  });
+
+  it('AMBIGUITY on one key stops the walk — no alternate is tried', async () => {
+    // Two δαπάνες claim the meter, and the account number would resolve cleanly to a
+    // third building. Continuing would answer a question only the operator can
+    // answer, using evidence just refused for being unclear.
+    BUILDINGS = [
+      {
+        _id: 'a-1',
+        name: 'ΟΔΟΣ ΑΛΦΑ 1',
+        expenses: [{ _id: 'x1', name: 'Νερό', billingId: METER }],
+        units: [],
+        sharedMeters: []
+      },
+      {
+        _id: 'a-2',
+        name: 'ΟΔΟΣ ΒΗΤΑ 2',
+        expenses: [{ _id: 'x2', name: 'Νερό', billingId: METER }],
+        units: [],
+        sharedMeters: []
+      },
+      {
+        _id: 'a-3',
+        name: 'ΟΔΟΣ ΓΑΜΑ 3',
+        expenses: [{ _id: 'x3', name: 'Νερό', billingId: ACCOUNT }],
+        units: [],
+        sharedMeters: []
+      }
+    ];
+    const bm = await import('../managers/billmanager.js');
+    const r = await bm.resolveBillTarget('r1', [METER, ACCOUNT]);
+    expect(r.expenseStatus).toBe('ambiguous');
+    expect(r.expenseHit).toBeNull();
+    // x3 must NOT have been proposed.
+    expect(r.sharedHit).toBeNull();
+    expect(r.unitHit).toBeNull();
+  });
+
+  it('an alternate reaches the APARTMENT tier too', async () => {
+    BUILDINGS = [
+      {
+        _id: 'u-b',
+        name: 'ΟΔΟΣ ΔΕΛΤΑ 7',
+        expenses: [],
+        units: [{ _id: 'u1', propertyId: 'prop-1', name: 'Α2', eydapNumber: REGISTRY }],
+        sharedMeters: []
+      }
+    ];
+    const bm = await import('../managers/billmanager.js');
+    const r = await bm.resolveBillTarget('r1', [METER, ACCOUNT, REGISTRY]);
+    expect(r.unitHit).toMatchObject({ propertyId: 'prop-1', unitLabel: 'Α2' });
+    expect(r.matchedKey).toBe(REGISTRY);
+  });
+
+  it('skips blanks and duplicates instead of re-querying', async () => {
+    // The primary is often one of the alternates too; querying it twice doubles the
+    // DB work for the same answer.
+    BUILDINGS = [];
+    const bm = await import('../managers/billmanager.js');
+    const r = await bm.resolveBillTarget('r1', [METER, METER, '', null, undefined]);
+    expect(r.expenseStatus).toBe('none');
+    expect(r.matchedKey).toBeUndefined();
+  });
+
+  it('the BOT lane passes the alternates through', async () => {
+    // The deps signature accepts them and the caller supplies them — otherwise the
+    // resolver would only ever see the primary on the Telegram path.
+    const fs = await import('fs');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const src = fs.readFileSync(
+      path.resolve(here, '../jobs/telegramInboxScanner.ts'),
+      'utf8'
+    );
+    expect(src).toContain('bill.alternateBillingIds || []');
+    expect(src).toContain('resolveBillTarget');
+  });
+});
