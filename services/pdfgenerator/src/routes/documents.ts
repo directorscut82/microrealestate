@@ -516,6 +516,170 @@ export default function () {
     })
   );
 
+  /**
+   * GET /documents/tree — COUNTS ONLY, never document bodies.
+   *
+   * Settings → Αρχεία used to call `GET /documents` with no filter, i.e. it
+   * downloaded EVERY document row in the realm the moment the page opened. Over
+   * years of bills that is thousands of rows, and the landlord asked for exactly
+   * the opposite: show the folders, load a folder's files only when it is opened.
+   *
+   * So this returns a shape, not content: one node per building (with its own
+   * sub-counts), plus realm-level buckets for owners and for documents whose
+   * entity no longer resolves. A single aggregation per bucket, no bodies, no
+   * urls — the payload is a few hundred bytes regardless of how many files exist.
+   *
+   * `type: 'file'` only. Template-generated `text` documents are a different
+   * surface (contracts), and counting them here would make the numbers disagree
+   * with what opening a folder then lists.
+   */
+  documentsApi.get(
+    '/tree',
+    Middlewares.asyncWrapper(async (req, res) => {
+      const realmId = (req as any).realm?._id;
+      if (!realmId) {
+        throw new ServiceError('organization not resolved', 400);
+      }
+
+      const [buildings, properties, tenants] = await Promise.all([
+        Collections.Building.find({ realmId }, { name: 1, units: 1 }).lean(),
+        Collections.Property.find({ realmId }, { name: 1, buildingId: 1 }).lean(),
+        Collections.Tenant.find({ realmId }, { name: 1, properties: 1 }).lean()
+      ]);
+
+      // One grouped count per entity key, three aggregations total — NOT one query
+      // per building, which would be a request storm on a realm with 40 buildings.
+      const countBy = async (field: string) => {
+        const rows = await Collections.Document.aggregate([
+          { $match: { realmId, type: 'file', [field]: { $nin: [null, ''] } } },
+          { $group: { _id: `$${field}`, count: { $sum: 1 } } }
+        ]);
+        const m = new Map<string, number>();
+        for (const r of rows as Array<{ _id: unknown; count: number }>) {
+          m.set(String(r._id), r.count);
+        }
+        return m;
+      };
+      const [byBuilding, byProperty, byTenant, byOwner] = await Promise.all([
+        countBy('buildingId'),
+        countBy('propertyId'),
+        countBy('tenantId'),
+        countBy('ownerKey')
+      ]);
+
+      // propertyId / tenantId → the building they belong to, so an apartment's or a
+      // tenant's files are counted under their building rather than in a flat list.
+      const buildingOfProperty = new Map<string, string>();
+      for (const p of properties as Array<{ _id: unknown; buildingId?: unknown }>) {
+        if (p.buildingId) {
+          buildingOfProperty.set(String(p._id), String(p.buildingId));
+        }
+      }
+      const buildingOfTenant = new Map<string, string>();
+      for (const t of tenants as Array<{
+        _id: unknown;
+        properties?: Array<{ propertyId?: unknown }>;
+      }>) {
+        for (const tp of t.properties || []) {
+          const b = tp?.propertyId
+            ? buildingOfProperty.get(String(tp.propertyId))
+            : undefined;
+          if (b) {
+            buildingOfTenant.set(String(t._id), b);
+            break;
+          }
+        }
+      }
+
+      const sumInto = (
+        target: Map<string, number>,
+        source: Map<string, number>,
+        resolve: (id: string) => string | undefined
+      ) => {
+        let unresolved = 0;
+        for (const [id, n] of source) {
+          const b = resolve(id);
+          if (!b) {
+            unresolved += n;
+            continue;
+          }
+          target.set(b, (target.get(b) || 0) + n);
+        }
+        return unresolved;
+      };
+
+      const propsPerBuilding = new Map<string, number>();
+      const tenantsPerBuilding = new Map<string, number>();
+      let orphanProperty = sumInto(propsPerBuilding, byProperty, (id) =>
+        buildingOfProperty.get(id)
+      );
+      let orphanTenant = sumInto(tenantsPerBuilding, byTenant, (id) =>
+        buildingOfTenant.get(id)
+      );
+
+      const knownBuildingIds = new Set(
+        (buildings as Array<{ _id: unknown }>).map((b) => String(b._id))
+      );
+      let orphanBuilding = 0;
+      for (const [id, n] of byBuilding) {
+        if (!knownBuildingIds.has(id)) orphanBuilding += n;
+      }
+
+      const nodes = (buildings as Array<{ _id: unknown; name?: string }>)
+        .map((b) => {
+          const id = String(b._id);
+          const folders = [
+            { key: 'building', count: byBuilding.get(id) || 0 },
+            { key: 'properties', count: propsPerBuilding.get(id) || 0 },
+            { key: 'tenants', count: tenantsPerBuilding.get(id) || 0 }
+          ];
+          return {
+            buildingId: id,
+            name: b.name || '',
+            count: folders.reduce((s, f) => s + f.count, 0),
+            folders
+          };
+        })
+        // A building with no files at all is noise on a page whose job is to find
+        // files. It stays reachable from the building's own Έγγραφα tab.
+        .filter((n) => n.count > 0)
+        .sort((a, b) => a.name.localeCompare(b.name, 'el'));
+
+      const ownerCount = [...byOwner.values()].reduce((s, n) => s + n, 0);
+
+      // Attached to NOTHING — the same predicate `?bucket=unattached` lists, so the
+      // count and its list cannot disagree.
+      const unattachedCount = await Collections.Document.countDocuments({
+        realmId,
+        type: 'file',
+        tenantId: { $in: [null, ''] },
+        buildingId: { $in: [null, ''] },
+        propertyId: { $in: [null, ''] },
+        ownerKey: { $in: [null, ''] }
+      });
+
+      // DANGLING: an entity id that no longer resolves (the building/apartment/tenant
+      // was deleted). Reported as its own number and NOT as a browsable folder,
+      // because it cannot be listed by a cheap predicate — but it must be reported.
+      // Silently omitting it is the absent-representation trap: the page would read
+      // as "every file is accounted for" while paid-for storage holds files nothing
+      // can reach. The reconcile tool is what cleans them.
+      const danglingCount = orphanProperty + orphanTenant + orphanBuilding;
+
+      res.json({
+        buildings: nodes,
+        owners: { count: ownerCount },
+        unattached: { count: unattachedCount },
+        dangling: { count: danglingCount },
+        total:
+          nodes.reduce((s, n) => s + n.count, 0) +
+          ownerCount +
+          unattachedCount +
+          danglingCount
+      });
+    })
+  );
+
   documentsApi.get(
     '/',
     Middlewares.asyncWrapper(async (req, res) => {
@@ -535,7 +699,69 @@ export default function () {
         filter.propertyId = String(req.query.propertyId);
       if (req.query.ownerKey) filter.ownerKey = String(req.query.ownerKey);
 
-      const documentsFound = await Collections.Document.find(filter);
+      // SET filters, for the settings file browser: «all the apartments of THIS
+      // building» is one request instead of one per apartment. Capped so a crafted
+      // query cannot turn into an unbounded $in — and the cap is a REFUSAL, not a
+      // silent truncation, because a silently-shortened list reads as a complete one.
+      const ID_SET_CAP = 500;
+      for (const [param, field] of [
+        ['propertyIds', 'propertyId'],
+        ['tenantIds', 'tenantId']
+      ] as const) {
+        const raw = req.query[param];
+        if (!raw) continue;
+        const ids = String(raw)
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (!ids.length) continue;
+        if (ids.length > ID_SET_CAP) {
+          throw new ServiceError(`${param}: too many ids (max ${ID_SET_CAP})`, 422);
+        }
+        filter[field] = { $in: ids };
+      }
+
+      // BUCKETS for the file browser's realm-level folders. Without these the
+      // browser had to send NO filter for «Ιδιοκτήτες», and an unknown/absent filter
+      // FAILS OPEN — the request would mean "every document in the realm", which is
+      // exactly the bug that made the apartment tab list the whole realm. A bucket is
+      // an explicit server-side predicate, so there is nothing to fail open.
+      const bucket = req.query.bucket ? String(req.query.bucket) : '';
+      if (bucket === 'owners') {
+        filter.ownerKey = { $nin: [null, ''] };
+      } else if (bucket === 'unattached') {
+        // Attached to NOTHING: every entity key absent or empty. Deliberately the
+        // same predicate the /tree count uses, so the number on the folder is the
+        // number that opens — a count that disagrees with its own list is worse than
+        // no count.
+        for (const f of ['tenantId', 'buildingId', 'propertyId', 'ownerKey']) {
+          filter[f] = { $in: [null, ''] };
+        }
+      } else if (bucket) {
+        throw new ServiceError(`unknown bucket: ${bucket}`, 422);
+      }
+
+      // Paging. The landlord's realm accumulates bills for years, and the file
+      // browser opens one folder at a time — `limit`/`skip` keep an open folder to
+      // one page instead of the whole history. Absent = unpaged, so every existing
+      // caller (the per-entity panels) is unaffected.
+      const parsedLimit = Number(req.query.limit);
+      const parsedSkip = Number(req.query.skip);
+      const limit =
+        Number.isFinite(parsedLimit) && parsedLimit > 0
+          ? Math.min(Math.floor(parsedLimit), 200)
+          : 0;
+      const skip =
+        Number.isFinite(parsedSkip) && parsedSkip > 0 ? Math.floor(parsedSkip) : 0;
+
+      let query = Collections.Document.find(filter);
+      if (limit) {
+        // Sort only when paging: an unsorted skip/limit can return the same row on
+        // two different pages and drop another entirely. `_id` breaks ties so the
+        // order is total, not merely consistent-looking.
+        query = query.sort({ createdDate: -1, _id: -1 }).skip(skip).limit(limit);
+      }
+      const documentsFound = await query;
       if (!documentsFound) {
         throw new ServiceError('document not found', 404);
       }

@@ -29,8 +29,14 @@ import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
 import { isVariableExpense } from '../../utils/variableExpense';
+import { billTermIsOutsideExpense } from '../../utils/billTerm';
 import BillSourceDialog from './BillSourceDialog';
-import { LuFileText, LuReceipt, LuScanLine } from 'react-icons/lu';
+import {
+  LuFileText,
+  LuReceipt,
+  LuScanLine,
+  LuAlertTriangle
+} from 'react-icons/lu';
 
 /*
  * BuildingExpensePanel — the single, calendar-driven expense surface.
@@ -386,6 +392,9 @@ function ExpenseRow({ row, value, onChange, onSave, saving, t, bill, onOpenBill 
 
 export default function BuildingExpensePanel({ building }) {
   const { t } = useTranslation('common');
+  // Locale-aware money formatting for the warning text below (the rest of the panel
+  // renders amounts through <NumberFormat/>, which is not usable inside a t() value).
+  const formatNumber = useFormatNumber();
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
 
@@ -419,6 +428,31 @@ export default function BuildingExpensePanel({ building }) {
     return m;
   }, [bills]);
   const [sourceDialog, setSourceDialog] = useState(null);
+
+  /**
+   * Bills attached to THIS month whose expense is not charged for it.
+   *
+   * The import dialog warns about this at the moment of import, and now the bot lane
+   * does too — but both warnings are gone the second the operator moves on, and the
+   * money stays invisible forever after. This is the persistent one: it appears in
+   * the month the bill belongs to, which is where the landlord looks when a figure
+   * seems to be missing. Live case: a ΔΕΗ bill for June on an expense starting in
+   * August — €120 recorded, €0 charged, and until now nothing on any screen said so.
+   */
+  const orphanBillsForTerm = useMemo(() => {
+    const expenses = building?.expenses || [];
+    return (Array.isArray(bills) ? bills : [])
+      .filter((b) => String(b?.term) === String(selectedTerm))
+      .map((b) => {
+        const exp = expenses.find(
+          (e) => String(e?._id) === String(b.expenseId)
+        );
+        if (!exp) return null;
+        if (!billTermIsOutsideExpense(exp, b.term)) return null;
+        return { bill: b, expense: exp };
+      })
+      .filter(Boolean);
+  }, [bills, building, selectedTerm]);
   const handleOpenBill = useCallback(
     (bill, kind) => setSourceDialog({ bill, kind }),
     []
@@ -627,6 +661,28 @@ export default function BuildingExpensePanel({ building }) {
     // month detail span the whole panel on top; the ΧΡΕΩΣΕΙΣ breakdown sits
     // entirely BELOW (was a side-by-side 2-col grid that cramped both halves).
     <div className="space-y-6">
+      {orphanBillsForTerm.length ? (
+        <div
+          className="rounded-md border border-oxide/40 bg-oxide/5 p-3 text-sm text-ink"
+          data-cy="orphanBillWarning"
+        >
+          {orphanBillsForTerm.map(({ bill, expense }) => (
+            <div key={String(bill._id)} className="flex items-start gap-2">
+              <LuAlertTriangle className="mt-0.5 size-4 shrink-0 text-oxide" />
+              <span>
+                {t(
+                  'A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.',
+                  {
+                    amount: formatNumber(Number(bill.totalAmount) || 0),
+                    expense: expense.name
+                  }
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {/* The archived document, opened from a row's pill: the bill on the left,
           the data read off it on the right. Mounted once for the whole panel —
           one dialog, whichever row was clicked. */}

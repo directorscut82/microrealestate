@@ -10,6 +10,7 @@ export { default as logger } from './utils/logger.js';
 export { default as ServiceError } from './utils/serviceerror.js';
 export * as Pagination from './utils/pagination.js';
 export * as OwnerStatement from './utils/ownerstatement.js';
+export * as BillTerm from './utils/billterm.js';
 export * as ShareBasis from './utils/sharebasis.js';
 // THE κυμαινόμενο predicate. Import it rather than re-deriving
 // `recurring && amount === 0` — that inference lived in three places before the

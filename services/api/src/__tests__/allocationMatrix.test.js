@@ -562,13 +562,17 @@ describe('allocation matrix — negative and non-numeric thousandths', () => {
     expect(sum(got)).toBe(AMOUNT);
   });
 
-  it('BUG (documented, not fixed): a NEGATIVE thousandth over-bills the building', () => {
-    // generals 400/300/200/−100 → denominator shrinks to 800, so pA/pB/pC are
-    // each inflated, and pD's offsetting −€25 credit is DROPPED by taskBase's
-    // `share > 0` gate. The building bills €225 for a €200 expense and the
-    // three paying tenants never see why. The engine itself returns the
-    // negative (asserted here so the behaviour cannot change unnoticed); it is
-    // the `share > 0` row gate that turns it into over-collection.
+  it('a NEGATIVE thousandth no longer over-bills the building', () => {
+    // WAS THE DEFECT: generals 400/300/200/-100 left the denominator at 800, so pA/pB/pC
+    // were each inflated, and pD's offsetting -EUR25 credit was DROPPED by taskBase's
+    // `share > 0` row gate. The building billed EUR225 for a EUR200 expense and the three
+    // paying tenants never saw why. As the vector approached zero it got worse without
+    // bound (600/500/-900 billed EUR1.100; a negative sum inverted every sign and billed
+    // EUR2.000).
+    //
+    // FIXED by normalising a negative thousandth to 0 on BOTH sides of the division, so
+    // the denominator's support set is IDENTICAL to the billed set — which is exactly the
+    // condition for the shares to sum to the amount. Denominator is now 900.
     const negativeUnits = [
       { ...UNITS[0], general: 400 },
       { ...UNITS[1], general: 300 },
@@ -580,49 +584,58 @@ describe('allocation matrix — negative and non-numeric thousandths', () => {
       makeExpense('general_thousandths', AMOUNT)
     );
     expectMatrix('negative-thousandths', got, {
-      pA: 100,
-      pB: 75,
-      pC: 50,
-      pD: -25
+      pA: 88.89,
+      pB: 66.67,
+      pC: 44.44,
+      pD: 0
     });
-    // Algebraically Σ is still the expense…
+    // No negative share exists any more, so there is nothing for the row gate to drop.
     expect(sum(got)).toBe(AMOUNT);
-    // …but the €225 must be read off the REAL bills, not off a test-side
-    // re-implementation of the `share > 0` gate: one rent per unit, summing only
-    // the rows taskBase actually wrote. pD's −€25 gets no row at all, so the
-    // credit that balances the algebra never reaches a tenant.
+    // And the figure that matters: what the REAL pipeline bills, summed off the rows
+    // taskBase actually wrote — not a test-side re-implementation of the gate.
     const expense = makeExpense('general_thousandths', AMOUNT);
     const rowsPerUnit = ['pA', 'pB', 'pC', 'pD'].map(
       (pid) => rentFor(makeBuilding(negativeUnits, [expense]), pid).buildingCharges
     );
+    // pD still gets no row — a 0 share is not a charge — but its absence no longer
+    // leaves the others holding a credit that was never issued.
     expect(rowsPerUnit[3]).toEqual([]);
     expect(rowsPerUnit.map((rows) => rows.map((r) => r.amount))).toEqual([
-      [100],
-      [75],
-      [50],
+      [88.89],
+      [66.67],
+      [44.44],
       []
     ]);
     const billedByPipeline =
       Math.round(
         rowsPerUnit.flat().reduce((s, r) => s + r.amount, 0) * 100
       ) / 100;
-    expect(billedByPipeline).toBe(225);
+    expect(billedByPipeline).toBe(200);
   });
 
-  it('thousandths that sum to 0 via cancellation (+100/−100) charge nobody', () => {
-    // The `if (total === 0) return 0` guard is a divide-by-zero shield, but it
-    // also swallows this misconfiguration whole: no row, no warning.
+  it('+100/-100 no longer cancels to nothing — the sole valid unit carries it', () => {
+    // WAS: the pair summed to 0, hit the divide-by-zero guard, and the expense was
+    // charged to NOBODY with no row and no warning — money made invisible by a
+    // misconfiguration (MONEY_SURFACE_MATRIX's absent-representation shape).
+    // NOW: -100 normalises to 0, the denominator is 100, and pA — the only unit with a
+    // valid share — carries the whole expense. That is the arithmetic being honest: if
+    // one unit holds all the valid thousandths, it holds all the cost. The bad -100 is
+    // announced in the engine log and refused at save time, so the operator is told
+    // rather than left with a silent zero.
     const cancelling = makeBuilding([
       { ...UNITS[0], general: 100 },
       { ...UNITS[1], general: -100 },
       { ...UNITS[2], general: 0 },
       { ...UNITS[3], general: 0 }
     ]);
-    expectMatrix(
-      'cancelling-thousandths',
-      shares(cancelling, makeExpense('general_thousandths', AMOUNT)),
-      { pA: 0, pB: 0, pC: 0, pD: 0 }
-    );
+    const got = shares(cancelling, makeExpense('general_thousandths', AMOUNT));
+    expectMatrix('cancelling-thousandths', got, {
+      pA: 200,
+      pB: 0,
+      pC: 0,
+      pD: 0
+    });
+    expect(sum(got)).toBe(AMOUNT);
   });
 });
 

@@ -19,7 +19,7 @@
  * setInterval + .unref() + re-entrancy guard, start/stop exports wired in
  * index.ts.
  */
-import { Collections, Crypto, logger } from '@microrealestate/common';
+import { BillTerm, Collections, Crypto, logger } from '@microrealestate/common';
 import axios from 'axios';
 import * as billStorage from '../managers/billstorage.js';
 import * as recapture from '../managers/recapturesession.js';
@@ -542,6 +542,30 @@ async function _sendReply(
  * file's hand-copied matcher was free to drift out of step with the upload path
  * for weeks without a single test going red.
  */
+const _GREEK_MONTHS = [
+  'Ιανουάριο',
+  'Φεβρουάριο',
+  'Μάρτιο',
+  'Απρίλιο',
+  'Μάιο',
+  'Ιούνιο',
+  'Ιούλιο',
+  'Αύγουστο',
+  'Σεπτέμβριο',
+  'Οκτώβριο',
+  'Νοέμβριο',
+  'Δεκέμβριο'
+];
+
+/** «2026080100» → «Αύγουστο 2026» (accusative — it follows «τον»). */
+function _termLabel(term: number): string {
+  const s = String(term ?? '');
+  const year = s.slice(0, 4);
+  const month = Number(s.slice(4, 6));
+  const name = _GREEK_MONTHS[month - 1];
+  return name ? `${name} ${year}` : s;
+}
+
 export function _defaultDeps(): InboxScanDeps {
   return {
     now: () => new Date(),
@@ -754,6 +778,11 @@ async function _handleUpdate(
   // and could not be read, rather than the message vanishing.
   let parsed: any = {};
   let parseError: string | undefined;
+  // Warnings that must reach the bell card. Kept separate from parseError: a bill
+  // that PARSED fine can still be attached to a month nobody is charged for, and
+  // collapsing the two would make a warning look like a failure (or worse, a
+  // failure look like a warning).
+  const termWarnings: string[] = [];
   let suggestedMatch: Awaited<ReturnType<InboxScanDeps['findMatch']>> = null;
   try {
     const parseResult = await deps.parseBill(file.buffer);
@@ -785,6 +814,37 @@ async function _handleUpdate(
           realm.realmId,
           bill.billingIdNormalized
         );
+        // The bot lane hardcoded `warnings: []`, so the ONE warning the upload lane
+        // gives — "this bill's month is outside its expense's active range" — was
+        // absent here entirely. That is not cosmetic: when the term is outside the
+        // range the rent engine charges the expense for no month at all, so the
+        // amount is recorded and lands on NO surface. It happened in live data (a
+        // June bill on an expense starting in August: €120 recorded, €0 charged,
+        // nothing said). Same shared rule as the upload lane, so the two doors cannot
+        // drift again.
+        const expenseId = (suggestedMatch as any)?.expenseId;
+        const buildingId = (suggestedMatch as any)?.buildingId;
+        if (expenseId && buildingId && parsed.proposedTerm) {
+          const b: any = await Collections.Building.findOne(
+            { _id: buildingId, realmId: realm.realmId },
+            { expenses: 1 }
+          ).lean();
+          const exp = (b?.expenses || []).find(
+            (e: any) => String(e._id) === String(expenseId)
+          );
+          if (exp) {
+            const fit = BillTerm.billTermFitsExpense(exp, parsed.proposedTerm);
+            if (!fit.fits) {
+              termWarnings.push(
+                fit.reason === 'before-start'
+                  ? `Η δαπάνη «${exp.name}» ξεκινά τον ${_termLabel(fit.startTerm)}, ενώ ο λογαριασμός αφορά τον ${_termLabel(Number(parsed.proposedTerm))} — δεν θα χρεωθεί σε κανέναν.`
+                  : fit.reason === 'after-end'
+                    ? `Η δαπάνη «${exp.name}» έληξε τον ${_termLabel(fit.endTerm)}, ενώ ο λογαριασμός αφορά τον ${_termLabel(Number(parsed.proposedTerm))} — δεν θα χρεωθεί σε κανέναν.`
+                    : `Η δαπάνη «${exp.name}» δεν έχει μήνα έναρξης — δεν χρεώνεται σε κανέναν μήνα.`
+              );
+            }
+          }
+        }
       }
     } else {
       parseError = parseResult?.error || 'Αποτυχία ανάλυσης λογαριασμού';
@@ -814,7 +874,7 @@ async function _handleUpdate(
     parsed,
     parseError,
     suggestedMatch,
-    warnings: [],
+    warnings: termWarnings,
     sourceFileName: safeName,
     telegramMessageId: msg.message_id,
     telegramFileId: fileId,

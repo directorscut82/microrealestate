@@ -590,13 +590,44 @@ function _computeBuildingChargeRaw(
   const managedUnits = building.units.filter((u) => u.propertyId);
 
   switch (allocationMethod) {
-    case 'general_thousandths': {
+    case 'general_thousandths':
+    case 'heating_thousandths':
+    case 'elevator_thousandths': {
       // Wave-14 F2: use the FULL building denominator (sum across ALL units,
       // including vacant) so each tenant pays exactly their pro-rata share.
       // The vacant unit's share is implicitly absorbed by the owner — it is
       // never associated with a tenant property, so it never lands on a bill.
-      const generalTotal = building.units.reduce((sum, u) => sum + (Number(u.generalThousandths) || 0), 0);
-      if (generalTotal === 0) {
+      //
+      // ONE derivation for all three ‰ dimensions (they were three byte-identical
+      // copies) and the per-unit rule comes from the shared normaliser in
+      // common/sharebasis, so the numerator, the denominator, the calc-basis the
+      // landlord reads, the owner-side allocator and the save-time guard can never
+      // disagree about what a unit's ‰ is.
+      const _field = ShareBasisUtil.THOUSANDTHS_FIELD[allocationMethod];
+      // NEGATIVE-‰ GUARD. A negative χιλιοστό shrinks the denominator while its
+      // own negative share is discarded by every `share > 0` row gate downstream,
+      // so the surviving units over-collect WITHOUT BOUND: 500/400/−100 bills €225
+      // on a €200 expense (+12,5 %); 600/500/−900 bills €1.100; a negative Σ‰
+      // inverts every sign and bills €2.000. The normaliser sends it to 0 on BOTH
+      // sides of the division — not a clamp AFTER the division, which would leave
+      // the siblings inflated. Normalising alone would make the corrupt data
+      // invisible, so it is announced here and refused by
+      // buildingmanager._assertThousandthsAvailable at save time.
+      const _negatives = ShareBasisUtil.negativeThousandths(
+        building.units,
+        _field
+      );
+      if (_negatives.length > 0) {
+        logger.warn(
+          `${allocationMethod} allocation: building ${building._id} has NEGATIVE ${_field} on ` +
+            `${_negatives.map((n: { propertyId: string; value: number }) => `${n.propertyId}=${n.value}`).join(', ')}. ` +
+            'χιλιοστά cannot be negative; treated as 0 in BOTH the unit share and the ' +
+            `denominator so the €${amount} expense is not over-collected. Fix the ` +
+            'χιλιοστά on the Units tab.'
+        );
+      }
+      const _total = ShareBasisUtil.thousandthsTotal(building.units, _field);
+      if (_total === 0) {
         // A zero vector means the split is unrepresentable: every unit gets 0, no
         // monthlyCharge row is written, and the amount lands on NO surface — the
         // absent-representation shape from MONEY_SURFACE_MATRIX. custom_ratio already
@@ -604,50 +635,17 @@ function _computeBuildingChargeRaw(
         // an E9-imported building with no χιλιοστά swallowed the expense in silence.
         // The RETURN VALUE is deliberately unchanged: this adds a diagnostic, not money.
         logger.warn(
-          `general_thousandths allocation: every unit in building ${building._id} has 0 generalThousandths, so ` +
+          `${allocationMethod} allocation: every unit in building ${building._id} has 0 ${_field}, so ` +
             `€${amount} is charged to nobody. Set χιλιοστά or pick another method.`
         );
         return 0;
       }
-      return (amount * (Number(unit.generalThousandths) || 0)) / generalTotal;
-    }
-
-    case 'heating_thousandths': {
-      // Wave-14 F2: see general_thousandths note.
-      const heatingTotal = building.units.reduce((sum, u) => sum + (Number(u.heatingThousandths) || 0), 0);
-      if (heatingTotal === 0) {
-        // A zero vector means the split is unrepresentable: every unit gets 0, no
-        // monthlyCharge row is written, and the amount lands on NO surface — the
-        // absent-representation shape from MONEY_SURFACE_MATRIX. custom_ratio already
-        // warns in the same situation (see its branch below); these three did not, so
-        // an E9-imported building with no χιλιοστά swallowed the expense in silence.
-        // The RETURN VALUE is deliberately unchanged: this adds a diagnostic, not money.
-        logger.warn(
-          `heating_thousandths allocation: every unit in building ${building._id} has 0 heatingThousandths, so ` +
-            `€${amount} is charged to nobody. Set χιλιοστά or pick another method.`
-        );
-        return 0;
-      }
-      return (amount * (Number(unit.heatingThousandths) || 0)) / heatingTotal;
-    }
-
-    case 'elevator_thousandths': {
-      // Wave-14 F2: see general_thousandths note.
-      const elevatorTotal = building.units.reduce((sum, u) => sum + (Number(u.elevatorThousandths) || 0), 0);
-      if (elevatorTotal === 0) {
-        // A zero vector means the split is unrepresentable: every unit gets 0, no
-        // monthlyCharge row is written, and the amount lands on NO surface — the
-        // absent-representation shape from MONEY_SURFACE_MATRIX. custom_ratio already
-        // warns in the same situation (see its branch below); these three did not, so
-        // an E9-imported building with no χιλιοστά swallowed the expense in silence.
-        // The RETURN VALUE is deliberately unchanged: this adds a diagnostic, not money.
-        logger.warn(
-          `elevator_thousandths allocation: every unit in building ${building._id} has 0 elevatorThousandths, so ` +
-            `€${amount} is charged to nobody. Set χιλιοστά or pick another method.`
-        );
-        return 0;
-      }
-      return (amount * (Number(unit.elevatorThousandths) || 0)) / elevatorTotal;
+      // The NUMERATOR goes through the same normaliser as the denominator. Reading
+      // the raw field here instead would reinstate the whole defect: a negative unit
+      // would produce a negative share that every `share > 0` row gate discards,
+      // while the normalised denominator has already excluded it — so the siblings
+      // over-collect exactly as before.
+      return (amount * ShareBasisUtil.unitThousandths(unit, _field)) / _total;
     }
 
     case 'equal': {

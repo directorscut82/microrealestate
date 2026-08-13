@@ -1,0 +1,140 @@
+[
+  {
+    "name": "bill in June, expense starts in August → before-start",
+    "expense": {
+      "startTerm": 2026080100
+    },
+    "term": 2026060100,
+    "expected": {
+      "fits": false,
+      "reason": "before-start",
+      "startTerm": 2026080100
+    }
+  },
+  {
+    "name": "bill in the expense start month → fits (inclusive)",
+    "expense": {
+      "startTerm": 2026080100
+    },
+    "term": 2026080100,
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "bill after the start → fits",
+    "expense": {
+      "startTerm": 2026010100
+    },
+    "term": 2026080100,
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "bill in the expense end month → fits (inclusive)",
+    "expense": {
+      "startTerm": 2026010100,
+      "endTerm": 2026060100
+    },
+    "term": 2026060100,
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "bill after the end → after-end",
+    "expense": {
+      "startTerm": 2026010100,
+      "endTerm": 2026060100
+    },
+    "term": 2026070100,
+    "expected": {
+      "fits": false,
+      "reason": "after-end",
+      "endTerm": 2026060100
+    }
+  },
+  {
+    "name": "no startTerm at all → charged for no month whatsoever",
+    "expense": {},
+    "term": 2026060100,
+    "expected": {
+      "fits": false,
+      "reason": "no-start"
+    }
+  },
+  {
+    "name": "endTerm absent → open-ended, any later month fits",
+    "expense": {
+      "startTerm": 2026010100,
+      "endTerm": null
+    },
+    "term": 2030010100,
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "unknown bill term → no warning (a false warning on every bill is worse)",
+    "expense": {
+      "startTerm": 2026080100
+    },
+    "term": null,
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "empty-string bill term → no warning",
+    "expense": {
+      "startTerm": 2026080100
+    },
+    "term": "",
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "garbage bill term → no warning",
+    "expense": {
+      "startTerm": 2026080100
+    },
+    "term": "not-a-term",
+    "expected": {
+      "fits": true
+    }
+  },
+  {
+    "name": "null expense → no-start, never a crash",
+    "expense": null,
+    "term": 2026060100,
+    "expected": {
+      "fits": false,
+      "reason": "no-start"
+    }
+  },
+  {
+    "name": "string terms compare numerically, not lexically",
+    "expense": {
+      "startTerm": "2026080100"
+    },
+    "term": "2026060100",
+    "expected": {
+      "fits": false,
+      "reason": "before-start",
+      "startTerm": 2026080100
+    }
+  },
+  {
+    "name": "a zero startTerm is not a real start",
+    "expense": {
+      "startTerm": 0
+    },
+    "term": 2026060100,
+    "expected": {
+      "fits": false,
+      "reason": "no-start"
+    }
+  }
+]

@@ -148,7 +148,13 @@ beforeAll(async () => {
       Middlewares: {},
       OwnerStatement: { LOIPOI_LABEL: 'ΛΟΙΠΟΙ' },
       BuildingProjection: {},
-      ShareBasis: {}
+      ShareBasis: {},
+      // telegramInboxScanner now warns when a bill's month falls outside its
+      // expense's active range, so this factory must provide that export too.
+      // unstable_mockModule replaces the WHOLE module: an export the graph
+      // consumes but the factory omits is `undefined` at call time, not a
+      // resolution error, so the failure surfaces as a TypeError deep inside.
+      BillTerm: { billTermFitsExpense: () => ({ fits: true }) }
     };
   });
   const scanner = await import('../jobs/telegramInboxScanner.js');

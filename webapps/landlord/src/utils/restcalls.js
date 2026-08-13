@@ -359,6 +359,51 @@ export async function fetchDocuments(entityFilter) {
   return response.data;
 }
 
+/**
+ * The file-browser SHAPE: per-building counts and nothing else. No document bodies,
+ * no urls — a few hundred bytes however many files the realm holds.
+ *
+ * Settings → Αρχεία previously called `fetchDocuments()` unfiltered and pulled every
+ * row in the realm on page open. This is the endpoint that lets the page render the
+ * folders first and fetch a folder's files only when it is opened.
+ */
+export async function fetchDocumentTree() {
+  const response = await apiFetcher().get('/documents/tree');
+  return response.data;
+}
+
+/**
+ * One page of a folder's files.
+ *
+ * `propertyIds` / `tenantIds` are SETS so «every apartment of this building» is one
+ * request rather than one per apartment. `limit`/`skip` keep an opened folder to one
+ * page — the landlord's realm accumulates bills for years.
+ */
+export async function fetchDocumentPage({
+  buildingId,
+  propertyIds,
+  tenantIds,
+  ownerKey,
+  bucket,
+  limit = 50,
+  skip = 0
+} = {}) {
+  const params = new URLSearchParams();
+  if (buildingId) params.set('buildingId', buildingId);
+  if (propertyIds?.length) params.set('propertyIds', propertyIds.join(','));
+  if (tenantIds?.length) params.set('tenantIds', tenantIds.join(','));
+  if (ownerKey) params.set('ownerKey', ownerKey);
+  // `bucket` ('owners' | 'unattached') is a server-side predicate for the realm-level
+  // folders. It exists so those folders never have to send an EMPTY filter: an empty
+  // filter means "every document in the realm", and that fail-open is what made the
+  // apartment tab list the whole realm.
+  if (bucket) params.set('bucket', bucket);
+  params.set('limit', String(limit));
+  params.set('skip', String(skip));
+  const response = await apiFetcher().get(`/documents?${params.toString()}`);
+  return response.data;
+}
+
 export async function createDocument(document) {
   const response = await apiFetcher().post('/documents', document);
   return response.data;

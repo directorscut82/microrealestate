@@ -36,7 +36,67 @@ export type ShareBasis = {
   allocKind?: string; // repair_vacant per-unit divisor: 'surface' | 'thousandths' | 'equal'
 };
 
+// The χιλιοστά weight rule (thousandths.ts) is re-exported through this
+// namespace on purpose: `ShareBasis` is already imported by the api engine and
+// already listed in every jest mock factory for '@microrealestate/common', so
+// the money rule reaches all its consumers without adding a new top-level
+// export (which would break those factories).
 const _round = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+
+// ─── χιλιοστά (‰): the SINGLE per-unit rule ──────────────────────────────────
+// χιλιοστά are per-mille ownership shares of a building: non-negative by
+// construction (Σ = 1000). A negative value is corrupt input — there is no
+// "negative share of a roof" — and it MUST be normalised to 0 on BOTH sides of
+// the division, numerator and denominator, by every surface that splits by ‰.
+//
+// Why both sides, and why here: every money surface downstream emits a row only
+// for a share > 0 (1_base:1174/:252/:465, buildingmanager:3473/:6415/:7003/
+// :7740, propertymanager:789). A SIGNED denominator with a positive-only billed
+// set cannot conserve — 500/400/−100 over a €200 expense billed 125+100 = €225
+// (+12,5 %), and as Σ‰ → 0⁺ the billed total → ∞ (600/500/−900 billed €1.100).
+// Normalising both sides makes the denominator's support set IDENTICAL to the
+// billed set, which is exactly the condition for Σ(shares) = amount.
+//
+// For a healthy vector (every ‰ ≥ 0 — everything the UI can produce) this is the
+// IDENTITY: same numerator, same denominator, same cents. It changes figures
+// only where a negative ‰ is already persisted.
+export const THOUSANDTHS_FIELD: Record<string, string> = {
+  general_thousandths: 'generalThousandths',
+  heating_thousandths: 'heatingThousandths',
+  elevator_thousandths: 'elevatorThousandths'
+};
+
+/** ONE unit's ‰ as allocation input: non-numeric → 0, NEGATIVE → 0. */
+export function unitThousandths(unit: any, field: string): number {
+  const v = Number(unit?.[field]) || 0; // undefined / null / 'δεν υπάρχει' → 0
+  return v > 0 ? v : 0; // negative, −0 and NaN → 0
+}
+
+/** The ‰ denominator over a unit list, using the SAME per-unit rule. */
+export function thousandthsTotal(units: any[], field: string): number {
+  return (units || []).reduce(
+    (s: number, u: any) => s + unitThousandths(u, field),
+    0
+  );
+}
+
+/**
+ * The units carrying a NEGATIVE ‰. Normalising to 0 keeps the money right but
+ * would make the misconfiguration invisible (MONEY_SURFACE_MATRIX forbids that),
+ * so callers use this to SURFACE it: a save-time 422, an engine warn, and a UI
+ * blocker. Returns [] for a healthy building, so no caller changes behaviour.
+ */
+export function negativeThousandths(
+  units: any[],
+  field: string
+): { propertyId: string; value: number }[] {
+  return (units || [])
+    .filter((u: any) => (Number(u?.[field]) || 0) < 0)
+    .map((u: any) => ({
+      propertyId: String(u?.propertyId ?? u?._id ?? '?'),
+      value: Number(u[field])
+    }));
+}
 
 // moment-free: parse a date-ish value to UTC YYYYMM as an integer year*100+month.
 function _toYM(d: any): number | null {
@@ -152,20 +212,14 @@ export function shareBasis(
     case 'general_thousandths':
     case 'heating_thousandths':
     case 'elevator_thousandths': {
-      const key =
-        method === 'general_thousandths'
-          ? 'generalThousandths'
-          : method === 'heating_thousandths'
-            ? 'heatingThousandths'
-            : 'elevatorThousandths';
-      const sumT = (building.units || []).reduce(
-        (s: number, u: any) => s + (Number(u[key]) || 0),
-        0
-      );
+      // Same normalised ‰ the allocator divides by, so the equation the landlord
+      // reads can never disagree with the euro on the bill («−100 / 800 × 200 €»
+      // was rendered as a straight face).
+      const key = THOUSANDTHS_FIELD[method];
       return {
         kind: 'thousandths',
-        part: fmt(unit[key] || 0),
-        whole: fmt(sumT),
+        part: fmt(unitThousandths(unit, key)),
+        whole: fmt(thousandthsTotal(building.units || [], key)),
         total: fmt(total),
         share: fmt(share)
       };
@@ -295,17 +349,9 @@ function _ownerAmountBasis(
     m === 'heating_thousandths' ||
     m === 'elevator_thousandths'
   ) {
-    const key =
-      m === 'general_thousandths'
-        ? 'generalThousandths'
-        : m === 'heating_thousandths'
-          ? 'heatingThousandths'
-          : 'elevatorThousandths';
-    const whole = (building.units || []).reduce(
-      (s: number, u: any) => s + (Number(u[key]) || 0),
-      0
-    );
-    const part = Number(unit?.[key]) || 0;
+    const key = THOUSANDTHS_FIELD[m];
+    const whole = thousandthsTotal(building.units || [], key);
+    const part = unitThousandths(unit, key);
     return {
       kind: 'thousandths',
       part: fmt(part),
@@ -439,20 +485,10 @@ export function ownerChargeBasis(building: any, charge: any): ShareBasis | null 
       method === 'heating_thousandths' ||
       method === 'elevator_thousandths'
     ) {
-      const key =
-        method === 'general_thousandths'
-          ? 'generalThousandths'
-          : method === 'heating_thousandths'
-            ? 'heatingThousandths'
-            : 'elevatorThousandths';
+      const key = THOUSANDTHS_FIELD[method];
       allocKind = 'thousandths';
-      part = _round(Number(unit?.[key]) || 0);
-      whole = _round(
-        (building.units || []).reduce(
-          (s: number, u: any) => s + (Number(u[key]) || 0),
-          0
-        )
-      );
+      part = _round(unitThousandths(unit, key));
+      whole = _round(thousandthsTotal(building.units || [], key));
     } else if (method === 'equal') {
       allocKind = 'equal';
       count = managed.length;

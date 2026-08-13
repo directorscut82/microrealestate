@@ -1572,5 +1572,12 @@
   "The file is no longer in storage": "Το αρχείο δεν υπάρχει πλέον στον αποθηκευτικό χώρο",
   "You are not allowed to open this file": "Δεν έχετε δικαίωμα να ανοίξετε αυτό το αρχείο",
   "The file could not be opened": "Το αρχείο δεν μπόρεσε να ανοίξει",
-  "Open in a new tab": "Άνοιγμα σε νέα καρτέλα"
+  "Open in a new tab": "Άνοιγμα σε νέα καρτέλα",
+  "{{count}} files — open a folder to load it": "{{count}} αρχεία — ανοίξτε έναν φάκελο για να φορτωθεί",
+  "Bills and receipts": "Λογαριασμοί & αποδείξεις",
+  "Apartments": "Διαμερίσματα",
+  "Not linked to anything": "Χωρίς αντιστοίχιση",
+  "Files whose building, apartment or tenant no longer exists": "Αρχεία των οποίων το κτίριο, το διαμέρισμα ή ο ενοικιαστής δεν υπάρχει πλέον",
+  "Show more ({{shown}} of {{total}})": "Εμφάνιση περισσότερων ({{shown}} από {{total}})",
+  "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.": "Υπάρχει λογαριασμός {{amount}} για τη δαπάνη «{{expense}}», αλλά η δαπάνη δεν χρεώνεται αυτόν τον μήνα — δεν φτάνει σε κανέναν. Διορθώστε την περίοδο της δαπάνης ή τον μήνα του λογαριασμού."
 }
