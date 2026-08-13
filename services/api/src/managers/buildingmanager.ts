@@ -4947,6 +4947,19 @@ export async function updateExpense(req: Req, res: Res) {
     effectiveCustomAllocations,
     effectiveAllocationMethod
   );
+  // The type↔method rule must ALSO run on the merged values, for the same reason as
+  // the four above. It was added (today) reading only `req.body`, and it bails when
+  // either field is not a string — so a PATCH that sent ONLY
+  // `{allocationMethod: 'general_thousandths'}` against a stored `electricity_private`
+  // expense sailed through, as did the mirror image sending only
+  // `{type: 'electricity_private'}` against a stored thousandths method. That second
+  // case is verbatim the scenario the validator's own docstring says it prevents: one
+  // apartment's bill keeps splitting across the whole building. The complete-payload
+  // case was refused, which is exactly why it looked correct.
+  validateTypeAllocationCompatible(
+    req.body.type !== undefined ? req.body.type : (expense as any).type,
+    effectiveAllocationMethod
+  );
   // Thousandths-availability guard — but ONLY when this PATCH actually CHANGES the
   // allocation method to a thousandths one AND a positive tenant amount is in
   // effect. Guarding on the merged method unconditionally would 422 every future
