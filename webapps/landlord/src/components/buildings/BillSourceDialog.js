@@ -149,11 +149,29 @@ export default function BillSourceDialog({ open, setOpen, bill, kind = 'bill' })
                 {t('Loading...')}
               </div>
             ) : isPdf ? (
-              <iframe
-                src={objectUrl}
-                title={t('Bill')}
-                className="w-full h-[70vh] min-h-80 rounded-md border border-stone-line bg-white"
-              />
+              <div className="space-y-2">
+                <iframe
+                  src={objectUrl}
+                  title={t('Bill')}
+                  data-cy="billPdfFrame"
+                  className="w-full h-[70vh] min-h-80 rounded-md border border-stone-line bg-white"
+                />
+                {/* A PDF in an <iframe> renders through the BROWSER's own viewer,
+                    which some builds ship without (headless Chromium has none at
+                    all, which is why an automated screenshot shows this pane
+                    blank). Never leave the document unreachable when that happens:
+                    this opens the same blob in a tab, where the viewer is the
+                    user's own. */}
+                <a
+                  href={objectUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-cy="billOpenInTab"
+                  className="text-label text-ink-muted underline underline-offset-2 hover:text-ink"
+                >
+                  {t('Open in a new tab')}
+                </a>
+              </div>
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -173,7 +191,13 @@ export default function BillSourceDialog({ open, setOpen, bill, kind = 'bill' })
               </div>
             </div>
 
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-sm">
+            {/* `min-w-0` on the grid AND on the value cell: without it the 1fr
+                column refuses to shrink below its content, so a billing period
+                rendered as «31/05/202» and a 25-character RF code lost its last
+                six characters instead of wrapping. A truncated payment code is
+                worse than useless — it looks like a value the landlord can read
+                off and type into their bank. */}
+            <dl className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
               {rows.map(([label, value]) => (
                 <DataRow key={label} label={label} value={value} />
               ))}
@@ -221,7 +245,7 @@ function DataRow({ label, value }) {
   return (
     <>
       <dt className="text-ink-muted whitespace-nowrap">{label}</dt>
-      <dd className="text-ink break-words tabular-nums">{value}</dd>
+      <dd className="min-w-0 break-words text-ink tabular-nums">{value}</dd>
     </>
   );
 }

@@ -331,7 +331,14 @@ function BillPills({ bill, onOpen, t }) {
 
 function ExpenseRow({ row, value, onChange, onSave, saving, t, bill, onOpenBill }) {
   return (
-    <div className="flex items-center justify-between gap-2 text-sm py-0.5">
+    // The tenant and owner lists render the SAME expense name, so a test (or a
+    // screenshot reviewer) cannot tell the two rows apart from their text. The side
+    // and the expense id are the only way to address one unambiguously.
+    <div
+      data-cy={row.isOwner ? 'ownerExpenseRow' : 'tenantExpenseRow'}
+      data-expense={row.expenseId}
+      className="flex items-center justify-between gap-2 text-sm py-0.5"
+    >
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
         {/* Left-panel monthly statement (FIX_PLAN §470-503): show the TYPE label
             with the name in parens — "Τύπος (όνομα)" — the SAME convention the

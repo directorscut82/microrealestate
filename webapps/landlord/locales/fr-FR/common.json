@@ -1324,5 +1324,6 @@
   "RF code": "RF code",
   "The file is no longer in storage": "The file is no longer in storage",
   "You are not allowed to open this file": "You are not allowed to open this file",
-  "The file could not be opened": "The file could not be opened"
+  "The file could not be opened": "The file could not be opened",
+  "Open in a new tab": "Ouvrir dans un nouvel onglet"
 }
