@@ -770,7 +770,14 @@ async function _handleUpdate(
     await deps.sendReply?.(
       realm.botToken,
       msg.chat.id,
-      'Το αρχείο δεν μπόρεσε να ληφθεί (πολύ μεγάλο ή μη διαθέσιμο). Στείλτε φωτογραφία έως 6MB.'
+      // MUST NOT say «send a photo». The other two replies tell the landlord to send
+      // the bill as a FILE, because Telegram compresses photos to ~1280px and a
+      // compressed bill often cannot be read. This reply fires when a FILE was
+      // refused — so telling them to fall back to a photo closed a LOOP: parse fails
+      // → "send a file" → file over 6MB → "send a photo" → compressed → parse fails.
+      // State the limit and how to get under it, and be honest that the photo
+      // fallback costs resolution instead of presenting it as the remedy.
+      'Το αρχείο δεν μπόρεσε να ληφθεί (πάνω από 6MB ή μη διαθέσιμο). Στείλτε το ως ΑΡΧΕΙΟ έως 6MB — αν είναι μεγαλύτερο, σαρώστε το σε χαμηλότερη ποιότητα ή στείλτε μία σελίδα τη φορά. Φωτογραφία επίσης δουλεύει, αλλά το Telegram τη συμπιέζει και συχνά δεν διαβάζεται.'
     );
     return 'skipped';
   }

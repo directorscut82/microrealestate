@@ -231,10 +231,25 @@ function ResultCard({
           </div>
         ) : (
           <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+            {/* WHY there is no match. «Could not be matched» is the wrong sentence when
+                the truth is that SEVERAL things matched and the operator has to choose:
+                its obvious remedy — create another έξοδο for the same παροχή — makes
+                the ambiguity permanent. The server has always known the difference and
+                now reports it as `matchAmbiguous`; until this block existed the field
+                had no reader, so an ambiguous bill read exactly like an unmatched one.
+                The bell has said this since the matcher was unified. */}
             <div className="text-sm text-muted-foreground">
-              {t(
-                'This bill could not be matched automatically. Register it by hand:'
-              )}
+              {result.matchAmbiguous === 'expense'
+                ? t(
+                    'This billing ID is on more than one expense — pick which one, or remove the duplicate'
+                  )
+                : result.matchAmbiguous === 'sharedMeter'
+                  ? t(
+                      'This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details'
+                    )
+                  : t(
+                      'This bill could not be matched automatically. Register it by hand:'
+                    )}
             </div>
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">

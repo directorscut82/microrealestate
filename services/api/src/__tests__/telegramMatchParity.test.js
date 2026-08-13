@@ -514,6 +514,32 @@ describe('the Telegram IMAGE path', () => {
     expect(src).toContain('sizes[sizes.length - 1]');
   });
 
+  it('EVERY reply is coherent: none offers a photo as the remedy', () => {
+    // THE DEFECT THIS EXISTS FOR. There are four reply sites. I changed two to say
+    // «send it as a FILE» and left the third saying «Στείλτε φωτογραφία έως 6MB» —
+    // which fires precisely when a FILE was refused. That closed a loop with no exit:
+    //   parse fails -> "send a file" -> file over 6MB -> "send a photo"
+    //   -> Telegram compresses to ~1280px -> parse fails -> repeat
+    // And it let me report «both replies now say to send it as a file», which was true
+    // of the two I touched and false of the bot.
+    //
+    // So this asserts the PROPERTY, not the presence of a string: no reply may
+    // instruct the landlord to send a photograph, because photographs are the thing
+    // that fails. Mentioning a photo as a lesser fallback WITH its downside is fine;
+    // «Στείλτε φωτογραφία» as the instruction is not.
+    const src = read();
+    const replies = [...src.matchAll(/'([^']*(?:Στείλτε|στείλτε|Ελήφθη)[^']*)'/g)].map(
+      (m) => m[1]
+    );
+    // Guard the guard: if the extraction finds nothing, the assertion below is
+    // vacuous — which is how a source-reading test silently stops testing.
+    expect(replies.length).toBeGreaterThanOrEqual(3);
+    const offenders = replies.filter((r) =>
+      /(?:Στείλτε|στείλτε)\s+φωτογραφ/.test(r)
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it('advises sending the bill as a FILE, not a closer photo', () => {
     // Telegram compresses a photo to ~1280px on its longest side — a hard ceiling no
     // re-shoot beats. The real ΕΥΔΑΠ bill arrived at exactly 854x1280, i.e. already

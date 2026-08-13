@@ -457,6 +457,31 @@ function InboxCard({ item, buildings, onGone }) {
         </div>
       )}
 
+      {/* WARNINGS the ingest attached to the item.
+          The Telegram scanner records these — currently the one that matters most:
+          the bill's month falls OUTSIDE its expense's active range, so the engine
+          charges that expense for no month at all and the amount lands on no
+          surface. They were persisted onto the InboxItem and returned by GET /inbox
+          (the handler returns the lean doc), and this component never read them — so
+          the warning existed in the database and nowhere the landlord could see it.
+          Which is the same absent-representation defect the warning itself exists to
+          announce.
+          The strings are already Greek: they are composed server-side beside the
+          expense name and the month, the same way `parseError` is. */}
+      {Array.isArray(item.warnings) && item.warnings.length > 0 && (
+        <div
+          className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs dark:border-amber-800 dark:bg-amber-950/30"
+          data-cy="inboxItemWarnings"
+        >
+          {item.warnings.map((w, i) => (
+            <div key={i} className="flex items-start gap-1.5">
+              <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+              <div className="text-amber-800 dark:text-amber-200">{w}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {match ? (
         <div className="flex items-center gap-1.5 rounded-md bg-success/10 text-success text-xs px-2.5 py-1.5">
           <LuCheck className="size-3.5 shrink-0" />
