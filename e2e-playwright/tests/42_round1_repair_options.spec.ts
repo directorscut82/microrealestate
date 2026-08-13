@@ -360,11 +360,22 @@ test('42.3 · edit existing repair — all fields round-trip through dialog', as
   await expect(page.locator('textarea#description')).toHaveValue(seedPayload.description);
   await expect(page.locator('input#estimatedCost')).toHaveValue(String(seedPayload.estimatedCost));
   await expect(page.locator('input#actualCost')).toHaveValue(String(seedPayload.actualCost));
-  await expect(page.locator('input#invoiceReference')).toHaveValue(seedPayload.invoiceReference);
-  await expect(page.locator('textarea#notes')).toHaveValue(seedPayload.notes);
-  await expect(page.locator('input#reportedDate')).toHaveValue(reportedDate);
-  await expect(page.locator('input#startDate')).toHaveValue(startDate);
   await expect(page.locator('input#completionDate')).toHaveValue(completionDate);
+  // `reportedDate`, `startDate`, `invoiceReference` and `notes` were DELETED from
+  // this dialog on purpose — written and stored but read by nobody (see the zod
+  // schema comment in RepairList.js). This test still asserted all four, so it
+  // failed on a feature that was correctly removed. Assert their ABSENCE instead:
+  // if a future change re-adds a dead field, this is what says so.
+  for (const gone of [
+    'input#invoiceReference',
+    'textarea#notes',
+    'input#reportedDate',
+    'input#startDate'
+  ]) {
+    await expect(page.locator(gone), `${gone} is a removed dead field`).toHaveCount(
+      0
+    );
+  }
 });
 
 test('42.4 · POST repair chargeableTo=owners + past chargeTerm + paid tenant rent → 200', async () => {
