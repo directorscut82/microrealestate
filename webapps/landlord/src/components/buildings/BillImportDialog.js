@@ -62,6 +62,19 @@ const ALLOCATION_METHOD_LABEL = {
   single_unit: 'Single Unit'
 };
 
+/**
+ * The amount as the landlord would write it — «120,00», not «120».
+ *
+ * Safe to seed in Greek form because the confirm path parses it back with
+ * parseGreekMoney, which handles both «1.234,56» and «1234.56». Untouched values
+ * therefore round-trip exactly; only the DISPLAY changes.
+ */
+function formatSeedAmount(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  return n.toFixed(2).replace('.', ',');
+}
+
 // H4: key per-result state by a stable synthetic uid, NOT filename. Two uploaded
 // files can share a name (the server keeps both), and a filename key made their
 // cards collide onto one state entry — assigning one drove the other, routing
@@ -418,7 +431,12 @@ function ResultCard({
               {!identifiedUnit && singleUnitTargetLabel ? (
                 <>
                   {' · '}
-                  {singleUnitTargetLabel}
+                  {/* Units in this realm can have no `name`, in which case the label
+                      is the bare ΑΤΑΚ — an 11-digit number with nothing saying it is
+                      an apartment. Prefix it when that is all we have. */}
+                  {/^\d+$/.test(singleUnitTargetLabel)
+                    ? `${t('Apartment')} ${singleUnitTargetLabel}`
+                    : singleUnitTargetLabel}
                 </>
               ) : null}
             </span>
@@ -575,7 +593,7 @@ function ResultCard({
                     value={
                       amountOverride !== undefined
                         ? amountOverride
-                        : String(parsed.totalAmount ?? '')
+                        : formatSeedAmount(parsed.totalAmount)
                     }
                     onChange={(e) => onAmountChange(result._uid, e.target.value)}
                     aria-label={t('Amount')}
