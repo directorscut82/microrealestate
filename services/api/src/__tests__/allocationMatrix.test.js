@@ -685,13 +685,19 @@ describe('allocation matrix — rounding: does Σ(shares) reconcile to the expen
     expect(sum(got)).toBe(100);
   });
 
-  it('BUG (documented, not fixed): thousandths methods have NO carrier-remainder — €100/3 collects only €99.99', () => {
-    // equal / by_surface / custom_ratio / custom_percentage all route the
-    // rounding remainder to a lex-max carrier so Σ bills the full amount. The
-    // three *_thousandths branches do not: each returns its own rounded share
-    // and the leftover cent is never charged to anyone. On a monthly recurring
-    // κοινόχρηστο that is €0.12/year per affected building, invisible on every
-    // surface because each individual share looks correct.
+  it('general_thousandths carries the leftover cent, so €100/3 collects exactly €100', () => {
+    // WAS THE DEFECT: equal / by_surface / custom_ratio / custom_percentage all
+    // routed the rounding remainder to a lex-max carrier so Σ billed the full
+    // amount; the three *_thousandths branches did not. Each returned its own
+    // rounded share, 33,33 three times, and the leftover cent was charged to
+    // nobody — €0,12 a year per affected building on a monthly κοινόχρηστο,
+    // invisible on every surface because each individual share looked right.
+    //
+    // FIXED with the same carrier rule by_surface uses, and the carrier is chosen
+    // from the SAME support set as the denominator (every unit with ‰ > 0, vacant
+    // and un-named included). Choosing it from managed units only reintroduced the
+    // gap: a 500/500 building with one unnamed unit billed the carrier the FULL
+    // €100 instead of €50, caught by expenseBreakdown's M2.
     const got = shares(
       makeBuilding(three),
       makeExpense('general_thousandths', 100)
@@ -699,26 +705,27 @@ describe('allocation matrix — rounding: does Σ(shares) reconcile to the expen
     expectMatrix('rounding/general_thousandths', got, {
       pA: 33.33,
       pB: 33.33,
-      pC: 33.33
+      pC: 33.34
     });
-    expect(sum(got)).toBe(99.99);
-    expect(Math.round((100 - sum(got)) * 100) / 100).toBe(0.01);
+    expect(sum(got)).toBe(100);
+    // Nothing left unbilled — this asserted a 0,01 shortfall while the bug stood.
+    expect(Math.round((100 - sum(got)) * 100) / 100).toBe(0);
   });
 
-  it('heating_thousandths loses the same cent (same missing carrier, second branch)', () => {
+  it('heating_thousandths carries it too (same branch now)', () => {
     const got = shares(
       makeBuilding(three),
       makeExpense('heating_thousandths', 100)
     );
-    expect(sum(got)).toBe(99.99);
+    expect(sum(got)).toBe(100);
   });
 
-  it('elevator_thousandths loses the same cent (third branch)', () => {
+  it('elevator_thousandths carries it too (same branch now)', () => {
     const got = shares(
       makeBuilding(three.map((u) => ({ ...u, elevator: 1 }))),
       makeExpense('elevator_thousandths', 100)
     );
-    expect(sum(got)).toBe(99.99);
+    expect(sum(got)).toBe(100);
   });
 
   it('custom_percentage 33.33/33.33/33.34: Σ bills exactly €100', () => {

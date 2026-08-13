@@ -640,12 +640,46 @@ function _computeBuildingChargeRaw(
         );
         return 0;
       }
-      // The NUMERATOR goes through the same normaliser as the denominator. Reading
-      // the raw field here instead would reinstate the whole defect: a negative unit
-      // would produce a negative share that every `share > 0` row gate discards,
-      // while the normalised denominator has already excluded it — so the siblings
-      // over-collect exactly as before.
-      return (amount * ShareBasisUtil.unitThousandths(unit, _field)) / _total;
+      // CARRIER-REMAINDER, the same rule `by_surface` already uses (see its branch
+      // below). Every share except the last is rounded independently; the last unit
+      // — lex-max propertyId among those with a positive ‰ — absorbs the rounding
+      // remainder, so Σ(shares) bills exactly `amount`.
+      //
+      // Without it, 1/1/1 χιλιοστά on a €100 expense gives every unit 33,333… which
+      // rounds to 33,33, and the building collects €99,99 — the landlord eats a cent
+      // every month, on every thousandths expense, forever. `equal` and `by_surface`
+      // have carried this since Wave-17; the three ‰ branches never got it.
+      //
+      // The carrier is chosen from the SAME support set as the denominator (every
+      // unit with ‰ > 0, vacant included — Wave-14 F2 above), because that identity
+      // is what makes the sum exact. Picking it from managed units only would leave
+      // the vacant units' rounding unaccounted for again.
+      const _myPropId = String(propertyId);
+      const _orderedIds = building.units
+        .filter(
+          (u) => ShareBasisUtil.unitThousandths(u, _field) > 0 && u.propertyId
+        )
+        .map((u) => String(u.propertyId))
+        .sort();
+      if (_orderedIds.length === 0) return 0;
+      if (_myPropId !== _orderedIds[_orderedIds.length - 1]) {
+        return (amount * ShareBasisUtil.unitThousandths(unit, _field)) / _total;
+      }
+      // Sum over EVERY other unit with a positive ‰ — including any that carries no
+      // propertyId. Those units are in the DENOMINATOR (it is the whole building),
+      // so leaving them out of this sum breaks the very identity the carrier exists
+      // to preserve: measured on a 500/500 building with one unnamed unit, the
+      // carrier returned the FULL €100 instead of its €50 share, because `othersSum`
+      // saw nothing. The carrier is identified by propertyId (it has to be, to know
+      // whether this call is the carrier's), but the sum is over the support set.
+      let _othersSum = 0;
+      for (const u of building.units) {
+        const w = ShareBasisUtil.unitThousandths(u, _field);
+        if (!(w > 0)) continue;
+        if (u.propertyId && String(u.propertyId) === _myPropId) continue;
+        _othersSum += Math.round(((amount * w) / _total) * 100) / 100;
+      }
+      return Math.round((amount - _othersSum) * 100) / 100;
     }
 
     case 'equal': {
