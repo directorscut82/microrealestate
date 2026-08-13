@@ -400,9 +400,10 @@ export function parseEydapBill(text: string): BillParseResult {
     warnings.push('registry-number-disagrees');
   }
 
-  if (!accountNumber && !registryNumber) missing.push('billingId');
-
+  // Without a meter number there is nothing to match on that identifies a supply
+  // point; the billing numbers are only fallbacks for pre-existing data.
   const meterSerial = text.match(METER_SERIAL)?.[1] || null;
+  if (!meterSerial && !accountNumber && !registryNumber) missing.push('billingId');
 
   // ─── period ────────────────────────────────────────────────────────────────
   // TWO date RANGES are printed, and only one of them is the billing period:
@@ -603,7 +604,10 @@ export function parseEydapBill(text: string): BillParseResult {
     // discarded everything else the OCR had read perfectly, and the landlord was
     // left with «parse failed» after 51 seconds.
     const partial: PartialBillFields = { missingFields: [...new Set(missing)] };
-    if (accountNumber) {
+    if (meterSerial) {
+      partial.billingId = meterSerial;
+      partial.billingIdNormalized = normalizeBillingId(meterSerial);
+    } else if (accountNumber) {
       partial.billingId = accountNumber;
       partial.billingIdNormalized = normalizeBillingId(accountNumber);
     } else if (registryNumber) {
@@ -624,10 +628,23 @@ export function parseEydapBill(text: string): BillParseResult {
     };
   }
 
-  // The account number is the primary key: it is what the landlord pays with and
-  // the most likely thing typed into the apartment's ΕΥΔΑΠ field. The μητρώο rides
-  // along as an alternate so a landlord who recorded THAT still matches.
-  const primary = accountNumber || (registryNumber as string);
+  // THE METER NUMBER IS THE KEY. The first version used the ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ
+  // because that is what you pay with — which is the wrong axis. The account number
+  // and the μητρώο are BILLING artefacts: they identify a contract, and a contract
+  // moves when the customer changes, gets re-issued, or is renumbered. The ΑΡΙΘΜΟΣ
+  // ΜΕΤΡΗΤΗ is the physical meter bolted to the building, and that is the thing the
+  // landlord actually knows and records.
+  //
+  // Matching on the meter answers everything downstream in one step: WHICH building
+  // (the meter is on exactly one), κοινόχρηστο or ιδιωτικό (whether it sits in
+  // `sharedMeters` or on a `unit`), and whether a δαπάνη already exists for it. No
+  // second decision is needed and none should be invented.
+  //
+  // The account number and μητρώο stay as ALTERNATES, not because the parser is
+  // hedging but because existing data was entered before this was settled — a
+  // landlord who typed the account number into `eydapNumber` must still match rather
+  // than be told their own bill is unrecognised.
+  const primary = meterSerial || accountNumber || (registryNumber as string);
   const alternates = [accountNumber, registryNumber]
     .filter((v): v is string => !!v && v !== primary)
     .map((v) => normalizeBillingId(v));

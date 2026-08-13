@@ -148,20 +148,26 @@ describe('ΕΥΔΑΠ parser — money', () => {
 describe('ΕΥΔΑΠ parser — identity and matching', () => {
   const r = parseEydapBill(OCR);
 
-  it('uses the ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ as the primary key', () => {
-    expect(r.bill.billingId).toBe('99900011122 003');
-    expect(r.bill.billingIdNormalized).toBe('99900011122003');
-  });
-
-  it('carries the ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ as an alternate', () => {
-    // A landlord may have typed EITHER into the apartment's ΕΥΔΑΠ field or onto a
-    // shared meter. Offering only one means the bill fails to match because they
-    // chose the other — and the parser has no business deciding which is "correct".
-    expect(r.bill.alternateBillingIds).toEqual(['999000133']);
-  });
-
-  it('reads the meter serial and the tariff class', () => {
+  it('uses the ΑΡΙΘΜΟΣ ΜΕΤΡΗΤΗ as the primary key', () => {
+    // The first version keyed on the ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ because that is what you
+    // pay with — the wrong axis. The account number and the μητρώο identify a
+    // CONTRACT, which moves when the customer changes or the account is re-issued.
+    // The meter is the physical thing bolted to the building, so matching on it
+    // answers everything at once: which building, κοινόχρηστο or ιδιωτικό (whether
+    // it is in `sharedMeters` or on a `unit`), and whether a δαπάνη exists already.
+    expect(r.bill.billingId).toBe('A99E90001');
+    expect(r.bill.billingIdNormalized).toBe('A99E90001');
     expect(r.bill.details.meterSerial).toBe('A99E90001');
+  });
+
+  it('keeps the billing numbers as alternates for data entered before that', () => {
+    // Not hedging: a landlord who already typed the account number into
+    // `eydapNumber` must still match rather than be told their own bill is
+    // unrecognised.
+    expect(r.bill.alternateBillingIds).toEqual(['99900011122003', '999000133']);
+  });
+
+  it('reads the tariff class', () => {
     expect(r.bill.details.tariff).toBe('Β1');
   });
 
@@ -300,7 +306,7 @@ describe('ΕΥΔΑΠ parser — degradation', () => {
     expect(r.partial.missingFields).toContain('period');
     // …and what WAS read survives, so the operator can still create the έξοδο.
     expect(r.partial.totalAmount).toBe(89.94);
-    expect(r.partial.billingId).toBe('99900011122 003');
+    expect(r.partial.billingId).toBe('A99E90001');
     expect(r.partial.issueDate.toISOString()).toBe('2026-08-04T00:00:00.000Z');
   });
 
