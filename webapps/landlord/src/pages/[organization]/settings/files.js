@@ -403,8 +403,11 @@ function Files() {
           <CardDescription>
             {total === 0
               ? t('No documents uploaded yet')
-              : t('{{count}} files — open a folder to load it', {
-                  count: String(total)
+              : // `count` must be a NUMBER: next-translate selects the `_one` variant
+                // from its type, so passing String(total) defeated pluralisation and
+                // the page read «1 αρχεία» — plural, for one file.
+                t('{{count}} files — open a folder to load it', {
+                  count: total
                 })}
           </CardDescription>
         </CardHeader>

@@ -1560,5 +1560,6 @@
   "Show more ({{shown}} of {{total}})": "Show more ({{shown}} of {{total}})",
   "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.": "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.",
   "Payment barcode": "Payment barcode",
-  "Scan to pay": "Scan to pay"
+  "Scan to pay": "Scan to pay",
+  "{{count}} files — open a folder to load it_one": "1 file — open the folder to load it"
 }
