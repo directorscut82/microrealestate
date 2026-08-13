@@ -103,6 +103,47 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
 }
 
 /**
+ * Generate the payment BARCODE PNG for a provider that prints one instead of an IRIS
+ * QR — ΕΥΔΑΠ, whose scannable code is the 41-digit run under the barcode to the right
+ * of the ΑΠΟΚΟΜΜΑ ΤΑΜΕΙΟΥ.
+ *
+ * WHY A BARCODE AND NOT A QR HERE. `generateIrisQr` requires an rfCode, and ΕΥΔΑΠ
+ * prints none — so a ΕΥΔΑΠ bill card showed no scannable code at all. The QR that IS
+ * printed on an ΕΥΔΑΠ bill is not a payment code either: decoding the real one gives
+ * `https://epsilondigital-eydap.epsilonnet.gr/fd/<hash>:106`, a link to the e-invoice
+ * on the provider's portal, and that hash appears nowhere in the OCR text — so it can
+ * never be regenerated, only decoded from the image. The barcode is the payable code,
+ * and its content the OCR does read.
+ *
+ * Code 128 because the string is 41 digits: both Interleaved 2 of 5 and Code 128
+ * subset C encode digits in PAIRS, so neither can hold an odd count on its own;
+ * bwip-js switches subsets as needed.
+ */
+export async function generatePaymentBarcode(
+  paymentString: string | undefined
+): Promise<Buffer | null> {
+  if (!paymentString) {
+    return null;
+  }
+  try {
+    const bwipjs = (await import('bwip-js')).default;
+    return await bwipjs.toBuffer({
+      bcid: 'code128',
+      text: paymentString,
+      scale: 3,
+      height: 12,
+      // The digits under the bars, exactly as the bill prints them — the landlord
+      // reads them off when a scan fails, which is the whole point of a printed code.
+      includetext: true,
+      textxalign: 'center'
+    });
+  } catch (error) {
+    logger.debug(`barcode generation failed: ${error}`);
+    return null;
+  }
+}
+
+/**
  * Generate IRIS QR code PNG from RF code + payment code.
  * QR content = RF code + payment amount code (verified against real DEH bill).
  * Returns null if either component is missing.

@@ -559,17 +559,37 @@ function ResultCard({
             Values now get all the remaining space, long codes truncate with the
             full value on hover instead of being cut, and nothing overflows. */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          {/* The scannable payment code, on the left. ΔΕΗ prints an IRIS QR; ΕΥΔΑΠ
+              prints a BARCODE instead (its scannable code is the 41-digit run under
+              the barcode beside the ΑΠΟΚΟΜΜΑ ΤΑΜΕΙΟΥ) and no RF code at all, so the
+              IRIS generator declines and this block used to render nothing for a
+              ΕΥΔΑΠ bill. A Code 128 is wide, not square: showing it in the QR's
+              `size-40` box squashes it into an unscannable smear, which is worse
+              than showing none — so the kind decides the box. */}
           {parsed.irisCodeBase64 ? (
-            <div className="shrink-0">
-              <img
-                src={`data:image/png;base64,${parsed.irisCodeBase64}`}
-                alt={t('IRIS payment QR code')}
-                className="size-40 rounded border border-border bg-white p-2"
-              />
-              <div className="mt-1 w-40 text-center text-[0.6875rem] leading-tight text-muted-foreground">
-                {t('Scan to pay (IRIS)')}
+            parsed.paymentCodeKind === 'barcode' ? (
+              <div className="w-full shrink-0 sm:w-72">
+                <img
+                  src={`data:image/png;base64,${parsed.irisCodeBase64}`}
+                  alt={t('Payment barcode')}
+                  className="h-20 w-full rounded border border-border bg-white object-contain p-2"
+                />
+                <div className="mt-1 text-center text-[0.6875rem] leading-tight text-muted-foreground">
+                  {t('Scan to pay')}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="shrink-0">
+                <img
+                  src={`data:image/png;base64,${parsed.irisCodeBase64}`}
+                  alt={t('IRIS payment QR code')}
+                  className="size-40 rounded border border-border bg-white p-2"
+                />
+                <div className="mt-1 w-40 text-center text-[0.6875rem] leading-tight text-muted-foreground">
+                  {t('Scan to pay (IRIS)')}
+                </div>
+              </div>
+            )
           ) : null}
 
           <div className="min-w-0 flex-1">
@@ -1042,6 +1062,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
           rfCode: r.parsed.rfCode,
           paymentCode: r.parsed.paymentCode,
           irisCodeBase64: r.parsed.irisCodeBase64,
+          paymentCodeKind: r.parsed.paymentCodeKind,
           // Slice 6 — carry the raw OCR text to persist on the Bill for later
           // απόδειξη matching (the server rebuilds the match bag from it).
           ocrText: r.parsed.ocrText,

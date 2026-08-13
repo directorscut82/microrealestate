@@ -148,6 +148,23 @@ const METER_SERIAL = /\b([A-ZΑ-Ω]\d{2}[A-ZΑ-Ω]\d{5})\b/;
 const PERIOD = /(\d{2}\/\d{2}\/\d{4})\s*[-–—]\s*(\d{2}\/\d{2}\/\d{4})/;
 /** ΑΡ. ΠΑΡΑΣΤΑΤΙΚΟΥ: «2026 0007 2757 0091 05». Printed twice. */
 const DOCUMENT_NUMBER = /\b(\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{2})\b/;
+/**
+ * THE PAYMENT STRING — the 41-digit run printed under the barcode to the RIGHT of the
+ * ΑΠΟΚΟΜΜΑ ΤΑΜΕΙΟΥ. This is the code a bank scans, and it is NOT the document number:
+ * the first version put the 18-digit ΑΡ. ΠΑΡΑΣΤΑΤΙΚΟΥ in `paymentCode`, which is a
+ * reference, not a payable code.
+ *
+ * It decomposes 16+9+8+8, and every part is corroborated by a value read
+ * independently elsewhere on the bill (verified against the real document):
+ *   [0:16]  document number    -> ΑΡ. ΠΑΡΑΣΤΑΤΙΚΟΥ without its 2-digit tail
+ *   [16:25] amount in cents    -> ΠΛΗΡΩΤΕΟ
+ *   [25:33] due date YYYYMMDD  -> ΗΜ/ΝΙΑ ΛΗΞΕΩΣ
+ *   [33:41] registry number    -> ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ
+ * The parser CHECKS all four instead of trusting a 41-digit run it happened to find,
+ * because a scannable code built from a misread digit pays the wrong invoice — and a
+ * wrong code that scans is far worse than no code.
+ */
+const PAYMENT_STRING = /^\s*(\d{41})\s*$/;
 /** A tiered consumption line: «14,50M3 x 0,35 € 5,08» — split across OCR lines. */
 const TIER_VOLUME = /^(\d+[.,]\d{2})\s*M3\s*[xX×]?$/i;
 const TIER_PRICE = /^(\d+[.,]\d{2})\s*€?$/;
@@ -565,6 +582,36 @@ export function parseEydapBill(text: string): BillParseResult {
 
   // ─── the rest, kept because discarding it is irreversible ──────────────────
   const documentNumberRaw = text.match(DOCUMENT_NUMBER)?.[1] || null;
+
+  // The scannable payment string, accepted only if it corroborates.
+  const paymentString = (() => {
+    for (const raw of lines) {
+      const m = raw.match(PAYMENT_STRING);
+      if (!m) continue;
+      const v = m[1];
+      const docPart = v.slice(0, 16);
+      const cents = parseInt(v.slice(16, 25), 10);
+      const dueYmd = v.slice(25, 33);
+      const regPart = String(parseInt(v.slice(33, 41), 10));
+      const docOk = documentNumberRaw
+        ? normalizeBillingId(documentNumberRaw).startsWith(docPart)
+        : true;
+      const amountOk =
+        totalAmount === null || Math.abs(cents / 100 - totalAmount) <= 0.01;
+      const dueOk =
+        !dueDate ||
+        dueYmd ===
+          `${dueDate.getUTCFullYear()}${String(dueDate.getUTCMonth() + 1).padStart(2, '0')}${String(dueDate.getUTCDate()).padStart(2, '0')}`;
+      const regOk = registryNumber
+        ? normalizeBillingId(registryNumber).startsWith(regPart)
+        : true;
+      if (docOk && amountOk && dueOk && regOk) return v;
+      // Reported, not silently dropped: an uncorroborated payment string means the
+      // OCR misread a digit somewhere in it.
+      warnings.push('payment-string-does-not-corroborate');
+    }
+    return null;
+  })();
   const mark = text.match(MARK)?.[1] || null;
   const tariff = text.match(TARIFF)?.[1] || null;
   const recipient = parseRecipient(lines);
@@ -663,9 +710,12 @@ export function parseEydapBill(text: string): BillParseResult {
     issueDate,
     dueDate,
     // ΕΥΔΑΠ prints no RF code; the ΑΡΙΘΜΟΣ ΠΑΡΑΣΤΑΤΙΚΟΥ is the payment reference.
-    paymentCode: documentNumberRaw
-      ? normalizeBillingId(documentNumberRaw)
-      : undefined,
+    // The SCANNABLE code. `generateIrisQr` declines without an rfCode and ΕΥΔΑΠ
+    // prints none, so a ΕΥΔΑΠ bill card currently shows no code at all; this is the
+    // value the renderer needs. The document number is only a fallback reference.
+    paymentCode:
+      paymentString ||
+      (documentNumberRaw ? normalizeBillingId(documentNumberRaw) : undefined),
     chargeableAmount: subtotal ?? undefined,
     alternateBillingIds: alternates.length ? alternates : undefined,
     warnings: warnings.length ? [...new Set(warnings)] : undefined,
@@ -675,6 +725,8 @@ export function parseEydapBill(text: string): BillParseResult {
       meterSerial,
       tariff,
       documentNumber: documentNumberRaw,
+      // The ΑΠΟΚΟΜΜΑ barcode's content, for the renderer.
+      paymentString,
       mark,
       einvoiceProvider,
       recipient,

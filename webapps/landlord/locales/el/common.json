@@ -1579,5 +1579,7 @@
   "Not linked to anything": "Χωρίς αντιστοίχιση",
   "Files whose building, apartment or tenant no longer exists": "Αρχεία των οποίων το κτίριο, το διαμέρισμα ή ο ενοικιαστής δεν υπάρχει πλέον",
   "Show more ({{shown}} of {{total}})": "Εμφάνιση περισσότερων ({{shown}} από {{total}})",
-  "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.": "Υπάρχει λογαριασμός {{amount}} για τη δαπάνη «{{expense}}», αλλά η δαπάνη δεν χρεώνεται αυτόν τον μήνα — δεν φτάνει σε κανέναν. Διορθώστε την περίοδο της δαπάνης ή τον μήνα του λογαριασμού."
+  "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.": "Υπάρχει λογαριασμός {{amount}} για τη δαπάνη «{{expense}}», αλλά η δαπάνη δεν χρεώνεται αυτόν τον μήνα — δεν φτάνει σε κανέναν. Διορθώστε την περίοδο της δαπάνης ή τον μήνα του λογαριασμού.",
+  "Payment barcode": "Barcode πληρωμής",
+  "Scan to pay": "Σαρώστε για πληρωμή"
 }

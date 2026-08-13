@@ -8,6 +8,7 @@ import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import {
   parseBillPdf,
   generateIrisQr,
+  generatePaymentBarcode,
   normalizeBillingId
 } from './billparser/index.js';
 import * as billStorage from './billstorage.js';
@@ -652,13 +653,27 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
     // payment reference, not the expense match. For providers without a
     // paymentCode (e.g. ΔΕΥΑ Τήνου), generateIrisQr returns null gracefully.
     let irisCodeBase64: string | undefined;
+    // 'qr' for the IRIS QR (ΔΕΗ), 'barcode' for a provider that prints a barcode
+    // instead (ΕΥΔΑΠ). The UI needs to know which: a QR is square and a Code 128 is
+    // wide, so rendering one in the other's box squashes it unreadably — and an
+    // unreadable payment code is worse than none.
+    let paymentCodeKind: 'qr' | 'barcode' | undefined;
     try {
       const qrBuffer = await generateIrisQr(bill.rfCode, bill.paymentCode);
       if (qrBuffer) {
         irisCodeBase64 = qrBuffer.toString('base64');
+        paymentCodeKind = 'qr';
+      } else {
+        // No rfCode — ΕΥΔΑΠ prints none, so the IRIS generator declines and the card
+        // used to show nothing at all. Its payable code is the ΑΠΟΚΟΜΜΑ barcode.
+        const barcode = await generatePaymentBarcode(bill.paymentCode);
+        if (barcode) {
+          irisCodeBase64 = barcode.toString('base64');
+          paymentCodeKind = 'barcode';
+        }
       }
     } catch (e) {
-      logger.debug(`QR generation failed for ${file.originalname}: ${e}`);
+      logger.debug(`payment code generation failed for ${file.originalname}: ${e}`);
     }
 
     // Check for existing bill in same term+expense
@@ -718,6 +733,9 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         rfCode: bill.rfCode,
         paymentCode: bill.paymentCode, // C1 fix: was omitted, confirm stores null
         irisCodeBase64,
+        // 'qr' | 'barcode'. A Code 128 rendered in the QR's square box is squashed
+        // unreadable, and an unreadable payment code is worse than none.
+        paymentCodeKind,
         proposedTerm: computeDefaultTerm(bill.periodEnd),
         ocrText: (parseResult.rawText || '').slice(0, 4000)
       },

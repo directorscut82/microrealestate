@@ -2173,6 +2173,7 @@ __metadata:
     "@typescript-eslint/parser": 7.15.0
     aws-sdk: 2.1677.0
     axios: 1.8.4
+    bwip-js: ^4.11.2
     eslint: 8.57.0
     eslint-config-prettier: 9.1.0
     eslint-plugin-import: 2.29.1
@@ -7968,6 +7969,15 @@ __metadata:
   dependencies:
     streamsearch: ^1.1.0
   checksum: 32801e2c0164e12106bf236291a00795c3c4e4b709ae02132883fe8478ba2ae23743b11c5735a0aae8afe65ac4b6ca4568b91f0d9fed1fdbc32ede824a73746e
+  languageName: node
+  linkType: hard
+
+"bwip-js@npm:^4.11.2":
+  version: 4.11.2
+  resolution: "bwip-js@npm:4.11.2"
+  bin:
+    bwip-js: bin/bwip-js.js
+  checksum: 9b0db924bb1a2a9dbe1a90e9a4e16aa64ef4b40de0c3a97e57e11bd4654f76e392e293203cfa8665dbbf57d15cdc2b7f318ed0da81a0f4e771c96aeb50caa11d
   languageName: node
   linkType: hard
 

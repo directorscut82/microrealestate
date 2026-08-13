@@ -32,6 +32,7 @@
     "@microrealestate/common": "*",
     "aws-sdk": "2.1677.0",
     "axios": "1.8.4",
+    "bwip-js": "^4.11.2",
     "exceljs": "4.4.0",
     "i18n": "0.13.3",
     "json2csv": "5.0.6",
