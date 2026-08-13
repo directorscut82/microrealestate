@@ -368,387 +368,379 @@ function ResultCard({
     String(identifiedBuildingId) !== String(openedFromBuilding._id);
 
   return (
-    <div className="border rounded-md p-4 space-y-3">
-      <div className="flex items-start gap-2">
-        <LuReceipt className="size-5 text-primary shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm">{result.filename}</div>
-          {/* The GREEK brand name. `parsed.provider` is a lowercase code, and
-              rendering it uppercased put «DEH» on a Greek screen. */}
-          <div className="text-xs text-muted-foreground">
+    <div className="rounded-lg border border-border overflow-hidden">
+      {/* ─ HEADER ────────────────────────────────────────────────────────────
+          One line of identity: the file, then the provider and the month this
+          bill will POST TO. The month used to be absent even though two of the
+          warnings below argue about months, which made them unreadable. The
+          expense-name badge that used to sit on the right is gone — it repeated
+          what the target row already says, so «DEH», «ΔΕΗ» and «Έξοδο: DEH» all
+          appeared within 40px of each other. */}
+      <div className="flex items-start gap-3 border-b border-border bg-muted/20 px-4 py-3">
+        <LuReceipt className="mt-0.5 size-5 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium" title={result.filename}>
+            {result.filename}
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
             {providerLabel(parsed.provider) || parsed.provider}
+            {billTerm ? (
+              <>
+                {' · '}
+                {termMonthYearAccusative(billTerm, lang)}
+              </>
+            ) : null}
           </div>
         </div>
-        {match && (
-          <Badge variant="outline" className="shrink-0">
-            {match.expenseName}
-          </Badge>
-        )}
       </div>
 
-      {/* T3: name WHAT the παροχή identified. Per the landlord's rule a
-          κοινόχρηστος bill is identified by its address; an apartment bill must
-          also show the apartment's ΑΤΑΚ. */}
-      {targetLabel && (
-        <div className="rounded-md bg-primary/5 border border-primary/20 px-2.5 py-1.5 text-xs">
-          <span className="text-muted-foreground">
-            {identifiedShared
-              ? t('Shared meter')
-              : identifiedUnit
-                ? t('Apartment')
-                : t('Expense')}
-            {': '}
-          </span>
-          {/* For a MATCHED bill the identification is the δαπάνη itself — reading
-              «Έξοδο: ΟΔΟΣ ΑΛΦΑ 1» is a mislabel, since that names a building under
-              the word "expense" and never says which expense the money lands on.
-              Verified on the deployed Greek screen 2026-08-12. */}
-          <span className="font-medium">
-            {match?.expenseName
-              ? `${match.expenseName} · ${targetLabel}`
-              : targetLabel}
-          </span>
-          {identifiedShared?.label ? (
+      <div className="space-y-4 px-4 py-4">
+        {/* ─ TARGET ────────────────────────────────────────────────────────
+            WHERE the money lands, stated once. Per the landlord's rule a
+            κοινόχρηστο is identified by its address and an apartment bill must
+            also carry the flat's ΑΤΑΚ. */}
+        {targetLabel && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
             <span className="text-muted-foreground">
-              {' · '}
-              {identifiedShared.label}
+              {identifiedShared
+                ? t('Shared meter')
+                : identifiedUnit
+                  ? t('Apartment')
+                  : t('Expense')}
             </span>
-          ) : null}
-        </div>
-      )}
-
-      {/* T4: the bill belongs to another building. This used to be silent — the
-          assignment was re-pointed and the δαπάνη landed on a building the
-          landlord was not looking at. */}
-      {wrongBuilding && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs dark:bg-amber-950/30 dark:border-amber-800">
-          <div className="flex items-start gap-1.5">
-            <LuAlertTriangle className="size-3.5 shrink-0 text-amber-600 mt-0.5" />
-            <div className="text-amber-800 dark:text-amber-200">
-              {t(
-                'This bill belongs to {{building}}, not the building you are viewing ({{current}}). It will be recorded there.',
-                {
-                  building: buildingLabel(identifiedBuilding),
-                  current: buildingLabel(openedFromBuilding)
-                }
-              )}
-            </div>
+            <span className="font-medium">
+              {match?.expenseName
+                ? `${match.expenseName} · ${targetLabel}`
+                : targetLabel}
+            </span>
+            {identifiedShared?.label ? (
+              <span className="text-xs text-muted-foreground">
+                ({identifiedShared.label})
+              </span>
+            ) : null}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* T7 (landlord's spec): the IRIS QR on the LEFT at a readable size, the
-          parsed/OCR'd values on the RIGHT, and everything else underneath. It used
-          to be a 96px thumbnail centred BELOW every field and banner. */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-        {parsed.irisCodeBase64 ? (
-          <div className="shrink-0 sm:w-44">
-            <div className="rounded-md border border-border bg-white p-2">
+        {/* ─ WARNINGS, ALL OF THEM, IN ONE PLACE ───────────────────────────
+            These used to be three separate amber boxes with the QR, the field
+            grid and the charge toggle interleaved between them, so the card read
+            as a pile of alarms rather than one bill. Collected into a single
+            block: same information, one location, ordered by how badly each one
+            can cost money. The «replace» switch stays INSIDE its own row because
+            it is the remedy for that specific warning. */}
+        {(wrongBuilding ||
+          startsAfterBillTerm ||
+          existingAmount !== undefined ||
+          duplicate) && (
+          <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-800 dark:bg-amber-950/30">
+            {wrongBuilding && (
+              <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200">
+                <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <span>
+                  {t(
+                    'This bill belongs to {{building}}, not the building you are viewing ({{current}}). It will be recorded there.',
+                    {
+                      building: buildingLabel(identifiedBuilding),
+                      current: buildingLabel(openedFromBuilding)
+                    }
+                  )}
+                </span>
+              </div>
+            )}
+
+            {startsAfterBillTerm && (
+              <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200">
+                <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <span>
+                  {t(
+                    'The expense starts in {{start}} but this bill is for {{bill}} — it will not appear on that month’s statement.',
+                    {
+                      start: termMonthYearAccusative(
+                        targetExpense.startTerm,
+                        lang
+                      ),
+                      bill: termMonthYearAccusative(billTerm, lang)
+                    }
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Same term, different amount: offer the upsert, because replacing
+                at THIS term is exactly the right remedy here. */}
+            {existingAmount !== undefined && (
+              <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200">
+                <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <div className="min-w-0 flex-1">
+                  <div>
+                    {t('A bill already exists for this period')}
+                    {' — '}
+                    {t('Existing amount')}:{' '}
+                    <NumberFormat value={existingAmount} />
+                  </div>
+                  <label
+                    htmlFor={`replace-${keyOf(result)}`}
+                    className="mt-1.5 flex cursor-pointer items-center gap-2"
+                  >
+                    <Switch
+                      id={`replace-${keyOf(result)}`}
+                      checked={!!replaceFlags[keyOf(result)]}
+                      onCheckedChange={() => onToggleReplace(keyOf(result))}
+                    />
+                    <span>{t('Replace the existing bill')}</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* DIFFERENT term, same physical bill. Deliberately no replace
+                button: replaceExisting upserts at THIS file's term and would
+                leave the other month's bill untouched — a button that looks like
+                it resolves the duplicate while silently creating a second one. */}
+            {duplicate && existingAmount === undefined && (
+              <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200">
+                <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <div>
+                  <div>
+                    {t('This bill appears to be already imported')}
+                    {' — '}
+                    {t('Already imported for {{month}}', {
+                      month: termMonthYearAccusative(duplicate.term, lang)
+                    })}
+                    {' · '}
+                    <NumberFormat value={duplicate.totalAmount} />
+                  </div>
+                  <div className="mt-0.5 text-amber-700/80 dark:text-amber-300/80">
+                    {t(
+                      'Check that month before confirming — deselect this file if it is a duplicate'
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─ WHAT WAS READ ─────────────────────────────────────────────────
+            QR left at a readable-but-not-dominant size, values right.
+
+            The grid is `max-content 1fr`, NOT two equal columns: at 50/50 the
+            labels claimed half the width and every value was squeezed, so the
+            παροχή broke mid-number across two lines, the period split a single
+            range across three, and both the amount input and the RF code were
+            clipped off the right edge (with a horizontal scrollbar to prove it).
+            Values now get all the remaining space, long codes truncate with the
+            full value on hover instead of being cut, and nothing overflows. */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          {parsed.irisCodeBase64 ? (
+            <div className="shrink-0">
               <img
                 src={`data:image/png;base64,${parsed.irisCodeBase64}`}
                 alt={t('IRIS payment QR code')}
-                className="w-40 h-40 mx-auto"
+                className="size-40 rounded border border-border bg-white p-2"
               />
+              <div className="mt-1 w-40 text-center text-[0.6875rem] leading-tight text-muted-foreground">
+                {t('Scan to pay (IRIS)')}
+              </div>
             </div>
-            <div className="mt-1 text-center text-[0.6875rem] text-muted-foreground">
-              {t('Scan to pay (IRIS)')}
+          ) : null}
+
+          <div className="min-w-0 flex-1">
+            <div className="mb-1.5 text-[0.6875rem] font-medium uppercase tracking-wide text-ink-muted">
+              {result.ocrText
+                ? t('Read from the image (OCR)')
+                : t('Read from the PDF')}
             </div>
-          </div>
-        ) : null}
 
-        <div className="min-w-0 flex-1">
-          <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-ink-muted mb-1">
-            {/* Say WHERE the values came from: a text PDF is parsed exactly, an
-                image is OCR'd and can misread. */}
-            {result.ocrText
-              ? t('Read from the image (OCR)')
-              : t('Read from the PDF')}
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <div className="text-muted-foreground">{t('Billing ID')}</div>
-        <div className="font-mono text-xs">{parsed.billingId}</div>
+            <dl className="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5 text-sm">
+              <dt className="text-muted-foreground">{t('Amount')}</dt>
+              <dd className="min-w-0">
+                {/* Editable: an OCR misread of the total («186,21» as «18621»)
+                    would otherwise flow verbatim into the bill and, via «Χρέωση
+                    ενοικιαστών», into every tenant's rent. */}
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  className="h-8 w-28 text-sm tabular-nums"
+                  value={
+                    amountOverride !== undefined
+                      ? amountOverride
+                      : String(parsed.totalAmount ?? '')
+                  }
+                  onChange={(e) => onAmountChange(result._uid, e.target.value)}
+                  aria-label={t('Amount')}
+                />
+              </dd>
 
-        <div className="text-muted-foreground">{t('Amount')}</div>
-        {/* O3 (destructive-write audit 2026-07): the amount is now EDITABLE.
-            It was a read-only NumberFormat, so an OCR misread of the total
-            (e.g. "186,21" read as "18621", or a dropped decimal) could not be
-            corrected and flowed verbatim into the bill and — via «Χρέωση
-            ενοικιαστών» — into every tenant's rent. The editable value
-            overrides parsed.totalAmount in the confirm payload. */}
-        <div className="font-medium">
-          <Input
-            type="text"
-            inputMode="decimal"
-            className="h-7 w-32 text-sm"
-            value={
-              amountOverride !== undefined
-                ? amountOverride
-                : String(parsed.totalAmount ?? '')
-            }
-            onChange={(e) => onAmountChange(result._uid, e.target.value)}
-            aria-label={t('Amount')}
-          />
+              <dt className="text-muted-foreground">{t('Supply number')}</dt>
+              <dd className="min-w-0 whitespace-nowrap font-mono text-xs tabular-nums">
+                {parsed.billingId}
+              </dd>
+
+              <dt className="text-muted-foreground">{t('Period')}</dt>
+              <dd className="min-w-0 whitespace-nowrap tabular-nums">
+                {parsed.periodStart
+                  ? moment(parsed.periodStart).format('L')
+                  : '—'}
+                {' – '}
+                {parsed.periodEnd ? moment(parsed.periodEnd).format('L') : '—'}
+              </dd>
+
+              {/* Issue date was simply absent from this card, though the parser
+                  reads it and it is what the landlord cross-checks against the
+                  paper bill. */}
+              {parsed.issueDate && (
+                <>
+                  <dt className="text-muted-foreground">{t('Issue Date')}</dt>
+                  <dd className="min-w-0 whitespace-nowrap tabular-nums">
+                    {moment(parsed.issueDate).format('L')}
+                  </dd>
+                </>
+              )}
+
+              {parsed.dueDate && (
+                <>
+                  <dt className="text-muted-foreground">{t('Due Date')}</dt>
+                  <dd className="min-w-0 whitespace-nowrap tabular-nums">
+                    {moment(parsed.dueDate).format('L')}
+                  </dd>
+                </>
+              )}
+
+              {parsed.rfCode && (
+                <>
+                  <dt className="text-muted-foreground">{t('RF Code')}</dt>
+                  {/* break-all, NOT truncate: the landlord pays from this code, so
+                      hiding its tail behind a tooltip is the clipping bug again in a
+                      politer form. At this width it fits on one line anyway. */}
+                  <dd className="min-w-0 break-all font-mono text-xs">
+                    {parsed.rfCode}
+                  </dd>
+                </>
+              )}
+            </dl>
+          </div>
         </div>
 
-        <div className="text-muted-foreground">{t('Period')}</div>
-        {/* i18n (2026-07): moment(undefined) is TODAY, not "Invalid Date" —
-            unguarded, an absent period bound would silently claim today as the
-            billing period on the very screen the landlord uses to decide what
-            to commit. Today the parser can't produce that (deh.ts:104 returns
-            success:false without a period and ResultCard early-returns above),
-            so this is defence-in-depth against a future parser that relaxes
-            the non-optional `periodStart: Date` contract. */}
-        <div>
-          {parsed.periodStart ? moment(parsed.periodStart).format('L') : '—'} –{' '}
-          {parsed.periodEnd ? moment(parsed.periodEnd).format('L') : '—'}
-        </div>
+        {/* ─ ASSIGN (unmatched only) ───────────────────────────────────────── */}
+        {!match && (
+          <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+            <div className="text-[0.6875rem] font-medium uppercase tracking-wide text-ink-muted">
+              {t('Assign to')}
+            </div>
 
-        {parsed.dueDate && (
-          <>
-            <div className="text-muted-foreground">{t('Due Date')}</div>
-            <div>{moment(parsed.dueDate).format('L')}</div>
-          </>
-        )}
-
-        {parsed.rfCode && (
-          <>
-            <div className="text-muted-foreground">{t('RF Code')}</div>
-            <div className="font-mono text-xs">{parsed.rfCode}</div>
-          </>
-        )}
-          </div>
-        </div>
-      </div>
-
-      {/* No exact match → let the user assign a building + expense in-dialog. */}
-      {!match && (
-        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
-          <div className="text-xs font-medium text-ink-muted uppercase tracking-wide">
-            {t('Assign to')}
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-sm text-muted-foreground">
-              {t('Building')}
-            </label>
-            <Select
-              value={buildingId || undefined}
-              onValueChange={(val) => onAssignBuilding(keyOf(result), val)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t('Select a building')} />
-              </SelectTrigger>
-              <SelectContent>
-                {/* Label with the street (or, failing that, the ΑΤΑΚ prefix) as
-                    well as the name. Two buildings may legitimately share a name
-                    — only atakPrefix is de-duped — and on `b.name` alone this
-                    dropdown rendered two IDENTICAL options, so the landlord could
-                    not tell which building the bill would be charged to. A select
-                    with indistinguishable options is a shipped bug. */}
-                {(buildings || []).map((b) => (
-                  <SelectItem key={b._id} value={String(b._id)}>
-                    {buildingLabels.get(String(b._id)) || buildingLabel(b)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {buildingId && (
             <div className="space-y-1">
-              <label className="text-sm text-muted-foreground">
-                {t('Expense')}
+              <label className="text-xs text-muted-foreground">
+                {t('Building')}
               </label>
               <Select
-                value={expenseId || undefined}
-                onValueChange={(val) => {
-                  if (val === '__new__') {
-                    onCreateExpense(keyOf(result), selectedBuilding);
-                  } else {
-                    onAssignExpense(keyOf(result), val);
-                  }
-                }}
+                value={buildingId || undefined}
+                onValueChange={(val) => onAssignBuilding(keyOf(result), val)}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={t('Select an expense')} />
+                  <SelectValue placeholder={t('Select a building')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {expenseOptions.map((e) => (
-                    <SelectItem key={e._id} value={String(e._id)}>
-                      {e.name}
+                  {(buildings || []).map((b) => (
+                    <SelectItem key={b._id} value={String(b._id)}>
+                      {buildingLabels.get(String(b._id)) || buildingLabel(b)}
                     </SelectItem>
                   ))}
-                  <SelectItem value="__new__">
-                    <span className="flex items-center gap-1.5 text-primary">
-                      <LuPlusCircle className="size-3.5" />
-                      {t('Create new expense')}
-                    </span>
-                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* Once an expense is resolved (matched or assigned), offer to charge
-          tenants this month — this bridges the amount into the rent engine.
+            {buildingId && (
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">
+                  {t('Expense')}
+                </label>
+                <Select
+                  value={expenseId || undefined}
+                  onValueChange={(val) => {
+                    if (val === '__new__') {
+                      onCreateExpense(keyOf(result), selectedBuilding);
+                    } else {
+                      onAssignExpense(keyOf(result), val);
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={t('Select an expense')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expenseOptions.map((e) => (
+                      <SelectItem key={e._id} value={String(e._id)}>
+                        {e.name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="__new__">
+                      <span className="flex items-center gap-1.5 text-primary">
+                        <LuPlusCircle className="size-3.5" />
+                        {t('Create new expense')}
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        )}
 
-          T12: the toggle asks the landlord to AUTHORISE a charge, so it must say
-          what the charge will do. It deliberately does NOT duplicate the expense
-          form's controls: confirming a bill attaches it to an expense that already
-          owns allocationMethod / chargeOwnerWhenVacant / owner tracking, and
-          saveMonthlyStatement applies them. Two places owning one money rule is
-          the defect this whole branch removed. So: show the settings, don't
-          re-offer them.
-
-          It also does NOT compute a per-unit split. That arithmetic lives in the
-          server's allocation engine (1_base.ts), and a second implementation here
-          would eventually disagree with it — a preview that lies about money is
-          worse than no preview. The method is named instead, in words. */}
-      {expenseId && (
-        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <Label
+        {/* ─ CHARGE ────────────────────────────────────────────────────────
+            The toggle authorises money, so it states what it will do. It does
+            NOT re-offer the expense form's controls (the expense owns those, and
+            two owners of one money rule is this area's recurring defect) and does
+            NOT compute a per-unit split — that arithmetic lives in the server's
+            allocation engine, and a second implementation would drift from it. */}
+        {expenseId && (
+          <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+            <label
               htmlFor={`charge-${keyOf(result)}`}
-              className="text-sm cursor-pointer"
+              className="flex cursor-pointer items-center justify-between gap-3"
             >
-              {t('Charge tenants this month')}
-            </Label>
-            <Switch
-              id={`charge-${keyOf(result)}`}
-              checked={!!chargeFlags[keyOf(result)]}
-              onCheckedChange={() => onToggleCharge(keyOf(result))}
-            />
-          </div>
+              <span className="text-sm">
+                {t('Charge tenants this month')}
+              </span>
+              <Switch
+                id={`charge-${keyOf(result)}`}
+                checked={!!chargeFlags[keyOf(result)]}
+                onCheckedChange={() => onToggleCharge(keyOf(result))}
+              />
+            </label>
 
-          {chargeFlags[keyOf(result)] && targetExpense && (
-            <div className="border-t border-border pt-2 text-xs space-y-1">
-              <div>
-                <span className="text-muted-foreground">
-                  {t('Split')}
-                  {': '}
-                </span>
-                <span className="font-medium">
-                  {ALLOCATION_METHOD_LABEL[targetExpense.allocationMethod]
-                    ? t(
-                        ALLOCATION_METHOD_LABEL[targetExpense.allocationMethod]
-                      )
-                    : targetExpense.allocationMethod}
-                </span>
-                {targetExpense.allocationMethod === 'single_unit' &&
-                singleUnitTargetLabel ? (
-                  <span className="text-muted-foreground">
-                    {' — '}
-                    {singleUnitTargetLabel}
+            {chargeFlags[keyOf(result)] && targetExpense && (
+              <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 border-t border-border pt-2 text-xs">
+                <dt className="text-muted-foreground">{t('Split')}</dt>
+                <dd className="min-w-0">
+                  <span className="font-medium">
+                    {ALLOCATION_METHOD_LABEL[targetExpense.allocationMethod]
+                      ? t(
+                          ALLOCATION_METHOD_LABEL[
+                            targetExpense.allocationMethod
+                          ]
+                        )
+                      : targetExpense.allocationMethod}
                   </span>
-                ) : null}
-              </div>
-              <div className="text-muted-foreground">
-                {targetExpense.chargeOwnerWhenVacant
-                  ? t('A vacant apartment is charged to its owner')
-                  : t('A vacant apartment is not charged')}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* T5 (landlord's decision: WARN, do not auto-correct). The expense form
-          defaults to «start from the current month», so an expense created today
-          for a June bill starts in August and does not exist in the month its own
-          bill covers — no statement for that month can show it. Silently moving the
-          start date would change which month every OTHER bill on that expense lands
-          in, so this only tells the truth and leaves the decision alone. */}
-      {startsAfterBillTerm && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 text-xs dark:bg-amber-950/30 dark:border-amber-800">
-          <div className="flex items-start gap-1.5">
-            <LuAlertTriangle className="size-3.5 shrink-0 text-amber-600 mt-0.5" />
-            <div className="text-amber-800 dark:text-amber-200">
-              {t(
-                'The expense starts in {{start}} but this bill is for {{bill}} — it will not appear on that month’s statement.',
-                {
-                  start: termMonthYearAccusative(targetExpense.startTerm, lang),
-                  bill: termMonthYearAccusative(billTerm, lang)
-                }
-              )}
-            </div>
+                  {targetExpense.allocationMethod === 'single_unit' &&
+                  singleUnitTargetLabel ? (
+                    <span className="text-muted-foreground">
+                      {' — '}
+                      {singleUnitTargetLabel}
+                    </span>
+                  ) : null}
+                </dd>
+                <dt className="text-muted-foreground">{t('Vacant')}</dt>
+                <dd className="min-w-0 text-muted-foreground">
+                  {targetExpense.chargeOwnerWhenVacant
+                    ? t('A vacant apartment is charged to its owner')
+                    : t('A vacant apartment is not charged')}
+                </dd>
+              </dl>
+            )}
           </div>
-        </div>
-      )}
-
-      {existingAmount !== undefined && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 p-3 dark:bg-amber-950/30 dark:border-amber-800">
-          <div className="flex items-start gap-2">
-            <LuAlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-amber-800 dark:text-amber-200">
-                {t('A bill already exists for this period')}
-              </p>
-              <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
-                {t('Existing amount')}: <NumberFormat value={existingAmount} />
-              </p>
-              <button
-                type="button"
-                className="mt-2 text-xs font-medium underline text-amber-800 dark:text-amber-200"
-                onClick={() => onToggleReplace(keyOf(result))}
-              >
-                {replaceFlags[keyOf(result)]
-                  ? t('Keep existing (cancel replace)')
-                  : t('Replace existing bill')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BILL-IDENTITY (bill-OCR audit 2026-07): the same PHYSICAL bill is
-          already stored under a DIFFERENT term. The banner above cannot see
-          this — it queries by the term derived from this file's OCR'd periodEnd,
-          which is exactly the value that diverged. Confirming would insert a
-          second Bill and charge the tenants in a second month.
-
-          Mutually exclusive with the same-term banner (identical `=== undefined`
-          predicate on both sides of the wire; the server skips the probe in that
-          case) so the operator never gets two warnings for one file.
-
-          NO «Replace existing bill» button here, deliberately: replaceExisting
-          upserts on (buildingId, expenseId, term) and would write at THIS file's
-          term, leaving the other month's bill untouched — a button that looks
-          like it resolves the duplicate while silently creating it. The only
-          remedy the dialog actually offers is to deselect this file, so that is
-          what the hint says (the period renders as static text — there is no
-          period/term override input on this row). */}
-      {duplicate && existingAmount === undefined && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 p-3 dark:bg-amber-950/30 dark:border-amber-800">
-          <div className="flex items-start gap-2">
-            <LuAlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-amber-800 dark:text-amber-200">
-                {t('This bill appears to be already imported')}
-              </p>
-              <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
-                {t('Already imported for {{month}}', {
-                  // Term is YYYYMMDDHH; the first 6 chars are the month.
-                  // Accusative, not moment's nominative: the el carrier is
-                  // «Έχει καταχωρηθεί για {{month}}» and «για» governs the
-                  // accusative («για Ιούλιο 2026», not «για Ιούλιος 2026»).
-                  // Same banner as InboxBell — same helper.
-                  month: termMonthYearAccusative(duplicate.term, lang)
-                })}
-                {' — '}
-                <NumberFormat value={duplicate.totalAmount} />
-              </p>
-              <p className="text-amber-700/80 dark:text-amber-300/80 text-xs mt-0.5">
-                {t(
-                  'Check that month before confirming — deselect this file if it is a duplicate'
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
+        )}
+      </div>
     </div>
   );
 }
@@ -1185,6 +1177,13 @@ export default function BillImportDialog({ open, setOpen, building }) {
         open={!!open}
         setOpen={setOpen}
         isLoading={isLoading}
+        /* The shared default is `max-w-lg` (512px). MEASURED as the root cause of
+           this card's proportions: at 512px a QR big enough to actually scan takes
+           ~43% of the row, so every value was squeezed into the remainder — the
+           παροχή broke mid-number, the period split across three lines, and both the
+           amount input and the RF code were clipped off the right edge. Widened for
+           this dialog only; the mobile drawer branch is unaffected. */
+        className="sm:max-w-3xl"
         renderHeader={() => t('Import Bills')}
         renderContent={() => (
           <div className="pt-4 space-y-4">

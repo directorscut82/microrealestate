@@ -1393,6 +1393,8 @@
   "Create new expense": "Δημιουργία νέας δαπάνης",
   "need assignment": "χρειάζονται αντιστοίχιση",
   "Charge tenants this month": "Χρέωση ενοικιαστών αυτόν τον μήνα",
+  "Issue Date": "Ημερομηνία έκδοσης",
+  "Replace the existing bill": "Αντικατάσταση υπάρχοντος λογαριασμού",
   "A vacant apartment is charged to its owner": "Το κενό διαμέρισμα χρεώνεται στον ιδιοκτήτη του",
   "A vacant apartment is not charged": "Το κενό διαμέρισμα δεν χρεώνεται",
   "IRIS payment QR code": "Κωδικός QR πληρωμής IRIS",

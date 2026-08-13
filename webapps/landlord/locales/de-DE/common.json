@@ -1226,6 +1226,8 @@
   "Create new expense": "Neue Ausgabe erstellen",
   "need assignment": "Zuordnung erforderlich",
   "Charge tenants this month": "Mieter diesen Monat belasten",
+  "Issue Date": "Rechnungsdatum",
+  "Replace the existing bill": "Bestehende Rechnung ersetzen",
   "A vacant apartment is charged to its owner": "Eine leerstehende Wohnung wird ihrem Eigentümer belastet",
   "A vacant apartment is not charged": "Eine leerstehende Wohnung wird nicht belastet",
   "IRIS payment QR code": "IRIS-Zahlungs-QR-Code",
