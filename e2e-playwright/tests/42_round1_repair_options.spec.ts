@@ -137,7 +137,17 @@ async function createFreshBuilding(
 ): Promise<string> {
   const headers = authHeaders(base.token, base.realmId);
   const name = `E2E-S42-${scenarioTag}-${RUN_ID}`;
-  const atakPrefix = `S42${scenarioTag}${RUN_ID}`.slice(0, 19);
+  // `atakPrefix` must be EXACTLY 6 DIGITS since 2026-08-07 (`isValidATAKPrefix`),
+  // so the old letter prefix 422'd on every create and this whole spec has been red
+  // ever since. Derived from the scenario tag + run id so two scenarios in one run
+  // cannot collide, kept in a reserved 99xxxx band, and deterministic per scenario
+  // so a re-run addresses the same fixture.
+  const seedStr = `S42${scenarioTag}${RUN_ID}`;
+  let h = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    h = (h * 31 + seedStr.charCodeAt(i)) % 10000;
+  }
+  const atakPrefix = `99${String(h).padStart(4, '0')}`;
   const r = await api.post(`${GATEWAY}/api/v2/buildings`, {
     headers,
     data: {

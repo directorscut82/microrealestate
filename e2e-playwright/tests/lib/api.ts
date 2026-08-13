@@ -333,14 +333,24 @@ export async function ensureSeedProperty(
   const propsResp = await request.get(`${GATEWAY}/api/v2/properties`, { headers: auth });
   expect(propsResp.status(), 'list properties').toBe(200);
   const props = (await propsResp.json()) as Array<{ _id: string; name: string }>;
-  let prop = props.find((p) => p.name === 'E2E-Property');
+  let prop = props.find((p) => p.name === 'E2E-Property') as
+    | { _id: string; name: string; price?: number }
+    | undefined;
   if (!prop) {
     const created = await request.post(`${GATEWAY}/api/v2/properties`, {
       headers: auth,
       data: {
         name: 'E2E-Property',
         type: 'apartment',
-        rent: 0,
+        // `price`, NOT `rent`. The API field is `price` (validators.ts
+        // `validateFiniteNumber(req.body.price, …)`), so the old `rent: 0` was
+        // silently ignored and every seeded property was created with NO rent.
+        // Harmless until 2026-08-08, when PropertyForm began requiring it: the
+        // form then refused to submit with «Rent is required», the PATCH never
+        // went out, and any spec that edits this property timed out waiting for
+        // a response that could not happen (spec 04). Non-zero so the form's
+        // required check is genuinely satisfied.
+        price: 500,
         surface: 50,
         address: { street1: 'Test', city: 'Test', zipCode: '00000' }
       }
@@ -349,7 +359,21 @@ export async function ensureSeedProperty(
       [200, 201],
       `create property (status=${created.status()}, body: ${await created.text().catch(() => '')})`
     ).toContain(created.status());
-    prop = (await created.json()) as { _id: string; name: string };
+    prop = (await created.json()) as { _id: string; name: string; price?: number };
+  } else if (!Number(prop.price)) {
+    // The fixture SURVIVES across runs, so a property created by the old helper
+    // is still price-less in every realm that has one. Repair it in place rather
+    // than leaving the fixture permanently un-editable through the form.
+    // `PATCH /properties/:id`, not `PATCH /properties` — the collection route has
+    // no PATCH handler, so the id-less form 404s.
+    const patched = await request.patch(
+      `${GATEWAY}/api/v2/properties/${prop._id}`,
+      { headers: auth, data: { ...prop, price: 500 } }
+    );
+    expect(
+      [200, 201],
+      `backfill property price (status=${patched.status()})`
+    ).toContain(patched.status());
   }
   return { ...seed, propertyId: prop._id };
 }

@@ -99,7 +99,11 @@ async function ensureSearchableProperty(
       data: {
         name: fields.name,
         type: 'apartment',
-        rent: 0,
+        // `price`, NOT `rent` — the API field is `price`, so `rent: 0` was silently
+        // dropped and every fixture was created without one. Since 2026-08-08 the
+        // property form requires a rent, so such a fixture can no longer be edited
+        // through the UI at all, and the PATCH below 422s for the same reason.
+        price: 500,
         surface: fields.surface,
         atakNumber: fields.atakNumber,
         address: {
@@ -121,18 +125,30 @@ async function ensureSearchableProperty(
       {
         headers: auth,
         data: {
+          // `update` reads the id from the BODY (`validateObjectId(property._id)`),
+          // not from the URL — so this PATCH has never once succeeded. It 422'd
+          // «Invalid property id» behind a console.warn, which means the
+          // "refresh the searchable fields" step silently did nothing for as long
+          // as it has existed, and the spec asserted against whatever the fixture
+          // happened to hold from an earlier run.
+          _id: prop._id,
           name: fields.name,
           atakNumber: fields.atakNumber,
           surface: fields.surface,
+          // Required by the update validator; omitting it made every refresh of a
+          // pre-existing fixture 422, and the warn-and-continue below meant the
+          // spec then asserted against STALE searchable fields.
+          price: 500,
           address: { street1: fields.street1, city: 'Test', zipCode: '00000' }
         }
       }
     );
-    if (patched.status() >= 400) {
-      console.warn(
-        `[26] PATCH searchable property failed status=${patched.status()}`
-      );
-    }
+    // Fail loudly. A warning here let the fixture silently stay stale, which is how
+    // a red spec looks like a flaky one.
+    expect(
+      [200, 201],
+      `refresh searchable property ${fields.name} (status=${patched.status()}, body: ${await patched.text().catch(() => '')})`
+    ).toContain(patched.status());
   }
   return { _id: prop._id };
 }
@@ -156,9 +172,17 @@ test('26.11 search prefix of property name narrows to that property', async ({ p
       .slice(2, 10)
       .padEnd(8, '0')
       .toUpperCase();
+  // ΑΤΑΚ must be exactly 11 DIGITS since 2026-08-08 (`isValidATAK`), so the
+  // hex-and-letters tag above cannot double as one — the create 422'd and this
+  // spec has been red ever since. A separate synthetic 11-digit value from the
+  // reserved 009999… band, still unique per run so the search assertion cannot
+  // be satisfied by a leftover fixture.
+  const atak =
+    '009999' +
+    String(Math.floor(Math.random() * 100000)).padStart(5, '0');
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Name`,
-    atakNumber: `${tag}-AT`,
+    atakNumber: atak,
     street1: `${tag}-Street`,
     surface: 77
   });
@@ -194,9 +218,17 @@ test('26.12 search 4 chars of atakNumber narrows the list', async ({ page }) => 
       .slice(2, 10)
       .padEnd(8, '0')
       .toUpperCase();
+  // ΑΤΑΚ must be 11 DIGITS (`isValidATAK`, 2026-08-08), so the letter tag cannot
+  // live in that field any more — the create 422'd and this spec went red. This
+  // test is ABOUT searching the ΑΤΑΚ, so the searched token has to BE the ΑΤΑΚ:
+  // a unique value from the reserved 009999… band, and the name deliberately does
+  // NOT contain it, so a match can only have come from the atakNumber field.
+  const atak =
+    '009999' +
+    String(Math.floor(Math.random() * 100000)).padStart(5, '0');
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Name`,
-    atakNumber: `${tag}-ATAK`,
+    atakNumber: atak,
     street1: 'AnyStreet',
     surface: 50
   });
@@ -205,9 +237,7 @@ test('26.12 search 4 chars of atakNumber narrows the list', async ({ page }) => 
   await signIn(page);
   await gotoProperties(page, seed.realmName);
 
-  // Search the full 11-char tag (sentinel + 8 hex) — uniqueness avoids
-  // substring collisions with leftover fixtures.
-  await page.locator('[data-cy=globalSearchField]').fill(tag);
+  await page.locator('[data-cy=globalSearchField]').fill(atak);
 
   await expect(
     page.locator('[data-cy=openResourceButton]')
@@ -227,7 +257,10 @@ test('26.13 search 4 chars of address.street1 narrows the list', async ({ page }
   const tag = 'STRZ' + Math.random().toString(36).slice(2, 6).toUpperCase();
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: `E2E-${tag}-Name`,
-    atakNumber: `${tag}-AT`,
+    // Incidental here: the street carries the unique token. It only has to be a
+    // VALID ΑΤΑΚ (11 digits, reserved band) so the create is not refused.
+    atakNumber:
+      '009999' + String(Math.floor(Math.random() * 100000)).padStart(5, '0'),
     // Street name carries the unique tag — we search the whole thing.
     street1: `${tag}-Avenue`,
     surface: 60
@@ -278,7 +311,9 @@ test('26.14 search a 2-digit surface value narrows the list', async ({ page }) =
   const surfaceVal = 87;
   await ensureSearchableProperty(apiCtx, seed.realmId, seed.token, {
     name: 'E2E-S87-Name',
-    atakNumber: 'S87-AT',
+    // 11 digits, reserved band — a letter ΑΤΑΚ is refused 422 since 2026-08-08.
+    // Fixed (not random) because this fixture is looked up by name across runs.
+    atakNumber: '00999900087',
     street1: 'S87-Street',
     surface: surfaceVal
   });
