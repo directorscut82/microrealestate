@@ -306,12 +306,29 @@ export function salvageGenericFields(text: string): PartialBillFields {
 
 export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
   let text: string;
+  /**
+   * WHICH of the three routes produced `text`. Only this function knows, and the card
+   * needs it: a figure lifted verbatim from a PDF's own text layer is trustworthy in a
+   * way an OCR'd photograph is not, and that is the single thing the provenance label
+   * exists to tell the operator.
+   *
+   * It is tracked HERE because every attempt to infer it downstream has been wrong in
+   * one direction or the other. The dialog first tested `result.ocrText`, which the
+   * server sets only on a FAILED parse, so every successfully-parsed photo was labelled
+   * «Από το PDF». The correction tested `parsed.ocrText`, which the server sets
+   * UNCONDITIONALLY from `rawText` — and all three routes below assign `text`, so that
+   * is always truthy and every bill became «Από την εικόνα (OCR)», including a digital
+   * PDF. Two constants in a row. The mode is not inferable from the payload; it has to
+   * be reported.
+   */
+  let textSource: 'pdf-text' | 'pdf-ocr' | 'image-ocr';
 
   const isPdf =
     buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === '%PDF';
 
   if (isPdf) {
     text = await extractTextFromPdf(buffer);
+    textSource = 'pdf-text';
     // Scanned / image-only PDF (no text layer — e.g. CamScanner export, which
     // is exactly how many bills arrive). Rasterize each page to an image via
     // pdfium (pure WASM) and OCR every page, joining with the same PAGE BREAK
@@ -331,11 +348,15 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
         pageTexts.push(await ocrImage(png));
       }
       text = pageTexts.join(PAGE_BREAK);
+      // A scanned PDF is OCR'd exactly like a photograph, so it must NOT be presented
+      // as a text-layer read — the figures carry the same OCR risk.
+      textSource = 'pdf-ocr';
     }
   } else {
     // Image file (JPEG/PNG/WEBP) — OCR in-process via paddleocr + WASM.
     const { ocrImage } = await import('./ocr.js');
     text = await ocrImage(buffer);
+    textSource = 'image-ocr';
   }
 
   const provider = detectProvider(text);
@@ -344,6 +365,7 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
       success: false,
       error: 'Δεν αναγνωρίστηκε ο πάροχος',
       rawText: text,
+      textSource,
       // Even with no provider marker, generic money/date/RF shapes are usually
       // readable and are what let the operator create the έξοδο by hand instead
       // of being told only that the parse failed. Measured on the three real
@@ -356,7 +378,7 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
     case 'deh': {
       // Slice 6 — surface the raw text so the confirm step can build matchKeys.
       const parsed = parseDehBill(text);
-      return { ...parsed, rawText: text, detectedProvider: 'deh' };
+      return { ...parsed, rawText: text, textSource, detectedProvider: 'deh' };
     }
     case 'eydap': {
       // Slice 3. The two things that kept this branch unimplemented — a ~3-month
@@ -372,13 +394,14 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
       // unit alone). A parser that guessed would file a whole building's water on
       // one flat, or split one flat's water across the building.
       const parsed = parseEydapBill(text);
-      return { ...parsed, rawText: text, detectedProvider: 'eydap' };
+      return { ...parsed, rawText: text, textSource, detectedProvider: 'eydap' };
     }
     case 'epa':
       return {
         success: false,
         error: 'Ο πάροχος ΕΠΑ δεν υποστηρίζεται ακόμα',
         rawText: text,
+        textSource,
         detectedProvider: 'epa',
         partial: salvageGenericFields(text)
       };
@@ -387,6 +410,7 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
         success: false,
         error: 'Μη υποστηριζόμενος πάροχος',
         rawText: text,
+        textSource,
         partial: salvageGenericFields(text)
       };
   }

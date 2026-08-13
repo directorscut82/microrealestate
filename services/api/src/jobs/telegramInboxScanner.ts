@@ -557,6 +557,25 @@ async function _sendReply(
  * file's hand-copied matcher was free to drift out of step with the upload path
  * for weeks without a single test going red.
  */
+/**
+ * Is this failure about provider COVERAGE rather than legibility?
+ *
+ * The parser's coverage refusals are «Δεν αναγνωρίστηκε ο πάροχος», «Ο πάροχος X δεν
+ * υποστηρίζεται ακόμα» and «Μη υποστηριζόμενος πάροχος» (billparser/index.ts). For
+ * those, re-sending the same bill at full resolution yields the identical error — the
+ * document was read fine and the app simply has no parser for it. Matching on the
+ * MESSAGE is unlovely, but it is what crosses the boundary: the poller receives a
+ * string, and inventing a machine-readable code would mean changing every parser
+ * return. If those strings are ever reworded, `providerCoverageMessages` in the parity
+ * suite goes red.
+ */
+function _providerNotCovered(message: string | undefined): boolean {
+  if (!message) return false;
+  return /δεν υποστηρίζεται|Μη υποστηριζόμενος|Δεν αναγνωρίστηκε ο πάροχος/i.test(
+    message
+  );
+}
+
 const _GREEK_MONTHS = [
   'Ιανουάριο',
   'Φεβρουάριο',
@@ -924,9 +943,19 @@ async function _handleUpdate(
     msg.chat.id,
     parseError
       ? `Ελήφθη, αλλά δεν διαβάστηκε (${parseError}).${
-          msg.photo?.length
-            ? ' Το Telegram συμπιέζει τις φωτογραφίες — στείλτε το ίδιο αρχείο ως ΑΡΧΕΙΟ (συνημμένο) για πλήρη ανάλυση.'
-            : ''
+          // GATE THE HINT ON THE FAILURE KIND. «Send it at full resolution» is only
+          // useful when legibility is the problem. When the parser refuses because it
+          // does not COVER the provider — «Ο πάροχος ΕΠΑ δεν υποστηρίζεται ακόμα»,
+          // «Δεν αναγνωρίστηκε ο πάροχος» — a bit-perfect file produces the
+          // byte-identical refusal, so the sentence sent the landlord to Files, made
+          // them wait a poll cycle, minted another pending item to dismiss, and
+          // returned the same error. Asking for a better file when the file was never
+          // the problem is the same unachievable-advice defect as «try a closer photo».
+          _providerNotCovered(parseError)
+            ? ' Καλύτερη φωτογραφία δεν θα βοηθήσει — καταχωρήστε τον λογαριασμό χειροκίνητα στη δαπάνη.'
+            : msg.photo?.length
+              ? ' Το Telegram συμπιέζει τις φωτογραφίες — στείλτε το ίδιο αρχείο ως ΑΡΧΕΙΟ (συνημμένο) για πλήρη ανάλυση.'
+              : ''
         } Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.`
       : `Ελήφθη ο λογαριασμός${parsed.totalAmount ? ` (${parsed.totalAmount}€)` : ''} — εκκρεμεί επιβεβαίωση στις ειδοποιήσεις της εφαρμογής.`
   );

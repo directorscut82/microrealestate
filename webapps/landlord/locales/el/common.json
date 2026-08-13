@@ -1582,5 +1582,10 @@
   "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.": "Υπάρχει λογαριασμός {{amount}} για τη δαπάνη «{{expense}}», αλλά η δαπάνη δεν χρεώνεται αυτόν τον μήνα — δεν φτάνει σε κανέναν. Διορθώστε την περίοδο της δαπάνης ή τον μήνα του λογαριασμού.",
   "Payment barcode": "Barcode πληρωμής",
   "Scan to pay": "Σαρώστε για πληρωμή",
-  "{{count}} files — open a folder to load it_one": "Ένα αρχείο — ανοίξτε τον φάκελο για να φορτωθεί"
+  "{{count}} files — open a folder to load it_one": "Ένα αρχείο — ανοίξτε τον φάκελο για να φορτωθεί",
+  "Read from the PDF text": "Από το κείμενο του PDF",
+  "Read from a scanned PDF (OCR)": "Από σκαναρισμένο PDF (OCR)",
+  "Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.": "Έως 5 αρχεία τη φορά — PDF, JPG, PNG ή WEBP (λογαριασμοί ΔΕΗ, ΕΥΔΑΠ, ΔΕΥΑ, σκαναρισμένοι ή φωτογραφημένοι). Έως 15MB το αρχείο, 45MB συνολικά.",
+  "The files are too large — upload fewer at a time": "Τα αρχεία είναι πολύ μεγάλα — ανεβάστε λιγότερα τη φορά",
+  "The upload timed out — try fewer files at a time": "Η ανάλυση άργησε πολύ — δοκιμάστε λιγότερα αρχεία τη φορά"
 }

@@ -866,7 +866,10 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         // unreadable, and an unreadable payment code is worse than none.
         paymentCodeKind,
         proposedTerm: computeDefaultTerm(bill),
-        ocrText: (parseResult.rawText || '').slice(0, 4000)
+        ocrText: (parseResult.rawText || '').slice(0, 4000),
+        // The provenance the card shows. Reported by the parser because only it knows
+        // which of its three routes ran; deriving it from ocrText yielded a constant.
+        textSource: parseResult.textSource
       },
       match: match
         ? {

@@ -1335,5 +1335,10 @@
   "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.": "A bill of {{amount}} is on file for «{{expense}}», but that expense is not charged this month — so it reaches no one. Adjust the expense period or the bill month.",
   "Payment barcode": "Payment barcode",
   "Scan to pay": "Scan to pay",
-  "{{count}} files — open a folder to load it_one": "1 arquivo — abra a pasta para carregá-lo"
+  "{{count}} files — open a folder to load it_one": "1 arquivo — abra a pasta para carregá-lo",
+  "Read from the PDF text": "Read from the PDF text",
+  "Read from a scanned PDF (OCR)": "Read from a scanned PDF (OCR)",
+  "Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.": "Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.",
+  "The files are too large — upload fewer at a time": "The files are too large — upload fewer at a time",
+  "The upload timed out — try fewer files at a time": "The upload timed out — try fewer files at a time"
 }

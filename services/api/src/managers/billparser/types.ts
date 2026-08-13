@@ -108,6 +108,14 @@ export type BillParseResult = {
   // utility bill" from "no bill markers found" (a receipt / single-code zoom).
   // Absent when no provider marker matched.
   detectedProvider?: 'deh' | 'eydap' | 'epa';
+  /**
+   * WHICH route produced the text: a PDF's own text layer, a rasterised+OCR'd scanned
+   * PDF, or an OCR'd image. The card's provenance label needs it, and it is NOT
+   * inferable from the payload — `rawText`/`parsed.ocrText` are populated by all three
+   * routes, so every attempt to derive it downstream produced a constant (first always
+   * «PDF», then always «OCR»).
+   */
+  textSource?: 'pdf-text' | 'pdf-ocr' | 'image-ocr';
 };
 
 export function normalizeBillingId(id: string): string {

@@ -609,16 +609,30 @@ function ResultCard({
 
           <div className="min-w-0 flex-1">
             <div className="mb-1.5 text-[0.6875rem] font-medium uppercase tracking-wide text-ink-muted">
-              {/* WHERE the values came from — a photograph read by OCR is less
-                  trustworthy than a PDF's own text layer, and the operator needs to
-                  know which they are checking.
-                  `ocrText` sits at the TOP level only on a FAILED parse; on success
-                  the server nests it under `parsed`. Reading only the top level
-                  therefore labelled every successfully-parsed PHOTO as «Από το PDF»
-                  — measured on the real ΕΥΔΑΠ jpg, whose card said PDF. */}
-              {result.parsed?.ocrText || result.ocrText
-                ? t('Read from the image (OCR)')
-                : t('Read from the PDF')}
+              {/* WHERE the values came from. A figure lifted verbatim from a PDF's
+                  own text layer is trustworthy in a way an OCR'd one is not, and this
+                  label is the only thing on the card that says which.
+                  It is read from `textSource`, which the PARSER reports, because both
+                  previous attempts to infer it produced a CONSTANT: testing
+                  `result.ocrText` (set only on a failed parse) labelled every
+                  successfully-parsed photo «Από το PDF», and testing
+                  `parsed.ocrText` — which the server sets unconditionally from
+                  rawText, and all three parser routes assign it — labelled every bill
+                  «Από την εικόνα (OCR)», including digital PDFs. Three distinct modes
+                  need three labels; a scanned PDF is OCR'd and must not be presented
+                  as a text-layer read. */}
+              {result.parsed?.textSource === 'pdf-text'
+                ? t('Read from the PDF text')
+                : result.parsed?.textSource === 'pdf-ocr'
+                  ? t('Read from a scanned PDF (OCR)')
+                  : result.parsed?.textSource === 'image-ocr'
+                    ? t('Read from the image (OCR)')
+                    : // No textSource: an OLD result shape, or a failed parse whose
+                      // partial fields are shown. Fall back to the FILENAME rather
+                      // than to a guess that reads as certainty.
+                      /\.pdf$/i.test(result.filename || '')
+                      ? t('Read from the PDF')
+                      : t('Read from the image (OCR)')}
             </div>
 
             <dl className="grid grid-cols-[max-content_1fr] items-baseline gap-x-3 gap-y-1.5 text-sm">
@@ -914,7 +928,24 @@ export default function BillImportDialog({ open, setOpen, building }) {
       setState('preview');
     } catch (error) {
       console.error('Bill parse error:', error);
-      toast.error(t('Failed to parse bill PDFs'));
+      // SHOW THE SERVER'S MESSAGE. It returns {status, message} on every rejection and
+      // the messages are specific and already Greek — «Ο συνολικός όγκος των αρχείων
+      // υπερβαίνει τα 45MB. Ανεβάστε λιγότερα αρχεία τη φορά.», «Only PDF or image
+      // files allowed», «Invalid file content: <name>». This catch discarded all of
+      // them for one generic sentence that also says PDF on the dialog built for
+      // photographs, so a landlord whose batch was too large was told the parse failed
+      // and reasonably retried the identical batch. ImportE9Dialog in this same
+      // directory has always read it (ImportE9Dialog.js:192).
+      const serverMessage = error?.response?.data?.message;
+      const status = error?.response?.status;
+      toast.error(
+        serverMessage ||
+          (status === 413
+            ? t('The files are too large — upload fewer at a time')
+            : status === 504
+              ? t('The upload timed out — try fewer files at a time')
+              : t('Failed to parse bill PDFs'))
+      );
       setState('idle');
     }
   }, [files, t]);
@@ -1278,7 +1309,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
                 disabled={isLoading}
                 dropLabel={t('Drop PDF or photos here or click to browse')}
                 description={t(
-                  'Up to 20 files — PDF, JPG, PNG or WEBP (DEH, EYDAP, DEYA bills, scanned or photographed)'
+                  'Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.'
                 )}
               />
             )}

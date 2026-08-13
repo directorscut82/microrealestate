@@ -142,3 +142,94 @@ describe('computeChargeTerm — WHICH MONTH the amount is charged in', () => {
     }
   });
 });
+
+describe('advice must match the FAILURE KIND, and the provider messages must not drift', () => {
+  const read = (rel) => fs.readFileSync(path.resolve(HERE, rel), 'utf8');
+
+  it('the parser still emits exactly the coverage messages the bot matches on', () => {
+    // The bot decides whether «send it as a FILE» is useful by matching the parser's
+    // error TEXT. That is a string boundary, so it can rot silently: reword a parser
+    // refusal and the bot starts telling landlords to re-send a bill whose provider it
+    // simply cannot parse. This test is the tripwire.
+    const parser = read('../managers/billparser/index.ts');
+    const coverage = [
+      'Δεν αναγνωρίστηκε ο πάροχος',
+      'δεν υποστηρίζεται ακόμα',
+      'Μη υποστηριζόμενος πάροχος'
+    ];
+    for (const msg of coverage) {
+      expect({ msg, present: parser.includes(msg) }).toEqual({ msg, present: true });
+    }
+  });
+
+  it('the bot recognises every one of them as "a better file will not help"', () => {
+    const scanner = read('../jobs/telegramInboxScanner.ts');
+    // The predicate exists and covers all three shapes.
+    expect(scanner).toContain('_providerNotCovered');
+    // The .test(...) call wraps across lines, so anchor only on the literal itself.
+    const m = scanner.match(/return \/([^/]+)\/i\.test\(/);
+    expect({ found: !!m }).toEqual({ found: true });
+    const re = new RegExp(m[1], 'i');
+    for (const msg of [
+      'Δεν αναγνωρίστηκε ο πάροχος',
+      'Ο πάροχος ΕΠΑ δεν υποστηρίζεται ακόμα',
+      'Ο πάροχος ΕΥΔΑΠ δεν υποστηρίζεται ακόμα',
+      'Μη υποστηριζόμενος πάροχος'
+    ]) {
+      expect({ msg, matched: re.test(msg) }).toEqual({ msg, matched: true });
+    }
+    // …and does NOT swallow a legibility failure, which is the case where re-sending
+    // the file genuinely helps.
+    for (const msg of [
+      'Δεν βρέθηκε αριθμός παροχής',
+      'Αποτυχία ανάλυσης λογαριασμού',
+      'Ο λογαριασμός ΕΥΔΑΠ διαβάστηκε μερικώς (λείπει: period)'
+    ]) {
+      expect({ msg, matched: re.test(msg) }).toEqual({ msg, matched: false });
+    }
+  });
+
+  it('the parse-source label has THREE modes, not a constant', () => {
+    // Twice this label was derived from a value that is always set, so it read the same
+    // for every bill — first always «PDF», then always «OCR». The parser reports the
+    // mode now because only it knows which of its three routes ran.
+    const parser = read('../managers/billparser/index.ts');
+    for (const mode of ["'pdf-text'", "'pdf-ocr'", "'image-ocr'"]) {
+      expect({ mode, set: parser.includes(`textSource = ${mode}`) }).toEqual({
+        mode,
+        set: true
+      });
+    }
+    const dialog = read(
+      '../../../../webapps/landlord/src/components/buildings/BillImportDialog.js'
+    );
+    // The card must branch on textSource, and must NOT be back to testing ocrText.
+    expect(dialog).toContain("result.parsed?.textSource === 'pdf-text'");
+    expect(dialog).toContain("result.parsed?.textSource === 'pdf-ocr'");
+    expect(dialog).not.toMatch(/result\.parsed\?\.ocrText \|\| result\.ocrText/);
+  });
+
+  it('the import dialog surfaces the SERVER message instead of one generic sentence', () => {
+    // The server returns {status, message} with specific Greek — the 45MB batch cap,
+    // the rejected content type, the invalid file. The catch threw all of it away.
+    const dialog = read(
+      '../../../../webapps/landlord/src/components/buildings/BillImportDialog.js'
+    );
+    expect(dialog).toContain('error?.response?.data?.message');
+    expect(dialog).toMatch(/status === 413/);
+  });
+
+  it('the drop zone states limits the pipeline can actually honour', () => {
+    // «Up to 20 files» was impossible: 15MB per file, 45MB per batch, and the gateway
+    // kills the single request at 300s while OCR takes ~50s per page.
+    const dialog = read(
+      '../../../../webapps/landlord/src/components/buildings/BillImportDialog.js'
+    );
+    expect(dialog).not.toContain('Up to 20 files');
+    expect(dialog).toContain('Up to 5 files at a time');
+    // And the stated caps must be the ones the route enforces.
+    const routes = read('../routes.ts');
+    expect(routes).toContain('MAX_BILL_BATCH_BYTES = 45 * 1024 * 1024');
+    expect(routes).toContain('fileSize: 15 * 1024 * 1024');
+  });
+});
