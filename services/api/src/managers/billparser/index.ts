@@ -2,6 +2,7 @@ import { logger, ServiceError } from '@microrealestate/common';
 import type { BillParseResult, PartialBillFields } from './types.js';
 import { isValidRF } from './matching.js';
 import { parseDehBill } from './deh.js';
+import { parseEydapBill } from './eydap.js';
 
 export { normalizeBillingId } from './types.js';
 export type {
@@ -316,23 +317,22 @@ export async function parseBillPdf(buffer: Buffer): Promise<BillParseResult> {
       const parsed = parseDehBill(text);
       return { ...parsed, rawText: text, detectedProvider: 'deh' };
     }
-    case 'eydap':
-      // Recognized as a bill (marker matched) but not yet parseable. Carry
-      // detectedProvider + rawText so a caller can tell this IS a utility bill
-      // — the recapture gate needs that to avoid swallowing it (Step-7), and
-      // carrying rawText avoids a redundant second OCR downstream.
-      // `partial` lets the operator create the έξοδο from what WAS read while
-      // Slice 3's ΕΥΔΑΠ parser does not exist yet. NOTE: ΕΥΔΑΠ bills state a
-      // 3-month consumption period and a prior-balance line (plan §17.5) — which
-      // is exactly why no period is salvaged and the amount comes only from an
-      // explicit total label.
-      return {
-        success: false,
-        error: 'Ο πάροχος ΕΥΔΑΠ δεν υποστηρίζεται ακόμα',
-        rawText: text,
-        detectedProvider: 'eydap',
-        partial: salvageGenericFields(text)
-      };
+    case 'eydap': {
+      // Slice 3. The two things that kept this branch unimplemented — a ~3-month
+      // consumption period and a prior-balance line — are now REPORTED rather than
+      // used as reasons to refuse the bill: `warnings` carries
+      // 'period-spans-multiple-months' and 'prior-balance-included-in-payable', and
+      // `chargeableAmount` (ΜΕΡΙΚΟ ΣΥΝΟΛΟ) is kept apart from `totalAmount`
+      // (ΠΛΗΡΩΤΕΟ) so tenants are never split the landlord's arrears.
+      //
+      // The parser does NOT decide κοινόχρηστος vs ιδιωτικός — that is the
+      // matcher's answer, from WHICH list the number is found in (a shared meter
+      // → water_common split by χιλιοστά; an apartment → water_private on that
+      // unit alone). A parser that guessed would file a whole building's water on
+      // one flat, or split one flat's water across the building.
+      const parsed = parseEydapBill(text);
+      return { ...parsed, rawText: text, detectedProvider: 'eydap' };
+    }
     case 'epa':
       return {
         success: false,

@@ -1,7 +1,11 @@
 export type ParsedBill = {
-  provider: 'deh' | 'eydap' | 'epa' | 'other';
+  provider: 'deh' | 'eydap' | 'epa' | 'telecom' | 'nova' | 'other';
   billingId: string;
   billingIdNormalized: string;
+  /**
+   * What is OWED to the utility — the «ΠΛΗΡΩΤΕΟ» figure, prior balance included.
+   * This is the payment-tracking number.
+   */
   totalAmount: number;
   periodStart: Date;
   periodEnd: Date;
@@ -9,6 +13,48 @@ export type ParsedBill = {
   dueDate?: Date;
   rfCode?: string;
   paymentCode?: string;
+
+  /**
+   * What may be CHARGED TO TENANTS — this period's own charges («ΜΕΡΙΚΟ ΣΥΝΟΛΟ»),
+   * excluding any prior balance.
+   *
+   * These are two different questions and a bill answers both. `totalAmount` is
+   * what the landlord owes; splitting THAT among tenants would bill them the
+   * landlord's arrears. Equal to `totalAmount` on a bill with no prior balance,
+   * which is the common case — so nothing changes there. Absent when the document
+   * states no separate subtotal (ΔΕΗ prints one figure).
+   */
+  chargeableAmount?: number;
+
+  /**
+   * OTHER identifiers printed on the bill that could legitimately be what the
+   * landlord recorded on the apartment or the shared meter.
+   *
+   * ΕΥΔΑΠ prints an ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ (what you pay with) AND an ΑΡΙΘΜΟΣ
+   * ΜΗΤΡΩΟΥ (the permanent registry number). Either is a reasonable thing to have
+   * typed into `eydapNumber`, so the matcher must be allowed to try both rather
+   * than fail because the landlord chose the other one. Normalised, like
+   * `billingIdNormalized`.
+   */
+  alternateBillingIds?: string[];
+
+  /**
+   * Everything else the OCR read, verbatim-ish and provider-shaped.
+   *
+   * Kept because throwing it away is a decision that cannot be undone later: the
+   * source image is archived but re-OCR costs ~60s per page, and the consumption
+   * history (meter readings, m³, tariff tiers) is exactly what a landlord needs to
+   * tell a leak from a hot summer. Nothing downstream may compute money from
+   * these — the money fields above are the contract.
+   */
+  details?: Record<string, unknown>;
+
+  /**
+   * Non-fatal observations about a bill that PARSED. Stable codes, not prose, for
+   * the same reason `missingFields` uses codes: the consumer renders them on a
+   * localised surface.
+   */
+  warnings?: string[];
 };
 
 /**
