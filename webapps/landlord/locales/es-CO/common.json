@@ -1226,6 +1226,7 @@
   "Create new expense": "Crear nuevo gasto",
   "need assignment": "requieren asignación",
   "Charge tenants this month": "Cobrar a los inquilinos este mes",
+  "Charge tenants for {{month}}": "Cobrar a los inquilinos por {{month}}",
   "Issue Date": "Fecha de emisión",
   "Replace the existing bill": "Reemplazar la factura existente",
   "A vacant apartment is charged to its owner": "Un apartamento vacío se cobra a su propietario",

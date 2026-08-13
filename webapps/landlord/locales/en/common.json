@@ -1373,6 +1373,7 @@
   "Create new expense": "Create new expense",
   "need assignment": "need assignment",
   "Charge tenants this month": "Charge tenants this month",
+  "Charge tenants for {{month}}": "Charge tenants for {{month}}",
   "Issue Date": "Issue Date",
   "Replace the existing bill": "Replace the existing bill",
   "A vacant apartment is charged to its owner": "A vacant apartment is charged to its owner",

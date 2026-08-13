@@ -1226,6 +1226,7 @@
   "Create new expense": "Créer une nouvelle dépense",
   "need assignment": "à affecter",
   "Charge tenants this month": "Facturer les locataires ce mois-ci",
+  "Charge tenants for {{month}}": "Facturer les locataires pour {{month}}",
   "Issue Date": "Date d'émission",
   "Replace the existing bill": "Remplacer la facture existante",
   "A vacant apartment is charged to its owner": "Un appartement vacant est facturé à son propriétaire",

@@ -1226,6 +1226,7 @@
   "Create new expense": "Neue Ausgabe erstellen",
   "need assignment": "Zuordnung erforderlich",
   "Charge tenants this month": "Mieter diesen Monat belasten",
+  "Charge tenants for {{month}}": "Mieter für {{month}} belasten",
   "Issue Date": "Rechnungsdatum",
   "Replace the existing bill": "Bestehende Rechnung ersetzen",
   "A vacant apartment is charged to its owner": "Eine leerstehende Wohnung wird ihrem Eigentümer belastet",

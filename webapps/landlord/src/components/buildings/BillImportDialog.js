@@ -729,8 +729,17 @@ function ResultCard({
               htmlFor={`charge-${keyOf(result)}`}
               className="flex cursor-pointer items-center justify-between gap-3"
             >
+              {/* «this month» was a lie: the charge posts to the BILL's term
+                  (parsed.proposedTerm), not the current month — a June bill charges
+                  June even in August. Name the month so the toggle cannot be
+                  misread, and fall back to the old wording only if the parse gave
+                  us no term to name. */}
               <span className="text-sm">
-                {t('Charge tenants this month')}
+                {billTerm
+                  ? t('Charge tenants for {{month}}', {
+                      month: termMonthYearAccusative(billTerm, lang)
+                    })
+                  : t('Charge tenants this month')}
               </span>
               <Switch
                 id={`charge-${keyOf(result)}`}
