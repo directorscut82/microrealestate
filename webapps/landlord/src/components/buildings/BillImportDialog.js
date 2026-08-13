@@ -594,7 +594,14 @@ function ResultCard({
 
           <div className="min-w-0 flex-1">
             <div className="mb-1.5 text-[0.6875rem] font-medium uppercase tracking-wide text-ink-muted">
-              {result.ocrText
+              {/* WHERE the values came from — a photograph read by OCR is less
+                  trustworthy than a PDF's own text layer, and the operator needs to
+                  know which they are checking.
+                  `ocrText` sits at the TOP level only on a FAILED parse; on success
+                  the server nests it under `parsed`. Reading only the top level
+                  therefore labelled every successfully-parsed PHOTO as «Από το PDF»
+                  — measured on the real ΕΥΔΑΠ jpg, whose card said PDF. */}
+              {result.parsed?.ocrText || result.ocrText
                 ? t('Read from the image (OCR)')
                 : t('Read from the PDF')}
             </div>
