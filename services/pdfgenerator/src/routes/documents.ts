@@ -733,8 +733,7 @@ export default function () {
       // segment before doing path resolution. The path.resolve check
       // below is the second line of defence.
       // eslint-disable-next-line no-control-regex
-      // eslint-disable-next-line no-control-regex
-      if (/\\|^\/+|(^|\/)\.\.(\/|$)|[ -]/.test(rawKey)) {
+      if (/\\|^\/+|(^|\/)\.\.(\/|$)|[\u0000-\u001f]/.test(rawKey)) {
         throw new ServiceError('invalid key', 422);
       }
       const expectedPrefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;
@@ -823,7 +822,7 @@ export default function () {
         throw new ServiceError('key required', 422);
       }
       // eslint-disable-next-line no-control-regex
-      if (/[\\ -]|^\/+|(^|\/)\.\.(\/|$)/.test(rawKey)) {
+      if (/[\\\u0000-\u001f]|^\/+|(^|\/)\.\.(\/|$)/.test(rawKey)) {
         throw new ServiceError('invalid key', 422);
       }
       const expectedPrefix = `${sanitize(realm.name)}-${sanitize(realm._id)}/`;

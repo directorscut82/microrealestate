@@ -11,7 +11,9 @@
  *   `${sanitize(realm.name)}-${sanitize(realmId)}/`
  * because the ONLY thing that serves these bytes back is pdfgenerator's
  * `GET /api/v2/documents/by-key`, which 403s any key not under that prefix
- * (documents.ts:639). Bill artifacts go under `<prefix>/bills/<billId>/<file>`.
+ * (pdfgenerator/src/routes/documents.ts, the `/by-key` handler — grep for
+ * it rather than trusting a line number; the one cited here had drifted onto an
+ * unrelated handler). Bill artifacts go under `<prefix>/bills/<billId>/<file>`.
  *
  * B2 is gated by s3.isEnabled (all 4 fields present) — NOTE the realm b2 config
  * has NO `selected` flag (unlike telegram/sms); presence of the creds IS the
