@@ -1558,5 +1558,18 @@
   "EPA": "ΕΠΑ",
   "Telecommunications": "Τηλεπικοινωνίες",
   "Details": "Στοιχεία",
-  "Documents about this apartment (private utility bills, certificates, photos)": "Έγγραφα του διαμερίσματος (ιδιωτικοί λογαριασμοί, βεβαιώσεις, φωτογραφίες)"
+  "Documents about this apartment (private utility bills, certificates, photos)": "Έγγραφα του διαμερίσματος (ιδιωτικοί λογαριασμοί, βεβαιώσεις, φωτογραφίες)",
+  "PDF": "PDF",
+  "OCR": "OCR",
+  "Payment receipt": "Απόδειξη πληρωμής",
+  "Open the bill": "Άνοιγμα του λογαριασμού",
+  "Open the scanned bill": "Άνοιγμα της σαρωμένης εικόνας",
+  "Open the payment receipt": "Άνοιγμα της απόδειξης",
+  "Recognised text": "Κείμενο που αναγνωρίστηκε",
+  "Billing period": "Περίοδος κατανάλωσης",
+  "Payment code": "Κωδικός πληρωμής",
+  "RF code": "Κωδικός RF",
+  "The file is no longer in storage": "Το αρχείο δεν υπάρχει πλέον στον αποθηκευτικό χώρο",
+  "You are not allowed to open this file": "Δεν έχετε δικαίωμα να ανοίξετε αυτό το αρχείο",
+  "The file could not be opened": "Το αρχείο δεν μπόρεσε να ανοίξει"
 }

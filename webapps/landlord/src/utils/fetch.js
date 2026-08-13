@@ -230,6 +230,27 @@ export const downloadDocument = async ({ endpoint, documentName }) => {
   FileDownload(response.data, documentName);
 };
 
+/**
+ * Fetch a B2-stored object for VIEWING (not downloading) and return an object URL
+ * plus its mime type.
+ *
+ * `GET /documents/by-key` is the only route that serves these bytes, and it 403s
+ * any key outside the caller realm's own `<name>-<realmId>/` prefix — that prefix
+ * IS the tenant-isolation boundary, so the key must never be built client-side
+ * from user input; pass through the one stored on the Bill.
+ *
+ * The caller MUST revokeObjectURL when done, or every open-and-close leaks the
+ * whole file (a scanned bill is ~845KB) for the life of the tab.
+ */
+export const fetchDocumentObjectUrl = async (key) => {
+  const response = await apiFetcher().get(
+    `/documents/by-key?key=${encodeURIComponent(key)}`,
+    { responseType: 'blob' }
+  );
+  const blob = response.data;
+  return { url: URL.createObjectURL(blob), mimeType: blob.type || '' };
+};
+
 export const uploadDocument = async ({
   endpoint,
   documentName,

@@ -1,5 +1,6 @@
 import {
   QueryKeys,
+  fetchBills,
   fetchExpenseBreakdown,
   saveMonthlyStatement
 } from '../../utils/restcalls';
@@ -27,6 +28,9 @@ import useFormatNumber from '../../hooks/useFormatNumber';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
+import { isVariableExpense } from '../../utils/variableExpense';
+import BillSourceDialog from './BillSourceDialog';
+import { LuFileText, LuReceipt, LuScanLine } from 'react-icons/lu';
 
 /*
  * BuildingExpensePanel — the single, calendar-driven expense surface.
@@ -81,20 +85,50 @@ function isExpenseActiveForTerm(expense, term) {
 //     amount comes from persisted monthlyCharges (sum across units) for
 //     this term, else blank.
 //   - fixed: has a known amount (one-off or recurring-with-amount).
-function buildRowsForTerm(building, term, isOwnerSide) {
+// Exported for tests ONLY. These two decide, per expense and per month, whether the
+// landlord sees an editable κυμαινόμενο input, a read-only figure, or nothing at
+// all — and whether the month gets a calendar dot. Every branch is a money
+// statement, so they are pinned by an exhaustive shape matrix rather than by
+// asserting on the source text.
+export function buildRowsForTerm(building, term, isOwnerSide) {
   const units = building?.units || [];
   const expenses = building?.expenses || [];
   const ownerEntries = building?.ownerMonthlyExpenses || [];
   const rows = [];
 
   for (const expense of expenses) {
+    if (!expense || typeof expense !== 'object') continue;
     const tracksOwner = !!expense.trackOwnerExpense;
     // Owner side shows owner-tracked expenses; tenant side shows all
     // expenses (owner-tracked ones still bill tenants for their share).
     if (isOwnerSide && !tracksOwner) continue;
 
-    const fixedAmount = isOwnerSide ? expense.ownerAmount : expense.amount;
-    const isVariable = expense.isRecurring && !fixedAmount;
+    // The tenant-side monthly cost of a `fixed`-allocation expense lives in
+    // `customAllocations`, NOT in `amount` — `amount` is legitimately 0 there and
+    // the rent engine still bills the per-unit figures (1_base.ts: the
+    // `total <= 0` skip explicitly exempts `fixed`). Reading `amount` alone made
+    // this panel call such an expense "variable" and render a blank input, i.e. it
+    // said «nothing entered yet» about money already on the tenants' rents, and
+    // contributed 0 to the month total while the ΧΡΕΩΣΕΙΣ breakdown underneath —
+    // computed by the server — showed the real figures. Same resolution as
+    // buildingprojection.expenseMonthlyCost and BuildingDashboard.
+    const fixedAmount = isOwnerSide
+      ? Number(expense.ownerAmount) || 0
+      : expense.allocationMethod === 'fixed'
+        ? (expense.customAllocations || []).reduce(
+            (sum, a) => sum + (Number(a?.value) || 0),
+            0
+          )
+        : Number(expense.amount) || 0;
+
+    // The κυμαινόμενο decision goes through the SHARED predicate. This file had
+    // its own hand-written copy (`expense.isRecurring && !fixedAmount`), so the
+    // explicit `isVariable` flag added 2026-08-12 had NO effect on the panel the
+    // landlord actually reads. Worst shape: `{isVariable: true, amount: 120}` with
+    // an imported charge of 78,40 for the term — the panel showed a read-only
+    // «120,00 €» and added 120 to the month total, while the breakdown below it
+    // showed 78,40. One screen, two figures, and the 120 was charged to nobody.
+    const isVariable = isVariableExpense(expense, fixedAmount);
 
     if (isVariable) {
       // Only surface if active for this term.
@@ -151,7 +185,14 @@ function buildRowsForTerm(building, term, isOwnerSide) {
         allocationMethod: expense.allocationMethod,
         isOwner: isOwnerSide
       });
-    } else if (fixedAmount) {
+      // `expense.isVariable === false` at a 0 amount is the UNFINISHED expense —
+      // the state the flag was added to make distinguishable from a deliberate
+      // κυμαινόμενο one. It must still be listed: routing it through the shared
+      // predicate correctly stops calling it variable, and without this clause the
+      // old `else if (fixedAmount)` dropped it, so the expense disappeared from the
+      // panel altogether. Rendered read-only at 0 (its real amount) rather than as
+      // an input, because a fixed amount is edited in the expense dialog.
+    } else if (fixedAmount || expense.isVariable === false) {
       if (!isExpenseActiveForTerm(expense, term)) continue;
       rows.push({
         expenseId: String(expense._id),
@@ -168,7 +209,7 @@ function buildRowsForTerm(building, term, isOwnerSide) {
 }
 
 // Which terms (YYYYMMDDHH) have ANY data — drives the calendar dots.
-function termsWithData(building) {
+export function termsWithData(building) {
   const set = new Set();
   const units = building?.units || [];
   const expenses = building?.expenses || [];
@@ -188,6 +229,7 @@ function termsWithData(building) {
   // by a month during the first 2-3h of a month in Athens (UTC+2/+3).
   const currentTerm = Number(moment().startOf('month').format('YYYYMMDDHH'));
   for (const expense of expenses) {
+    if (!expense || typeof expense !== 'object') continue;
     if (!expense.startTerm) continue;
     // A VARIABLE recurring expense (recurring, no fixed amount on either
     // side) has NO data until the landlord enters a monthly amount — that
@@ -196,10 +238,21 @@ function termsWithData(building) {
     // active month unconditionally, destroying the filled-vs-blank signal
     // the calendar dots exist to give. Skip the projection for it; only its
     // real saved entries should dot.
-    const isVariable =
-      expense.isRecurring &&
-      !Number(expense.amount) &&
-      !Number(expense.ownerAmount);
+    // Same shared predicate, second copy. The cost is the larger of the two sides,
+    // which for legacy rows is 0 exactly when both amounts are 0 — i.e. today's
+    // `!amount && !ownerAmount` test, unchanged. `fixed` allocations resolve from
+    // customAllocations here too, so a fixed expense carrying 0 keeps its dots.
+    const tenantCost =
+      expense.allocationMethod === 'fixed'
+        ? (expense.customAllocations || []).reduce(
+            (sum, a) => sum + (Number(a?.value) || 0),
+            0
+          )
+        : Number(expense.amount) || 0;
+    const isVariable = isVariableExpense(
+      expense,
+      Math.max(tenantCost, Number(expense.ownerAmount) || 0)
+    );
     if (isVariable) continue;
     const start = Number(expense.startTerm);
     const end = expense.endTerm
@@ -220,7 +273,63 @@ function termsWithData(building) {
   return set;
 }
 
-function ExpenseRow({ row, value, onChange, onSave, saving, t }) {
+/**
+ * «PDF» / «OCR» / «Απόδειξη» pills on a δαπάνη row — the archived λογαριασμός made
+ * reachable from the month it belongs to.
+ *
+ * Until now a bill's source was uploaded to B2, its key stored on `Bill.pdfUrl`,
+ * and then rendered on NO surface in the app: the landlord could not see that a
+ * document existed, let alone open it. Absent representation — a bill with a
+ * scanned original looked identical to one typed in by hand.
+ *
+ * «PDF» when the stored file is the issuer's own document, «OCR» when it is a
+ * photograph the recogniser read. That difference is worth showing: an OCR'd
+ * figure was inferred from an image and is the one to double-check. A row with no
+ * bill gets NO pill — never a greyed-out one, which would read as "there is a
+ * document and it is broken".
+ */
+function BillPills({ bill, onOpen, t }) {
+  if (!bill) return null;
+  const isPdf = /\.pdf$/i.test(String(bill.pdfUrl || ''));
+  const hasSource = !!bill.pdfUrl;
+  const hasReceipt =
+    (bill.receipts || []).some((r) => r?.proofUrl) || !!bill.paymentProofUrl;
+  if (!hasSource && !hasReceipt) return null;
+  return (
+    <span className="flex items-center gap-1 shrink-0">
+      {hasSource ? (
+        <button
+          type="button"
+          onClick={() => onOpen(bill, 'bill')}
+          data-cy="billSourcePill"
+          title={isPdf ? t('Open the bill') : t('Open the scanned bill')}
+          className="inline-flex items-center gap-1 h-5 rounded-full border border-stone-line bg-muted/60 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-muted hover:border-ink-muted hover:text-ink transition-colors"
+        >
+          {isPdf ? (
+            <LuFileText className="size-3" />
+          ) : (
+            <LuScanLine className="size-3" />
+          )}
+          {isPdf ? t('PDF') : t('OCR')}
+        </button>
+      ) : null}
+      {hasReceipt ? (
+        <button
+          type="button"
+          onClick={() => onOpen(bill, 'receipt')}
+          data-cy="billReceiptPill"
+          title={t('Open the payment receipt')}
+          className="inline-flex items-center gap-1 h-5 rounded-full border border-stone-line bg-muted/60 px-1.5 text-[10px] font-semibold tracking-wide text-ink-muted hover:border-ink-muted hover:text-ink transition-colors"
+        >
+          <LuReceipt className="size-3" />
+          {t('Receipt')}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+function ExpenseRow({ row, value, onChange, onSave, saving, t, bill, onOpenBill }) {
   return (
     <div className="flex items-center justify-between gap-2 text-sm py-0.5">
       <span className="text-muted-foreground min-w-0 flex-1 truncate">
@@ -231,6 +340,7 @@ function ExpenseRow({ row, value, onChange, onSave, saving, t }) {
             landlord doesn't need to see HOW it's split on the statement line). */}
         {expenseDisplayLabel(t, row.name, row.type)}
       </span>
+      <BillPills bill={bill} onOpen={onOpenBill} t={t} />
       {row.kind === 'variable' ? (
         <div className="flex items-center gap-1.5 shrink-0">
           <Input
@@ -284,6 +394,28 @@ export default function BuildingExpensePanel({ building }) {
     []
   );
   const [selectedTerm, setSelectedTerm] = useState(currentTerm);
+  // The archived λογαριασμός / απόδειξη behind a δαπάνη row. ONE request per
+  // building (not per row) — the Bill collection's unique index is exactly
+  // (realmId, buildingId, expenseId, term), so the lookup below is an exact match
+  // on the same key the server uses, not a heuristic.
+  const { data: bills = [] } = useQuery({
+    queryKey: [QueryKeys.BILLS, building?._id],
+    queryFn: () => fetchBills({ buildingId: building?._id }),
+    enabled: !!building?._id
+  });
+  const billByExpenseTerm = useMemo(() => {
+    const m = new Map();
+    for (const b of Array.isArray(bills) ? bills : []) {
+      if (!b?.expenseId || !b?.term) continue;
+      m.set(`${String(b.expenseId)}:${String(b.term)}`, b);
+    }
+    return m;
+  }, [bills]);
+  const [sourceDialog, setSourceDialog] = useState(null);
+  const handleOpenBill = useCallback(
+    (bill, kind) => setSourceDialog({ bill, kind }),
+    []
+  );
   const isPastTerm = Number(selectedTerm) < Number(currentTerm);
   // Contract._isFrozen ALSO freezes the CURRENT term once a tenant's rent for it
   // is fully paid (contract.ts:475 -> _isFullyPaid), so the phantom-receivable
@@ -488,6 +620,15 @@ export default function BuildingExpensePanel({ building }) {
     // month detail span the whole panel on top; the ΧΡΕΩΣΕΙΣ breakdown sits
     // entirely BELOW (was a side-by-side 2-col grid that cramped both halves).
     <div className="space-y-6">
+      {/* The archived document, opened from a row's pill: the bill on the left,
+          the data read off it on the right. Mounted once for the whole panel —
+          one dialog, whichever row was clicked. */}
+      <BillSourceDialog
+        open={!!sourceDialog}
+        setOpen={(v) => !v && setSourceDialog(null)}
+        bill={sourceDialog?.bill}
+        kind={sourceDialog?.kind}
+      />
       {/* TOP — calendar + month total + variable-amount entry rows */}
       <div className="min-w-0">
       {/* Centered year navigator */}
@@ -615,6 +756,10 @@ export default function BuildingExpensePanel({ building }) {
                     key={`t-${row.expenseId}`}
                     row={row}
                     value={drafts[`tenant:${row.expenseId}`]}
+                    bill={billByExpenseTerm.get(
+                      `${row.expenseId}:${selectedTerm}`
+                    )}
+                    onOpenBill={handleOpenBill}
                     onChange={(id, v) => handleDraftChange(id, v, false)}
                     onSave={handleSaveRow}
                     saving={saving}
@@ -642,6 +787,10 @@ export default function BuildingExpensePanel({ building }) {
                     key={`o-${row.expenseId}`}
                     row={row}
                     value={drafts[`owner:${row.expenseId}`]}
+                    bill={billByExpenseTerm.get(
+                      `${row.expenseId}:${selectedTerm}`
+                    )}
+                    onOpenBill={handleOpenBill}
                     onChange={(id, v) => handleDraftChange(id, v, true)}
                     onSave={handleSaveRow}
                     saving={saving}

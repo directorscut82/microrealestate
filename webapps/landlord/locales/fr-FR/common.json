@@ -1311,5 +1311,18 @@
   "EPA": "EPA",
   "Telecommunications": "Télécommunications",
   "Details": "Détails",
-  "Documents about this apartment (private utility bills, certificates, photos)": "Documents de cet appartement (factures privées, certificats, photos)"
+  "Documents about this apartment (private utility bills, certificates, photos)": "Documents de cet appartement (factures privées, certificats, photos)",
+  "PDF": "PDF",
+  "OCR": "OCR",
+  "Payment receipt": "Payment receipt",
+  "Open the bill": "Open the bill",
+  "Open the scanned bill": "Open the scanned image",
+  "Open the payment receipt": "Open the payment receipt",
+  "Recognised text": "Recognised text",
+  "Billing period": "Billing period",
+  "Payment code": "Payment code",
+  "RF code": "RF code",
+  "The file is no longer in storage": "The file is no longer in storage",
+  "You are not allowed to open this file": "You are not allowed to open this file",
+  "The file could not be opened": "The file could not be opened"
 }

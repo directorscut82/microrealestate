@@ -3,8 +3,13 @@
  *
  * WHY THIS FILE EXISTS. Until 2026-08-12 there was no flag: "variable" was
  * INFERRED as `recurring && monthlyCost === 0`, and that inference was written out
- * by hand in three separate places (buildingprojection twice, ExpenseFormDialog
- * once). Two consequences, both reported by the landlord:
+ * by hand in FIVE places: buildingprojection twice, ExpenseFormDialog once, and
+ * BuildingExpensePanel twice (`buildRowsForTerm` and `termsWithData`). The first
+ * three were converted on 2026-08-12 and the commit claimed "one shared rule read
+ * by every surface" — while the two in BuildingExpensePanel, which is THE panel
+ * rendered on the building page, were missed. The flag therefore had no effect on
+ * the only screen the landlord uses until 2026-08-13. Count the call sites, do not
+ * trust this sentence: `grep -rn "isRecurring &&" webapps services`. Two consequences, both reported by the landlord:
  *
  *   1. «κυμαινόμενο» and «I have not typed the amount yet» were the SAME state.
  *      A half-finished expense was indistinguishable from a deliberate variable

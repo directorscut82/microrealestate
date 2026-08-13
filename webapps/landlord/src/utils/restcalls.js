@@ -632,6 +632,14 @@ export async function pollRecapture(id) {
   return response.data;
 }
 
+/**
+ * Bills, optionally scoped to a building or a status.
+ *
+ * The expense panel matches a bill to a δαπάνη row on `(expenseId, term)` — which
+ * is already the Bill collection's unique index, so the mapping is exact rather
+ * than heuristic. Fetched ONCE per building, never per row: the panel renders up
+ * to 12 months x N expenses and a per-row fetch would be a request storm.
+ */
 export async function fetchBills({ buildingId, status } = {}) {
   const params = new URLSearchParams();
   if (buildingId) params.set('buildingId', buildingId);
