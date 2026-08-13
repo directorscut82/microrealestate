@@ -412,6 +412,15 @@ function ResultCard({
               {match?.expenseName
                 ? `${match.expenseName} · ${targetLabel}`
                 : targetLabel}
+              {/* The matched branch has no unitMatch (the server stops looking once an
+                  expense hits), so without this a per-apartment bill named its building
+                  and never its flat — the one fact the landlord is checking. */}
+              {!identifiedUnit && singleUnitTargetLabel ? (
+                <>
+                  {' · '}
+                  {singleUnitTargetLabel}
+                </>
+              ) : null}
             </span>
             {identifiedShared?.label ? (
               <span className="text-xs text-muted-foreground">
@@ -558,18 +567,21 @@ function ResultCard({
                 {/* Editable: an OCR misread of the total («186,21» as «18621»)
                     would otherwise flow verbatim into the bill and, via «Χρέωση
                     ενοικιαστών», into every tenant's rent. */}
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  className="h-8 w-28 text-sm tabular-nums"
-                  value={
-                    amountOverride !== undefined
-                      ? amountOverride
-                      : String(parsed.totalAmount ?? '')
-                  }
-                  onChange={(e) => onAmountChange(result._uid, e.target.value)}
-                  aria-label={t('Amount')}
-                />
+                <span className="flex items-center gap-1.5">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="h-8 w-28 text-sm tabular-nums"
+                    value={
+                      amountOverride !== undefined
+                        ? amountOverride
+                        : String(parsed.totalAmount ?? '')
+                    }
+                    onChange={(e) => onAmountChange(result._uid, e.target.value)}
+                    aria-label={t('Amount')}
+                  />
+                  <span className="text-muted-foreground">€</span>
+                </span>
               </dd>
 
               <dt className="text-muted-foreground">{t('Supply number')}</dt>
