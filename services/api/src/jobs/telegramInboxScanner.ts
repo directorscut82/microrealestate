@@ -744,7 +744,20 @@ async function _handleUpdate(
     fileId = msg.document.file_id;
     fileName = msg.document.file_name;
   } else if (msg.photo?.length) {
-    fileId = msg.photo[msg.photo.length - 1].file_id;
+    // Telegram sends several sizes of the same photo and OCR quality depends
+    // entirely on getting the LARGEST. Taking the last element relies on the array
+    // being ascending — which it conventionally is, but the API does not promise it,
+    // and picking a thumbnail would produce an unreadable bill with no error: the
+    // parse would simply fail and the landlord would be told to take a better photo.
+    // Choose by declared size, falling back to the last element when Telegram omits
+    // file_size.
+    const sizes = msg.photo;
+    const largest = sizes.reduce(
+      (best, cur) =>
+        (cur.file_size ?? -1) > (best.file_size ?? -1) ? cur : best,
+      sizes[sizes.length - 1]
+    );
+    fileId = largest.file_id;
     fileName = `photo-${msg.message_id}.jpg`;
   }
   if (!fileId) return 'skipped'; // text-only message — not a bill
@@ -781,7 +794,9 @@ async function _handleUpdate(
       await deps.sendReply?.(
         realm.botToken,
         msg.chat.id,
-        'Ελήφθη, αλλά ο κωδικός δεν διαβάστηκε καθαρά. Δοκιμάστε πιο κοντινή φωτογραφία ή πληκτρολογήστε τον χειροκίνητα στη φόρμα.'
+        // Same reason: a closer PHOTO still gets compressed to ~1280px. The file
+        // route is the one that actually raises the resolution.
+        'Ελήφθη, αλλά ο κωδικός δεν διαβάστηκε καθαρά. Στείλτε το ως ΑΡΧΕΙΟ (συνημμένο) αντί για φωτογραφία, ή πληκτρολογήστε τον κωδικό χειροκίνητα στη φόρμα.'
       );
       return 'skipped';
     }
@@ -901,7 +916,11 @@ async function _handleUpdate(
     realm.botToken,
     msg.chat.id,
     parseError
-      ? `Ελήφθη, αλλά δεν διαβάστηκε (${parseError}). Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.`
+      ? `Ελήφθη, αλλά δεν διαβάστηκε (${parseError}).${
+          msg.photo?.length
+            ? ' Το Telegram συμπιέζει τις φωτογραφίες — στείλτε το ίδιο αρχείο ως ΑΡΧΕΙΟ (συνημμένο) για πλήρη ανάλυση.'
+            : ''
+        } Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.`
       : `Ελήφθη ο λογαριασμός${parsed.totalAmount ? ` (${parsed.totalAmount}€)` : ''} — εκκρεμεί επιβεβαίωση στις ειδοποιήσεις της εφαρμογής.`
   );
   return 'ingested';

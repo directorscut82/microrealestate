@@ -485,3 +485,42 @@ describe('a bill matches on ANY identifier it printed, not only the primary', ()
     expect(src).toContain('resolveBillTarget');
   });
 });
+
+describe('the Telegram IMAGE path', () => {
+  let src = '';
+  beforeAll(async () => {
+    // ESM suite: `require` is not defined and process.cwd() depends on how jest was
+    // launched. Anchor on this file's own URL, as the parity suites do.
+    const fs = await import('fs');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    src = fs.readFileSync(
+      path.resolve(here, '../jobs/telegramInboxScanner.ts'),
+      'utf8'
+    );
+  });
+  const read = () => src;
+
+  it('picks the LARGEST photo size by declared bytes, not by array position', () => {
+    // OCR quality depends entirely on getting the largest size. The code took
+    // `photo[photo.length - 1]`, which relies on the array being ascending — the API
+    // does not promise it, and picking a thumbnail fails SILENTLY: the parse just
+    // fails and the landlord is told to take a better photo.
+    const src = read();
+    expect(src).toContain('(cur.file_size ?? -1) > (best.file_size ?? -1)');
+    expect(src).not.toContain('msg.photo[msg.photo.length - 1].file_id');
+    // …and still falls back to the last element when Telegram omits file_size.
+    expect(src).toContain('sizes[sizes.length - 1]');
+  });
+
+  it('advises sending the bill as a FILE, not a closer photo', () => {
+    // Telegram compresses a photo to ~1280px on its longest side — a hard ceiling no
+    // re-shoot beats. The real ΕΥΔΑΠ bill arrived at exactly 854x1280, i.e. already
+    // at the limit. «Try a closer photo» is therefore worse advice than «send it as a
+    // file», which preserves full resolution.
+    const src = read();
+    expect(src).toContain('ως ΑΡΧΕΙΟ');
+    expect(src).not.toContain('Δοκιμάστε πιο κοντινή φωτογραφία ή πληκτρολογήστε');
+  });
+});
