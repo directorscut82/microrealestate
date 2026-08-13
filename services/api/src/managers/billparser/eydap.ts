@@ -55,13 +55,14 @@
  *   parser returns `totalAmount` = ΠΛΗΡΩΤΕΟ and `chargeableAmount` = ΜΕΡΙΚΟ ΣΥΝΟΛΟ,
  *   and warns when they differ. On the sample they are both 89,94 and nothing changes.
  *
- * · THE PERIOD IS ~3 MONTHS (28/04–23/07 on the sample: 87 ΗΜΕΡΕΣ ΚΑΤΑΝΑΛΩΣΗΣ).
- *   `computeDefaultTerm(periodEnd)` puts the whole amount in ONE month. That is a
- *   modelling choice the landlord must see, not one the parser should make quietly,
- *   so it is reported as `period-spans-multiple-months` with the count. This is
- *   exactly the concern that kept the ΕΥΔΑΠ branch unimplemented (plan §17.5); the
- *   resolution is to surface it, because refusing the bill entirely is what left the
- *   landlord typing it by hand.
+ * · THE PERIOD IS ~3 MONTHS, AND THAT IS NORMAL. ΕΥΔΑΠ reads meters quarterly, so
+ *   every Greek water bill covers about three months (87 ΗΜΕΡΕΣ ΚΑΤΑΝΑΛΩΣΗΣ on the
+ *   sample). The landlord pays it once and charges it once. An earlier version
+ *   warned about the span, which would have fired on EVERY water bill — the trap
+ *   described above, where a warning on everything trains the operator to dismiss
+ *   the one that matters. The span is kept as data (`details.monthsSpanned`) and
+ *   nothing is raised. What IS worth deciding is WHICH MONTH the charge lands in,
+ *   and that is `computeDefaultTerm`'s business, not the parser's.
  *
  * INTERNAL CONSISTENCY, because a wrong number that looks right is the failure mode
  * here. Three identities are checked against the document's own arithmetic:
@@ -585,17 +586,20 @@ export function parseEydapBill(text: string): BillParseResult {
   // ─── period span, reported rather than decided ─────────────────────────────
   let monthsSpanned: number | null = null;
   if (periodStart && periodEnd) {
-    // CALENDAR months touched, which is what matters for "can this land in one
-    // term": 28/04-23/07 touches four (Apr, May, Jun, Jul) even though it is 87
-    // days of water. Both numbers are reported because they answer different
-    // questions — the span decides whether a single-term charge is a distortion,
-    // the day count is what tells a leak from a hot summer.
+    // Calendar months touched, kept as DATA and deliberately NOT warned about.
+    //
+    // An earlier version raised `period-spans-multiple-months` here, on the theory
+    // that a ~3-month bill charged to one term is a distortion. It is not: ΕΥΔΑΠ
+    // reads meters QUARTERLY, so every Greek water bill covers about three months.
+    // The warning would have fired on every ΕΥΔΑΠ bill ever imported — the exact
+    // failure this file warns about elsewhere, that a warning appearing on
+    // everything trains the operator to dismiss the one that matters. A normal bill
+    // must look normal.
     const monthsTouched =
       (periodEnd.getUTCFullYear() - periodStart.getUTCFullYear()) * 12 +
       (periodEnd.getUTCMonth() - periodStart.getUTCMonth()) +
       1;
     monthsSpanned = monthsTouched;
-    if (monthsTouched > 1) warnings.push('period-spans-multiple-months');
   }
 
   // ─── assemble ──────────────────────────────────────────────────────────────

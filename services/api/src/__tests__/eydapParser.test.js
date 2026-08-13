@@ -219,14 +219,18 @@ describe('ΕΥΔΑΠ parser — the period, which decides WHICH MONTH is charged
     });
   });
 
-  it('warns that the period spans more than one month', () => {
-    // A ~3-month water bill charged to a single term is a distortion the landlord
-    // must SEE. Refusing the bill instead is what left them typing it by hand.
-    expect(r.bill.warnings).toContain('period-spans-multiple-months');
+  it('does NOT warn about the quarterly period — that is how ΕΥΔΑΠ meters work', () => {
+    // ΕΥΔΑΠ reads meters quarterly, so ~3 months is what EVERY Greek water bill
+    // covers. Warning about it would fire on every bill ever imported and train the
+    // operator to dismiss warnings, including the ones that matter. Kept as data.
+    expect(r.bill.warnings || []).not.toContain('period-spans-multiple-months');
+    expect(r.bill.details.monthsSpanned).toBe(4);
   });
 
-  it('does not warn about a prior balance when there is none', () => {
-    expect(r.bill.warnings).not.toContain('prior-balance-included-in-payable');
+  it('a clean bill carries NO warnings at all', () => {
+    // The whole array is absent, not merely free of one code: a self-consistent
+    // quarterly water bill is the NORMAL case and must present as unremarkable.
+    expect(r.bill.warnings).toBeUndefined();
   });
 
   it('reads both dates, whose labels sit 3-4 lines from their values', () => {
