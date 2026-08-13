@@ -8,7 +8,12 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
   expenseId: { type: String, required: true },
   provider: {
     type: String,
-    enum: ['deh', 'eydap', 'epa', 'other'],
+    // Must stay in step with `VALID_PROVIDERS` (billmanager), `ALLOWED_PROVIDERS`
+    // (buildingmanager) and SharedMeterSchema. `telecom` is the service the
+    // landlord picks; `nova` is the brand the parser reads off a document. Both
+    // were accepted everywhere EXCEPT here, so confirming a telecom bill threw a
+    // mongoose ValidationError after the OCR had already run.
+    enum: ['deh', 'eydap', 'epa', 'telecom', 'nova', 'other'],
     required: true
   },
   billingId: { type: String, required: true },

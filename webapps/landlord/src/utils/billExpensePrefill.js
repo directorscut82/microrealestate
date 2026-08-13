@@ -53,13 +53,17 @@ const PROVIDER_TYPE_SHARED = {
   deh: 'electricity_common',
   eydap: 'water_common',
   epa: 'heating',
-  nova: 'telecom_common'
+  nova: 'telecom_common',
+  // The generic service the landlord picks in the UI; `nova` is only what the parser
+  // reads off a NOVA document.
+  telecom: 'telecom_common'
 };
 const PROVIDER_TYPE_PRIVATE = {
   deh: 'electricity_private',
   eydap: 'water_private',
   epa: 'gas_private',
-  nova: 'telecom_private'
+  nova: 'telecom_private',
+  telecom: 'telecom_private'
 };
 
 /**
@@ -73,7 +77,8 @@ const PROVIDER_LABEL = {
   deh: 'ΔΕΗ',
   eydap: 'ΕΥΔΑΠ',
   epa: 'ΕΠΑ',
-  nova: 'NOVA'
+  nova: 'NOVA',
+  telecom: 'Τηλεπικοινωνίες'
 };
 
 /** The Greek display name for a provider code, or '' when unknown. */

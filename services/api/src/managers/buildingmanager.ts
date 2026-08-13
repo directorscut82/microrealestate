@@ -1110,7 +1110,7 @@ export function validateSharedMeters(
   // 'nova' belongs here now that telecom_* expense types exist: without it a NOVA
   // κοινόχρηστος line (building internet, entry-phone) could not be recorded at all,
   // so the new types were unreachable for the provider they were added for.
-  const ALLOWED_PROVIDERS = ['deh', 'eydap', 'epa', 'nova', 'other'];
+  const ALLOWED_PROVIDERS = ['deh', 'eydap', 'epa', 'telecom', 'nova', 'other'];
   const cleaned: { provider: string; supplyNumber: string; label: string }[] = [];
   const seen = new Set<string>();
   for (const raw of input as any[]) {

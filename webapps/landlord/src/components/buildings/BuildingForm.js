@@ -377,11 +377,15 @@ export default function BuildingForm({ building, onSubmit }) {
                         <SelectItem value="deh">{t('DEH')}</SelectItem>
                         <SelectItem value="eydap">{t('EYDAP')}</SelectItem>
                         <SelectItem value="epa">{t('EPA')}</SelectItem>
-                        {/* NOVA: a κοινόχρηστη telecom line (building internet,
-                            entry-phone). The server accepts it and telecom_common
-                            exists as an expense type, but this select did not offer
-                            it — so the type was unreachable from the UI. */}
-                        <SelectItem value="nova">{t('NOVA')}</SelectItem>
+                        {/* The KIND of service, not a company. «nova» is a provider
+                            BRAND — offering it here would have left a landlord on
+                            Cosmote or Vodafone unable to record a telecom line at all.
+                            `nova` stays valid server-side because that is what the
+                            parser recognises on a NOVA document; what the landlord
+                            picks is the service. */}
+                        <SelectItem value="telecom">
+                          {t('Telecommunications')}
+                        </SelectItem>
                         <SelectItem value="other">{t('Other')}</SelectItem>
                       </SelectContent>
                     </Select>

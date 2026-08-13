@@ -1308,5 +1308,6 @@
   "DEH": "DEH",
   "EYDAP": "EYDAP",
   "Supply numbers billed to the whole building. An imported bill matching one of these is proposed as a shared expense.": "Números de suministro facturados a todo el edificio. Una factura que coincida se propone como gasto común.",
-  "EPA": "EPA"
+  "EPA": "EPA",
+  "Telecommunications": "Telecomunicaciones"
 }

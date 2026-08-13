@@ -669,7 +669,7 @@ export namespace CollectionTypes {
     // importer matches on `supplyNumber`; `provider` drives the proposed expense
     // type and `label` its name. See SharedMeterSchema in collections/building.ts.
     sharedMeters?: {
-      provider: 'deh' | 'eydap' | 'epa' | 'other';
+      provider: BillProvider;
       supplyNumber: string;
       label?: string;
     }[];
@@ -701,7 +701,13 @@ export namespace CollectionTypes {
     updatedDate?: Date;
   };
 
-  export type BillProvider = 'deh' | 'eydap' | 'epa' | 'other';
+  export type BillProvider =
+    | 'deh'
+    | 'eydap'
+    | 'epa'
+    | 'telecom'
+    | 'nova'
+    | 'other';
   export type BillStatus = 'pending' | 'partial' | 'paid';
 
   // Slice 6 — one recorded payment απόδειξη (installment-capable).

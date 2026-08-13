@@ -934,7 +934,7 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       // rethrows everything else), leaving the period with NO bill at all.
       // 'nova' — 3 of the 7 real sample bills are NOVA, and without it confirming one
       // was refused outright even though the parser recognises it.
-      const VALID_PROVIDERS = ['deh', 'eydap', 'epa', 'nova', 'other'];
+      const VALID_PROVIDERS = ['deh', 'eydap', 'epa', 'telecom', 'nova', 'other'];
       if (!provider || !VALID_PROVIDERS.includes(String(provider))) {
         throw new ServiceError(
           `Bill provider must be one of ${VALID_PROVIDERS.join(', ')} (got ${provider})`,
