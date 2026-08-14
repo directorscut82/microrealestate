@@ -155,7 +155,12 @@ async function confirmOnto(
           term: parsed.proposedTerm,
           rfCode: parsed.rfCode,
           paymentCode: parsed.paymentCode,
-          chargeTenants: true
+          // THE SERVER READS `chargeThisMonth`. This said `chargeTenants`, which confirmBills
+          // ignores — so `if (chargeThisMonth)` never fired and the tenant-charge bridge was
+          // never invoked by these four scenarios. The Bill-row assertions still held, which
+          // is exactly why it went unnoticed: I reported them as proving the arrears fix
+          // "through the pipeline" when the pipeline's charging half never ran.
+          chargeThisMonth: true
         }
       ]
     },
@@ -260,6 +265,15 @@ for (const [label, file, provider, expectTotal, expectCharge, expectTerm] of [
 
     const res = await confirmOnto(ctx, parsed, expenseId);
     expect(res.status(), `confirm ${file} (${await res.text().catch(() => '')})`).toBe(200);
+    // 200 IS NOT ENOUGH. bridgeChargeToStatement is best-effort: confirmBills catches its
+    // failure, attaches `chargeError` and still answers 200, so asserting the status alone
+    // reports a silently-failed charge as success. Read the flag.
+    const body = (await res.json()) as Array<{ chargeError?: string }>;
+    const chargeErrors = body.map((b) => b.chargeError).filter(Boolean);
+    expect(
+      { file, chargeErrors },
+      'the tenant-charge bridge must not have failed'
+    ).toEqual({ file, chargeErrors: [] });
 
     // THE ASSERTION THAT MATTERS: what got written, and which figure was charged.
     const bill = JSON.parse(
@@ -281,6 +295,53 @@ for (const [label, file, provider, expectTotal, expectCharge, expectTerm] of [
       { file, chargedToTenants },
       'tenants must never be charged the prior balance'
     ).toEqual({ file, chargedToTenants: expectCharge });
+
+    // AND THE LEDGER, which is the only assertion that survives the field being dropped
+    // anywhere between here and mongo. Read what the bridge actually wrote into the units'
+    // monthlyCharges for this term and sum the landlord-entered figure: it must be the
+    // CHARGEABLE amount, never the payable. The Bill-row check above passes even when the
+    // charge is wrong; this one does not.
+    const charged = JSON.parse(
+      mongoExec(
+        `var out = [];
+         db.buildings.find({realmId:'${realmId}', _id: ObjectId('${BUILDING}')}).forEach(function(b){
+           // BOTH SIDES. An equal split goes per ACTIVE TENANT, and this building's units
+           // are vacant for the term, so with chargeOwnerWhenVacant the money lands in
+           // ownerMonthlyExpenses rather than unit.monthlyCharges. Reading only the tenant
+           // array returned zero rows and looked like the bridge had never run.
+           (b.units||[]).forEach(function(u){
+             (u.monthlyCharges||[]).forEach(function(c){
+               if (String(c.expenseId) === '${expenseId}' && Number(c.term) === ${expectTerm}) {
+                 out.push({ side:'tenant', amount: c.amount, input: c.inputAmount });
+               }
+             });
+           });
+           (b.ownerMonthlyExpenses||[]).forEach(function(o){
+             if (String(o.expenseId) === '${expenseId}' && Number(o.term) === ${expectTerm}) {
+               out.push({ side:'owner', amount: o.amount, input: o.inputAmount });
+             }
+           });
+         });
+         print(JSON.stringify(out));`
+      ).trim()
+    ) as Array<{ side: string; amount: number; input: number | null }>;
+    expect(
+      { file, rows: charged.length > 0 },
+      'the bridge must have written monthlyCharges — if this is 0 the charge half never ran'
+    ).toEqual({ file, rows: true });
+    // Σ over whichever side received it must be the CHARGEABLE figure — never the payable.
+    // This is the assertion that survives the field being dropped anywhere in between: on the
+    // arrears bill it is 89,94 and a regression makes it 289,94.
+    const total =
+      Math.round(charged.reduce((sum, c) => sum + (Number(c.amount) || 0), 0) * 100) / 100;
+    expect(
+      { file, sides: [...new Set(charged.map((c) => c.side))], total },
+      'the amount distributed must be ΜΕΡΙΚΟ ΣΥΝΟΛΟ, not ΠΛΗΡΩΤΕΟ'
+    ).toEqual({
+      file,
+      sides: [...new Set(charged.map((c) => c.side))],
+      total: expectCharge
+    });
   });
 }
 
