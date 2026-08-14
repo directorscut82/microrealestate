@@ -916,7 +916,16 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         ocrText: (parseResult.rawText || '').slice(0, 4000),
         // The provenance the card shows. Reported by the parser because only it knows
         // which of its three routes ran; deriving it from ocrText yielded a constant.
-        textSource: parseResult.textSource
+        textSource: parseResult.textSource,
+        // ΜΕΡΙΚΟ ΣΥΝΟΛΟ, when the document states it separately from ΠΛΗΡΩΤΕΟ. Carried
+        // so the dialog can show BOTH and confirm can send the chargeable one; it was
+        // computed by the parser and dropped here, which is why the tenant split used
+        // the arrears-inclusive figure.
+        chargeableAmount: bill.chargeableAmount,
+        // Parser observations, as stable codes. Dropped here too, so
+        // 'prior-balance-included-in-payable' — the warning that says the two figures
+        // differ and why it matters — reached no surface at all.
+        warnings: bill.warnings
       },
       match: match
         ? {
@@ -998,6 +1007,10 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       provider,
       billingId,
       totalAmount,
+      // What may be charged to TENANTS (ΜΕΡΙΚΟ ΣΥΝΟΛΟ). Distinct from totalAmount
+      // (ΠΛΗΡΩΤΕΟ, arrears included) because one number was answering two questions —
+      // see the field's comment on the Bill schema.
+      chargeableAmount,
       periodStart,
       periodEnd,
       issueDate,
@@ -1240,6 +1253,12 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
           provider,
           billingId,
           totalAmount,
+          // Persisted so the split can be recomputed later from the same figure the
+          // import used. Absent for a bill that states one amount only.
+          chargeableAmount:
+            chargeableAmount === undefined || chargeableAmount === null
+              ? undefined
+              : Number(chargeableAmount),
           // O4: seed the stable original-total baseline on first create.
           originalTotalAmount: Number(totalAmount),
           periodStart: new Date(periodStart),
@@ -1446,12 +1465,22 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       let chargeError: string | undefined;
       if (chargeThisMonth) {
         try {
+          // THE FIX. This split ΠΛΗΡΩΤΕΟ, so on a bill carrying a prior balance the
+          // landlord's arrears were distributed across the tenants: with ΜΕΡΙΚΟ
+          // ΣΥΝΟΛΟ 89,94 and ΠΛΗΡΩΤΕΟ 289,94 a 100‰ tenant was billed 28,99 instead
+          // of 8,99. `?? totalAmount` keeps every existing bill and every ΔΕΗ bill
+          // byte-identical — only a document that states BOTH figures changes, which
+          // is exactly the case that was wrong.
+          const amountToCharge =
+            chargeableAmount === undefined || chargeableAmount === null
+              ? Number(totalAmount)
+              : Number(chargeableAmount);
           await bridgeChargeToStatement(
             realmId,
             buildingId,
             expenseId,
             term,
-            Number(totalAmount),
+            amountToCharge,
             expenseName || provider || 'Bill'
           );
         } catch (err: any) {

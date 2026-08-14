@@ -573,6 +573,40 @@ async function _sendReply(
  * return. If those strings are ever reworded, `providerCoverageMessages` in the parity
  * suite goes red.
  */
+/**
+ * A parser warning CODE → the Greek sentence the bell shows.
+ *
+ * The parser emits codes, not prose, so the wording lives with the surface that
+ * displays it. Only the codes worth interrupting the landlord for are mapped; an
+ * unmapped code returns null and is not rendered, because a warning nobody can act on
+ * trains them to dismiss the ones they can.
+ */
+function _parserWarningMessage(
+  code: string,
+  bill: { totalAmount?: number; chargeableAmount?: number }
+): string | null {
+  const owed = Number(bill?.totalAmount) || 0;
+  const chargeable = Number(bill?.chargeableAmount) || 0;
+  switch (code) {
+    case 'prior-balance-included-in-payable': {
+      const arrears = Math.round((owed - chargeable) * 100) / 100;
+      return `Ο λογαριασμός περιλαμβάνει ${arrears.toFixed(2)}€ από προηγούμενη περίοδο. Οι ενοικιαστές χρεώνονται μόνο τα ${chargeable.toFixed(2)}€ της τρέχουσας.`;
+    }
+    case 'breakdown-does-not-sum-to-subtotal':
+      return 'Η ανάλυση του λογαριασμού δεν αθροίζει στο μερικό σύνολο — ελέγξτε το ποσό στο έντυπο.';
+    case 'payment-string-does-not-corroborate':
+      return 'Ο κωδικός πληρωμής δεν συμφωνεί με τα υπόλοιπα στοιχεία — μην τον σαρώσετε, πληρώστε από το έντυπο.';
+    case 'tiers-do-not-sum-to-consumption':
+    case 'tier-amounts-do-not-sum-to-charges':
+      return 'Η ανάλυση κατανάλωσης δεν συμφωνεί με το σύνολο — πιθανή λάθος ανάγνωση.';
+    case 'registry-number-disagrees':
+    case 'period-disagrees':
+      return 'Δύο σημεία του λογαριασμού δίνουν διαφορετική τιμή για το ίδιο στοιχείο — ελέγξτε το έντυπο.';
+    default:
+      return null;
+  }
+}
+
 function _providerNotCovered(message: string | undefined): boolean {
   if (!message) return false;
   return /δεν υποστηρίζεται|Μη υποστηριζόμενος|Δεν αναγνωρίστηκε ο πάροχος/i.test(
@@ -853,6 +887,12 @@ async function _handleUpdate(
         billingId: bill.billingId,
         billingIdNormalized: bill.billingIdNormalized,
         totalAmount: bill.totalAmount,
+        // What tenants may be charged (ΜΕΡΙΚΟ ΣΥΝΟΛΟ), when the document states it
+        // apart from what is OWED. Dropped here, so confirming from the bell split
+        // ΠΛΗΡΩΤΕΟ and distributed the landlord's arrears across the tenants. This lane
+        // is the WORSE of the two doors for it: the bell renders the amount read-only,
+        // so there was not even a manual correction available.
+        chargeableAmount: bill.chargeableAmount,
         periodStart: bill.periodStart,
         periodEnd: bill.periodEnd,
         issueDate: bill.issueDate,
@@ -882,6 +922,15 @@ async function _handleUpdate(
         // June bill on an expense starting in August: €120 recorded, €0 charged,
         // nothing said). Same shared rule as the upload lane, so the two doors cannot
         // drift again.
+        // The parser's own observations, as stable CODES, mapped into the schema shape
+        // so the bell can render them. They were computed and dropped: the one that
+        // matters most, 'prior-balance-included-in-payable', says ΠΛΗΡΩΤΕΟ carries a
+        // balance from an earlier period — precisely the case where charging the wrong
+        // figure costs the tenants money. The display surface already existed.
+        for (const code of bill.warnings || []) {
+          const message = _parserWarningMessage(code, bill);
+          if (message) termWarnings.push({ level: 'warn', code, message });
+        }
         const expenseId = (suggestedMatch as any)?.expenseId;
         const buildingId = (suggestedMatch as any)?.buildingId;
         if (expenseId && buildingId && parsed.proposedTerm) {

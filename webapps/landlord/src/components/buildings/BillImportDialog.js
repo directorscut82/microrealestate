@@ -44,6 +44,7 @@ import { Switch } from '../ui/switch';
 import { termMonthYearAccusative } from '../../utils/greekMonths';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import useFormatNumber from '../../hooks/useFormatNumber';
 import useTranslation from 'next-translate/useTranslation';
 
 // Allocation method → the same label keys ExpenseFormDialog uses, so the charge
@@ -111,6 +112,12 @@ function ResultCard({
   onAmountChange
 }) {
   const { t, lang } = useTranslation('common');
+  // Money inside a t() value cannot use <NumberFormat/>, so the locale-aware formatter
+  // is needed directly for the arrears row. It MUST be called here, above the
+  // parse-fail early return below — placing it further down made it conditional, and
+  // on a batch mixing a failed and a successful parse React's hook order changes
+  // between renders.
+  const formatNumber = useFormatNumber();
 
   // Shared by BOTH branches below (the parse-fail card returns early). Qualified
   // only where two options would otherwise read the same — the old code appended
@@ -388,6 +395,14 @@ function ResultCard({
   // The term this bill will be posted to (YYYYMMDDHH), and whether the target
   // expense even exists that month.
   const billTerm = parsed.proposedTerm ?? null;
+  /**
+   * ΠΛΗΡΩΤΕΟ exceeds ΜΕΡΙΚΟ ΣΥΝΟΛΟ: the bill carries a balance from an earlier period.
+   * Only in that direction — a payable BELOW the subtotal is a credit and costs nobody
+   * anything, so warning about it would be noise.
+   */
+  const hasArrears =
+    Number(parsed?.chargeableAmount) > 0 &&
+    Number(parsed?.chargeableAmount) < Number(parsed?.totalAmount) - 0.005;
   const startsAfterBillTerm =
     !!targetExpense?.startTerm &&
     !!billTerm &&
@@ -477,6 +492,7 @@ function ResultCard({
         {(wrongBuilding ||
           startsAfterBillTerm ||
           existingAmount !== undefined ||
+          hasArrears ||
           duplicate) && (
           <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-800 dark:bg-amber-950/30">
             {wrongBuilding && (
@@ -488,6 +504,31 @@ function ResultCard({
                     {
                       building: buildingLabel(identifiedBuilding),
                       current: buildingLabel(openedFromBuilding)
+                    }
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* ARREARS. The document states TWO figures and they differ, so ΠΛΗΡΩΤΕΟ
+                carries a balance from an earlier period. Tenants are charged ΜΕΡΙΚΟ
+                ΣΥΝΟΛΟ — but the card shows the payable one, so without this row the
+                landlord had no way to know the two were not the same number. The
+                parser has separated them since Slice 3; nothing said so out loud. */}
+            {hasArrears && (
+              <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200">
+                <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <span>
+                  {t(
+                    'This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.',
+                    {
+                      arrears: formatNumber(
+                        Number(result.parsed.totalAmount) -
+                          Number(result.parsed.chargeableAmount)
+                      ),
+                      current: formatNumber(
+                        Number(result.parsed.chargeableAmount)
+                      )
                     }
                   )}
                 </span>
@@ -1111,6 +1152,15 @@ export default function BillImportDialog({ open, setOpen, building }) {
           provider: r.parsed.provider,
           billingId: r.parsed.billingId,
           totalAmount: effectiveAmount(r),
+          // What tenants may be charged, when the document states it apart from what is
+          // OWED. Sent only while the operator has NOT overridden the amount: once they
+          // type a figure it is their answer to both questions, and inventing a second
+          // one from the parse would silently disagree with what they typed.
+          chargeableAmount:
+            amountOverrides[r._uid] !== undefined &&
+            String(amountOverrides[r._uid]).trim() !== ''
+              ? undefined
+              : r.parsed.chargeableAmount,
           periodStart: r.parsed.periodStart,
           periodEnd: r.parsed.periodEnd,
           issueDate: r.parsed.issueDate,

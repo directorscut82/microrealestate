@@ -1588,5 +1588,6 @@
   "Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.": "Έως 5 αρχεία τη φορά — PDF, JPG, PNG ή WEBP (λογαριασμοί ΔΕΗ, ΕΥΔΑΠ, ΔΕΥΑ, σκαναρισμένοι ή φωτογραφημένοι). Έως 15MB το αρχείο, 45MB συνολικά.",
   "The files are too large — upload fewer at a time": "Τα αρχεία είναι πολύ μεγάλα — ανεβάστε λιγότερα τη φορά",
   "The upload timed out — try fewer files at a time": "Η ανάλυση άργησε πολύ — δοκιμάστε λιγότερα αρχεία τη φορά",
-  "This supply number is on more than one apartment — fix the duplicate on the units, then re-import": "Αυτός ο αριθμός παροχής υπάρχει σε περισσότερα από ένα διαμερίσματα — διορθώστε τη διπλή καταχώρηση στις μονάδες και εισάγετέ τον ξανά"
+  "This supply number is on more than one apartment — fix the duplicate on the units, then re-import": "Αυτός ο αριθμός παροχής υπάρχει σε περισσότερα από ένα διαμερίσματα — διορθώστε τη διπλή καταχώρηση στις μονάδες και εισάγετέ τον ξανά",
+  "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.": "Ο λογαριασμός περιλαμβάνει {{arrears}} από προηγούμενη περίοδο. Οι ενοικιαστές χρεώνονται μόνο τα {{current}} της τρέχουσας."
 }

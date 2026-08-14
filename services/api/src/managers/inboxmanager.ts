@@ -128,6 +128,15 @@ export async function confirm(req: Req, res: Res): Promise<void> {
     provider: p.provider || 'other',
     billingId: p.billingId,
     totalAmount: totalAmount !== undefined ? totalAmount : p.totalAmount,
+    // What tenants may be charged (ΜΕΡΙΚΟ ΣΥΝΟΛΟ). Forwarded so confirming from the
+    // bell splits this period's charges rather than ΠΛΗΡΩΤΕΟ, which on a bill carrying
+    // a prior balance distributed the landlord's arrears across the tenants.
+    //
+    // Dropped when the operator AMENDS the amount: their figure is then their answer to
+    // both questions, and keeping a parse-derived second figure alongside it would
+    // silently disagree with what they typed.
+    chargeableAmount:
+      totalAmount !== undefined ? undefined : p.chargeableAmount,
     periodStart: periodStart !== undefined ? periodStart : p.periodStart,
     periodEnd: periodEnd !== undefined ? periodEnd : p.periodEnd,
     issueDate: issueDate !== undefined ? issueDate : p.issueDate,

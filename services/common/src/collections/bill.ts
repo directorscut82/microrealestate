@@ -17,7 +17,29 @@ const BillSchema = new mongoose.Schema<CollectionTypes.Bill>({
     required: true
   },
   billingId: { type: String, required: true },
+  // WHAT IS OWED to the provider — the ΠΛΗΡΩΤΕΟ figure, any prior balance included.
+  // It is the payment-tracking number: `status` compares Σ(receipts) against it
+  // (:paid/:partial), the receipt matcher scores against it, and `remaining` and
+  // `overpaid` are derived from it.
   totalAmount: { type: Number, required: true },
+  /**
+   * WHAT MAY BE CHARGED TO TENANTS — this period's own charges (ΜΕΡΙΚΟ ΣΥΝΟΛΟ),
+   * excluding any prior balance. Absent on a bill that states one figure only, which
+   * is every ΔΕΗ bill and every bill imported before 2026-08-14.
+   *
+   * WHY A SECOND COLUMN AND NOT AN EDITED totalAmount. One number was answering two
+   * questions. ΕΥΔΑΠ prints both, and the parser has separated them since Slice 3 —
+   * but nothing persisted the second one, so the tenant-charge bridge split ΠΛΗΡΩΤΕΟ:
+   * on a bill of ΜΕΡΙΚΟ ΣΥΝΟΛΟ 89,94 / ΠΛΗΡΩΤΕΟ 289,94 a 100‰ tenant was billed 28,99
+   * instead of 8,99, i.e. the landlord's €200 of arrears distributed across the payers.
+   * Correcting it by retyping the amount is not a workaround: the same field is the
+   * target `status` compares receipts against, so an 89,94 receipt would mark a 289,94
+   * debt as paid.
+   *
+   * Readers must use `chargeableAmount ?? totalAmount`, so a bill without it behaves
+   * exactly as before.
+   */
+  chargeableAmount: Number,
   periodStart: { type: Date, required: true },
   periodEnd: { type: Date, required: true },
   issueDate: Date,

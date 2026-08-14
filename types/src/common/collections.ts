@@ -731,6 +731,9 @@ export namespace CollectionTypes {
     provider: BillProvider;
     billingId: string;
     totalAmount: number;
+    /** What may be charged to TENANTS (ΜΕΡΙΚΟ ΣΥΝΟΛΟ). Absent when the bill states
+     *  one figure only. Readers use `chargeableAmount ?? totalAmount`. */
+    chargeableAmount?: number;
     // O4: the total the bill was first created with; never overwritten on a
     // corrective replace, so paid-status re-classification has a stable base.
     originalTotalAmount?: number;

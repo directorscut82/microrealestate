@@ -100,14 +100,24 @@ describe('the scanner writes that shape', () => {
     'utf8'
   );
 
-  it('pushes an object with all three keys, never a bare template string', () => {
-    const at = src.indexOf('termWarnings.push(');
-    expect(at).toBeGreaterThan(-1);
-    const block = src.slice(at, src.indexOf('});', at));
-    for (const key of ['level:', 'code:', 'message:']) {
-      expect({ key, present: block.includes(key) }).toEqual({ key, present: true });
+  it('EVERY push site writes an object, never a bare template string', () => {
+    // There is more than one push site (the term-fit check and the parser-warning
+            // mapper), so anchoring on the FIRST occurrence tested whichever one happened to
+    // come first in the file — the same slicing fragility that already made one
+    // assertion in this repo pass vacuously. Check them all.
+    const sites = [...src.matchAll(/termWarnings\.push\(/g)].map((m) => m.index);
+    expect(sites.length).toBeGreaterThanOrEqual(2);
+    for (const at of sites) {
+      const block = src.slice(at, src.indexOf('});', at));
+      // Either the keys are written out, or the shorthand names are — both produce
+      // `{level, code, message}`; a bare string produces none of them.
+      const hasShape =
+        (block.includes('level:') || /\blevel\b/.test(block)) &&
+        (block.includes('code:') || /\bcode\b/.test(block)) &&
+        (block.includes('message:') || /\bmessage\b/.test(block));
+      expect({ at, hasShape }).toEqual({ at, hasShape: true });
     }
-    // `termWarnings.push(` immediately followed by a backtick is the defect's shape.
+    // A push immediately followed by a backtick is the defect's exact shape.
     expect(src).not.toMatch(/termWarnings\.push\(\s*`/);
   });
 
@@ -119,9 +129,11 @@ describe('the scanner writes that shape', () => {
 
   it('every code it emits is kebab-case and stable', () => {
     // Codes are what a future surface will branch on; a sentence as a code cannot be
-    // matched, and a reworded sentence would silently change the branch.
-    const at = src.indexOf('termWarnings.push(');
-    const block = src.slice(at, src.indexOf('});', at));
+    // matched, and a reworded sentence would silently change the branch. Read the
+    // TERM-FIT site specifically — it is the one that writes literal codes.
+    const at = src.indexOf('code:\n                  fit.reason');
+    expect(at).toBeGreaterThan(-1);
+    const block = src.slice(at, src.indexOf('message:', at));
     const codes = [...block.matchAll(/'([a-z][a-z-]+)'/g)].map((m) => m[1]);
     expect(codes.length).toBeGreaterThanOrEqual(3);
     for (const c of codes) {
