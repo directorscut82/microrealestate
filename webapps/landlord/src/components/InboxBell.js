@@ -345,6 +345,57 @@ function InboxCard({ item, buildings, onGone }) {
 
   const busy = confirmMutation.isPending || dismissMutation.isPending;
 
+  /**
+   * PROCESSING card: the file has arrived and the OCR is still running.
+   *
+   * This state exists because the row is now written at RECEIPT rather than after the
+   * parse. Before, the bell showed nothing for up to a minute and the landlord could not
+   * tell «not received» from «still working» — so they re-sent bills, which minted
+   * duplicate items to dismiss. It must come BEFORE the parseError branch and before the
+   * normal card: a processing row has no parsed amount, so the normal card would render an
+   * empty bill with a live «Καταχώρηση» button that the server (correctly) refuses.
+   *
+   * Dismiss stays available — a mis-sent file should be cancellable without waiting for a
+   * parse to finish.
+   */
+  if (item.status === 'processing') {
+    return (
+      <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxProcessing">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-medium text-ink">
+            {t('Reading the bill…')}
+          </span>
+          <span className="text-[11px] border rounded px-1.5 text-muted-foreground">
+            Telegram
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {/* An animated bar rather than a static label: the whole point of this state is
+              to show that something is HAPPENING. */}
+          <span className="relative inline-block h-1 w-24 overflow-hidden rounded bg-muted">
+            <span className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded bg-ink/40" />
+          </span>
+          <span>
+            {item.sourceFileName || t('File')}
+          </span>
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          {t('This can take up to a minute for a scanned page.')}
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => dismissMutation.mutate()}
+          >
+            {t('Dismiss')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // Unreadable card: parse failed server-side — explain + dismiss only.
   if (item.parseError) {
     return (

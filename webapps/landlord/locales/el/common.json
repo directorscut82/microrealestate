@@ -1590,5 +1590,7 @@
   "The upload timed out — try fewer files at a time": "Η ανάλυση άργησε πολύ — δοκιμάστε λιγότερα αρχεία τη φορά",
   "This supply number is on more than one apartment — fix the duplicate on the units, then re-import": "Αυτός ο αριθμός παροχής υπάρχει σε περισσότερα από ένα διαμερίσματα — διορθώστε τη διπλή καταχώρηση στις μονάδες και εισάγετέ τον ξανά",
   "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.": "Ο λογαριασμός περιλαμβάνει {{arrears}} από προηγούμενη περίοδο. Οι ενοικιαστές χρεώνονται μόνο τα {{current}} της τρέχουσας.",
-  "Files on an apartment or tenant that is not under a building": "Αρχεία σε διαμέρισμα ή ενοικιαστή που δεν ανήκει σε κτίριο"
+  "Files on an apartment or tenant that is not under a building": "Αρχεία σε διαμέρισμα ή ενοικιαστή που δεν ανήκει σε κτίριο",
+  "Reading the bill…": "Διαβάζω τον λογαριασμό…",
+  "This can take up to a minute for a scanned page.": "Μπορεί να πάρει έως ένα λεπτό για σαρωμένη σελίδα."
 }

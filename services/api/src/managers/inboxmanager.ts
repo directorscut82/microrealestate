@@ -30,9 +30,13 @@ export async function list(req: Req, res: Res): Promise<void> {
   if (!realmId) {
     throw new ServiceError('Unauthorized', 401);
   }
+  // 'processing' rows are INCLUDED. They are written at receipt, before the OCR finishes,
+  // precisely so the bell can show that a file arrived and is being read — filtering them
+  // out here would restore the old behaviour where the notification appeared only after a
+  // parse that can take a minute, and pressing the bell mid-parse showed nothing new.
   const items = await Collections.InboxItem.find({
     realmId,
-    status: 'pending'
+    status: { $in: ['processing', 'pending'] }
   })
     .sort({ createdDate: -1 })
     .lean();
@@ -92,6 +96,20 @@ export async function confirm(req: Req, res: Res): Promise<void> {
     status: 'pending'
   }).lean();
   if (!item) {
+    // Distinguish «still being read» from «gone». The lookup above requires
+    // status:'pending', so a processing row lands here — and «δεν βρέθηκε» would be a lie
+    // about a row the landlord can see on their own screen.
+    const processing = await Collections.InboxItem.exists({
+      _id: id,
+      realmId,
+      status: 'processing'
+    });
+    if (processing) {
+      throw new ServiceError(
+        'Ο λογαριασμός διαβάζεται ακόμα — δοκιμάστε σε λίγο.',
+        409
+      );
+    }
     throw new ServiceError('Το στοιχείο εισερχομένων δεν βρέθηκε', 404);
   }
   // kind:'notice' items carry no parsed bill — running them through the
@@ -267,7 +285,10 @@ export async function dismiss(req: Req, res: Res): Promise<void> {
   validateObjectId(id, 'inbox item id');
 
   const updated = await Collections.InboxItem.updateOne(
-    { _id: id, realmId, status: 'pending' },
+    // A 'processing' row is dismissible too: it is the one state the landlord may want to
+    // cancel out of (a mis-sent file, a parse taking too long). The scanner's finishing
+    // update is conditional on status still being 'processing', so this wins the race.
+    { _id: id, realmId, status: { $in: ['processing', 'pending'] } },
     { $set: { status: 'dismissed', updatedDate: new Date() } }
   );
   if (!updated.matchedCount) {

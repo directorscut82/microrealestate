@@ -3,6 +3,7 @@
 // entirely through the dependency-injection hooks (same pattern as
 // leaseExpiryScanner.test.js): no network, no mongo, no WASM.
 import {
+  _awaitParseQueue,
   scanTelegramInbox,
   _clearRetries
 } from '../jobs/telegramInboxScanner.js';
@@ -51,6 +52,10 @@ function makeDeps({
     getUpdatesCalls: [],
     created: [],
     replies: [],
+    updates: [],
+    edits: [],
+    rows: {},
+    receipts: [],
     downloads: [],
     archives: []
   };
@@ -89,8 +94,27 @@ function makeDeps({
           },
     findMatch: async () => matchResult,
     hasInboxItem: async () => hasItem,
+    // TWO-PHASE now. The tick creates a 'processing' row and returns its id; the
+    // background parse updates that row. The stub models both so a test can assert the
+    // state the LANDLORD ends up seeing, not just the first write.
     createInboxItem: async (doc) => {
-      state.created.push(doc);
+      const id = `item-${state.created.length + 1}`;
+      // `created` is the LIVE row: the background parse updates it, so assertions about
+      // the finished item read naturally. `receipts` is an immutable snapshot of what
+      // RECEIPT wrote — needed because the parse mutates the live row, which would
+      // otherwise make «status was 'processing' when it arrived» untestable.
+      const row = { _id: id, ...doc };
+      state.created.push(row);
+      state.rows[id] = row;
+      state.receipts.push({ ...doc });
+      return id;
+    },
+    updateInboxItem: async (id, patch) => {
+      state.updates.push({ id, patch });
+      if (state.rows[id]) Object.assign(state.rows[id], patch);
+    },
+    editReply: async (botToken, chatId, messageId, text) => {
+      state.edits.push({ messageId, text });
     },
     archiveSource: async (realm, billLikeId, fileName, buffer) => {
       state.archives.push({ billLikeId, fileName, bytes: buffer?.length });
@@ -102,6 +126,8 @@ function makeDeps({
     tryRecapture: async () => false,
     sendReply: async (_botToken, chatId, text) => {
       state.replies.push({ chatId, text });
+      // Return an id: the ack's id is what the parse edits into the result.
+      return 5000 + state.replies.length;
     }
   };
   return { deps, state };
@@ -115,6 +141,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
   it('polls from lastUpdateId+1', async () => {
     const { deps, state } = makeDeps({ initialOffset: 41, updates: [] });
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(state.getUpdatesCalls).toEqual([
       { botToken: 'TESTTOKEN', offset: 42 }
     ]);
@@ -123,11 +150,18 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
   it('ingests a photo message from the admin chat and advances the offset', async () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(1);
     expect(state.created).toHaveLength(1);
     const item = state.created[0];
     expect(item.realmId).toBe('realm-1');
     expect(item.source).toBe('telegram');
+    // TWO PHASES, both asserted. At RECEIPT the row is 'processing' so the bell has
+    // something to show before a 50s parse finishes; once the parse lands it becomes
+    // 'pending' and confirmable. Before this protocol the row appeared only after OCR, so
+    // the landlord could not tell «not received» from «still working».
+    expect(state.receipts[0].status).toBe('processing');
     expect(item.status).toBe('pending');
     expect(item.telegramMessageId).toBe(1001);
     expect(item.parsed.billingIdNormalized).toBe('999935585032');
@@ -140,6 +174,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
   it('downloads the LARGEST photo rendition (last array entry)', async () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(state.downloads).toEqual(['big-1001']);
   });
 
@@ -148,6 +183,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       updates: [photoMsg(42, 1001, 999)]
     });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(0);
     expect(r.skipped).toBe(1);
     expect(state.created).toHaveLength(0);
@@ -159,6 +196,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
   it('skips text-only messages but advances the offset', async () => {
     const { deps, state } = makeDeps({ updates: [textMsg(42, 1001)] });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.skipped).toBe(1);
     expect(state.created).toHaveLength(0);
     expect(state.offsets['realm-1']).toBe(42);
@@ -170,10 +209,17 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       parseResult: { success: false, error: 'Δεν αναγνωρίστηκε ο πάροχος' }
     });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(1);
     expect(state.created[0].parseError).toBe('Δεν αναγνωρίστηκε ο πάροχος');
-    // and the sender is told it arrived but was unreadable
-    expect(state.replies[0].text).toContain('δεν διαβάστηκε');
+    // TWO MESSAGES' WORTH OF INFORMATION, ONE MESSAGE ON SCREEN. reply[0] is the ack sent
+    // at receipt; the outcome arrives as an EDIT of that same message, so the landlord is
+    // not left with an ack above a result and no clue which is current.
+    expect(state.replies[0].text).toContain('Ελήφθη');
+    expect(state.edits).toHaveLength(1);
+    expect(state.edits[0].messageId).toBe(5001); // the ack's own id
+    expect(state.edits[0].text).toContain('δεν διαβάστηκε');
   });
 
   it('a parse THROW is contained: item created with parseError, no crash', async () => {
@@ -182,6 +228,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       throw new Error('Image too large to OCR');
     };
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(1);
     expect(state.created[0].parseError).toBe('Image too large to OCR');
   });
@@ -192,6 +240,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       hasItem: true
     });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.skipped).toBe(1);
     expect(state.created).toHaveLength(0);
     expect(state.offsets['realm-1']).toBe(42);
@@ -203,6 +253,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       downloadResult: null
     });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.skipped).toBe(1);
     expect(state.created).toHaveLength(0);
     expect(state.replies[0].text).toContain('6MB');
@@ -224,6 +276,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       state.created.push(doc);
     };
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.errors).toBe(1);
     expect(r.ingested).toBe(0); // 1002 not reached (we stopped at 1001)
     expect(state.setOffsetCalls).toHaveLength(0); // offset UNCHANGED → retry
@@ -242,6 +296,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       state.created.push(doc);
     };
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(1); // 1001 made it
     expect(r.errors).toBe(1); // 1002 failed
     expect(state.offsets['realm-1']).toBe(42); // committed through 1001 only
@@ -267,6 +323,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       };
       // eslint-disable-next-line no-await-in-loop
       const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
       expect(r.errors).toBe(1);
       if (tick < 5) {
         expect(state.setOffsetCalls).toHaveLength(0); // held for retry
@@ -301,6 +359,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       };
       // eslint-disable-next-line no-await-in-loop
       const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
       expect(r.errors).toBe(1);
       expect(state.setOffsetCalls).toHaveLength(0); // never advances
       expect(state.offsets['realm-1']).toBe(0); // bill preserved for next tick
@@ -313,6 +373,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       throw new Error('network');
     };
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.errors).toBe(1);
     expect(state.setOffsetCalls).toHaveLength(0);
     expect(state.offsets['realm-1']).toBe(41);
@@ -330,12 +392,15 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       matchResult: match
     });
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(state.created[0].suggestedMatch).toEqual(match);
   });
 
   it('empty poll: no offset write, no items', async () => {
     const { deps, state } = makeDeps({ updates: [], initialOffset: 7 });
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.updates).toBe(0);
     expect(state.setOffsetCalls).toHaveLength(0);
     expect(state.offsets['realm-1']).toBe(7);
@@ -345,6 +410,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
   it('archives the source buffer at ingest and stores the key on sourcePdfUrl', async () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(state.archives).toHaveLength(1);
     expect(state.archives[0].billLikeId).toBe('tg-1001');
     expect(state.archives[0].bytes).toBeGreaterThan(0);
@@ -357,6 +423,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     deps.archiveSource = async () => null; // B2 off or upload failed
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(1);
     expect(state.created[0].sourcePdfUrl).toBeUndefined();
   });
@@ -364,6 +432,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
   it('does not archive when there is no file (text-only message)', async () => {
     const { deps, state } = makeDeps({ updates: [textMsg(42, 1001)] });
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(state.archives).toHaveLength(0);
   });
 
@@ -378,6 +447,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
       return 'recovered'; // consumed + a valid key was read
     };
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(recaptureCalls).toBe(1);
     expect(state.created).toHaveLength(0); // NOT ingested as a bill
     expect(state.archives).toHaveLength(0); // not archived either
@@ -390,6 +460,7 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     deps.tryRecapture = async () => 'failed'; // it WAS the re-shot, but no valid key
     await scanTelegramInbox(deps);
+    await _awaitParseQueue();
     expect(state.created).toHaveLength(0); // still not ingested as a bill
     expect(state.offsets['realm-1']).toBe(42); // consumed → offset advances
     // must NOT claim the code was updated…
@@ -404,6 +475,8 @@ describe('telegramInboxScanner — scanTelegramInbox', () => {
     const { deps, state } = makeDeps({ updates: [photoMsg(42, 1001)] });
     deps.tryRecapture = async () => false;
     const r = await scanTelegramInbox(deps);
+    // The parse is fire-and-forget now, so wait for it before asserting what it wrote.
+    await _awaitParseQueue();
     expect(r.ingested).toBe(1);
     expect(state.created).toHaveLength(1);
   });

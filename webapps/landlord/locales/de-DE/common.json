@@ -1343,5 +1343,7 @@
   "The upload timed out — try fewer files at a time": "The upload timed out — try fewer files at a time",
   "This supply number is on more than one apartment — fix the duplicate on the units, then re-import": "This supply number is on more than one apartment — fix the duplicate on the units, then re-import",
   "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.": "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.",
-  "Files on an apartment or tenant that is not under a building": "Files on an apartment or tenant that is not under a building"
+  "Files on an apartment or tenant that is not under a building": "Files on an apartment or tenant that is not under a building",
+  "Reading the bill…": "Reading the bill…",
+  "This can take up to a minute for a scanned page.": "This can take up to a minute for a scanned page."
 }

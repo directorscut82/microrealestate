@@ -17,7 +17,17 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
   },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'dismissed'],
+    /**
+     * 'processing' — the file has ARRIVED and is being read. Written at receipt, before
+     * OCR, so the bell has something to show while a 50s-per-page parse runs. Without it
+     * the row appeared only after OCR finished, so pressing the notification mid-parse
+     * showed the previous state and the landlord had no way to tell «not received» from
+     * «still working».
+     *
+     * A processing item is NOT confirmable — there is nothing parsed to confirm yet — and
+     * inboxmanager.confirm refuses it for the same reason it refuses a 'notice'.
+     */
+    enum: ['processing', 'pending', 'confirmed', 'dismissed'],
     default: 'pending'
   },
   // 'bill' (default, legacy docs have no kind) — a parsed bill waiting for
@@ -90,6 +100,14 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
     }
   ],
   sourceFileName: String,
+  /**
+   * The Telegram message id of the bot's own ACK. Kept so the ack can be EDITED into the
+   * outcome instead of the landlord receiving two messages and having to work out which
+   * one is current.
+   */
+  ackMessageId: Number,
+  /** Chat the ack was sent to — an edit needs both ids. */
+  ackChatId: String,
   telegramMessageId: Number,
   telegramFileId: String,
   irisCodeBase64: String,

@@ -766,7 +766,16 @@ export namespace CollectionTypes {
   };
 
   export type InboxItemSource = 'telegram' | 'upload' | 'system';
-  export type InboxItemStatus = 'pending' | 'confirmed' | 'dismissed';
+  /**
+   * 'processing' is written at RECEIPT, before OCR, so the bell can show that a file
+   * arrived and is being read. A processing item carries no parsed bill yet and is not
+   * confirmable.
+   */
+  export type InboxItemStatus =
+    | 'processing'
+    | 'pending'
+    | 'confirmed'
+    | 'dismissed';
   export type InboxItemKind = 'bill' | 'notice';
 
   // kind:'notice' payload — a server-composed alert. `message` is the
@@ -843,6 +852,9 @@ export namespace CollectionTypes {
     } | null;
     warnings: InboxItemWarning[] | [];
     sourceFileName?: string;
+    /** Telegram message id of the bot's own ack, so it can be edited into the result. */
+    ackMessageId?: number;
+    ackChatId?: string;
     telegramMessageId?: number;
     telegramFileId?: string;
     irisCodeBase64?: string;

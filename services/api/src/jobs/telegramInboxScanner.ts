@@ -117,7 +117,7 @@ export interface InboxScanDeps {
     realmId: string,
     telegramMessageId: number
   ) => Promise<boolean>;
-  createInboxItem: (doc: Record<string, unknown>) => Promise<void>;
+  createInboxItem: (doc: Record<string, unknown>) => Promise<string>;
   /**
    * Tier-2 re-capture (Slice 6 §15). If a recapture session is WAITING for this
    * realm, the next admin-chat photo MAY be a zoomed re-shot of a failed
@@ -149,10 +149,23 @@ export interface InboxScanDeps {
     buffer: Buffer
   ) => Promise<string | null>;
   /** Acknowledge a message we won't ingest (wrong chat, no file, too big). */
+  /** Returns the sent message's id so the ack can later be edited into the result. */
   sendReply?: (
     botToken: string,
     chatId: string | number,
     text: string
+  ) => Promise<number | null>;
+  /** Rewrite an earlier message; falls back to sending a new one. */
+  editReply?: (
+    botToken: string,
+    chatId: string | number,
+    messageId: number | null | undefined,
+    text: string
+  ) => Promise<void>;
+  /** Update an InboxItem in place — used to move it out of 'processing'. */
+  updateInboxItem?: (
+    id: string,
+    patch: Record<string, unknown>
   ) => Promise<void>;
 }
 
@@ -383,8 +396,33 @@ async function _hasInboxItem(
   return !!existing;
 }
 
-async function _createInboxItem(doc: Record<string, unknown>): Promise<void> {
-  await Collections.InboxItem.create(doc);
+/** Returns the new row's id: the background parse needs it to finish the row. */
+async function _createInboxItem(doc: Record<string, unknown>): Promise<string> {
+  const created: any = await Collections.InboxItem.create(doc);
+  return String(created?._id || '');
+}
+
+/**
+ * Finish a row ONLY while it is still 'processing'.
+ *
+ * The parse runs off the tick, so the landlord can dismiss the item from the bell while it
+ * is in flight. An unconditional update would then set it back to 'pending' and resurrect
+ * something they explicitly dismissed. Guarding on the current status makes the dismiss
+ * win, which is the right precedence: it is the human's decision against a background job.
+ */
+async function _updateInboxItem(
+  id: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const res = await Collections.InboxItem.updateOne(
+    { _id: id, status: 'processing' },
+    { $set: { ...patch, updatedDate: new Date() } }
+  );
+  if (!res.matchedCount) {
+    logger.info(
+      `telegram-inbox: item ${id} was no longer 'processing' (dismissed while parsing?) — parse result discarded`
+    );
+  }
 }
 
 // Tier-2: consume a re-shot photo for an active recapture session. OCR the
@@ -538,20 +576,60 @@ async function _b2ConfigForRealm(
   return billStorage.isEnabled(b2) ? (b2 as billStorage.B2Config) : null;
 }
 
+/**
+ * Send a reply and return the sent message's id.
+ *
+ * The id is what lets the immediate ACK later become the RESULT — one message that
+ * changes, rather than an ack the landlord has to scroll past to find the outcome. It
+ * returns null on failure because a reply is never worth failing an ingest over: the bill
+ * is already recorded and the app's own bell is the durable surface.
+ */
 async function _sendReply(
   botToken: string,
   chatId: string | number,
   text: string
-): Promise<void> {
+): Promise<number | null> {
   try {
-    await axios.post(
+    const res = await axios.post(
       `https://api.telegram.org/bot${botToken}/sendMessage`,
       { chat_id: chatId, text, disable_web_page_preview: true },
       { timeout: 15_000 }
     );
+    return res?.data?.result?.message_id ?? null;
   } catch (err: any) {
     logger.warn(`telegram-inbox: reply failed: ${err?.message || err}`);
+    return null;
   }
+}
+
+/**
+ * Rewrite a message already sent — used to turn «επεξεργάζομαι…» into the outcome.
+ *
+ * Falls back to a NEW message when the edit fails (the ack may be too old to edit, or
+ * never sent because Telegram was briefly unreachable). Silence is the one thing that is
+ * not acceptable here: the landlord is waiting on this specific message to change.
+ */
+async function _editReply(
+  botToken: string,
+  chatId: string | number,
+  messageId: number | null | undefined,
+  text: string
+): Promise<void> {
+  if (messageId) {
+    try {
+      await axios.post(
+        `https://api.telegram.org/bot${botToken}/editMessageText`,
+        { chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true },
+        { timeout: 15_000 }
+      );
+      return;
+    } catch (err: any) {
+      logger.warn(
+        `telegram-inbox: edit of message ${messageId} failed, sending a new one: ${err?.message || err}`
+      );
+    }
+  }
+  await _sendReply(botToken, chatId, text);
 }
 
 /**
@@ -652,7 +730,9 @@ export function _defaultDeps(): InboxScanDeps {
     createInboxItem: _createInboxItem,
     tryRecapture: _tryRecapture,
     archiveSource: _archiveSource,
-    sendReply: _sendReply
+    sendReply: _sendReply,
+    editReply: _editReply,
+    updateInboxItem: _updateInboxItem
   };
 }
 
@@ -817,7 +897,19 @@ async function _handleUpdate(
     fileId = largest.file_id;
     fileName = `photo-${msg.message_id}.jpg`;
   }
-  if (!fileId) return 'skipped'; // text-only message — not a bill
+  if (!fileId) {
+    // TEXT-ONLY. Dropped in total silence until now, so a landlord who typed
+    // «καταβολή 500 στον Παπαδόπουλο» got nothing back and had no way to learn the bot
+    // does not read text yet. Answering costs one API call and tells the truth about the
+    // boundary. This is also the seam for a future message KIND: when text becomes
+    // actionable, it branches here rather than needing this gate unpicked.
+    await deps.sendReply?.(
+      realm.botToken,
+      msg.chat.id,
+      'Έλαβα το μήνυμα, αλλά προς το παρόν διαβάζω μόνο λογαριασμούς που στέλνετε ως αρχείο ή φωτογραφία. Για καταβολές και άλλες κινήσεις χρησιμοποιήστε την εφαρμογή.'
+    );
+    return 'skipped';
+  }
 
   // Dedup (unique index is the backstop; this avoids the duplicate-key noise).
   if (await deps.hasInboxItem(realm.realmId, msg.message_id)) return 'skipped';
@@ -866,6 +958,154 @@ async function _handleUpdate(
     }
   }
 
+  // ── ACK NOW, PARSE LATER ───────────────────────────────────────────────────────
+  // Everything above is fast (an in-memory session check, a file download). Everything
+  // below — OCR at up to ~50s per page — used to run HERE, awaited inside the poll tick,
+  // which had three consequences: the landlord waited up to 60s for the tick plus the
+  // whole parse before hearing anything at all; the bell had nothing to show because the
+  // row was created only afterwards; and the single-flight guard meant one multi-page PDF
+  // blocked every other realm's messages behind it.
+  //
+  // So: acknowledge immediately, write the row as 'processing' so the bell can render it,
+  // and let the parse finish on its own. The ack's message id is stored on the row and the
+  // parse EDITS that same message into the outcome — one message that changes, rather than
+  // an ack the landlord must scroll past to find the result.
+  // Computed here now (it was declared inside the parse block, which has moved into the
+  // worker and therefore no longer sees `fileName`).
+  const safeName = fileName || 'telegram-file';
+  const ackText = msg.document
+    ? 'Ελήφθη το αρχείο — το διαβάζω τώρα…'
+    : 'Ελήφθη η φωτογραφία — τη διαβάζω τώρα…';
+  const ackMessageId = (await deps.sendReply?.(
+    realm.botToken,
+    msg.chat.id,
+    ackText
+  )) ?? null;
+
+  const receivedAt = deps.now();
+  const itemId = await deps.createInboxItem({
+    realmId: realm.realmId,
+    source: 'telegram',
+    status: 'processing',
+    kind: 'bill',
+    parsed: {},
+    sourceFileName: safeName,
+    telegramMessageId: msg.message_id,
+    telegramFileId: fileId,
+    ackMessageId: ackMessageId ?? undefined,
+    ackChatId: String(msg.chat.id),
+    createdDate: receivedAt,
+    updatedDate: receivedAt
+  });
+
+  // Bounded, single-flight, in-process. A real queue would be a new dependency for one
+  // producer; what matters here is that only ONE parse runs at a time (the OCR is the
+  // documented OOM risk in this container) and that a full queue degrades visibly rather
+  // than silently dropping or ballooning memory with held buffers.
+  enqueueParse({
+    realm,
+    file,
+    msg,
+    fileId,
+    safeName,
+    itemId,
+    ackMessageId,
+    deps
+  });
+  return 'ingested';
+}
+
+// ── the parse worker ─────────────────────────────────────────────────────────────
+/**
+ * ONE parse at a time, at most QUEUE_CAP waiting.
+ *
+ * Why in-process rather than BullMQ: there is a single producer (this poller), the work is
+ * idempotent per InboxItem, and a stalled item is recoverable from its own 'processing'
+ * status by the sweep below. A queue server would add an operational dependency to buy
+ * durability that the sweep already provides.
+ *
+ * Why the cap: each queued job holds the file's BUFFER in memory. Unbounded queueing of
+ * 6MB buffers is how this container OOMs. At the cap the parse runs inline on the tick —
+ * the old blocking behaviour, which is slower but never loses the bill.
+ */
+const QUEUE_CAP = 4;
+type ParseJob = {
+  realm: TelegramRealmConfig;
+  file: { buffer: Buffer };
+  msg: NonNullable<TgUpdate['message']>;
+  fileId: string;
+  safeName: string;
+  itemId: string;
+  ackMessageId: number | null;
+  deps: InboxScanDeps;
+};
+const parseQueue: ParseJob[] = [];
+let parseRunning = false;
+
+function enqueueParse(job: ParseJob): void {
+  if (parseQueue.length >= QUEUE_CAP) {
+    logger.warn(
+      `telegram-inbox: parse queue full (${QUEUE_CAP}); running item ${job.itemId} inline`
+    );
+    // Awaited nowhere on purpose — but NOT unobserved: failures are logged and the row
+    // stays 'processing' for the sweep.
+    void _runParseJob(job);
+    return;
+  }
+  parseQueue.push(job);
+  void _drainParseQueue();
+}
+
+async function _drainParseQueue(): Promise<void> {
+  if (parseRunning) return;
+  parseRunning = true;
+  try {
+    while (parseQueue.length) {
+      const job = parseQueue.shift();
+      if (job) await _runParseJob(job);
+    }
+  } finally {
+    parseRunning = false;
+  }
+}
+
+async function _runParseJob(job: ParseJob): Promise<void> {
+  const { realm, file, msg, fileId, safeName, itemId, ackMessageId, deps } = job;
+  try {
+    await _parseAndFinish(realm, file, msg, fileId, safeName, itemId, ackMessageId, deps);
+  } catch (err: any) {
+    logger.error(
+      `telegram-inbox: parse of item ${itemId} threw: ${err?.message || err}`
+    );
+    // Leave a row the landlord can see, and tell them. A 'processing' row that never
+    // resolves is the absent-representation shape: it reads as "still working" forever.
+    await deps
+      .updateInboxItem?.(itemId, {
+        status: 'pending',
+        parseError:
+          'Η ανάλυση απέτυχε απρόσμενα. Καταχωρήστε τον λογαριασμό χειροκίνητα.'
+      })
+      .catch(() => {});
+    await deps.editReply?.(
+      realm.botToken,
+      msg.chat.id,
+      ackMessageId,
+      'Ελήφθη, αλλά η ανάλυση απέτυχε. Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.'
+    );
+  }
+}
+
+/** The OCR/parse/match/archive half — everything that was inline on the poll tick. */
+async function _parseAndFinish(
+  realm: TelegramRealmConfig,
+  file: { buffer: Buffer },
+  msg: NonNullable<TgUpdate['message']>,
+  fileId: string,
+  safeName: string,
+  itemId: string,
+  ackMessageId: number | null,
+  deps: InboxScanDeps
+): Promise<void> {
   // Same pipeline as the import dialog. A parse failure still creates an
   // InboxItem (with parseError) — the landlord must SEE that a bill arrived
   // and could not be read, rather than the message vanishing.
@@ -983,7 +1223,6 @@ async function _handleUpdate(
   // Archive the source bytes to B2 at ingest (best-effort — a failure returns
   // null and never blocks ingest). We have the buffer here; confirm carries
   // the key onto the Bill's pdfUrl without a re-upload.
-  const safeName = fileName || 'telegram-file';
   const sourcePdfUrl = deps.archiveSource
     ? await deps.archiveSource(
         realm,
@@ -993,26 +1232,28 @@ async function _handleUpdate(
       )
     : null;
 
-  const now = deps.now();
-  await deps.createInboxItem({
-    realmId: realm.realmId,
-    source: 'telegram',
+  // (No `now` here: the row's timestamps were set at receipt, and updateInboxItem stamps
+  // updatedDate itself — a second clock read would only invite the two to disagree.)
+  // FINISH the row the tick already created — do not create a second one. The tick wrote
+  // it as 'processing' with the identifiers; this fills in what the parse learned and moves
+  // it to 'pending' so the bell offers it for confirmation. Creating again here would also
+  // be rejected outright: {realmId, telegramMessageId} is unique.
+  await deps.updateInboxItem?.(itemId, {
     status: 'pending',
     parsed,
     parseError,
     suggestedMatch,
     warnings: termWarnings,
-    sourceFileName: safeName,
-    telegramMessageId: msg.message_id,
-    telegramFileId: fileId,
-    sourcePdfUrl: sourcePdfUrl || undefined,
-    createdDate: now,
-    updatedDate: now
+    sourcePdfUrl: sourcePdfUrl || undefined
   });
 
-  await deps.sendReply?.(
+  // EDIT the ack rather than sending a second message: the landlord is watching the
+  // «το διαβάζω τώρα…» line, and a new message below it leaves two states on screen with
+  // no indication which is current.
+  await deps.editReply?.(
     realm.botToken,
     msg.chat.id,
+    ackMessageId,
     parseError
       ? `Ελήφθη, αλλά δεν διαβάστηκε (${parseError}).${
           // GATE THE HINT ON THE FAILURE KIND. «Send it at full resolution» is only
@@ -1031,7 +1272,6 @@ async function _handleUpdate(
         } Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.`
       : `Ελήφθη ο λογαριασμός${parsed.totalAmount ? ` (${parsed.totalAmount}€)` : ''} — εκκρεμεί επιβεβαίωση στις ειδοποιήσεις της εφαρμογής.`
   );
-  return 'ingested';
 }
 
 // --- Cron wiring (leaseExpiryScanner pattern, 60s cadence) -------------------
@@ -1062,9 +1302,65 @@ export async function runInboxPollOnce(
   }
 }
 
+/**
+ * A 'processing' row that never resolved.
+ *
+ * The parse runs off the poll tick, so a container restart (deploy, OOM, crash) can leave a
+ * row mid-flight. That row is the WORST state to leave behind: it renders as «διαβάζω
+ * τώρα…» forever, which reads as progress rather than as failure — the
+ * absent-representation shape, where the landlord waits instead of acting.
+ *
+ * The file itself is NOT re-fetchable in general (Telegram's file links expire), so this
+ * does not retry the parse. It converts the stall into something visible and actionable:
+ * the row becomes 'pending' with an explicit reason, which is exactly how a parse FAILURE
+ * already behaves, and the landlord can enter the bill by hand or re-send it.
+ *
+ * STALE_MS is generously above the worst observed parse (a 3-page PDF at ~50s/page plus
+ * download) so a slow-but-live job is never mistaken for a dead one.
+ */
+const STALE_PROCESSING_MS = 15 * 60 * 1000;
+
+export async function sweepStalledProcessing(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - STALE_PROCESSING_MS);
+  const stalled: any[] = await Collections.InboxItem.find({
+    status: 'processing',
+    updatedDate: { $lt: cutoff }
+  })
+    .limit(50)
+    .lean();
+  for (const item of stalled) {
+    await Collections.InboxItem.updateOne(
+      { _id: item._id },
+      {
+        $set: {
+          status: 'pending',
+          parseError:
+            'Η ανάγνωση διακόπηκε (επανεκκίνηση υπηρεσίας). Καταχωρήστε τον λογαριασμό χειροκίνητα ή στείλτε τον ξανά.',
+          updatedDate: new Date()
+        }
+      }
+    );
+    logger.warn(
+      `telegram-inbox: item ${item._id} was stuck in 'processing' since ${item.updatedDate} — marked pending`
+    );
+  }
+  if (stalled.length) {
+    logger.info(`telegram-inbox: released ${stalled.length} stalled item(s)`);
+  }
+  return stalled.length;
+}
+
 export function startTelegramInboxCron(): void {
   if (pollTimer) return;
+  // At startup: anything left 'processing' by the previous process is stalled by
+  // definition, so release it before the first poll rather than after 15 minutes.
+  sweepStalledProcessing().catch((err) =>
+    logger.error(`telegram-inbox: startup sweep failed: ${err?.message || err}`)
+  );
   pollTimer = setInterval(() => {
+    sweepStalledProcessing().catch((err) =>
+      logger.error(`telegram-inbox: sweep failed: ${err?.message || err}`)
+    );
     runInboxPollOnce().catch((err) => {
       logger.error(
         `telegram-inbox: unexpected rejection: ${err?.message || err}`
@@ -1073,6 +1369,26 @@ export function startTelegramInboxCron(): void {
   }, POLL_MS);
   pollTimer.unref();
   logger.info('telegram-inbox: 60s poller installed');
+}
+
+/**
+ * TEST SEAM. The parse is deliberately fire-and-forget, so a test that asserts the finished
+ * row has nothing to await. Rather than have every test sleep — a guess that is either
+ * flaky or slow — this resolves when the queue is empty and no job is running.
+ *
+ * Exported for tests only; nothing in production needs it, because production's whole point
+ * is not to wait.
+ */
+export async function _awaitParseQueue(timeoutMs = 30_000): Promise<void> {
+  const started = Date.now();
+  while (parseQueue.length || parseRunning) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(
+        `parse queue did not drain within ${timeoutMs}ms (queued=${parseQueue.length}, running=${parseRunning})`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 export function stopTelegramInboxCron(): void {

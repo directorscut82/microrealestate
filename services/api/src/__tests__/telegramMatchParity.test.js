@@ -547,10 +547,23 @@ describe('the Telegram IMAGE path', () => {
     // not help («δεν θα βοηθήσει»). Those are the only two truthful framings — one is
     // the remedy, the other is the absence of one — and both are the phrase that makes
     // the sentence actionable, so removing either is exactly the regression.
+    // REFINED once more, and for a reason worth recording. The property was "any reply
+    // mentioning a photograph must offer the file route" — which was right while every
+    // such reply was advice. It became wrong when the bot gained an ACK: «Ελήφθη η
+    // φωτογραφία — τη διαβάζω τώρα…» names the medium without instructing anything, and
+    // flagging it would have pushed me to reword a correct message to satisfy a test.
+    //
+    // What the rule is actually about: a reply must not TELL the landlord to send a
+    // photograph without also offering the file route. So an offender needs all three —
+    // a send verb, a photograph, and neither marker. An ack has no send verb; the
+    // text-only reply has one but does offer «ως αρχείο», case-insensitively.
     const mentioningPhotos = replies.filter((r) => /φωτογραφ/i.test(r));
     expect(mentioningPhotos.length).toBeGreaterThanOrEqual(3);
     const badFraming = mentioningPhotos.filter(
-      (r) => !/ως ΑΡΧΕΙΟ/.test(r) && !/δεν θα βοηθήσει/.test(r)
+      (r) =>
+        /(Στείλτε|στείλτε|στέλνετε)/.test(r) &&
+        !/ως ΑΡΧΕΙΟ/i.test(r) &&
+        !/δεν θα βοηθήσει/.test(r)
     );
     expect(badFraming).toEqual([]);
     // And the original defect's exact wording must never come back.
