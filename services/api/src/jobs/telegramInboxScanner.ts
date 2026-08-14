@@ -837,7 +837,8 @@ async function _handleUpdate(
   // that PARSED fine can still be attached to a month nobody is charged for, and
   // collapsing the two would make a warning look like a failure (or worse, a
   // failure look like a warning).
-  const termWarnings: string[] = [];
+  const termWarnings: { level: 'warn' | 'block'; code: string; message: string }[] =
+    [];
   let suggestedMatch: Awaited<ReturnType<InboxScanDeps['findMatch']>> = null;
   try {
     const parseResult = await deps.parseBill(file.buffer);
@@ -890,13 +891,31 @@ async function _handleUpdate(
           if (exp) {
             const fit = BillTerm.billTermFitsExpense(exp, parsed.proposedTerm);
             if (!fit.fits) {
-              termWarnings.push(
-                fit.reason === 'before-start'
-                  ? `Η δαπάνη «${exp.name}» ξεκινά τον ${_termLabel(fit.startTerm)}, ενώ ο λογαριασμός αφορά τον ${_termLabel(Number(parsed.proposedTerm))} — δεν θα χρεωθεί σε κανέναν.`
-                  : fit.reason === 'after-end'
-                    ? `Η δαπάνη «${exp.name}» έληξε τον ${_termLabel(fit.endTerm)}, ενώ ο λογαριασμός αφορά τον ${_termLabel(Number(parsed.proposedTerm))} — δεν θα χρεωθεί σε κανέναν.`
-                    : `Η δαπάνη «${exp.name}» δεν έχει μήνα έναρξης — δεν χρεώνεται σε κανέναν μήνα.`
-              );
+              // THE SCHEMA SHAPE, not a bare string. `InboxItem.warnings` is
+              // `[{level, code, message}]` (collections/inboxItem.ts:85-91), and
+              // pushing a string made mongoose throw «Cast to embedded failed» —
+              // which rejects the WHOLE document, so every Telegram bill that earned
+              // a warning was DESTROYED instead of merely un-warned. Strictly worse
+              // than the defect the warning was added to fix.
+              //
+              // It survived my own e2e test because a direct mongo insert bypasses
+              // mongoose validation, so the spec was green against a shape the
+              // application can never produce.
+              termWarnings.push({
+                level: 'warn',
+                code:
+                  fit.reason === 'before-start'
+                    ? 'bill-term-before-expense-start'
+                    : fit.reason === 'after-end'
+                      ? 'bill-term-after-expense-end'
+                      : 'expense-has-no-start-term',
+                message:
+                  fit.reason === 'before-start'
+                    ? `Η δαπάνη «${exp.name}» ξεκινά τον ${_termLabel(fit.startTerm)}, ενώ ο λογαριασμός αφορά τον ${_termLabel(Number(parsed.proposedTerm))} — δεν θα χρεωθεί σε κανέναν.`
+                    : fit.reason === 'after-end'
+                      ? `Η δαπάνη «${exp.name}» έληξε τον ${_termLabel(fit.endTerm)}, ενώ ο λογαριασμός αφορά τον ${_termLabel(Number(parsed.proposedTerm))} — δεν θα χρεωθεί σε κανέναν.`
+                      : `Η δαπάνη «${exp.name}» δεν έχει μήνα έναρξης — δεν χρεώνεται σε κανέναν μήνα.`
+              });
             }
           }
         }

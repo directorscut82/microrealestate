@@ -150,6 +150,11 @@ test('WARNINGS reach the screen — a bill on a month nobody is charged for', as
   // it. Which is the same absent-representation failure the warning itself announces:
   // when a bill's month falls outside its expense's active range, the engine charges
   // that expense for no month at all and the amount lands on no surface.
+  // THE SCHEMA SHAPE. The first version seeded a bare string, which a direct mongo
+  // insert accepts because it bypasses mongoose validation — so this test was GREEN
+  // against a shape the application can never write. Meanwhile the real scanner pushed
+  // the same bare string and mongoose rejected the entire document, destroying every
+  // Telegram bill that earned a warning. The test lied in the direction that hid it.
   const warning =
     'Η δαπάνη «ΔΕΗ» ξεκινά τον Αύγουστο 2026, ενώ ο λογαριασμός αφορά τον Ιούνιο 2026 — δεν θα χρεωθεί σε κανέναν.';
   seedItem(`{
@@ -161,7 +166,7 @@ test('WARNINGS reach the screen — a bill on a month nobody is charged for', as
       proposedTerm: NumberInt(2026060100)
     },
     suggestedMatch: null,
-    warnings: ['${warning}']
+    warnings: [{ level: 'warn', code: 'bill-term-before-expense-start', message: '${warning}' }]
   }`);
   await signIn(page);
   await openBell(page);

@@ -218,8 +218,22 @@ test('the ΕΥΔΑΠ bill parses, and shows a scannable BARCODE not an empty box
   // The charge month must be AUGUST (the issue month), not July (the period end) —
   // the card prints it beside the provider: «ΕΥΔΑΠ · Αύγουστο 2026».
   expect(text).toMatch(/ΕΥΔΑΠ\s*·\s*Αύγουστ/);
-  // The meter is the match key, so it is the identifier shown.
-  expect(text).toContain('A98E84011');
+  // The meter is the match key, so it is the identifier the card must show. Read the
+  // expected value out of the GITIGNORED parse fixture at runtime — the first version
+  // hardcoded it, which published the landlord's real meter serial in a public repo.
+  // scan-pii missed it because every prior real identifier on these bills was pure
+  // digits and this one is alphanumeric, so it lived in neither `digitRuns` nor
+  // `tokens`; it is in `tokens` now.
+  const expectedMeter = JSON.parse(
+    fs.readFileSync(
+      path.resolve(__dirname, '../../.scratch-eydap/parse.json'),
+      'utf8'
+    )
+  )[0]?.ocrText?.match(/\b([A-Z]\d{2}[A-Z]\d{5})\b/)?.[1];
+  expect(
+    typeof expectedMeter === 'string' && expectedMeter.length === 9
+  ).toBe(true);
+  expect(text).toContain(expectedMeter);
   // And the source label must say OCR for a photograph, not PDF.
   expect(text).toMatch(/OCR|εικόν/i);
   expect(text).not.toContain('Από το PDF');

@@ -476,7 +476,14 @@ function InboxCard({ item, buildings, onGone }) {
           {item.warnings.map((w, i) => (
             <div key={i} className="flex items-start gap-1.5">
               <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-              <div className="text-amber-800 dark:text-amber-200">{w}</div>
+              <div className="text-amber-800 dark:text-amber-200">
+                {/* A warning is `{level, code, message}` per the schema. Rendering the
+                    object itself — which the first version did — throws «Objects are
+                    not valid as a React child» and takes the whole bell down, so this
+                    surface was broken in BOTH directions at once. The string branch is
+                    for any row written by an older build. */}
+                {typeof w === 'string' ? w : w?.message || w?.code || ''}
+              </div>
             </div>
           ))}
         </div>
