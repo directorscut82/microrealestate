@@ -367,16 +367,20 @@ function parseRecipient(
         name = line;
         break;
       }
-      // A line that is neither, between the postcode and the street, is OCR noise
-      // from the interleaved stub columns — keep walking rather than give up.
-      if (!street && NAME_LINE.test(line)) {
-        // A name found BEFORE any street means this block has no street line;
-        // record it and stop, rather than mislabel it as the street.
-        name = line;
-        break;
-      }
+      // A line that is neither street nor name is OCR noise from the interleaved stub
+      // columns — keep walking rather than give up.
+      //
+      // NOTE what is deliberately NOT here: an earlier version accepted a NAME found
+      // before any street, on the theory that some blocks carry no street line. But
+      // «all-caps Greek with no digits» describes a stub LABEL as well as a person, and
+      // the stub columns are full of them — so one interleaved «ΑΠΟ ΛΟΓΑΡΙΑΣΜΟΥΣ»
+      // between the street and the postcode was returned as the account holder's name
+      // AND lost the street entirely. A label presented as a person is a confidently
+      // wrong answer; walking past it finds the real street one line further up.
     }
-    if (street || name) {
+    // Only report a name when a STREET was found beneath it: that adjacency is the
+    // only thing distinguishing a person from a label in an all-caps OCR block.
+    if (street) {
       return { name, street, postCode: pc[1], area: pc[2].trim() };
     }
   }
@@ -577,7 +581,18 @@ export function parseEydapBill(text: string): BillParseResult {
     if (idx < 0) return null;
     if (ints[idx + 1] !== consumption) return null;
     const days = ints[idx + 2];
-    return Number.isFinite(days) && days > 0 && days < 400 ? days : null;
+    if (!(Number.isFinite(days) && days > 0 && days < 400)) return null;
+    // SECOND corroboration, free: the day count must be within a few days of the
+    // period it bills. A blank ΗΜΕΡΕΣ cell emits nothing, so the positional read lands
+    // on whatever integer follows — and ΥΔΡΟΛ/ΠΡΟΣΘΕΤΑ are small positive integers that
+    // would pass the range check alone and misstate the consumption rate.
+    if (periodStart && periodEnd) {
+      const spanDays = Math.round(
+        (periodEnd.getTime() - periodStart.getTime()) / 86400000
+      );
+      if (spanDays > 0 && Math.abs(spanDays - days) > 3) return null;
+    }
+    return days;
   })();
 
   // ─── the rest, kept because discarding it is irreversible ──────────────────
@@ -696,9 +711,16 @@ export function parseEydapBill(text: string): BillParseResult {
   // landlord who typed the account number into `eydapNumber` must still match rather
   // than be told their own bill is unrecognised.
   const primary = meterSerial || accountNumber || (registryNumber as string);
-  const alternates = [accountNumber, registryNumber]
+  // The account number normalises to 14 digits («11 digits» + a 3-digit branch), which
+  // is OUTSIDE supplyBody's 9-12 window — so as a single alternate it could only ever
+  // match by exact string equality, and a landlord who recorded just the 11-digit body
+  // (or typed it with different spacing) would not match at all. Emit the body as its
+  // own alternate so the suffix-tolerant path applies to it.
+  const accountBody = accountMatch ? accountMatch[1] : null;
+  const alternates = [accountNumber, accountBody, registryNumber]
     .filter((v): v is string => !!v && v !== primary)
-    .map((v) => normalizeBillingId(v));
+    .map((v) => normalizeBillingId(v))
+    .filter((v, i, all) => all.indexOf(v) === i);
 
   const bill: ParsedBill = {
     provider: 'eydap',

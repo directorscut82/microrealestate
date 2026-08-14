@@ -164,7 +164,13 @@ describe('ΕΥΔΑΠ parser — identity and matching', () => {
     // Not hedging: a landlord who already typed the account number into
     // `eydapNumber` must still match rather than be told their own bill is
     // unrecognised.
-    expect(r.bill.alternateBillingIds).toEqual(['99900011122003', '999000133']);
+    // The 11-digit BODY rides along too: the 14-digit form is outside supplyBody's
+    // 9-12 window and could only match by exact string equality.
+    expect(r.bill.alternateBillingIds).toEqual([
+      '99900011122003',
+      '99900011122',
+      '999000133'
+    ]);
   });
 
   it('reads the tariff class', () => {
@@ -387,5 +393,75 @@ describe('ΕΥΔΑΠ parser — degradation', () => {
     expect(parseEydapBill('').success).toBe(false);
     expect(parseEydapBill('χχχ').success).toBe(false);
     expect(parseEydapBill('').detectedProvider).toBe('eydap');
+  });
+});
+
+describe('parser robustness — the shapes real OCR produces', () => {
+  const lines = OCR.split('\n');
+
+  it('walks PAST an interleaved stub label instead of calling it the name', () => {
+    // The stub columns are printed side by side, so the OCR interleaves their rows: an
+    // all-caps label can land between the street and the postcode. «All-caps Greek with
+    // no digits» describes a LABEL as well as a person, so an earlier version accepted
+    // the label as the account holder AND lost the street — a confidently wrong answer,
+    // which is worse than an absent one. The street's adjacency is the only thing that
+    // distinguishes the two.
+    const pcIdx = lines.findIndex((l) => /^\d{5}\s+\S/.test(l.trim()));
+    expect(pcIdx).toBeGreaterThan(0);
+    const injected = [...lines];
+    injected.splice(pcIdx, 0, 'ΑΠΟ ΛΟΓΑΡΙΑΣΜΟΥΣ');
+    const r = parseEydapBill(injected.join('\n')).bill;
+    expect(r.details.recipient).toEqual({
+      name: 'ΠΑΠΑΔΟΠΟΥΛΟΣ ΝΙΚΟΣ',
+      street: 'ΟΔΟΣ ΑΛΦΑ 24',
+      postCode: '11111',
+      area: 'ΑΘΗΝΩΝ'
+    });
+  });
+
+  it('reports NO recipient rather than a label when there is no street', () => {
+    // Absent beats wrong. Strip the street and the name must not be reported either,
+    // because without the street beneath it there is nothing to tell a person from a
+    // stub label.
+    const noStreet = lines.filter((l) => !/ΟΔΟΣ ΑΛΦΑ 24/.test(l)).join('\n');
+    const r = parseEydapBill(noStreet).bill;
+    expect(r.details.recipient.name).toBeUndefined();
+    expect(r.details.recipient.street).toBeUndefined();
+  });
+
+  it('drops daysBilled when the ΗΜΕΡΕΣ cell is blank', () => {
+    // A blank cell emits NOTHING, so the positional read lands on whatever integer
+    // follows — and ΥΔΡΟΛ / ΠΡΟΣΘΕΤΑ are small positive integers that pass a range check
+    // on their own. Corroborated against the period length, so a wrong number is
+    // rejected rather than used to misstate the consumption rate.
+    const noDays = lines.filter((l) => l.trim() !== '87').join('\n');
+    expect(
+      parseEydapBill(noDays).bill.details.consumption.daysBilled
+    ).toBeNull();
+    // …and the unmodified bill still reports it.
+    expect(
+      parseEydapBill(OCR).bill.details.consumption.daysBilled
+    ).toBe(87);
+  });
+
+  it('rejects a day count that contradicts the period it bills', () => {
+    // 28/04–23/07 is 86 days; a read of 8 must not be accepted just because it is a
+    // small positive integer.
+    const wrong = OCR.replace(/^87$/m, '8');
+    expect(
+      parseEydapBill(wrong).bill.details.consumption.daysBilled
+    ).toBeNull();
+  });
+
+  it('offers the 11-digit account BODY as an alternate, not only the 14-digit form', () => {
+    // The account number normalises to 14 digits (11 + a 3-digit branch), which is
+    // outside supplyBody's 9-12 window — so on its own it could match only by exact
+    // string equality, and a landlord who recorded the 11-digit body would not match at
+    // all. Both forms are offered, de-duplicated.
+    const alts = parseEydapBill(OCR).bill.alternateBillingIds;
+    expect(alts).toContain('99900011122003');
+    expect(alts).toContain('99900011122');
+    expect(alts).toContain('999000133');
+    expect(new Set(alts).size).toBe(alts.length);
   });
 });
