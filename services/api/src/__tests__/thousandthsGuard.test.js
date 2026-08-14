@@ -104,3 +104,53 @@ describe('_assertThousandthsAvailable', () => {
     ).not.toThrow();
   });
 });
+
+describe('the guard and the ENGINE must compute the same denominator', () => {
+  /**
+   * WHY THIS EXISTS. The guard's own comment claimed it summed «the SAME denominator the
+   * tenant engine uses» while computing a different one: it reduced
+   * `Number(u[field]) || 0` RAW, so a negative χιλιοστό counted AGAINST the total here,
+   * whereas 1_base normalises a negative to 0 on both sides of its division (the
+   * over-billing fix). They disagreed in both directions:
+   *
+   *   500/500/−1000  raw 0    → save REFUSED as "no χιλιοστά"
+   *                  norm 1000 → engine would have split it perfectly well
+   *   500/−400       raw 100  → save allowed
+   *                  norm 500  → engine's denominator is 5× the guard's
+   *
+   * One money rule computed twice is this repo's most-repeated defect, so the guard now
+   * calls the shared normaliser. These cases are the ones where that matters.
+   */
+  const vec = (values) =>
+    values.map((v, i) => ({ propertyId: `p${i}`, generalThousandths: v }));
+
+  it('ACCEPTS a vector the engine can split, even with a large negative present', () => {
+    // The raw sum is 0 here, which used to read as "this building has no χιλιοστά" and
+    // blocked a save the engine would have handled.
+    expect(() =>
+      _assertThousandthsAvailable({ units: vec([500, 500, -1000]) }, 'general_thousandths')
+    ).not.toThrow();
+  });
+
+  it('still REFUSES a building with genuinely no χιλιοστά', () => {
+    // The guard's actual purpose, unchanged: a zero vector means the amount would land
+    // on no surface at all (MONEY_SURFACE_MATRIX's absent-representation shape).
+    expect(() =>
+      _assertThousandthsAvailable({ units: vec([0, 0, 0]) }, 'general_thousandths')
+    ).toThrow(/thousandths/i);
+  });
+
+  it('REFUSES a vector that is only negative — nothing to split by', () => {
+    // Normalised total is 0, so there is no denominator; refusing is right, and now both
+    // sides agree on why.
+    expect(() =>
+      _assertThousandthsAvailable({ units: vec([-100, -50]) }, 'general_thousandths')
+    ).toThrow(/thousandths/i);
+  });
+
+  it('the healthy case is untouched', () => {
+    expect(() =>
+      _assertThousandthsAvailable({ units: vec([400, 300, 200, 100]) }, 'general_thousandths')
+    ).not.toThrow();
+  });
+});

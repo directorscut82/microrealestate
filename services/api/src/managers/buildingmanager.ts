@@ -1,4 +1,9 @@
-import { Collections, logger, ServiceError } from '@microrealestate/common';
+import {
+  Collections,
+  logger,
+  ServiceError,
+  ShareBasis
+} from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import type { CollectionTypes } from '@microrealestate/types';
 import { parseE9 } from './e9parser.js';
@@ -326,11 +331,17 @@ export function _assertThousandthsAvailable(
   if (!allocationMethod) return;
   const field = _THOUSANDTHS_FIELD[allocationMethod];
   if (!field) return; // not a thousandths method
-  // Sum across ALL units — the SAME denominator the tenant engine uses
-  // (1_base.ts general_thousandths branch reduces over building.units).
-  const total = ((building?.units || []) as any[]).reduce(
-    (sum, u) => sum + (Number(u[field]) || 0),
-    0
+  // Sum across ALL units, THROUGH THE SHARED NORMALISER — because that is what the
+  // tenant engine's denominator now is. The comment below used to claim "the SAME
+  // denominator" while computing a different one: this reduced `Number(u[field]) || 0`
+  // raw, so a negative χιλιοστό counted AGAINST the total here while 1_base normalises
+  // it to 0 on both sides of its division. The two disagreed in both directions —
+  // 500/500/−1000 sums to 0 here (save refused as "no χιλιοστά") but 1000 in the engine,
+  // and 500/−400 sums to 100 here (save allowed) but 500 in the engine. One money rule,
+  // computed twice, which is this repo's most-repeated defect.
+  const total = ShareBasis.thousandthsTotal(
+    (building?.units || []) as any[],
+    field
   );
   if (total <= 0) {
     const labels: Record<string, string> = {
