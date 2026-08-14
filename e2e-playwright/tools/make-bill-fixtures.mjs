@@ -19,6 +19,7 @@
  * emit label-runs and value-runs the way a real scan does — that shape is what the parsers
  * are written against, and a naive single-column render would not exercise it.
  */
+/* eslint-env node */
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
@@ -77,7 +78,8 @@ function deh({ supply, rf, total, periodFrom, periodTo, issue, due, kwh, nextRea
     </tr>
     <tr>
       <!-- The ASTERISK is load-bearing, not decoration: the real ΔΕΗ bill prints its
-           payable as «*120,00€» and the parser's second amount pattern is /\*\s*([\d,.]+)\s*€/.
+           payable as «*120,00€» and the parser's second amount pattern requires that
+           leading asterisk before the digits.
            Rendered without it, the amount was not found at all. -->
       <td class="big">*${total}€</td>
       <td>${due}</td>
