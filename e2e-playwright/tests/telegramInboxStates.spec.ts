@@ -80,9 +80,15 @@ function cleanup() {
 }
 
 async function signIn(page: import('@playwright/test').Page) {
-  await page.goto(`${BASE}/signin`);
-  await page.waitForTimeout(700);
-  await page.locator('input[name=email]').fill(EMAIL);
+  await page.goto(`${BASE}/signin`, { waitUntil: 'domcontentloaded' });
+  // WAIT FOR THE FIELD, not for a duration. `domcontentloaded` means the HTML arrived,
+  // not that React has hydrated — and this NAS serves a cold route in 8-14s (measured),
+  // so the fixed 700ms sleep this used to have filled nothing: the failure screenshot
+  // showed the signin form with both inputs still empty. A sleep can only ever be too
+  // short on a slow day or wasted on a fast one.
+  const email = page.locator('input[name=email]');
+  await expect(email).toBeVisible({ timeout: 60_000 });
+  await email.fill(EMAIL);
   await page.locator('input[name=password]').fill(PASSWORD);
   await page.locator('[data-cy=submit]').first().click();
   await expect
@@ -92,8 +98,9 @@ async function signIn(page: import('@playwright/test').Page) {
 
 /** Open the bell and return its panel text. */
 async function openBell(page: import('@playwright/test').Page) {
-  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/dashboard`);
-  await page.waitForTimeout(2500);
+  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/dashboard`, { waitUntil: 'domcontentloaded' });
+  // Again: wait for the bell itself rather than guessing how long the dashboard needs.
+  // Its queries fan out (rents, buildings, inbox), so 2500ms was a coin flip.
   // By ACCESSIBLE NAME. The first version guessed at `header button` — there is no
   // <header> element; the bell lives inside <main>, and the guess timed out on all
   // seven tests while the item was sitting there correctly with its badge showing 1.
@@ -103,7 +110,10 @@ async function openBell(page: import('@playwright/test').Page) {
   // seeding failure is distinguishable from a rendering failure.
   await expect(bell).toContainText(/[1-9]/);
   await bell.click();
-  await page.waitForTimeout(2500);
+  // The panel's own header text is the proof it opened — «N εκκρεμεί». Waiting for that
+  // rather than a duration means a slow render extends the wait and a fast one does not
+  // pay for it.
+  await expect(page.getByText(/εκκρεμ/)).toBeVisible({ timeout: 20000 });
   return page;
 }
 
@@ -118,6 +128,12 @@ test.beforeEach(async () => {
 test.afterEach(async () => {
   cleanup();
 });
+
+// The NAS serves a cold Next.js route in 8-14s (measured), so the 30s default leaves no
+// room for the app's own work on the first tests of a file — each one signs in fresh.
+// Raised per-file rather than globally: a slow gate here would hide a real slowdown
+// elsewhere. Note test.setTimeout is NOT inherited by hooks, so this sits at file scope.
+test.describe.configure({ timeout: 90_000 });
 
 test('a PARSE FAILURE shows the reason and advice that can be followed', async ({
   page
@@ -307,7 +323,18 @@ test('DISMISS removes the item from the bell', async ({ page }) => {
   const found = await dismiss.isVisible().catch(() => false);
   test.skip(!found, 'dismiss affordance not found on the card');
   await dismiss.click();
-  await page.waitForTimeout(2500);
+  // POLLED, not slept on. The sleep that used to sit here was a guess AND a silent race:
+  // a slow PATCH would leave the row 'pending' and fail the assertion below for the
+  // wrong reason.
+  await expect
+    .poll(
+      () =>
+        mongoExec(
+          `var i = db.inboxitems.findOne({_id: ObjectId('${id}')}); print(i ? i.status : 'gone');`
+        ).trim(),
+      { timeout: 20000 }
+    )
+    .not.toBe('pending');
 
   // Assert the WRITE, not just the screen: the row must be non-pending in mongo, or a
   // re-render would bring it back.

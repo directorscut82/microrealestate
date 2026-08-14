@@ -41,7 +41,7 @@ const EYDAP_IMG = path.resolve(__dirname, '../../.scratch-eydap/eydap.jpg');
 test.use({ viewport: { width: 1400, height: 1000 }, deviceScaleFactor: 2 });
 
 async function signIn(page: import('@playwright/test').Page) {
-  await page.goto(`${BASE}/signin`);
+  await page.goto(`${BASE}/signin`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(700);
   await page.locator('input[name=email]').fill(EMAIL);
   await page.locator('input[name=password]').fill(PASSWORD);
@@ -69,7 +69,7 @@ test('settings Αρχεία loads COUNTS only, and a folder fetches only when op
     if (/\/api\/v2\/documents(\?|$)/.test(u)) docRequests.push(u);
   });
 
-  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/settings/files`);
+  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/settings/files`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
   await page.screenshot({ path: path.join(OUT, 'today_files_closed.png'), fullPage: true });
 
@@ -111,7 +111,7 @@ test('settings Αρχεία loads COUNTS only, and a folder fetches only when op
 test('an apartment has an Έγγραφα tab wired to ITS OWN documents', async ({ page }) => {
   // Before today the property page had no tabs at all, and `Document` had no
   // propertyId — an apartment's papers had nowhere to live.
-  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/properties/${PROPERTY}`);
+  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/properties/${PROPERTY}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
   const tab = page.locator('[data-cy=documentsTab]');
   await expect(tab).toBeVisible();
@@ -147,7 +147,7 @@ test('an apartment has an Έγγραφα tab wired to ITS OWN documents', async 
 });
 
 test('«ΔΕΗ» is an electricity expense and my test row is gone', async ({ page }) => {
-  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/buildings/${BUILDING}?tab=expenses`);
+  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/buildings/${BUILDING}?tab=expenses`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
   // Same guard: a 404 page contains neither string, so both assertions below would
   // "pass" the not-contains and fail the contains for the wrong reason.
@@ -171,7 +171,7 @@ test('the ΕΥΔΑΠ bill parses, and shows a scannable BARCODE not an empty box
   test.skip(!fs.existsSync(EYDAP_IMG), 'real ΕΥΔΑΠ image not present (gitignored)');
   test.setTimeout(300000); // OCR is ~60s on the NAS
 
-  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/buildings/${BUILDING}?tab=expenses`);
+  await page.goto(`${BASE}/${encodeURIComponent(ORG)}/buildings/${BUILDING}?tab=expenses`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
 
   // Drive the real import dialog rather than the API, so the CARD is what gets
