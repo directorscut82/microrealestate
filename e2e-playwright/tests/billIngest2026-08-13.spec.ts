@@ -118,10 +118,14 @@ test('an apartment has an Έγγραφα tab wired to ITS OWN documents', async 
 
   // The request the tab fires must be scoped to the apartment. An unfiltered call
   // would list the WHOLE REALM under one flat — the fail-open shape.
+  // Capture documents requests WITH OR WITHOUT a query string. The first version
+  // filtered on `documents\?`, which requires a «?» — and the fail-open regression is
+  // exactly a request with NO query string, so it was never captured, `scoped` stayed
+  // empty, and `[].every(...)` is true. The test passed on the regression it guards.
   const scoped: string[] = [];
   page.on('request', (r) => {
     const u = r.url();
-    if (/\/api\/v2\/documents\?/.test(u)) scoped.push(u);
+    if (/\/api\/v2\/documents(\?|$)/.test(u)) scoped.push(u);
   });
   await tab.click();
   await page.waitForTimeout(2500);
@@ -129,10 +133,12 @@ test('an apartment has an Έγγραφα tab wired to ITS OWN documents', async 
     path: path.join(OUT, 'today_apartment_documents.png'),
     fullPage: true
   });
-  expect(
-    scoped.every((u) => u.includes('propertyId=')),
-    `documents calls must be propertyId-scoped, got: ${scoped.join(' | ')}`
-  ).toBe(true);
+  // At least one call must have happened, or "every call is scoped" is vacuously true.
+  expect({ callsMade: scoped.length > 0, urls: scoped }).toMatchObject({
+    callsMade: true
+  });
+  const unscoped = scoped.filter((u) => !u.includes('propertyId='));
+  expect(unscoped).toEqual([]);
 
   // The details form must still be reachable — the tab must not have replaced it.
   await page.locator('[data-cy=detailsTab]').click();

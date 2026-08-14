@@ -534,10 +534,27 @@ describe('the Telegram IMAGE path', () => {
     // Guard the guard: if the extraction finds nothing, the assertion below is
     // vacuous — which is how a source-reading test silently stops testing.
     expect(replies.length).toBeGreaterThanOrEqual(3);
-    const offenders = replies.filter((r) =>
-      /(?:Στείλτε|στείλτε)\s+φωτογραφ/.test(r)
+    // THE PROPERTY, after two weaker attempts.
+    //
+    // Attempt 1 was /Στείλτε\s+φωτογραφ/ — adjacency, so «Στείλτε μια φωτογραφία»
+    // restored the loop and passed. Attempt 2 pinned a reviewed SET by marker substring,
+    // and a marker elsewhere in the same long reply vouched for a changed instruction:
+    // mutating the opening clause left «πάνω από 6MB» intact further down and the test
+    // stayed green. Both were verified by mutation, which is how they were caught.
+    //
+    // What actually holds: a reply may mention a photograph ONLY while also either
+    // offering the FILE route («ως ΑΡΧΕΙΟ») or saying outright that a better photo will
+    // not help («δεν θα βοηθήσει»). Those are the only two truthful framings — one is
+    // the remedy, the other is the absence of one — and both are the phrase that makes
+    // the sentence actionable, so removing either is exactly the regression.
+    const mentioningPhotos = replies.filter((r) => /φωτογραφ/i.test(r));
+    expect(mentioningPhotos.length).toBeGreaterThanOrEqual(3);
+    const badFraming = mentioningPhotos.filter(
+      (r) => !/ως ΑΡΧΕΙΟ/.test(r) && !/δεν θα βοηθήσει/.test(r)
     );
-    expect(offenders).toEqual([]);
+    expect(badFraming).toEqual([]);
+    // And the original defect's exact wording must never come back.
+    expect(src).not.toMatch(/Στείλτε φωτογραφία έως/);
   });
 
   it('advises sending the bill as a FILE, not a closer photo', () => {
