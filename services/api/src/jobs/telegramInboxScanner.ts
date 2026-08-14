@@ -1002,7 +1002,7 @@ async function _handleUpdate(
   // producer; what matters here is that only ONE parse runs at a time (the OCR is the
   // documented OOM risk in this container) and that a full queue degrades visibly rather
   // than silently dropping or ballooning memory with held buffers.
-  enqueueParse({
+  await enqueueParse({
     realm,
     file,
     msg,
@@ -1025,10 +1025,22 @@ async function _handleUpdate(
  * durability that the sweep already provides.
  *
  * Why the cap: each queued job holds the file's BUFFER in memory. Unbounded queueing of
- * 6MB buffers is how this container OOMs. At the cap the parse runs inline on the tick —
- * the old blocking behaviour, which is slower but never loses the bill.
+ * 6MB buffers is how this container OOMs. At the cap the tick applies BACKPRESSURE — it
+ * waits for the backlog to drain before queueing more. Slower under load, which is the
+ * correct trade when memory is the constraint, and the bill is never lost.
+ *
+ * WHAT THIS MUST NOT DO, because the first version did: start the job with an un-awaited
+ * `void _runParseJob(job)` at the cap. That is not "inline" — it runs CONCURRENTLY with the
+ * draining job, so the single moment memory is under pressure was the single moment the
+ * concurrency-1 guarantee broke, and a second OCR was launched. Exactly backwards.
  */
 const QUEUE_CAP = 4;
+/**
+ * How long the tick will wait for the backlog before queueing anyway. Generous relative to
+ * one parse (~50s/page) and far below the 15min stall sweep, so a genuinely slow queue
+ * degrades to "one extra buffer" rather than to a lost bill or a wedged poller.
+ */
+const BACKPRESSURE_WAIT_MS = 180_000;
 type ParseJob = {
   realm: TelegramRealmConfig;
   file: { buffer: Buffer };
@@ -1042,17 +1054,24 @@ type ParseJob = {
 const parseQueue: ParseJob[] = [];
 let parseRunning = false;
 
-function enqueueParse(job: ParseJob): void {
+async function enqueueParse(job: ParseJob): Promise<void> {
   if (parseQueue.length >= QUEUE_CAP) {
     logger.warn(
-      `telegram-inbox: parse queue full (${QUEUE_CAP}); running item ${job.itemId} inline`
+      `telegram-inbox: parse queue at cap (${QUEUE_CAP}) — applying backpressure before queueing item ${job.itemId}`
     );
-    // Awaited nowhere on purpose — but NOT unobserved: failures are logged and the row
-    // stays 'processing' for the sweep.
-    void _runParseJob(job);
-    return;
+    // BACKPRESSURE. Waiting here blocks the poll tick, which is the point: it bounds
+    // retained buffers at QUEUE_CAP and keeps exactly one parse running. If the wait times
+    // out we queue anyway — one extra buffer beats losing the bill, and the row is already
+    // 'processing' so the sweep is the backstop either way.
+    await _awaitParseQueue(BACKPRESSURE_WAIT_MS).catch((err) =>
+      logger.warn(
+        `telegram-inbox: backpressure wait gave up (${err?.message || err}); queueing anyway`
+      )
+    );
   }
   parseQueue.push(job);
+  // Un-awaited on purpose — this is the handoff. _runParseJob catches everything, so the
+  // drain cannot reject.
   void _drainParseQueue();
 }
 
@@ -1310,10 +1329,19 @@ export async function runInboxPollOnce(
  * τώρα…» forever, which reads as progress rather than as failure — the
  * absent-representation shape, where the landlord waits instead of acting.
  *
- * The file itself is NOT re-fetchable in general (Telegram's file links expire), so this
- * does not retry the parse. It converts the stall into something visible and actionable:
- * the row becomes 'pending' with an explicit reason, which is exactly how a parse FAILURE
- * already behaves, and the landlord can enter the bill by hand or re-send it.
+ * This does NOT retry the parse — and the reason is a design choice, not a platform limit.
+ * An earlier version of this comment claimed the file «is not re-fetchable because Telegram's
+ * links expire». That is wrong and worth correcting, because it would stop the next reader
+ * from implementing the better behaviour: `file_path` expires after about an hour, but
+ * `file_id` does not, and the row stores `telegramFileId` — so getFile can mint a fresh link
+ * and the parse COULD be retried from here.
+ *
+ * Not doing it yet, deliberately: a retry inside the sweep needs the realm's bot token and
+ * the download path, which makes the sweep a second ingest lane with its own failure modes,
+ * and the visible fallback below is already correct rather than merely acceptable. The row
+ * becomes 'pending' with an explicit reason — exactly how a parse FAILURE already behaves —
+ * so the landlord can enter the bill by hand or re-send it. Worth revisiting if stalls turn
+ * out to be common; the data needed is already on the row.
  *
  * STALE_MS is generously above the worst observed parse (a 3-page PDF at ~50s/page plus
  * download) so a slow-but-live job is never mistaken for a dead one.
