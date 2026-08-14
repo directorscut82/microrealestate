@@ -361,21 +361,27 @@ function InboxCard({ item, buildings, onGone }) {
   if (item.status === 'processing') {
     return (
       <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxProcessing">
+        {/* The title must not be truncated by the badge — «Διαβάζω τον λογαριασμό…» is
+            longer than the panel is wide, and the first version rendered it as
+            «Διαβάζω τον λογαριασμό…» clipped mid-word with the badge pushing it. The badge
+            shrinks instead of the sentence. */}
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium text-ink">
+          <span className="min-w-0 text-sm font-medium text-ink">
             {t('Reading the bill…')}
           </span>
-          <span className="text-[11px] border rounded px-1.5 text-muted-foreground">
+          <span className="shrink-0 text-[11px] border rounded px-1.5 text-muted-foreground">
             Telegram
           </span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {/* An animated bar rather than a static label: the whole point of this state is
-              to show that something is HAPPENING. */}
-          <span className="relative inline-block h-1 w-24 overflow-hidden rounded bg-muted">
-            <span className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded bg-ink/40" />
+          {/* A bar that MOVES. The first version used animate-pulse on a third-width block,
+              which at this size rendered as a faint static line indistinguishable from a
+              divider — the one signal this whole state exists to give, invisible. A
+              travelling indeterminate bar reads as progress at a glance. */}
+          <span className="relative inline-block h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted">
+            <span className="absolute inset-y-0 left-0 w-2/5 rounded-full bg-ink/70 motion-safe:animate-inbox-scan" />
           </span>
-          <span>
+          <span className="min-w-0 truncate">
             {item.sourceFileName || t('File')}
           </span>
         </div>

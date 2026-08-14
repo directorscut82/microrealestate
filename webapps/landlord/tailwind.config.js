@@ -149,13 +149,22 @@ module.exports = {
         'accordion-up': {
           from: { height: 'var(--radix-accordion-content-height)' },
           to: { height: 0 }
+        },
+        // The indeterminate bar on the Telegram inbox «Διαβάζω τον λογαριασμό…» card.
+        // Declared here rather than as an arbitrary value so the class survives
+        // purging — an arbitrary animate-[…] name Tailwind cannot resolve renders as
+        // NOTHING, which for a progress indicator means the card silently looks idle.
+        'inbox-scan': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(250%)' }
         }
       },
       animation: {
         'accordion-down':
           'accordion-down 180ms cubic-bezier(0.165, 0.84, 0.44, 1)',
         'accordion-up':
-          'accordion-up 180ms cubic-bezier(0.165, 0.84, 0.44, 1)'
+          'accordion-up 180ms cubic-bezier(0.165, 0.84, 0.44, 1)',
+        'inbox-scan': 'inbox-scan 1.1s ease-in-out infinite'
       }
     }
   },

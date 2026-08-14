@@ -343,3 +343,53 @@ test('DISMISS removes the item from the bell', async ({ page }) => {
   );
   expect(String(status || '').trim()).toMatch(/dismissed|gone/);
 });
+
+test('a PROCESSING item shows that the bill is being read, and is dismissible', async ({
+  page
+}) => {
+  /**
+   * The state that did not exist until the ack-first protocol landed.
+   *
+   * The row used to be written only AFTER the OCR, so for up to a minute the bell showed
+   * nothing at all and «not received» was indistinguishable from «still working» — which
+   * is what made bills get re-sent, minting duplicate items to dismiss. It is now written
+   * at receipt as 'processing'.
+   *
+   * Two things must hold on screen, and the second is the one a rendering bug would break
+   * silently: the card must SAY it is reading, and it must NOT offer «Καταχώρηση», because
+   * a processing row carries no parsed amount and the server refuses to confirm it (409).
+   * Rendering the normal card here would put a live confirm button on an empty bill.
+   */
+  seedItem(`{ status: 'processing', parsed: {} }`);
+  await signIn(page);
+  const p = await openBell(page);
+
+  // `.first()` because more than one bill can legitimately be processing at once — a
+  // landlord who forwards three bills in a row gets three. The first version asserted on
+  // the bare locator, which is STRICT: two matches threw «resolved to 2 elements» in 5s,
+  // and the truncated message read as «not visible» while the card was in fact on screen.
+  // (The second match was a row my own ad-hoc seeding had left in the realm.)
+  const cards = p.locator('[data-cy=inboxProcessing]');
+  await expect(cards.first()).toBeVisible({ timeout: 20000 });
+  const card = cards.filter({ hasText: MARK }).first();
+  await expect(card).toBeVisible({ timeout: 20000 });
+  const text = await card.innerText();
+  await p.screenshot({
+    path: path.join(OUT, 'inbox_processing.png'),
+    fullPage: true
+  });
+
+  // It says what is happening, in Greek, naming the file.
+  expect(text).toMatch(/Διαβάζω τον λογαριασμό/);
+  expect(text).toContain(MARK);
+  // It sets the expectation about duration rather than leaving the landlord guessing.
+  expect(text).toMatch(/λεπτό/);
+  // NO confirm affordance on a row with nothing parsed.
+  expect(text).not.toMatch(/Καταχώρηση/);
+  // Dismiss IS offered: a mis-sent file must be cancellable without waiting for the parse.
+  expect(text).toMatch(/Απόρριψη|Παράβλεψη|Διαγραφή/);
+
+  // The server-side refusal (409 «διαβάζεται ακόμα» rather than 404) is asserted in
+  // services/api telegramAckProtocol.test.js — checking it here would mean plumbing an API
+  // token into a spec that otherwise only drives the screen.
+});
