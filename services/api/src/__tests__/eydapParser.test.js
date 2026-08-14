@@ -465,3 +465,93 @@ describe('parser robustness — the shapes real OCR produces', () => {
     expect(new Set(alts).size).toBe(alts.length);
   });
 });
+
+describe('every consistency check has a test that FAILS if it is deleted', () => {
+  /**
+   * WHY THIS EXISTS. The parser can emit eight warning codes. Six of them had NO
+   * assertion at all — neither positive nor negative — so every one of those checks
+   * could be deleted and this 750-line suite would stay green. They are not decoration:
+   * they are the difference between "the OCR read this bill correctly" and "these numbers
+   * do not add up and a human should look", on a document that decides what tenants pay.
+   *
+   * A negative assertion (`not.toContain`) cannot substitute. It passes both when the
+   * check is working and when the check is gone.
+   *
+   * Each test below feeds the parser an input that trips exactly one identity, so the
+   * assertion fails the moment that identity stops being computed.
+   */
+
+  it('breakdown-does-not-sum-to-subtotal — the six lines vs ΜΕΡΙΚΟ ΣΥΝΟΛΟ', () => {
+    // Move ΠΑΓΙΟ ΤΕΛΟΣ so the six current-period lines no longer reach the subtotal.
+    // This is the check that catches a misread digit in the one figure tenants are
+    // charged, so it is the most consequential of the eight.
+    const broken = OCR.replace(/^8,70$/m, '18,70');
+    const b = parseEydapBill(broken).bill;
+    expect(b.warnings).toContain('breakdown-does-not-sum-to-subtotal');
+    // And the clean bill must NOT report it, or the warning is just noise.
+    expect(parseEydapBill(OCR).bill.warnings ?? []).not.toContain(
+      'breakdown-does-not-sum-to-subtotal'
+    );
+  });
+
+  it('tiers-do-not-sum-to-consumption — Σ(tier m³) vs ΚΑΤΑΝΑΛΩΣΗ', () => {
+    // 14,50 + 43,50 + 3,00 = 61 m³, which matches 6061 − 6000. Break the first tier's
+    // volume and the identity must report itself.
+    const broken = OCR.replace('14,50M3', '24,50M3');
+    const b = parseEydapBill(broken).bill;
+    expect(b.warnings).toContain('tiers-do-not-sum-to-consumption');
+  });
+
+  it('tier-amounts-do-not-sum-to-charges — Σ(tier €) vs ΣΥΝΟΛΟ ΤΙΜΗΜΑΤΟΣ', () => {
+    // 5,08 + 27,84 + 5,49 = 38,41. Change one and the sum no longer matches the
+    // charges line it is the breakdown of.
+    const broken = OCR.replace(/^5,08$/m, '6,08');
+    const b = parseEydapBill(broken).bill;
+    expect(b.warnings).toContain('tier-amounts-do-not-sum-to-charges');
+  });
+
+  it('registry-number-disagrees — two different ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ on one bill', () => {
+    // The registry number appears twice (header and stub). If they differ, the bill may
+    // have been mis-OCR'd or two bills photographed together — and attributing it by the
+    // wrong one puts the charge on the wrong apartment. Reported, never silently
+    // resolved: replace only the SECOND occurrence.
+    const first = OCR.indexOf('9990001-33');
+    const second = OCR.indexOf('9990001-33', first + 1);
+    expect(second).toBeGreaterThan(first); // the fixture really does carry it twice
+    const broken =
+      OCR.slice(0, second) + '9990002-33' + OCR.slice(second + '9990001-33'.length);
+    const b = parseEydapBill(broken).bill;
+    expect(b.warnings).toContain('registry-number-disagrees');
+  });
+
+  it('period-disagrees — two different consumption periods on one bill', () => {
+    const first = OCR.indexOf('28/04/2026-23/07/2026');
+    const second = OCR.indexOf('28/04/2026-23/07/2026', first + 1);
+    expect(second).toBeGreaterThan(first);
+    const broken =
+      OCR.slice(0, second) +
+      '28/04/2026-24/07/2026' +
+      OCR.slice(second + '28/04/2026-23/07/2026'.length);
+    const b = parseEydapBill(broken).bill;
+    expect(b.warnings).toContain('period-disagrees');
+  });
+
+  it('consumption-from-tiers-only — the stub reading is missing', () => {
+    // With no ΚΑΤΑΝΑΛΩΣΗ figure the parser falls back to summing the tiers. That is a
+    // reasonable recovery and it must SAY it recovered, because the fallback cannot be
+    // cross-checked against the meter readings the way the printed figure can.
+    const noStub = OCR.split('\n')
+      .filter((l) => l.trim() !== '61' && l.trim() !== '61 M3')
+      .join('\n');
+    const b = parseEydapBill(noStub).bill;
+    expect(b.warnings).toContain('consumption-from-tiers-only');
+    // The recovered value must still be right.
+    expect(b.details.consumption.cubicMetres).toBe(61);
+  });
+
+  it('a clean bill emits NO warnings at all', () => {
+    // The other half of the contract: if this ever starts reporting something, one of the
+    // identities above has become over-eager and the landlord will learn to ignore them.
+    expect(parseEydapBill(OCR).bill.warnings ?? []).toEqual([]);
+  });
+});

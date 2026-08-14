@@ -89,9 +89,20 @@ test('settings Αρχεία loads COUNTS only, and a folder fetches only when op
 
   const folders = page.locator('[data-cy=fileBrowserFolder]');
   const n = await folders.count();
-  // Nothing to assert about laziness if the realm has no files at all — say so
-  // rather than pass vacuously.
-  test.skip(n === 0, 'realm has no uploaded files; nothing to expand');
+  // Distinguish "no data" from "UI broken", which the bare `test.skip(n === 0)` could
+  // not: it skipped both, so a browser that rendered NO folders at all reported itself as
+  // skipped and the suite stayed green. The page itself says which case it is — an empty
+  // realm renders «Δεν έχουν μεταφορτωθεί έγγραφα», a populated one renders the
+  // «N αρχεία» summary. So: no folders AND no empty-state is a failure, not a skip.
+  const emptyState = page.getByText(/Δεν έχουν μεταφορτωθεί έγγραφα/);
+  const isGenuinelyEmpty = await emptyState.isVisible().catch(() => false);
+  if (n === 0) {
+    expect(
+      { foldersRendered: n, emptyStateShown: isGenuinelyEmpty },
+      'no folders rendered AND no empty-state — the browser is broken, not the realm'
+    ).toEqual({ foldersRendered: 0, emptyStateShown: true });
+    test.skip(true, 'realm genuinely has no uploaded files');
+  }
 
   await folders.first().click();
   await page.waitForTimeout(2500);
@@ -176,9 +187,13 @@ test('the ΕΥΔΑΠ bill parses, and shows a scannable BARCODE not an empty box
 
   // Drive the real import dialog rather than the API, so the CARD is what gets
   // asserted — the parser was already proven by unit tests; this is about the screen.
+  // ASSERT, do not skip. This used to be `test.skip(!opened, …)`, which is true exactly
+  // when the surface is BROKEN: remove the import button and the only test covering the
+  // ΕΥΔΑΠ card, the barcode and the source label would report itself as skipped and the
+  // suite would stay green. A skip may only ever be about absent test INPUT, never about
+  // absent application behaviour.
   const importBtn = page.getByRole('button', { name: /Εισαγωγή|λογαριασμ/i }).first();
-  const opened = await importBtn.isVisible().catch(() => false);
-  test.skip(!opened, 'bill-import entry point not found on the expenses tab');
+  await expect(importBtn).toBeVisible({ timeout: 20000 });
   await importBtn.click();
   await page.waitForTimeout(1200);
 
