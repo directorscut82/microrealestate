@@ -54,7 +54,25 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
     provider: String,
     billingId: String,
     billingIdNormalized: String,
+    // What is OWED (ΠΛΗΡΩΤΕΟ, any prior balance included).
     totalAmount: Number,
+    /**
+     * What may be CHARGED TO TENANTS (ΜΕΡΙΚΟ ΣΥΝΟΛΟ), when the document states it apart
+     * from what is owed.
+     *
+     * WHY THIS LINE IS LOAD-BEARING. It was missing, and mongoose strict mode drops an
+     * undeclared sub-path SILENTLY — verified against this repo's mongoose 6.13.6, on both
+     * the document path and the updateOne path. So the ΕΥΔΑΠ parser computed 89,94, the
+     * scanner wrote it, mongoose deleted it, inboxmanager read undefined, and the bridge
+     * fell back to ΠΛΗΡΩΤΕΟ: a 100‰ tenant was billed 28,99 instead of 8,99 — €20 of the
+     * landlord's €200 arrears, per tenant, on every bell-confirmed bill.
+     *
+     * And the bell RENDERED the warning correctly the whole time, because `warnings` IS a
+     * declared path — so the screen said «οι ενοικιαστές χρεώνονται μόνο τα 89,94 €» while
+     * the confirm charged 289,94. The commit that introduced this said it fixed the split
+     * «on both lanes»; the Bill schema had the column and this one did not.
+     */
+    chargeableAmount: Number,
     periodStart: Date,
     periodEnd: Date,
     issueDate: Date,

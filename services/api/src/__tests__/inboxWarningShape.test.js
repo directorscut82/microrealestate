@@ -159,3 +159,88 @@ describe('the bell renders the object, not the object itself', () => {
     expect(bell).not.toMatch(/dark:text-amber-200">\{w\}</);
   });
 });
+
+describe('every field the scanner writes into `parsed` is a DECLARED schema path', () => {
+  /**
+   * THE GENERALISED GUARD, written after the specific bug bit twice in one day.
+   *
+   * Mongoose strict mode drops an undeclared sub-path SILENTLY — no throw, no warning, on
+   * both the document path and the updateOne path. So `parsed.chargeableAmount` was
+   * computed by the ΕΥΔΑΠ parser, written by the scanner, deleted by mongoose, read back as
+   * undefined, and the tenant-charge bridge fell through to ΠΛΗΡΩΤΕΟ. A 100‰ tenant was
+   * billed 28,99 instead of 8,99 — €20 of the landlord's €200 arrears, per tenant, on every
+   * bell-confirmed bill. Meanwhile the bell rendered «οι ενοικιαστές χρεώνονται μόνο τα
+   * 89,94 €» perfectly, because `warnings` IS declared: the screen asserted the opposite of
+   * what the confirm did.
+   *
+   * WHY NEITHER EXISTING TEST CAUGHT IT, and this is the part worth keeping:
+   *   · the e2e spec seeds InboxItems with a DIRECT MONGO INSERT, which bypasses mongoose
+   *     casting entirely — so the field survived in the seed and the confirm read it. A
+   *     seeded fixture can only ever prove the READER works.
+   *   · the arrears guard grepped the scanner's SOURCE TEXT for
+   *     `chargeableAmount: bill.chargeableAmount`. That proves the code writes it. It says
+   *     nothing about whether the schema keeps it.
+   * Both are the same mistake: asserting the call instead of the write.
+   *
+   * So this compares the two sets directly. Any future field added to the parse literal
+   * without a matching schema path fails here, by name.
+   */
+  const scanner = fs.readFileSync(
+    path.resolve(HERE, '../jobs/telegramInboxScanner.ts'),
+    'utf8'
+  );
+  const schemaSrc = fs.readFileSync(
+    path.resolve(HERE, '../../../common/src/collections/inboxItem.ts'),
+    'utf8'
+  );
+
+  /** The keys assigned inside the scanner's `parsed = { … }` literal. */
+  const writtenKeys = (() => {
+    const at = scanner.indexOf('      parsed = {');
+    expect(at).toBeGreaterThan(-1);
+    const body = scanner.slice(at, scanner.indexOf('\n      };', at));
+    // Top-level keys only: `key:` at the literal's own indent, comments stripped.
+    return [
+      ...new Set(
+        body
+          .split('\n')
+          .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+          .map((l) => l.match(/^\s{8}([A-Za-z_][A-Za-z0-9_]*):/))
+          .filter(Boolean)
+          .map((m) => m[1])
+      )
+    ];
+  })();
+
+  /** The sub-paths the schema declares under `parsed`. */
+  const declaredKeys = (() => {
+    const at = schemaSrc.indexOf('  parsed: {');
+    const body = schemaSrc.slice(at, schemaSrc.indexOf('\n  },', at));
+    return [
+      ...new Set(
+        body
+          .split('\n')
+          .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'))
+          .map((l) => l.match(/^\s{4}([A-Za-z_][A-Za-z0-9_]*):/))
+          .filter(Boolean)
+          .map((m) => m[1])
+      )
+    ];
+  })();
+
+  it('reads a non-empty set from each side (a broken parse must not pass vacuously)', () => {
+    expect(writtenKeys.length).toBeGreaterThanOrEqual(10);
+    expect(declaredKeys.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('writes NOTHING the schema would silently drop', () => {
+    const dropped = writtenKeys.filter((k) => !declaredKeys.includes(k));
+    // Named, so the failure says which field and not merely that a count differs.
+    expect(dropped).toEqual([]);
+  });
+
+  it('chargeableAmount specifically — the field that cost money', () => {
+    expect(declaredKeys).toContain('chargeableAmount');
+    expect(writtenKeys).toContain('chargeableAmount');
+  });
+});

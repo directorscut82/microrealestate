@@ -818,6 +818,9 @@ export namespace CollectionTypes {
       billingId?: string;
       billingIdNormalized?: string;
       totalAmount?: number;
+      /** ΜΕΡΙΚΟ ΣΥΝΟΛΟ — what tenants may be charged. MUST also exist on the mongoose
+     *  sub-schema: an undeclared sub-path is dropped silently. */
+    chargeableAmount?: number;
       periodStart?: Date;
       periodEnd?: Date;
       issueDate?: Date;

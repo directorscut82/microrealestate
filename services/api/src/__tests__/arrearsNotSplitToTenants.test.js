@@ -95,12 +95,36 @@ describe('the CONSUMERS, so the value cannot be computed and dropped again', () 
   });
 
   it('the Telegram lane carries it too — it is the worse door', () => {
-    // The bell renders the amount READ-ONLY, so on that lane there was not even a
-    // manual correction available.
+    // The bell renders the amount READ-ONLY, so on that lane there is no manual correction.
     const scanner = read('../jobs/telegramInboxScanner.ts');
     expect(scanner).toContain('chargeableAmount: bill.chargeableAmount');
     const inbox = read('../managers/inboxmanager.ts');
     expect(inbox).toContain('chargeableAmount:');
+  });
+
+  it('and the InboxItem SCHEMA keeps it — writing it is not the same as storing it', () => {
+    /**
+     * THIS ASSERTION IS WHY THE BUG SURVIVED. The test above greps the scanner for the
+     * write and passes — it proves the code assigns the field. It cannot see that
+     * `parsed.chargeableAmount` was not a declared sub-path, so mongoose strict mode
+     * deleted it on the way to disk: parser computed 89,94, scanner wrote it, mongoose
+     * dropped it, inboxmanager read undefined, and the bridge charged ΠΛΗΡΩΤΕΟ. A 100‰
+     * tenant was billed 28,99 instead of 8,99 while the bell displayed «οι ενοικιαστές
+     * χρεώνονται μόνο τα 89,94 €», because `warnings` IS declared.
+     *
+     * The e2e spec could not catch it either: it seeds InboxItems with a direct mongo
+     * insert, which bypasses casting, so the field survived in the seed. A seeded fixture
+     * proves the reader; only the schema proves the writer.
+     */
+    const inboxSchema = read('../../../common/src/collections/inboxItem.ts');
+    const at = inboxSchema.indexOf('  parsed: {');
+    expect(at).toBeGreaterThan(-1);
+    const parsedBlock = inboxSchema.slice(at, inboxSchema.indexOf('\n  },', at));
+    expect(parsedBlock).toContain('chargeableAmount: Number');
+    // Both schemas, named together — the previous guard checked only Bill's.
+    expect(read('../../../common/src/collections/bill.ts')).toContain(
+      'chargeableAmount: Number'
+    );
   });
 
   it('an AMENDED amount drops it on both lanes', () => {
