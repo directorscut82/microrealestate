@@ -354,6 +354,10 @@ async function _findMatch(
   // arrived unmatched by Telegram while matching on upload. Tried LAST because a
   // shared meter and a unit meter mean opposite things for allocation, and shared
   // must win.
+  // Two apartments claim this παροχή — say so rather than propose one of them.
+  // `single_unit` bills 100% of the amount to the chosen flat, so an arbitrary pick is
+  // the entire bill in the wrong place.
+  if (resolution.unitStatus === 'ambiguous') return { ambiguous: 'unit' };
   const unit = resolution.unitHit;
   if (unit) {
     return {

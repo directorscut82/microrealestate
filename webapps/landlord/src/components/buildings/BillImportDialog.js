@@ -247,9 +247,13 @@ function ResultCard({
                   ? t(
                       'This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details'
                     )
-                  : t(
-                      'This bill could not be matched automatically. Register it by hand:'
-                    )}
+                  : result.matchAmbiguous === 'unit'
+                    ? t(
+                        'This supply number is on more than one apartment — fix the duplicate on the units, then re-import'
+                      )
+                    : t(
+                        'This bill could not be matched automatically. Register it by hand:'
+                      )}
             </div>
             <div className="space-y-1">
               <label className="text-sm text-muted-foreground">

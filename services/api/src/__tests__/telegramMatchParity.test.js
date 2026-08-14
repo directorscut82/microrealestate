@@ -550,3 +550,110 @@ describe('the Telegram IMAGE path', () => {
     expect(src).not.toContain('Δοκιμάστε πιο κοντινή φωτογραφία ή πληκτρολογήστε');
   });
 });
+
+describe('AMBIGUITY STOPS THE WALK — including at the apartment tier', () => {
+  // The invariant resolveBillTarget's docstring claims. It held for the expense and
+  // shared-meter tiers and NOT for the unit tier: findUnitBySupplyNumber detected two
+  // apartments sharing a παροχή, logged it, and returned the same `null` as a clean
+  // miss — so the walk continued to the next key and answered, with weaker evidence, a
+  // question only the operator can. `single_unit` bills 100% of the amount to the
+  // chosen flat, so an arbitrary pick is the entire bill in the wrong place.
+  const METER = 'A99E90001';
+  const ACCOUNT = '99900011122003';
+
+  it('an ambiguous APARTMENT on key 1 does not fall through to key 2', async () => {
+    BUILDINGS = [
+      {
+        _id: 'amb-a',
+        name: 'ΟΔΟΣ ΑΛΦΑ 1',
+        expenses: [],
+        // Two apartments carry the SAME identifier — the live realm has such a pair.
+        units: [
+          { _id: 'u1', propertyId: 'p1', name: 'Α1', eydapNumber: METER },
+          { _id: 'u2', propertyId: 'p2', name: 'Α2', eydapNumber: METER }
+        ],
+        sharedMeters: []
+      },
+      {
+        _id: 'amb-b',
+        name: 'ΟΔΟΣ ΒΗΤΑ 2',
+        // Key 2 WOULD resolve cleanly here. It must not be consulted.
+        expenses: [{ _id: 'e-b', name: 'Νερό', billingId: ACCOUNT }],
+        units: [],
+        sharedMeters: []
+      }
+    ];
+    const bm = await import('../managers/billmanager.js');
+    const r = await bm.resolveBillTarget('r1', [METER, ACCOUNT]);
+    expect(r.unitStatus).toBe('ambiguous');
+    expect(r.unitHit).toBeNull();
+    // The clean match on the alternate must NOT have been taken.
+    expect(r.expenseStatus).toBe('none');
+    expect(r.expenseHit).toBeNull();
+    expect(r.matchedKey).toBe(METER);
+  });
+
+  it('the unit matcher itself reports the three states distinctly', async () => {
+    const bm = await import('../managers/billmanager.js');
+    BUILDINGS = [
+      {
+        _id: 'b1',
+        name: 'ΟΔΟΣ ΓΑΜΑ 3',
+        expenses: [],
+        units: [
+          { _id: 'u1', propertyId: 'p1', name: 'Α1', eydapNumber: '999111000' },
+          { _id: 'u2', propertyId: 'p2', name: 'Α2', eydapNumber: METER },
+          { _id: 'u3', propertyId: 'p3', name: 'Α3', eydapNumber: METER }
+        ],
+        sharedMeters: []
+      }
+    ];
+    await expect(bm.findUnitMatch('r1', '999111000')).resolves.toMatchObject({
+      status: 'match'
+    });
+    await expect(bm.findUnitMatch('r1', METER)).resolves.toEqual({
+      status: 'ambiguous',
+      hit: null
+    });
+    await expect(bm.findUnitMatch('r1', '999999999')).resolves.toEqual({
+      status: 'none',
+      hit: null
+    });
+    // The legacy wrapper still collapses both to null, so callers that do not care are
+    // unaffected.
+    await expect(bm.findUnitBySupplyNumber('r1', METER)).resolves.toBeNull();
+    await expect(bm.findUnitBySupplyNumber('r1', '999999999')).resolves.toBeNull();
+  });
+
+  it('BOTH lanes report an ambiguous apartment instead of proposing one', async () => {
+    BUILDINGS = [
+      {
+        _id: 'amb-c',
+        name: 'ΟΔΟΣ ΔΕΛΤΑ 4',
+        expenses: [],
+        units: [
+          { _id: 'u1', propertyId: 'p1', name: 'Α1', eydapNumber: METER },
+          { _id: 'u2', propertyId: 'p2', name: 'Α2', eydapNumber: METER }
+        ],
+        sharedMeters: []
+      }
+    ];
+    // The bot lane.
+    await expect(findMatch('r1', METER)).resolves.toEqual({ ambiguous: 'unit' });
+    // And both UIs must have a sentence for it, or the state renders as nothing.
+    const fs = await import('fs');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    for (const rel of [
+      '../../../../webapps/landlord/src/components/InboxBell.js',
+      '../../../../webapps/landlord/src/components/buildings/BillImportDialog.js'
+    ]) {
+      const src = fs.readFileSync(path.resolve(here, rel), 'utf8');
+      expect({
+        file: rel.split('/').pop(),
+        handles: /=== 'unit'/.test(src)
+      }).toEqual({ file: rel.split('/').pop(), handles: true });
+    }
+  });
+});

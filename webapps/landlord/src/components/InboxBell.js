@@ -515,7 +515,11 @@ function InboxCard({ item, buildings, onGone }) {
                 ? t(
                     'This supply number is registered as a shared meter on more than one building — fix the duplicate in the building details'
                   )
-                : t('No expense found with this billing ID')}
+                : rawSuggestion?.ambiguous === 'unit'
+                  ? t(
+                      'This supply number is on more than one apartment — fix the duplicate on the units, then re-import'
+                    )
+                  : t('No expense found with this billing ID')}
           </div>
           <div className="flex gap-2">
             <Select

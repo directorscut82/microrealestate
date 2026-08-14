@@ -1340,5 +1340,6 @@
   "Read from a scanned PDF (OCR)": "Read from a scanned PDF (OCR)",
   "Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.": "Up to 5 files at a time — PDF, JPG, PNG or WEBP. Max 15MB per file, 45MB in total.",
   "The files are too large — upload fewer at a time": "The files are too large — upload fewer at a time",
-  "The upload timed out — try fewer files at a time": "The upload timed out — try fewer files at a time"
+  "The upload timed out — try fewer files at a time": "The upload timed out — try fewer files at a time",
+  "This supply number is on more than one apartment — fix the duplicate on the units, then re-import": "This supply number is on more than one apartment — fix the duplicate on the units, then re-import"
 }

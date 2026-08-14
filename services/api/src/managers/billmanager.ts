@@ -422,16 +422,42 @@ export async function findSharedMeterMatch(
 // expense + shared meters, so a bill whose παροχή identifies an APARTMENT — the
 // commonest case, and the exact shape of the ΔΕΗ bill reported on 2026-08-09 —
 // arrived unmatched by bot while matching on upload.
-export async function findUnitBySupplyNumber(
-  realmId: string,
-  normalizedBillingId: string
-): Promise<{
+export interface UnitHit {
   buildingId: string;
   buildingName: string;
   propertyId: string;
   unitLabel: string;
-} | null> {
-  if (!normalizedBillingId) return null;
+}
+
+/**
+ * Back-compat wrapper: the hit only, `null` for both ambiguous and nothing-found.
+ * Callers that need the distinction use `findUnitMatch`.
+ */
+export async function findUnitBySupplyNumber(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<UnitHit | null> {
+  const { hit } = await findUnitMatch(realmId, normalizedBillingId);
+  return hit;
+}
+
+/**
+ * The same lookup, distinguishing AMBIGUOUS from NOTHING-MATCHED — the contract
+ * `findExpenseMatch` and `findSharedMeterMatch` already use.
+ *
+ * WHY THE UNIT TIER NEEDED IT TOO. It was the outlier: it detected ambiguity (two
+ * apartments sharing a παροχή — the live realm has such a pair), logged it, and then
+ * returned the same `null` as a clean miss. `resolveBillTarget` reads that null as
+ * "nothing here" and WALKS ON TO THE NEXT KEY, which is precisely what its own
+ * docstring forbids: an ambiguity the operator must resolve gets answered by a
+ * different identifier, and `single_unit` bills 100% of the amount to whichever
+ * apartment that other key happened to find.
+ */
+export async function findUnitMatch(
+  realmId: string,
+  normalizedBillingId: string
+): Promise<{ status: 'match' | 'ambiguous' | 'none'; hit: UnitHit | null }> {
+  if (!normalizedBillingId) return { status: 'none', hit: null };
   const buildings = await Collections.Building.find({ realmId }).lean();
   type Hit = {
     buildingId: string;
@@ -472,24 +498,25 @@ export async function findUnitBySupplyNumber(
       else if (sameSupply(stored, normalizedBillingId)) byBody.push(hit);
     }
   }
-  if (exact.length === 1) return exact[0];
+  if (exact.length === 1) return { status: 'match', hit: exact[0] };
   if (exact.length > 1) {
     logger.warn(
       `unit match ambiguous: ${exact.length} units share this supply number — asking the operator`
     );
-    return null;
+    return { status: 'ambiguous', hit: null };
   }
   // A body-only match is accepted ONLY when it is unique. The live realm already
   // has two units sharing one 9-digit body (ΟΔΟΣ ΒΗΤΑ, measured 2026-08-10),
   // and `single_unit` bills 100% of the amount to the chosen apartment — so
   // picking one arbitrarily would put the whole bill on the wrong flat.
-  if (byBody.length === 1) return byBody[0];
+  if (byBody.length === 1) return { status: 'match', hit: byBody[0] };
   if (byBody.length > 1) {
     logger.warn(
       `unit match ambiguous on the 9-digit body: ${byBody.length} units — asking the operator`
     );
+    return { status: 'ambiguous', hit: null };
   }
-  return null;
+  return { status: 'none', hit: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -531,7 +558,9 @@ export interface BillTargetResolution {
   expenseHit: Awaited<ReturnType<typeof findExpenseMatch>>['hit'];
   sharedStatus: 'match' | 'ambiguous' | 'none' | 'skip';
   sharedHit: Awaited<ReturnType<typeof findSharedMeterMatch>>['hit'];
-  unitHit: Awaited<ReturnType<typeof findUnitBySupplyNumber>>;
+  /** Three-state like the others, so an ambiguous apartment is not read as a miss. */
+  unitStatus: 'match' | 'ambiguous' | 'none';
+  unitHit: UnitHit | null;
 }
 
 export async function resolveBillTarget(
@@ -539,11 +568,15 @@ export async function resolveBillTarget(
   keys: (string | undefined | null)[]
 ): Promise<BillTargetResolution> {
   const tried = new Set<string>();
-  let last: BillTargetResolution = {
+  // The nothing-matched answer. It was a `let` reassigned at the end of every
+  // iteration to the same literal it was initialised with — dead code the review
+  // flagged, and removing it made the compiler point out it was never a variable.
+  const nothingMatched: BillTargetResolution = {
     expenseStatus: 'none',
     expenseHit: null,
     sharedStatus: 'none',
     sharedHit: null,
+    unitStatus: 'none',
     unitHit: null
   };
   for (const raw of keys) {
@@ -561,6 +594,7 @@ export async function resolveBillTarget(
         expenseHit: expense.hit,
         sharedStatus: 'skip',
         sharedHit: null,
+        unitStatus: 'none',
         unitHit: null
       };
     }
@@ -571,6 +605,7 @@ export async function resolveBillTarget(
         expenseHit: null,
         sharedStatus: 'skip',
         sharedHit: null,
+        unitStatus: 'none',
         unitHit: null
       };
     }
@@ -583,6 +618,7 @@ export async function resolveBillTarget(
         expenseHit: null,
         sharedStatus: 'match',
         sharedHit: shared.hit,
+        unitStatus: 'none',
         unitHit: null
       };
     }
@@ -593,30 +629,41 @@ export async function resolveBillTarget(
         expenseHit: null,
         sharedStatus: 'ambiguous',
         sharedHit: null,
+        unitStatus: 'none',
         unitHit: null
       };
     }
 
-    const unit = await findUnitBySupplyNumber(realmId, key);
-    if (unit) {
+    const unit = await findUnitMatch(realmId, key);
+    if (unit.hit) {
       return {
         matchedKey: key,
         expenseStatus: 'none',
         expenseHit: null,
         sharedStatus: 'none',
         sharedHit: null,
-        unitHit: unit
+        unitStatus: 'match',
+        unitHit: unit.hit
       };
     }
-    last = {
-      expenseStatus: 'none',
-      expenseHit: null,
-      sharedStatus: 'none',
-      sharedHit: null,
-      unitHit: null
-    };
+    if (unit.status === 'ambiguous') {
+      // Two apartments claim this παροχή. Stopping here is the same rule the two
+      // tiers above apply: continuing to the next key would answer, with weaker
+      // evidence, a question only the operator can — and `single_unit` puts 100% of
+      // the amount on one flat, so a wrong answer is the whole bill in the wrong
+      // place. Before this the unit tier returned a bare null and the walk continued.
+      return {
+        matchedKey: key,
+        expenseStatus: 'none',
+        expenseHit: null,
+        sharedStatus: 'none',
+        sharedHit: null,
+        unitStatus: 'ambiguous',
+        unitHit: null
+      };
+    }
   }
-  return last;
+  return nothingMatched;
 }
 
 export async function parseBills(req: Req, res: Res): Promise<void> {
@@ -895,7 +942,9 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
           ? 'expense'
           : sharedResult.status === 'ambiguous'
             ? 'sharedMeter'
-            : undefined,
+            : resolution.unitStatus === 'ambiguous'
+              ? 'unit'
+              : undefined,
       /** Which of the bill's identifiers resolved, so the card can name it. */
       matchedKey: resolution.matchedKey,
       // Building + apartment identified by the αριθμός παροχής when there is no
