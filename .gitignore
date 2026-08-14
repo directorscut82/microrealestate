@@ -124,3 +124,4 @@ e2e-playwright/_*.mjs
 # to exercise a real decrypt / Mongoose schema / zod schema while debugging a live
 # surface. Same rationale as e2e-playwright/_*.mjs — they hardcode realm data.
 /.[a-z]*.cjs
+.fixtures-bills/

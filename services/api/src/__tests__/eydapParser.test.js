@@ -555,3 +555,58 @@ describe('every consistency check has a test that FAILS if it is deleted', () =>
     expect(parseEydapBill(OCR).bill.warnings ?? []).toEqual([]);
   });
 });
+
+describe('the CHARGEABLE figure must survive a mislocated subtotal label', () => {
+  /**
+   * FOUND BY TESTING THE SAME DOCUMENT AS BOTH PNG AND PDF, which is the only reason it
+   * surfaced: the PNG gave chargeableAmount 89,94 and the PDF gave 289,94.
+   *
+   * A PDF TEXT LAYER can arrive as one long line, where OCR gives one line per row. The
+   * ΜΕΡΙΚΟ ΣΥΝΟΛΟ label match then latches onto a nearby number — measured: the payable.
+   * chargeableAmount became the payable, so the tenant-charge bridge would have split
+   * the landlord's arrears. The same money defect fixed in the ledger today, arriving
+   * through a different door, and invisible because the wrong value is self-consistent.
+   *
+   * The itemised breakdown is the better authority by construction: six separately
+   * located current-period lines, none of which is the payable.
+   */
+  it('prefers the itemised sum when the label disagrees with it', () => {
+    // Make the subtotal label read the PAYABLE, exactly as the one-line PDF text did.
+    const broken = OCR.replace(
+      /ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94/,
+      'ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) :\n289,94'
+    );
+    expect(broken).not.toBe(OCR); // the substitution must actually have applied
+    const b = parseEydapBill(broken).bill;
+    // The itemised lines sum to 89,94 — that is what tenants may be charged.
+    expect(b.chargeableAmount).toBe(89.94);
+    expect(b.warnings).toContain('breakdown-does-not-sum-to-subtotal');
+    expect(b.warnings).toContain('subtotal-label-overridden-by-breakdown-sum');
+  });
+
+  it('still detects the prior balance after the override', () => {
+    // The arrears test must run against the TRUSTED figure, or overriding the label would
+    // silently disable the very warning that says «do not charge this to tenants».
+    const broken = OCR.replace(
+      /ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94/,
+      'ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) :\n289,94'
+    ).replace(/ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/, 'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n289,94');
+    const b = parseEydapBill(broken).bill;
+    expect(b.totalAmount).toBe(289.94);
+    expect(b.chargeableAmount).toBe(89.94);
+    expect(b.warnings).toContain('prior-balance-included-in-payable');
+  });
+
+  it('derives the subtotal when the label is absent entirely', () => {
+    const noLabel = OCR.replace(/ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94\n/, '');
+    const b = parseEydapBill(noLabel).bill;
+    expect(b.chargeableAmount).toBe(89.94);
+    expect(b.warnings).toContain('subtotal-derived-from-breakdown');
+  });
+
+  it('a clean bill still overrides NOTHING and warns about NOTHING', () => {
+    const b = parseEydapBill(OCR).bill;
+    expect(b.chargeableAmount).toBe(89.94);
+    expect(b.warnings ?? []).toEqual([]);
+  });
+});

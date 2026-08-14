@@ -505,18 +505,45 @@ export function parseEydapBill(text: string): BillParseResult {
     Object.values(breakdown).reduce<number>((s, v) => s + (v ?? 0), 0)
   );
   const haveWholeBreakdown = Object.values(breakdown).every((v) => v !== null);
+  /**
+   * Is the labelled ΜΕΡΙΚΟ ΣΥΝΟΛΟ trustworthy AS THE FIGURE TENANTS ARE CHARGED?
+   *
+   * It is not enough that a number was found next to the label. On a source whose text
+   * arrives as one long line — which is what a PDF TEXT LAYER produces, as opposed to
+   * OCR's line-per-row — the label match can latch onto a NEARBY number. Measured on a
+   * generated ΕΥΔΑΠ PDF: the six itemised lines sum to 89,94 while the "subtotal" came
+   * back as 289,94, i.e. the PAYABLE. The parser then reported
+   * chargeableAmount = 289,94 and the tenants would have been billed the landlord's
+   * €200 of arrears — the exact defect fixed in the ledger today, arriving through a
+   * different door.
+   *
+   * The breakdown is the better authority here BY CONSTRUCTION: it is the sum of six
+   * separately-labelled current-period lines, each individually located, and none of
+   * them is the payable. So when the two disagree, prefer the arithmetic over the label
+   * and say so.
+   */
+  let subtotalTrusted = subtotal;
   if (subtotal !== null && haveWholeBreakdown) {
     // 2c tolerance: each of six lines can round by a cent.
     if (Math.abs(breakdownSum - subtotal) > 0.02) {
       warnings.push('breakdown-does-not-sum-to-subtotal');
+      // Prefer the itemised sum for the CHARGEABLE figure. A wrong number that happens
+      // to equal the payable is the worst case: nothing downstream looks inconsistent,
+      // and the arrears are charged silently.
+      subtotalTrusted = breakdownSum;
+      warnings.push('subtotal-label-overridden-by-breakdown-sum');
     }
+  } else if (subtotal === null && haveWholeBreakdown) {
+    // No label found at all, but all six lines were. The sum IS this period's charges.
+    subtotalTrusted = breakdownSum;
+    warnings.push('subtotal-derived-from-breakdown');
   }
 
   // ARREARS. When ΠΛΗΡΩΤΕΟ exceeds ΜΕΡΙΚΟ ΣΥΝΟΛΟ the difference is a prior balance,
   // and charging THAT to tenants would bill them the landlord's debt. Only flagged
   // in the direction that costs someone money: a payable BELOW the subtotal is a
   // credit and harmless to split (the tenants pay less).
-  if (payable !== null && subtotal !== null && payable - subtotal > 0.02) {
+  if (payable !== null && subtotalTrusted !== null && payable - subtotalTrusted > 0.02) {
     warnings.push('prior-balance-included-in-payable');
   }
 
@@ -738,7 +765,10 @@ export function parseEydapBill(text: string): BillParseResult {
     paymentCode:
       paymentString ||
       (documentNumberRaw ? normalizeBillingId(documentNumberRaw) : undefined),
-    chargeableAmount: subtotal ?? undefined,
+    // The TRUSTED subtotal, not the raw label read — see subtotalTrusted above. This is
+    // the figure the tenant-charge bridge splits, so a label that disagrees with the
+    // itemised lines must not reach it.
+    chargeableAmount: subtotalTrusted ?? undefined,
     alternateBillingIds: alternates.length ? alternates : undefined,
     warnings: warnings.length ? [...new Set(warnings)] : undefined,
     details: {
