@@ -965,6 +965,65 @@ function expenseDisplayLabel(t, name, type) {
 // Returns '' only when there is genuinely nothing to explain ('none').
 function formatBasis(t, basis, fmt) {
   if (!basis || typeof basis !== 'object') return '';
+  // INTERNAL-CONSISTENCY BACKSTOP. Never print an equation whose left side does not
+  // evaluate to its own stated result — render NO sub-line instead of a false one.
+  //
+  // The PDF has had this since two arithmetically-false equations shipped past a green
+  // jest suite AND a static HTML mock (invoicebody.ejs:58-85, and its comment records
+  // why). This panel did not, so it was the outlier: the χιλιοστά carrier-remainder
+  // makes the CARRIER unit's charge differ from the raw part÷whole×total by up to
+  // (N−1)/2 cents — measured 7,83 against an equation reading «90 ÷ 1000 × 87,43» on an
+  // 11-unit building, i.e. the panel printed a sum that does not add up.
+  //
+  // Same EPS as the PDF (2 cents), so the two surfaces agree about what counts as
+  // reconciled and a normal one-cent rounding still shows its explanation.
+  const EPS = 0.02;
+  let ok = false;
+  let lhs;
+  switch (basis.kind) {
+    case 'equal':
+      ok = Number(basis.count) > 0;
+      if (ok) lhs = (Number(basis.total) || 0) / Number(basis.count);
+      break;
+    case 'surface':
+    case 'thousandths':
+    case 'custom_ratio':
+      ok = Number(basis.whole) > 0;
+      if (ok) {
+        lhs =
+          ((Number(basis.part) || 0) / Number(basis.whole)) *
+          (Number(basis.total) || 0);
+      }
+      break;
+    case 'custom_percentage':
+      ok = true;
+      lhs = ((Number(basis.part) || 0) / 100) * (Number(basis.total) || 0);
+      break;
+    case 'repair_split':
+      ok = true;
+      lhs = (Number(basis.total) || 0) * ((Number(basis.ownerPct) || 0) / 100);
+      break;
+    case 'repair_vacant':
+      ok = true;
+      lhs = (Number(basis.total) || 0) * ((Number(basis.tenantPct) || 0) / 100);
+      break;
+    case 'fixed':
+    case 'single_unit':
+      ok = true; // no divisor that could contradict the result
+      break;
+    default:
+      return '';
+  }
+  if (!ok) return '';
+  if (lhs !== undefined) {
+    const rhs =
+      basis.kind === 'repair_vacant'
+        ? Number(basis.pool) || 0
+        : basis.kind === 'repair_split'
+          ? Number(basis.result) || 0
+          : Number(basis.share) || 0;
+    if (Math.abs(lhs - rhs) > EPS) return '';
+  }
   // el-GR money formatter for the euro tokens inside the basis string. Without
   // it the raw JS numbers render '1.7' (dot decimal, unpadded) instead of the
   // mandated '1,70'. The template strings already carry a literal ' €', so we
