@@ -610,12 +610,35 @@ export default function () {
 
       const propsPerBuilding = new Map<string, number>();
       const tenantsPerBuilding = new Map<string, number>();
-      let orphanProperty = sumInto(propsPerBuilding, byProperty, (id) =>
-        buildingOfProperty.get(id)
+      // An apartment with NO buildingId is a perfectly ordinary standalone property —
+      // the resolver only maps property→building, so «cannot be placed under a building»
+      // was being reported as «its entity no longer exists». Same for that apartment's
+      // tenant. Those files are reachable and must not be labelled as strays; count them
+      // in their own bucket instead of inflating the dangling figure, which is meant to
+      // mean «the entity was deleted».
+      const knownPropertyIds = new Set(
+        (properties as Array<{ _id: unknown }>).map((p) => String(p._id))
       );
-      let orphanTenant = sumInto(tenantsPerBuilding, byTenant, (id) =>
-        buildingOfTenant.get(id)
+      const knownTenantIds = new Set(
+        (tenants as Array<{ _id: unknown }>).map((t) => String(t._id))
       );
+      // Fill the per-building tallies. The unresolved remainder is classified below, so
+      // the return value is not needed here.
+      sumInto(propsPerBuilding, byProperty, (id) => buildingOfProperty.get(id));
+      sumInto(tenantsPerBuilding, byTenant, (id) => buildingOfTenant.get(id));
+      // Split the unresolved counts by whether the entity still EXISTS.
+      let existsButNoBuilding = 0;
+      let trulyDangling = 0;
+      for (const [id, n] of byProperty) {
+        if (buildingOfProperty.get(id)) continue;
+        if (knownPropertyIds.has(id)) existsButNoBuilding += n;
+        else trulyDangling += n;
+      }
+      for (const [id, n] of byTenant) {
+        if (buildingOfTenant.get(id)) continue;
+        if (knownTenantIds.has(id)) existsButNoBuilding += n;
+        else trulyDangling += n;
+      }
 
       const knownBuildingIds = new Set(
         (buildings as Array<{ _id: unknown }>).map((b) => String(b._id))
@@ -664,18 +687,26 @@ export default function () {
       // Silently omitting it is the absent-representation trap: the page would read
       // as "every file is accounted for" while paid-for storage holds files nothing
       // can reach. The reconcile tool is what cleans them.
-      const danglingCount = orphanProperty + orphanTenant + orphanBuilding;
+      // Only entities that are actually GONE. A file on a building-less apartment used
+      // to land here, which reads as data corruption when nothing is wrong.
+      const danglingCount = trulyDangling + orphanBuilding;
+      // Reachable, just not under a building. Reported separately so it is neither
+      // hidden nor mislabelled.
+      const unfiledCount = existsButNoBuilding;
 
       res.json({
         buildings: nodes,
         owners: { count: ownerCount },
         unattached: { count: unattachedCount },
         dangling: { count: danglingCount },
+        /** Files on an apartment or tenant that exists but sits under no building. */
+        unfiled: { count: unfiledCount },
         total:
           nodes.reduce((s, n) => s + n.count, 0) +
           ownerCount +
           unattachedCount +
-          danglingCount
+          danglingCount +
+          unfiledCount
       });
     })
   );
@@ -698,6 +729,18 @@ export default function () {
       if (req.query.propertyId)
         filter.propertyId = String(req.query.propertyId);
       if (req.query.ownerKey) filter.ownerKey = String(req.query.ownerKey);
+      // TYPE filter. /documents/tree counts `type:'file'` only, while this route
+      // returned every type — so template `text` documents consumed a page's budget and
+      // were then discarded client-side, and a folder could show fewer rows than its own
+      // badge with no way to reach the rest. Whitelisted, because an arbitrary value
+      // here would silently return nothing.
+      if (req.query.type) {
+        const t = String(req.query.type);
+        if (!['text', 'file', 'fileDescriptor'].includes(t)) {
+          throw new ServiceError(`unknown document type: ${t}`, 422);
+        }
+        filter.type = t;
+      }
 
       // SET filters, for the settings file browser: «all the apartments of THIS
       // building» is one request instead of one per apartment. Capped so a crafted

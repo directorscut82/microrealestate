@@ -211,6 +211,12 @@ function Folder({
   depth = 0,
   cacheKey,
   fetchPage,
+  /**
+   * Whether the data `fetchPage` needs is available yet. Without it a folder whose id
+   * set had not loaded issued a fail-closed request whose empty result was cached
+   * under the same key the real result would use.
+   */
+  isReady,
   onRename,
   onDelete,
   children
@@ -220,11 +226,37 @@ function Folder({
   const [pages, setPages] = useState(1);
 
   const isLeaf = typeof fetchPage === 'function';
+  /**
+   * THE KEY MUST INCLUDE WHAT THE FETCH DEPENDS ON.
+   *
+   * A folder's fetch needs an id set that arrives from a DIFFERENT query (buildings /
+   * tenants). Until it does, `fetchPage` fails closed and returns []. React Query then
+   * cached that empty array under a key containing only `cacheKey` and `pages` — so
+   * when the ids arrived the key was unchanged, the cached empty result stood, and the
+   * folder stayed permanently empty. `ready` also keeps the request from going out at
+   * all before the ids exist, so the empty is never cached in the first place.
+   */
+  const ready = typeof isReady === 'function' ? isReady() : true;
   const { data, isFetching } = useQuery({
-    queryKey: [QueryKeys.DOCUMENTS, 'browser', cacheKey, pages],
-    queryFn: () => fetchPage({ limit: PAGE_SIZE * pages, skip: 0 }),
-    // The lazy-load guarantee. A closed folder never fetches.
-    enabled: open && isLeaf
+    queryKey: [QueryKeys.DOCUMENTS, 'browser', cacheKey, ready, pages],
+    // SKIP-based pages, accumulated. Growing `limit` instead hit the server's hard clamp
+    // of 200: past that the request returned the same 200 rows while «Show more» kept
+    // offering rows it could never fetch.
+    queryFn: async () => {
+      const out = [];
+      for (let i = 0; i < pages; i++) {
+        const batch = await fetchPage({ limit: PAGE_SIZE, skip: i * PAGE_SIZE });
+        const rows = Array.isArray(batch) ? batch : [];
+        out.push(...rows);
+        // A short page is the end of the folder — asking for the next one would be a
+        // request that can only come back empty.
+        if (rows.length < PAGE_SIZE) break;
+      }
+      return out;
+    },
+    // The lazy-load guarantee. A closed folder never fetches, and neither does one whose
+    // id set has not arrived.
+    enabled: open && isLeaf && ready
   });
 
   // An empty folder is not rendered at all — see the file docstring.
@@ -445,6 +477,7 @@ function Files() {
                       count={folderCount('properties')}
                       depth={1}
                       cacheKey={`p:${bid}`}
+                      isReady={() => propertyIds.length > 0}
                       fetchPage={({ limit, skip }) =>
                         // The count came from the server; if the client cannot resolve
                         // the id set (buildings still loading) return nothing rather
@@ -462,6 +495,7 @@ function Files() {
                       count={folderCount('tenants')}
                       depth={1}
                       cacheKey={`t:${bid}`}
+                      isReady={() => tenantIds.length > 0}
                       fetchPage={({ limit, skip }) =>
                         tenantIds.length
                           ? fetchDocumentPage({ tenantIds, limit, skip })
@@ -498,6 +532,23 @@ function Files() {
                   files exist. Hiding them entirely is the absent-representation trap:
                   the page would read as "everything is accounted for" while storage
                   holds files nothing can reach. */}
+              {/* Reachable, just not under a building — a standalone apartment or its
+                  tenant. These used to be counted as DANGLING, which reads as data
+                  corruption when nothing is wrong. */}
+              {Number(tree?.unfiled?.count) > 0 ? (
+                <div
+                  className="flex items-center gap-2.5 py-2.5 text-label text-ink-muted"
+                  data-cy="fileBrowserUnfiled"
+                >
+                  <LuFileQuestion className="size-4 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    {t('Files on an apartment or tenant that is not under a building')}
+                  </span>
+                  <span className="shrink-0 tabular-nums">
+                    {tree.unfiled.count}
+                  </span>
+                </div>
+              ) : null}
               {Number(tree?.dangling?.count) > 0 ? (
                 <div
                   className="flex items-center gap-2.5 py-2.5 text-label text-oxide"

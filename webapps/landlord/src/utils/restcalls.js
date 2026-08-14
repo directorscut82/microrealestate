@@ -398,6 +398,9 @@ export async function fetchDocumentPage({
   // filter means "every document in the realm", and that fail-open is what made the
   // apartment tab list the whole realm.
   if (bucket) params.set('bucket', bucket);
+  // Only files. The tree counts files only, so without this the two disagree and a
+  // folder can show fewer rows than its badge.
+  params.set('type', 'file');
   params.set('limit', String(limit));
   params.set('skip', String(skip));
   const response = await apiFetcher().get(`/documents?${params.toString()}`);

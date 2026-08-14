@@ -171,9 +171,54 @@ describe('ΕΥΔΑΠ parser — identity and matching', () => {
     expect(r.bill.details.tariff).toBe('Β1');
   });
 
-  it('reads the payment reference (ΕΥΔΑΠ prints no RF code)', () => {
-    expect(r.bill.paymentCode).toBe('202699900001000203');
+  it('reads the SCANNABLE payment string, not the document number', () => {
+    // This assertion used to expect the 18-digit ΑΡ. ΠΑΡΑΣΤΑΤΙΚΟΥ — the FALLBACK — and
+    // so encoded a defect as the expected behaviour. The cause was in the fixture: my
+    // synthetic substitution grew the payment line to 43 digits where the real bill has
+    // 41, `PAYMENT_STRING` never matched, and every test therefore ran the fallback
+    // path while the barcode had no coverage at all. The real bill was always parsed
+    // correctly, which is exactly why nothing looked wrong.
+    expect(r.bill.paymentCode).toBe(
+      '20269990000100020000089942026090109990001'
+    );
+    expect(r.bill.details.paymentString).toBe(r.bill.paymentCode);
     expect(r.bill.rfCode).toBeUndefined();
+  });
+
+  it('the payment string corroborates all four fields it encodes', () => {
+    // 16+9+8+8. Each part must agree with a value read INDEPENDENTLY elsewhere on the
+    // bill, because a scannable code built from a misread digit pays the wrong invoice —
+    // and a wrong code that scans is far worse than no code.
+    const v = r.bill.details.paymentString;
+    expect(v).toHaveLength(41);
+    // amount in cents -> ΠΛΗΡΩΤΕΟ
+    expect(parseInt(v.slice(16, 25), 10) / 100).toBe(r.bill.totalAmount);
+    // due date -> ΗΜ/ΝΙΑ ΛΗΞΕΩΣ
+    const d = r.bill.dueDate;
+    const ymd = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+    expect(v.slice(25, 33)).toBe(ymd);
+    // registry number -> ΑΡΙΘΜΟΣ ΜΗΤΡΩΟΥ
+    expect(String(parseInt(v.slice(33, 41), 10))).toBe(
+      r.bill.details.registryNumber.replace('-33', '')
+    );
+    // document number prefix -> ΑΡ. ΠΑΡΑΣΤΑΤΙΚΟΥ
+    expect(r.bill.details.documentNumber.replace(/\s/g, '')).toContain(
+      v.slice(0, 16)
+    );
+  });
+
+  it('REFUSES a payment string that does not corroborate', () => {
+    // The guard that matters: a 41-digit run whose amount disagrees with ΠΛΗΡΩΤΕΟ is a
+    // misread, so it must be reported and NOT used as a payable code.
+    const broken = OCR.replace(
+      '20269990000100020000089942026090109990001',
+      '20269990000100020000099992026090109990001' // amount 99,99 vs ΠΛΗΡΩΤΕΟ 89,94
+    );
+    const b = parseEydapBill(broken).bill;
+    expect(b.warnings).toContain('payment-string-does-not-corroborate');
+    // Falls back to the document number rather than shipping a wrong scannable code.
+    expect(b.paymentCode).toBe('202699900001000203');
+    expect(b.details.paymentString).toBeNull();
   });
 
   it('reads the AADE MARK and the e-invoicing provider despite «nάpoxoc»', () => {
