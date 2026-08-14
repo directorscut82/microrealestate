@@ -259,3 +259,80 @@ test('the ΕΥΔΑΠ bill parses, and shows a scannable BARCODE not an empty box
   expect(text).toMatch(/OCR|εικόν/i);
   expect(text).not.toContain('Από το PDF');
 });
+
+test('a bill carrying ARREARS says so on the card, and names both figures', async ({
+  page
+}) => {
+  /**
+   * GATE 9 GAP, closed. The arrears row was verified by unit test and by the persisted
+   * Bill row, but never LOOKED AT. That is exactly the class of defect this repo keeps
+   * shipping: the money was right and the screen said nothing.
+   *
+   * The generated eydap-1 fixture states ΜΕΡΙΚΟ ΣΥΝΟΛΟ 89,94 with ΠΛΗΡΩΤΕΟ 289,94 — €200
+   * carried from an earlier period. The card must show the PAYABLE in the amount field
+   * (that is what the landlord owes and pays) while stating plainly that tenants are
+   * charged only this period's figure. Showing one number without the sentence is how the
+   * arrears silently reached the tenants in the first place.
+   */
+  const FIX = path.resolve(__dirname, '../.fixtures-bills/eydap-1.png');
+  test.skip(
+    !fs.existsSync(FIX),
+    'fixtures absent — run: node tools/make-bill-fixtures.mjs .fixtures-bills'
+  );
+  test.setTimeout(300000);
+
+  await page.goto(
+    `${BASE}/${encodeURIComponent(ORG)}/buildings/${BUILDING}?tab=expenses`,
+    { waitUntil: 'domcontentloaded' }
+  );
+  const importBtn = page.getByRole('button', { name: /Εισαγωγή|λογαριασμ/i }).first();
+  await expect(importBtn).toBeVisible({ timeout: 20000 });
+  await importBtn.click();
+  await page.locator('input[type=file]').first().setInputFiles(FIX);
+  await expect(page.getByText('eydap-1.png')).toBeVisible({ timeout: 15000 });
+  await page.getByRole('button', { name: /Συνέχεια/ }).click();
+
+  // Wait for the OCR, then read the whole card.
+  await expect
+    .poll(async () => (await page.locator('body').innerText()).length, {
+      timeout: 240000,
+      intervals: [2000]
+    })
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () => await page.locator('body').innerText(), {
+      timeout: 240000,
+      intervals: [2000]
+    })
+    .toMatch(/289,94|89,94/);
+  await page.screenshot({
+    path: path.join(OUT, 'today_eydap_arrears.png'),
+    fullPage: true
+  });
+
+  const text = await page.locator('body').innerText();
+  // The PAYABLE lives in an editable <input>, whose value is NOT part of innerText — a
+  // lesson this very file already records sixty lines above («the amount is an editable
+  // INPUT, so getByText never matches it») and which I repeated here. Read the value.
+  const amountValues = await page
+    .locator('input')
+    .filter({ hasNot: page.locator('[type=file]') })
+    .evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+
+  // BOTH figures must reach the landlord: what is OWED (the editable amount) and what
+  // tenants are CHARGED (the warning). One without the other is the defect — 289,94 alone
+  // hides that tenants pay less; 89,94 alone hides that the landlord owes more.
+  expect(
+    {
+      owedInAmountField: amountValues.some((v) => v.includes('289,94')),
+      chargeableStated: /89,94/.test(text)
+    },
+    `card text:\n${text.slice(0, 700)}\ninputs: ${JSON.stringify(amountValues)}`
+  ).toEqual({ owedInAmountField: true, chargeableStated: true });
+
+  // And it must SAY why, naming the arrears, not leave the landlord to subtract.
+  expect(text).toMatch(/προηγούμενη περίοδο/);
+  expect(text).toMatch(/200,00/);
+  // The charge month is the ISSUE month (August), not the period end (July).
+  expect(text).toMatch(/Αύγουστο 2026/);
+});

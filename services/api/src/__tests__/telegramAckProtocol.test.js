@@ -151,10 +151,16 @@ function makeDeps({ parseDelayMs = 0, parseResult } = {}) {
     hasInboxItem: async () => false,
     createInboxItem: async (doc) => {
       events.push(`create:${doc.status}`);
-      const row = { _id: 'item-1', ...doc };
+      // A UNIQUE id per row. The first version returned a hardcoded 'item-1', so with more
+      // than one message every worker update landed on the FIRST row — 7 bills produced 1
+      // finished row and 6 stuck in 'processing', which read as a queue defect. The queue
+      // was fine; the stub was lying. Same shape as the telegramMessageId collision that
+      // made an earlier seeder report success on a failed insert.
+      const id = `item-${state.created.length + 1}`;
+      const row = { _id: id, ...doc };
       state.created.push(row);
       state.receipts.push({ ...doc });
-      return 'item-1';
+      return id;
     },
     updateInboxItem: async (id, patch) => {
       events.push(`update:${patch.status}`);
@@ -287,5 +293,104 @@ describe('the surfaces agree that processing exists', () => {
   it('confirm refuses a processing row with a reason, not «not found»', () => {
     const mgr = read('../managers/inboxmanager.ts');
     expect(mgr).toContain('διαβάζεται ακόμα');
+  });
+});
+
+describe('the queue cap is BACKPRESSURE, never extra concurrency', () => {
+  /**
+   * FOUND BY THE FULL REVIEW, gate 1, in code I had just shipped.
+   *
+   * The cap exists because each queued job retains the file's buffer and the OCR is this
+   * container's documented OOM risk. The first version responded to hitting the cap with
+   * `void _runParseJob(job)` — un-awaited — so the one moment memory was under pressure was
+   * the one moment a SECOND concurrent OCR started. Exactly backwards, and the docstring
+   * claimed it ran "inline on the tick", which un-awaited code does not.
+   */
+  it('never runs two parses at once, even past the cap', async () => {
+    let concurrent = 0;
+    let peak = 0;
+    const { deps } = makeDeps();
+    deps.parseBill = async () => {
+      concurrent++;
+      peak = Math.max(peak, concurrent);
+      await new Promise((r) => setTimeout(r, 25));
+      concurrent--;
+      return {
+        success: true,
+        bill: {
+          provider: 'deh',
+          billingId: '999935585',
+          billingIdNormalized: '999935585',
+          totalAmount: 120,
+          periodEnd: new Date('2026-07-09T00:00:00Z'),
+          issueDate: new Date('2026-07-12T00:00:00Z')
+        },
+        rawText: 'x'
+      };
+    };
+    // More messages than the cap, each a distinct update so none is deduped.
+    let n = 0;
+    deps.getUpdates = async () => {
+      if (n++) return [];
+      return Array.from({ length: 9 }, (_, i) => ({
+        update_id: 100 + i,
+        message: {
+          message_id: 2000 + i,
+          date: Math.floor(FIXED_NOW.getTime() / 1000),
+          chat: { id: 55 },
+          document: { file_id: `f${i}`, file_name: `bill-${i}.pdf` }
+        }
+      }));
+    };
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    // THE assertion. 9 bills, cap 4, and never more than one OCR in flight.
+    expect({ peak }).toEqual({ peak: 1 });
+  });
+
+  it('queues every bill past the cap rather than dropping any', async () => {
+    const { deps, state } = makeDeps();
+    let n = 0;
+    deps.getUpdates = async () => {
+      if (n++) return [];
+      return Array.from({ length: 7 }, (_, i) => ({
+        update_id: 200 + i,
+        message: {
+          message_id: 3000 + i,
+          date: Math.floor(FIXED_NOW.getTime() / 1000),
+          chat: { id: 55 },
+          document: { file_id: `g${i}`, file_name: `bill-${i}.pdf` }
+        }
+      }));
+    };
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    // Backpressure must not silently discard: 7 in, 7 rows, 7 finished.
+    expect({
+      rows: state.created.length,
+      statuses: state.created.map((r) => r.status)
+    }).toEqual({
+      rows: 7,
+      statuses: Array(7).fill('pending')
+    });
+  });
+
+  it('the cap path does not fire an un-awaited job', () => {
+    // Source-level, because the concurrency assertion above can be satisfied by luck on a
+    // fast machine while the shape is still wrong.
+    const src = fs.readFileSync(
+      path.resolve(HERE, '../jobs/telegramInboxScanner.ts'),
+      'utf8'
+    );
+    // Strip comments first: this file DOCUMENTS the old broken shape by name, and matching
+    // raw source flagged the explanation instead of the code. A source assertion has to look
+    // at code, or it fails on its own changelog.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//'))
+      .join('\n');
+    expect(code).not.toMatch(/void _runParseJob\(/);
+    expect(code).toMatch(/await enqueueParse\(/);
   });
 });
