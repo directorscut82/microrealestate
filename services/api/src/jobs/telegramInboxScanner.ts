@@ -162,11 +162,18 @@ export interface InboxScanDeps {
     messageId: number | null | undefined,
     text: string
   ) => Promise<void>;
-  /** Update an InboxItem in place — used to move it out of 'processing'. */
+  /**
+   * Update an InboxItem in place — used to move it out of 'processing'.
+   *
+   * Resolves to whether the row was still 'processing' and therefore actually took the
+   * patch. The caller MUST NOT assume it did: a discarded update means the landlord
+   * dismissed the item, or the sweep released it, and telling them «εκκρεμεί
+   * επιβεβαίωση» about a row that no longer says so leaves two surfaces disagreeing.
+   */
   updateInboxItem?: (
     id: string,
     patch: Record<string, unknown>
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }
 
 export interface TgUpdate {
@@ -413,7 +420,7 @@ async function _createInboxItem(doc: Record<string, unknown>): Promise<string> {
 async function _updateInboxItem(
   id: string,
   patch: Record<string, unknown>
-): Promise<void> {
+): Promise<boolean> {
   const res = await Collections.InboxItem.updateOne(
     { _id: id, status: 'processing' },
     { $set: { ...patch, updatedDate: new Date() } }
@@ -422,7 +429,9 @@ async function _updateInboxItem(
     logger.info(
       `telegram-inbox: item ${id} was no longer 'processing' (dismissed while parsing?) — parse result discarded`
     );
+    return false;
   }
+  return true;
 }
 
 // Tier-2: consume a re-shot photo for an active recapture session. OCR the
@@ -1006,7 +1015,6 @@ async function _handleUpdate(
     realm,
     file,
     msg,
-    fileId,
     safeName,
     itemId,
     ackMessageId,
@@ -1045,7 +1053,6 @@ type ParseJob = {
   realm: TelegramRealmConfig;
   file: { buffer: Buffer };
   msg: NonNullable<TgUpdate['message']>;
-  fileId: string;
   safeName: string;
   itemId: string;
   ackMessageId: number | null;
@@ -1053,6 +1060,28 @@ type ParseJob = {
 };
 const parseQueue: ParseJob[] = [];
 let parseRunning = false;
+
+/**
+ * The rows THIS process still owns: queued, or being parsed right now.
+ *
+ * A row is "stalled" precisely when no live worker owns it, and this is the set of live
+ * owners — so the sweep consults it instead of inferring ownership from a timestamp.
+ *
+ * The timestamp inference was wrong. `updatedDate` is written once, at receipt, and never
+ * heartbeated, so it measures how long ago the bill ARRIVED, not how long the work has
+ * been silent. Four bills queued behind a 3-page PDF (~50s per page, plus download) can
+ * sit for longer than STALE_PROCESSING_MS before their parse even starts, and the sweep
+ * would then release a job that was still perfectly alive. The damage compounded: the
+ * released row is no longer 'processing', so when the parse DID finish `_updateInboxItem`
+ * matched nothing and threw the result away — the bill was read correctly and the landlord
+ * was told to enter it by hand.
+ *
+ * Heartbeating would also work, but it means a write per row per interval to answer a
+ * question this process can answer exactly. Note the deliberate asymmetry: after a restart
+ * the set is empty, and that is correct, because a row left 'processing' by a dead process
+ * genuinely IS stalled — which is what the startup sweep is for.
+ */
+const ownedItemIds = new Set<string>();
 
 async function enqueueParse(job: ParseJob): Promise<void> {
   if (parseQueue.length >= QUEUE_CAP) {
@@ -1069,6 +1098,9 @@ async function enqueueParse(job: ParseJob): Promise<void> {
       )
     );
   }
+  // Claim the row BEFORE it can be seen waiting. Registering it after the push would leave
+  // a window in which the sweep sees a 'processing' row that nothing owns.
+  ownedItemIds.add(job.itemId);
   parseQueue.push(job);
   // Un-awaited on purpose — this is the handoff. _runParseJob catches everything, so the
   // drain cannot reject.
@@ -1089,28 +1121,39 @@ async function _drainParseQueue(): Promise<void> {
 }
 
 async function _runParseJob(job: ParseJob): Promise<void> {
-  const { realm, file, msg, fileId, safeName, itemId, ackMessageId, deps } = job;
+  const { realm, file, msg, safeName, itemId, ackMessageId, deps } = job;
   try {
-    await _parseAndFinish(realm, file, msg, fileId, safeName, itemId, ackMessageId, deps);
+    await _parseAndFinish(realm, file, msg, safeName, itemId, ackMessageId, deps);
   } catch (err: any) {
     logger.error(
       `telegram-inbox: parse of item ${itemId} threw: ${err?.message || err}`
     );
     // Leave a row the landlord can see, and tell them. A 'processing' row that never
     // resolves is the absent-representation shape: it reads as "still working" forever.
-    await deps
-      .updateInboxItem?.(itemId, {
-        status: 'pending',
-        parseError:
-          'Η ανάλυση απέτυχε απρόσμενα. Καταχωρήστε τον λογαριασμό χειροκίνητα.'
-      })
-      .catch(() => {});
+    // `?? true`: when no updateInboxItem is injected there is no row to disagree with, so
+    // the normal sentence is the honest one. A discarded update is the case that must not
+    // claim a notification the landlord will not find.
+    const landed =
+      (await deps
+        .updateInboxItem?.(itemId, {
+          status: 'pending',
+          parseError:
+            'Η ανάλυση απέτυχε απρόσμενα. Καταχωρήστε τον λογαριασμό χειροκίνητα.'
+        })
+        .catch(() => true)) ?? true;
     await deps.editReply?.(
       realm.botToken,
       msg.chat.id,
       ackMessageId,
-      'Ελήφθη, αλλά η ανάλυση απέτυχε. Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.'
+      landed
+        ? 'Ελήφθη, αλλά η ανάλυση απέτυχε. Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.'
+        : 'Ελήφθη, αλλά η ανάλυση απέτυχε και η καταχώρηση ακυρώθηκε στο μεταξύ. Στείλτε τον λογαριασμό ξανά αν τον χρειάζεστε.'
     );
+  } finally {
+    // Release ownership on EVERY exit, including the throw above — a leaked id would make
+    // the row permanently un-sweepable, which is the same «reading…» forever this whole
+    // mechanism exists to prevent.
+    ownedItemIds.delete(itemId);
   }
 }
 
@@ -1119,7 +1162,6 @@ async function _parseAndFinish(
   realm: TelegramRealmConfig,
   file: { buffer: Buffer },
   msg: NonNullable<TgUpdate['message']>,
-  fileId: string,
   safeName: string,
   itemId: string,
   ackMessageId: number | null,
@@ -1257,7 +1299,7 @@ async function _parseAndFinish(
   // it as 'processing' with the identifiers; this fills in what the parse learned and moves
   // it to 'pending' so the bell offers it for confirmation. Creating again here would also
   // be rejected outright: {realmId, telegramMessageId} is unique.
-  await deps.updateInboxItem?.(itemId, {
+  const landed = await deps.updateInboxItem?.(itemId, {
     status: 'pending',
     parsed,
     parseError,
@@ -1265,6 +1307,21 @@ async function _parseAndFinish(
     warnings: termWarnings,
     sourcePdfUrl: sourcePdfUrl || undefined
   });
+
+  if (landed === false) {
+    // The row is gone from under us — dismissed from the bell, or released by the sweep.
+    // Editing the ack to «εκκρεμεί επιβεβαίωση» here would send the landlord to a
+    // notification that either does not exist or says the opposite, and the figure in that
+    // sentence would be one no surface in the app agrees with. Say what actually happened
+    // and stop; the parse result has already been discarded by design.
+    await deps.editReply?.(
+      realm.botToken,
+      msg.chat.id,
+      ackMessageId,
+      'Ελήφθη, αλλά η καταχώρηση ακυρώθηκε στο μεταξύ (απορρίφθηκε ή διακόπηκε). Στείλτε τον λογαριασμό ξανά αν τον χρειάζεστε.'
+    );
+    return;
+  }
 
   // EDIT the ack rather than sending a second message: the landlord is watching the
   // «το διαβάζω τώρα…» line, and a new message below it leaves two states on screen with
@@ -1348,17 +1405,40 @@ export async function runInboxPollOnce(
  */
 const STALE_PROCESSING_MS = 15 * 60 * 1000;
 
-export async function sweepStalledProcessing(now: Date = new Date()): Promise<number> {
-  const cutoff = new Date(now.getTime() - STALE_PROCESSING_MS);
-  const stalled: any[] = await Collections.InboxItem.find({
+export async function sweepStalledProcessing(
+  now: Date = new Date(),
+  // Startup passes 0: in a process that has just booted, `ownedItemIds` is empty, so any
+  // row still 'processing' was left there by the process that died and is stalled by
+  // definition — waiting out the age cutoff would only make the landlord stare at
+  // «το διαβάζω τώρα…» for another quarter of an hour. The comment at the call site has
+  // always claimed this; without the parameter the code did the opposite.
+  staleMs: number = STALE_PROCESSING_MS
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - staleMs);
+  const candidates: any[] = await Collections.InboxItem.find({
     status: 'processing',
     updatedDate: { $lt: cutoff }
   })
     .limit(50)
     .lean();
+  // Never release a row this process is still working on. See `ownedItemIds`.
+  const stalled = candidates.filter((item) => !ownedItemIds.has(String(item._id)));
+  const skipped = candidates.length - stalled.length;
+  if (skipped) {
+    logger.info(
+      `telegram-inbox: sweep left ${skipped} item(s) alone — still queued or parsing here`
+    );
+  }
+  let released = 0;
   for (const item of stalled) {
-    await Collections.InboxItem.updateOne(
-      { _id: item._id },
+    // `status: 'processing'` in the FILTER, not just in the find. The find and this write
+    // are separate round-trips, and the worker can finish in between: an unconditional
+    // update then stamps «η ανάγνωση διακόπηκε» onto a row that parsed perfectly well, and
+    // because the bell tests `parseError` before it renders the normal card, a correctly
+    // read bill turns into an error card with no confirm button. Same predicate as
+    // `_updateInboxItem`, for the same reason.
+    const res = await Collections.InboxItem.updateOne(
+      { _id: item._id, status: 'processing' },
       {
         $set: {
           status: 'pending',
@@ -1368,21 +1448,33 @@ export async function sweepStalledProcessing(now: Date = new Date()): Promise<nu
         }
       }
     );
+    if (!res.matchedCount) {
+      logger.info(
+        `telegram-inbox: item ${item._id} finished between the sweep's find and its write — left as it is`
+      );
+      continue;
+    }
+    released++;
     logger.warn(
       `telegram-inbox: item ${item._id} was stuck in 'processing' since ${item.updatedDate} — marked pending`
     );
   }
-  if (stalled.length) {
-    logger.info(`telegram-inbox: released ${stalled.length} stalled item(s)`);
+  if (released) {
+    logger.info(`telegram-inbox: released ${released} stalled item(s)`);
   }
-  return stalled.length;
+  // The COUNT RELEASED, not the count considered. The two differ exactly when a row was
+  // skipped or won the race, and reporting the larger number would claim work that did
+  // not happen.
+  return released;
 }
 
 export function startTelegramInboxCron(): void {
   if (pollTimer) return;
   // At startup: anything left 'processing' by the previous process is stalled by
-  // definition, so release it before the first poll rather than after 15 minutes.
-  sweepStalledProcessing().catch((err) =>
+  // definition, so release it before the first poll rather than after 15 minutes. Hence
+  // staleMs 0 — with the age cutoff this released nothing for the first quarter of an hour
+  // and the sentence above was simply untrue of the code beneath it.
+  sweepStalledProcessing(new Date(), 0).catch((err) =>
     logger.error(`telegram-inbox: startup sweep failed: ${err?.message || err}`)
   );
   pollTimer = setInterval(() => {

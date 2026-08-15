@@ -40,6 +40,8 @@ let scanTelegramInbox;
 let _awaitParseQueue;
 let sweepStalledProcessing;
 let inboxDocs;
+/** Set by a test to mutate rows between the sweep's find and its write. */
+let afterFind = null;
 
 beforeAll(async () => {
   inboxDocs = [];
@@ -56,17 +58,34 @@ beforeAll(async () => {
         InboxItem: {
           find: (q) => ({
             limit: () => ({
-              lean: async () =>
-                inboxDocs.filter(
+              lean: async () => {
+                const res = inboxDocs.filter(
                   (d) =>
                     d.status === q.status &&
                     (!q.updatedDate || d.updatedDate < q.updatedDate.$lt)
-                )
+                );
+                // The seam that makes the find/write race reproducible: the sweep does two
+                // round-trips, and a test can only exercise the WRITE's guard by changing
+                // the row in between. Fires once, then disarms.
+                if (afterFind) {
+                  const h = afterFind;
+                  afterFind = null;
+                  h();
+                }
+                return res;
+              }
             })
           }),
           updateOne: async (filter, update) => {
-            const row = inboxDocs.find(
-              (d) => String(d._id) === String(filter._id)
+            // HONOURS THE WHOLE FILTER, not just _id. A mock that matches on _id alone is
+            // more permissive than mongo, so a guard like `{_id, status:'processing'}`
+            // cannot be distinguished from `{_id}` — the assertion that the guard exists
+            // would pass with the guard deleted. Same class as the mock-factory `...real`
+            // trap: the stub has to be able to say NO.
+            const row = inboxDocs.find((d) =>
+              Object.entries(filter).every(([k, v]) =>
+                k === '_id' ? String(d._id) === String(v) : d[k] === v
+              )
             );
             if (row) Object.assign(row, update.$set);
             return { matchedCount: row ? 1 : 0 };
@@ -95,7 +114,27 @@ beforeAll(async () => {
       OwnerStatement: { LOIPOI_LABEL: 'ΛΟΙΠΟΙ' },
       BuildingProjection: {},
       ShareBasis: {},
-      BillTerm: { billTermFitsExpense: () => ({ fits: true }) }
+      BillTerm: {
+        billTermFitsExpense: () => ({ fits: true }),
+        /**
+         * MUST be here. Without it `parsed.proposedTerm = BillTerm.computeChargeTerm(bill)`
+         * threw INSIDE the parse try-block, so every "successful parse" in this file was
+         * silently taking the FAILURE branch — the rows reached 'pending' with a parseError
+         * of «computeChargeTerm is not a function» and the assertions about status still
+         * passed. The suite was pinning a degraded path and calling it the ack protocol.
+         * `unstable_mockModule` replaces the WHOLE module, so every export the code under
+         * test touches has to be present; a missing one is not a missing stub, it is a
+         * different code path.
+         */
+        computeChargeTerm: (bill) => {
+          const d = bill?.issueDate || bill?.periodEnd;
+          if (!d) return undefined;
+          const dt = d instanceof Date ? d : new Date(String(d));
+          return Number(
+            `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}0100`
+          );
+        }
+      }
     };
   });
   const mod = await import('../jobs/telegramInboxScanner.js');
@@ -201,6 +240,10 @@ describe('the ack comes BEFORE the parse, not after it', () => {
     expect(state.edits).toHaveLength(1);
     expect(state.edits[0].messageId).toBe(7001);
     expect(state.created[0].status).toBe('pending');
+    // NO parseError. Asserting only the status let a broken mock send every one of these
+    // tests down the failure branch unnoticed for as long as the file existed.
+    expect(state.created[0].parseError).toBeFalsy();
+    expect(state.created[0].parsed?.totalAmount).toBe(120);
   });
 
   it('the poll tick returns without waiting for a slow parse', async () => {
@@ -392,5 +435,207 @@ describe('the queue cap is BACKPRESSURE, never extra concurrency', () => {
       .join('\n');
     expect(code).not.toMatch(/void _runParseJob\(/);
     expect(code).toMatch(/await enqueueParse\(/);
+  });
+});
+
+describe('the sweep must not reap work that is still alive', () => {
+  /**
+   * FOUND BY GATE 8 on code I had just shipped, and it is a two-stage failure.
+   *
+   * `updatedDate` is written once, at receipt, and never heartbeated — so it measures how
+   * long ago the bill ARRIVED, not how long the work has been silent. Bills queued behind
+   * a 3-page PDF (~50s per page plus download) can sit longer than STALE_PROCESSING_MS
+   * before their parse even STARTS. The sweep then released a live job, and because the
+   * released row is no longer 'processing', `_updateInboxItem`'s guard made the finish a
+   * no-op: the bill was read CORRECTLY, the result was thrown away, and the landlord was
+   * told the reading had been interrupted and to enter it by hand.
+   *
+   * The fix is ownership, not a longer timeout: this process knows exactly which rows it
+   * is holding, so the sweep asks instead of guessing from a clock.
+   */
+  it('leaves a queued row alone however long it has been waiting', async () => {
+    const { deps, state } = makeDeps({ parseDelayMs: 120 });
+    // Two bills. The second waits behind the first, and BOTH carry an arrival time older
+    // than the stale threshold — the situation a slow queue produces on its own.
+    let n = 0;
+    deps.getUpdates = async () => {
+      if (n++) return [];
+      return [0, 1].map((i) => ({
+        update_id: 700 + i,
+        message: {
+          message_id: 7100 + i,
+          date: Math.floor(FIXED_NOW.getTime() / 1000),
+          chat: { id: 55 },
+          document: { file_id: `q${i}`, file_name: `bill-${i}.pdf` }
+        }
+      }));
+    };
+    const scanning = scanTelegramInbox(deps);
+    await scanning;
+    // Mirror both rows into the collection the sweep reads, aged well past the cutoff.
+    inboxDocs = state.created.map((r) => ({
+      _id: r._id,
+      status: 'processing',
+      updatedDate: new Date(FIXED_NOW.getTime() - 40 * 60 * 1000)
+    }));
+    // The sweep runs on the same 60s interval as the poll, so this is the ordinary case.
+    const released = await sweepStalledProcessing(FIXED_NOW);
+    expect({ released, statuses: inboxDocs.map((d) => d.status) }).toEqual({
+      released: 0,
+      statuses: ['processing', 'processing']
+    });
+    await _awaitParseQueue();
+    // …and both parses land, which is the consequence that actually matters: with the
+    // timestamp-only sweep the second row's result was discarded.
+    expect(state.created.map((r) => r.status)).toEqual(['pending', 'pending']);
+    expect(state.created.every((r) => !r.parseError)).toBe(true);
+  });
+
+  it('releases the row once the worker is done with it', async () => {
+    // Ownership must be given back, or the row becomes permanently un-sweepable — the same
+    // «reading…» forever this mechanism exists to prevent, just with a different cause.
+    const { deps, state } = makeDeps();
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    inboxDocs = [
+      {
+        _id: state.created[0]._id,
+        status: 'processing', // as if a later crash left it here
+        updatedDate: new Date(FIXED_NOW.getTime() - 40 * 60 * 1000)
+      }
+    ];
+    expect(await sweepStalledProcessing(FIXED_NOW)).toBe(1);
+  });
+
+  it('gives ownership back even when the parse THROWS', async () => {
+    const { deps, state } = makeDeps();
+    deps.parseBill = async () => {
+      throw new Error('OCR exploded');
+    };
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    inboxDocs = [
+      {
+        _id: state.created[0]._id,
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 40 * 60 * 1000)
+      }
+    ];
+    expect(await sweepStalledProcessing(FIXED_NOW)).toBe(1);
+  });
+
+  it('does not overwrite a row that finished between the find and the write', async () => {
+    // The find and the write are separate round-trips, and the worker can complete in
+    // between. Without `status:'processing'` in the WRITE filter the sweep stamps «η
+    // ανάγνωση διακόπηκε» onto a row that parsed perfectly — and the bell tests parseError
+    // BEFORE it renders the normal card, so a correctly read bill becomes an error card
+    // with no confirm button and the landlord cannot post the δαπάνη at all.
+    inboxDocs = [
+      {
+        _id: 'raced-1',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 40 * 60 * 1000)
+      }
+    ];
+    // The row finishes AFTER the sweep has already selected it.
+    afterFind = () => {
+      inboxDocs[0].status = 'pending';
+      inboxDocs[0].parsed = { totalAmount: 89.94 };
+    };
+    const released = await sweepStalledProcessing(FIXED_NOW);
+    expect({
+      released,
+      status: inboxDocs[0].status,
+      parseError: inboxDocs[0].parseError,
+      total: inboxDocs[0].parsed?.totalAmount
+    }).toEqual({
+      released: 0,
+      status: 'pending',
+      parseError: undefined,
+      total: 89.94
+    });
+  });
+});
+
+describe('the ack must not describe a row that no longer says that', () => {
+  it('does not promise «εκκρεμεί επιβεβαίωση» when the update was discarded', async () => {
+    // The landlord dismissed the item from the bell while the OCR was running, so
+    // `_updateInboxItem` correctly refuses (the human's decision beats the background job).
+    // The ack was still edited to «Ελήφθη ο λογαριασμός (120€) — εκκρεμεί επιβεβαίωση στις
+    // ειδοποιήσεις», sending them to a notification that does not exist, quoting a figure
+    // no surface in the app agrees with.
+    const { deps, state } = makeDeps();
+    deps.updateInboxItem = async () => false; // the row is gone from under us
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    expect(state.edits).toHaveLength(1);
+    expect(state.edits[0].text).toMatch(/ακυρώθηκε/);
+    expect(state.edits[0].text).not.toMatch(/εκκρεμεί επιβεβαίωση/);
+  });
+
+  it('still says the normal thing when the update DID land', async () => {
+    // The no-regression half: the ordinary path must be untouched.
+    const { deps, state } = makeDeps();
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    expect(state.edits[0].text).toMatch(/εκκρεμεί επιβεβαίωση/);
+    expect(state.edits[0].text).not.toMatch(/ακυρώθηκε/);
+  });
+
+  it('a parse that THREW and lost its row says so too', async () => {
+    const { deps, state } = makeDeps();
+    deps.parseBill = async () => {
+      throw new Error('OCR exploded');
+    };
+    deps.updateInboxItem = async () => false;
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    expect(state.edits[0].text).toMatch(/ακυρώθηκε/);
+    // …and it must not send them to the notifications either.
+    expect(state.edits[0].text).not.toMatch(/στις ειδοποιήσεις/);
+  });
+});
+
+describe('the startup sweep does what its comment says', () => {
+  it('releases a row that has been processing for only a minute', async () => {
+    /**
+     * At startup nothing is in flight, so a row still marked 'processing' was left there by
+     * the process that died — stalled by definition, whatever its age. The call site has
+     * always said it releases these «before the first poll rather than after 15 minutes»,
+     * but it passed no cutoff override, so a row updated shortly before the crash sat at
+     * «το διαβάζω τώρα…» for the rest of the quarter hour. A comment describing behaviour
+     * the code does not have is worse than no comment.
+     */
+    inboxDocs = [
+      {
+        _id: 'fresh-crash',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 60 * 1000)
+      }
+    ];
+    expect(await sweepStalledProcessing(FIXED_NOW, 0)).toBe(1);
+    expect(inboxDocs[0].status).toBe('pending');
+  });
+
+  it('the periodic sweep keeps its age cutoff', async () => {
+    // staleMs 0 is for startup ONLY. If the interval used it, every parse would be reaped
+    // the moment it began — and after the ownership fix that would be silent, because the
+    // owned-row check would be doing all the work.
+    inboxDocs = [
+      {
+        _id: 'live-2',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 60 * 1000)
+      }
+    ];
+    expect(await sweepStalledProcessing(FIXED_NOW)).toBe(0);
+  });
+
+  it('the startup call site passes the override', () => {
+    const src = fs.readFileSync(
+      path.resolve(HERE, '../jobs/telegramInboxScanner.ts'),
+      'utf8'
+    );
+    expect(src).toMatch(/sweepStalledProcessing\(new Date\(\), 0\)/);
   });
 });
