@@ -230,3 +230,82 @@ describe('chargeableAmount is bounded before it can be charged', () => {
     expect(persist).toBeGreaterThan(guard);
   });
 });
+
+describe('a message that says the figure was SUBSTITUTED must name the figure', () => {
+  /**
+   * FOUND ON THE RENDERED GREEK CARD, after the phantom-arrears row was correctly removed.
+   *
+   * The card then read «το τυπωμένο μερικό σύνολο διαφωνεί … χρησιμοποιήθηκε το άθροισμα
+   * των γραμμών» and 89,94 appeared NOWHERE on it — the arrears row had been the only
+   * place stating what the tenants are charged. So the landlord was told a substitution had
+   * happened and left unable to see WHAT was substituted: the fact present, the number
+   * absent. Removing a false row exposed a missing one.
+   */
+  const SUBSTITUTION_CODES = [
+    'subtotal-label-overridden-by-breakdown-sum',
+    'subtotal-derived-from-breakdown'
+  ];
+
+  it('the dialog messages carry the placeholder and the dialog fills it', () => {
+    for (const code of SUBSTITUTION_CODES) {
+      const at = dialog.indexOf(`'${code}':`);
+      expect({ code, found: at > -1 }).toEqual({ code, found: true });
+      const msg = dialog.slice(at, dialog.indexOf('\n', dialog.indexOf("',", at)));
+      expect({ code, namesFigure: msg.includes('{{current}}') }).toEqual({
+        code,
+        namesFigure: true
+      });
+    }
+    // …and the value is actually supplied, or next-translate renders the raw «{{current}}».
+    expect(dialog).toContain(
+      'current: formatNumber(Number(parsed?.chargeableAmount))'
+    );
+  });
+
+  it('every locale keeps the placeholder — dropping it prints a sentence with a hole', () => {
+    const messages = SUBSTITUTION_CODES.map((code) => {
+      const at = dialog.indexOf(`'${code}':`);
+      const m = dialog.slice(at).match(/'([^']*\{\{current\}\}[^']*)'/);
+      return m[1];
+    });
+    for (const loc of LOCALES) {
+      const dict = JSON.parse(
+        read(`../../../../webapps/landlord/locales/${loc}/common.json`)
+      );
+      for (const msg of messages) {
+        expect({ loc, msg: msg.slice(0, 30), ok: (dict[msg] || '').includes('{{current}}') }).toEqual(
+          { loc, msg: msg.slice(0, 30), ok: true }
+        );
+      }
+    }
+  });
+
+  it('the Telegram lane names it too — there the amount is read-only', async () => {
+    const { _parserWarningMessage } = await import(
+      '../jobs/telegramInboxScanner.js'
+    );
+    const bill = { totalAmount: 109.94, chargeableAmount: 89.94 };
+    for (const code of SUBSTITUTION_CODES) {
+      const msg = _parserWarningMessage(code, bill);
+      expect({ code, namesFigure: /89[.,]94/.test(msg) }).toEqual({
+        code,
+        namesFigure: true
+      });
+    }
+  });
+
+  it('the prior-balance message states the REPORTED balance', async () => {
+    const { _parserWarningMessage } = await import(
+      '../jobs/telegramInboxScanner.js'
+    );
+    // A real balance alongside an override: the document says 200,00 and subtracting the
+    // two amounts says 220,00. The message must say what the document says.
+    const msg = _parserWarningMessage('prior-balance-included-in-payable', {
+      totalAmount: 289.94,
+      chargeableAmount: 69.94,
+      priorBalance: 200
+    });
+    expect(msg).toContain('200.00');
+    expect(msg).not.toContain('220.00');
+  });
+});

@@ -696,9 +696,9 @@ export function _parserWarningMessage(
     // landlord could not even have corrected it. Found by a source-derived census of the
     // codes the parsers emit; a hand-maintained list had simply never heard of them.
     case 'subtotal-label-overridden-by-breakdown-sum':
-      return 'Το τυπωμένο μερικό σύνολο διαφωνεί με τις αναλυτικές γραμμές· για το μερίδιο των ενοικιαστών χρησιμοποιήθηκε το άθροισμα των γραμμών. Ελέγξτε το στο έντυπο.';
+      return `Το τυπωμένο μερικό σύνολο διαφωνεί με τις αναλυτικές γραμμές, οπότε οι ενοικιαστές χρεώνονται το άθροισμα των γραμμών, ${chargeable.toFixed(2)}€. Ελέγξτε το στο έντυπο.`;
     case 'subtotal-derived-from-breakdown':
-      return 'Ο λογαριασμός δεν αναγράφει μερικό σύνολο για την περίοδο, οπότε το μερίδιο των ενοικιαστών υπολογίστηκε από τις αναλυτικές γραμμές.';
+      return `Ο λογαριασμός δεν αναγράφει μερικό σύνολο για την περίοδο, οπότε οι ενοικιαστές χρεώνονται ${chargeable.toFixed(2)}€, από το άθροισμα των αναλυτικών γραμμών.`;
     case 'breakdown-exceeds-subtotal':
       return 'Μέρος των αναλυτικών γραμμών υπερβαίνει ήδη το αναγραφόμενο μερικό σύνολο — πιθανή λάθος ανάγνωση του ποσού.';
     // The one that costs money if ignored, and on THIS lane the amount is read-only, so

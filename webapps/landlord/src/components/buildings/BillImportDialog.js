@@ -445,9 +445,9 @@ function ResultCard({
       // paper. Nothing said so on any surface, which is the quietest possible way to
       // change what the tenants pay.
       'subtotal-label-overridden-by-breakdown-sum':
-        'The printed subtotal disagrees with the bill’s own itemised lines; the itemised total was used for the tenants’ share. Check it against the paper bill.',
+        'The printed subtotal disagrees with the bill’s own itemised lines, so the tenants are charged the itemised total of {{current}}. Check it against the paper bill.',
       'subtotal-derived-from-breakdown':
-        'This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.',
+        'This bill prints no subtotal for the period, so the tenants are charged {{current}}, computed from its itemised lines.',
       'breakdown-exceeds-subtotal':
         'Some of the bill’s itemised lines already exceed its stated subtotal — the amount may have been misread.',
       // The one that costs money if ignored: with no subtotal read, confirm falls back to
@@ -623,7 +623,16 @@ function ResultCard({
                 className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200"
               >
                 <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-                <span>{t(message)}</span>
+                {/* `current` is consumed only by the two messages that say the tenants'
+                    share came from the itemised lines. Naming the figure is the point:
+                    without it the card stated that a substitution had happened and left
+                    the landlord unable to see WHAT was substituted — the fact present, the
+                    number absent. Messages without the placeholder ignore it. */}
+                <span>
+                  {t(message, {
+                    current: formatNumber(Number(parsed?.chargeableAmount))
+                  })}
+                </span>
               </div>
             ))}
 
