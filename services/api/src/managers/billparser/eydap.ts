@@ -656,7 +656,31 @@ export function parseEydapBill(text: string): BillParseResult {
   // and charging THAT to tenants would bill them the landlord's debt. Only flagged
   // in the direction that costs someone money: a payable BELOW the subtotal is a
   // credit and harmless to split (the tenants pay less).
-  if (payable !== null && subtotalTrusted !== null && payable - subtotalTrusted > 0.02) {
+  /**
+   * MEASURED ON THE RENDERED GREEK CARD, not by any unit test: comparing against the
+   * OVERRIDDEN figure manufactures arrears that do not exist.
+   *
+   * On a bill printing ΜΕΡΙΚΟ ΣΥΝΟΛΟ 109,94 and ΠΛΗΡΩΤΕΟ 109,94 whose itemised lines sum
+   * to 89,94, the override lowers the trusted figure to 89,94 and this check then reported
+   * «ο λογαριασμός περιλαμβάνει 20,00 € από προηγούμενη περίοδο». The document says the
+   * opposite: payable equals its stated subtotal, so its ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ box is zero.
+   * The 20,00 is the bill's own internal disagreement, which the override warning already
+   * reports — so the card showed the same 20,00 twice with two different explanations, one
+   * of them false, on a money surface.
+   *
+   * A prior balance is by definition ΠΛΗΡΩΤΕΟ minus THIS PERIOD'S STATED CHARGES, so the
+   * basis is the printed subtotal whenever the bill printed one. Only when it printed none
+   * does the derived sum stand in — and then there is no competing claim to confuse.
+   *
+   * This does mean that when the label latched the payable (printed == payable, lines
+   * lower) no arrears row appears. That is correct and not a loss: the parser cannot
+   * distinguish that case from an unknown seventh levy, so it must not assert a cause it
+   * cannot establish. The tenants are still protected — chargeableAmount is the lower
+   * figure either way — and the override row states plainly that their share came from the
+   * itemised lines.
+   */
+  const arrearsBasis = subtotal !== null ? subtotal : subtotalTrusted;
+  if (payable !== null && arrearsBasis !== null && payable - arrearsBasis > 0.02) {
     warnings.push('prior-balance-included-in-payable');
   }
 

@@ -267,6 +267,40 @@ const DOCS = [
     })
   },
   {
+    /**
+     * A bill whose PRINTED ΜΕΡΙΚΟ ΣΥΝΟΛΟ disagrees with its own itemised lines.
+     *
+     * The other four fixtures are internally consistent, so none of them can make the
+     * parser emit 'breakdown-does-not-sum-to-subtotal' or the override code — which meant
+     * the amber rows those codes drive could not be LOOKED AT on the real screen at all. A
+     * surface no fixture can reach is a surface nobody has reviewed.
+     *
+     * The six lines are untouched and sum to 89,94; the printed subtotal is 20,00 higher,
+     * which is what an unknown seventh levy looks like. The parser must charge the LOWER
+     * figure and say on the card that it did.
+     */
+    name: 'eydap-mismatch',
+    html: eydap({
+      account: '99900022244 004',
+      registry: '9990002-44',
+      meter: 'A99E77002',
+      route: '28',
+      tariff: 'B1',
+      prevRead: '7000',
+      currRead: '7061',
+      usage: '61',
+      days: '87',
+      issue: '04/08/2026',
+      due: '01/09/2026',
+      periodFrom: '28/04/2026',
+      periodTo: '23/07/2026',
+      docNumber: '2026 0009 9900 0303 05',
+      subtotal: '109,94',
+      payable: '109,94',
+      paymentString: '2026000999000303' + '000010994' + '20260901' + '09990002'
+    })
+  },
+  {
     name: 'eydap-2',
     html: eydap({
       account: EYDAP_ACCOUNT, // SAME account — scenario 4

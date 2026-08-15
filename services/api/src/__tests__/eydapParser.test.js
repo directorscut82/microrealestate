@@ -584,17 +584,97 @@ describe('the CHARGEABLE figure must survive a mislocated subtotal label', () =>
     expect(b.warnings).toContain('subtotal-label-overridden-by-breakdown-sum');
   });
 
-  it('still detects the prior balance after the override', () => {
-    // The arrears test must run against the TRUSTED figure, or overriding the label would
-    // silently disable the very warning that says «do not charge this to tenants».
+  it('does NOT claim a prior balance it cannot establish, and still protects the tenants', () => {
+    /**
+     * REWRITTEN AFTER LOOKING AT THE RENDERED GREEK CARD. This test used to assert
+     * `prior-balance-included-in-payable` here, on the reasoning that the arrears check
+     * must run against the TRUSTED figure «or overriding the label would silently disable
+     * the very warning that says do not charge this to tenants». The reasoning conflated
+     * two things: the tenants are protected by `chargeableAmount`, not by the warning.
+     *
+     * What the old rule actually produced, measured on the deployed card: a bill printing
+     * ΜΕΡΙΚΟ ΣΥΝΟΛΟ 109,94 / ΠΛΗΡΩΤΕΟ 109,94 whose lines sum to 89,94 rendered «ο
+     * λογαριασμός περιλαμβάνει 20,00 € από προηγούμενη περίοδο» BESIDE the override row —
+     * the same 20,00 explained twice, and the arrears explanation was false: payable equals
+     * the stated subtotal, so the bill's own ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ box is zero.
+     *
+     * printed == payable with lower lines is indistinguishable from an unknown seventh
+     * levy, so a cause cannot be asserted. What CAN be asserted is what this now checks:
+     * the chargeable figure is the lower one, and the landlord is told the tenants' share
+     * came from the itemised lines.
+     */
     const broken = OCR.replace(
       /ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94/,
       'ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) :\n289,94'
     ).replace(/ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/, 'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n289,94');
     const b = parseEydapBill(broken).bill;
-    expect(b.totalAmount).toBe(289.94);
-    expect(b.chargeableAmount).toBe(89.94);
-    expect(b.warnings).toContain('prior-balance-included-in-payable');
+    expect({
+      total: b.totalAmount,
+      chargeable: b.chargeableAmount,
+      overrideStated: b.warnings.includes(
+        'subtotal-label-overridden-by-breakdown-sum'
+      ),
+      // The claim the parser must NOT make.
+      claimsArrears: b.warnings.includes('prior-balance-included-in-payable')
+    }).toEqual({
+      total: 289.94,
+      chargeable: 89.94,
+      overrideStated: true,
+      claimsArrears: false
+    });
+  });
+
+  it('a REAL prior balance is still reported — the printed subtotal is the basis', () => {
+    // The no-regression half, and the case that actually happens: the label is correct at
+    // 89,94 and the payable is 289,94, so the document itself states €200 of arrears.
+    // Nothing is overridden here, and the warning must survive the basis change.
+    const arrears = OCR.replace(
+      /ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/,
+      'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n289,94'
+    ).replace(/ΠΛΗΡΩΤΕΟ\n89,94€/, 'ΠΛΗΡΩΤΕΟ\n289,94€');
+    const b = parseEydapBill(arrears).bill;
+    expect({
+      total: b.totalAmount,
+      chargeable: b.chargeableAmount,
+      claimsArrears: b.warnings.includes('prior-balance-included-in-payable'),
+      overrideStated: b.warnings.includes(
+        'subtotal-label-overridden-by-breakdown-sum'
+      )
+    }).toEqual({
+      total: 289.94,
+      chargeable: 89.94,
+      claimsArrears: true,
+      overrideStated: false
+    });
+  });
+
+  it('with NO printed subtotal, the derived sum is the arrears basis', () => {
+    /**
+     * The branch the basis change could have broken and no test covered — found by
+     * mutation, not by reading: `arrearsBasis = subtotal` (always the printed one) passed
+     * the whole suite, because nothing exercised a bill that prints no ΜΕΡΙΚΟ ΣΥΝΟΛΟ AND
+     * carries a prior balance. That combination would then have reported no arrears at all,
+     * which is the original money bug: the landlord's balance split among the tenants with
+     * nothing said.
+     */
+    const noLabelWithArrears = OCR.replace(
+      /ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94\n/,
+      ''
+    )
+      .replace(/ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/, 'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n289,94')
+      .replace(/ΠΛΗΡΩΤΕΟ\n89,94€/, 'ΠΛΗΡΩΤΕΟ\n289,94€');
+    const b = parseEydapBill(noLabelWithArrears).bill;
+    expect({
+      total: b.totalAmount,
+      chargeable: b.chargeableAmount,
+      derived: b.warnings.includes('subtotal-derived-from-breakdown'),
+      claimsArrears: b.warnings.includes('prior-balance-included-in-payable')
+    }).toEqual({
+      total: 289.94,
+      chargeable: 89.94,
+      derived: true,
+      claimsArrears: true
+    });
   });
 
   it('derives the subtotal when the label is absent entirely', () => {
