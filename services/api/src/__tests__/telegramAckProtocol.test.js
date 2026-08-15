@@ -639,3 +639,109 @@ describe('the startup sweep does what its comment says', () => {
     expect(src).toMatch(/sweepStalledProcessing\(new Date\(\), 0\)/);
   });
 });
+
+describe('a released row corrects the message the landlord is looking at', () => {
+  /**
+   * `ackMessageId` and `ackChatId` were written onto every row and then read by nothing:
+   * the worker carried its own copy in memory, so the persisted pair was dead data. The
+   * consequence is the same two-surfaces-disagree defect as an unchecked update, triggered
+   * by a restart instead of a dismiss — the row correctly said «η ανάγνωση διακόπηκε»
+   * while the Telegram message the landlord was staring at still said «το διαβάζω τώρα…»,
+   * forever. The in-memory copy cannot help by definition: the process that held it died.
+   */
+  it('edits the stored ack when it releases a stalled row', async () => {
+    inboxDocs = [
+      {
+        _id: 'stuck-ack',
+        realmId: 'realm-1',
+        status: 'processing',
+        ackMessageId: 9001,
+        ackChatId: '55',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      }
+    ];
+    const edits = [];
+    const released = await sweepStalledProcessing(FIXED_NOW, undefined, {
+      editReply: async (_t, chatId, messageId, text) => {
+        edits.push({ chatId, messageId, text });
+      },
+      botTokenFor: async () => 'tok'
+    });
+    expect({ released, edits: edits.length }).toEqual({ released: 1, edits: 1 });
+    // The SAME message, not a new one: a second message below the first leaves two states
+    // on screen with no indication which is current.
+    expect(edits[0]).toMatchObject({ chatId: '55', messageId: 9001 });
+    expect(edits[0].text).toMatch(/διακόπηκε/);
+  });
+
+  it('still releases the row when Telegram refuses the edit', async () => {
+    // Best-effort: the row is already correct without the edit, and one realm's dead bot
+    // token must not stop the remaining rows from being released.
+    inboxDocs = [
+      {
+        _id: 'stuck-ack-2',
+        realmId: 'realm-1',
+        status: 'processing',
+        ackMessageId: 9002,
+        ackChatId: '55',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      }
+    ];
+    const released = await sweepStalledProcessing(FIXED_NOW, undefined, {
+      editReply: async () => {
+        throw new Error('403 bot was blocked by the user');
+      },
+      botTokenFor: async () => 'tok'
+    });
+    expect({ released, status: inboxDocs[0].status }).toEqual({
+      released: 1,
+      status: 'pending'
+    });
+  });
+
+  it('does not try to edit a row that has no stored ack', async () => {
+    // Rows from before the ack protocol, and rows whose ack send failed, have no message
+    // to edit. Calling Telegram with messageId undefined makes _editReply fall back to
+    // SENDING a new message — an unsolicited «η ανάγνωση διακόπηκε» about a bill the
+    // landlord may never have been told was being read.
+    inboxDocs = [
+      {
+        _id: 'no-ack',
+        realmId: 'realm-1',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      }
+    ];
+    const edits = [];
+    const released = await sweepStalledProcessing(FIXED_NOW, undefined, {
+      editReply: async (...a) => {
+        edits.push(a);
+      },
+      botTokenFor: async () => 'tok'
+    });
+    expect({ released, edits: edits.length }).toEqual({ released: 1, edits: 0 });
+  });
+
+  it('does not edit anything when the realm has no bot token any more', async () => {
+    // The landlord can turn the channel off while a row is in flight; that is a normal
+    // state, not an error, and it must not throw inside the sweep.
+    inboxDocs = [
+      {
+        _id: 'no-token',
+        realmId: 'realm-gone',
+        status: 'processing',
+        ackMessageId: 9003,
+        ackChatId: '55',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      }
+    ];
+    const edits = [];
+    const released = await sweepStalledProcessing(FIXED_NOW, undefined, {
+      editReply: async (...a) => {
+        edits.push(a);
+      },
+      botTokenFor: async () => null
+    });
+    expect({ released, edits: edits.length }).toEqual({ released: 1, edits: 0 });
+  });
+});

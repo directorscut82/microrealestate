@@ -35,7 +35,6 @@ import { Button } from '../ui/button';
 import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
 import { Input } from '../ui/input';
-import { Label } from '../ui/label';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import { parseGreekMoney } from '../../utils/numberformat';
@@ -403,6 +402,65 @@ function ResultCard({
   const hasArrears =
     Number(parsed?.chargeableAmount) > 0 &&
     Number(parsed?.chargeableAmount) < Number(parsed?.totalAmount) - 0.005;
+  /**
+   * The parser's own observations, which reached no surface on THIS lane.
+   *
+   * Every code here means «a cross-check inside the document disagreed», i.e. the amount
+   * on the card may be a misread. The Telegram lane has shown them since the ack protocol
+   * landed; the upload dialog dropped them — which is backwards, because this is the lane
+   * where the operator can still correct the figure before confirming. A signal shown only
+   * where nothing can be done about it is the absent-representation shape again.
+   *
+   * 'prior-balance-included-in-payable' is deliberately absent: `hasArrears` below renders
+   * it with the two actual figures, and listing it twice would train the operator to skim
+   * the block.
+   */
+  const parserWarnings = (() => {
+    const byCode = {
+      'breakdown-does-not-sum-to-subtotal':
+        'The bill’s own breakdown does not add up to its subtotal — check the amount against the paper bill.',
+      'payment-string-does-not-corroborate':
+        'The payment code does not agree with the rest of the bill — do not scan it, pay from the paper bill.',
+      'tiers-do-not-sum-to-consumption':
+        'The consumption breakdown does not match the total — the amount may have been misread.',
+      'tier-amounts-do-not-sum-to-charges':
+        'The consumption breakdown does not match the total — the amount may have been misread.',
+      'registry-number-disagrees':
+        'Two places on the bill give different values for the same field — check the paper bill.',
+      'period-disagrees':
+        'Two places on the bill give different values for the same field — check the paper bill.',
+      // THE TWO THAT CHANGE THE FIGURE. The parser substitutes the itemised sum for the
+      // printed ΜΕΡΙΚΟ ΣΥΝΟΛΟ when they disagree, or derives it when the bill prints
+      // none — so the chargeable amount about to be confirmed is not the number on the
+      // paper. Nothing said so on any surface, which is the quietest possible way to
+      // change what the tenants pay.
+      'subtotal-label-overridden-by-breakdown-sum':
+        'The printed subtotal disagrees with the bill’s own itemised lines; the itemised total was used for the tenants’ share. Check it against the paper bill.',
+      'subtotal-derived-from-breakdown':
+        'This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.'
+    };
+    // The override message states the disagreement AND what was done about it, so the
+    // plainer «does not add up» row would be a strictly weaker duplicate of it.
+    const codes = (parsed?.warnings || []).map((w) => w?.code ?? w);
+    const superseded = codes.includes('subtotal-label-overridden-by-breakdown-sum')
+      ? new Set(['breakdown-does-not-sum-to-subtotal'])
+      : new Set();
+    // Two codes can map to the SAME sentence (the tier pair, the disagreement pair), and
+    // printing it twice reads as two separate problems. De-duplicate on the message.
+    return [
+      ...new Set(
+        codes
+          .filter((c) => !superseded.has(c))
+          .map((c) => byCode[c])
+          .filter(Boolean)
+      )
+    ];
+    // NOT useMemo. This sits below the parse-fail early return, so a hook here is called
+    // CONDITIONALLY — on a batch mixing a failed and a successful parse React's hook order
+    // changes between renders, which is the trap the comment above `formatNumber` already
+    // describes. Mapping at most six codes needs no memo anyway.
+  })();
+
   const startsAfterBillTerm =
     !!targetExpense?.startTerm &&
     !!billTerm &&
@@ -493,6 +551,7 @@ function ResultCard({
           startsAfterBillTerm ||
           existingAmount !== undefined ||
           hasArrears ||
+          parserWarnings.length > 0 ||
           duplicate) && (
           <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-800 dark:bg-amber-950/30">
             {wrongBuilding && (
@@ -534,6 +593,21 @@ function ResultCard({
                 </span>
               </div>
             )}
+
+            {/* THE PARSER'S CROSS-CHECKS, last in the block. Ordered by how badly each
+                row can cost money, and these are advisory: the amount MIGHT be a
+                misread, whereas the rows above state something that will definitely
+                happen. They are still here because this is the only lane where the
+                operator can fix the figure before confirming. */}
+            {parserWarnings.map((message) => (
+              <div
+                key={message}
+                className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200"
+              >
+                <LuAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <span>{t(message)}</span>
+              </div>
+            ))}
 
             {startsAfterBillTerm && (
               <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-200">

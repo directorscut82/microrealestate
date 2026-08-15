@@ -1112,6 +1112,37 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         );
       }
 
+      // …AND THE SAME FOR chargeableAmount, which is the figure the tenants are
+      // actually billed. It had no bounds at all: `Number(chargeableAmount)` was
+      // handed straight to bridgeChargeToStatement, so a garbled value became a
+      // garbled charge. NaN is the worst of them — it propagates silently through
+      // the allocation into monthlyCharges and every money surface then renders
+      // NaN, which no validator downstream rejects because nothing compares it.
+      //
+      // Deliberately NOT the same rule as totalAmount in two respects:
+      //   · ZERO IS LEGAL here. A period whose own charges are nil is a real
+      //     statement (a credit that exactly covers it), and rejecting it would
+      //     force the operator to invent a figure.
+      //   · NO CROSS-BOUND against totalAmount. chargeableAmount > totalAmount is
+      //     the CREDIT case — the landlord owes less than this period cost because
+      //     an earlier overpayment absorbed part of it — and the tenants still owe
+      //     this period in full. Capping it here would quietly under-charge them.
+      if (chargeableAmount !== undefined && chargeableAmount !== null) {
+        const _ca = Number(chargeableAmount);
+        if (!Number.isFinite(_ca) || _ca < 0) {
+          throw new ServiceError(
+            `Bill chargeableAmount must be a non-negative number (got ${chargeableAmount})`,
+            422
+          );
+        }
+        if (_ca > 1_000_000) {
+          throw new ServiceError(
+            `Bill chargeableAmount is implausibly large (got ${chargeableAmount}); check for an OCR misread`,
+            422
+          );
+        }
+      }
+
       // Tier A6 (B3) — Bill date validation. periodStart and periodEnd are
       // required and must be valid dates with periodStart ≤ periodEnd.
       // issueDate / dueDate are optional but, when set, must be valid and

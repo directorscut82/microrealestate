@@ -668,7 +668,7 @@ async function _editReply(
  * unmapped code returns null and is not rendered, because a warning nobody can act on
  * trains them to dismiss the ones they can.
  */
-function _parserWarningMessage(
+export function _parserWarningMessage(
   code: string,
   bill: { totalAmount?: number; chargeableAmount?: number }
 ): string | null {
@@ -681,6 +681,16 @@ function _parserWarningMessage(
     }
     case 'breakdown-does-not-sum-to-subtotal':
       return 'Η ανάλυση του λογαριασμού δεν αθροίζει στο μερικό σύνολο — ελέγξτε το ποσό στο έντυπο.';
+    // THE TWO THAT CHANGE THE FIGURE. The parser substitutes the itemised sum for the
+    // printed ΜΕΡΙΚΟ ΣΥΝΟΛΟ when they disagree, or derives it when the bill prints none, so
+    // the amount the tenants are charged is not the number on the paper. Neither code
+    // reached any surface — and on THIS lane the amount is rendered read-only, so the
+    // landlord could not even have corrected it. Found by a source-derived census of the
+    // codes the parsers emit; a hand-maintained list had simply never heard of them.
+    case 'subtotal-label-overridden-by-breakdown-sum':
+      return 'Το τυπωμένο μερικό σύνολο διαφωνεί με τις αναλυτικές γραμμές· για το μερίδιο των ενοικιαστών χρησιμοποιήθηκε το άθροισμα των γραμμών. Ελέγξτε το στο έντυπο.';
+    case 'subtotal-derived-from-breakdown':
+      return 'Ο λογαριασμός δεν αναγράφει μερικό σύνολο για την περίοδο, οπότε το μερίδιο των ενοικιαστών υπολογίστηκε από τις αναλυτικές γραμμές.';
     case 'payment-string-does-not-corroborate':
       return 'Ο κωδικός πληρωμής δεν συμφωνεί με τα υπόλοιπα στοιχεία — μην τον σαρώσετε, πληρώστε από το έντυπο.';
     case 'tiers-do-not-sum-to-consumption':
@@ -1228,7 +1238,18 @@ async function _parseAndFinish(
         // matters most, 'prior-balance-included-in-payable', says ΠΛΗΡΩΤΕΟ carries a
         // balance from an earlier period — precisely the case where charging the wrong
         // figure costs the tenants money. The display surface already existed.
-        for (const code of bill.warnings || []) {
+        // The override message states the disagreement AND what was done about it, so the
+        // plainer «does not add up» row is a strictly weaker duplicate of it. Suppressed
+        // here rather than in the message map, because it depends on the OTHER codes
+        // present. Same rule as the upload dialog.
+        const codes: string[] = bill.warnings || [];
+        const superseded = codes.includes(
+          'subtotal-label-overridden-by-breakdown-sum'
+        )
+          ? new Set(['breakdown-does-not-sum-to-subtotal'])
+          : new Set<string>();
+        for (const code of codes) {
+          if (superseded.has(code)) continue;
           const message = _parserWarningMessage(code, bill);
           if (message) termWarnings.push({ level: 'warn', code, message });
         }
@@ -1405,6 +1426,30 @@ export async function runInboxPollOnce(
  */
 const STALE_PROCESSING_MS = 15 * 60 * 1000;
 
+/**
+ * The bot token for a realm, memoised for the caller's batch. Returns null (and says so
+ * once) when the realm no longer has Telegram configured — which is a normal state, not an
+ * error: the landlord may have turned the channel off while a row was in flight.
+ */
+async function _botTokenForRealm(
+  realmId: string,
+  cache: Map<string, string | null>
+): Promise<string | null> {
+  if (cache.has(realmId)) return cache.get(realmId) ?? null;
+  let token: string | null = null;
+  try {
+    const realm: any = await Collections.Realm.findOne({ _id: realmId }).lean();
+    const tg = realm?.thirdParties?.telegram;
+    if (tg?.selected && tg?.botToken) token = Crypto.decrypt(tg.botToken);
+  } catch (err: any) {
+    logger.warn(
+      `telegram-inbox: no bot token for realm ${realmId}: ${err?.message || err}`
+    );
+  }
+  cache.set(realmId, token);
+  return token;
+}
+
 export async function sweepStalledProcessing(
   now: Date = new Date(),
   // Startup passes 0: in a process that has just booted, `ownedItemIds` is empty, so any
@@ -1412,7 +1457,16 @@ export async function sweepStalledProcessing(
   // definition — waiting out the age cutoff would only make the landlord stare at
   // «το διαβάζω τώρα…» for another quarter of an hour. The comment at the call site has
   // always claimed this; without the parameter the code did the opposite.
-  staleMs: number = STALE_PROCESSING_MS
+  staleMs: number = STALE_PROCESSING_MS,
+  /**
+   * Injected for tests, same reason the scanner takes its deps: without a seam here the
+   * sweep reaches api.telegram.org from a unit test — a real outbound call to a third
+   * party, on every run, whose only saving grace is that the failure is caught.
+   */
+  hooks: {
+    editReply?: InboxScanDeps['editReply'];
+    botTokenFor?: (realmId: string) => Promise<string | null>;
+  } = {}
 ): Promise<number> {
   const cutoff = new Date(now.getTime() - staleMs);
   const candidates: any[] = await Collections.InboxItem.find({
@@ -1430,6 +1484,10 @@ export async function sweepStalledProcessing(
     );
   }
   let released = 0;
+  // One realm lookup per realm per sweep, not per row: a batch of 50 stalled rows is
+  // overwhelmingly one realm's backlog, and each miss costs a Realm read plus an AES
+  // decrypt. `null` is cached too, so a realm whose token is gone is not retried 50 times.
+  const tokenCache = new Map<string, string | null>();
   for (const item of stalled) {
     // `status: 'processing'` in the FILTER, not just in the find. The find and this write
     // are separate round-trips, and the worker can finish in between: an unconditional
@@ -1458,6 +1516,36 @@ export async function sweepStalledProcessing(
     logger.warn(
       `telegram-inbox: item ${item._id} was stuck in 'processing' since ${item.updatedDate} — marked pending`
     );
+    // TELL THE LANDLORD ON THE MESSAGE THEY ARE LOOKING AT.
+    //
+    // This is what `ackMessageId`/`ackChatId` are stored FOR, and until now nothing read
+    // them back: the worker carried its own copy in memory, so the persisted pair was dead
+    // data. The consequence was the same two-surfaces-disagree defect as an unchecked
+    // update, just triggered by a restart instead of a dismiss — the row correctly said
+    // «η ανάγνωση διακόπηκε», while the Telegram message the landlord was staring at still
+    // said «το διαβάζω τώρα…», forever. The in-memory copy cannot help here by definition:
+    // the process that held it is the one that died.
+    //
+    // Best-effort and last: a Telegram failure must not stop the sweep from releasing the
+    // remaining rows, and the row is already correct without the edit.
+    if (item.ackMessageId && item.ackChatId) {
+      const token = hooks.botTokenFor
+        ? await hooks.botTokenFor(String(item.realmId))
+        : await _botTokenForRealm(String(item.realmId), tokenCache);
+      const edit = hooks.editReply ?? _editReply;
+      if (token) {
+        await edit(
+          token,
+          item.ackChatId,
+          item.ackMessageId,
+          'Η ανάγνωση διακόπηκε (επανεκκίνηση υπηρεσίας). Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση — ή στείλτε τον λογαριασμό ξανά.'
+        ).catch((err: any) =>
+          logger.warn(
+            `telegram-inbox: could not update the ack for ${item._id}: ${err?.message || err}`
+          )
+        );
+      }
+    }
   }
   if (released) {
     logger.info(`telegram-inbox: released ${released} stalled item(s)`);
