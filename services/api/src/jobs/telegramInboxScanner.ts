@@ -691,6 +691,12 @@ export function _parserWarningMessage(
       return 'Το τυπωμένο μερικό σύνολο διαφωνεί με τις αναλυτικές γραμμές· για το μερίδιο των ενοικιαστών χρησιμοποιήθηκε το άθροισμα των γραμμών. Ελέγξτε το στο έντυπο.';
     case 'subtotal-derived-from-breakdown':
       return 'Ο λογαριασμός δεν αναγράφει μερικό σύνολο για την περίοδο, οπότε το μερίδιο των ενοικιαστών υπολογίστηκε από τις αναλυτικές γραμμές.';
+    case 'breakdown-exceeds-subtotal':
+      return 'Μέρος των αναλυτικών γραμμών υπερβαίνει ήδη το αναγραφόμενο μερικό σύνολο — πιθανή λάθος ανάγνωση του ποσού.';
+    // The one that costs money if ignored, and on THIS lane the amount is read-only, so
+    // the instruction has to be «do it in the app», not «check the figure».
+    case 'subtotal-not-read-payable-charged':
+      return 'Δεν διαβάστηκε το μερικό σύνολο της περιόδου, οπότε οι ενοικιαστές θα χρεωθούν το συνολικό οφειλόμενο — μαζί με τυχόν προηγούμενες οφειλές. Διορθώστε το ποσό στη δαπάνη πριν το επιβεβαιώσετε.';
     case 'payment-string-does-not-corroborate':
       return 'Ο κωδικός πληρωμής δεν συμφωνεί με τα υπόλοιπα στοιχεία — μην τον σαρώσετε, πληρώστε από το έντυπο.';
     case 'tiers-do-not-sum-to-consumption':

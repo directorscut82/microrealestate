@@ -42,6 +42,7 @@ describe('the codes the parser emits and the codes a surface explains', () => {
     // instead of silently becoming a warning nobody renders.
     expect(emittedCodes()).toEqual([
       'breakdown-does-not-sum-to-subtotal',
+      'breakdown-exceeds-subtotal',
       'consumption-from-tiers-only',
       'payment-string-does-not-corroborate',
       'period-disagrees',
@@ -49,6 +50,7 @@ describe('the codes the parser emits and the codes a surface explains', () => {
       'registry-number-disagrees',
       'subtotal-derived-from-breakdown',
       'subtotal-label-overridden-by-breakdown-sum',
+      'subtotal-not-read-payable-charged',
       'tier-amounts-do-not-sum-to-charges',
       'tiers-do-not-sum-to-consumption'
     ]);
@@ -127,7 +129,7 @@ describe('the dialog’s messages exist in all six locales', () => {
   it('found the message strings to check', () => {
     // Without this the regex could match nothing and the loop below would assert zero
     // times — a green test proving only that it ran.
-    expect(messages.length).toBeGreaterThanOrEqual(6);
+    expect(messages.length).toBeGreaterThanOrEqual(8);
   });
 
   for (const loc of LOCALES) {

@@ -611,6 +611,140 @@ describe('the CHARGEABLE figure must survive a mislocated subtotal label', () =>
   });
 });
 
+describe('when the printed subtotal and the itemised lines disagree', () => {
+  /**
+   * The override is a BACKSTOP, and a backstop has to fail toward the party who cannot see
+   * it. Two opposed risks live here:
+   *
+   *   · the ΜΕΡΙΚΟ ΣΥΝΟΛΟ label latched the ΠΛΗΡΩΤΕΟ box — trusting it charges the
+   *     TENANTS the landlord's arrears;
+   *   · the bill printed a seventh charge line this parser does not know, so the six-line
+   *     sum under-counts — trusting it under-charges the tenants and the landlord absorbs
+   *     the difference.
+   *
+   * Over-charging spends someone else's money; under-charging costs the operator, who is
+   * the person reading the warning and can raise the figure. So the rule is: charge the
+   * LOWER of the two, and never silently.
+   */
+  const withSubtotal = (v) =>
+    OCR.replace(/ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94/, `ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) :\n${v}`);
+
+  it('a SEVENTH charge line does not silently under-charge without a warning', () => {
+    // The printed subtotal is 20,00 higher than the six lines this parser knows — exactly
+    // what an added levy looks like. The lower figure is charged, and BOTH codes fire so
+    // the operator can raise it.
+    const b = parseEydapBill(withSubtotal('109,94')).bill;
+    expect({
+      chargeable: b.chargeableAmount,
+      disagrees: b.warnings.includes('breakdown-does-not-sum-to-subtotal'),
+      overridden: b.warnings.includes('subtotal-label-overridden-by-breakdown-sum')
+    }).toEqual({ chargeable: 89.94, disagrees: true, overridden: true });
+  });
+
+  it('itemised lines ABOVE the printed subtotal keep the lower printed figure', () => {
+    // The other direction: the sum exceeds the label, so the label is already the lower
+    // number and stands. Reported, because lines that exceed the stated subtotal mean
+    // something was misread.
+    const b = parseEydapBill(withSubtotal('69,94')).bill;
+    expect({
+      chargeable: b.chargeableAmount,
+      exceeds: b.warnings.includes('breakdown-exceeds-subtotal'),
+      overridden: b.warnings.includes('subtotal-label-overridden-by-breakdown-sum')
+    }).toEqual({ chargeable: 69.94, exceeds: true, overridden: false });
+  });
+
+  it('never resolves to a figure that is neither of the two', () => {
+    // A guard against a future "average"/"repair" attempt: the chargeable figure must be
+    // one of the two numbers the document supports, not a third one invented here.
+    for (const v of ['109,94', '69,94', '289,94']) {
+      const b = parseEydapBill(withSubtotal(v)).bill;
+      const printed = Number(v.replace(',', '.'));
+      expect([printed, 89.94]).toContain(b.chargeableAmount);
+    }
+  });
+});
+
+describe('the identity must not decline to run in silence', () => {
+  /**
+   * `haveWholeBreakdown` requires all six lines, so a bill that legitimately omits one —
+   * the environmental levy is not on every bill — skipped the sum check entirely, and its
+   * silence read as a pass. That is the defect `amountAfterLabel`'s own comment warns
+   * about: «a consistency check that quietly declines to run is worse than not having
+   * one».
+   */
+  const dropLine = (label) =>
+    OCR.split('\n')
+      .filter((l, i, all) => {
+        // Drop the label AND the amount line that follows it.
+        if (l.includes(label)) return false;
+        return !(i > 0 && all[i - 1].includes(label));
+      })
+      .join('\n');
+
+  it('a five-line bill whose lines already exceed the subtotal is reported', () => {
+    // Remove the environmental levy (0,03) and lower the printed subtotal well below the
+    // remaining five lines. The five found lines now exceed what the bill says.
+    const src = dropLine('ΠΕΡΙΒΑΛΛ').replace(
+      /ΜΕΡΙΚΟ ΣΥΝΟΛΟ \(ΕΥΡΩ\) :\n89,94/,
+      'ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) :\n50,00'
+    );
+    const r = parseEydapBill(src);
+    const b = r.bill ?? r.partial;
+    expect(b.warnings).toContain('breakdown-exceeds-subtotal');
+  });
+
+  it('a five-line bill that merely sums LOW is NOT reported — that would be noise', () => {
+    // With a line missing, a sum below the subtotal is exactly what one expects. Warning
+    // about it would train the operator to dismiss the block that matters.
+    const src = dropLine('ΠΕΡΙΒΑΛΛ');
+    const r = parseEydapBill(src);
+    const b = r.bill ?? r.partial;
+    // `?? []`: the bill omits `warnings` entirely when there are none, so asserting on the
+    // bare property tests `undefined` and reports «Received has value: undefined» — which
+    // is a pass for the wrong reason on `.not.toContain`, and the failure that taught me
+    // this. Also assert the parse SUCCEEDED, or a broken fixture would satisfy the rest.
+    expect(r.success).toBe(true);
+    expect(b.warnings ?? []).not.toContain('breakdown-exceeds-subtotal');
+    expect(b.warnings ?? []).not.toContain('breakdown-does-not-sum-to-subtotal');
+    // …and the figure is still the printed subtotal, unchanged by a missing line.
+    expect(b.chargeableAmount).toBe(89.94);
+  });
+});
+
+describe('an unreadable subtotal is not a neutral absence', () => {
+  it('says so, because confirm would otherwise charge the PAYABLE', () => {
+    /**
+     * ΕΥΔΑΠ always prints both figures. When the subtotal cannot be read,
+     * `chargeableAmount` goes out null, `confirmBills` correctly falls back to
+     * `totalAmount` — the payable — and the landlord's arrears are split among the tenants
+     * with nothing on any surface saying so. Same defect as the dropped schema path,
+     * reached by a different route: the figure is missing rather than deleted.
+     */
+    // No subtotal label AND an incomplete breakdown, so nothing can be derived.
+    const src = OCR.split('\n')
+      .filter(
+        (l) =>
+          !/ΜΕΡΙΚΟ\s+ΣΥΝΟΛΟ/.test(l) &&
+          !/ΣΥΝΟΛΟ\s+ΤΙΜΗΜΑΤΟΣ/.test(l) &&
+          !/ΠΑΓΙΟ\s+ΤΕΛΟΣ/.test(l)
+      )
+      .join('\n');
+    const r = parseEydapBill(src);
+    const b = r.bill ?? r.partial;
+    expect(b.chargeableAmount ?? null).toBeNull();
+    expect(b.warnings).toContain('subtotal-not-read-payable-charged');
+  });
+
+  it('a ΔΕΗ-shaped single-figure bill is NOT accused of this', () => {
+    // ΔΕΗ states one figure, so an absent chargeableAmount is legitimate there and the
+    // fallback is right. The warning is ΕΥΔΑΠ-specific for exactly that reason — firing it
+    // on every ΔΕΗ bill would make it meaningless.
+    const clean = parseEydapBill(OCR).bill;
+    expect(clean.warnings ?? []).not.toContain('subtotal-not-read-payable-charged');
+    expect(clean.chargeableAmount).toBe(89.94);
+  });
+});
+
 describe('a ONE-LINE text layer must never yield a DIFFERENT amount', () => {
   /**
    * THE ROOT CAUSE behind the PNG-vs-PDF divergence, fixed upstream of the symptom.

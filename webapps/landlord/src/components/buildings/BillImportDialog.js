@@ -437,7 +437,13 @@ function ResultCard({
       'subtotal-label-overridden-by-breakdown-sum':
         'The printed subtotal disagrees with the bill’s own itemised lines; the itemised total was used for the tenants’ share. Check it against the paper bill.',
       'subtotal-derived-from-breakdown':
-        'This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.'
+        'This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.',
+      'breakdown-exceeds-subtotal':
+        'Some of the bill’s itemised lines already exceed its stated subtotal — the amount may have been misread.',
+      // The one that costs money if ignored: with no subtotal read, confirm falls back to
+      // the PAYABLE and the landlord's arrears are split among the tenants.
+      'subtotal-not-read-payable-charged':
+        'This period’s own subtotal could not be read, so the tenants would be charged the full amount owed — arrears included. Enter the period’s amount by hand.'
     };
     // The override message states the disagreement AND what was done about it, so the
     // plainer «does not add up» row would be a strictly weaker duplicate of it.

@@ -578,16 +578,78 @@ export function parseEydapBill(text: string): BillParseResult {
     // 2c tolerance: each of six lines can round by a cent.
     if (Math.abs(breakdownSum - subtotal) > 0.02) {
       warnings.push('breakdown-does-not-sum-to-subtotal');
-      // Prefer the itemised sum for the CHARGEABLE figure. A wrong number that happens
-      // to equal the payable is the worst case: nothing downstream looks inconsistent,
-      // and the arrears are charged silently.
-      subtotalTrusted = breakdownSum;
-      warnings.push('subtotal-label-overridden-by-breakdown-sum');
+      /**
+       * WHEN THE TWO DISAGREE, CHARGE THE LOWER — and say so on both lanes.
+       *
+       * The first version took the itemised sum unconditionally, which is wrong in one
+       * direction, and I then tried a discriminator («override only when the label equals
+       * the payable»), which is wrong in the other. The two risks are opposed:
+       *
+       *   · The label latched the wrong number — the ΠΛΗΡΩΤΕΟ box — which is the measured
+       *     bug this override exists for. Trusting the label CHARGES THE TENANTS the
+       *     landlord's arrears.
+       *   · The bill printed a SEVENTH charge line this parser does not know (ΕΥΔΑΠ has
+       *     added levies before), so the six-line sum is an UNDER-COUNT while the printed
+       *     subtotal is correct. Trusting the sum UNDER-CHARGES the tenants and the
+       *     landlord absorbs the difference.
+       *
+       * They are not symmetric. Over-charging spends someone else's money and is the
+       * defect the whole arrears fix exists to prevent; under-charging costs the operator,
+       * who is the person reading this warning and can raise the figure in the dialog. So
+       * take the lower of the two, and never take it silently: the disagreement is
+       * reported above, and the code below names which figure was used. The dialog renders
+       * both and its amount field stays editable.
+       *
+       * (The root cause of the first case is fixed upstream — the label search is bounded
+       * to the text after the label — so this is a backstop. A backstop should fail toward
+       * the party who cannot see it.)
+       */
+      if (breakdownSum < subtotal) {
+        subtotalTrusted = breakdownSum;
+        warnings.push('subtotal-label-overridden-by-breakdown-sum');
+      } else {
+        // The label is already the lower figure, so it stands. Still a disagreement worth
+        // naming: itemised lines that exceed the stated subtotal mean something was
+        // misread, and the operator should compare against the paper before confirming.
+        warnings.push('breakdown-exceeds-subtotal');
+      }
     }
   } else if (subtotal === null && haveWholeBreakdown) {
     // No label found at all, but all six lines were. The sum IS this period's charges.
     subtotalTrusted = breakdownSum;
     warnings.push('subtotal-derived-from-breakdown');
+  } else if (subtotal !== null && breakdownSum - subtotal > 0.02) {
+    /**
+     * THE IDENTITY USED TO DECLINE TO RUN HERE, SILENTLY.
+     *
+     * `haveWholeBreakdown` requires all six lines, so a bill that legitimately omits one
+     * — the environmental levy is not on every bill — skipped the check entirely. Its
+     * silence read as a pass, which is the defect `amountAfterLabel`'s own comment warns
+     * about twenty lines above: «a consistency check that quietly declines to run is
+     * worse than not having one».
+     *
+     * ONE-SIDED on purpose. With lines missing, a sum BELOW the subtotal is expected and
+     * warning about it would be noise — and noise is what trains an operator to dismiss
+     * the row that matters. A partial sum that already EXCEEDS the stated subtotal cannot
+     * be explained by the missing lines, so something was misread. No override: with an
+     * incomplete breakdown there is no figure here worth more trust than the label.
+     */
+    warnings.push('breakdown-exceeds-subtotal');
+  }
+
+  /**
+   * ΕΥΔΑΠ ALWAYS PRINTS BOTH FIGURES, so failing to read the subtotal is not a neutral
+   * absence: `chargeableAmount` goes out null, `confirmBills` correctly falls back to
+   * `totalAmount` — the PAYABLE — and the landlord's arrears are split among the tenants
+   * with nothing on any surface saying so. That is the same defect as the dropped schema
+   * path, reached by a different route: the figure is missing rather than deleted.
+   *
+   * ΔΕΗ is unaffected: it states one figure, so `chargeableAmount` is legitimately absent
+   * there and the fallback is exactly right. This warning is ΕΥΔΑΠ-specific for that
+   * reason.
+   */
+  if (subtotalTrusted === null && payable !== null) {
+    warnings.push('subtotal-not-read-payable-charged');
   }
 
   // ARREARS. When ΠΛΗΡΩΤΕΟ exceeds ΜΕΡΙΚΟ ΣΥΝΟΛΟ the difference is a prior balance,

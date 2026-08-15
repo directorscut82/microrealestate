@@ -1,10 +1,12 @@
 {
   "Payments - {{year}}.xlsx": "Paiements - {{year}}.xlsx",
+  "Some of the bill’s itemised lines already exceed its stated subtotal — the amount may have been misread.": "Une partie du détail dépasse déjà le sous-total indiqué — le montant a peut-être été mal lu.",
   "The bill’s own breakdown does not add up to its subtotal — check the amount against the paper bill.": "Le détail de la facture ne correspond pas à son sous-total — vérifiez le montant sur la facture papier.",
   "The consumption breakdown does not match the total — the amount may have been misread.": "Le détail de la consommation ne correspond pas au total — le montant a peut-être été mal lu.",
   "The payment code does not agree with the rest of the bill — do not scan it, pay from the paper bill.": "Le code de paiement ne concorde pas avec le reste de la facture — ne le scannez pas, payez depuis la facture papier.",
   "The printed subtotal disagrees with the bill’s own itemised lines; the itemised total was used for the tenants’ share. Check it against the paper bill.": "Le sous-total imprimé ne concorde pas avec le détail de la facture ; c’est le total du détail qui a été retenu pour la part des locataires. Vérifiez-le sur la facture papier.",
   "This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.": "Cette facture n’imprime pas de sous-total pour la période ; la part des locataires a donc été calculée à partir du détail.",
+  "This period’s own subtotal could not be read, so the tenants would be charged the full amount owed — arrears included. Enter the period’s amount by hand.": "Le sous-total de la période n’a pas pu être lu ; les locataires seraient donc facturés le montant total dû, arriérés compris. Saisissez le montant de la période à la main.",
   "Two places on the bill give different values for the same field — check the paper bill.": "Deux endroits de la facture donnent des valeurs différentes pour le même champ — vérifiez la facture papier.",
   "Vacant / owner-occupied unit shares": "Parts des lots vacants / occupés par le propriétaire",
   "Pending": "En attente",

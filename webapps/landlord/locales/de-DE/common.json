@@ -1,10 +1,12 @@
 {
   "Payments - {{year}}.xlsx": "Zahlungen - {{year}}.xlsx",
+  "Some of the bill’s itemised lines already exceed its stated subtotal — the amount may have been misread.": "Einzelne Positionen übersteigen bereits die angegebene Zwischensumme — der Betrag wurde möglicherweise falsch gelesen.",
   "The bill’s own breakdown does not add up to its subtotal — check the amount against the paper bill.": "Die Aufstellung der Rechnung ergibt nicht die Zwischensumme — prüfen Sie den Betrag auf der Papierrechnung.",
   "The consumption breakdown does not match the total — the amount may have been misread.": "Die Verbrauchsaufstellung passt nicht zur Summe — der Betrag wurde möglicherweise falsch gelesen.",
   "The payment code does not agree with the rest of the bill — do not scan it, pay from the paper bill.": "Der Zahlungscode stimmt nicht mit der übrigen Rechnung überein — nicht scannen, zahlen Sie über die Papierrechnung.",
   "The printed subtotal disagrees with the bill’s own itemised lines; the itemised total was used for the tenants’ share. Check it against the paper bill.": "Die gedruckte Zwischensumme widerspricht der Aufstellung der Rechnung; für den Mieteranteil wurde die Summe der Positionen verwendet. Prüfen Sie sie auf der Papierrechnung.",
   "This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.": "Diese Rechnung weist keine Zwischensumme für den Zeitraum aus; der Mieteranteil wurde daher aus den Positionen berechnet.",
+  "This period’s own subtotal could not be read, so the tenants would be charged the full amount owed — arrears included. Enter the period’s amount by hand.": "Die Zwischensumme des Zeitraums konnte nicht gelesen werden; den Mietern würde der gesamte offene Betrag einschließlich Rückstände berechnet. Geben Sie den Betrag des Zeitraums manuell ein.",
   "Two places on the bill give different values for the same field — check the paper bill.": "Zwei Stellen der Rechnung nennen unterschiedliche Werte für dasselbe Feld — prüfen Sie die Papierrechnung.",
   "Vacant / owner-occupied unit shares": "Anteile leerstehender / eigengenutzter Einheiten",
   "Pending": "Ausstehend",

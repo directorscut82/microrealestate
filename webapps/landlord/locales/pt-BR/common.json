@@ -1,10 +1,12 @@
 {
   "Payments - {{year}}.xlsx": "Pagamentos - {{year}}.xlsx",
+  "Some of the bill’s itemised lines already exceed its stated subtotal — the amount may have been misread.": "Parte do detalhamento já excede o subtotal informado — o valor pode ter sido lido errado.",
   "The bill’s own breakdown does not add up to its subtotal — check the amount against the paper bill.": "O detalhamento da fatura não soma o subtotal — confira o valor na fatura impressa.",
   "The consumption breakdown does not match the total — the amount may have been misread.": "O detalhamento de consumo não corresponde ao total — o valor pode ter sido lido errado.",
   "The payment code does not agree with the rest of the bill — do not scan it, pay from the paper bill.": "O código de pagamento não confere com o restante da fatura — não o escaneie, pague pela fatura impressa.",
   "The printed subtotal disagrees with the bill’s own itemised lines; the itemised total was used for the tenants’ share. Check it against the paper bill.": "O subtotal impresso não confere com o detalhamento da fatura; para a parte dos inquilinos foi usada a soma do detalhamento. Confira na fatura impressa.",
   "This bill prints no subtotal for the period, so the tenants’ share was computed from its itemised lines.": "Esta fatura não imprime subtotal do período, então a parte dos inquilinos foi calculada a partir do detalhamento.",
+  "This period’s own subtotal could not be read, so the tenants would be charged the full amount owed — arrears included. Enter the period’s amount by hand.": "O subtotal do período não pôde ser lido, então os inquilinos seriam cobrados pelo total devido, incluindo atrasados. Informe o valor do período manualmente.",
   "Two places on the bill give different values for the same field — check the paper bill.": "Duas partes da fatura trazem valores diferentes para o mesmo dado — confira a fatura impressa.",
   "Vacant / owner-occupied unit shares": "Cotas de unidades vagas / de uso próprio",
   "Pending": "Pendente",
