@@ -395,13 +395,23 @@ function ResultCard({
   // expense even exists that month.
   const billTerm = parsed.proposedTerm ?? null;
   /**
-   * ΠΛΗΡΩΤΕΟ exceeds ΜΕΡΙΚΟ ΣΥΝΟΛΟ: the bill carries a balance from an earlier period.
-   * Only in that direction — a payable BELOW the subtotal is a credit and costs nobody
-   * anything, so warning about it would be noise.
+   * THE PRIOR BALANCE THE DOCUMENT STATES — reported by the parser, not derived here.
+   *
+   * This used to be `chargeableAmount < totalAmount`, which answers a different question.
+   * Measured on the deployed Greek card: a bill printing ΜΕΡΙΚΟ ΣΥΝΟΛΟ 109,94 / ΠΛΗΡΩΤΕΟ
+   * 109,94 whose itemised lines sum to 89,94 carries NO prior balance — its own
+   * ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ box is zero — but the two figures differ by 20,00 because the
+   * parser lowered the chargeable amount, so the card announced «περιλαμβάνει 20,00 € από
+   * προηγούμενη περίοδο» directly above the row that correctly explained the same 20,00 as
+   * the bill disagreeing with itself. Two causes for one number, one of them false, on a
+   * money surface.
+   *
+   * Fixing it server-side was not enough on its own: only the parser can tell arrears from
+   * an internal disagreement, and this component was deciding independently. One
+   * derivation, in the one place that has the evidence.
    */
-  const hasArrears =
-    Number(parsed?.chargeableAmount) > 0 &&
-    Number(parsed?.chargeableAmount) < Number(parsed?.totalAmount) - 0.005;
+  const priorBalance = Number(parsed?.priorBalance) || 0;
+  const hasArrears = priorBalance > 0.005;
   /**
    * The parser's own observations, which reached no surface on THIS lane.
    *
@@ -587,10 +597,12 @@ function ResultCard({
                   {t(
                     'This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.',
                     {
-                      arrears: formatNumber(
-                        Number(result.parsed.totalAmount) -
-                          Number(result.parsed.chargeableAmount)
-                      ),
+                      // The stated balance, not a subtraction: the two disagree exactly
+                      // when the subtotal was ALSO overridden (printed 89,94 / payable
+                      // 289,94 / lines 70,00 → the bill says 200,00, subtracting says
+                      // 219,94). Printing an equation that does not add up is the defect
+                      // the owner-statement PDF already taught this repo.
+                      arrears: formatNumber(priorBalance),
                       current: formatNumber(
                         Number(result.parsed.chargeableAmount)
                       )

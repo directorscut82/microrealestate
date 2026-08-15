@@ -680,8 +680,11 @@ export function parseEydapBill(text: string): BillParseResult {
    * itemised lines.
    */
   const arrearsBasis = subtotal !== null ? subtotal : subtotalTrusted;
+  let priorBalance: number | null = null;
   if (payable !== null && arrearsBasis !== null && payable - arrearsBasis > 0.02) {
     warnings.push('prior-balance-included-in-payable');
+    // Reported, not left to the surfaces to subtract. See BillFields.priorBalance.
+    priorBalance = round2(payable - arrearsBasis);
   }
 
   // ─── consumption ───────────────────────────────────────────────────────────
@@ -906,6 +909,7 @@ export function parseEydapBill(text: string): BillParseResult {
     // the figure the tenant-charge bridge splits, so a label that disagrees with the
     // itemised lines must not reach it.
     chargeableAmount: subtotalTrusted ?? undefined,
+    priorBalance: priorBalance ?? undefined,
     alternateBillingIds: alternates.length ? alternates : undefined,
     warnings: warnings.length ? [...new Set(warnings)] : undefined,
     details: {

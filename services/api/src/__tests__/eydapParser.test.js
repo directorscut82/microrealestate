@@ -36,6 +36,8 @@ import { fileURLToPath } from 'url';
 import { parseEydapBill } from '../managers/billparser/eydap.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const round = (n) => Math.round(n * 100) / 100;
+const read = (rel) => fs.readFileSync(path.resolve(HERE, rel), 'utf8');
 const OCR = fs.readFileSync(
   path.join(HERE, 'fixtures/eydap-ocr.synthetic.txt'),
   'utf8'
@@ -688,6 +690,88 @@ describe('the CHARGEABLE figure must survive a mislocated subtotal label', () =>
     const b = parseEydapBill(OCR).bill;
     expect(b.chargeableAmount).toBe(89.94);
     expect(b.warnings ?? []).toEqual([]);
+  });
+});
+
+describe('the prior balance is REPORTED, not left to be subtracted', () => {
+  /**
+   * `totalAmount - chargeableAmount` is not the prior balance, and two surfaces were
+   * computing exactly that — the import dialog and the Telegram message. Both were wrong in
+   * the same two ways:
+   *
+   *   · it is non-zero whenever the subtotal was overridden, even on a bill whose own
+   *     ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ box is zero, which is how the deployed card came to announce
+   *     «περιλαμβάνει 20,00 € από προηγούμενη περίοδο» about a bill with no arrears;
+   *   · when a real balance AND an override both apply, the subtraction gives a third
+   *     number that matches neither the document nor the charge.
+   */
+  it('is absent on a bill that carries none', () => {
+    expect(parseEydapBill(OCR).bill.priorBalance ?? null).toBeNull();
+  });
+
+  it('is the figure the DOCUMENT states, not the difference between the two amounts', () => {
+    // printed 89,94 / payable 289,94 / lines 89,94 → a real 200,00 balance, no override.
+    const arrears = OCR.replace(
+      /ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/,
+      'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n289,94'
+    ).replace(/ΠΛΗΡΩΤΕΟ\n89,94€/, 'ΠΛΗΡΩΤΕΟ\n289,94€');
+    const b = parseEydapBill(arrears).bill;
+    expect(b.priorBalance).toBe(200);
+    // Here the subtraction happens to agree, which is why the defect survived.
+    expect(round(b.totalAmount - b.chargeableAmount)).toBe(200);
+  });
+
+  it('DISAGREES with the subtraction when the subtotal was also overridden', () => {
+    /**
+     * The case that proves the field is necessary rather than decorative. Printed subtotal
+     * 89,94, payable 289,94, and the itemised lines lowered to 69,94 by dropping the
+     * sewerage line's 28,81 down to 8,81:
+     *   · the document states a 200,00 prior balance (289,94 − 89,94);
+     *   · the override lowers the charge to 69,94;
+     *   · subtracting gives 220,00, which is neither.
+     */
+    const src = OCR.replace(
+      /ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/,
+      'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n289,94'
+    )
+      .replace(/ΠΛΗΡΩΤΕΟ\n89,94€/, 'ΠΛΗΡΩΤΕΟ\n289,94€')
+      .replace(/^28,81$/m, '8,81');
+    const b = parseEydapBill(src).bill;
+    expect({
+      stated: b.priorBalance,
+      charged: b.chargeableAmount,
+      subtracted: round(b.totalAmount - b.chargeableAmount)
+    }).toEqual({ stated: 200, charged: 69.94, subtracted: 220 });
+  });
+
+  it('a CREDIT is not reported as a balance', () => {
+    // Payable BELOW the printed subtotal: an earlier overpayment absorbed part of this
+    // period. Nobody is owed anything, the tenants still owe the period in full, and
+    // warning about it would be noise.
+    const credit = OCR.replace(
+      /ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n89,94/,
+      'ΠΛΗΡΩΤΕΟ(ΕΥΡΩ) :\n49,94'
+    ).replace(/ΠΛΗΡΩΤΕΟ\n89,94€/, 'ΠΛΗΡΩΤΕΟ\n49,94€');
+    const b = parseEydapBill(credit).bill;
+    expect({
+      prior: b.priorBalance ?? null,
+      claims: (b.warnings ?? []).includes('prior-balance-included-in-payable'),
+      chargeable: b.chargeableAmount
+    }).toEqual({ prior: null, claims: false, chargeable: 89.94 });
+  });
+
+  it('neither surface subtracts any more', () => {
+    // The two consumers, named. A future edit that reintroduces the subtraction on either
+    // lane brings the false «από προηγούμενη περίοδο» row straight back.
+    const dialog = read(
+      '../../../../webapps/landlord/src/components/buildings/BillImportDialog.js'
+    );
+    expect(dialog).toContain('const priorBalance = Number(parsed?.priorBalance)');
+    expect(dialog).not.toMatch(
+      /Number\(result\.parsed\.totalAmount\)\s*-\s*\n?\s*Number\(result\.parsed\.chargeableAmount\)/
+    );
+    const scanner = read('../jobs/telegramInboxScanner.ts');
+    expect(scanner).toContain('bill?.priorBalance ??');
   });
 });
 

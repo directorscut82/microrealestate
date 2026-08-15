@@ -157,13 +157,28 @@ describe('the CONSUMERS, so the value cannot be computed and dropped again', () 
   });
 
   it('only the direction that costs money is warned about', () => {
-    // A payable BELOW the subtotal is a credit and warning about it would be noise —
-    // and noise is what trains an operator to dismiss the row that matters.
+    /**
+     * A payable BELOW the subtotal is a credit and warning about it would be noise — and
+     * noise is what trains an operator to dismiss the row that matters.
+     *
+     * REWRITTEN: this used to assert the dialog's own `chargeableAmount < totalAmount`
+     * expression, which is the derivation that had to go. Deriving it in the component
+     * announced «περιλαμβάνει 20,00 € από προηγούμενη περίοδο» on a bill whose own
+     * ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ box is zero, because the parser had lowered the chargeable
+     * figure. Only the parser can tell arrears from the bill disagreeing with itself, so
+     * the direction is enforced there and the dialog just renders what it is told.
+     */
+    const parser = read('../managers/billparser/eydap.ts');
+    // The one-sided comparison, in the one place that has the evidence.
+    expect(parser).toMatch(/payable - arrearsBasis > 0\.02/);
+    // …and the dialog renders the reported figure rather than a subtraction.
     const dialog = read(
       '../../../../webapps/landlord/src/components/buildings/BillImportDialog.js'
     );
     const at = dialog.indexOf('const hasArrears =');
+    expect(at).toBeGreaterThan(-1);
     const expr = dialog.slice(at, dialog.indexOf(';', at));
-    expect(expr).toMatch(/chargeableAmount\).{0,40}<.{0,40}totalAmount/s);
+    expect(expr).toContain('priorBalance > 0.005');
+    expect(expr).not.toContain('totalAmount');
   });
 });

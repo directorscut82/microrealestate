@@ -670,13 +670,21 @@ async function _editReply(
  */
 export function _parserWarningMessage(
   code: string,
-  bill: { totalAmount?: number; chargeableAmount?: number }
+  bill: {
+    totalAmount?: number;
+    chargeableAmount?: number;
+    priorBalance?: number;
+  }
 ): string | null {
   const owed = Number(bill?.totalAmount) || 0;
   const chargeable = Number(bill?.chargeableAmount) || 0;
   switch (code) {
     case 'prior-balance-included-in-payable': {
-      const arrears = Math.round((owed - chargeable) * 100) / 100;
+      // The figure the DOCUMENT states. `owed - chargeable` is a different quantity and
+      // disagrees with it whenever the subtotal was also overridden. See
+      // BillFields.priorBalance.
+      const arrears =
+        bill?.priorBalance ?? Math.round((owed - chargeable) * 100) / 100;
       return `Ο λογαριασμός περιλαμβάνει ${arrears.toFixed(2)}€ από προηγούμενη περίοδο. Οι ενοικιαστές χρεώνονται μόνο τα ${chargeable.toFixed(2)}€ της τρέχουσας.`;
     }
     case 'breakdown-does-not-sum-to-subtotal':

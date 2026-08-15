@@ -922,6 +922,9 @@ export async function parseBills(req: Req, res: Res): Promise<void> {
         // computed by the parser and dropped here, which is why the tenant split used
         // the arrears-inclusive figure.
         chargeableAmount: bill.chargeableAmount,
+        // The prior balance the DOCUMENT states, so the card does not subtract two figures
+        // that do not answer that question. See BillFields.priorBalance.
+        priorBalance: bill.priorBalance,
         // Parser observations, as stable codes. Dropped here too, so
         // 'prior-balance-included-in-payable' — the warning that says the two figures
         // differ and why it matters — reached no surface at all.

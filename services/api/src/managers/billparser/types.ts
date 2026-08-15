@@ -27,6 +27,24 @@ export type ParsedBill = {
   chargeableAmount?: number;
 
   /**
+   * The prior balance the document itself states: ΠΛΗΡΩΤΕΟ minus THIS PERIOD'S PRINTED
+   * charges. Present only when the bill actually carries one.
+   *
+   * REPORTED RATHER THAN DERIVED, because `totalAmount - chargeableAmount` is not it and
+   * two surfaces were computing exactly that. Measured on the deployed Greek card: a bill
+   * printing ΜΕΡΙΚΟ ΣΥΝΟΛΟ 109,94 / ΠΛΗΡΩΤΕΟ 109,94 whose lines sum to 89,94 has NO prior
+   * balance — its own ΠΡΟΗΓΟΥΜΕΝΕΣ ΟΦΕΙΛΕΣ box is zero — yet the difference is 20,00 and
+   * the card announced «περιλαμβάνει 20,00 € από προηγούμενη περίοδο» beside the row that
+   * correctly explained the same 20,00 as an internal disagreement.
+   *
+   * The difference is also the wrong FIGURE when both the override and a real prior balance
+   * apply: printed 89,94 / payable 289,94 / lines 70,00 gives a true balance of 200,00
+   * while the subtraction gives 219,94. An equation that does not add up must not be
+   * printed — the same rule the owner-statement PDF learned.
+   */
+  priorBalance?: number;
+
+  /**
    * OTHER identifiers printed on the bill that could legitimately be what the
    * landlord recorded on the apartment or the shared meter.
    *
