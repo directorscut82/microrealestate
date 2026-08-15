@@ -146,6 +146,17 @@ const REGISTRY_NUMBER = /\b(\d{7})-(\d{2})\b/;
 const METER_SERIAL = /\b([A-ZΑ-Ω]\d{2}[A-ZΑ-Ω]\d{5})\b/;
 /** ΠΕΡΙΟΔΟΣ ΚΑΤΑΝΑΛΩΣΗΣ: «28/04/2026-23/07/2026». Printed twice. */
 const PERIOD = /(\d{2}\/\d{2}\/\d{4})\s*[-–—]\s*(\d{2}\/\d{2}\/\d{4})/;
+/**
+ * «ΕΠΟΜΕΝΗ ΚΑΤΑΜΕΤΡΗΣΗ: 18/10/2026-24/10/2026» — the NEXT meter reading, which is a date
+ * range that is NOT the billing period. It has to be excluded before any positional
+ * period search, or a bill measured in July gets charged to October: the amount and the
+ * παροχή would both be right, so there would be no symptom.
+ *
+ * Global, and the range is optional, because the OCR sometimes breaks the line after the
+ * label. Matched case-insensitively for the same reason the period label is.
+ */
+const NEXT_READING =
+  /ΕΠΟΜΕΝΗ\s+ΚΑΤΑΜΕΤΡΗΣΗ\s*:?\s*(?:\d{1,2}\/\d{1,2}\/\d{2,4}\s*[-–—]\s*\d{1,2}\/\d{1,2}\/\d{2,4})?/gi;
 /** ΑΡ. ΠΑΡΑΣΤΑΤΙΚΟΥ: «2026 0007 2757 0091 05». Printed twice. */
 const DOCUMENT_NUMBER = /\b(\d{4}\s+\d{4}\s+\d{4}\s+\d{4}\s+\d{2})\b/;
 /**
@@ -188,6 +199,25 @@ const POSTCODE_AREA = /^(\d{5})\s+(.+)$/;
  * box's figures. A percentage line («75%», «13%») is skipped — it sits between an
  * ΑΠΟΧΕΤΕΥΣΗ/ΦΠΑ label and its euro amount.
  */
+/**
+ * How far past a label a value may sit and still belong to it.
+ *
+ * WHY BOUNDED. The same-line branch used to do `lines[i].replace(label,' ')` and then match
+ * UNANCHORED — i.e. search the whole line from index 0. That is harmless when a line is a
+ * line. It is catastrophic when the whole document arrives AS ONE LINE, which is exactly what
+ * a PDF TEXT LAYER produces (OCR gives one line per row; pdf text extraction does not). The
+ * label then matched and the search returned the FIRST amount on the entire page.
+ *
+ * Measured: the same ΕΥΔΑΠ bill parsed as an image gave chargeableAmount 89,94 and as a PDF
+ * gave 289,94 — the payable — so the tenant-charge bridge would have split the landlord's
+ * arrears. 698eb3da treated that by preferring the itemised sum when the label disagreed;
+ * this is the actual cause, upstream of it.
+ *
+ * 48 characters is generous for «ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) :   89,94» while far too short to
+ * reach the next box on a one-line blob.
+ */
+const SAME_LINE_REACH = 48;
+
 function amountAfterLabel(
   lines: string[],
   label: RegExp,
@@ -216,7 +246,12 @@ function amountAfterLabel(
   for (let i = 0; i < lines.length; i++) {
     if (!label.test(lines[i])) continue;
     // Same line first: «ΜΕΡΙΚΟ ΣΥΝΟΛΟ (ΕΥΡΩ) : 89,94» is one line on some scans.
-    const after = lines[i].replace(label, ' ');
+    // Search only AFTER the label's own position, and only as far as SAME_LINE_REACH.
+    const lm = lines[i].match(label);
+    const after =
+      lm && lm.index != null
+        ? lines[i].slice(lm.index + lm[0].length, lm.index + lm[0].length + SAME_LINE_REACH)
+        : '';
     const sameLine = after.match(/(\d{1,3}(?:[.\s]\d{3})*|\d+)[,.](\d{2})/);
     if (sameLine) {
       const n = parseAmount(sameLine[0]);
@@ -275,7 +310,15 @@ function valueAfterLabel(
 ): string | null {
   for (let i = 0; i < lines.length; i++) {
     if (!label.test(lines[i])) continue;
-    const after = lines[i].replace(label, ' ').trim();
+    // SAME BOUNDING as amountAfterLabel, and for the same reason: an unanchored search of
+    // `lines[i]` returns the first match on the page when the page IS one line, so every
+    // labelled date collapsed to the first date printed on a PDF text layer.
+    const lm = lines[i].match(label);
+    const after = (
+      lm && lm.index != null
+        ? lines[i].slice(lm.index + lm[0].length, lm.index + lm[0].length + SAME_LINE_REACH)
+        : ''
+    ).trim();
     const same = after.match(shape);
     if (same) return same[0];
     for (let j = i + 1; j <= i + maxLookahead && j < lines.length; j++) {
@@ -438,7 +481,15 @@ export function parseEydapBill(text: string): BillParseResult {
   // and the παροχή would both be right. So the next-reading line is excluded
   // outright, and the ΠΕΡΙΟΔΟΣ ΚΑΤΑΝΑΛΩΣΗΣ label (which IS adjacent to its value in
   // the stub) is preferred over position.
-  const periodLines = lines.filter((l) => !/ΕΠΟΜΕΝΗ\s+ΚΑΤΑΜΕΤΡΗΣΗ/i.test(l));
+  // Excising the CLAUSE, not the LINE. Dropping every line that mentions the next
+  // reading is the same line-granularity assumption the label helpers had, and it fails
+  // the same way: pdfjs can return a whole page as ONE line, and that line mentions the
+  // next reading somewhere, so the filter discarded the entire document and `period` was
+  // reported missing on every ΕΥΔΑΠ bill that arrived with a text layer. Removing just
+  // the label and the range printed beside it leaves the rest of the line readable, and
+  // on a normally-lined scan the effect is unchanged: a dedicated next-reading line
+  // becomes blank, which every lookahead already skips.
+  const periodLines = lines.map((l) => l.replace(NEXT_READING, ' '));
   const labelledPeriod = valueAfterLabel(
     periodLines,
     // «ΠΕΡΙΟΔΟΣ ΚΑΤΑΝΑΛΩΣΗΣ» OCRs as «ΠΕΡΙΟΔΟΣ ΚΑΤΑΝΑΛΩΙΗΣ» (Σ->Ι) in the header.

@@ -212,7 +212,18 @@ export function salvageGenericFields(text: string): PartialBillFields {
   const amountNear = (label: RegExp): number | undefined => {
     for (let i = 0; i < lines.length; i++) {
       if (!label.test(lines[i])) continue;
-      const candidates = [lines[i].replace(label, ' ')];
+      // On the label's OWN line take only the text AFTER the label, bounded.
+      // `replace(label,' ')` kept the whole line and the amount pattern is unanchored, so on
+      // the pdfjs digital path — where a whole page is joined into ONE line — this returned
+      // the first amount anywhere on the page. The date helper below (`labelledDate`) was
+      // fixed for precisely this and its comment says so; the AMOUNT helper two functions
+      // above it was left, which is the one that decides what tenants are charged.
+      const hit = lines[i].match(label);
+      const sameLine =
+        hit && hit.index !== undefined
+          ? lines[i].slice(hit.index + hit[0].length, hit.index + hit[0].length + 48)
+          : '';
+      const candidates = [sameLine];
       for (let j = i + 1; j <= i + 2 && j < lines.length; j++) {
         candidates.push(lines[j]);
       }

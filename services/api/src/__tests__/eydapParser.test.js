@@ -610,3 +610,60 @@ describe('the CHARGEABLE figure must survive a mislocated subtotal label', () =>
     expect(b.warnings ?? []).toEqual([]);
   });
 });
+
+describe('a ONE-LINE text layer must never yield a DIFFERENT amount', () => {
+  /**
+   * THE ROOT CAUSE behind the PNG-vs-PDF divergence, fixed upstream of the symptom.
+   *
+   * OCR emits one line per printed row. A PDF TEXT LAYER does not — pdfjs can hand back a
+   * whole page as ONE line. The label helpers did `lines[i].replace(label, ' ')` and then
+   * matched UNANCHORED, i.e. from index 0, so on a one-line document EVERY label returned
+   * the first match on the page rather than the value printed beside it. That is how the
+   * same ΕΥΔΑΠ bill could report the payable where the subtotal belongs — and the subtotal
+   * is the figure the tenant-charge bridge splits.
+   *
+   * 698eb3da treated the symptom (prefer the itemised sum when the label disagrees). This
+   * is the cause: each search is now bounded to SAME_LINE_REACH characters PAST the label's
+   * own match position.
+   */
+  // The fixture prints 89,94 for BOTH ΜΕΡΙΚΟ ΣΥΝΟΛΟ and ΠΛΗΡΩΤΕΟ, so on the fixture as-is
+  // a wrong pick is indistinguishable from a right one and the assertion cannot fail —
+  // mutation-verified: with the unmodified fixture the regression passed. The arrears
+  // variant is what gives it teeth.
+  const ARREARS = OCR.replace(/(ΠΛΗΡΩΤΕΟ\(ΕΥΡΩ\) :\n)89,94/, '$1289,94').replace(
+    /(ΠΛΗΡΩΤΕΟ\n)89,94€/,
+    '$1289,94€'
+  );
+  const oneLine = ARREARS.split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join('  ');
+
+  it('the arrears variant really differs from the fixture', () => {
+    // A `.replace()` whose pattern does not match returns the input UNCHANGED and throws
+    // nothing, which would leave every assertion below comparing the clean fixture to
+    // itself. Pin the premise or the suite is decoration.
+    expect(ARREARS).not.toBe(OCR);
+    expect(ARREARS).toContain('289,94');
+  });
+
+  it('parses a one-line page to the SAME bill as the lined one', () => {
+    const multi = parseEydapBill(ARREARS);
+    const flat = parseEydapBill(oneLine);
+    const shape = (r) => ({
+      success: r.success,
+      total: (r.bill ?? r.partial)?.totalAmount ?? null,
+      chargeable: (r.bill ?? r.partial)?.chargeableAmount ?? null,
+      from: (r.bill ?? r.partial)?.periodStart?.toISOString() ?? null,
+      to: (r.bill ?? r.partial)?.periodEnd?.toISOString() ?? null
+    });
+    // Same document, two renderings, one answer. 289,94 is what the landlord owes and
+    // 89,94 is what this period cost — the figure the tenant split is taken from.
+    expect(shape(flat)).toEqual(shape(multi));
+    expect(shape(multi)).toMatchObject({
+      success: true,
+      total: 289.94,
+      chargeable: 89.94
+    });
+  });
+});
