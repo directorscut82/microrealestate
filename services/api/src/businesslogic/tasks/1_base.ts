@@ -655,12 +655,20 @@ function _computeBuildingChargeRaw(
       // is what makes the sum exact. Picking it from managed units only would leave
       // the vacant units' rounding unaccounted for again.
       const _myPropId = String(propertyId);
-      const _orderedIds = building.units
-        .filter(
-          (u) => ShareBasisUtil.unitThousandths(u, _field) > 0 && u.propertyId
+      // DEDUPED. Two units can carry the SAME propertyId (a known shape in this data — the
+      // June 2026 money batch found a duplicate-propertyId bug), and a repeated id makes
+      // «am I the last?» ambiguous: the id could be both the carrier and a non-carrier in
+      // one list. The remainder sum below is already over the support set rather than this
+      // list, so deduping only stabilises the carrier IDENTITY.
+      const _orderedIds = [
+        ...new Set(
+          building.units
+            .filter(
+              (u) => ShareBasisUtil.unitThousandths(u, _field) > 0 && u.propertyId
+            )
+            .map((u) => String(u.propertyId))
         )
-        .map((u) => String(u.propertyId))
-        .sort();
+      ].sort();
       if (_orderedIds.length === 0) return 0;
       if (_myPropId !== _orderedIds[_orderedIds.length - 1]) {
         return (amount * ShareBasisUtil.unitThousandths(unit, _field)) / _total;

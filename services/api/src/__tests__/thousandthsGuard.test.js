@@ -3,6 +3,9 @@
 // when the building has no thousandths for that dimension — else the tenant/split
 // share evaporates (found live: ΟΔΟΣ ΗΤΑ general_thousandths repair, 180€ → nobody).
 // type: module → jest.unstable_mockModule + dynamic import (mirror ownerPaymentCarry).
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { jest } from '@jest/globals';
 
 let _assertThousandthsAvailable;
@@ -152,5 +155,82 @@ describe('the guard and the ENGINE must compute the same denominator', () => {
     expect(() =>
       _assertThousandthsAvailable({ units: vec([400, 300, 200, 100]) }, 'general_thousandths')
     ).not.toThrow();
+  });
+});
+
+describe('the OWNER side uses the same ‰ rule as the tenant side', () => {
+  /**
+   * GATE 8 finding. ffc9cc02 normalised the ‰ denominator on the tenant side and left the
+   * owner allocator (buildingmanager `_ownerPerUnit`) summing RAW. Because that allocator
+   * has a carrier-remainder, the TOTAL was always conserved — so this never over-collected.
+   * What it did was move money BETWEEN owners: on 500/400/−100 over a €200 expense the raw
+   * denominator of 800 bills 125,00 / 75,00 where the normalised 900 bills 111,11 / 88,89.
+   * €13,89 taken from one owner and handed to the other, and the tenant-side split of the
+   * SAME vector disagreed with it.
+   *
+   * Asserted at source because the allocator is a closure inside a 400-line handler and not
+   * separately exported; the arithmetic itself is pinned by the shared normaliser's own
+   * tests plus the engine probe.
+   */
+  const src = fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../managers/buildingmanager.ts'),
+    'utf8'
+  );
+
+  it('the owner allocator sums through the shared normaliser, not raw', () => {
+    const at = src.indexOf('const totalT = ');
+    expect(at).toBeGreaterThan(-1);
+    const line = src.slice(at, src.indexOf(';', at));
+    expect(line).toContain('ShareBasis.thousandthsTotal');
+    // The raw form must be gone from this computation.
+    expect(line).not.toMatch(/Number\(u\[key\]\)\s*\|\|\s*0/);
+  });
+
+  it('its numerator is normalised too — one side is not enough', () => {
+    // Normalising only the denominator would still bill a negative unit a negative share,
+    // which every `share > 0` gate downstream then discards.
+    const at = src.indexOf('const raw = (amt *');
+    expect(at).toBeGreaterThan(-1);
+    expect(src.slice(at, src.indexOf(';', at))).toContain(
+      'ShareBasis.unitThousandths'
+    );
+  });
+
+  it('the printed owner basis divides by the SAME set as the allocator', () => {
+    // The equation is the landlord's only window into the arithmetic. It summed raw ‰ over
+    // ALL units while the allocator divides over MANAGED ones, so the printed whole
+    // disagreed with the divisor that produced the euro beside it — and the panel's
+    // consistency backstop then suppressed the sub-line, costing the explanation.
+    const at = src.indexOf("kind: 'thousandths',");
+    expect(at).toBeGreaterThan(-1);
+    const block = src.slice(Math.max(0, at - 700), at + 300);
+    expect(block).toContain(
+      'ShareBasis.thousandthsTotal(_managedUnitsForBasis, key)'
+    );
+    expect(block).toContain('ShareBasis.unitThousandths(unit, key)');
+  });
+
+  it('the frontend blocker uses the same normalisation as the server guard', () => {
+    // A dialog that says «the units have no thousandths» about a vector the server accepts
+    // is worse than either behaviour on its own.
+    const dialog = fs.readFileSync(
+      path.resolve(
+        path.dirname(fileURLToPath(import.meta.url)),
+        '../../../../webapps/landlord/src/components/buildings/ExpenseFormDialog.js'
+      ),
+      'utf8'
+    );
+    expect(dialog).toContain('const _sumThousandths =');
+    expect(dialog).toContain('_sumThousandths(units, THOUSANDTHS[m])');
+  });
+
+  it('the carrier id list is deduped, so a repeated propertyId cannot be ambiguous', () => {
+    const base = fs.readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../businesslogic/tasks/1_base.ts'),
+      'utf8'
+    );
+    const at = base.indexOf('const _orderedIds =');
+    expect(at).toBeGreaterThan(-1);
+    expect(base.slice(at, at + 260)).toContain('new Set(');
   });
 });

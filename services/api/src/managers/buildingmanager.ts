@@ -3143,19 +3143,30 @@ function _allocateOwnerAmountPerUnit(
         : method === 'heating_thousandths'
           ? 'heatingThousandths'
           : 'elevatorThousandths';
-    const totalT = managed.reduce(
-      (s: number, u: any) => s + (Number(u[key]) || 0),
-      0
-    );
+    /**
+     * THROUGH THE SHARED NORMALISER, like the tenant side.
+     *
+     * This summed `Number(u[key]) || 0` RAW while filtering the billed set to `> 0` — the
+     * signed-denominator / positive-billed-set mismatch fixed on the tenant side in
+     * ffc9cc02 and left here. The carrier-remainder below means the TOTAL is still
+     * conserved, so this never over-collected; what it did was move money BETWEEN owners.
+     * Measured on 500/400/−100 over a €200 expense: the raw denominator of 800 bills
+     * 125,00 / 75,00 where the normalised 900 bills 111,11 / 88,89 — €13,89 taken from one
+     * owner and given to the other, and the engine's tenant-side split of the same vector
+     * disagrees with it.
+     */
+    const totalT = ShareBasis.thousandthsTotal(managed, key);
     if (totalT > 0) {
       const withT = managed
-        .filter((u: any) => (Number(u[key]) || 0) > 0)
+        .filter((u: any) => ShareBasis.unitThousandths(u, key) > 0)
         .map((u: any) => String(u.propertyId))
         .sort();
       let allocated = 0;
       for (let i = 0; i < withT.length; i++) {
         const u = managed.find((m: any) => String(m.propertyId) === withT[i]);
-        const raw = (amt * (Number(u[key]) || 0)) / totalT;
+        // Numerator normalised too: reading it raw here would reinstate the mismatch on
+        // the other side of the division.
+        const raw = (amt * ShareBasis.unitThousandths(u, key)) / totalT;
         const share =
           i === withT.length - 1
             ? Math.round((amt - allocated) * 100) / 100
@@ -4097,13 +4108,21 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
           : m === 'heating_thousandths'
             ? 'heatingThousandths'
             : 'elevatorThousandths';
-      const whole = hydratedUnits.reduce(
-        (s: number, u: any) => s + (Number(u[key]) || 0),
-        0
-      );
+      /**
+       * SAME SET, SAME NORMALISATION AS THE ALLOCATOR THIS EXPLAINS.
+       *
+       * This is the OWNER basis (see the caller: _ownerAmountBasis), and the owner
+       * allocator divides over MANAGED units through the shared normaliser. This summed
+       * raw ‰ over ALL units, so the printed equation's whole disagreed with the divisor
+       * that produced the euro beside it — on 500/400/−100 it printed a whole of 800 for a
+       * share computed from 900. The panel's consistency backstop then suppressed the
+       * sub-line, so the landlord lost the explanation rather than seeing a false one; this
+       * makes it correct instead of merely absent.
+       */
+      const whole = ShareBasis.thousandthsTotal(_managedUnitsForBasis, key);
       return {
         kind: 'thousandths',
-        part: fmt(unit?.[key] || 0),
+        part: fmt(ShareBasis.unitThousandths(unit, key)),
         whole: fmt(whole),
         total: fmt(total),
         share: fmt(share)

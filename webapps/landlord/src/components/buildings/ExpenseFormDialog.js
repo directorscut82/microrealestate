@@ -838,6 +838,26 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
   // managedUnits = units with a propertyId (:590, :762). Getting this wrong in
   // either direction is a false positive or a missed warning.
   const _sum = (list, f) => list.reduce((s, u) => s + (Number(u?.[f]) || 0), 0);
+  /**
+   * The ‰ denominator, normalised exactly as the server does.
+   *
+   * `_sum` is the RAW sum, and this dialog used it to pre-announce whether a ‰ method is
+   * usable — while the server's guard (_assertThousandthsAvailable) now sums through the
+   * shared normaliser, which sends a negative to 0. The two then disagreed in both
+   * directions: on 500/500/−1000 the raw sum is 0, so the dialog said «the units have no
+   * thousandths» about a vector the server accepts and the engine splits perfectly well;
+   * and on 500/−400 the raw 100 let the dialog pass a vector whose real denominator is 500.
+   * A screen that contradicts the save is worse than either behaviour alone.
+   *
+   * Inline rather than imported: the server rule lives in common/sharebasis, which the
+   * frontend cannot import (mongoose in the package index). Same arrangement as
+   * variableExpense and billTerm — one rule, a browser copy, and a test pinning them.
+   */
+  const _sumThousandths = (list, f) =>
+    list.reduce((s, u) => {
+      const v = Number(u?.[f]);
+      return s + (Number.isFinite(v) && v > 0 ? v : 0);
+    }, 0);
   const allocationBlocker = (() => {
     const m = allocationMethod;
     if (!m) return null;
@@ -857,7 +877,7 @@ function ExpenseFormDialog({ open, setOpen, expense, building, onCreated }) {
       heating_thousandths: 'heatingThousandths',
       elevator_thousandths: 'elevatorThousandths'
     };
-    if (THOUSANDTHS[m] && _sum(units, THOUSANDTHS[m]) === 0) {
+    if (THOUSANDTHS[m] && _sumThousandths(units, THOUSANDTHS[m]) === 0) {
       return {
         title: t('The units have no thousandths for this method'),
         detail: t(
