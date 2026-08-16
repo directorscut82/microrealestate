@@ -69,6 +69,8 @@ from vadseg import MAX_SPAN_S, SR, Vad
 MODELS_DIR = os.environ.get("VOICEASR_MODELS_DIR", "/models")
 TRUNC_GUARD_MS = 150
 
+# NOTE: services/api/src/utils/greekmatch.ts carries the SAME month table for
+# typed-text matching. Two runtimes, no shared source — keep them in step.
 MONTHS = {
     1: ["ΙΑΝΟΥΑΡΙΟΣ", "ΙΑΝΟΥΑΡΙΟΥ", "ΓΕΝΑΡΗΣ", "ΓΕΝΑΡΗ"],
     2: ["ΦΕΒΡΟΥΑΡΙΟΣ", "ΦΕΒΡΟΥΑΡΙΟΥ", "ΦΛΕΒΑΡΗΣ", "ΦΛΕΒΑΡΗ"],

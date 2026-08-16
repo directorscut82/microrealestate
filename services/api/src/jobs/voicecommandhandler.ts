@@ -20,7 +20,6 @@ import {
   advance,
   activeSession,
   endSession,
-  extractSlots,
   startSession,
   PersonEntry,
   Reply,
@@ -50,6 +49,8 @@ interface Msg {
   chat: { id: number };
   voice?: { file_id: string };
   audio?: { file_id: string };
+  document?: { file_id: string };
+  photo?: { file_id: string }[];
   text?: string;
 }
 
@@ -71,6 +72,14 @@ export async function handleVoiceCommand(
   msg: Msg,
   deps: VoiceHandlerDeps
 ): Promise<boolean> {
+  // A message carrying a DOCUMENT or PHOTO is NEVER dialogue material — it is
+  // a bill, whatever else is going on. Without this gate, a bill photo sent
+  // while a dialogue happened to be open matched none of voice/text below,
+  // became an EMPTY text utterance, and was claimed anyway — the bill was
+  // swallowed and never ingested (gate-3 review finding, the exact
+  // silent-bill-loss shape the recapture code already guards against).
+  if (msg.document?.file_id || msg.photo?.length) return false;
+
   const now = deps.now().getTime();
   const existing = activeSession(realm.realmId, now);
   const fileId = msg.voice?.file_id || msg.audio?.file_id;
@@ -86,6 +95,11 @@ export async function handleVoiceCommand(
     // else: a voice/audio message with no active session always starts one —
     // the landlord sent a voice note, and command is the safe first mode.
   }
+
+  // An open session + a message with NEITHER audio NOR text (sticker, contact,
+  // location…) is not a reply we can parse — leave it to the default handling
+  // rather than feeding an empty utterance into the state machine.
+  if (existing && !fileId && !text) return false;
 
   const session =
     existing || startSession(realm.realmId, deps.newId(), now);
@@ -162,6 +176,3 @@ export async function handleVoiceCommand(
   }
   return true;
 }
-
-/** Re-export for the caller's convenience. */
-export { extractSlots };

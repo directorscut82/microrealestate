@@ -232,6 +232,9 @@ export function matchIntent(utterance: string): Match<MoneyIntent> | null {
   return findBest(utterance, INTENTS, 0.72);
 }
 
+// NOTE: services/voiceasr/src/pipeline.py carries the SAME month table for the
+// container's closed-set decode. Two runtimes, no shared source — if you add a
+// form here (e.g. another colloquial genitive), add it there too.
 const MONTHS: { value: number; labels: string[] }[] = [
   { value: 1, labels: ['Ιανουάριος', 'Ιανουαρίου', 'Γενάρης', 'Γενάρη'] },
   { value: 2, labels: ['Φεβρουάριος', 'Φεβρουαρίου', 'Φλεβάρης', 'Φλεβάρη'] },
