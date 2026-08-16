@@ -775,8 +775,29 @@ export namespace CollectionTypes {
     | 'processing'
     | 'pending'
     | 'confirmed'
-    | 'dismissed';
-  export type InboxItemKind = 'bill' | 'notice';
+    | 'dismissed'
+    // kind:'voiceCommand' (shadow mode) only:
+    | 'awaiting_confirmation'
+    | 'validated'
+    | 'abandoned';
+  export type InboxItemKind = 'bill' | 'notice' | 'voiceCommand';
+
+  // kind:'voiceCommand' payload — a Telegram money-command dialogue held in
+  // SHADOW MODE. A completed row is a validation SAMPLE, never an executed
+  // payment; nothing reads it into a money pipeline.
+  export type InboxItemVoiceCommand = {
+    intent?: 'rentPayment' | 'commonChargesPayment' | 'ownerPayment';
+    personId?: string;
+    personName?: string;
+    personConfidence?: number;
+    amount?: number;
+    amountSource?: 'voice' | 'text';
+    month?: number;
+    transcript?: { text: string; source: string }[];
+    telegramFileIds?: string[];
+    corrections?: number;
+    outcome?: 'validated' | 'rejected' | 'abandoned';
+  };
 
   // kind:'notice' payload — a server-composed alert. `message` is the
   // ready-to-render Greek text (identical to the Telegram message); `link` is
@@ -811,6 +832,7 @@ export namespace CollectionTypes {
     // Absent on legacy docs — treat missing as 'bill'.
     kind?: InboxItemKind;
     notice?: InboxItemNotice | null;
+    voiceCommand?: InboxItemVoiceCommand | null;
     // Idempotence key for kind:'notice' items (unique+sparse per realm).
     dedupeKey?: string;
     parsed: {

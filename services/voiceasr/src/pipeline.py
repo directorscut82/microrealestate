@@ -287,7 +287,11 @@ class Pipeline:
         arr -= arr.max()
         p = float(np.exp(arr[0]) / np.exp(arr).sum())
         n1, s1 = items[0]
-        lr = s1 - float(lp.max(axis=1).sum())
+        # LR in the MAX semiring on both sides (see rescore.ctc_viterbi_batch):
+        # best alignment of the winning spelling vs the unconstrained argmax path.
+        win_targets = [lb for lb in self.cand_ids[n1]]
+        vit = float(R.ctc_viterbi_batch(lp, win_targets).max())
+        lr = vit - float(lp.max(axis=1).sum())
         return _res("amount", transcript, int(n1), p, lr, "rank", t0)
 
     def _closed_set(self, lp, transcript, table, mode, t0):
@@ -310,9 +314,10 @@ class Pipeline:
         arr -= arr.max()
         p = float(np.exp(arr[0]) / np.exp(arr).sum())
         k1, s1 = items[0]
-        lr = s1 - float(lp.max(axis=1).sum())
-        value = k1 if mode == "month" else k1
-        return _res(mode, transcript, value, p, lr, "rank", t0)
+        win = [lb for f in table[k1] if (lb := self._labels_for(f))]
+        vit = float(R.ctc_viterbi_batch(lp, win).max())
+        lr = vit - float(lp.max(axis=1).sum())
+        return _res(mode, transcript, k1, p, lr, "rank", t0)
 
 
 # Per-mode gates, from the measured separation on the eval set (real answers

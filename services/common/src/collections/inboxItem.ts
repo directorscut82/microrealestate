@@ -27,14 +27,54 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
      * A processing item is NOT confirmable — there is nothing parsed to confirm yet — and
      * inboxmanager.confirm refuses it for the same reason it refuses a 'notice'.
      */
-    enum: ['processing', 'pending', 'confirmed', 'dismissed'],
+    // voiceCommand adds three: 'awaiting_confirmation' (the dialogue asked
+    // «ναι/όχι»), 'validated' (confirmed — a sample, NOT an executed payment),
+    // 'abandoned' (dialogue timed out / restart lost the in-memory session).
+    enum: [
+      'processing',
+      'pending',
+      'confirmed',
+      'dismissed',
+      'awaiting_confirmation',
+      'validated',
+      'abandoned'
+    ],
     default: 'pending'
   },
   // 'bill' (default, legacy docs have no kind) — a parsed bill waiting for
   // confirm/dismiss. 'notice' — a server-composed alert (lease expiry, bill
   // due, deposit unreturned, …) that can only be opened or dismissed; the
   // confirm pipeline rejects it.
-  kind: { type: String, enum: ['bill', 'notice'], default: 'bill' },
+  // 'voiceCommand' — a money-command dialogue held over Telegram (voice OR
+  // text), in SHADOW MODE: the completed row is a validation SAMPLE, never an
+  // executed operation. Nothing reads these rows into any money pipeline.
+  kind: { type: String, enum: ['bill', 'notice', 'voiceCommand'], default: 'bill' },
+  /**
+   * kind:'voiceCommand' payload. EVERY sub-path is declared — mongoose strict
+   * mode silently DELETES undeclared paths on write (measured 6.13.6: no
+   * throw, no warning), which is exactly how parsed.chargeableAmount vanished
+   * and the bot lane charged arrears. A field added to the writer without a
+   * line here does not exist.
+   */
+  voiceCommand: {
+    type: {
+      intent: String, // rentPayment | commonChargesPayment | ownerPayment
+      personId: String,
+      personName: String,
+      personConfidence: Number,
+      amount: Number,
+      amountSource: String, // 'voice' | 'text'
+      month: Number, // 1..12
+      // The whole dialogue, for the validation dataset: what was said/typed,
+      // in order. Audio itself stays in Telegram (file_id reference) — no
+      // voice bytes anywhere near this public repo's backups.
+      transcript: [{ text: String, source: String }],
+      telegramFileIds: [String],
+      corrections: Number,
+      outcome: String // 'validated' | 'rejected' | 'abandoned'
+    },
+    default: null
+  },
   // kind:'notice' payload. `message` is the server-composed Greek text (same
   // string that goes to Telegram — precedent: the scanner's Telegram literals).
   // `link` is app-relative WITHOUT the org segment ('/tenants/{id}', …, or '').

@@ -137,6 +137,47 @@ def ctc_logp_batch(logp, targets, blank=0):
     return np.logaddexp(al[np.arange(C), idx], al[np.arange(C), idx - 1])
 
 
+def ctc_viterbi_batch(logp, targets, blank=0):
+    """Max-semiring twin of ctc_logp_batch: the score of the single BEST alignment.
+
+    Exists for the likelihood-ratio guard. The LR compares the winning numeral
+    against the unconstrained ceiling (the per-frame argmax path), and the
+    ceiling is a MAX-semiring quantity — comparing a forward-SUM numerator
+    against it biases the ratio by the alignment entropy of the numerator
+    (utterance-verification literature: numerator and denominator must live in
+    the same semiring; Rose & Paul 1990 / Rahim et al. 1997 both threshold a
+    Viterbi-vs-filler ratio). Posterior ranking keeps the forward sum, which is
+    the right quantity for WHICH number; this one answers WHETHER it was said.
+    """
+    C = len(targets)
+    Ls = [len(t) for t in targets]
+    Sm = 2 * max(Ls) + 1
+    ext = np.full((C, Sm), blank, dtype=np.int64)
+    valid = np.zeros((C, Sm), bool)
+    can_skip = np.zeros((C, Sm), bool)
+    for i, t in enumerate(targets):
+        S = 2 * len(t) + 1
+        ext[i, 1:S:2] = t
+        valid[i, :S] = True
+        if len(t) > 1:
+            a = np.asarray(t)
+            can_skip[i, 3:S:2] = a[1:] != a[:-1]
+    NEG = -1e30
+    lp = logp[:, ext]
+    al = np.full((C, Sm), NEG)
+    al[:, 0] = lp[0, :, 0]
+    al[np.arange(C), 1] = lp[0, np.arange(C), 1]
+    al = np.where(valid, al, NEG)
+    for t in range(1, logp.shape[0]):
+        s1 = np.concatenate([np.full((C, 1), NEG), al[:, :-1]], 1)
+        s2 = np.concatenate([np.full((C, 2), NEG), al[:, :-2]], 1)
+        s2 = np.where(can_skip, s2, NEG)
+        al = np.maximum(np.maximum(al, s1), s2) + lp[t]
+        al = np.where(valid, al, NEG)
+    idx = np.array(Ls) * 2
+    return np.maximum(al[np.arange(C), idx], al[np.arange(C), idx - 1])
+
+
 def rescore(logits, beam_ints, ch2id, T=1.0, prior=None):
     """Returns ranked [(n, p)], plus diagnostics."""
     logp = log_softmax(np.asarray(logits, dtype=np.float64), axis=1)

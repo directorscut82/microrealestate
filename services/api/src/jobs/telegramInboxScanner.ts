@@ -27,6 +27,10 @@ import {
   parseBillPdf,
   looksLikeFullBillText
 } from '../managers/billparser/index.js';
+import { handleVoiceCommand as _routeVoiceCommand } from './voicecommandhandler.js';
+import { recognize as _recognizeVoice } from '../managers/voiceasrclient.js';
+import type { VoiceSession } from '../managers/voicesession.js';
+import { randomUUID } from 'crypto';
 
 const POLL_MS = 60_000;
 // A Telegram photo of a bill is a few MB. This bound is now DELIBERATELY
@@ -174,6 +178,16 @@ export interface InboxScanDeps {
     id: string,
     patch: Record<string, unknown>
   ) => Promise<boolean>;
+  /**
+   * Money-command dialogue router (shadow mode). Returns true when the message
+   * WAS a voice command and is fully handled — the scanner then stops. Optional
+   * so the existing test suite (which never sets it) simply skips the branch.
+   * The real implementation is wired in _defaultDeps.
+   */
+  handleVoiceCommand?: (
+    realm: TelegramRealmConfig,
+    msg: NonNullable<TgUpdate['message']>
+  ) => Promise<boolean>;
 }
 
 export interface TgUpdate {
@@ -193,6 +207,12 @@ export interface TgUpdate {
       mime_type?: string;
       file_size?: number;
     };
+    // Voice note (OGG/Opus) and audio file — the money-command modality.
+    voice?: { file_id: string; duration?: number; file_size?: number };
+    audio?: { file_id: string; duration?: number; file_size?: number };
+    // Plain typed text. A money command may arrive typed, and a dialogue reply
+    // (a name, an amount, ναι/όχι) is usually typed even when it started as voice.
+    text?: string;
     caption?: string;
   };
 }
@@ -765,8 +785,69 @@ export function _defaultDeps(): InboxScanDeps {
     archiveSource: _archiveSource,
     sendReply: _sendReply,
     editReply: _editReply,
-    updateInboxItem: _updateInboxItem
+    updateInboxItem: _updateInboxItem,
+    handleVoiceCommand: (realm, msg) =>
+      _routeVoiceCommand(realm, msg, {
+        now: () => new Date(),
+        newId: () => randomUUID(),
+        downloadFileById: async (botToken, fileId) => {
+          const f = await _downloadFile(botToken, fileId);
+          return f ? f.buffer : null;
+        },
+        recognize: _recognizeVoice,
+        peopleForRealm: _peopleForRealm,
+        sendReply: _sendReply,
+        saveSample: _saveVoiceSample
+      })
   };
+}
+
+/** Tenants of a realm as {id, name}, for fuzzy person matching in the dialogue. */
+async function _peopleForRealm(
+  realmId: string
+): Promise<{ id: string; name: string }[]> {
+  const tenants: any[] = await Collections.Tenant.find({ realmId })
+    .select('_id name')
+    .lean();
+  return tenants
+    .filter((t) => t?.name)
+    .map((t) => ({ id: String(t._id), name: String(t.name) }));
+}
+
+/**
+ * Persist a completed dialogue as a validation SAMPLE — kind 'voiceCommand',
+ * status mirrors the outcome. This is the ONLY thing a finished dialogue does;
+ * there is deliberately no call into any money manager (shadow mode). The row
+ * is the dataset that will decide whether voice is ever allowed to act.
+ */
+async function _saveVoiceSample(session: VoiceSession): Promise<void> {
+  const s = session.slots;
+  const statusOf: Record<string, string> = {
+    validated: 'validated',
+    rejected: 'dismissed',
+    abandoned: 'abandoned'
+  };
+  await Collections.InboxItem.create({
+    realmId: session.realmId,
+    source: 'telegram',
+    kind: 'voiceCommand',
+    status: statusOf[session.outcome || 'abandoned'] || 'abandoned',
+    voiceCommand: {
+      intent: s.intent,
+      personId: s.person?.id,
+      personName: s.person?.name,
+      personConfidence: s.person?.confidence,
+      amount: s.amount?.value,
+      amountSource: s.amount?.source,
+      month: s.month,
+      transcript: session.transcript,
+      telegramFileIds: session.fileIds,
+      corrections: session.corrections,
+      outcome: session.outcome
+    },
+    receivedDate: new Date(),
+    updatedDate: new Date()
+  });
 }
 
 // --- Core scan (exported for unit tests) ------------------------------------
@@ -906,6 +987,17 @@ async function _handleUpdate(
   // Only the realm's configured admin chat may feed the inbox — anything else
   // (random people messaging a public bot) is ignored, not replied to.
   if (String(msg.chat.id) !== realm.adminChatId) return 'skipped';
+
+  // MONEY-COMMAND DIALOGUE (shadow mode), before anything else. It claims a
+  // message when: a dialogue is already open for this realm (any modality is
+  // its reply), OR this is a voice/audio message, OR it is text matching a
+  // money intent. Returning true means fully handled — do not also treat it as
+  // a bill. Bills (document/photo) never match a money intent, so they fall
+  // through untouched.
+  if (deps.handleVoiceCommand) {
+    const claimed = await deps.handleVoiceCommand(realm, msg);
+    if (claimed) return 'skipped';
+  }
 
   // Pick the file: document as-is; photo → the largest rendition (last entry).
   let fileId: string | undefined;
