@@ -93,6 +93,23 @@ services:
           memory: 500M
           cpus: '0.5'
   ###############################################################################
+  # voiceasr
+  ###############################################################################
+  voiceasr:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: services/voiceasr/Dockerfile
+    deploy:
+      resources:
+        limits:
+          # Measured on the J4125: ~540MB steady (model session) + ~400MB peak
+          # per decode at the 15s span cap. 1536M holds the worst case with
+          # headroom; the span cap in vadseg.py is what makes this bound REAL
+          # (an uncapped 86s span measured 6.2GB and would OOM anything sane).
+          memory: 1536M
+          cpus: '3'
+  ###############################################################################
   # Emailer
   ###############################################################################
   emailer:

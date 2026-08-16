@@ -206,7 +206,7 @@ if [[ "$redeploy" == "yes" ]]; then
   # We pull each image explicitly via the Docker API to guarantee freshness.
   info "Force-pulling all :nas images via Docker API..."
   # NAS stack intentionally excludes resetservice (dev/CI only — see CLAUDE.md).
-  IMAGES=(authenticator api gateway emailer pdfgenerator tenantapi landlord-frontend tenant-frontend)
+  IMAGES=(authenticator api gateway emailer pdfgenerator tenantapi voiceasr landlord-frontend tenant-frontend)
   for img in "${IMAGES[@]}"; do
     pull_status=$(curl -sS -X POST \
       -H "X-API-Key: $PORTAINER_TOKEN" \
@@ -249,9 +249,9 @@ if [[ "$redeploy" == "yes" ]]; then
     total=$(echo "$containers" | jq -r '[.[] | select(.Names[] | test("mre-"))] | length')
     running=$(echo "$containers" | jq -r '[.[] | select(.Names[] | test("mre-")) | select(.State == "running")] | length')
     printf "\r  %d/%d containers running (try %d/30)...      " "$running" "$total" "$i"
-    if [[ "$running" -eq 10 ]]; then
+    if [[ "$running" -eq 11 ]]; then
       echo
-      ok "All 10 containers running"
+      ok "All 11 containers running"
       break
     fi
   done
@@ -265,7 +265,7 @@ if [[ "$redeploy" == "yes" ]]; then
   containers=$(curl -sS -H "X-API-Key: $PORTAINER_TOKEN" \
     "$PORTAINER_URL/api/endpoints/$PORTAINER_ENDPOINT_ID/docker/containers/json?all=true")
   mismatch=0
-  for cname in mre-authenticator-1 mre-api-1 mre-gateway-1 mre-emailer-1 mre-pdfgenerator-1 mre-tenantapi-1 mre-landlord-frontend-1 mre-tenant-frontend-1; do
+  for cname in mre-authenticator-1 mre-api-1 mre-gateway-1 mre-emailer-1 mre-pdfgenerator-1 mre-tenantapi-1 mre-voiceasr-1 mre-landlord-frontend-1 mre-tenant-frontend-1; do
     imgid=$(echo "$containers" | jq -r ".[] | select(.Names[] | test(\"$cname\")) | .ImageID" | head -1)
     if [[ -z "$imgid" || "$imgid" == "null" ]]; then
       err "  $cname: not found"

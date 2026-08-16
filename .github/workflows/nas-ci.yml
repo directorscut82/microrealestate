@@ -64,6 +64,9 @@ jobs:
           - appname: emailer
             image: ghcr.io/${{ github.repository }}/emailer
             dockerfile: services/emailer/Dockerfile
+          - appname: voiceasr
+            image: ghcr.io/${{ github.repository }}/voiceasr
+            dockerfile: services/voiceasr/Dockerfile
           - appname: resetservice
             image: ghcr.io/${{ github.repository }}/resetservice
             dockerfile: services/resetservice/Dockerfile

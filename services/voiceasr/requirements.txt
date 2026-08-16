@@ -1,0 +1,6 @@
+# Pinned exactly — this container recognizes money amounts, and "pip resolved
+# something newer" must never be why a number changed. All three verified
+# AVX2-free and measured working on the NAS J4125 (2026-08).
+numpy==2.2.6
+onnxruntime==1.20.1
+flashlight-text==0.0.7

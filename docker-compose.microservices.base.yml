@@ -157,6 +157,25 @@ services:
       - mongo
       - pdfgenerator
   ###############################################################################
+  # voiceasr — Greek voice-command recognition (shadow mode; see services/voiceasr)
+  ###############################################################################
+  voiceasr:
+    image: 'ghcr.io/microrealestate/microrealestate/voiceasr:${MRE_VERSION:-latest}'
+    environment:
+      - PORT=$VOICEASR_PORT
+      # 3 threads leaves one core for the api/OCR under contention (measured 2x
+      # slowdown at 3 busy cores on the J4125).
+      - VOICEASR_THREADS=3
+      - VOICEASR_MODELS_DIR=/models
+    expose:
+      - '$VOICEASR_PORT'
+    # The 338MB weights are fetched once (checksum-pinned) into this named
+    # volume by entrypoint.sh — never in the image, never in the repo.
+    volumes:
+      - voiceasr_models:/models
+    networks:
+      - net
+  ###############################################################################
   # api
   ###############################################################################
   api:
@@ -173,6 +192,7 @@ services:
       - REDIS_PASSWORD
       - EMAILER_URL
       - PDFGENERATOR_URL
+      - VOICEASR_URL
       - RESTORE_DB
       - ACCESS_TOKEN_SECRET=$AUTHENTICATOR_ACCESS_TOKEN_SECRET
       - CIPHER_KEY
@@ -186,6 +206,12 @@ services:
       - redis
       - emailer
       - pdfgenerator
+      # NOT a hard dependency for readiness: voiceasr spends ~1min fetching
+      # weights on first boot, and the api must not block startup on it. The
+      # telegram poller degrades gracefully when VOICEASR_URL is unreachable
+      # (voice messages get a "try again" reply); listing it here only fixes
+      # start ORDER, not health.
+      - voiceasr
   ###############################################################################
   # tenant api
   ###############################################################################
@@ -255,3 +281,11 @@ services:
 networks:
   net:
     driver: bridge
+###############################################################################
+# volumes
+###############################################################################
+volumes:
+  # Holds the voiceasr model weights (338MB), fetched once per host by the
+  # container's entrypoint. Survives image updates so a code-only redeploy does
+  # not re-download.
+  voiceasr_models:
