@@ -81,6 +81,8 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
           p: Number,
           lr: Number,
           nFrames: Number, // post-VAD logit frames scored; null from pre-2026-08-16 containers
+          truncMargin: Number, // nats; near 0 => recording probably cut mid-word
+          truncAlt: Number, // the longer amount that margin refers to
           accept: Boolean,
           reason: String,
           ms: Number

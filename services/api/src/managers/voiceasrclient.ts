@@ -25,6 +25,13 @@ export interface RecognizeResult {
   /** Post-VAD logit frames scored (0 on refusals). Absent from container
    *  builds before 2026-08-16 — treat undefined as unknown, not zero. */
   nFrames?: number;
+  /** Truncation margin in nats (amount mode): how well a LONGER in-grammar
+   *  amount explains the same audio. Near zero => the recording was probably cut
+   *  mid-word. null when the winner admits no continuation. */
+  truncMargin?: number | null;
+  /** The longer amount that margin refers to — the value to offer if we ever
+   *  ask «88 ή 80;». */
+  truncAlt?: number | null;
   ms: number;
 }
 

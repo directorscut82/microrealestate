@@ -802,6 +802,8 @@ export namespace CollectionTypes {
       p?: number | null;
       lr?: number | null;
       nFrames?: number | null;
+      truncMargin?: number | null;
+      truncAlt?: number | null;
       accept?: boolean;
       reason?: string;
       ms?: number | null;

@@ -156,6 +156,8 @@ export async function handleVoiceCommand(
       p: typeof rec.p === 'number' ? rec.p : null,
       lr: typeof rec.lr === 'number' ? rec.lr : null,
       nFrames: typeof rec.nFrames === 'number' ? rec.nFrames : null,
+      truncMargin: typeof rec.truncMargin === 'number' ? rec.truncMargin : null,
+      truncAlt: typeof rec.truncAlt === 'number' ? rec.truncAlt : null,
       accept: !!rec.accept,
       reason: rec.reason || '',
       ms: typeof rec.ms === 'number' ? rec.ms : null

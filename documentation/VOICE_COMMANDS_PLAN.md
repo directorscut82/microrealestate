@@ -154,20 +154,167 @@ decodes: [{
 (All sample-size figures — 59/93/124, 149, SPRT 72/+40, uniform 58, Jeffreys 38, Wilson 52 — verified by direct binomial computation, not quoted from approximation.)
 
 
+## Truncation: what was tried, what was measured, what shipped
+
+**The problem.** A landlord releases the record button early, clipping the final
+syllable. «ενενήντα έξι» (96) then decodes as 90 — and confidence *rises* as more
+audio is cut (measured p=0.9994 at a 400 ms cut on a real clip). Two earlier
+guards were shipped and removed; the third is what is in the code now.
+
+**Why it is not a scoring bug.** Every scorer in the pipeline requires a
+candidate to explain ALL of its characters. Given the surviving audio, the
+shorter numeral genuinely *is* the better answer. Measured on a synthetic
+truncation ladder (46 clips × 0/40/80/120/200/300/400 ms = 313 decodes, harness
+in `~/voice-asr-eval/`, outside the repo because the clips are real speech):
+
+- the true value was **already in the widened candidate set for 34 of 36**
+  value-changing truncations, and lost by 20–108 nats. No re-ranking, no wider
+  shortlist and no threshold can recover it.
+- **13 of 36** value-changing truncations clear the current advisory gate
+  (p≥0.80, lr≥−150). That is the real exposure the human confirmation covers.
+- the likelihood ratio is **inverted** on this failure: truncated decodes score
+  *better* (median −37 nats) than intact ones (−59), because a shorter word
+  aligns more cleanly to less audio.
+
+**Five candidate signals, all refuted by that ladder** — recorded so nobody
+re-proposes them:
+
+| signal | why it fails |
+|---|---|
+| trailing-blank run after the last emission | median 0 frames on correct AND on truncated; silero pads spans to the buffer edge, so tight-but-complete looks identical |
+| non-blank mass in the final K frames | ≈1.0 on both populations; CTC is peaky (arXiv:2105.14849), so the statistic is dominated by whether one spike lands in the window |
+| prefix-extensibility alone | fires on 61% of correct decodes — **round numbers are exactly the extensible ones**, so it re-asks «350» every time |
+| frames-per-character ("more audio than the word accounts for") | separates the *wrong way*: truncated median 4.40 vs correct 5.42 |
+| offering the top-scoring extension as the alternative | top-1 recovers the truth 0/13 times; would offer a spurious second option on 25/40 correct decodes |
+
+**What shipped: the truncation margin** (`pipeline._truncation_margin`,
+`rescore.ctc_viterbi_prefix_batch`). The question that *can* see truncation lets
+the longer word **end early**: score the best PREFIX alignment of an in-grammar
+continuation against the winner's COMPLETE alignment. This is Kaldi's
+`final_relative_cost = best_cost_with_final − best_cost`
+(`lattice-faster-decoder.cc:576`), which its endpointer thresholds at 2.0 nats
+(confident) / 8.0 (permissive) in `online-endpoint.h` rules 2/3 — a continuous
+"how mid-word am I" measure evaluated at the last frame with no future frames,
+which is why it transfers to an already-ended file when learned end-of-query
+models (Shannon et al. 2017; Chang et al. 2019) cannot: those classify a *pause*,
+and a truncated clip has none. flashlight's own `LexiconDecoder` computes the
+same information and throws it away — `decodeEnd()` (`LexiconDecoder.cpp:231-247`)
+drops every hypothesis sitting at a non-root trie node once any word completed,
+which is precisely the partial `ΕΝΕΝΗΝΤΑΕΞ…` that is the evidence.
+
+Measured, same ladder: at θ=4 nats it fired on **0 of 25** scoreable correct
+decodes — 21 of them ending «…ΕΥΡΩ», the vowel-final class that made both earlier
+guards unusable — while flagging 19% of value-changing truncations, and in the
+cases it flagged, **the named alternative was the truth** (88 for a decoded 80;
+255 for a decoded 250). Its structural blind spot is not fixable acoustically: if
+the cut removed the whole continuation there are no frames to support it and the
+margin collapses, so a cut exactly at a word boundary is undetectable.
+
+It is therefore **advisory, exactly like p and lr** — returned raw as
+`truncMargin`/`truncAlt`, never gating `accept`, and persisted per decode so θ can
+be fitted from confirmed samples rather than from 25 clips. The human confirmation
+remains the backstop, which is the correct design and not a concession.
+
+**Implementation notes worth keeping.** Extensions must be indexed by the
+**numeral**, not the full spelling: the winner's best-scoring form is usually the
+«…ΕΥΡΩ» one (speakers do say «ευρώ»), nothing extends a string ending in ΕΥΡΩ, and
+indexing it disabled the check on 5 of 13 dangerous decodes before the fix.
+1123 of 9999 values have a value-changing extension, so ~89% of the lexicon — every
+…ΕΞΙ/…ΕΝΑ/…ΤΡΙΑ compound — is exempt for free. Cost: 0.09 s once at startup,
+k≤8 extra batched alignments per amount decode.
+
+**Also settled, so nobody chases it:** Opus's end-trim is not the problem. RFC 7845
+§4.4 has the decoder discard the encoder's pad, `libopusenc` writes ≤2.5 ms of
+LPC-extrapolated tail (`opusenc.c` LPC_PADDING 120), and ffmpeg honours the trim —
+so the real discontinuity survives into the PCM the VAD sees. Telegram's own
+encoder was **not** verified.
+
+## Accent variants in the trie: measured INERT, do not add
+
+The trie is built from `greeknum.int_to_words`, which emits unaccented spellings
+(ΤΡΙΑΚΟΣΙΑ), while `vocab.json` carries Ά Έ Ή Ί Ό Ύ Ώ and the model's own output is
+accented on every real clip (ΠΕΝΉΝΤΑ, ΚΑΚΌΣΧΙΑ, ΕΒΡΏ). `greeknum.LEXICON` already
+holds the accented surface forms and the trie builder never uses them, which looks
+exactly like the off-trie failure the pipeline docstring blames for pyctcdecode
+returning no hypothesis on 7/10 clips.
+
+**Measured A/B on the 46-clip eval set: no difference whatsoever.** 40/46 correct
+both ways, 35 accepted-and-correct both ways, and **zero clips changed value** — at
+8× the trie (319,122 spellings vs 39,922). The reason is the difference the
+docstring itself describes: flashlight's beam explores off-argmax paths, so a
+one-character accent substitution is absorbed, whereas pyctcdecode's exact string
+match died on it. Adding accent variants buys nothing here and costs memory on a
+1.5 GiB container. Revisit only if a real clip is ever shown to fail *because* of
+an accent.
+
+## Currency and cents: the design, not yet built
+
+Landlords may say «ογδόντα ευρώ και πενήντα λεπτά». The grammar today is bare
+integers 1..9999 plus an optional trailing ΕΥΡΩ, so cents cannot be expressed.
+
+**No Greek money/ITN grammar exists to port.** Enumerated, not assumed (fetched
+2026-08-17): NeMo-text-processing has 18 ITN and 17 TN languages, no `el` (and
+zero issues even asking); Google's TextNormalizationCoveringGrammars ships English
+and Russian only; num2words has no `lang_EL`; Microsoft Recognizers-Text (behind
+LUIS/CLU prebuilt `money`) has 15 languages, no Greek; Amazon Lex V2's
+`AMAZON.Currency` lists 66 locales without `el_GR`. The three Greek repos that
+exist (`geoph9/Numbers2Words-Greek`, `nmantzarea/ArithmoLex`,
+`ekaragiannis/number-to-greek-words`) are all number→words only. `mastermunj/to-words`
+`el-GR.ts` is useful only as a word inventory — and it independently confirms
+cents are **λεπτά** and 1000 splits Χίλια/Χιλιάδες, while getting the gender wrong
+(«τρία χιλιάδες»), so it is not a correctness oracle. `greeknum.py` appears to be
+the only Greek spoken-money→value grammar in existence.
+
+**The blocker is resolved, and it is not what it looked like.** flashlight cannot
+express optional tokens inside one lexicon entry (`Trie::insert` takes an exact
+index vector — no epsilon, no repeat flag), so a naive cents grammar means a
+cross-product. But its `DecodeResult` already returns a **per-frame word vector**
+(`Utils.h`), and `pipeline._amount` throws it away: it filters `x >= 0` and keeps
+only `w[0]`. So «ΟΓΔΟΝΤΑ ΕΥΡΩ ΚΑΙ ΠΕΝΗΝΤΑ ΛΕΠΤΑ» can decode as the word sequence
+[80][ΕΥΡΩ][ΚΑΙ][50][ΛΕΠΤΑ] and be assembled into 80,50 in post-processing —
+optionality by Kleene closure over words (Mohri/Pereira/Riley CSL 2002 §3.1) with
+`word_score` as the insertion penalty, which is how Kaldi and SRGS `repeat="0-1"`
+both do it, and how Lex's own grammar-slot example assembles a value.
+
+**Measured cost, which decides the design:**
+
+| lexicon | entries | trie nodes |
+|---|---|---|
+| shipped (1..9999 × {spaced,fused} × {—,+ΕΥΡΩ}) | 39,922 | 176,156 |
+| **word-level** (`greeknum.LEXICON` + ~9 function words) | **332** | **985** |
+| cross-product euros×cents, extrapolated to 9999 | ~1.98 M | ~18.7 M → **1.9–4.7 GB, impossible in 1.5 GiB** |
+
+Rescoring is linear in candidates and in target length, and `ctc_logp_batch`
+materialises T×C×(2L+1)×8 bytes: additive widening (perturb the euro slot, then
+the cent slot) stays at parity with what ships; multiplicative widening wants
+362 MB and seconds per decode.
+
+**Ambiguity policy** — «τριάντα πενήντα» is 3050, not 30,50: Lex's
+`AMAZON.Currency` resolves a bare two-number sequence as concatenation
+("five fifteen" → 515.00) and requires the unit words for the cents reading
+("five dollars fifteen cents" → 5.15). Require the marker («λεπτά», «κόμμα», «και
+μισό»); resolve anything else at the confirmation, which this dialogue already has.
+
+**Why it is not built yet, and the precondition.** Any grammar change shifts both
+the posterior and the LR null distributions, which invalidates the measured −86/−247
+out-of-grammar separation, the advisory gates, the truncation-margin operating
+point above, and every accept counter below. It must not be done on a hunch about
+what landlords say. **Precondition: count cent/colloquial forms in real shadow
+transcripts first**; the samples are being collected for exactly this. When the
+data justifies it, the word-level lexicon is the design — it is also 178× smaller
+than the shipped trie, so it is a simplification, not just a feature.
+
 ## Owed work (honest ledger)
 
-- **Endpointing / truncation detection** — the guard was removed (both attempted
-  forms were wrong in one direction or the other; see the long comment in
-  `services/voiceasr/src/pipeline.py`). The literature review for the real fix
-  has NOT landed (research agents rate-limited twice, 2026-08-16). Unverified
-  hypotheses on file: conjunction of VAD ends-in-speech + grammar-prefix
-  extensibility (90→96 is a prefix flip) + CTC tail-blank margin; and prompting
-  «…ευρώ» so an early cut clips the filler word, not the numeral. Treat both as
-  hypotheses to measure, not findings.
-- **Currency/cents grammar** («ογδόντα ευρώ και πενήντα λεπτά») — same rate-limited
-  review. Do not expand the lexicon before measuring demand in real shadow
-  transcripts: any grammar change shifts the p/lr null distributions and resets
-  every threshold and counter above.
+- **Fit θ for the truncation margin** from confirmed samples. It ships advisory at
+  a measured-safe bracket; 25 clips cannot set a money threshold. The gating study
+  the literature calls for (≥200 real clips stratified by final character, FP
+  measured at the 0 ms condition per character class) needs real voice notes.
+- **Decide on cents** once the shadow transcripts say whether anyone speaks them.
+  Design and cost table are above; the precondition is demand data, not effort.
+- **Re-validate after ANY grammar change** — the out-of-grammar separation, the
+  advisory gates, the truncation operating point and the accept counters all
+  assume today's lexicon.
 - **Review surface in the app** — a read-only «Φωνητικές εντολές (δοκιμαστική
   λειτουργία)» card so the landlord can see accumulated samples. The bell is the
   wrong home (it is action-oriented and its list query filters

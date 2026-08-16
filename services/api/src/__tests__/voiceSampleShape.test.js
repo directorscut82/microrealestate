@@ -63,7 +63,10 @@ describe('decodes — the calibration scores must actually reach the database', 
     const vcAt = schema.indexOf('voiceCommand: {');
     const vcBlock = schema.slice(vcAt, schema.indexOf('notice: {', vcAt));
     expect(vcBlock).toMatch(/decodes:\s*\[/);
-    for (const field of ['mode', 'value', 'p', 'lr', 'nFrames', 'accept', 'reason', 'ms']) {
+    for (const field of [
+      'mode', 'value', 'p', 'lr', 'nFrames', 'truncMargin', 'truncAlt',
+      'accept', 'reason', 'ms'
+    ]) {
       expect(vcBlock).toMatch(new RegExp(`${field}:\\s*(String|Number|Boolean)`));
     }
   });
@@ -88,6 +91,8 @@ describe('decodes — the calibration scores must actually reach the database', 
                   p: Number,
                   lr: Number,
                   nFrames: Number,
+                  truncMargin: Number,
+                  truncAlt: Number,
                   accept: Boolean,
                   reason: String,
                   ms: Number
@@ -110,6 +115,8 @@ describe('decodes — the calibration scores must actually reach the database', 
             p: 0.8786,
             lr: -6.1,
             nFrames: 142,
+            truncMargin: -0.44,
+            truncAlt: 88,
             accept: true,
             reason: 'rank',
             ms: 2711,
@@ -128,6 +135,8 @@ describe('decodes — the calibration scores must actually reach the database', 
     expect(out.p).toBe(0.8786);
     expect(out.lr).toBe(-6.1);
     expect(out.nFrames).toBe(142);
+    expect(out.truncMargin).toBe(-0.44);
+    expect(out.truncAlt).toBe(88);
     expect(out.accept).toBe(true);
     expect(out.reason).toBe('rank');
     expect(out.ms).toBe(2711);

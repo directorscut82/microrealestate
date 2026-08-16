@@ -28,18 +28,19 @@ each produced a silently wrong money amount:
              posterior alone accepts a GREETING at p=0.995: the posterior is
              conditional on the answer being a number at all; only the LR can
              say it was not.
-             (3) a trailing-truncation guard: a clipped «ενενήντα έξι» decodes
-             to 90 with RISING confidence (measured p=0.931 on a 200 ms early
-             cut), because the truncated audio is a PERFECT match for the
-             shorter number. No output-side score can see missing audio, so
-             the guard is input-side, and its signal is VAD's own end state
-             (vadseg.analyze ends_in_speech): a recording that stops DURING
-             speech — no closing silence ever observed — was cut mid-word. The
-             first form measured span-vs-buffer-end distance instead; VAD pads
-             spans to the buffer edge, so that gap was always <32 ms and the
-             guard degenerated into an RMS test that refused any word ending
-             in a vowel (gate-8: it systematically rejected a normal
-             «πεντακόσια») while MISSING cuts in quiet fricatives.
+             (3) the TRUNCATION MARGIN (_truncation_margin): the best PREFIX
+             alignment of an in-grammar continuation against the winner's
+             COMPLETE alignment. A clipped «ενενήντα έξι» decodes to 90 with
+             RISING confidence (p=0.931 at a 200 ms cut) because for the
+             surviving audio the shorter numeral genuinely IS the better answer —
+             so no complete-alignment score can ever see it, and two earlier
+             input-side guards (VAD span geometry, then VAD ends_in_speech) both
+             failed because silero pads every span to the buffer edge, making a
+             tight complete recording byte-identical to a mid-word cut. Letting
+             the longer word end EARLY is the question that works; it is Kaldi's
+             final_relative_cost, and it is measured against a 313-decode
+             truncation ladder in the method's own docstring, along with the five
+             signals it beat.
 
 Thresholds are DELIBERATELY not decided here: p, lr and the reason flags go
 back to the caller raw, because 16 clips cannot calibrate a money threshold.
@@ -110,6 +111,7 @@ class Pipeline:
         self.blank = self.vocab["<pad>"]
         self.sep = self.vocab["|"]
         self._build_amount_decoder()
+        self._build_extension_index()
 
     # -- lexicon ------------------------------------------------------------
     def _labels_for(self, s: str):
@@ -164,6 +166,109 @@ class Pipeline:
             opts, trie, ZeroLM(), self.sep, self.blank,
             self.word_dict.get_index("<unk>"), [], False,
         )
+
+    def _build_extension_index(self):
+        """Spelling -> the values whose numeral spelling strictly EXTENDS it.
+
+        Indexed by the numeral only: «ΕΥΡΩ» is a suffix, not part of the number,
+        so ΟΓΔΟΝΤΑ's competitor is «ΟΓΔΟΝΤΑΟΧΤΩ (ΕΥΡΩ)» — indexing the
+        ΕΥΡΩ-suffixed string instead finds nothing, which silently disabled the
+        check on 5 of 13 measured dangerous decodes (the speaker usually DOES say
+        «ευρώ», so that variant usually wins the spelling contest).
+
+        Measured on this lexicon: 1123 of 9999 values have a value-changing
+        extension. The other ~89% — every …ΕΞΙ/…ΕΝΑ/…ΤΡΙΑ compound — are exempt
+        from the check for free, because no in-grammar word continues them, so a
+        truncation cannot turn them into a different valid amount.
+        """
+        self.forms = {}
+        owner = {}
+        for n, lbs in self.cand_ids.items():
+            fs = sorted(
+                {
+                    "".join(self.inv.get(i, "") for i in lb).replace("|", "")
+                    for lb in lbs
+                }
+            )
+            self.forms[n] = fs
+            for f in fs:
+                owner.setdefault(f, set()).add(n)
+        self._allforms = sorted(owner)
+        self._owner = owner
+
+    def _extensions_of(self, spelling: str, val: int, k: int = 8):
+        """[(competitor spelling, value)] — the k shortest continuations."""
+        import bisect
+
+        had_cur = spelling.endswith("ΕΥΡΩ")
+        stem = spelling[: -len("ΕΥΡΩ")] if had_cur else spelling
+        found = []
+        i = bisect.bisect_right(self._allforms, stem)
+        while i < len(self._allforms) and self._allforms[i].startswith(stem):
+            f = self._allforms[i]
+            i += 1
+            if f == stem or f.endswith("ΕΥΡΩ"):
+                continue
+            for v in self._owner[f] - {val}:
+                found.append((len(f), f + ("ΕΥΡΩ" if had_cur else ""), v))
+        found.sort()
+        seen, keep = set(), []
+        for _, f, v in found:
+            if v in seen:
+                continue
+            seen.add(v)
+            keep.append((f, v))
+            if len(keep) >= k:
+                break
+        return keep, len(stem)
+
+    def _truncation_margin(self, lp, value):
+        """Δ = best PREFIX alignment of an in-grammar continuation
+             − COMPLETE alignment of the winner, in nats (max semiring both
+        sides, as the LR guard requires).
+
+        Δ near zero means a LONGER valid amount explains this audio just as well
+        as the winner and merely ran out of frames — the signature of a recording
+        cut mid-word. Returns (Δ, alternative value) or (None, None) when the
+        winner admits no continuation.
+
+        MEASURED (313-decode synthetic truncation ladder, 46 clips × 0-400 ms):
+        this is the ONLY one of six candidate signals with a usable operating
+        point. At θ=4 nats it fired on 0 of 25 scoreable correct decodes — 21 of
+        them «…ΕΥΡΩ», the vowel-final class that made both previous guards
+        unusable — while catching 19% of value-changing truncations, and in the
+        cases it caught, the named alternative WAS the truth (88 for a decoded
+        80, 255 for a decoded 250). The five signals it beat, all refuted by the
+        same ladder: trailing-blank run (median 0 frames on correct AND on
+        truncated), non-blank tail mass (~1.0 on both), prefix-extensibility
+        alone (fires on 61% of correct decodes — round numbers ARE the extensible
+        ones), frames-per-character (separates the wrong way), and the LR itself
+        (INVERTED: truncated decodes score better, median −37 vs −59 nats).
+
+        Structural blind spot, and it is not fixable acoustically: if the cut
+        removed the whole continuation, no frames support it and Δ collapses. A
+        cut exactly at a word boundary is undetectable. That is why the flag is
+        advisory and the human confirmation stays the backstop.
+        """
+        forms = self.forms.get(value) or []
+        targets = [self._labels_for(f) for f in forms]
+        pairs = [(f, t) for f, t in zip(forms, targets) if t]
+        if not pairs:
+            return None, None
+        sc = R.ctc_viterbi_batch(lp, [t for _, t in pairs])
+        bi = int(np.argmax(sc))
+        w_spell, s_complete = pairs[bi][0], float(sc[bi])
+
+        exts, stem_len = self._extensions_of(w_spell, value)
+        cand = [(f, v, lb) for f, v in exts if (lb := self._labels_for(f))]
+        if not cand:
+            return None, None
+        # require the alignment to consume the winner PLUS one further character,
+        # else the prefix score degenerates into re-scoring the winner
+        s_min = [2 * stem_len + 1] * len(cand)
+        sp = R.ctc_viterbi_prefix_batch(lp, [lb for _, _, lb in cand], s_min)
+        j = int(np.argmax(sp))
+        return float(sp[j]) - s_complete, int(cand[j][1])
 
     # -- audio --------------------------------------------------------------
     def decode_audio(self, data: bytes) -> np.ndarray:
@@ -244,23 +349,13 @@ class Pipeline:
         if len(spans) > 1 and mode == "amount":
             return _res(mode, None, None, 0.0, None, "multiple_utterances", t0)
         a, b = max(spans, key=lambda s: s[1] - s[0])
-        # TRUNCATION: NO RELIABLE GUARD YET — do not gate on it.
-        #
-        # Two forms were tried and both were wrong. Form 1 (span-vs-buffer gap +
-        # RMS) fired on any word ending in a vowel because VAD pads spans to the
-        # buffer edge — it refused a normal «πεντακόσια». Form 2 (VAD
-        # ends_in_speech) fires on EVERY tightly-cut clip because a recording
-        # with no trailing silence is indistinguishable, from VAD alone, from a
-        # mid-word cut. The honest position: detecting "the recording was cut"
-        # from the audio the recorder DID capture is the endpointing problem,
-        # and the literature review that was to inform it (workflow) has not
-        # landed. Rather than ship a guard that is wrong in one direction or the
-        # other, ship none: the human confirmation step is the real backstop
-        # (shadow mode executes nothing), and a truncated amount surfaces as a
-        # wrong number the landlord rejects — recorded as a correction sample,
-        # which is exactly the data the endpointing fix will be built on.
-        # TODO(endpointing): forced-alignment end-time margin or a dedicated
-        # end-of-query model, per the pending research.
+        # TRUNCATION is measured in _amount() via _truncation_margin(), NOT here
+        # and NOT from the audio geometry. Two input-side attempts failed at this
+        # exact spot (span-vs-buffer gap + RMS; then VAD ends_in_speech) because
+        # silero pads every span to the buffer edge, so a tight complete
+        # recording and a mid-word cut are indistinguishable from VAD alone. The
+        # signal that works is a DECODER-side one and needs the logits, so it
+        # lives where the logits and the winning hypothesis both exist.
         lp = self._logits(wav[a:b]).astype(np.float64)
         transcript = self._greedy(lp)
 
@@ -315,8 +410,16 @@ class Pipeline:
         win_targets = [lb for lb in self.cand_ids[n1]]
         vit = float(R.ctc_viterbi_batch(lp, win_targets).max())
         lr = vit - float(lp.max(axis=1).sum())
-        return _res("amount", transcript, int(n1), p, lr, "rank", t0,
-                    lp.shape[0])
+        r = _res("amount", transcript, int(n1), p, lr, "rank", t0, lp.shape[0])
+        # Truncation margin — ADVISORY, like p and lr: reported raw, never gating
+        # `accept` here. The threshold belongs to the api, where confirmed samples
+        # accumulate; θ=4 nats is the measured 0-false-alarm bracket (Kaldi's own
+        # max_relative_cost is 2.0 confident / 8.0 permissive) but 25 clips cannot
+        # fix a money threshold, which is the whole reason for shadow mode.
+        delta, alt = self._truncation_margin(lp, int(n1))
+        r["truncMargin"] = None if delta is None else round(delta, 2)
+        r["truncAlt"] = alt
+        return r
 
     def _closed_set(self, lp, transcript, table, mode, t0):
         """2 (yesno) or 12 (month) candidates: no beam needed — score every
@@ -385,5 +488,9 @@ def _res(mode, transcript, value, p, lr, reason, t0, n_frames=0):
         # is implicitly a duration gate. Kept raw here for the same reason as
         # p/lr: thresholds are the api's job, this container just measures.
         "nFrames": int(n_frames),
+        # Present on every response so the shape is stable; only amount mode
+        # ever computes them (see _truncation_margin).
+        "truncMargin": None,
+        "truncAlt": None,
         "ms": int((time.time() - t0) * 1000),
     }

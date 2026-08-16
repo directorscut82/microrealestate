@@ -71,6 +71,10 @@ export interface VoiceDecode {
   p: number | null;
   lr: number | null;
   nFrames: number | null;
+  /** Truncation margin (nats) and the longer amount it names; amount mode only,
+   *  null when the winner admits no in-grammar continuation. */
+  truncMargin: number | null;
+  truncAlt: number | null;
   accept: boolean;
   reason: string;
   ms: number | null;

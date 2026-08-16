@@ -164,6 +164,8 @@ describe('what the router claims', () => {
               accept: true,
               reason: 'rank',
               nFrames: 138,
+              truncMargin: -0.44,
+              truncAlt: 88,
               ms: 2711
             }
           : {
@@ -193,6 +195,8 @@ describe('what the router claims', () => {
         p: 0.9,
         lr: -20,
         nFrames: 142,
+        truncMargin: null,
+        truncAlt: null,
         accept: true,
         reason: 'transcript',
         ms: 900
@@ -203,6 +207,8 @@ describe('what the router claims', () => {
         p: 0.8786,
         lr: -6.1,
         nFrames: 138,
+        truncMargin: -0.44,
+        truncAlt: 88,
         accept: true,
         reason: 'rank',
         ms: 2711

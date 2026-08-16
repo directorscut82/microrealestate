@@ -178,6 +178,61 @@ def ctc_viterbi_batch(logp, targets, blank=0):
     return np.maximum(al[np.arange(C), idx], al[np.arange(C), idx - 1])
 
 
+def ctc_viterbi_prefix_batch(logp, targets, s_min, blank=0):
+    """Max-semiring CTC that may terminate at ANY state s >= s_min, instead of
+    only at the target's final states.
+
+    WHY THIS PRIMITIVE EXISTS. Every other scorer here demands that a candidate
+    explain ALL of its characters. That is correct for ranking and it is exactly
+    why a truncated recording is invisible: on a clipped «ενενήντα έξι» the full
+    ΕΝΕΝΗΝΤΑΕΞΙ is asked to fit characters for which no frames exist, is
+    correctly scored as terrible, and ΕΝΕΝΗΝΤΑ wins with RISING confidence.
+    Measured on a 313-decode truncation ladder: the true value was already in the
+    candidate set for 34 of 36 value-changing truncations and lost by 20-108
+    nats. No re-ranking can recover it, because given the surviving audio the
+    shorter numeral is genuinely the better answer.
+
+    The question that can see it lets the longer word END EARLY: score its best
+    PREFIX alignment against the winner's COMPLETE alignment. Kaldi computes this
+    quantity to decide whether a pause is a real endpoint --
+    final_relative_cost = best_cost_with_final - best_cost
+    (lattice-faster-decoder.cc:576, thresholded at 2.0/8.0 nats by
+    online-endpoint.h rules 2/3). flashlight's own LexiconDecoder discards the
+    mid-word hypotheses that carry this evidence (LexiconDecoder.cpp:231-247,
+    hasNiceEnding), which is why the beam cannot surface it either.
+    """
+    C = len(targets)
+    Ls = [len(t) for t in targets]
+    Sm = 2 * max(Ls) + 1
+    ext = np.full((C, Sm), blank, dtype=np.int64)
+    valid = np.zeros((C, Sm), bool)
+    can_skip = np.zeros((C, Sm), bool)
+    for i, t in enumerate(targets):
+        S = 2 * len(t) + 1
+        ext[i, 1:S:2] = t
+        valid[i, :S] = True
+        if len(t) > 1:
+            a = np.asarray(t)
+            can_skip[i, 3:S:2] = a[1:] != a[:-1]
+    NEG = -1e30
+    lp = logp[:, ext]
+    al = np.full((C, Sm), NEG)
+    al[:, 0] = lp[0, :, 0]
+    al[np.arange(C), 1] = lp[0, np.arange(C), 1]
+    al = np.where(valid, al, NEG)
+    for t in range(1, logp.shape[0]):
+        s1 = np.concatenate([np.full((C, 1), NEG), al[:, :-1]], 1)
+        s2 = np.concatenate([np.full((C, 2), NEG), al[:, :-2]], 1)
+        s2 = np.where(can_skip, s2, NEG)
+        al = np.maximum(np.maximum(al, s1), s2) + lp[t]
+        al = np.where(valid, al, NEG)
+    out = np.full(C, NEG)
+    for i in range(C):
+        lo = min(max(0, s_min[i]), 2 * Ls[i])
+        out[i] = al[i, lo:2 * Ls[i] + 1].max()
+    return out
+
+
 def rescore(logits, beam_ints, ch2id, T=1.0, prior=None):
     """Returns ranked [(n, p)], plus diagnostics."""
     logp = log_softmax(np.asarray(logits, dtype=np.float64), axis=1)
