@@ -1579,5 +1579,19 @@
   "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.": "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.",
   "Files on an apartment or tenant that is not under a building": "Files on an apartment or tenant that is not under a building",
   "Reading the bill…": "Reading the bill…",
-  "This can take up to a minute for a scanned page.": "This can take up to a minute for a scanned page."
+  "This can take up to a minute for a scanned page.": "This can take up to a minute for a scanned page.",
+  "Voice commands (trial mode)": "Voice commands (trial mode)",
+  "Commands you send to the bot are recorded as validation samples. Nothing is booked automatically during this phase.": "Commands you send to the bot are recorded as validation samples. Nothing is booked automatically during this phase.",
+  "No samples yet. Send a voice or text command to the Telegram bot.": "No samples yet. Send a voice or text command to the Telegram bot.",
+  "Validated": "Validated",
+  "Rejected": "Rejected",
+  "Abandoned": "Abandoned",
+  "incomplete": "incomplete",
+  "(no money command recognized)": "(no money command recognized)",
+  "{{count}} corrections": "{{count}} corrections",
+  "{{count}} corrections_one": "1 correction",
+  "Rent payment": "Rent payment",
+  "Common charges payment": "Common charges payment",
+  "Owner payment": "Owner payment",
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}"
 }

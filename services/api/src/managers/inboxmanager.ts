@@ -74,6 +74,76 @@ export async function list(req: Req, res: Res): Promise<void> {
 }
 
 /**
+ * The view a voiceCommand sample row exposes to the settings card. A pure
+ * mapper (exported for unit tests): the card renders WHO/WHAT/WHEN and the
+ * outcome — deliberately NOT the transcript bodies (whatever the landlord said
+ * to the bot stays out of the browser payload) and NOT the decodes (raw
+ * calibration scores are analysis data, not UI data).
+ */
+export function _voiceSampleView(rows: any[]): any[] {
+  return (rows || []).map((r) => {
+    const vc = r?.voiceCommand || {};
+    return {
+      _id: r._id,
+      createdDate: r.createdDate,
+      intent: vc.intent || null,
+      personName: vc.personName || null,
+      amount: typeof vc.amount === 'number' ? vc.amount : null,
+      month: typeof vc.month === 'number' ? vc.month : null,
+      corrections: typeof vc.corrections === 'number' ? vc.corrections : 0,
+      outcome: vc.outcome || null,
+      // 🎤 vs ⌨️ on the card: the modality of the FIRST message of the dialogue.
+      firstSource: vc.transcript?.[0]?.source || null
+    };
+  });
+}
+
+/**
+ * GET /inbox/voicesamples — the shadow-mode validation samples, read-only,
+ * newest first, capped to the latest 20 for the settings card. `stats` covers
+ * ALL samples (countDocuments — which CASTS realmId like find(); an aggregate
+ * $match would compare the ObjectId against the schema's String and silently
+ * return zeros), so the summary line never lies when history exceeds the cap.
+ */
+export async function listVoiceSamples(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+  const base = { realmId, kind: 'voiceCommand' } as const;
+  const [rows, total, validated, rejected, abandoned, validatedLe1] =
+    await Promise.all([
+      Collections.InboxItem.find(base)
+        .sort({ createdDate: -1 })
+        .limit(20)
+        .select('createdDate voiceCommand')
+        .lean(),
+      Collections.InboxItem.countDocuments(base),
+      Collections.InboxItem.countDocuments({
+        ...base,
+        'voiceCommand.outcome': 'validated'
+      }),
+      Collections.InboxItem.countDocuments({
+        ...base,
+        'voiceCommand.outcome': 'rejected'
+      }),
+      Collections.InboxItem.countDocuments({
+        ...base,
+        'voiceCommand.outcome': 'abandoned'
+      }),
+      Collections.InboxItem.countDocuments({
+        ...base,
+        'voiceCommand.outcome': 'validated',
+        'voiceCommand.corrections': { $lte: 1 }
+      })
+    ]);
+  res.json({
+    items: _voiceSampleView(rows as any[]),
+    stats: { total, validated, rejected, abandoned, validatedLe1 }
+  });
+}
+
+/**
  * POST /inbox/:id/confirm
  * Body: {buildingId, expenseId, chargeThisMonth?, replaceExisting?,
  *        [amended parsed fields: totalAmount, term, periodStart, periodEnd,

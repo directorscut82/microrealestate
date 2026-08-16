@@ -1600,5 +1600,19 @@
   "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.": "Ο λογαριασμός περιλαμβάνει {{arrears}} από προηγούμενη περίοδο. Οι ενοικιαστές χρεώνονται μόνο τα {{current}} της τρέχουσας.",
   "Files on an apartment or tenant that is not under a building": "Αρχεία σε διαμέρισμα ή ενοικιαστή που δεν ανήκει σε κτίριο",
   "Reading the bill…": "Διαβάζω τον λογαριασμό…",
-  "This can take up to a minute for a scanned page.": "Μπορεί να πάρει έως ένα λεπτό για σαρωμένη σελίδα."
+  "This can take up to a minute for a scanned page.": "Μπορεί να πάρει έως ένα λεπτό για σαρωμένη σελίδα.",
+  "Voice commands (trial mode)": "Φωνητικές εντολές (δοκιμαστική λειτουργία)",
+  "Commands you send to the bot are recorded as validation samples. Nothing is booked automatically during this phase.": "Οι εντολές που στέλνετε στο bot καταγράφονται ως δείγματα επικύρωσης. Καμία καταβολή δεν καταχωρείται αυτόματα σε αυτή τη φάση.",
+  "No samples yet. Send a voice or text command to the Telegram bot.": "Δεν υπάρχουν ακόμη δείγματα. Στείλτε μια φωνητική ή γραπτή εντολή στο Telegram bot.",
+  "Validated": "Επικυρώθηκε",
+  "Rejected": "Απορρίφθηκε",
+  "Abandoned": "Εγκαταλείφθηκε",
+  "incomplete": "ημιτελές",
+  "(no money command recognized)": "(δεν αναγνωρίστηκε εντολή καταβολής)",
+  "{{count}} corrections": "{{count}} διορθώσεις",
+  "{{count}} corrections_one": "1 διόρθωση",
+  "Rent payment": "Καταβολή ενοικίου",
+  "Common charges payment": "Πληρωμή κοινοχρήστων",
+  "Owner payment": "Καταβολή ιδιοκτήτη",
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Δείγματα: {{total}} · Επικυρωμένα: {{validated}} · Σωστά με το πολύ μία διόρθωση: {{good}}/{{validated}}"
 }

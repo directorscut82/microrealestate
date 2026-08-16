@@ -567,6 +567,12 @@ export default function routes(): express.Router {
   // pending confirm/dismiss from the notification bell.
   const inboxRouter = express.Router();
   inboxRouter.get('/', Middlewares.asyncWrapper(inboxManager.list as any));
+  // Read-only voice-command validation samples (shadow mode) for the
+  // settings/third-parties card. No confirm/dismiss — samples are a dataset.
+  inboxRouter.get(
+    '/voicesamples',
+    Middlewares.asyncWrapper(inboxManager.listVoiceSamples as any)
+  );
   inboxRouter.post(
     '/:id/confirm',
     Middlewares.asyncWrapper(inboxManager.confirm as any)

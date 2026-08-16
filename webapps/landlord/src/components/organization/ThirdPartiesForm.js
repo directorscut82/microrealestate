@@ -12,6 +12,7 @@ import { Separator } from '../ui/separator';
 import { Switch } from '../ui/switch';
 import Link from '../Link';
 import { StoreContext } from '../../store';
+import VoiceSamplesCard from './VoiceSamplesCard';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
@@ -415,6 +416,7 @@ export default function ThirdPartiesForm({ organization }) {
             </Link>
             <div className="space-y-2 mt-2"><Label htmlFor="telegramBotToken">{t('Bot token')}</Label><Input id="telegramBotToken" type="password" autoComplete="off" placeholder="123456:ABC-DEF..." {...register('telegramBotToken')} /></div>
             <div className="space-y-2 mt-2"><Label htmlFor="telegramAdminChatId">{t('Admin chat ID')}</Label><Input id="telegramAdminChatId" autoComplete="off" {...register('telegramAdminChatId')} /></div>
+            <VoiceSamplesCard />
           </>
         ) : null}
       </SectionWithSwitch>

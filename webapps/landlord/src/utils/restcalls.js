@@ -14,7 +14,8 @@ export const QueryKeys = {
   TENANTS: 'tenants',
   TEMPLATES: 'templates',
   RENTS: 'rents',
-  LEASES: 'leases'
+  LEASES: 'leases',
+  VOICE_SAMPLES: 'voiceSamples'
 };
 
 // Owner-debt ledger (καταβολές ιδιοκτητών). Owners are aggregated server-side
@@ -720,6 +721,13 @@ export async function confirmInboxItem(id, payload) {
 
 export async function dismissInboxItem(id) {
   const response = await apiFetcher().post(`/inbox/${id}/dismiss`);
+  return response.data;
+}
+
+// Voice-command validation samples (shadow mode) — read-only list for the
+// settings/third-parties card. Returns {items, stats}.
+export async function fetchVoiceSamples() {
+  const response = await apiFetcher().get('/inbox/voicesamples');
   return response.data;
 }
 

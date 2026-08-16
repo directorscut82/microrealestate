@@ -1353,5 +1353,19 @@
   "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.": "This bill carries {{arrears}} from an earlier period. Tenants are charged only this period’s {{current}}.",
   "Files on an apartment or tenant that is not under a building": "Files on an apartment or tenant that is not under a building",
   "Reading the bill…": "Reading the bill…",
-  "This can take up to a minute for a scanned page.": "This can take up to a minute for a scanned page."
+  "This can take up to a minute for a scanned page.": "This can take up to a minute for a scanned page.",
+  "Voice commands (trial mode)": "Comandos de voz (modo de teste)",
+  "Commands you send to the bot are recorded as validation samples. Nothing is booked automatically during this phase.": "Os comandos enviados ao bot são registrados como amostras de validação. Nada é lançado automaticamente nesta fase.",
+  "No samples yet. Send a voice or text command to the Telegram bot.": "Ainda não há amostras. Envie um comando de voz ou de texto ao bot do Telegram.",
+  "Validated": "Validado",
+  "Rejected": "Rejeitado",
+  "Abandoned": "Abandonado",
+  "incomplete": "incompleto",
+  "(no money command recognized)": "(nenhum comando de pagamento reconhecido)",
+  "{{count}} corrections": "{{count}} correções",
+  "{{count}} corrections_one": "1 correção",
+  "Rent payment": "Pagamento de aluguel",
+  "Common charges payment": "Pagamento de despesas comuns",
+  "Owner payment": "Pagamento ao proprietário",
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Amostras: {{total}} · Validadas: {{validated}} · Corretas com no máximo uma correção: {{good}}/{{validated}}"
 }
