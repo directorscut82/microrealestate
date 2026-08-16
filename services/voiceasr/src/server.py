@@ -82,8 +82,13 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 result = get_pipeline().recognize(data, mode)
             self._send(200, result)
-        except Exception as exc:  # noqa: BLE001 — the caller needs the reason
-            self._send(500, {"ok": False, "error": str(exc)[:300]})
+        except Exception as exc:  # noqa: BLE001
+            # Detail goes to the LOG, not the wire: the raw text carries ffmpeg
+            # command lines and container paths. The api discards the body
+            # anyway (recognize() returns null on any failure), so the generic
+            # string costs nothing and leaks nothing.
+            print(f"recognize failed: {exc!r}"[:500], flush=True)
+            self._send(500, {"ok": False, "error": "recognition failed"})
 
     def log_message(self, fmt, *args):  # stdlib logs to stderr per request;
         pass  # the api logs the call anyway, and double logging is noise

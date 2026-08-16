@@ -40,8 +40,17 @@ export interface VoiceHandlerDeps {
     chatId: string | number,
     text: string
   ) => Promise<number | null>;
-  /** Persist the dialogue as a validation sample (InboxItem kind voiceCommand). */
-  saveSample: (session: VoiceSession) => Promise<void>;
+  /** Persist the dialogue as a validation sample (InboxItem kind voiceCommand),
+   *  keyed on the TERMINAL message id for idempotency. */
+  saveSample: (session: VoiceSession, terminalMessageId: number) => Promise<void>;
+  /**
+   * Has a voiceCommand sample already been written for this (realm, message_id)?
+   * Telegram re-delivers a whole batch when setOffset fails after handling, so
+   * without this a re-delivered TERMINAL «ναι» starts a fresh dialogue, fails to
+   * re-match the intent, and writes a phantom 'rejected' sample for a command the
+   * landlord issued once (gate-8 finding 2). The bill lane has the same guard.
+   */
+  sampleExists: (realmId: string, messageId: number) => Promise<boolean>;
 }
 
 interface Msg {
@@ -85,21 +94,32 @@ export async function handleVoiceCommand(
   const fileId = msg.voice?.file_id || msg.audio?.file_id;
   const text = (msg.text || '').trim();
 
-  // Decide whether this message belongs to the dialogue at all.
+  // Decide whether this message belongs to the dialogue at all — BEFORE any DB
+  // call. A non-command text (chit-chat, a bill caption) must fall through
+  // without touching mongo; putting the sampleExists dedup ahead of this ran a
+  // real query on every stray message and hung the poll path.
   if (!existing) {
-    if (!fileId) {
-      // A text message only STARTS a dialogue when it looks like a money
-      // command; anything else is not ours (bills, chit-chat) → fall through.
-      if (!text || !matchIntent(text)) return false;
-    }
-    // else: a voice/audio message with no active session always starts one —
-    // the landlord sent a voice note, and command is the safe first mode.
+    // A text message only STARTS a dialogue when it looks like a money command;
+    // a voice/audio message always does (the landlord sent a voice note).
+    if (!fileId && (!text || !matchIntent(text))) return false;
+  } else if (!fileId && !text) {
+    // Open session + neither audio nor text (sticker, contact, location…) is
+    // not a reply we can parse — leave it to default handling rather than
+    // feeding an empty utterance into the state machine.
+    return false;
   }
 
-  // An open session + a message with NEITHER audio NOR text (sticker, contact,
-  // location…) is not a reply we can parse — leave it to the default handling
-  // rather than feeding an empty utterance into the state machine.
-  if (existing && !fileId && !text) return false;
+  // IDEMPOTENCY (gate-8 finding 2): Telegram re-delivers a whole batch when the
+  // offset persist fails after handling. Only now that we KNOW this is our
+  // message do we pay the dedup query. Without a live session, a re-delivered
+  // TERMINAL message would otherwise start a fresh dialogue and write a phantom
+  // sample; if a sample already exists for this exact message it is a replay,
+  // so swallow it silently (claimed, no reply, no second row). Mid-dialogue
+  // replays are handled by the session still being open; only a terminal
+  // message ever produced a row to collide with.
+  if (!existing && (await deps.sampleExists(realm.realmId, msg.message_id))) {
+    return true;
+  }
 
   const session =
     existing || startSession(realm.realmId, deps.newId(), now);
@@ -161,12 +181,13 @@ export async function handleVoiceCommand(
   }
 
   const people = await deps.peopleForRealm(realm.realmId);
-  const reply: Reply = advance(session, utt, people);
+  const reply: Reply = advance(session, utt, people, now);
   await deps.sendReply(realm.botToken, msg.chat.id, reply.say);
 
   if (reply.outcome) {
     try {
-      await deps.saveSample(session);
+      // The terminal message id keys the sample for the re-delivery dedup above.
+      await deps.saveSample(session, msg.message_id);
     } catch (err: any) {
       logger.error(
         `voice-command: failed to persist sample for realm ${realm.realmId}: ${err?.message || err}`

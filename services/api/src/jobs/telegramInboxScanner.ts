@@ -30,6 +30,7 @@ import {
 import { handleVoiceCommand as _routeVoiceCommand } from './voicecommandhandler.js';
 import { recognize as _recognizeVoice } from '../managers/voiceasrclient.js';
 import type { VoiceSession } from '../managers/voicesession.js';
+import { sweepAbandoned as _sweepAbandonedVoice } from '../managers/voicesession.js';
 import { randomUUID } from 'crypto';
 
 const POLL_MS = 60_000;
@@ -797,9 +798,26 @@ export function _defaultDeps(): InboxScanDeps {
         recognize: _recognizeVoice,
         peopleForRealm: _peopleForRealm,
         sendReply: _sendReply,
-        saveSample: _saveVoiceSample
+        saveSample: _saveVoiceSample,
+        sampleExists: async (realmId, messageId) =>
+          !!(await Collections.InboxItem.exists({
+            realmId,
+            kind: 'voiceCommand',
+            telegramMessageId: messageId
+          }))
       })
   };
+}
+
+/**
+ * Persist every timed-out voice dialogue as an 'abandoned' sample. Called on
+ * the 60s tick. sweepAbandoned removes the sessions from memory as it returns
+ * them, so a persist failure loses only that one sample, never loops.
+ */
+async function _sweepAbandonedVoiceSessions(): Promise<void> {
+  for (const session of _sweepAbandonedVoice(Date.now())) {
+    await _saveVoiceSample(session);
+  }
 }
 
 /** Tenants of a realm as {id, name}, for fuzzy person matching in the dialogue. */
@@ -820,7 +838,10 @@ async function _peopleForRealm(
  * there is deliberately no call into any money manager (shadow mode). The row
  * is the dataset that will decide whether voice is ever allowed to act.
  */
-async function _saveVoiceSample(session: VoiceSession): Promise<void> {
+async function _saveVoiceSample(
+  session: VoiceSession,
+  terminalMessageId?: number
+): Promise<void> {
   const s = session.slots;
   const statusOf: Record<string, string> = {
     validated: 'validated',
@@ -832,6 +853,10 @@ async function _saveVoiceSample(session: VoiceSession): Promise<void> {
     source: 'telegram',
     kind: 'voiceCommand',
     status: statusOf[session.outcome || 'abandoned'] || 'abandoned',
+    // Keys the re-delivery dedup (finding 2). Absent for a swept-abandoned
+    // dialogue (no single terminal message) — that row is written once by the
+    // sweep and never re-delivered, so it needs no key.
+    ...(terminalMessageId != null ? { telegramMessageId: terminalMessageId } : {}),
     voiceCommand: {
       intent: s.intent,
       personId: s.person?.id,
@@ -1674,6 +1699,12 @@ export function startTelegramInboxCron(): void {
   pollTimer = setInterval(() => {
     sweepStalledProcessing().catch((err) =>
       logger.error(`telegram-inbox: sweep failed: ${err?.message || err}`)
+    );
+    // Persist timed-out voice dialogues as 'abandoned' samples — the give-up
+    // signal the validation dataset needs (gate-8 finding 1). Best-effort; a
+    // failure logs and the session is already dropped from memory.
+    _sweepAbandonedVoiceSessions().catch((err) =>
+      logger.error(`telegram-inbox: voice sweep failed: ${err?.message || err}`)
     );
     runInboxPollOnce().catch((err) => {
       logger.error(

@@ -29,14 +29,17 @@ each produced a silently wrong money amount:
              conditional on the answer being a number at all; only the LR can
              say it was not.
              (3) a trailing-truncation guard: a clipped «ενενήντα έξι» decodes
-             to 90 with RISING confidence (the review measured p=0.931 on a
-             200 ms early cut), because the truncated audio is a PERFECT match
-             for the shorter number. No output-side score can see missing
-             audio, so the guard is on the input side: if the last speech
-             frame sits within TRUNC_GUARD_MS of the END OF THE BUFFER (not of
-             the VAD span — VAD closes spans on real silence), the recording
-             itself was cut and the answer is refused. Provisional pending the
-             endpointing literature review; marked as such.
+             to 90 with RISING confidence (measured p=0.931 on a 200 ms early
+             cut), because the truncated audio is a PERFECT match for the
+             shorter number. No output-side score can see missing audio, so
+             the guard is input-side, and its signal is VAD's own end state
+             (vadseg.analyze ends_in_speech): a recording that stops DURING
+             speech — no closing silence ever observed — was cut mid-word. The
+             first form measured span-vs-buffer-end distance instead; VAD pads
+             spans to the buffer edge, so that gap was always <32 ms and the
+             guard degenerated into an RMS test that refused any word ending
+             in a vowel (gate-8: it systematically rejected a normal
+             «πεντακόσια») while MISSING cuts in quiet fricatives.
 
 Thresholds are DELIBERATELY not decided here: p, lr and the reason flags go
 back to the caller raw, because 16 clips cannot calibrate a money threshold.
@@ -67,7 +70,6 @@ import rescore as R
 from vadseg import MAX_SPAN_S, SR, Vad
 
 MODELS_DIR = os.environ.get("VOICEASR_MODELS_DIR", "/models")
-TRUNC_GUARD_MS = 150
 
 # NOTE: services/api/src/utils/greekmatch.ts carries the SAME month table for
 # typed-text matching. Two runtimes, no shared source — keep them in step.
@@ -216,6 +218,12 @@ class Pipeline:
         too_long = [s for s in spans if (s[1] - s[0]) / SR > MAX_SPAN_S]
         if too_long:
             return _res(mode, None, None, 0.0, None, "too_long", t0)
+        # TOTAL cap as well as per-span (gate-8 container finding): command mode
+        # decodes every span, so a rambling many-span note could exceed the api
+        # client's 45s timeout while wedging the single-flight lock for everyone.
+        total_speech = sum(b - a for a, b in spans) / SR
+        if total_speech > MAX_SPAN_S:
+            return _res(mode, None, None, 0.0, None, "too_long", t0)
 
         if mode == "command":
             # transcript only; slot extraction happens API-side where the
@@ -233,14 +241,23 @@ class Pipeline:
         if len(spans) > 1 and mode == "amount":
             return _res(mode, None, None, 0.0, None, "multiple_utterances", t0)
         a, b = max(spans, key=lambda s: s[1] - s[0])
-        # trailing-truncation guard: if speech runs into the END OF THE
-        # RECORDING, the audio was cut mid-word and the shorter reading will
-        # be a perfect (and wrong) match
-        buffer_end_s = len(wav) / SR
-        if buffer_end_s - b / SR < TRUNC_GUARD_MS / 1000.0:
-            tail = wav[max(0, len(wav) - int(0.048 * SR)):]
-            if float(np.sqrt((tail ** 2).mean())) > 0.02:
-                return _res(mode, None, None, 0.0, None, "possibly_truncated", t0)
+        # TRUNCATION: NO RELIABLE GUARD YET — do not gate on it.
+        #
+        # Two forms were tried and both were wrong. Form 1 (span-vs-buffer gap +
+        # RMS) fired on any word ending in a vowel because VAD pads spans to the
+        # buffer edge — it refused a normal «πεντακόσια». Form 2 (VAD
+        # ends_in_speech) fires on EVERY tightly-cut clip because a recording
+        # with no trailing silence is indistinguishable, from VAD alone, from a
+        # mid-word cut. The honest position: detecting "the recording was cut"
+        # from the audio the recorder DID capture is the endpointing problem,
+        # and the literature review that was to inform it (workflow) has not
+        # landed. Rather than ship a guard that is wrong in one direction or the
+        # other, ship none: the human confirmation step is the real backstop
+        # (shadow mode executes nothing), and a truncated amount surfaces as a
+        # wrong number the landlord rejects — recorded as a correction sample,
+        # which is exactly the data the endpointing fix will be built on.
+        # TODO(endpointing): forced-alignment end-time margin or a dedicated
+        # end-of-query model, per the pending research.
         lp = self._logits(wav[a:b]).astype(np.float64)
         transcript = self._greedy(lp)
 

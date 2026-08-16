@@ -64,19 +64,41 @@ class Vad:
         min_silence_ms: int = 180,
         pad_ms: int = 100,
     ):
-        """Speech spans as (start_sample, end_sample), with hysteresis.
+        """Speech spans as (start_sample, end_sample). Thin wrapper over analyze()."""
+        return self.analyze(wav, threshold, min_speech_ms, min_silence_ms, pad_ms)[
+            "spans"
+        ]
+
+    def analyze(
+        self,
+        wav: np.ndarray,
+        threshold: float = 0.5,
+        min_speech_ms: int = 120,
+        min_silence_ms: int = 180,
+        pad_ms: int = 100,
+    ):
+        """One VAD pass → {spans, ends_in_speech}.
 
         Hysteresis (leave only after min_silence_ms below threshold) is what
         stops a stop-consonant closure mid-word from splitting a number in
-        half — the split that once made «πενήντα έξι» arrive as two fragments
-        and 56 unrecoverable.
+        half — the split that once made «πενήντα έξι» arrive as two fragments.
+
+        `ends_in_speech`: was the LAST frame of the recording still speech, with
+        no closing silence after it? That — NOT the span-vs-buffer-end gap — is
+        the truncation signal. VAD pads every span to nearly the buffer end when
+        speech reaches it, so a gap test fires on any word spoken to the edge
+        (the guard's original, broken form: it refused «πεντακόσια» spoken
+        normally). What actually distinguishes a mid-word CUT from a complete
+        utterance is whether the recorder stopped while speech was ongoing (no
+        trailing silence → ends_in_speech True) versus after the speaker
+        finished (VAD saw the closing silence → False).
         """
         probs = self.speech_probs(wav)
         ms = WIN / SR * 1000.0
         min_sil = round(min_silence_ms / ms)
         min_sp = round(min_speech_ms / ms)
         pad = round(pad_ms / ms)
-        spans = []
+        raw = []
         start, sil = None, 0
         for i, p in enumerate(probs):
             if p >= threshold:
@@ -88,17 +110,17 @@ class Vad:
                 if sil >= min_sil:
                     end = i - sil + 1
                     if end - start >= min_sp:
-                        spans.append((start, end))
+                        raw.append((start, end))
                     start, sil = None, 0
+        # A span still open at the last frame = the recording ended DURING speech.
+        ends_in_speech = start is not None
         if start is not None and len(probs) - start >= min_sp:
-            spans.append((start, len(probs)))
-        return [
-            (
-                max(0, (a - pad)) * WIN,
-                min(len(probs), (b + pad)) * WIN,
-            )
-            for a, b in spans
+            raw.append((start, len(probs)))
+        spans = [
+            (max(0, (a - pad)) * WIN, min(len(probs), (b + pad)) * WIN)
+            for a, b in raw
         ]
+        return {"spans": spans, "ends_in_speech": ends_in_speech}
 
 
 def _one_thread():

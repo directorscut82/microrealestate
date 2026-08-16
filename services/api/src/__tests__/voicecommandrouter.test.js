@@ -50,9 +50,13 @@ function makeDeps(overrides = {}) {
         sent.push(text);
         return 1;
       },
-      saveSample: async (s) => {
-        saved.push(s);
+      saveSample: async (s, terminalMessageId) => {
+        saved.push({ ...s, terminalMessageId });
       },
+      // In-memory stand-in for the InboxItem lookup: a sample "exists" when a
+      // previous saveSample in THIS test stored that terminal message id.
+      sampleExists: async (_realmId, messageId) =>
+        saved.some((x) => x.terminalMessageId === messageId),
       ...overrides
     }
   };
@@ -165,5 +169,46 @@ describe('what the router claims', () => {
     await expect(
       handleVoiceCommand(REALM, { message_id: 3, chat: { id: 5 }, text: 'ναι' }, deps)
     ).resolves.toBe(true);
+  });
+});
+
+describe('re-delivery idempotency (gate-8 finding 2)', () => {
+  it('a re-delivered TERMINAL VOICE «ναι» writes no phantom sample', async () => {
+    // The refuter's exact path: the confirmation is a VOICE note. A voice
+    // message ALWAYS passes routing (unlike a text «ναι», which is not a
+    // command and falls through), so a re-delivery reaches the dedup. Without
+    // it, tick 2 starts a fresh dialogue, recognizes «ΝΑΙ» in command mode,
+    // fails to match it as an intent, and writes a phantom REJECTED sample.
+    const yesVoice = (id) => ({
+      message_id: id, chat: { id: 5 }, voice: { file_id: `nai-${id}` }
+    });
+    const { deps, saved } = makeDeps({
+      recognize: async (_a, mode) =>
+        mode === 'yesno'
+          ? { ok: true, mode, transcript: 'ΝΑΙ', value: 'yes', p: 0.99, lr: 0, accept: true, reason: 'rank', ms: 50 }
+          : { ok: true, mode, transcript: 'ΝΑΙ', value: null, p: 0.9, lr: -20, accept: true, reason: 'rank', ms: 50 }
+    });
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    // terminal confirmation as a voice note → validated sample keyed on msg 2
+    await handleVoiceCommand(REALM, yesVoice(2), deps);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].outcome).toBe('validated');
+    // Telegram re-delivers the same voice note (offset persist failed):
+    const claimed = await handleVoiceCommand(REALM, yesVoice(2), deps);
+    expect(claimed).toBe(true); // swallowed as a replay
+    expect(saved).toHaveLength(1); // NO phantom second row
+  });
+
+  it('a re-delivered terminal TEXT «ναι» falls through (not a command, no phantom)', async () => {
+    // The text path is safe for a different reason: «ναι» alone is not a money
+    // intent, so with no session it returns false at routing — no fresh
+    // dialogue, no phantom sample — before the dedup is even needed.
+    const { deps, saved } = makeDeps();
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'ναι' }, deps);
+    expect(saved).toHaveLength(1);
+    const claimed = await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'ναι' }, deps);
+    expect(claimed).toBe(false);
+    expect(saved).toHaveLength(1);
   });
 });

@@ -224,6 +224,32 @@ describe('modality independence and mixed defects', () => {
   });
 });
 
+describe('abandonment sweep (gate-8 finding 1)', () => {
+  it('a timed-out dialogue is returned as an abandoned sample and dropped', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Μάντας'), PEOPLE, NOW); // incomplete → still open
+    // before TTL: nothing swept, session still active
+    expect(VS.sweepAbandoned(NOW + 60_000)).toEqual([]);
+    expect(VS.activeSession('r1', NOW + 60_000)).not.toBeNull();
+    // after TTL (10min): swept, stamped abandoned, and removed from memory
+    const swept = VS.sweepAbandoned(NOW + 11 * 60_000);
+    expect(swept).toHaveLength(1);
+    expect(swept[0].outcome).toBe('abandoned');
+    expect(swept[0].realmId).toBe('r1');
+    expect(VS.activeSession('r1', NOW + 11 * 60_000)).toBeNull();
+    // idempotent: a second sweep finds nothing (already removed)
+    expect(VS.sweepAbandoned(NOW + 12 * 60_000)).toEqual([]);
+  });
+
+  it('a COMPLETED dialogue is never swept as abandoned', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    VS.advance(s, text('ναι'), PEOPLE); // validated → phase done, removed
+    // even well past TTL, there is nothing to abandon
+    expect(VS.sweepAbandoned(NOW + 20 * 60_000)).toEqual([]);
+  });
+});
+
 describe('SHADOW MODE — no money path exists', () => {
   it('voicesession.ts imports no money manager', () => {
     const src = fs.readFileSync(path.join(HERE, '../managers/voicesession.ts'), 'utf8');

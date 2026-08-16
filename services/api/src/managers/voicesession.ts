@@ -33,9 +33,14 @@
  *
  * In-memory, one active dialogue per realm — the same single-consumer pattern
  * as recapturesession.ts, and for the same reason: the Telegram poller is the
- * single getUpdates consumer and adminChatId is one chat. The durable record
- * is the InboxItem row; losing the in-memory session on restart abandons the
- * dialogue (the row is swept to 'abandoned'), and the landlord starts over.
+ * single getUpdates consumer and adminChatId is one chat.
+ *
+ * PERSISTENCE, honestly: a COMPLETED dialogue (validated/rejected) writes an
+ * InboxItem sample. A dialogue that TIMES OUT is swept to an 'abandoned' sample
+ * by the scanner's 60s tick (sweepAbandoned below). A dialogue interrupted by
+ * an api RESTART is lost with the in-memory map and leaves NO row — it never
+ * wrote a mid-flight one. That last case is an accepted gap for a shadow-mode
+ * dataset, documented on the schema, not papered over.
  */
 import {
   MoneyIntent,
@@ -124,6 +129,30 @@ export function startSession(
 
 export function endSession(realmId: string): void {
   byRealm.delete(realmId);
+}
+
+/**
+ * Collect and REMOVE every dialogue that has passed its TTL without completing,
+ * stamping each with outcome 'abandoned'. The caller (the scanner's 60s sweep)
+ * persists these as samples — so a walk-away/timeout is recorded, not lost.
+ *
+ * This records the COMMON abandonment (the human gave up); it cannot record an
+ * api restart, because the in-memory map dies with the process and these
+ * dialogues never wrote a mid-flight row (a deliberate simplicity choice —
+ * writing/updating a row at every turn is the alternative and is not worth it
+ * for a shadow-mode dataset). That residual is documented on the schema, not
+ * promised away.
+ */
+export function sweepAbandoned(now: number): VoiceSession[] {
+  const out: VoiceSession[] = [];
+  for (const [realmId, s] of byRealm) {
+    if (now > s.expiresAt && s.phase !== 'done') {
+      s.outcome = 'abandoned';
+      out.push(s);
+      byRealm.delete(realmId);
+    }
+  }
+  return out;
 }
 
 // test-only
@@ -261,10 +290,15 @@ function askFor(slot: 'person' | 'amount' | 'month'): Reply {
 export function advance(
   session: VoiceSession,
   utt: Utterance,
-  people: PersonEntry[]
+  people: PersonEntry[],
+  // The clock, injected — startSession and sweepAbandoned already take one, and
+  // reading Date.now() here instead mixed wall-clock into a session whose TTL is
+  // set from the injected clock, so the sweep (also injected-clock) could never
+  // see the row as expired. Defaults to real time for production callers.
+  now: number = Date.now()
 ): Reply {
   session.transcript.push({ text: utt.text, source: utt.source });
-  session.expiresAt = Date.now() + TTL_MS;
+  session.expiresAt = now + TTL_MS;
 
   // ── pass 1: the slot we explicitly asked for ──────────────────────────────
   if (session.asked === 'confirm') {
