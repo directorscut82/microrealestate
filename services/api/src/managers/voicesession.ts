@@ -174,10 +174,24 @@ export function extractSlots(
   const intent = matchIntent(utt.text);
   if (intent) out.intent = intent.value;
 
+  // EVERY NAME TOKEN is a label, not just the full name. Occupant.name holds
+  // the lease's full legal name («ΜΑΝΤΑΣ ΚΩΝΣΤΑΝΤΙΝΟΣ»), while people say the
+  // surname — and findBest windows are sized to the NEEDLE, so a full-name
+  // needle could never score against a surname-only utterance: the refuter
+  // demonstrated the owner's own example «Μάντας» looping «Ποιον αφορά;» until
+  // TTL. Tokens under 4 chars are excluded (particles, initials — too
+  // matchable). Floor 0.75: at 0.7, answering «Αύγουστος» to the month question
+  // matched a hypothetical tenant «ΑΥΓΟΥΣΤΙΔΗΣ» at exactly the floor.
   const person = findBest(
     utt.text,
-    people.map((p) => ({ value: p, labels: [p.name] })),
-    0.7
+    people.map((p) => ({
+      value: p,
+      labels: [
+        p.name,
+        ...p.name.split(/\s+/).filter((t) => t.length >= 4)
+      ]
+    })),
+    0.75
   );
   if (person) {
     out.person = {
@@ -187,8 +201,21 @@ export function extractSlots(
     };
   }
 
-  const month = matchMonth(utt.text);
-  if (month) out.month = month.value;
+  // MONTH by modality, same rule as the amount: when the container was asked
+  // for a month (utt.voiceMonth present), ITS verdict is the only source — the
+  // refuter demonstrated a refused verdict (accept=false on Ιούνιος/Ιούλιος-
+  // ambiguous audio) being bypassed by fuzzy-matching the very transcript the
+  // LR guard had refused. Transcript matching remains correct for text and for
+  // command-mode voice (no voiceMonth), where no verdict exists.
+  let month: ReturnType<typeof matchMonth> = null;
+  if (utt.voiceMonth !== undefined) {
+    if (utt.voiceMonth.accept && utt.voiceMonth.value != null) {
+      out.month = utt.voiceMonth.value;
+    }
+  } else {
+    month = matchMonth(utt.text);
+    if (month) out.month = month.value;
+  }
 
   // Amount: the modality decides the parser. Voice amounts are only trusted
   // through the container's grammar+LR verdict; typed digits are unambiguous.
@@ -198,6 +225,16 @@ export function extractSlots(
     }
   } else {
     const a = parseAmountText(utt.text);
+    // A date number CAN be misread as the amount («για τον Αύγουστο 2026» →
+    // €2026), but the two guards that tried to veto it (plausible-year, or a
+    // number adjacent to the month word) each dropped LEGITIMATE amounts:
+    // «30 Αύγουστος» is €30 in August, and a €2000 rent is a real Athens figure.
+    // The demonstrated HARM was a date number OVERWRITING an already-correct
+    // amount — and that is handled where it belongs, by the fill-if-empty rule
+    // in advance() (a filled amount is never clobbered by pass-2 absorption).
+    // A stray date-as-amount on an OTHERWISE-empty slot surfaces in the confirm
+    // text, which the human rejects; in shadow mode that is the backstop, and
+    // vetoing real amounts to pre-empt it is the worse trade.
     if (a) out.amount = { value: a.value, source: 'text' };
   }
   return out;
@@ -302,9 +339,17 @@ export function advance(
 
   // ── pass 1: the slot we explicitly asked for ──────────────────────────────
   if (session.asked === 'confirm') {
+    // When the container was asked yes/no (voiceYesNo present), its verdict is
+    // FINAL: accept → use the value; refused → unresolved, fall through to the
+    // correction pass and ultimately a re-ask. The earlier shape fell back to
+    // matchYesNo on the very transcript the LR guard had just refused — a
+    // dialogue could VALIDATE from audio the recognizer would not trust
+    // (refuter, demonstrated). Text replies still match the transcript.
     const yn =
-      utt.source === 'voice' && utt.voiceYesNo?.accept
-        ? utt.voiceYesNo.value
+      utt.voiceYesNo !== undefined
+        ? utt.voiceYesNo.accept
+          ? utt.voiceYesNo.value
+          : null
         : matchYesNo(utt.text);
     if (yn === 'yes') {
       session.phase = 'done';
@@ -374,10 +419,18 @@ export function advance(
       if (wanted === 'person') session.slots.person = found.person;
       if (wanted === 'amount') session.slots.amount = found.amount;
       if (wanted === 'month') session.slots.month = found.month;
-      // ── pass 2 bonus: absorb any OTHER slots the same message carried ──────
-      if (wanted !== 'person' && found.person) session.slots.person = found.person;
-      if (wanted !== 'amount' && found.amount) session.slots.amount = found.amount;
-      if (wanted !== 'month' && found.month) session.slots.month = found.month;
+      // ── pass 2 bonus: absorb OTHER slots the message carried — but only
+      // into EMPTY slots. Overwriting a filled one turned «15 Αυγούστου»
+      // (answering the month question) into amount=15, clobbering the correct
+      // 350 already collected (refuter, demonstrated). Replacing a filled slot
+      // is what the όχι→correction pass is for, where replacement is the
+      // user's stated intent.
+      if (wanted !== 'person' && found.person && !session.slots.person)
+        session.slots.person = found.person;
+      if (wanted !== 'amount' && found.amount && !session.slots.amount)
+        session.slots.amount = found.amount;
+      if (wanted !== 'month' && found.month && !session.slots.month)
+        session.slots.month = found.month;
       const miss = missingSlot(session.slots);
       if (miss) {
         session.asked = miss;
@@ -387,19 +440,19 @@ export function advance(
       session.phase = 'confirming';
       return { say: confirmText(session.slots), asked: 'confirm', expectMode: 'yesno' };
     }
-    // The asked slot did not resolve — maybe they answered something else
-    const other = { ...found };
+    // The asked slot did not resolve — maybe they answered something else.
+    // Same fill-if-empty rule as the pass-2 bonus, same demonstrated hazard.
     let absorbed = false;
-    if (other.person) {
-      session.slots.person = other.person;
+    if (found.person && !session.slots.person) {
+      session.slots.person = found.person;
       absorbed = true;
     }
-    if (other.amount) {
-      session.slots.amount = other.amount;
+    if (found.amount && !session.slots.amount) {
+      session.slots.amount = found.amount;
       absorbed = true;
     }
-    if (other.month) {
-      session.slots.month = other.month;
+    if (found.month && !session.slots.month) {
+      session.slots.month = found.month;
       absorbed = true;
     }
     if (absorbed) {
@@ -425,7 +478,21 @@ export function advance(
 
   // ── first message of the dialogue (or a fresh command mid-flight) ─────────
   const found = extractSlots(utt, people);
-  if (found.intent) session.slots.intent = found.intent;
+  // A BARE-NOUN intent («ενοίκιο», «κοινόχρηστα» as single words) needs a
+  // second signal. The single-word labels exist so the owner's real phrasing
+  // matches, but alone they also match chit-chat — «το ενοίκιο του μαγαζιού
+  // είναι ακριβό φέτος» opened a dialogue that then swallowed every text for
+  // ten minutes (refuter, demonstrated). A multi-word command phrase, or a
+  // bare noun accompanied by any other slot, is a command; a lone noun in a
+  // sentence is conversation.
+  const intentHit = matchIntent(utt.text);
+  const bareNounOnly =
+    intentHit !== null &&
+    !intentHit.matched.includes(' ') &&
+    !found.person &&
+    !found.amount &&
+    !found.month;
+  if (found.intent && !bareNounOnly) session.slots.intent = found.intent;
   if (found.person) session.slots.person = found.person;
   if (found.amount) session.slots.amount = found.amount;
   if (found.month) session.slots.month = found.month;

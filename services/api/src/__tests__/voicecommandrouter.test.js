@@ -158,17 +158,24 @@ describe('what the router claims', () => {
     expect(sent[0]).toMatch(/δεν είναι διαθέσιμη|Γράψτε/);
   });
 
-  it('saveSample failure does not crash the poll path', async () => {
+  it('a saveSample failure THROWS so the scanner retries (F4: save before reply)', async () => {
+    // The confirmation text says «Καταγράφηκε». Sending it before a failed
+    // write left the landlord told the sample was saved when it was lost. The
+    // handler now saves FIRST and lets the failure propagate, so the scanner\'s
+    // contiguous-prefix retry re-delivers the batch (the sampleExists dedup
+    // makes that idempotent). The bot must NOT have claimed success.
+    const sent = [];
     const { deps } = makeDeps({
-      saveSample: async () => {
-        throw new Error('mongo down');
-      }
+      sendReply: async (_t, _c, text) => { sent.push(text); return 1; },
+      saveSample: async () => { throw new Error('mongo down'); }
     });
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350' }, deps);
-    await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    const before = sent.length;
     await expect(
-      handleVoiceCommand(REALM, { message_id: 3, chat: { id: 5 }, text: 'ναι' }, deps)
-    ).resolves.toBe(true);
+      handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'ναι' }, deps)
+    ).rejects.toThrow('mongo down');
+    // and the «Καταγράφηκε» success line was NEVER sent
+    expect(sent.slice(before).some((t) => /Καταγράφηκε/.test(t))).toBe(false);
   });
 });
 
@@ -197,6 +204,28 @@ describe('re-delivery idempotency (gate-8 finding 2)', () => {
     const claimed = await handleVoiceCommand(REALM, yesVoice(2), deps);
     expect(claimed).toBe(true); // swallowed as a replay
     expect(saved).toHaveLength(1); // NO phantom second row
+  });
+
+  it('F9: dedup fires REGARDLESS of session liveness (ghost-dialogue replay)', async () => {
+    // Batch replay: msg1 re-runs and starts a ghost dialogue, so the replayed
+    // terminal msg2 arrives with a session LIVE. The dedup must still swallow
+    // it (keyed on the message, not on !existing), or it double-validates and
+    // hits E11000. Simulate by leaving a session open AND a prior sample present.
+    const { deps, saved } = makeDeps({
+      recognize: async (_a, mode) =>
+        mode === 'yesno'
+          ? { ok: true, mode, transcript: 'ΝΑΙ', value: 'yes', p: 0.99, lr: 0, accept: true, reason: 'rank', ms: 50 }
+          : { ok: true, mode, transcript: 'ΝΑΙ', value: null, p: 0.9, lr: -20, accept: true, reason: 'rank', ms: 50 }
+    });
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, voice: { file_id: 'v2' } }, deps);
+    expect(saved).toHaveLength(1);
+    // A ghost dialogue is now open (msg1 replayed); the replayed terminal msg2
+    // must be swallowed even though a session is live.
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    const claimed = await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, voice: { file_id: 'v2' } }, deps);
+    expect(claimed).toBe(true);
+    expect(saved).toHaveLength(1); // no phantom second validated sample
   });
 
   it('a re-delivered terminal TEXT «ναι» falls through (not a command, no phantom)', async () => {

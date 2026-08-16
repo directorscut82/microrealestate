@@ -224,6 +224,94 @@ describe('modality independence and mixed defects', () => {
   });
 });
 
+describe('gate-8 money-safety fixes', () => {
+  const FULL = [
+    { id: 'f1', name: 'ΜΑΝΤΑΣ ΚΩΝΣΤΑΝΤΙΝΟΣ' },
+    { id: 'f2', name: 'ΠΑΠΑΔΟΠΟΥΛΟΥ ΕΛΕΝΗ' }
+  ];
+
+  it('F1: a SURNAME resolves against a stored FULL legal name', () => {
+    // Occupant.name holds the full name; people say the surname. The refuter
+    // showed the owner\'s own «Μάντας» looping «Ποιον αφορά;» forever.
+    const s = VS.startSession('r1', 'id1', NOW);
+    const r = VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), FULL, NOW);
+    expect(s.slots.person?.id).toBe('f1');
+    expect(r.asked).toBe('confirm');
+  });
+
+  it('F1: greeklish surname too', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('plhrwmh enoikiou Papadopoulou 300 Aygoustos'), FULL, NOW);
+    expect(s.slots.person?.id).toBe('f2');
+  });
+
+  it('F2: a month-question answer does NOT clobber the already-set amount', () => {
+    // «15 Αυγούστου» answering the month question must set month, not overwrite 350.
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE, NOW); // asks month
+    VS.advance(s, text('15 Αυγούστου'), PEOPLE, NOW);
+    expect(s.slots.amount?.value).toBe(350); // NOT 15
+    expect(s.slots.month).toBe(8);
+  });
+
+  it('F3: a REFUSED voice month is not filled from the transcript', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE, NOW); // asks month
+    const r = VS.advance(
+      s,
+      { text: 'ΙΟΥΛΙΟΣ', source: 'voice', voiceMonth: { value: null, accept: false } },
+      PEOPLE,
+      NOW
+    );
+    expect(s.slots.month).toBeUndefined(); // the refused transcript is NOT trusted
+    expect(r.asked).toBe('month'); // re-asked
+  });
+
+  it('F3: a REFUSED voice ναι does not validate', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE, NOW); // confirm
+    const r = VS.advance(
+      s,
+      { text: 'ΝΑΙ', source: 'voice', voiceYesNo: { value: null, accept: false } },
+      PEOPLE,
+      NOW
+    );
+    expect(r.outcome).toBeUndefined(); // NOT validated from refused audio
+  });
+
+  it('F3: an ACCEPTED voice month IS used', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE, NOW);
+    VS.advance(
+      s,
+      { text: 'ΑΥΓΟΥΣΤΟΣ', source: 'voice', voiceMonth: { value: 8, accept: true } },
+      PEOPLE,
+      NOW
+    );
+    expect(s.slots.month).toBe(8);
+  });
+
+  it('F5: a bare-noun intent in chit-chat does NOT start a dialogue', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    const r = VS.advance(s, text('το ενοίκιο του μαγαζιού είναι ακριβό φέτος'), PEOPLE, NOW);
+    expect(r.outcome).toBe('rejected'); // not treated as a command
+    expect(s.slots.intent).toBeUndefined();
+  });
+
+  it('F5: a bare noun WITH another slot IS a command', () => {
+    const s = VS.startSession('r1', 'id1', NOW);
+    const r = VS.advance(s, text('κοινόχρηστα 30 Αύγουστος Μάντας'), PEOPLE, NOW);
+    expect(s.slots.intent).toBe('commonChargesPayment');
+    expect(s.slots.amount?.value).toBe(30); // and 30 is the amount, not vetoed
+    expect(r.asked).toBe('confirm');
+  });
+
+  it('F6: an equidistant month typo is a TIE → null, not a wrong guess', () => {
+    // «Ιούνλιος» is one edit from both Ιούνιος and Ιούλιος.
+    expect(GM.matchMonth('Ιούνλιος')).toBeNull();
+  });
+});
+
 describe('abandonment sweep (gate-8 finding 1)', () => {
   it('a timed-out dialogue is returned as an abandoned sample and dropped', () => {
     const s = VS.startSession('r1', 'id1', NOW);

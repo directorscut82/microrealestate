@@ -181,7 +181,16 @@ export function findBest<T>(
 ): Match<T> | null {
   const hay = skeleton(utterance);
   if (!hay) return null;
-  let best: Match<T> | null = null;
+  // Unrounded throughout, and the runner-up of a DIFFERENT value is tracked so a
+  // tie can be refused. Two demonstrated defects lived here: (a) the stored
+  // confidence was rounded via toFixed(3), so a raw 0.83333 compared > a stored
+  // 0.833 and an EXACT tie resolved deterministically to the LAST vocab entry —
+  // «Ιούνλιος», one edit from both months, always answered July; (b) a tie is
+  // ambiguity by this file's own contract ("null means ASK AGAIN, never guess"),
+  // so best-vs-runner-up within EPSILON now returns null.
+  const EPSILON = 0.02;
+  let best: { value: T; conf: number; matched: string } | null = null;
+  let rival = -Infinity; // best confidence among entries with a DIFFERENT value
   for (const entry of vocab) {
     for (const label of entry.labels) {
       const needle = skeleton(label);
@@ -199,12 +208,22 @@ export function findBest<T>(
         }
       }
       const conf = 1 - bestD / needle.length;
-      if (conf >= minConfidence && (!best || conf > best.confidence)) {
-        best = { value: entry.value, confidence: +conf.toFixed(3), matched: label };
+      if (conf < minConfidence) continue;
+      if (!best) {
+        best = { value: entry.value, conf, matched: label };
+      } else if (entry.value === best.value) {
+        if (conf > best.conf) best = { value: entry.value, conf, matched: label };
+      } else if (conf > best.conf) {
+        rival = Math.max(rival, best.conf);
+        best = { value: entry.value, conf, matched: label };
+      } else {
+        rival = Math.max(rival, conf);
       }
     }
   }
-  return best;
+  if (!best) return null;
+  if (best.conf - rival < EPSILON) return null; // tie between values → ask again
+  return { value: best.value, confidence: +best.conf.toFixed(3), matched: best.matched };
 }
 
 // ── slot resolvers ───────────────────────────────────────────────────────────

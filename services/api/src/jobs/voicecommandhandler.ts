@@ -15,7 +15,6 @@
  * router is unit-testable without network/mongo — the same discipline as the
  * scanner it plugs into.
  */
-import { logger } from '@microrealestate/common';
 import {
   advance,
   activeSession,
@@ -109,15 +108,16 @@ export async function handleVoiceCommand(
     return false;
   }
 
-  // IDEMPOTENCY (gate-8 finding 2): Telegram re-delivers a whole batch when the
-  // offset persist fails after handling. Only now that we KNOW this is our
-  // message do we pay the dedup query. Without a live session, a re-delivered
-  // TERMINAL message would otherwise start a fresh dialogue and write a phantom
-  // sample; if a sample already exists for this exact message it is a replay,
-  // so swallow it silently (claimed, no reply, no second row). Mid-dialogue
-  // replays are handled by the session still being open; only a terminal
-  // message ever produced a row to collide with.
-  if (!existing && (await deps.sampleExists(realm.realmId, msg.message_id))) {
+  // IDEMPOTENCY (gate-8 findings 2 + 8): Telegram re-delivers a whole batch when
+  // the offset persist fails after handling. If a sample already exists for
+  // this exact message it is a replay — swallow silently (claimed, no reply, no
+  // second row). Checked REGARDLESS of session liveness: a batch replay can
+  // resurrect a ghost dialogue (msg1 starts a fresh session on replay), so the
+  // replayed TERMINAL message then arrives with that ghost session live — the
+  // earlier `!existing` guard let it through to a second «Καταγράφηκε» and an
+  // E11000 the catch swallowed. Keying on the message, not the session state,
+  // makes the replay a no-op at the door.
+  if (await deps.sampleExists(realm.realmId, msg.message_id)) {
     return true;
   }
 
@@ -182,18 +182,23 @@ export async function handleVoiceCommand(
 
   const people = await deps.peopleForRealm(realm.realmId);
   const reply: Reply = advance(session, utt, people, now);
-  await deps.sendReply(realm.botToken, msg.chat.id, reply.say);
 
   if (reply.outcome) {
-    try {
-      // The terminal message id keys the sample for the re-delivery dedup above.
-      await deps.saveSample(session, msg.message_id);
-    } catch (err: any) {
-      logger.error(
-        `voice-command: failed to persist sample for realm ${realm.realmId}: ${err?.message || err}`
-      );
-    }
+    // PERSIST BEFORE REPLYING, and let a failure THROW. The terminal message
+    // says «Καταγράφηκε ως δείγμα» — sending that before the write meant a
+    // mongo blip left the landlord told the sample was saved while it was
+    // silently lost and unrecoverable (endSession wiped memory, the offset
+    // advanced). Saving first, and rethrowing, lets the scanner's contiguous-
+    // prefix retry re-deliver the batch; the sampleExists/unique-index dedup
+    // makes that retry idempotent, so the only outcomes are "saved + told" or
+    // "not saved + not told, will retry". The terminal message id keys the
+    // dedup.
+    await deps.saveSample(session, msg.message_id);
+    await deps.sendReply(realm.botToken, msg.chat.id, reply.say);
     endSession(realm.realmId);
+    return true;
   }
+  // Non-terminal turn: the dialogue continues, so just prompt.
+  await deps.sendReply(realm.botToken, msg.chat.id, reply.say);
   return true;
 }

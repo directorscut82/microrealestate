@@ -815,8 +815,18 @@ export function _defaultDeps(): InboxScanDeps {
  * them, so a persist failure loses only that one sample, never loops.
  */
 async function _sweepAbandonedVoiceSessions(): Promise<void> {
+  // Per-item catch: sweepAbandoned has ALREADY removed every returned session
+  // from memory, so if the first persist threw and propagated, every later
+  // realm's sample would be lost with it (they can never be swept again). One
+  // failure logs and the loop continues — matching this function's own comment.
   for (const session of _sweepAbandonedVoice(Date.now())) {
-    await _saveVoiceSample(session);
+    try {
+      await _saveVoiceSample(session);
+    } catch (err: any) {
+      logger.error(
+        `telegram-inbox: failed to persist abandoned voice sample for realm ${session.realmId}: ${err?.message || err}`
+      );
+    }
   }
 }
 
@@ -870,7 +880,12 @@ async function _saveVoiceSample(
       corrections: session.corrections,
       outcome: session.outcome
     },
-    receivedDate: new Date(),
+    // Use createdDate — a DECLARED path that carries the TTL index. The bill
+    // lane's "received" timestamp field is undeclared on this schema, so
+    // mongoose strict would silently drop it (the chargeableAmount incident, in
+    // this file's own schema comments) and the sample would have no creation
+    // timestamp at all.
+    createdDate: new Date(),
     updatedDate: new Date()
   });
 }
