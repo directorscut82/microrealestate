@@ -70,6 +70,22 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
       // voice bytes anywhere near this public repo's backups.
       transcript: [{ text: String, source: String }],
       telegramFileIds: [String],
+      // One row per recognizer call — the calibration dataset. The human
+      // outcome labels these raw scores; the threshold work (frame-normalized
+      // LR, Platt-style calibration) runs over exactly these fields. Without
+      // them a sample is a label with no score attached.
+      decodes: [
+        {
+          mode: String, // 'command' | 'amount' | 'yesno' | 'month'
+          value: String, // stringified recognized value ('96', 'yes'); null when refused
+          p: Number,
+          lr: Number,
+          nFrames: Number, // post-VAD logit frames scored; null from pre-2026-08-16 containers
+          accept: Boolean,
+          reason: String,
+          ms: Number
+        }
+      ],
       corrections: Number,
       outcome: String // 'validated' | 'rejected' | 'abandoned'
     },

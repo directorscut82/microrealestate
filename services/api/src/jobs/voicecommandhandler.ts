@@ -146,6 +146,20 @@ export async function handleVoiceCommand(
       );
       return true;
     }
+    // Record the RAW scores beside the dialogue. The container returns p/lr/
+    // nFrames precisely so the api can calibrate thresholds from confirmed
+    // samples — dropping them here made every sample a label with no score to
+    // calibrate, which defeats the stated purpose of the shadow phase.
+    session.decodes.push({
+      mode,
+      value: rec.value == null ? null : String(rec.value),
+      p: typeof rec.p === 'number' ? rec.p : null,
+      lr: typeof rec.lr === 'number' ? rec.lr : null,
+      nFrames: typeof rec.nFrames === 'number' ? rec.nFrames : null,
+      accept: !!rec.accept,
+      reason: rec.reason || '',
+      ms: typeof rec.ms === 'number' ? rec.ms : null
+    });
     utt = {
       text: rec.transcript || '',
       source: 'voice',

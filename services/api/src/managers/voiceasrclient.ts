@@ -22,6 +22,9 @@ export interface RecognizeResult {
   lr: number | null;
   accept: boolean;
   reason: string;
+  /** Post-VAD logit frames scored (0 on refusals). Absent from container
+   *  builds before 2026-08-16 — treat undefined as unknown, not zero. */
+  nFrames?: number;
   ms: number;
 }
 

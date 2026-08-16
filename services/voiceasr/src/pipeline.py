@@ -228,10 +228,13 @@ class Pipeline:
         if mode == "command":
             # transcript only; slot extraction happens API-side where the
             # realm's names live
-            text = " ".join(
-                self._greedy(self._logits(wav[a:b])) for a, b in spans
-            ).strip()
-            r = _res(mode, text, None, 0.0, None, "transcript", t0)
+            texts, n_frames = [], 0
+            for a, b in spans:
+                lp_span = self._logits(wav[a:b])
+                n_frames += lp_span.shape[0]
+                texts.append(self._greedy(lp_span))
+            r = _res(mode, " ".join(texts).strip(), None, 0.0, None,
+                     "transcript", t0, n_frames)
             r["spans"] = [[a / SR, b / SR] for a, b in spans]
             return r
 
@@ -286,7 +289,8 @@ class Pipeline:
             if len(seeds) >= 5:
                 break
         if not seeds:
-            return _res("amount", transcript, None, 0.0, None, "no_hypothesis", t0)
+            return _res("amount", transcript, None, 0.0, None, "no_hypothesis",
+                        t0, T)
         wide = set()
         for n in seeds[:3]:
             wide |= R.slot_neighbours(n)
@@ -311,7 +315,8 @@ class Pipeline:
         win_targets = [lb for lb in self.cand_ids[n1]]
         vit = float(R.ctc_viterbi_batch(lp, win_targets).max())
         lr = vit - float(lp.max(axis=1).sum())
-        return _res("amount", transcript, int(n1), p, lr, "rank", t0)
+        return _res("amount", transcript, int(n1), p, lr, "rank", t0,
+                    lp.shape[0])
 
     def _closed_set(self, lp, transcript, table, mode, t0):
         """2 (yesno) or 12 (month) candidates: no beam needed — score every
@@ -336,7 +341,7 @@ class Pipeline:
         win = [lb for f in table[k1] if (lb := self._labels_for(f))]
         vit = float(R.ctc_viterbi_batch(lp, win).max())
         lr = vit - float(lp.max(axis=1).sum())
-        return _res(mode, transcript, k1, p, lr, "rank", t0)
+        return _res(mode, transcript, k1, p, lr, "rank", t0, lp.shape[0])
 
 
 # Per-mode gates, from the measured separation on the eval set (real answers
@@ -353,7 +358,7 @@ _GATES = {
 }
 
 
-def _res(mode, transcript, value, p, lr, reason, t0):
+def _res(mode, transcript, value, p, lr, reason, t0, n_frames=0):
     gate = _GATES.get(mode, _GATES["command"])
     # `accept` is ADVISORY. It is true only when the value cleared both the
     # posterior and the likelihood-ratio gate; the api still shows the human a
@@ -374,5 +379,11 @@ def _res(mode, transcript, value, p, lr, reason, t0):
         "lr": None if lr is None else round(float(lr), 1),
         "accept": accept,
         "reason": reason,
+        # Post-VAD logit frames actually scored (0 on refusals). The api
+        # persists this beside p/lr on every sample because the calibration
+        # literature normalizes the LR by length (nats/frame) — a raw-LR gate
+        # is implicitly a duration gate. Kept raw here for the same reason as
+        # p/lr: thresholds are the api's job, this container just measures.
+        "nFrames": int(n_frames),
         "ms": int((time.time() - t0) * 1000),
     }

@@ -31,7 +31,7 @@ beforeAll(async () => {
 beforeEach(() => VS._clearAll());
 
 const PEOPLE = [
-  { id: 't1', name: 'ΜΑΝΤΑΣ' },
+  { id: 't1', name: 'ΒΗΤΑΣ' },
   { id: 't2', name: 'ΜΑΡΙΑ ΜΑΓΔΑΛΗΝΗ' },
   { id: 't3', name: 'ΠΑΠΑΔΟΠΟΥΛΟΣ' },
   { id: 't4', name: 'ΜΑΡΓΑΡΙΤΑ' }
@@ -46,14 +46,14 @@ const voice = (t, extra = {}) => ({ text: t, source: 'voice', ...extra });
 
 describe('greekmatch — the noise tolerance itself', () => {
   it('greeklish transliterates to Greek before matching', () => {
-    // The owner types «plhrwmh enoikiou Mantas» — pure greeklish.
-    expect(GM.matchIntent('plhrwmh enoikiou Mantas')?.value).toBe('rentPayment');
+    // The owner types «plhrwmh enoikiou Vhtas» — pure greeklish.
+    expect(GM.matchIntent('plhrwmh enoikiou Vhtas')?.value).toBe('rentPayment');
   });
 
   it('a misspelt tenant name still matches (ASR / typo tolerance)', () => {
-    // «ΜΑΝΤΑΣ» heard/typed as «ΜΑΔΑΣ», «Μαντα», «μανδας»
-    for (const spelling of ['ΜΑΔΑΣ', 'Μαντα', 'μανδας', 'mantas']) {
-      const m = GM.findBest(spelling, [{ value: 't1', labels: ['ΜΑΝΤΑΣ'] }], 0.6);
+    // «ΒΗΤΑΣ» heard/typed as «ΒΙΔΑΣ», «Βητα», «βηδας»
+    for (const spelling of ['ΒΙΔΑΣ', 'Βητα', 'βηδας', 'vhtas']) {
+      const m = GM.findBest(spelling, [{ value: 't1', labels: ['ΒΗΤΑΣ'] }], 0.6);
       expect({ spelling, id: m?.value }).toEqual({ spelling, id: 't1' });
     }
   });
@@ -74,7 +74,7 @@ describe('greekmatch — the noise tolerance itself', () => {
   it('a completely unrelated word matches NOTHING, not the nearest month', () => {
     // The floor is the safety: gibberish must return null so the bot re-asks.
     expect(GM.matchMonth('σπίτι')).toBeNull();
-    expect(GM.findBest('τζζζ', [{ value: 't1', labels: ['ΜΑΝΤΑΣ'] }], 0.66)).toBeNull();
+    expect(GM.findBest('τζζζ', [{ value: 't1', labels: ['ΒΗΤΑΣ'] }], 0.66)).toBeNull();
   });
 
   it('typed amounts: digits, cents, euro word, greeklish euro', () => {
@@ -103,7 +103,7 @@ describe('greekmatch — the noise tolerance itself', () => {
 describe('the dialogue — the owner’s exact flow', () => {
   it('one complete text command → straight to confirm', () => {
     const s = fresh();
-    const r = VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    const r = VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE);
     expect(s.slots).toMatchObject({
       intent: 'rentPayment',
       person: { id: 't1' },
@@ -112,12 +112,12 @@ describe('the dialogue — the owner’s exact flow', () => {
     });
     expect(r.asked).toBe('confirm');
     expect(r.say).toMatch(/Επιβεβαιώστε/);
-    expect(r.say).toMatch(/Μάντας|ΜΑΝΤΑΣ/);
+    expect(r.say).toMatch(/Βήτας|ΒΗΤΑΣ/);
   });
 
   it('«ναι» validates and stores a sample; no money executed', () => {
     const s = fresh();
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE);
     const r = VS.advance(s, text('ναι'), PEOPLE);
     expect(r.outcome).toBe('validated');
     expect(s.phase).toBe('done');
@@ -127,7 +127,7 @@ describe('the dialogue — the owner’s exact flow', () => {
   it('a MISSING slot is asked for, one at a time', () => {
     const s = fresh();
     // no month
-    let r = VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE);
+    let r = VS.advance(s, text('πληρωμή ενοικίου Βήτας 350'), PEOPLE);
     expect(r.asked).toBe('month');
     expect(r.say).toMatch(/μήνα/);
     r = VS.advance(s, text('Αύγουστος'), PEOPLE);
@@ -152,15 +152,15 @@ describe('the dialogue — the owner’s exact flow', () => {
 
   it('«όχι» → asks what to fix → a bare corrected name is absorbed → re-confirm', () => {
     const s = fresh();
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE);
     VS.advance(s, text('ναι σωστά; όχι'), PEOPLE); // ambiguous ναι/όχι → not yes
     // force the clean no:
     VS._clearAll();
     const s2 = fresh();
-    VS.advance(s2, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    VS.advance(s2, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE);
     let r = VS.advance(s2, text('όχι'), PEOPLE);
     expect(r.asked).toBe('whatToFix');
-    // correction: it was Μαργαρίτα, not Μάντας — a bare name
+    // correction: it was Μαργαρίτα, not Βήτας — a bare name
     r = VS.advance(s2, text('Μαργαρίτα'), PEOPLE);
     expect(s2.slots.person.id).toBe('t4');
     expect(r.asked).toBe('confirm');
@@ -176,7 +176,7 @@ describe('modality independence and mixed defects', () => {
     // voiceasr already recognised the amount and accepted it
     const r = VS.advance(
       s,
-      voice('ΠΛΗΡΩΜΗ ΕΝΟΙΚΙΟΥ ΜΑΝΤΑΣ ΑΥΓΟΥΣΤΟΣ', {
+      voice('ΠΛΗΡΩΜΗ ΕΝΟΙΚΙΟΥ ΒΗΤΑΣ ΑΥΓΟΥΣΤΟΣ', {
         voiceAmount: { value: 350, accept: true, reason: 'rank' }
       }),
       PEOPLE
@@ -188,7 +188,7 @@ describe('modality independence and mixed defects', () => {
 
   it('a REJECTED voice amount is NOT filled — the bot re-asks', () => {
     const s = fresh();
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας Αύγουστος'), PEOPLE); // asks amount
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας Αύγουστος'), PEOPLE); // asks amount
     const r = VS.advance(
       s,
       voice('ΕΝΕΝΗΝΤΑ', {
@@ -226,15 +226,15 @@ describe('modality independence and mixed defects', () => {
 
 describe('gate-8 money-safety fixes', () => {
   const FULL = [
-    { id: 'f1', name: 'ΜΑΝΤΑΣ ΚΩΝΣΤΑΝΤΙΝΟΣ' },
+    { id: 'f1', name: 'ΒΗΤΑΣ ΚΩΝΣΤΑΝΤΙΝΟΣ' },
     { id: 'f2', name: 'ΠΑΠΑΔΟΠΟΥΛΟΥ ΕΛΕΝΗ' }
   ];
 
   it('F1: a SURNAME resolves against a stored FULL legal name', () => {
     // Occupant.name holds the full name; people say the surname. The refuter
-    // showed the owner\'s own «Μάντας» looping «Ποιον αφορά;» forever.
+    // showed the owner\'s own «Βήτας» looping «Ποιον αφορά;» forever.
     const s = VS.startSession('r1', 'id1', NOW);
-    const r = VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), FULL, NOW);
+    const r = VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), FULL, NOW);
     expect(s.slots.person?.id).toBe('f1');
     expect(r.asked).toBe('confirm');
   });
@@ -248,7 +248,7 @@ describe('gate-8 money-safety fixes', () => {
   it('F2: a month-question answer does NOT clobber the already-set amount', () => {
     // «15 Αυγούστου» answering the month question must set month, not overwrite 350.
     const s = VS.startSession('r1', 'id1', NOW);
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE, NOW); // asks month
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350'), PEOPLE, NOW); // asks month
     VS.advance(s, text('15 Αυγούστου'), PEOPLE, NOW);
     expect(s.slots.amount?.value).toBe(350); // NOT 15
     expect(s.slots.month).toBe(8);
@@ -256,7 +256,7 @@ describe('gate-8 money-safety fixes', () => {
 
   it('F3: a REFUSED voice month is not filled from the transcript', () => {
     const s = VS.startSession('r1', 'id1', NOW);
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE, NOW); // asks month
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350'), PEOPLE, NOW); // asks month
     const r = VS.advance(
       s,
       { text: 'ΙΟΥΛΙΟΣ', source: 'voice', voiceMonth: { value: null, accept: false } },
@@ -269,7 +269,7 @@ describe('gate-8 money-safety fixes', () => {
 
   it('F3: a REFUSED voice ναι does not validate', () => {
     const s = VS.startSession('r1', 'id1', NOW);
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE, NOW); // confirm
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE, NOW); // confirm
     const r = VS.advance(
       s,
       { text: 'ΝΑΙ', source: 'voice', voiceYesNo: { value: null, accept: false } },
@@ -281,7 +281,7 @@ describe('gate-8 money-safety fixes', () => {
 
   it('F3: an ACCEPTED voice month IS used', () => {
     const s = VS.startSession('r1', 'id1', NOW);
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350'), PEOPLE, NOW);
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350'), PEOPLE, NOW);
     VS.advance(
       s,
       { text: 'ΑΥΓΟΥΣΤΟΣ', source: 'voice', voiceMonth: { value: 8, accept: true } },
@@ -300,7 +300,7 @@ describe('gate-8 money-safety fixes', () => {
 
   it('F5: a bare noun WITH another slot IS a command', () => {
     const s = VS.startSession('r1', 'id1', NOW);
-    const r = VS.advance(s, text('κοινόχρηστα 30 Αύγουστος Μάντας'), PEOPLE, NOW);
+    const r = VS.advance(s, text('κοινόχρηστα 30 Αύγουστος Βήτας'), PEOPLE, NOW);
     expect(s.slots.intent).toBe('commonChargesPayment');
     expect(s.slots.amount?.value).toBe(30); // and 30 is the amount, not vetoed
     expect(r.asked).toBe('confirm');
@@ -315,7 +315,7 @@ describe('gate-8 money-safety fixes', () => {
 describe('abandonment sweep (gate-8 finding 1)', () => {
   it('a timed-out dialogue is returned as an abandoned sample and dropped', () => {
     const s = VS.startSession('r1', 'id1', NOW);
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας'), PEOPLE, NOW); // incomplete → still open
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας'), PEOPLE, NOW); // incomplete → still open
     // before TTL: nothing swept, session still active
     expect(VS.sweepAbandoned(NOW + 60_000)).toEqual([]);
     expect(VS.activeSession('r1', NOW + 60_000)).not.toBeNull();
@@ -331,7 +331,7 @@ describe('abandonment sweep (gate-8 finding 1)', () => {
 
   it('a COMPLETED dialogue is never swept as abandoned', () => {
     const s = VS.startSession('r1', 'id1', NOW);
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE);
     VS.advance(s, text('ναι'), PEOPLE); // validated → phase done, removed
     // even well past TTL, there is nothing to abandon
     expect(VS.sweepAbandoned(NOW + 20 * 60_000)).toEqual([]);
@@ -381,7 +381,7 @@ describe('SHADOW MODE — no money path exists', () => {
     // advance() returns a Reply, and persistence is the caller's injected
     // saveSample. There is no code path from advance() to a manager.
     const s = fresh();
-    VS.advance(s, text('πληρωμή ενοικίου Μάντας 350 Αύγουστος'), PEOPLE);
+    VS.advance(s, text('πληρωμή ενοικίου Βήτας 350 Αύγουστος'), PEOPLE);
     const r = VS.advance(s, text('ναι'), PEOPLE);
     expect(r).not.toHaveProperty('execute');
     expect(r).not.toHaveProperty('payment');

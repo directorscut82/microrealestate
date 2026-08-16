@@ -877,6 +877,7 @@ async function _saveVoiceSample(
       month: s.month,
       transcript: session.transcript,
       telegramFileIds: session.fileIds,
+      decodes: session.decodes,
       corrections: session.corrections,
       outcome: session.outcome
     },

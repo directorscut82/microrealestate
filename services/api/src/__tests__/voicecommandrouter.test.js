@@ -22,7 +22,7 @@ beforeAll(async () => {
 beforeEach(() => VS._clearAll());
 
 const REALM = { realmId: 'r1', botToken: 'tok' };
-const PEOPLE = [{ id: 't1', name: 'ΜΑΝΤΑΣ' }];
+const PEOPLE = [{ id: 't1', name: 'ΒΗΤΑΣ' }];
 
 function makeDeps(overrides = {}) {
   const sent = [];
@@ -37,12 +37,13 @@ function makeDeps(overrides = {}) {
       recognize: async (_a, mode) => ({
         ok: true,
         mode,
-        transcript: 'ΠΛΗΡΩΜΗ ΕΝΟΙΚΙΟΥ ΜΑΝΤΑΣ',
+        transcript: 'ΠΛΗΡΩΜΗ ΕΝΟΙΚΙΟΥ ΒΗΤΑΣ',
         value: null,
         p: 0.9,
         lr: -20,
         accept: true,
         reason: 'rank',
+        nFrames: 142,
         ms: 100
       }),
       peopleForRealm: async () => PEOPLE,
@@ -66,7 +67,7 @@ describe('what the router must NOT claim', () => {
   it('a bill DOCUMENT falls through even with a dialogue open (the bill-loss fix)', async () => {
     const { deps } = makeDeps();
     // open a dialogue first
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας' }, deps);
     // now a bill arrives as a document — this is a BILL, not a dialogue reply
     const claimed = await handleVoiceCommand(
       REALM,
@@ -78,7 +79,7 @@ describe('what the router must NOT claim', () => {
 
   it('a bill PHOTO falls through too', async () => {
     const { deps } = makeDeps();
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας' }, deps);
     const claimed = await handleVoiceCommand(
       REALM,
       { message_id: 2, chat: { id: 5 }, photo: [{ file_id: 'p1' }] },
@@ -99,7 +100,7 @@ describe('what the router must NOT claim', () => {
 
   it('a sticker-like message (no audio, no text) with a dialogue open falls through', async () => {
     const { deps } = makeDeps();
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας' }, deps);
     const claimed = await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 } }, deps);
     expect(claimed).toBe(false);
   });
@@ -121,7 +122,7 @@ describe('what the router claims', () => {
     const { deps, sent } = makeDeps();
     const claimed = await handleVoiceCommand(
       REALM,
-      { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350' },
+      { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350' },
       deps
     );
     expect(claimed).toBe(true);
@@ -130,7 +131,7 @@ describe('what the router claims', () => {
 
   it('a full dialogue: command → month → ναι → sample saved, correct slots', async () => {
     const { deps, sent, saved } = makeDeps();
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350' }, deps);
     await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'Αύγουστος' }, deps);
     expect(sent[1]).toMatch(/Επιβεβαιώστε/);
     await handleVoiceCommand(REALM, { message_id: 3, chat: { id: 5 }, text: 'ναι' }, deps);
@@ -145,6 +146,95 @@ describe('what the router claims', () => {
     // and the session is closed — the next text is a fresh routing decision
     const claimed = await handleVoiceCommand(REALM, { message_id: 4, chat: { id: 5 }, text: 'καλημέρα' }, deps);
     expect(claimed).toBe(false);
+  });
+
+  it('every VOICE turn lands its raw scores in the sample; text turns add none', async () => {
+    // The saved decodes ARE the calibration dataset — a sample without them is
+    // a label with no score to calibrate, which defeats the shadow phase.
+    const { deps, saved } = makeDeps({
+      recognize: async (_a, mode) =>
+        mode === 'amount'
+          ? {
+              ok: true,
+              mode,
+              transcript: 'ΕΝΕΝΗΝΤΑ ΕΞΙ',
+              value: 96,
+              p: 0.8786,
+              lr: -6.1,
+              accept: true,
+              reason: 'rank',
+              nFrames: 138,
+              ms: 2711
+            }
+          : {
+              ok: true,
+              mode,
+              transcript: 'ΠΛΗΡΩΜΗ ΕΝΟΙΚΙΟΥ ΒΗΤΑΣ',
+              value: null,
+              p: 0.9,
+              lr: -20,
+              accept: true,
+              reason: 'transcript',
+              nFrames: 142,
+              ms: 900
+            }
+    });
+    // voice command (no amount) → asked amount → VOICE amount → text month → text ναι
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, voice: { file_id: 'v1' } }, deps);
+    await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, voice: { file_id: 'v2' } }, deps);
+    await handleVoiceCommand(REALM, { message_id: 3, chat: { id: 5 }, text: 'Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 4, chat: { id: 5 }, text: 'ναι' }, deps);
+    expect(saved).toHaveLength(1);
+    // Exactly the two voice turns, in order, values STRINGIFIED, scores raw.
+    expect(saved[0].decodes).toEqual([
+      {
+        mode: 'command',
+        value: null,
+        p: 0.9,
+        lr: -20,
+        nFrames: 142,
+        accept: true,
+        reason: 'transcript',
+        ms: 900
+      },
+      {
+        mode: 'amount',
+        value: '96',
+        p: 0.8786,
+        lr: -6.1,
+        nFrames: 138,
+        accept: true,
+        reason: 'rank',
+        ms: 2711
+      }
+    ]);
+    expect(saved[0].slots.amount).toMatchObject({ value: 96, source: 'voice' });
+  });
+
+  it('an old container without nFrames yields null, never a fake zero', async () => {
+    const { deps, saved } = makeDeps({
+      recognize: async (_a, mode) => ({
+        ok: true,
+        mode,
+        transcript: 'ΠΛΗΡΩΜΗ ΕΝΟΙΚΙΟΥ ΒΗΤΑΣ 350 ΑΥΓΟΥΣΤΟΣ',
+        value: null,
+        p: 0.9,
+        lr: -20,
+        accept: true,
+        reason: 'transcript',
+        ms: 900
+        // no nFrames — a pre-2026-08-16 container build
+      })
+    });
+    // voice command carries person+month; the amount arrives TYPED (a
+    // command-mode transcript never fills the amount slot — voice amounts come
+    // only through the container's amount-mode verdict).
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, voice: { file_id: 'v1' } }, deps);
+    await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: '350' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 3, chat: { id: 5 }, text: 'ναι' }, deps);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].decodes).toHaveLength(1);
+    expect(saved[0].decodes[0].nFrames).toBeNull();
   });
 
   it('voiceasr unreachable → honest reply, still claimed, no crash', async () => {
@@ -169,7 +259,7 @@ describe('what the router claims', () => {
       sendReply: async (_t, _c, text) => { sent.push(text); return 1; },
       saveSample: async () => { throw new Error('mongo down'); }
     });
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350 Αύγουστος' }, deps);
     const before = sent.length;
     await expect(
       handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'ναι' }, deps)
@@ -195,7 +285,7 @@ describe('re-delivery idempotency (gate-8 finding 2)', () => {
           ? { ok: true, mode, transcript: 'ΝΑΙ', value: 'yes', p: 0.99, lr: 0, accept: true, reason: 'rank', ms: 50 }
           : { ok: true, mode, transcript: 'ΝΑΙ', value: null, p: 0.9, lr: -20, accept: true, reason: 'rank', ms: 50 }
     });
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350 Αύγουστος' }, deps);
     // terminal confirmation as a voice note → validated sample keyed on msg 2
     await handleVoiceCommand(REALM, yesVoice(2), deps);
     expect(saved).toHaveLength(1);
@@ -217,12 +307,12 @@ describe('re-delivery idempotency (gate-8 finding 2)', () => {
           ? { ok: true, mode, transcript: 'ΝΑΙ', value: 'yes', p: 0.99, lr: 0, accept: true, reason: 'rank', ms: 50 }
           : { ok: true, mode, transcript: 'ΝΑΙ', value: null, p: 0.9, lr: -20, accept: true, reason: 'rank', ms: 50 }
     });
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350 Αύγουστος' }, deps);
     await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, voice: { file_id: 'v2' } }, deps);
     expect(saved).toHaveLength(1);
     // A ghost dialogue is now open (msg1 replayed); the replayed terminal msg2
     // must be swallowed even though a session is live.
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350 Αύγουστος' }, deps);
     const claimed = await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, voice: { file_id: 'v2' } }, deps);
     expect(claimed).toBe(true);
     expect(saved).toHaveLength(1); // no phantom second validated sample
@@ -233,7 +323,7 @@ describe('re-delivery idempotency (gate-8 finding 2)', () => {
     // intent, so with no session it returns false at routing — no fresh
     // dialogue, no phantom sample — before the dedup is even needed.
     const { deps, saved } = makeDeps();
-    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Μάντας 350 Αύγουστος' }, deps);
+    await handleVoiceCommand(REALM, { message_id: 1, chat: { id: 5 }, text: 'πληρωμή ενοικίου Βήτας 350 Αύγουστος' }, deps);
     await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'ναι' }, deps);
     expect(saved).toHaveLength(1);
     const claimed = await handleVoiceCommand(REALM, { message_id: 2, chat: { id: 5 }, text: 'ναι' }, deps);

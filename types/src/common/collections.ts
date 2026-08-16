@@ -795,6 +795,17 @@ export namespace CollectionTypes {
     month?: number;
     transcript?: { text: string; source: string }[];
     telegramFileIds?: string[];
+    // One row per recognizer call — the raw scores the human outcome labels.
+    decodes?: {
+      mode: 'command' | 'amount' | 'yesno' | 'month';
+      value?: string | null;
+      p?: number | null;
+      lr?: number | null;
+      nFrames?: number | null;
+      accept?: boolean;
+      reason?: string;
+      ms?: number | null;
+    }[];
     corrections?: number;
     outcome?: 'validated' | 'rejected' | 'abandoned';
   };

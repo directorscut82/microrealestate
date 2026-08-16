@@ -24,7 +24,7 @@
  * A reply that resolves nothing gets a re-ask, never a guess.
  *
  * The dialogue (the owner's spec, verbatim shape):
- *   1. «πληρωμή ενοικίου Μάντας 350 Αύγουστος» (voice or text)
+ *   1. «πληρωμή ενοικίου Βήτας 350 Αύγουστος» (voice or text)
  *   2. bot: «Επιβεβαιώστε: … — ναι ή όχι;»
  *   3. ναι → validated (sample stored). όχι → «τι να διορθώσω;» and the next
  *      message carries the correction (a name, an amount, a month — matched
@@ -54,6 +54,26 @@ import {
 export interface PersonEntry {
   id: string;
   name: string;
+}
+
+/**
+ * One recognizer call, scores kept RAW. This is the calibration dataset the
+ * shadow phase exists to collect: the human's ναι/όχι (the session outcome +
+ * final slots) labels these scores, and the threshold work (Platt/affine
+ * log-LR calibration, frame-normalized per the utterance-verification
+ * literature) runs over exactly these fields. A sample persisted without them
+ * is a label with nothing to calibrate.
+ */
+export interface VoiceDecode {
+  mode: 'command' | 'amount' | 'yesno' | 'month';
+  /** Recognized value, stringified ('96', 'yes', '8'); null when refused. */
+  value: string | null;
+  p: number | null;
+  lr: number | null;
+  nFrames: number | null;
+  accept: boolean;
+  reason: string;
+  ms: number | null;
 }
 
 export interface Utterance {
@@ -90,6 +110,8 @@ export interface VoiceSession {
   /** Telegram file_ids of every audio message in the dialogue (durable refs;
    *  the audio itself stays in Telegram, never in this repo's backups). */
   fileIds: string[];
+  /** One entry per recognizer call, pushed by the handler beside fileIds. */
+  decodes: VoiceDecode[];
 }
 
 // A dialogue is a human typing/talking — minutes, not the 2 of recapture.
@@ -121,7 +143,8 @@ export function startSession(
     createdAt: now,
     expiresAt: now + TTL_MS,
     transcript: [],
-    fileIds: []
+    fileIds: [],
+    decodes: []
   };
   byRealm.set(realmId, s);
   return s;
@@ -175,10 +198,10 @@ export function extractSlots(
   if (intent) out.intent = intent.value;
 
   // EVERY NAME TOKEN is a label, not just the full name. Occupant.name holds
-  // the lease's full legal name («ΜΑΝΤΑΣ ΚΩΝΣΤΑΝΤΙΝΟΣ»), while people say the
+  // the lease's full legal name («ΒΗΤΑΣ ΚΩΝΣΤΑΝΤΙΝΟΣ»), while people say the
   // surname — and findBest windows are sized to the NEEDLE, so a full-name
   // needle could never score against a surname-only utterance: the refuter
-  // demonstrated the owner's own example «Μάντας» looping «Ποιον αφορά;» until
+  // demonstrated the owner's own example «Βήτας» looping «Ποιον αφορά;» until
   // TTL. Tokens under 4 chars are excluded (particles, initials — too
   // matchable). Floor 0.75: at 0.7, answering «Αύγουστος» to the month question
   // matched a hypothetical tenant «ΑΥΓΟΥΣΤΙΔΗΣ» at exactly the floor.

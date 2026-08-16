@@ -4,7 +4,7 @@
  * THE DESIGN PRINCIPLE (owner requirement, verbatim intent): quick messaging
  * and voice dictation are real-time constructs — names arrive misspelt from
  * the ASR, months arrive with typos when typed, and the first message may be
- * GREEKLISH («plhrwmh enoikiou Mantas» is how the owner actually types). No
+ * GREEKLISH («plhrwmh enoikiou Vhtas» is how the owner actually types). No
  * resolver in this file may demand exact spelling; every one takes noisy input
  * and returns {value, confidence} or null — and null means ASK AGAIN, never
  * guess.
