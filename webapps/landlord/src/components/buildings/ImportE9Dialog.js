@@ -1,4 +1,8 @@
-import { createDocument, importBuildingPdf, QueryKeys } from '../../utils/restcalls';
+import {
+  createDocument,
+  importBuildingPdf,
+  QueryKeys
+} from '../../utils/restcalls';
 import { uploadDocument } from '../../utils/fetch';
 import {
   LuAlertTriangle,
@@ -47,8 +51,12 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
   // Hydrate from a Telegram inbox item: land directly on the preview step with
   // the rehydrated original as the (single) parsed file, so handleConfirm's
   // existing re-upload loop runs unchanged.
+  // Hydrate ONCE per item — see the lease dialog's note.
+  const hydratedRef = useRef(null);
   useEffect(() => {
     if (!open || !initialImport?.preview || !initialImport?.fileBlob) return;
+    if (hydratedRef.current === initialImport.itemId) return;
+    hydratedRef.current = initialImport.itemId;
     const file = new File(
       [initialImport.fileBlob],
       initialImport.fileName || 'e9.pdf',
@@ -78,200 +86,200 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
 
   // T2.P1.16: parse a specific subset of files (defaults to all current
   // files). On retry-failed-only the caller passes the subset that errored.
-  const handleParse = useCallback(async (filesToParse) => {
-    const targets = filesToParse || files;
-    if (targets.length === 0) return;
+  const handleParse = useCallback(
+    async (filesToParse) => {
+      const targets = filesToParse || files;
+      if (targets.length === 0) return;
 
-    setState('loading');
-    const controller = new AbortController();
-    abortRef.current = controller;
+      setState('loading');
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-    try {
-      // T1.P1.2: previous code did a flat `allBuildings.push(...)` over
-      // every PDF in the batch, producing one preview card per (file,
-      // building) pair. When the user uploaded N E9 PDFs that all
-      // declared the same physical building (very common for co-owners
-      // or year-over-year amendments), the dialog rendered N duplicate
-      // cards. Group by `${street1}|${streetNumber}|${zipCode}` (mirror
-      // of e9parser.ts:502 baseKey logic — street + number, refined by
-      // zip only when both sides agree) and union units[] / owners[]
-      // across duplicates so the preview shows one card per real
-      // building.
-      const buildingsByKey = new Map();
-      let totalSkipped = 0;
-      const owners = [];
+      try {
+        // T1.P1.2: previous code did a flat `allBuildings.push(...)` over
+        // every PDF in the batch, producing one preview card per (file,
+        // building) pair. When the user uploaded N E9 PDFs that all
+        // declared the same physical building (very common for co-owners
+        // or year-over-year amendments), the dialog rendered N duplicate
+        // cards. Group by `${street1}|${streetNumber}|${zipCode}` (mirror
+        // of e9parser.ts:502 baseKey logic — street + number, refined by
+        // zip only when both sides agree) and union units[] / owners[]
+        // across duplicates so the preview shows one card per real
+        // building.
+        const buildingsByKey = new Map();
+        let totalSkipped = 0;
+        const owners = [];
 
-      const buildingKey = (b) => {
-        const street1 = (b?.address?.street1 || '').trim().toUpperCase();
-        // street1 is "STREET NUMBER" already (set by e9parser.ts:581);
-        // include zipCode in the key but treat empty zip as a wildcard
-        // so a zip-less row merges into a zipped sibling instead of
-        // creating a separate group.
-        const zip = (b?.address?.zipCode || '').trim();
-        return `${street1}|${zip}`;
-      };
+        const buildingKey = (b) => {
+          const street1 = (b?.address?.street1 || '').trim().toUpperCase();
+          // street1 is "STREET NUMBER" already (set by e9parser.ts:581);
+          // include zipCode in the key but treat empty zip as a wildcard
+          // so a zip-less row merges into a zipped sibling instead of
+          // creating a separate group.
+          const zip = (b?.address?.zipCode || '').trim();
+          return `${street1}|${zip}`;
+        };
 
-      // T2.P1.16: track per-file results so one failed PDF doesn't crash
-      // the rest of the batch. We also start from any prior fileResults
-      // so a "retry failed" pass merges new outcomes over the failed
-      // entries while preserving previously-parsed successes.
-      const nextResults = (() => {
-        if (filesToParse) {
-          // Retry path: clone existing fileResults so we can flip the
-          // status of the retried files in place.
-          return [...fileResults];
-        }
-        return targets.map((file) => ({ file, status: 'pending' }));
-      })();
-      const findResultIndex = (file) =>
-        nextResults.findIndex((r) => r.file === file);
-
-      for (const file of targets) {
-        // T2.P1.21: bail out early if the user clicked Cancel mid-batch.
-        if (controller.signal.aborted) break;
-        try {
-          const result = await importBuildingPdf(file, false, {
-            signal: controller.signal
-          });
-          if (result.owner) {
-            const existing = owners.find(
-              (o) => o.taxId === result.owner.taxId
-            );
-            if (!existing) {
-              owners.push(result.owner);
-            }
+        // T2.P1.16: track per-file results so one failed PDF doesn't crash
+        // the rest of the batch. We also start from any prior fileResults
+        // so a "retry failed" pass merges new outcomes over the failed
+        // entries while preserving previously-parsed successes.
+        const nextResults = (() => {
+          if (filesToParse) {
+            // Retry path: clone existing fileResults so we can flip the
+            // status of the retried files in place.
+            return [...fileResults];
           }
-          if (result.buildings) {
-            for (const b of result.buildings) {
-              const key = buildingKey(b);
-              // Find an existing group: exact key OR (same street, one
-              // side has empty zip). Without the empty-zip fallback two
-              // PDFs of the same building where one row was missing a
-              // zip would still split into two cards.
-              const streetPart = key.split('|')[0];
-              let existing = buildingsByKey.get(key);
+          return targets.map((file) => ({ file, status: 'pending' }));
+        })();
+        const findResultIndex = (file) =>
+          nextResults.findIndex((r) => r.file === file);
+
+        for (const file of targets) {
+          // T2.P1.21: bail out early if the user clicked Cancel mid-batch.
+          if (controller.signal.aborted) break;
+          try {
+            const result = await importBuildingPdf(file, false, {
+              signal: controller.signal
+            });
+            if (result.owner) {
+              const existing = owners.find(
+                (o) => o.taxId === result.owner.taxId
+              );
               if (!existing) {
-                for (const [k, v] of buildingsByKey) {
-                  const [s, z] = k.split('|');
-                  if (
-                    s === streetPart &&
-                    (!z || !key.endsWith(`|${z}`))
-                  ) {
-                    // Either existing or incoming has empty zip — merge.
-                    if (!z || key.endsWith('|')) {
-                      existing = v;
-                      break;
+                owners.push(result.owner);
+              }
+            }
+            if (result.buildings) {
+              for (const b of result.buildings) {
+                const key = buildingKey(b);
+                // Find an existing group: exact key OR (same street, one
+                // side has empty zip). Without the empty-zip fallback two
+                // PDFs of the same building where one row was missing a
+                // zip would still split into two cards.
+                const streetPart = key.split('|')[0];
+                let existing = buildingsByKey.get(key);
+                if (!existing) {
+                  for (const [k, v] of buildingsByKey) {
+                    const [s, z] = k.split('|');
+                    if (s === streetPart && (!z || !key.endsWith(`|${z}`))) {
+                      // Either existing or incoming has empty zip — merge.
+                      if (!z || key.endsWith('|')) {
+                        existing = v;
+                        break;
+                      }
                     }
                   }
                 }
-              }
-              if (existing) {
-                // Union units by atakNumber so the same unit declared
-                // by two co-owners doesn't appear twice.
-                const seenAtaks = new Set(
-                  (existing.units || []).map((u) => u.atakNumber)
-                );
-                for (const u of b.units || []) {
-                  if (!seenAtaks.has(u.atakNumber)) {
-                    existing.units.push(u);
-                    seenAtaks.add(u.atakNumber);
+                if (existing) {
+                  // Union units by atakNumber so the same unit declared
+                  // by two co-owners doesn't appear twice.
+                  const seenAtaks = new Set(
+                    (existing.units || []).map((u) => u.atakNumber)
+                  );
+                  for (const u of b.units || []) {
+                    if (!seenAtaks.has(u.atakNumber)) {
+                      existing.units.push(u);
+                      seenAtaks.add(u.atakNumber);
+                    }
                   }
+                  // Promote zip if we now know it.
+                  if (!existing.address?.zipCode && b.address?.zipCode) {
+                    existing.address = {
+                      ...(existing.address || {}),
+                      zipCode: b.address.zipCode
+                    };
+                    // Re-key under the new (now-zipped) key so subsequent
+                    // matches can hit it directly.
+                    buildingsByKey.delete(key);
+                    buildingsByKey.set(buildingKey(existing), existing);
+                  }
+                } else {
+                  // Clone the building so subsequent unions don't mutate
+                  // the response object the parser handed us.
+                  buildingsByKey.set(key, {
+                    ...b,
+                    address: { ...(b.address || {}) },
+                    units: [...(b.units || [])]
+                  });
                 }
-                // Promote zip if we now know it.
-                if (!existing.address?.zipCode && b.address?.zipCode) {
-                  existing.address = {
-                    ...(existing.address || {}),
-                    zipCode: b.address.zipCode
-                  };
-                  // Re-key under the new (now-zipped) key so subsequent
-                  // matches can hit it directly.
-                  buildingsByKey.delete(key);
-                  buildingsByKey.set(buildingKey(existing), existing);
-                }
-              } else {
-                // Clone the building so subsequent unions don't mutate
-                // the response object the parser handed us.
-                buildingsByKey.set(key, {
-                  ...b,
-                  address: { ...(b.address || {}) },
-                  units: [...(b.units || [])]
-                });
               }
             }
+            totalSkipped += result.skippedLandPlots || 0;
+            const idx = findResultIndex(file);
+            const entry = { file, status: 'parsed' };
+            if (idx >= 0) nextResults[idx] = entry;
+            else nextResults.push(entry);
+          } catch (error) {
+            // Cancellation: surface as cancelled and stop iterating — no
+            // sense parsing further files when the user has dismissed.
+            if (
+              controller.signal.aborted ||
+              error?.name === 'CanceledError' ||
+              error?.code === 'ERR_CANCELED'
+            ) {
+              break;
+            }
+            const serverMessage = error.response?.data?.message;
+            const idx = findResultIndex(file);
+            const entry = {
+              file,
+              status: 'error',
+              message: serverMessage || error.message || 'Parse failed'
+            };
+            if (idx >= 0) nextResults[idx] = entry;
+            else nextResults.push(entry);
           }
-          totalSkipped += result.skippedLandPlots || 0;
-          const idx = findResultIndex(file);
-          const entry = { file, status: 'parsed' };
-          if (idx >= 0) nextResults[idx] = entry;
-          else nextResults.push(entry);
-        } catch (error) {
-          // Cancellation: surface as cancelled and stop iterating — no
-          // sense parsing further files when the user has dismissed.
-          if (
-            controller.signal.aborted ||
-            error?.name === 'CanceledError' ||
-            error?.code === 'ERR_CANCELED'
-          ) {
-            break;
-          }
-          const serverMessage = error.response?.data?.message;
-          const idx = findResultIndex(file);
-          const entry = {
-            file,
-            status: 'error',
-            message: serverMessage || error.message || 'Parse failed'
-          };
-          if (idx >= 0) nextResults[idx] = entry;
-          else nextResults.push(entry);
         }
-      }
 
-      // T2.P1.21: if the user cancelled, don't transition to preview —
-      // just reset to idle so they can re-pick files.
-      if (controller.signal.aborted) {
-        abortRef.current = null;
-        setState('idle');
-        return;
-      }
+        // T2.P1.21: if the user cancelled, don't transition to preview —
+        // just reset to idle so they can re-pick files.
+        if (controller.signal.aborted) {
+          abortRef.current = null;
+          setState('idle');
+          return;
+        }
 
-      setFileResults(nextResults);
-      const errored = nextResults.filter((r) => r.status === 'error');
-      if (errored.length === nextResults.length) {
-        // Every file failed — stay on the picker so the user sees the
-        // per-file error list and can retry.
-        toast.error(
-          t('All files failed to parse ({{count}})', {
-            count: errored.length
-          })
-        );
-        setState('idle');
-      } else {
-        if (errored.length > 0) {
-          toast.warning(
-            t('{{count}} of {{total}} files failed; review errors below', {
-              count: errored.length,
-              total: nextResults.length
+        setFileResults(nextResults);
+        const errored = nextResults.filter((r) => r.status === 'error');
+        if (errored.length === nextResults.length) {
+          // Every file failed — stay on the picker so the user sees the
+          // per-file error list and can retry.
+          toast.error(
+            t('All files failed to parse ({{count}})', {
+              count: errored.length
             })
           );
+          setState('idle');
+        } else {
+          if (errored.length > 0) {
+            toast.warning(
+              t('{{count}} of {{total}} files failed; review errors below', {
+                count: errored.length,
+                total: nextResults.length
+              })
+            );
+          }
+          setPreview({
+            owners,
+            buildings: Array.from(buildingsByKey.values()),
+            skippedLandPlots: totalSkipped
+          });
+          setState('preview');
         }
-        setPreview({
-          owners,
-          buildings: Array.from(buildingsByKey.values()),
-          skippedLandPlots: totalSkipped
-        });
-        setState('preview');
+      } catch (error) {
+        // Outer catch is now reserved for non-axios programming errors
+        // (e.g. a thrown TypeError in the merge path). Per-file axios
+        // failures are caught above.
+        const serverMessage = error.response?.data?.message;
+        toast.error(serverMessage || t('Failed to parse E9 PDF'));
+        setState('idle');
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
       }
-    } catch (error) {
-      // Outer catch is now reserved for non-axios programming errors
-      // (e.g. a thrown TypeError in the merge path). Per-file axios
-      // failures are caught above.
-      const serverMessage = error.response?.data?.message;
-      toast.error(serverMessage || t('Failed to parse E9 PDF'));
-      setState('idle');
-    } finally {
-      if (abortRef.current === controller) abortRef.current = null;
-    }
-  }, [files, fileResults, t]);
+    },
+    [files, fileResults, t]
+  );
 
   const handleConfirm = useCallback(async () => {
     // T2.P1.16: only confirm files that successfully parsed. A failed
@@ -367,20 +375,25 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
 
       if (createdCount > 0 || updatedCount > 0) {
         toast.success(
-          t(
-            '{{created}} created, {{updated}} updated, {{units}} units added',
-            {
-              created: createdCount,
-              updated: updatedCount,
-              units: unitsAddedTotal
-            }
-          )
+          t('{{created}} created, {{updated}} updated, {{units}} units added', {
+            created: createdCount,
+            updated: updatedCount,
+            units: unitsAddedTotal
+          })
         );
       } else {
         toast.success(t('Buildings imported successfully'));
       }
-      // Telegram-opened import: consume the inbox item (success only).
-      if (initialImport?.onImported) initialImport.onImported();
+      // Telegram-opened import: consume the inbox item only when the import
+      // actually changed something. A 0-created/0-updated run reaches here too
+      // (every building already present and nothing to add), and consuming then
+      // removes the landlord's only way back to this document.
+      if (
+        initialImport?.onImported &&
+        (createdCount > 0 || updatedCount > 0 || unitsAddedTotal > 0)
+      ) {
+        initialImport.onImported();
+      }
       handleClose();
     } catch (error) {
       const serverMessage = error.response?.data?.message;
@@ -389,7 +402,15 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [fileResults, files, forceOverwrite, handleClose, initialImport, queryClient, t]);
+  }, [
+    fileResults,
+    files,
+    forceOverwrite,
+    handleClose,
+    initialImport,
+    queryClient,
+    t
+  ]);
 
   const isLoading = state === 'loading' || state === 'confirming';
   // T2.P1.16: retry only the files that errored in the previous parse.
@@ -467,9 +488,7 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
               ones without re-picking the whole batch. */}
           {fileResults.length > 0 && state !== 'preview' && (
             <div className="border rounded-md p-3 space-y-1 text-sm">
-              <div className="font-medium mb-1">
-                {t('Per-file status')}
-              </div>
+              <div className="font-medium mb-1">{t('Per-file status')}</div>
               {fileResults.map((r, idx) => (
                 <div key={idx} className="flex items-center gap-2">
                   {r.status === 'parsed' && (
@@ -523,14 +542,11 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
               {preview.owners.length > 0 && (
                 <div className="border rounded-md p-4 space-y-2">
                   <div className="font-medium">
-                    {preview.owners.length === 1
-                      ? t('Owner')
-                      : t('Owners')}
+                    {preview.owners.length === 1 ? t('Owner') : t('Owners')}
                   </div>
                   {preview.owners.map((owner, idx) => (
                     <div key={idx} className="text-sm">
-                      {owner.name}{' '}
-                      {owner.taxId && `(ΑΦΜ: ${owner.taxId})`}
+                      {owner.name} {owner.taxId && `(ΑΦΜ: ${owner.taxId})`}
                     </div>
                   ))}
                 </div>
@@ -557,7 +573,8 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
                         <LuBuilding2 className="size-5 mt-0.5" />
                         <div className="flex-1">
                           <div className="font-medium">
-                            {building.address?.street1}, {building.address?.city}
+                            {building.address?.street1},{' '}
+                            {building.address?.city}
                           </div>
                           <div className="text-sm text-muted-foreground">
                             {t('ATAK Prefix')}: {building.atakPrefix}
@@ -581,18 +598,25 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
                           {building.existingBuildingId && (
                             <div className="flex items-center gap-1 text-sm text-warning mt-2">
                               <LuAlertTriangle className="size-4" />
-                              {t('Will merge into existing building: {{name}}', {
-                                name: building.existingBuildingName
-                              })}
+                              {t(
+                                'Will merge into existing building: {{name}}',
+                                {
+                                  name: building.existingBuildingName
+                                }
+                              )}
                             </div>
                           )}
                           {(building.units || []).length > 0 && (
                             <ul className="mt-2 text-xs text-muted-foreground space-y-0.5">
                               {(building.units || []).map((u, uIdx) => (
-                                <li key={uIdx} className="flex items-center gap-1">
+                                <li
+                                  key={uIdx}
+                                  className="flex items-center gap-1"
+                                >
                                   <span>
                                     {u.atakNumber}
-                                    {typeof u.surface === 'number' && u.surface > 0
+                                    {typeof u.surface === 'number' &&
+                                    u.surface > 0
                                       ? ` · ${u.surface} τμ`
                                       : ''}
                                   </span>
@@ -634,7 +658,10 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
                   className="mt-0.5"
                 />
                 <div className="space-y-1">
-                  <Label htmlFor="e9-force-overwrite" className="cursor-pointer">
+                  <Label
+                    htmlFor="e9-force-overwrite"
+                    className="cursor-pointer"
+                  >
                     {t('Update existing properties')}
                   </Label>
                   <p className="text-xs text-muted-foreground">

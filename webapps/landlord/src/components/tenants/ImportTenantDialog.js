@@ -1,4 +1,10 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState
+} from 'react';
 import {
   createDocument,
   createLease,
@@ -16,10 +22,7 @@ import {
   updateProperty,
   updateTenant
 } from '../../utils/restcalls';
-import {
-  apiFetcher,
-  uploadDocument
-} from '../../utils/fetch';
+import { apiFetcher, uploadDocument } from '../../utils/fetch';
 import {
   Select,
   SelectContent,
@@ -88,8 +91,13 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
   // land on the SAME preview the upload path builds. The row shape mirrors
   // handleParse's `{ ...result, _fileName, _file }` — everything downstream
   // (lease matching, merge strategies, the confirm) is shared code.
+  // Hydrate ONCE per item: a re-fired effect would overwrite the strategies and
+  // flags the landlord has already set on the preview rows.
+  const hydratedRef = React.useRef(null);
   useEffect(() => {
     if (!open || !initialImport?.parsed) return;
+    if (hydratedRef.current === initialImport.itemId) return;
+    hydratedRef.current = initialImport.itemId;
     setParsedResults([
       {
         ...initialImport.parsed,
@@ -152,30 +160,38 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
       if (prop?.atakNumber) {
         // Primary: exact ATAK match (check both atakNumber and altAtakNumbers)
         matchedProperty = existingProperties.find(
-          (p) => p.atakNumber === prop.atakNumber ||
+          (p) =>
+            p.atakNumber === prop.atakNumber ||
             p.altAtakNumbers?.includes(prop.atakNumber)
         );
         // Fallback: match by street + floor (co-owned properties have different ATAKs)
         if (!matchedProperty && prop?.address?.street1) {
           const floorMatch = prop.rawAddress?.match(/Όροφος\s+(\d+)/);
-          const isIsogeio = !floorMatch && /Ισόγειο/i.test(prop.rawAddress || '');
-          const floor = floorMatch ? parseInt(floorMatch[1], 10) : (isIsogeio ? 0 : null);
-          const floorLabel = floor === 0 ? 'Ισόγειο'
-            : floor != null ? `Όροφος ${floor}`
-            : null;
+          const isIsogeio =
+            !floorMatch && /Ισόγειο/i.test(prop.rawAddress || '');
+          const floor = floorMatch
+            ? parseInt(floorMatch[1], 10)
+            : isIsogeio
+              ? 0
+              : null;
+          const floorLabel =
+            floor === 0 ? 'Ισόγειο' : floor != null ? `Όροφος ${floor}` : null;
           // street1 may include appended floor (e.g. "ΟΔΟΣ ΗΤΑ 24, Όροφος 1")
           // Extract just the street+number part before the comma
           const streetOnly = (prop.address?.street1 || '').split(',')[0].trim();
           if (floor !== null && floorLabel) {
-            matchedProperty = existingProperties.find(
-              (p) => {
-                if (!p.name?.includes(streetOnly)) return false;
-                if (!p.name?.includes(floorLabel)) return false;
-                // If surface available, prefer exact surface match
-                if (prop.surface && p.surface && Math.abs(p.surface - prop.surface) > 1) return false;
-                return true;
-              }
-            );
+            matchedProperty = existingProperties.find((p) => {
+              if (!p.name?.includes(streetOnly)) return false;
+              if (!p.name?.includes(floorLabel)) return false;
+              // If surface available, prefer exact surface match
+              if (
+                prop.surface &&
+                p.surface &&
+                Math.abs(p.surface - prop.surface) > 1
+              )
+                return false;
+              return true;
+            });
           }
         }
       }
@@ -191,11 +207,8 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
       // Check if property is occupied by a different tenant
       let occupiedBy = null;
       if (matchedProperty && !matchedTenant) {
-        occupiedBy = existingTenants.find(
-          (t) =>
-            t.properties?.some(
-              (tp) => tp.propertyId === matchedProperty._id
-            )
+        occupiedBy = existingTenants.find((t) =>
+          t.properties?.some((tp) => tp.propertyId === matchedProperty._id)
         );
       }
 
@@ -448,271 +461,255 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
         }
 
         try {
+          const months =
+            matchInfo?.months ||
+            computeMonths(parsed.validityStart, parsed.validityEnd);
 
-        const months =
-          matchInfo?.months ||
-          computeMonths(parsed.validityStart, parsed.validityEnd);
-
-        // 1. Resolve lease
-        let leaseId = selectedLeaseIds[idx] || '';
-        if (!leaseId) {
-          const leaseName = t('Lease {{count}} months', { count: months });
-          // Reuse a lease of the same name created earlier in THIS batch (or
-          // already on the realm) instead of POSTing a duplicate that 422s.
-          leaseId = leaseByName.get(leaseName) || '';
+          // 1. Resolve lease
+          let leaseId = selectedLeaseIds[idx] || '';
           if (!leaseId) {
-            try {
-              const newLease = await createLease({
-                name: leaseName,
-                numberOfTerms: months,
-                timeRange: 'months',
-                active: true
-              });
-              leaseId = newLease._id;
-            } catch (leaseErr) {
-              // Defensive: if the server reports the name already exists
-              // (concurrent/duplicate), refetch and reuse it rather than
-              // failing the row.
-              const msg =
-                leaseErr?.response?.data?.message || leaseErr?.message || '';
-              if (
-                leaseErr?.response?.status === 422 &&
-                /already exists/i.test(msg)
-              ) {
-                const fresh = await fetchLeases();
-                const found = (fresh || []).find((l) => l.name === leaseName);
-                if (!found) throw leaseErr;
-                leaseId = found._id;
-              } else {
-                throw leaseErr;
+            const leaseName = t('Lease {{count}} months', { count: months });
+            // Reuse a lease of the same name created earlier in THIS batch (or
+            // already on the realm) instead of POSTing a duplicate that 422s.
+            leaseId = leaseByName.get(leaseName) || '';
+            if (!leaseId) {
+              try {
+                const newLease = await createLease({
+                  name: leaseName,
+                  numberOfTerms: months,
+                  timeRange: 'months',
+                  active: true
+                });
+                leaseId = newLease._id;
+              } catch (leaseErr) {
+                // Defensive: if the server reports the name already exists
+                // (concurrent/duplicate), refetch and reuse it rather than
+                // failing the row.
+                const msg =
+                  leaseErr?.response?.data?.message || leaseErr?.message || '';
+                if (
+                  leaseErr?.response?.status === 422 &&
+                  /already exists/i.test(msg)
+                ) {
+                  const fresh = await fetchLeases();
+                  const found = (fresh || []).find((l) => l.name === leaseName);
+                  if (!found) throw leaseErr;
+                  leaseId = found._id;
+                } else {
+                  throw leaseErr;
+                }
               }
             }
+            leaseByName.set(leaseName, leaseId);
           }
-          leaseByName.set(leaseName, leaseId);
-        }
 
-        // 2. Resolve properties (P2.9 / N1)
-        // AADE PDFs may declare multiple properties under a single lease
-        // (e.g. apartment + storage room + parking spot, all rented to the
-        // same tenant). Iterate over `parsed.properties` and create or
-        // match each one — previously only properties[0] was processed
-        // and the rest were silently dropped. Each iteration goes through
-        // the same resolve-property → ensure-building flow as before; the
-        // outputs are accumulated into `resolvedProperties` and threaded
-        // into the tenant body's properties[] array further down.
-        const resolvedProperties = [];
-        // Track properties dropped because they're occupied by ANOTHER tenant,
-        // so a multi-property lease that loses SOME (but not all) properties
-        // doesn't silently attach the tenant to fewer units than the PDF
-        // declared (GAP A). Surfaced after the loop.
-        const droppedOccupiedProps = [];
-        for (let pIdx = 0; pIdx < parsed.properties.length; pIdx++) {
-          const prop = parsed.properties[pIdx];
-        // Compute a proper name from address (e.g. "ΟΔΟΣ ΗΤΑ 24 - Ισόγειο")
-        const streetPart = (prop.address?.street1 || '').split(',')[0].trim();
-        const floorRaw = (prop.address?.street1 || '').match(/Όροφος\s*(\d+)/);
-        const floorNum = floorRaw ? parseInt(floorRaw[1], 10) : null;
-        const floorLabel = floorNum === 0 ? 'Ισόγειο'
-          : floorNum != null ? `Όροφος ${floorNum}`
-          : (prop.address?.street1 || '').match(/Ισόγειο/i) ? 'Ισόγειο' : null;
-        const propertyName = streetPart && floorLabel
-          ? `${streetPart} - ${floorLabel}`
-          : streetPart || prop.rawAddress || prop.atakNumber || 'Imported property';
-        const propertyData = {
-          name: propertyName,
-          type: prop.type || 'apartment',
-          surface: prop.surface || 0,
-          price: prop.monthlyRent || 0,
-          address: {
-            street1: prop.address?.street1 || '',
-            street2: '',
-            zipCode: prop.address?.zipCode || '',
-            city: prop.address?.city || '',
-            state: prop.address?.state || '',
-            country: 'Ελλάδα'
-          },
-          atakNumber: prop.atakNumber || '',
-          dehNumber: prop.dehNumber || '',
-          landSurface: prop.landSurface || undefined,
-          energyCertificate: prop.energyCertificate
-            ? {
-                number: prop.energyCertificate.number,
-                issueDate: prop.energyCertificate.issueDate
-                  ? moment(
-                      prop.energyCertificate.issueDate,
-                      'DD/MM/YYYY'
-                    ).toISOString()
-                  : undefined,
-                energyClass: prop.energyCertificate.energyClass,
-                inspectorNumber: prop.energyCertificate.inspectorNumber
+          // 2. Resolve properties (P2.9 / N1)
+          // AADE PDFs may declare multiple properties under a single lease
+          // (e.g. apartment + storage room + parking spot, all rented to the
+          // same tenant). Iterate over `parsed.properties` and create or
+          // match each one — previously only properties[0] was processed
+          // and the rest were silently dropped. Each iteration goes through
+          // the same resolve-property → ensure-building flow as before; the
+          // outputs are accumulated into `resolvedProperties` and threaded
+          // into the tenant body's properties[] array further down.
+          const resolvedProperties = [];
+          // Track properties dropped because they're occupied by ANOTHER tenant,
+          // so a multi-property lease that loses SOME (but not all) properties
+          // doesn't silently attach the tenant to fewer units than the PDF
+          // declared (GAP A). Surfaced after the loop.
+          const droppedOccupiedProps = [];
+          for (let pIdx = 0; pIdx < parsed.properties.length; pIdx++) {
+            const prop = parsed.properties[pIdx];
+            // Compute a proper name from address (e.g. "ΟΔΟΣ ΗΤΑ 24 - Ισόγειο")
+            const streetPart = (prop.address?.street1 || '')
+              .split(',')[0]
+              .trim();
+            const floorRaw = (prop.address?.street1 || '').match(
+              /Όροφος\s*(\d+)/
+            );
+            const floorNum = floorRaw ? parseInt(floorRaw[1], 10) : null;
+            const floorLabel =
+              floorNum === 0
+                ? 'Ισόγειο'
+                : floorNum != null
+                  ? `Όροφος ${floorNum}`
+                  : (prop.address?.street1 || '').match(/Ισόγειο/i)
+                    ? 'Ισόγειο'
+                    : null;
+            const propertyName =
+              streetPart && floorLabel
+                ? `${streetPart} - ${floorLabel}`
+                : streetPart ||
+                  prop.rawAddress ||
+                  prop.atakNumber ||
+                  'Imported property';
+            const propertyData = {
+              name: propertyName,
+              type: prop.type || 'apartment',
+              surface: prop.surface || 0,
+              price: prop.monthlyRent || 0,
+              address: {
+                street1: prop.address?.street1 || '',
+                street2: '',
+                zipCode: prop.address?.zipCode || '',
+                city: prop.address?.city || '',
+                state: prop.address?.state || '',
+                country: 'Ελλάδα'
+              },
+              atakNumber: prop.atakNumber || '',
+              dehNumber: prop.dehNumber || '',
+              landSurface: prop.landSurface || undefined,
+              energyCertificate: prop.energyCertificate
+                ? {
+                    number: prop.energyCertificate.number,
+                    issueDate: prop.energyCertificate.issueDate
+                      ? moment(
+                          prop.energyCertificate.issueDate,
+                          'DD/MM/YYYY'
+                        ).toISOString()
+                      : undefined,
+                    energyClass: prop.energyCertificate.energyClass,
+                    inspectorNumber: prop.energyCertificate.inspectorNumber
+                  }
+                : undefined
+            };
+
+            // Per-property match resolution: matchInfo only carries the
+            // primary (properties[0]) match. For pIdx > 0 (additional
+            // properties on a multi-property lease) we look up the match
+            // inline against existingProperties using the same atak-or-
+            // street-floor heuristic the matchInfos memo uses.
+            let perPropertyMatch = null;
+            let perPropertyOccupiedBy = null;
+            if (pIdx === 0) {
+              perPropertyMatch = matchInfo?.matchedProperty || null;
+              perPropertyOccupiedBy = matchInfo?.occupiedBy || null;
+            } else if (prop?.atakNumber) {
+              perPropertyMatch =
+                existingProperties.find(
+                  (p) =>
+                    p.atakNumber === prop.atakNumber ||
+                    p.altAtakNumbers?.includes(prop.atakNumber)
+                ) || null;
+              if (perPropertyMatch && !matchInfo?.matchedTenant) {
+                perPropertyOccupiedBy =
+                  existingTenants.find((t) =>
+                    t.properties?.some(
+                      (tp) => tp.propertyId === perPropertyMatch._id
+                    )
+                  ) || null;
               }
-            : undefined
-        };
+            }
 
-        // Per-property match resolution: matchInfo only carries the
-        // primary (properties[0]) match. For pIdx > 0 (additional
-        // properties on a multi-property lease) we look up the match
-        // inline against existingProperties using the same atak-or-
-        // street-floor heuristic the matchInfos memo uses.
-        let perPropertyMatch = null;
-        let perPropertyOccupiedBy = null;
-        if (pIdx === 0) {
-          perPropertyMatch = matchInfo?.matchedProperty || null;
-          perPropertyOccupiedBy = matchInfo?.occupiedBy || null;
-        } else if (prop?.atakNumber) {
-          perPropertyMatch =
-            existingProperties.find(
-              (p) =>
-                p.atakNumber === prop.atakNumber ||
-                p.altAtakNumbers?.includes(prop.atakNumber)
-            ) || null;
-          if (perPropertyMatch && !matchInfo?.matchedTenant) {
-            perPropertyOccupiedBy =
-              existingTenants.find((t) =>
-                t.properties?.some(
-                  (tp) => tp.propertyId === perPropertyMatch._id
-                )
-              ) || null;
-          }
-        }
-
-        // Skip properties already occupied by another tenant — the user
-        // saw the warning at preview time. Continue with the remaining
-        // properties on the same lease so we don't lose data. RECORD the drop
-        // so a partial-property loss is surfaced (GAP A), not silent.
-        if (perPropertyOccupiedBy) {
-          droppedOccupiedProps.push(
-            (prop.address?.street1 || '').split(',')[0].trim() ||
-              perPropertyOccupiedBy.name ||
-              t('a unit')
-          );
-          continue;
-        }
-
-        let property;
-        if (perPropertyMatch) {
-          // P1.7 / M3: only overwrite the existing property when the user
-          // explicitly opted in via the per-row checkbox. Default OFF so
-          // re-importing the same lease (or an amendment) doesn't silently
-          // clobber manual edits like surface corrections, custom name,
-          // expense categories, etc.
-          if (updatePropertyFlags[idx]) {
-            property = await updateProperty({
-              _id: perPropertyMatch._id,
-              ...propertyData
-            });
-          } else {
-            property = perPropertyMatch;
-          }
-        } else {
-          // P2.12 / N9: a concurrent identical import (same PDF, two
-          // tabs / two browsers / a re-clicked button) can race past the
-          // existingProperties match and try to insert a duplicate
-          // atakNumber. Mongo answers with E11000 which the common
-          // errorHandler now translates to 409. Recover by re-fetching
-          // properties and treating the duplicate as already-imported.
-          try {
-            property = await createProperty(propertyData);
-          } catch (err) {
-            if (err?.response?.status === 409 && propertyData.atakNumber) {
-              const refreshedProps = await fetchProperties();
-              const dup = refreshedProps.find(
-                (p) =>
-                  p.atakNumber === propertyData.atakNumber ||
-                  p.altAtakNumbers?.includes(propertyData.atakNumber)
+            // Skip properties already occupied by another tenant — the user
+            // saw the warning at preview time. Continue with the remaining
+            // properties on the same lease so we don't lose data. RECORD the drop
+            // so a partial-property loss is surfaced (GAP A), not silent.
+            if (perPropertyOccupiedBy) {
+              droppedOccupiedProps.push(
+                (prop.address?.street1 || '').split(',')[0].trim() ||
+                  perPropertyOccupiedBy.name ||
+                  t('a unit')
               );
-              if (dup) {
-                property = dup;
+              continue;
+            }
+
+            let property;
+            if (perPropertyMatch) {
+              // P1.7 / M3: only overwrite the existing property when the user
+              // explicitly opted in via the per-row checkbox. Default OFF so
+              // re-importing the same lease (or an amendment) doesn't silently
+              // clobber manual edits like surface corrections, custom name,
+              // expense categories, etc.
+              if (updatePropertyFlags[idx]) {
+                property = await updateProperty({
+                  _id: perPropertyMatch._id,
+                  ...propertyData
+                });
               } else {
-                throw err;
+                property = perPropertyMatch;
               }
             } else {
-              throw err;
-            }
-          }
-        }
-
-        // Ensure a building exists for this property
-        if (!property.buildingId && streetPart) {
-          // P1.8 / N4: greekleaseparser surfaces the landlord names + AFMs
-          // + ownership percentages but the import previously sent owners:
-          // []. For any co-owned property (6/11 user PDFs) this dropped 50%+
-          // of the ownership data. The Building schema's UnitOwnerSchema
-          // accepts type ∈ {'member','external'} — parsed lease landlords
-          // are external co-owners by definition (they're in the lease, not
-          // necessarily in the realm members list).
-          const ownersFromPdf = (parsed.landlords || []).map((L) => ({
-            type: 'external',
-            name: L.name,
-            taxId: L.taxId,
-            percentage: L.ownershipPercent
-          }));
-          const buildings = await fetchBuildings();
-          const existingBuilding = buildings.find(
-            (b) => b.name === streetPart || b.address?.street1 === streetPart
-          );
-          if (existingBuilding) {
-            // Add unit to existing building if not already there
-            const hasUnit = existingBuilding.units?.some(
-              (u) => u.propertyId === property._id
-            );
-            if (!hasUnit) {
-              await apiFetcher().post(
-                `/buildings/${existingBuilding._id}/units`,
-                {
-                  atakNumber: prop.atakNumber || '',
-                  floor: floorNum ?? 0,
-                  surface: prop.surface || 0,
-                  electricitySupplyNumber: prop.dehNumber || '',
-                  propertyId: property._id,
-                  isManaged: true,
-                  owners: ownersFromPdf
-                }
-              );
-            }
-          } else {
-            // P1.3 / M2: 8/11 PDFs in the user's corpus share atakPrefix
-            // '00557' (same building, different units). buildingmanager
-            // refuses a second building with the same prefix (422). Catch
-            // that, look up the actual building by prefix, and fall back
-            // to adding the unit there. Any other 422 surfaces the server
-            // message in the toast for diagnosability.
-            const atakPrefix = (prop.atakNumber || '').slice(0, 5);
-            try {
-              await apiFetcher().post('/buildings', {
-                name: streetPart,
-                atakPrefix,
-                address: propertyData.address,
-                units: [
-                  {
-                    atakNumber: prop.atakNumber || '',
-                    floor: floorNum ?? 0,
-                    surface: prop.surface || 0,
-                    electricitySupplyNumber: prop.dehNumber || '',
-                    propertyId: property._id,
-                    isManaged: true,
-                    owners: ownersFromPdf
-                  }
-                ]
-              });
-            } catch (err) {
-              const msg = err?.response?.data?.message || '';
-              const isPrefixCollision =
-                err?.response?.status === 422 &&
-                /atak prefix/i.test(msg) &&
-                /already exists/i.test(msg);
-              if (isPrefixCollision && atakPrefix) {
-                const refreshed = await fetchBuildings();
-                const sharedBuilding = refreshed.find(
-                  (b) => b.atakPrefix === atakPrefix
-                );
-                if (sharedBuilding) {
-                  const hasUnitAlready = sharedBuilding.units?.some(
-                    (u) => u.propertyId === property._id
+              // P2.12 / N9: a concurrent identical import (same PDF, two
+              // tabs / two browsers / a re-clicked button) can race past the
+              // existingProperties match and try to insert a duplicate
+              // atakNumber. Mongo answers with E11000 which the common
+              // errorHandler now translates to 409. Recover by re-fetching
+              // properties and treating the duplicate as already-imported.
+              try {
+                property = await createProperty(propertyData);
+              } catch (err) {
+                if (err?.response?.status === 409 && propertyData.atakNumber) {
+                  const refreshedProps = await fetchProperties();
+                  const dup = refreshedProps.find(
+                    (p) =>
+                      p.atakNumber === propertyData.atakNumber ||
+                      p.altAtakNumbers?.includes(propertyData.atakNumber)
                   );
-                  if (!hasUnitAlready) {
-                    await apiFetcher().post(
-                      `/buildings/${sharedBuilding._id}/units`,
+                  if (dup) {
+                    property = dup;
+                  } else {
+                    throw err;
+                  }
+                } else {
+                  throw err;
+                }
+              }
+            }
+
+            // Ensure a building exists for this property
+            if (!property.buildingId && streetPart) {
+              // P1.8 / N4: greekleaseparser surfaces the landlord names + AFMs
+              // + ownership percentages but the import previously sent owners:
+              // []. For any co-owned property (6/11 user PDFs) this dropped 50%+
+              // of the ownership data. The Building schema's UnitOwnerSchema
+              // accepts type ∈ {'member','external'} — parsed lease landlords
+              // are external co-owners by definition (they're in the lease, not
+              // necessarily in the realm members list).
+              const ownersFromPdf = (parsed.landlords || []).map((L) => ({
+                type: 'external',
+                name: L.name,
+                taxId: L.taxId,
+                percentage: L.ownershipPercent
+              }));
+              const buildings = await fetchBuildings();
+              const existingBuilding = buildings.find(
+                (b) =>
+                  b.name === streetPart || b.address?.street1 === streetPart
+              );
+              if (existingBuilding) {
+                // Add unit to existing building if not already there
+                const hasUnit = existingBuilding.units?.some(
+                  (u) => u.propertyId === property._id
+                );
+                if (!hasUnit) {
+                  await apiFetcher().post(
+                    `/buildings/${existingBuilding._id}/units`,
+                    {
+                      atakNumber: prop.atakNumber || '',
+                      floor: floorNum ?? 0,
+                      surface: prop.surface || 0,
+                      electricitySupplyNumber: prop.dehNumber || '',
+                      propertyId: property._id,
+                      isManaged: true,
+                      owners: ownersFromPdf
+                    }
+                  );
+                }
+              } else {
+                // P1.3 / M2: 8/11 PDFs in the user's corpus share atakPrefix
+                // '00557' (same building, different units). buildingmanager
+                // refuses a second building with the same prefix (422). Catch
+                // that, look up the actual building by prefix, and fall back
+                // to adding the unit there. Any other 422 surfaces the server
+                // message in the toast for diagnosability.
+                const atakPrefix = (prop.atakNumber || '').slice(0, 5);
+                try {
+                  await apiFetcher().post('/buildings', {
+                    name: streetPart,
+                    atakPrefix,
+                    address: propertyData.address,
+                    units: [
                       {
                         atakNumber: prop.atakNumber || '',
                         floor: floorNum ?? 0,
@@ -722,9 +719,246 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
                         isManaged: true,
                         owners: ownersFromPdf
                       }
+                    ]
+                  });
+                } catch (err) {
+                  const msg = err?.response?.data?.message || '';
+                  const isPrefixCollision =
+                    err?.response?.status === 422 &&
+                    /atak prefix/i.test(msg) &&
+                    /already exists/i.test(msg);
+                  if (isPrefixCollision && atakPrefix) {
+                    const refreshed = await fetchBuildings();
+                    const sharedBuilding = refreshed.find(
+                      (b) => b.atakPrefix === atakPrefix
                     );
+                    if (sharedBuilding) {
+                      const hasUnitAlready = sharedBuilding.units?.some(
+                        (u) => u.propertyId === property._id
+                      );
+                      if (!hasUnitAlready) {
+                        await apiFetcher().post(
+                          `/buildings/${sharedBuilding._id}/units`,
+                          {
+                            atakNumber: prop.atakNumber || '',
+                            floor: floorNum ?? 0,
+                            surface: prop.surface || 0,
+                            electricitySupplyNumber: prop.dehNumber || '',
+                            propertyId: property._id,
+                            isManaged: true,
+                            owners: ownersFromPdf
+                          }
+                        );
+                      }
+                    } else {
+                      throw err;
+                    }
+                  } else {
+                    throw err;
                   }
+                }
+              }
+            }
+
+            // Record the resolved property + per-property rent so the tenant
+            // body below can attach all of them. prop.monthlyRent is the
+            // per-property amount AADE emits separately from the lease total.
+            resolvedProperties.push({
+              property,
+              rent: prop.monthlyRent || 0
+            });
+          }
+          // End P2.9 / N1 per-property loop.
+
+          // No properties resolved at all (every property on the lease was
+          // occupied by another tenant). Skip this lease entirely; the
+          // outer loop's `created` array is the success ledger so we
+          // simply don't push.
+          if (resolvedProperties.length === 0) {
+            skipped += 1;
+            continue;
+          }
+
+          // 3. Resolve tenant
+          // P1.1 / M6: client-side defense — even though the server now
+          // 422s non-lease PDFs in pdfimportmanager, malformed legitimate
+          // PDFs may produce a tenants[0] without a name. Don't crash the
+          // whole batch on a single weird row.
+          const primaryTenant = parsed.tenants?.[0];
+          if (!primaryTenant?.name) {
+            skipped += 1;
+            continue;
+          }
+          // P2.5 / M8: when the parser flagged this tenant as a Greek legal
+          // entity (Α.Ε., Ε.Π.Ε., etc.), persist it as a company instead of
+          // first/last-name-decomposing the legal name. The Tenant schema
+          // accepts isCompany/company/manager/legalForm — the API just
+          // round-trips them. We don't have a manager name from the AADE
+          // PDF, so leave that empty for the user to fill in.
+          const isCompany = !!primaryTenant.isCompany;
+          const nameParts = primaryTenant.name.split(/\s+/);
+          const lastName = isCompany ? '' : nameParts[0] || '';
+          const firstName = isCompany ? '' : nameParts.slice(1).join(' ') || '';
+          const beginDate = parsed.validityStart || parsed.originalStartDate;
+          const tenantData = {
+            name: primaryTenant.name,
+            firstName,
+            lastName,
+            isCompany,
+            company: isCompany
+              ? primaryTenant.companyName || primaryTenant.name
+              : '',
+            legalForm: isCompany ? primaryTenant.legalForm || '' : '',
+            manager: '',
+            leaseId,
+            beginDate,
+            endDate: parsed.validityEnd || '',
+            properties: resolvedProperties.map((rp) => ({
+              propertyId: rp.property._id,
+              rent: rp.rent,
+              expenses: [],
+              entryDate: beginDate,
+              exitDate: parsed.validityEnd || ''
+            })),
+            taxId: primaryTenant.taxId || '',
+            declarationNumber: parsed.declarationNumber || '',
+            amendsDeclaration: parsed.amendsDeclaration || '',
+            originalLeaseStartDate: parsed.originalStartDate
+              ? moment(parsed.originalStartDate, 'DD/MM/YYYY').toISOString()
+              : undefined,
+            leaseNotes: parsed.notes || '',
+            coTenants: parsed.tenants.map((t) => ({
+              name: t.name,
+              taxId: t.taxId,
+              acceptanceDate: t.acceptanceDate
+                ? moment(t.acceptanceDate, 'DD/MM/YYYY').toISOString()
+                : undefined
+            })),
+            contacts: [
+              {
+                contact: isCompany
+                  ? primaryTenant.companyName || primaryTenant.name
+                  : `${firstName} ${lastName}`.trim(),
+                email: '',
+                phone1: '',
+                phone2: ''
+              }
+            ],
+            stepperMode: false,
+            // "Mark all past months paid" for a NEW tenant: let the server seed
+            // the past ledger already-settled at generation (Contract.create
+            // autoPayThroughTerm). This replaces the old post-create PATCH loop
+            // (below) that paid each month's CUMULATIVE grandTotal and thus
+            // over-recorded collected N-fold (the ΟΔΟΣ ΗΤΑ 24 garbage). Only the
+            // createTenant (strategy 'new') server path threads this; extend/
+            // replace still use the loop until their handlers thread it too.
+            // Must use the SAME predicate as the checkbox and the replace/extend
+            // loop below (`=== true`), or the box reads unchecked while the server
+            // still seeds the past ledger as settled.
+            markPastPaid:
+              markPaidFlags[idx] === true && matchInfo?.pastMonths > 0
+          };
+
+          let tenant;
+          const strategy = importStrategies[idx] || 'new';
+          // 'extend' and 'replace' both require an existing matched tenant.
+          // If the user picked one of those without a match (shouldn't be
+          // possible from the UI, but guard anyway), fall back to creating
+          // a new tenant rather than crashing on a null _id.
+          const canMergeIntoExisting =
+            !!matchInfo?.matchedTenant && strategy !== 'new';
+          if (canMergeIntoExisting && strategy === 'extend') {
+            // PDF-import-as-lease-extension: server snapshots the prior
+            // root-level lease window into leaseHistory[] before applying the
+            // new declaration's dates / declaration number. The parsed object
+            // we POST is the same shape parseImportedPdf returned plus the
+            // resolved leaseId so the server doesn't have to re-resolve.
+            //
+            // Refresh __v from a live GET before POSTing — the matchInfo
+            // snapshot may be minutes old (the dialog stays mounted) and the
+            // server's optimistic-lock guard 422s on stale __v. Same pattern
+            // as the replace branch below.
+            let extendVersion = matchInfo.matchedTenant.__v;
+            try {
+              const fresh = await fetchTenant(matchInfo.matchedTenant._id);
+              if (fresh && typeof fresh.__v === 'number') {
+                extendVersion = fresh.__v;
+              }
+            } catch {
+              // Fall through to the cached __v; server will 409 if it lost
+              // the race and the user can retry.
+            }
+            tenant = await extendTenantLease(matchInfo.matchedTenant._id, {
+              ...parsed,
+              leaseId,
+              __v: extendVersion
+            });
+          } else if (canMergeIntoExisting && strategy === 'replace') {
+            // P2.1 / H2: previously the PATCH overwrote properties[] with a
+            // single-element array built from parsed.properties[0], wiping any
+            // existing property entries on a multi-property tenant. GET the
+            // current tenant, merge the new property entry keyed on
+            // propertyId (skip if already present, append if new), and PATCH
+            // the merged body. Also thread __v from the matched fixture so
+            // occupantmanager's optimistic-lock guard accepts the request
+            // (otherwise it 422s on missing __v).
+            let mergedProperties = tenantData.properties;
+            let baseVersion = matchInfo.matchedTenant.__v;
+            try {
+              const fresh = await fetchTenant(matchInfo.matchedTenant._id);
+              const existing = Array.isArray(fresh?.properties)
+                ? fresh.properties
+                : [];
+              const existingIds = new Set(
+                existing.map((p) => String(p.propertyId))
+              );
+              // Append only the parsed entries that are not already on the
+              // tenant. P2.9 / N1 produces N entries (one per parsed
+              // property) so we walk the whole list rather than only [0].
+              const newEntries = tenantData.properties.filter(
+                (e) => !existingIds.has(String(e.propertyId))
+              );
+              mergedProperties = newEntries.length
+                ? [...existing, ...newEntries]
+                : existing;
+              if (Number.isFinite(fresh?.__v)) {
+                baseVersion = fresh.__v;
+              }
+            } catch {
+              // GET failed — fall back to the dialog's snapshot to avoid
+              // blocking the import. The merge degrades to "old behavior"
+              // for this one row only, which is the safest fallback when
+              // we can't read the live state.
+            }
+            tenant = await updateTenant({
+              _id: matchInfo.matchedTenant._id,
+              ...tenantData,
+              properties: mergedProperties,
+              __v: baseVersion
+            });
+          } else {
+            // P2.12 / N9: concurrent same-PDF imports may try to insert two
+            // tenants with the same taxId. The server now translates that
+            // E11000 into a 409. Re-read tenants and treat the duplicate as
+            // already-imported (success). If we somehow can't find the
+            // duplicate (race vs another in-flight import that hasn't
+            // committed yet), surface a recoverable error.
+            try {
+              tenant = await createTenant(tenantData);
+            } catch (err) {
+              if (err?.response?.status === 409 && tenantData.taxId) {
+                const refreshedTenants = await fetchTenants();
+                const dup = refreshedTenants.find(
+                  (t) =>
+                    t.taxId === tenantData.taxId ||
+                    t.coTenants?.some((ct) => ct.taxId === tenantData.taxId)
+                );
+                if (dup) {
+                  tenant = dup;
                 } else {
+                  toast.warning(
+                    t('Another import is in progress; please retry')
+                  );
                   throw err;
                 }
               } else {
@@ -732,383 +966,184 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
               }
             }
           }
-        }
 
-        // Record the resolved property + per-property rent so the tenant
-        // body below can attach all of them. prop.monthlyRent is the
-        // per-property amount AADE emits separately from the lease total.
-        resolvedProperties.push({
-          property,
-          rent: prop.monthlyRent || 0
-        });
-        }
-        // End P2.9 / N1 per-property loop.
-
-        // No properties resolved at all (every property on the lease was
-        // occupied by another tenant). Skip this lease entirely; the
-        // outer loop's `created` array is the success ledger so we
-        // simply don't push.
-        if (resolvedProperties.length === 0) {
-          skipped += 1;
-          continue;
-        }
-
-        // 3. Resolve tenant
-        // P1.1 / M6: client-side defense — even though the server now
-        // 422s non-lease PDFs in pdfimportmanager, malformed legitimate
-        // PDFs may produce a tenants[0] without a name. Don't crash the
-        // whole batch on a single weird row.
-        const primaryTenant = parsed.tenants?.[0];
-        if (!primaryTenant?.name) {
-          skipped += 1;
-          continue;
-        }
-        // P2.5 / M8: when the parser flagged this tenant as a Greek legal
-        // entity (Α.Ε., Ε.Π.Ε., etc.), persist it as a company instead of
-        // first/last-name-decomposing the legal name. The Tenant schema
-        // accepts isCompany/company/manager/legalForm — the API just
-        // round-trips them. We don't have a manager name from the AADE
-        // PDF, so leave that empty for the user to fill in.
-        const isCompany = !!primaryTenant.isCompany;
-        const nameParts = primaryTenant.name.split(/\s+/);
-        const lastName = isCompany ? '' : nameParts[0] || '';
-        const firstName = isCompany ? '' : nameParts.slice(1).join(' ') || '';
-        const beginDate = parsed.validityStart || parsed.originalStartDate;
-        const tenantData = {
-          name: primaryTenant.name,
-          firstName,
-          lastName,
-          isCompany,
-          company: isCompany
-            ? primaryTenant.companyName || primaryTenant.name
-            : '',
-          legalForm: isCompany ? primaryTenant.legalForm || '' : '',
-          manager: '',
-          leaseId,
-          beginDate,
-          endDate: parsed.validityEnd || '',
-          properties: resolvedProperties.map((rp) => ({
-            propertyId: rp.property._id,
-            rent: rp.rent,
-            expenses: [],
-            entryDate: beginDate,
-            exitDate: parsed.validityEnd || ''
-          })),
-          taxId: primaryTenant.taxId || '',
-          declarationNumber: parsed.declarationNumber || '',
-          amendsDeclaration: parsed.amendsDeclaration || '',
-          originalLeaseStartDate: parsed.originalStartDate
-            ? moment(parsed.originalStartDate, 'DD/MM/YYYY').toISOString()
-            : undefined,
-          leaseNotes: parsed.notes || '',
-          coTenants: parsed.tenants.map((t) => ({
-            name: t.name,
-            taxId: t.taxId,
-            acceptanceDate: t.acceptanceDate
-              ? moment(t.acceptanceDate, 'DD/MM/YYYY').toISOString()
-              : undefined
-          })),
-          contacts: [
-            {
-              contact: isCompany
-                ? primaryTenant.companyName || primaryTenant.name
-                : `${firstName} ${lastName}`.trim(),
-              email: '',
-              phone1: '',
-              phone2: ''
-            }
-          ],
-          stepperMode: false,
-          // "Mark all past months paid" for a NEW tenant: let the server seed
-          // the past ledger already-settled at generation (Contract.create
-          // autoPayThroughTerm). This replaces the old post-create PATCH loop
-          // (below) that paid each month's CUMULATIVE grandTotal and thus
-          // over-recorded collected N-fold (the ΟΔΟΣ ΗΤΑ 24 garbage). Only the
-          // createTenant (strategy 'new') server path threads this; extend/
-          // replace still use the loop until their handlers thread it too.
-          // Must use the SAME predicate as the checkbox and the replace/extend
-          // loop below (`=== true`), or the box reads unchecked while the server
-          // still seeds the past ledger as settled.
-          markPastPaid:
-            markPaidFlags[idx] === true && matchInfo?.pastMonths > 0
-        };
-
-        let tenant;
-        const strategy = importStrategies[idx] || 'new';
-        // 'extend' and 'replace' both require an existing matched tenant.
-        // If the user picked one of those without a match (shouldn't be
-        // possible from the UI, but guard anyway), fall back to creating
-        // a new tenant rather than crashing on a null _id.
-        const canMergeIntoExisting =
-          !!matchInfo?.matchedTenant && strategy !== 'new';
-        if (canMergeIntoExisting && strategy === 'extend') {
-          // PDF-import-as-lease-extension: server snapshots the prior
-          // root-level lease window into leaseHistory[] before applying the
-          // new declaration's dates / declaration number. The parsed object
-          // we POST is the same shape parseImportedPdf returned plus the
-          // resolved leaseId so the server doesn't have to re-resolve.
+          // Settle past months if flag is set.
           //
-          // Refresh __v from a live GET before POSTing — the matchInfo
-          // snapshot may be minutes old (the dialog stays mounted) and the
-          // server's optimistic-lock guard 422s on stale __v. Same pattern
-          // as the replace branch below.
-          let extendVersion = matchInfo.matchedTenant.__v;
-          try {
-            const fresh = await fetchTenant(matchInfo.matchedTenant._id);
-            if (fresh && typeof fresh.__v === 'number') {
-              extendVersion = fresh.__v;
-            }
-          } catch {
-            // Fall through to the cached __v; server will 409 if it lost
-            // the race and the user can retry.
-          }
-          tenant = await extendTenantLease(matchInfo.matchedTenant._id, {
-            ...parsed,
-            leaseId,
-            __v: extendVersion
-          });
-        } else if (canMergeIntoExisting && strategy === 'replace') {
-          // P2.1 / H2: previously the PATCH overwrote properties[] with a
-          // single-element array built from parsed.properties[0], wiping any
-          // existing property entries on a multi-property tenant. GET the
-          // current tenant, merge the new property entry keyed on
-          // propertyId (skip if already present, append if new), and PATCH
-          // the merged body. Also thread __v from the matched fixture so
-          // occupantmanager's optimistic-lock guard accepts the request
-          // (otherwise it 422s on missing __v).
-          let mergedProperties = tenantData.properties;
-          let baseVersion = matchInfo.matchedTenant.__v;
-          try {
-            const fresh = await fetchTenant(matchInfo.matchedTenant._id);
-            const existing = Array.isArray(fresh?.properties)
-              ? fresh.properties
-              : [];
-            const existingIds = new Set(
-              existing.map((p) => String(p.propertyId))
+          // The 'new' strategy is now handled SERVER-SIDE: createTenant received
+          // markPastPaid above → Contract.create seeds the past ledger already
+          // settled at generation (no cumulative carry-in). Running this client
+          // loop for 'new' too would double-pay. So this loop now covers ONLY the
+          // extend/replace strategies, whose server handlers (extendTenantLease /
+          // updateTenant) do NOT yet thread autoPayThroughTerm.
+          //
+          // NOTE: for extend/replace this loop still pays totalAmount − payment
+          // per term. On those paths the tenant ALREADY EXISTS with a prior
+          // ledger, so a full seed-at-create isn't available; this preserves the
+          // prior behavior for them until their handlers thread the directive
+          // (tracked follow-up). It is NOT the cumulative-snowball path — it
+          // re-fetches and pays each term's residual owed.
+          if (
+            strategy !== 'new' &&
+            // Opt-IN. This synthesises `transfer` payments for each past term's
+            // residual owed — for a tenant genuinely in arrears that FABRICATES
+            // money never received and erases the debt from every surface. It was
+            // pre-checked (`!== false` on an empty map is true), so the
+            // destructive path was the default.
+            markPaidFlags[idx] === true &&
+            matchInfo?.pastMonths > 0
+          ) {
+            // P1.2 / M4: previously hit `/rents/:year` which is not a
+            // registered route — the silent catch fell back to base
+            // monthlyRent only, dropping charges/VAT/discount. Use the
+            // actual endpoint (services/api/src/routes.ts:200) which
+            // returns the full per-term rent ledger for this tenant in a
+            // single round-trip and is correct across multi-year leases.
+            const startDate = moment(
+              parsed.validityStart || parsed.originalStartDate,
+              'DD/MM/YYYY'
             );
-            // Append only the parsed entries that are not already on the
-            // tenant. P2.9 / N1 produces N entries (one per parsed
-            // property) so we walk the whole list rather than only [0].
-            const newEntries = tenantData.properties.filter(
-              (e) => !existingIds.has(String(e.propertyId))
-            );
-            mergedProperties = newEntries.length
-              ? [...existing, ...newEntries]
-              : existing;
-            if (Number.isFinite(fresh?.__v)) {
-              baseVersion = fresh.__v;
-            }
-          } catch {
-            // GET failed — fall back to the dialog's snapshot to avoid
-            // blocking the import. The merge degrades to "old behavior"
-            // for this one row only, which is the safest fallback when
-            // we can't read the live state.
-          }
-          tenant = await updateTenant({
-            _id: matchInfo.matchedTenant._id,
-            ...tenantData,
-            properties: mergedProperties,
-            __v: baseVersion
-          });
-        } else {
-          // P2.12 / N9: concurrent same-PDF imports may try to insert two
-          // tenants with the same taxId. The server now translates that
-          // E11000 into a 409. Re-read tenants and treat the duplicate as
-          // already-imported (success). If we somehow can't find the
-          // duplicate (race vs another in-flight import that hasn't
-          // committed yet), surface a recoverable error.
-          try {
-            tenant = await createTenant(tenantData);
-          } catch (err) {
-            if (err?.response?.status === 409 && tenantData.taxId) {
-              const refreshedTenants = await fetchTenants();
-              const dup = refreshedTenants.find(
-                (t) =>
-                  t.taxId === tenantData.taxId ||
-                  t.coTenants?.some((ct) => ct.taxId === tenantData.taxId)
-              );
-              if (dup) {
-                tenant = dup;
-              } else {
-                toast.warning(
-                  t(
-                    'Another import is in progress; please retry'
-                  )
-                );
-                throw err;
-              }
-            } else {
-              throw err;
-            }
-          }
-        }
-
-        // Settle past months if flag is set.
-        //
-        // The 'new' strategy is now handled SERVER-SIDE: createTenant received
-        // markPastPaid above → Contract.create seeds the past ledger already
-        // settled at generation (no cumulative carry-in). Running this client
-        // loop for 'new' too would double-pay. So this loop now covers ONLY the
-        // extend/replace strategies, whose server handlers (extendTenantLease /
-        // updateTenant) do NOT yet thread autoPayThroughTerm.
-        //
-        // NOTE: for extend/replace this loop still pays totalAmount − payment
-        // per term. On those paths the tenant ALREADY EXISTS with a prior
-        // ledger, so a full seed-at-create isn't available; this preserves the
-        // prior behavior for them until their handlers thread the directive
-        // (tracked follow-up). It is NOT the cumulative-snowball path — it
-        // re-fetches and pays each term's residual owed.
-        if (
-          strategy !== 'new' &&
-          // Opt-IN. This synthesises `transfer` payments for each past term's
-          // residual owed — for a tenant genuinely in arrears that FABRICATES
-          // money never received and erases the debt from every surface. It was
-          // pre-checked (`!== false` on an empty map is true), so the
-          // destructive path was the default.
-          markPaidFlags[idx] === true &&
-          matchInfo?.pastMonths > 0
-        ) {
-          // P1.2 / M4: previously hit `/rents/:year` which is not a
-          // registered route — the silent catch fell back to base
-          // monthlyRent only, dropping charges/VAT/discount. Use the
-          // actual endpoint (services/api/src/routes.ts:200) which
-          // returns the full per-term rent ledger for this tenant in a
-          // single round-trip and is correct across multi-year leases.
-          const startDate = moment(parsed.validityStart || parsed.originalStartDate, 'DD/MM/YYYY');
-          const now = moment();
-          let termDate = startDate.clone();
-          // BUGFIX (mark-past-paid balance snowball — reproduced live 2026-07):
-          // the old code read `rentForTerm.total.grandTotal`, but the
-          // /rents/tenant/:id payload (fetchTenantRents) has NO `.total`
-          // object — the amounts are TOP-LEVEL (`totalAmount`, `balance`,
-          // `payment`). So `.total.grandTotal` was ALWAYS undefined and every
-          // month fell back to the flat monthly rent (180), underpaying while
-          // the carried balance snowballed (180→360→540→720) and dumping a
-          // phantom balance into the current month ("huge owed").
-          // Fix: RE-FETCH the ledger before each term (so each term's owed
-          // reflects prior settlements) and pay that term's TRUE owed =
-          // totalAmount − already-paid. Verified: every past month settles to
-          // newBalance 0 and the current month carries only its own rent.
-          while (termDate.isBefore(now, 'month')) {
-            const term = termDate.format('YYYYMM') + '0100';
-            // L1 (destructive-write audit 2026-07): the /rents/payment PATCH
-            // has REPLACE (PUT) semantics — the payments array sent OVERWRITES
-            // what's on disk (rentmanager `_updateByTerm`). This loop must
-            // therefore (a) preserve the term's EXISTING recorded payments and
-            // (b) add only the DELTA still owed — never post `[{amount: fullOwed}]`
-            // alone, which destroyed a partially-paid term's real payment(s)
-            // (date/reference/allocation) and left it under-paid. Only fetch +
-            // patch when a rent record exists; a fetch failure must NOT clobber
-            // with a flat fallback (that wiped even a fully-paid term).
-            let existingPayments = [];
-            let delta = 0;
-            let haveRentRecord = false;
-            try {
-              const snap = await fetchTenantRents(tenant._id);
-              const rentForTerm = (snap?.rents || []).find(
-                (r) => String(r.term) === term
-              );
-              if (rentForTerm) {
-                haveRentRecord = true;
-                // Echo existing payments verbatim (dates are already
-                // DD/MM/YYYY on disk) so REPLACE preserves them.
-                existingPayments = (rentForTerm.payments || [])
-                  .filter((p) => Number(p?.amount) > 0)
-                  .map((p) => ({
-                    amount: Number(p.amount) || 0,
-                    date: p.date || '',
-                    type: p.type || 'transfer',
-                    reference: p.reference || '',
-                    description: p.description || '',
-                    promo: Number(p.promo) || 0,
-                    notepromo: p.notepromo || '',
-                    extracharge: Number(p.extracharge) || 0,
-                    noteextracharge: p.noteextracharge || '',
-                    allocation: Array.isArray(p.allocation) ? p.allocation : []
-                  }));
-                // totalAmount includes carried balance + this month's
-                // rent/charges; `payment` is what's already recorded. Only the
-                // remaining gap needs a new mark-paid row.
-                const owed =
-                  (Number(rentForTerm.totalAmount) || 0) -
-                  (Number(rentForTerm.payment) || 0);
-                delta = Math.max(0, Math.round(owed * 100) / 100);
-              }
-            } catch (err) {
-              // Fetch failed → we do NOT know the existing payments, so we must
-              // NOT PATCH (a REPLACE with a fabricated array would clobber).
-              console.warn(
-                `import: mark-past-paid skipped term ${term} (ledger fetch failed):`,
-                err?.response?.data?.message || err?.message || err
-              );
-              termDate.add(1, 'month');
-              continue;
-            }
-            if (haveRentRecord && delta > 0.005) {
-              const payments = [
-                ...existingPayments,
-                {
-                  amount: delta,
-                  type: 'transfer',
-                  date: termDate.format('DD/MM/YYYY')
-                }
-              ];
+            const now = moment();
+            let termDate = startDate.clone();
+            // BUGFIX (mark-past-paid balance snowball — reproduced live 2026-07):
+            // the old code read `rentForTerm.total.grandTotal`, but the
+            // /rents/tenant/:id payload (fetchTenantRents) has NO `.total`
+            // object — the amounts are TOP-LEVEL (`totalAmount`, `balance`,
+            // `payment`). So `.total.grandTotal` was ALWAYS undefined and every
+            // month fell back to the flat monthly rent (180), underpaying while
+            // the carried balance snowballed (180→360→540→720) and dumping a
+            // phantom balance into the current month ("huge owed").
+            // Fix: RE-FETCH the ledger before each term (so each term's owed
+            // reflects prior settlements) and pay that term's TRUE owed =
+            // totalAmount − already-paid. Verified: every past month settles to
+            // newBalance 0 and the current month carries only its own rent.
+            while (termDate.isBefore(now, 'month')) {
+              const term = termDate.format('YYYYMM') + '0100';
+              // L1 (destructive-write audit 2026-07): the /rents/payment PATCH
+              // has REPLACE (PUT) semantics — the payments array sent OVERWRITES
+              // what's on disk (rentmanager `_updateByTerm`). This loop must
+              // therefore (a) preserve the term's EXISTING recorded payments and
+              // (b) add only the DELTA still owed — never post `[{amount: fullOwed}]`
+              // alone, which destroyed a partially-paid term's real payment(s)
+              // (date/reference/allocation) and left it under-paid. Only fetch +
+              // patch when a rent record exists; a fetch failure must NOT clobber
+              // with a flat fallback (that wiped even a fully-paid term).
+              let existingPayments = [];
+              let delta = 0;
+              let haveRentRecord = false;
               try {
-                await apiFetcher().patch(
-                  `/rents/payment/${tenant._id}/${term}`,
-                  { _id: tenant._id, payments }
+                const snap = await fetchTenantRents(tenant._id);
+                const rentForTerm = (snap?.rents || []).find(
+                  (r) => String(r.term) === term
                 );
+                if (rentForTerm) {
+                  haveRentRecord = true;
+                  // Echo existing payments verbatim (dates are already
+                  // DD/MM/YYYY on disk) so REPLACE preserves them.
+                  existingPayments = (rentForTerm.payments || [])
+                    .filter((p) => Number(p?.amount) > 0)
+                    .map((p) => ({
+                      amount: Number(p.amount) || 0,
+                      date: p.date || '',
+                      type: p.type || 'transfer',
+                      reference: p.reference || '',
+                      description: p.description || '',
+                      promo: Number(p.promo) || 0,
+                      notepromo: p.notepromo || '',
+                      extracharge: Number(p.extracharge) || 0,
+                      noteextracharge: p.noteextracharge || '',
+                      allocation: Array.isArray(p.allocation)
+                        ? p.allocation
+                        : []
+                    }));
+                  // totalAmount includes carried balance + this month's
+                  // rent/charges; `payment` is what's already recorded. Only the
+                  // remaining gap needs a new mark-paid row.
+                  const owed =
+                    (Number(rentForTerm.totalAmount) || 0) -
+                    (Number(rentForTerm.payment) || 0);
+                  delta = Math.max(0, Math.round(owed * 100) / 100);
+                }
               } catch (err) {
-                // F8 (audit-2026-07): a real settlement failure must not vanish
-                // silently — the operator has no other signal it didn't land.
+                // Fetch failed → we do NOT know the existing payments, so we must
+                // NOT PATCH (a REPLACE with a fabricated array would clobber).
                 console.warn(
-                  `import: mark-past-paid failed for ${tenant._id} term ${term}:`,
+                  `import: mark-past-paid skipped term ${term} (ledger fetch failed):`,
                   err?.response?.data?.message || err?.message || err
                 );
+                termDate.add(1, 'month');
+                continue;
               }
+              if (haveRentRecord && delta > 0.005) {
+                const payments = [
+                  ...existingPayments,
+                  {
+                    amount: delta,
+                    type: 'transfer',
+                    date: termDate.format('DD/MM/YYYY')
+                  }
+                ];
+                try {
+                  await apiFetcher().patch(
+                    `/rents/payment/${tenant._id}/${term}`,
+                    { _id: tenant._id, payments }
+                  );
+                } catch (err) {
+                  // F8 (audit-2026-07): a real settlement failure must not vanish
+                  // silently — the operator has no other signal it didn't land.
+                  console.warn(
+                    `import: mark-past-paid failed for ${tenant._id} term ${term}:`,
+                    err?.response?.data?.message || err?.message || err
+                  );
+                }
+              }
+              termDate.add(1, 'month');
             }
-            termDate.add(1, 'month');
           }
-        }
 
-        created.push(tenant);
+          created.push(tenant);
 
-        // Persist the ORIGINAL imported lease PDF to the tenant's documents
-        // (B2 via /documents/upload + a Document record). Best-effort: a
-        // storage failure must never fail the import itself.
-        if (parsed._file && tenant?._id && leaseId) {
-          try {
-            const uploadResp = await uploadDocument({
-              endpoint: '/documents/upload',
-              documentName: (parsed._fileName || 'lease').replace(/\.pdf$/i, ''),
-              file: parsed._file,
-              folder: `${tenant.name || tenant._id}/contract_scanned_documents`
-            });
-            await createDocument({
-              tenantId: tenant._id,
-              leaseId,
-              type: 'file',
-              name: parsed._fileName || 'lease.pdf',
-              description: t('Imported lease PDF'),
-              mimeType: 'application/pdf',
-              url: uploadResp.data.key,
-              versionId: uploadResp.data.versionId
-            });
-          } catch (persistErr) {
-            console.error('lease PDF persist failed (non-blocking)', persistErr);
+          // Persist the ORIGINAL imported lease PDF to the tenant's documents
+          // (B2 via /documents/upload + a Document record). Best-effort: a
+          // storage failure must never fail the import itself.
+          if (parsed._file && tenant?._id && leaseId) {
+            try {
+              const uploadResp = await uploadDocument({
+                endpoint: '/documents/upload',
+                documentName: (parsed._fileName || 'lease').replace(
+                  /\.pdf$/i,
+                  ''
+                ),
+                file: parsed._file,
+                folder: `${tenant.name || tenant._id}/contract_scanned_documents`
+              });
+              await createDocument({
+                tenantId: tenant._id,
+                leaseId,
+                type: 'file',
+                name: parsed._fileName || 'lease.pdf',
+                description: t('Imported lease PDF'),
+                mimeType: 'application/pdf',
+                url: uploadResp.data.key,
+                versionId: uploadResp.data.versionId
+              });
+            } catch (persistErr) {
+              console.error(
+                'lease PDF persist failed (non-blocking)',
+                persistErr
+              );
+            }
           }
-        }
 
-        // GAP A: the tenant WAS created but one or more of its declared
-        // properties were dropped as already-occupied — surface that so the
-        // operator knows the tenant has fewer units than the PDF declared.
-        if (droppedOccupiedProps.length > 0) {
-          failures.push({
-            name: rowName,
-            reason: 'partialProperties',
-            props: droppedOccupiedProps
-          });
-        }
+          // GAP A: the tenant WAS created but one or more of its declared
+          // properties were dropped as already-occupied — surface that so the
+          // operator knows the tenant has fewer units than the PDF declared.
+          if (droppedOccupiedProps.length > 0) {
+            failures.push({
+              name: rowName,
+              reason: 'partialProperties',
+              props: droppedOccupiedProps
+            });
+          }
         } catch (err) {
           // Per-row isolation: a failure on ONE tenant must not abort the
           // whole batch (was the multi-tenant-collapse bug). Record why and
@@ -1124,7 +1159,11 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
           skipped += 1;
           failures.push({ name: rowName, reason, status });
           // eslint-disable-next-line no-console
-          console.warn(`import: skipped tenant "${rowName}"`, status, serverMsg);
+          console.warn(
+            `import: skipped tenant "${rowName}"`,
+            status,
+            serverMsg
+          );
           continue;
         }
       }
@@ -1143,10 +1182,16 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
-      // Telegram-opened import: let the page consume the inbox item so the
-      // bell clears. Fires only on SUCCESS — a failed/cancelled import leaves
-      // the notification pending, which is the honest state.
-      if (initialImport?.onImported) initialImport.onImported();
+      // Telegram-opened import: consume the inbox item so the bell clears —
+      // but ONLY if a tenant was actually created. `onSuccess` here means "the
+      // mutation did not throw", not "something was imported": every row can be
+      // skipped (property already occupied → 422, invalid dates), and this same
+      // handler goes on to render «No tenants imported». Consuming then left the
+      // landlord with an error toast, no tenant, and no notification to retry
+      // from — recoverable only by re-sending the PDF to the bot.
+      if (initialImport?.onImported && (tenants?.length ?? 0) > 0) {
+        initialImport.onImported();
+      }
       handleClose();
       // P2.11 / N8: surface skipped count alongside the success message
       // so a single-success import that swallowed N occupied / invalid
@@ -1155,7 +1200,9 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
       // Surface WHICH tenants were skipped/partial and WHY (was a bare count
       // that hid a whole-batch collapse AND silent partial-property loss).
       const occupied = failures.filter((f) => f.reason === 'occupied').length;
-      const invalid = failures.filter((f) => f.reason === 'invalidDates').length;
+      const invalid = failures.filter(
+        (f) => f.reason === 'invalidDates'
+      ).length;
       const partial = failures.filter((f) => f.reason === 'partialProperties');
       const other = failures.filter(
         (f) =>
@@ -1165,7 +1212,9 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
       );
       const parts = [];
       if (occupied)
-        parts.push(t('{{count}} occupied by another tenant', { count: occupied }));
+        parts.push(
+          t('{{count}} occupied by another tenant', { count: occupied })
+        );
       if (invalid) parts.push(t('{{count}} invalid dates', { count: invalid }));
       if (partial.length)
         parts.push(
@@ -1173,7 +1222,9 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
             count: partial.length
           }) +
             ': ' +
-            partial.map((f) => `${f.name} (${(f.props || []).join(', ')})`).join(', ')
+            partial
+              .map((f) => `${f.name} (${(f.props || []).join(', ')})`)
+              .join(', ')
         );
       if (other.length)
         parts.push(
@@ -1340,7 +1391,7 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
                           : info.classificationKind === 'review'
                             ? t('Possible co-tenant — please review')
                             : t('Tenant already exists')}
-                        :{' '}{info.matchedTenant.name}
+                        : {info.matchedTenant.name}
                       </div>
                     )}
 
@@ -1403,9 +1454,12 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
                     {info?.occupiedBy && (
                       <div className="flex items-center gap-1 text-xs text-red-700">
                         <LuBan className="size-3" />
-                        {t('Property occupied by {{name}} — remove them first', {
-                          name: info.occupiedBy.name
-                        })}
+                        {t(
+                          'Property occupied by {{name}} — remove them first',
+                          {
+                            name: info.occupiedBy.name
+                          }
+                        )}
                       </div>
                     )}
 
@@ -1444,10 +1498,7 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
                         parking) surface the full set the import will
                         create / attach. */}
                     {parsed.properties.map((p, pIdx) => (
-                      <div
-                        key={pIdx}
-                        className="text-sm text-muted-foreground"
-                      >
+                      <div key={pIdx} className="text-sm text-muted-foreground">
                         <LuCheck className="inline size-3 mr-1" />
                         {p.address?.street1}
                         {p.surface ? ` · ${p.surface} τμ` : ''}
@@ -1530,9 +1581,14 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
                           }
                         />
                         <div className="min-w-0">
-                          <label htmlFor={`markPaid-${idx}`} className="text-sm flex items-center gap-1.5 cursor-pointer">
+                          <label
+                            htmlFor={`markPaid-${idx}`}
+                            className="text-sm flex items-center gap-1.5 cursor-pointer"
+                          >
                             <LuCalendarClock className="size-4 shrink-0" />
-                            {t('Mark {{count}} past months as paid', { count: info.pastMonths })}
+                            {t('Mark {{count}} past months as paid', {
+                              count: info.pastMonths
+                            })}
                           </label>
                           <p className="mt-1 text-label text-ink-muted">
                             {t(

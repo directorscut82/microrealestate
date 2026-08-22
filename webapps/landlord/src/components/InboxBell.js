@@ -240,7 +240,10 @@ function ImportDocCard({ item, onGone, onNavigate }) {
   // shape as the bill processing card, named for what it is.
   if (item.status === 'processing') {
     return (
-      <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxDocProcessing">
+      <div
+        className="p-4 space-y-2 border-b last:border-b-0"
+        data-cy="inboxDocProcessing"
+      >
         <div className="flex items-baseline gap-2">
           <span className="min-w-0 text-sm font-medium text-ink">
             {t('Reading the document…')}
@@ -312,7 +315,10 @@ function ImportDocCard({ item, onGone, onNavigate }) {
   }
 
   return (
-    <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxDocCard">
+    <div
+      className="p-4 space-y-2 border-b last:border-b-0"
+      data-cy="inboxDocCard"
+    >
       <div className="flex items-baseline gap-2">
         <span className="text-sm font-semibold uppercase">
           {isLease ? t('Lease declaration') : t('E9 declaration')}
@@ -407,8 +413,7 @@ function InboxCard({ item, buildings, onGone }) {
   // building C left `buildingId` on the suggested B, the select still listed B's
   // expenses, and confirm posted {buildingId: B, expenseId: <B's>} — the bill
   // charged a building the landlord never chose.
-  const buildingId =
-    assignment?.buildingId || rawSuggestion?.buildingId || '';
+  const buildingId = assignment?.buildingId || rawSuggestion?.buildingId || '';
   const expenseId = assignment?.expenseId || match?.expenseId || '';
   const selectedBuilding = (buildings || []).find(
     (b) => String(b._id) === String(buildingId)
@@ -552,7 +557,10 @@ function InboxCard({ item, buildings, onGone }) {
    */
   if (item.status === 'processing') {
     return (
-      <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxProcessing">
+      <div
+        className="p-4 space-y-2 border-b last:border-b-0"
+        data-cy="inboxProcessing"
+      >
         {/* The title must not be truncated by the badge — «Διαβάζω τον λογαριασμό…» is
             longer than the panel is wide, and the first version rendered it as
             «Διαβάζω τον λογαριασμό…» clipped mid-word with the badge pushing it. The badge

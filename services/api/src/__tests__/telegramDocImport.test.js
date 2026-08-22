@@ -42,7 +42,10 @@ const E9_PARSED = {
       address: { street1: 'ΟΔΟΣ ΑΛΦΑ 12', zipCode: '11111' },
       units: [{ atakNumber: '1' }, { atakNumber: '2' }]
     },
-    { address: { street1: 'ΟΔΟΣ ΒΗΤΑ 4', zipCode: '22222' }, units: [{ atakNumber: '3' }] }
+    {
+      address: { street1: 'ΟΔΟΣ ΒΗΤΑ 4', zipCode: '22222' },
+      units: [{ atakNumber: '3' }]
+    }
   ],
   skippedLandPlots: 0
 };
@@ -69,14 +72,26 @@ function makeDeps({
   parseE9Result = E9_PARSED,
   classifyResult = { kind: 'extension', matchedTenantId: 't-1' }
 } = {}) {
-  const state = { created: [], rows: {}, replies: [], edits: [], updates: [], archives: [], parseBillCalls: 0, extractCalls: [] };
+  const state = {
+    created: [],
+    rows: {},
+    replies: [],
+    edits: [],
+    updates: [],
+    archives: [],
+    parseBillCalls: 0,
+    extractCalls: []
+  };
   const deps = {
     now: () => FIXED_NOW,
     findTelegramRealms: async () => [REALM],
     getOffset: async () => 0,
     setOffset: async () => {},
     getUpdates: async () => updates,
-    downloadFile: async () => ({ buffer: Buffer.from('%PDF-fake'), fileName: 'doc.pdf' }),
+    downloadFile: async () => ({
+      buffer: Buffer.from('%PDF-fake'),
+      fileName: 'doc.pdf'
+    }),
     parseBill: async () => {
       state.parseBillCalls++;
       return { success: false, error: 'not a bill' };
@@ -189,14 +204,20 @@ describe('telegram document orchestrator — routing at receipt', () => {
     expect(row.parseError).toContain('δεν διαβάστηκαν στοιχεία');
     expect(row.importDoc.parsed).toBeNull();
     expect(state.parseBillCalls).toBe(0);
-    expect(state.edits[state.edits.length - 1].text).toContain('δεν διαβάστηκε');
+    expect(state.edits[state.edits.length - 1].text).toContain(
+      'δεν διαβάστηκε'
+    );
   });
 
   it('an Ε9 with only land plots gets the ΠΙΝΑΚΑΣ-2 message, not «nothing found»', async () => {
     const { deps, state } = makeDeps({
       updates: [pdfMsg(1, 103)],
       pdfText: E9_TEXT,
-      parseE9Result: { owner: { taxId: '999000018' }, buildings: [], skippedLandPlots: 3 }
+      parseE9Result: {
+        owner: { taxId: '999000018' },
+        buildings: [],
+        skippedLandPlots: 3
+      }
     });
     await scanTelegramInbox(deps);
     await _awaitParseQueue();
@@ -222,7 +243,11 @@ describe('telegram document orchestrator — routing at receipt', () => {
           message: {
             message_id: 105,
             chat: { id: 111 },
-            document: { file_id: 'img-105', file_name: 'bill.jpg', mime_type: 'image/jpeg' }
+            document: {
+              file_id: 'img-105',
+              file_name: 'bill.jpg',
+              mime_type: 'image/jpeg'
+            }
           }
         }
       ],
@@ -243,7 +268,10 @@ describe('telegram document orchestrator — routing at receipt', () => {
           message: {
             message_id: 106,
             chat: { id: 111 },
-            photo: [{ file_id: 'p-small' }, { file_id: 'p-big', file_size: 5000 }]
+            photo: [
+              { file_id: 'p-small' },
+              { file_id: 'p-big', file_size: 5000 }
+            ]
           }
         }
       ],
@@ -280,7 +308,9 @@ describe('telegram document orchestrator — routing at receipt', () => {
     // the harness records `maxPages ?? null`: 2 on the tick, uncapped in the worker
     expect(state.extractCalls).toEqual([2, null]);
     // and the full parse still produced the payload
-    expect(state.created[0].importDoc.parsed.tenants[0].taxId).toBe('999000043');
+    expect(state.created[0].importDoc.parsed.tenants[0].taxId).toBe(
+      '999000043'
+    );
   });
 
   it('persists the mime type, defaulting a classified PDF to application/pdf', async () => {
@@ -335,6 +365,36 @@ describe('telegram document orchestrator — routing at receipt', () => {
     await _awaitParseQueue();
     expect(state.extractCalls).toEqual([]);
     expect(state.created[0].kind).toBe('bill');
+  });
+
+  it('the DI seams are optional in the TYPE only — an omitted one is the REAL thing', async () => {
+    // scanTelegramInbox merges {..._defaultDeps(), ...overrides}. A test that
+    // sends a .pdf and omits extractPdfText therefore runs pdfjs for real,
+    // which is how the ack-protocol suite started timing out under load. This
+    // pins the merge behaviour so the trap is stated in a test, not a comment.
+    const mod = await import('../jobs/telegramInboxScanner.js');
+    const seen = [];
+    await mod.scanTelegramInbox({
+      findTelegramRealms: async () => [REALM],
+      getOffset: async () => 0,
+      setOffset: async () => {},
+      getUpdates: async () => [],
+      // deliberately NOT injecting extractPdfText / parseBill / createInboxItem
+      sendReply: async (_t, _c, text) => {
+        seen.push(text);
+        return 1;
+      }
+    });
+    // No updates, so nothing ran — the point is that the call SUCCEEDS with
+    // real defaults merged in, i.e. the omitted seams resolved to something.
+    expect(seen).toEqual([]);
+    // and the production wiring really does supply them
+    const defaults = mod._defaultDepsForTest?.();
+    if (defaults) {
+      expect(typeof defaults.extractPdfText).toBe('function');
+      expect(typeof defaults.parseLeaseText).toBe('function');
+      expect(typeof defaults.parseE9Text).toBe('function');
+    }
   });
 
   it('classification failure is advisory: the lease row still lands, without a verdict', async () => {

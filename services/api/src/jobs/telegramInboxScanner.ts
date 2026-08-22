@@ -201,13 +201,20 @@ export interface InboxScanDeps {
     msg: NonNullable<TgUpdate['message']>
   ) => Promise<boolean>;
   /**
-   * Document-orchestrator seams (all optional so the existing bill-lane tests
-   * skip them; wired in _defaultDeps). extractPdfText is the SAME pdfjs
-   * extraction the upload lanes run, used at RECEIPT to classify the PDF
-   * (lease / e9 / bill) so the row is written with the right kind and the bell
-   * names what it is reading. parseLeaseText / parseE9Text / classifyLease run
-   * in the WORKER — pure functions injected so the orchestrator tests need
-   * neither pdfjs nor mongo.
+   * Document-orchestrator seams. Optional in the TYPE only — `scanTelegramInbox`
+   * merges `{..._defaultDeps(), ...overrides}`, so an omitted seam is the REAL
+   * implementation, not a no-op. A test that sends a `.pdf` document and does
+   * not inject `extractPdfText` therefore loads pdfjs and runs getDocument on
+   * its fixture buffer. (An earlier version of this comment claimed the
+   * opposite — "optional so the existing bill-lane tests skip them" — and that
+   * false claim is what let the real extractor leak into the ack-protocol
+   * suite until it timed out under load.)
+   *
+   * extractPdfText is the SAME extraction the upload lanes run, called at
+   * RECEIPT with CLASSIFICATION_PAGES to route the document, and again in the
+   * worker without a cap for the full parse. parseLeaseText / parseE9Text /
+   * classifyLease run in the WORKER — pure functions injected so the
+   * orchestrator tests need neither pdfjs nor mongo.
    */
   extractPdfText?: (buffer: Buffer, maxPages?: number) => Promise<string>;
   parseLeaseText?: (text: string) => any;
@@ -687,7 +694,12 @@ async function _editReply(
     try {
       await axios.post(
         `https://api.telegram.org/bot${botToken}/editMessageText`,
-        { chat_id: chatId, message_id: messageId, text, disable_web_page_preview: true },
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          text,
+          disable_web_page_preview: true
+        },
         { timeout: 15_000 }
       );
       return;
@@ -908,7 +920,9 @@ async function _saveVoiceSample(
     // Keys the re-delivery dedup (finding 2). Absent for a swept-abandoned
     // dialogue (no single terminal message) — that row is written once by the
     // sweep and never re-delivered, so it needs no key.
-    ...(terminalMessageId != null ? { telegramMessageId: terminalMessageId } : {}),
+    ...(terminalMessageId != null
+      ? { telegramMessageId: terminalMessageId }
+      : {}),
     voiceCommand: {
       intent: s.intent,
       personId: s.person?.id,
@@ -1007,7 +1021,10 @@ export async function scanTelegramInbox(
             // which is exactly the transient-vs-permanent discriminator.
             const mid = u.message?.message_id;
             try {
-              if (mid != null && !(await deps.hasInboxItem(realm.realmId, mid))) {
+              if (
+                mid != null &&
+                !(await deps.hasInboxItem(realm.realmId, mid))
+              ) {
                 const now = deps.now();
                 await deps.createInboxItem({
                   realmId: realm.realmId,
@@ -1223,11 +1240,8 @@ async function _handleUpdate(
         : msg.document
           ? 'Ελήφθη το αρχείο — το διαβάζω τώρα…'
           : 'Ελήφθη η φωτογραφία — τη διαβάζω τώρα…';
-  const ackMessageId = (await deps.sendReply?.(
-    realm.botToken,
-    msg.chat.id,
-    ackText
-  )) ?? null;
+  const ackMessageId =
+    (await deps.sendReply?.(realm.botToken, msg.chat.id, ackText)) ?? null;
 
   const receivedAt = deps.now();
   const itemId = await deps.createInboxItem({
@@ -1378,7 +1392,15 @@ async function _runParseJob(job: ParseJob): Promise<void> {
     if (job.docClass === 'lease' || job.docClass === 'e9') {
       await _parseImportDocAndFinish(job);
     } else {
-      await _parseAndFinish(realm, file, msg, safeName, itemId, ackMessageId, deps);
+      await _parseAndFinish(
+        realm,
+        file,
+        msg,
+        safeName,
+        itemId,
+        ackMessageId,
+        deps
+      );
     }
   } catch (err: any) {
     logger.error(
@@ -1438,7 +1460,8 @@ async function _parseImportDocAndFinish(job: ParseJob): Promise<void> {
 
   let parsed: any = null;
   let parseError: string | undefined;
-  let summary: { title?: string; subtitle?: string; classification?: string } = {};
+  let summary: { title?: string; subtitle?: string; classification?: string } =
+    {};
 
   try {
     // FULL extraction here, not on the tick: a μισθωτήριο runs to several pages
@@ -1594,8 +1617,11 @@ async function _parseAndFinish(
   // that PARSED fine can still be attached to a month nobody is charged for, and
   // collapsing the two would make a warning look like a failure (or worse, a
   // failure look like a warning).
-  const termWarnings: { level: 'warn' | 'block'; code: string; message: string }[] =
-    [];
+  const termWarnings: {
+    level: 'warn' | 'block';
+    code: string;
+    message: string;
+  }[] = [];
   let suggestedMatch: Awaited<ReturnType<InboxScanDeps['findMatch']>> = null;
   try {
     const parseResult = await deps.parseBill(file.buffer);
@@ -1902,7 +1928,9 @@ export async function sweepStalledProcessing(
     .limit(50)
     .lean();
   // Never release a row this process is still working on. See `ownedItemIds`.
-  const stalled = candidates.filter((item) => !ownedItemIds.has(String(item._id)));
+  const stalled = candidates.filter(
+    (item) => !ownedItemIds.has(String(item._id))
+  );
   const skipped = candidates.length - stalled.length;
   if (skipped) {
     logger.info(

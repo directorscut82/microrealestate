@@ -204,7 +204,8 @@ export async function confirm(req: Req, res: Res): Promise<void> {
   // write a notice accepts.
   if (item.kind === 'notice') {
     throw new ServiceError(
-      'Μια ειδοποίηση δεν μπορεί να καταχωρηθεί ως λογαριασμός', 422
+      'Μια ειδοποίηση δεν μπορεί να καταχωρηθεί ως λογαριασμός',
+      422
     );
   }
   // kind:'leaseImport'/'e9Import' — confirm CONSUMES the notification, nothing

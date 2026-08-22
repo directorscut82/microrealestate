@@ -95,7 +95,10 @@ beforeAll(async () => {
           findOne: () => ({ lean: async () => null })
         },
         Realm: { find: () => ({ lean: async () => [] }) },
-        Building: { find: () => ({ lean: async () => [] }), findOne: () => ({ lean: async () => null }) },
+        Building: {
+          find: () => ({ lean: async () => [] }),
+          findOne: () => ({ lean: async () => null })
+        },
         TelegramOffset: {},
         Property: { find: () => ({ lean: async () => [] }) },
         Tenant: { find: () => ({ lean: async () => [] }) },
@@ -146,7 +149,13 @@ beforeAll(async () => {
 /** A deps set that records the ORDER of everything, which is what the protocol is about. */
 function makeDeps({ parseDelayMs = 0, parseResult } = {}) {
   const events = [];
-  const state = { created: [], receipts: [], updates: [], replies: [], edits: [] };
+  const state = {
+    created: [],
+    receipts: [],
+    updates: [],
+    replies: [],
+    edits: []
+  };
   const deps = {
     now: () => FIXED_NOW,
     findTelegramRealms: async () => [REALM],
@@ -208,6 +217,13 @@ function makeDeps({ parseDelayMs = 0, parseResult } = {}) {
       if (row) Object.assign(row, patch);
     },
     tryRecapture: async () => false,
+    // MUST be injected. `scanTelegramInbox` merges `{..._defaultDeps(),
+    // ...overrides}`, so an "optional" seam is never absent — it is the REAL
+    // pdfjs extractor. These fixtures send `bill.pdf`, which is classified at
+    // receipt, so without this the tick imports pdfjs and runs getDocument on
+    // `Buffer.from('x')`: this suite's ack test went from milliseconds to
+    // seconds and crossed the 5s default timeout under full-suite load.
+    extractPdfText: async () => '',
     archiveSource: async () => null,
     sendReply: async (_t, _c, text) => {
       events.push('ack');
@@ -357,7 +373,9 @@ describe('the surfaces agree that processing exists', () => {
     expect(read('../../../common/src/collections/inboxItem.ts')).toContain(
       "'processing'"
     );
-    const bell = read('../../../../webapps/landlord/src/components/InboxBell.js');
+    const bell = read(
+      '../../../../webapps/landlord/src/components/InboxBell.js'
+    );
     expect(bell).toContain("item.status === 'processing'");
     // BEFORE the parseError branch and the normal card, or a row with no parsed amount
     // renders as an empty confirmable bill.
@@ -702,7 +720,10 @@ describe('a released row corrects the message the landlord is looking at', () =>
       },
       botTokenFor: async () => 'tok'
     });
-    expect({ released, edits: edits.length }).toEqual({ released: 1, edits: 1 });
+    expect({ released, edits: edits.length }).toEqual({
+      released: 1,
+      edits: 1
+    });
     // The SAME message, not a new one: a second message below the first leaves two states
     // on screen with no indication which is current.
     expect(edits[0]).toMatchObject({ chatId: '55', messageId: 9001 });
@@ -754,7 +775,10 @@ describe('a released row corrects the message the landlord is looking at', () =>
       },
       botTokenFor: async () => 'tok'
     });
-    expect({ released, edits: edits.length }).toEqual({ released: 1, edits: 0 });
+    expect({ released, edits: edits.length }).toEqual({
+      released: 1,
+      edits: 0
+    });
   });
 
   it('does not edit anything when the realm has no bot token any more', async () => {
@@ -777,6 +801,9 @@ describe('a released row corrects the message the landlord is looking at', () =>
       },
       botTokenFor: async () => null
     });
-    expect({ released, edits: edits.length }).toEqual({ released: 1, edits: 0 });
+    expect({ released, edits: edits.length }).toEqual({
+      released: 1,
+      edits: 0
+    });
   });
 });

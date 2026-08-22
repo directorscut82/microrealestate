@@ -78,9 +78,7 @@ export async function classifyAgainstExisting(
     return {
       kind: 'review',
       matchedTenantId: String(primaryMatches[0]._id),
-      ambiguousMatchedTenantIds: primaryMatches.map((t: any) =>
-        String(t._id)
-      )
+      ambiguousMatchedTenantIds: primaryMatches.map((t: any) => String(t._id))
     } as any;
   }
   const primaryMatch = primaryMatches[0];
@@ -117,11 +115,13 @@ export async function classifyAgainstExisting(
   }
 
   // No primary match — every match must be a coTenant-only hit.
-  const coTenantOnlyMatch = matches.find((t: any) =>
-    Array.isArray(t.coTenants) &&
-    t.coTenants.some(
-      (ct: any) => typeof ct?.taxId === 'string' && allTaxIds.includes(ct.taxId)
-    )
+  const coTenantOnlyMatch = matches.find(
+    (t: any) =>
+      Array.isArray(t.coTenants) &&
+      t.coTenants.some(
+        (ct: any) =>
+          typeof ct?.taxId === 'string' && allTaxIds.includes(ct.taxId)
+      )
   );
   if (coTenantOnlyMatch) {
     return {

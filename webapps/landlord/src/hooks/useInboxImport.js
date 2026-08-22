@@ -11,6 +11,19 @@ import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 
 /**
+ * Normalise the server's Ε9 preview into the shape ImportE9Dialog's own state
+ * owns. Exported and PURE so the contract test exercises this code rather than
+ * a copy of it: the dialog renders `preview.owners` (PLURAL — its upload path
+ * aggregates one owner per file across a batch), while the single-document
+ * server view returns `owner` singular. Handing the raw response through threw
+ * at render and ErrorBoundary took the page with it.
+ */
+export function normalizeE9Preview(preview) {
+  if (!preview) return null;
+  return { ...preview, owners: preview.owner ? [preview.owner] : [] };
+}
+
+/**
  * Deep-link handler for Telegram document imports.
  *
  * The bell's «Άνοιγμα» navigates to the page that already MOUNTS the import
@@ -56,7 +69,17 @@ export default function useInboxImport({ expectedKind, requireOriginal }) {
     queryKey: ['inbox-import-payload', inboxImportId],
     queryFn: () => fetchInboxImportPayload(inboxImportId),
     enabled: !!inboxImportId,
-    retry: false
+    retry: false,
+    // FETCH ONCE per item. The app's QueryClient defaults to staleTime 0 with
+    // refetch-on-focus, and this endpoint deliberately RECOMPUTES the
+    // classification and the Ε9 preview on every call — so tabbing away to
+    // check the PDF and back could return a materially different payload, give
+    // `payload` a new identity, and re-fire the dialogs' hydration effects,
+    // resetting merge strategies the landlord had already chosen. A review
+    // dialog whose source data changes underneath it is a data-loss surface.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false
   });
 
   useEffect(() => {
@@ -80,7 +103,9 @@ export default function useInboxImport({ expectedKind, requireOriginal }) {
     if (!inboxImportId) return;
     if (payloadError) {
       toast.error(
-        t('This notification is no longer available — it may have been handled already.')
+        t(
+          'This notification is no longer available — it may have been handled already.'
+        )
       );
       clear();
     } else if (payload && payload.kind !== expectedKind) {
@@ -88,7 +113,9 @@ export default function useInboxImport({ expectedKind, requireOriginal }) {
       clear();
     } else if (payload && requireOriginal && originalFailed) {
       toast.error(
-        t('The original file is not available — import it from the app instead.')
+        t(
+          'The original file is not available — import it from the app instead.'
+        )
       );
       clear();
     }
@@ -124,10 +151,15 @@ export default function useInboxImport({ expectedKind, requireOriginal }) {
     if (!originalBlob && !originalFailed) return null;
     if (requireOriginal && !originalBlob) return null;
     return {
+      // Identity for the dialogs' hydrate-once guard.
+      itemId: inboxImportId,
       parsed: payload.parsed
         ? { ...payload.parsed, classification: payload.classification }
         : null,
-      preview: payload.preview || null,
+      // See normalizeE9Preview above for why this cannot be the raw response.
+      // buildE9Preview is NOT the place to fix it — that would change the
+      // upload route's response contract.
+      preview: normalizeE9Preview(payload.preview),
       fileName: payload.sourceFileName || null,
       fileBlob: originalBlob,
       onImported
