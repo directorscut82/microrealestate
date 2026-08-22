@@ -131,7 +131,10 @@ async function signIn(page: any) {
   await page.getByLabel(/Email|Ηλεκτρονικό/i).fill(EMAIL);
   await page.getByLabel(/Password|Κωδικός/i).fill(PASSWORD);
   await page.getByRole('button', { name: /Σύνδεση|Sign in/i }).click();
-  await page.waitForURL(/\/(dashboard|landlord)/, { timeout: 60_000 });
+  // `/landlord` is the app's BASE PATH, so a matcher containing it passes
+  // instantly while still on /signin — the sign-in then races whatever comes
+  // next. Wait for the dashboard route specifically.
+  await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
 }
 
 async function openBell(page: any) {

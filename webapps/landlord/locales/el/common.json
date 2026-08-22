@@ -1621,5 +1621,13 @@
   "Nothing is imported until you review it.": "Δεν εισάγεται τίποτα πριν το ελέγξετε.",
   "This notification is no longer available — it may have been handled already.": "Η ειδοποίηση δεν είναι πλέον διαθέσιμη — ίσως έχει ήδη διεκπεραιωθεί.",
   "This notification belongs to a different page.": "Η ειδοποίηση αφορά διαφορετική σελίδα.",
-  "The original file is not available — import it from the app instead.": "Το αρχικό αρχείο δεν είναι διαθέσιμο — εισάγετέ το από την εφαρμογή."
+  "The original file is not available — import it from the app instead.": "Το αρχικό αρχείο δεν είναι διαθέσιμο — εισάγετέ το από την εφαρμογή.",
+  "Update existing properties": "Ενημέρωση υπαρχόντων ακινήτων",
+  "Parsing…": "Ανάλυση…",
+  "Importing…": "Εισαγωγή…",
+  "Cancel upload": "Ακύρωση μεταφόρτωσης",
+  "Per-file status": "Κατάσταση ανά αρχείο",
+  "Retry failed ({{count}})": "Επανάληψη για όσα απέτυχαν ({{count}})",
+  "All files failed to parse ({{count}})": "Κανένα αρχείο δεν διαβάστηκε ({{count}})",
+  "{{count}} of {{total}} files failed; review errors below": "{{count}} από {{total}} αρχεία απέτυχαν — δείτε τα σφάλματα παρακάτω"
 }

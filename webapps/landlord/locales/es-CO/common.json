@@ -1374,5 +1374,13 @@
   "Nothing is imported until you review it.": "Nada se importa hasta que lo revise.",
   "This notification is no longer available — it may have been handled already.": "Esta notificación ya no está disponible — puede que ya se haya gestionado.",
   "This notification belongs to a different page.": "Esta notificación pertenece a otra página.",
-  "The original file is not available — import it from the app instead.": "El archivo original no está disponible — impórtelo desde la aplicación."
+  "The original file is not available — import it from the app instead.": "El archivo original no está disponible — impórtelo desde la aplicación.",
+  "Update existing properties": "Actualizar inmuebles existentes",
+  "Parsing…": "Analizando…",
+  "Importing…": "Importando…",
+  "Cancel upload": "Cancelar carga",
+  "Per-file status": "Estado por archivo",
+  "Retry failed ({{count}})": "Reintentar los fallidos ({{count}})",
+  "All files failed to parse ({{count}})": "Ningún archivo se pudo analizar ({{count}})",
+  "{{count}} of {{total}} files failed; review errors below": "{{count}} de {{total}} archivos fallaron; revise los errores abajo"
 }

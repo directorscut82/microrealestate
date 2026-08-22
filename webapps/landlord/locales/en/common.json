@@ -1600,5 +1600,13 @@
   "Nothing is imported until you review it.": "Nothing is imported until you review it.",
   "This notification is no longer available — it may have been handled already.": "This notification is no longer available — it may have been handled already.",
   "This notification belongs to a different page.": "This notification belongs to a different page.",
-  "The original file is not available — import it from the app instead.": "The original file is not available — import it from the app instead."
+  "The original file is not available — import it from the app instead.": "The original file is not available — import it from the app instead.",
+  "Update existing properties": "Update existing properties",
+  "Parsing…": "Parsing…",
+  "Importing…": "Importing…",
+  "Cancel upload": "Cancel upload",
+  "Per-file status": "Per-file status",
+  "Retry failed ({{count}})": "Retry failed ({{count}})",
+  "All files failed to parse ({{count}})": "All files failed to parse ({{count}})",
+  "{{count}} of {{total}} files failed; review errors below": "{{count}} of {{total}} files failed; review errors below"
 }
