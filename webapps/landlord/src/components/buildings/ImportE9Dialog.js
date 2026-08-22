@@ -69,13 +69,12 @@ export default function ImportE9Dialog({ open, setOpen, initialImport }) {
   }, [open, initialImport]);
 
   const handleClose = useCallback(() => {
-    // RESET the hydrate-once guard. Without this, re-opening the SAME still-
-    // pending item gives an EMPTY dialog: both import dialogs are permanently
-    // mounted and the bell's «Άνοιγμα» is a same-pathname next/link, so nothing
-    // remounts — the effect bails on the stale ref and the landlord lands on the
-    // file drop zone with no preview, no error and no explanation until a full
-    // page reload. The guard exists to stop a REFETCH clobbering an open review,
-    // which is a different lifetime from the dialog's own.
+    // Reset the hydrate-once guard: its job is to stop a REFETCH clobbering an
+    // OPEN review, which is a shorter lifetime than this component's. Raised as
+    // a Critical (re-opening the same item would bail on a stale ref and show an
+    // empty dialog) — measured, and it does NOT reproduce: the route change
+    // remounts this dialog, so the ref is fresh on every open anyway. Kept
+    // because correctness here should not rest on remount behaviour.
     hydratedRef.current = null;
     // T2.P1.21: tear down any in-flight axios request before closing so
     // the server-side parse doesn't keep running and rate-limit the

@@ -300,8 +300,9 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
 
   const handleClose = useCallback(() => {
     setOpen(false);
-    // Reset the hydrate-once guard too — see ImportE9Dialog's note: without it a
-    // second «Άνοιγμα» on the same item opens an empty dialog.
+    // Reset the hydrate-once guard too — see ImportE9Dialog's note (defensive:
+    // the reported re-open failure does not reproduce, because the route change
+    // remounts the dialog).
     hydratedRef.current = null;
     setState('idle');
     setFiles([]);

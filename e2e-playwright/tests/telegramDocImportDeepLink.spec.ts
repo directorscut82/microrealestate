@@ -341,12 +341,19 @@ test('Ε9 «Άνοιγμα» opens the REAL import dialog and renders the owner 
 test('re-opening the SAME item re-hydrates — the hydrate-once guard must not outlive the dialog', async ({
   page
 }) => {
-  // The regression the finding-4 fix introduced: `hydratedRef` was set on first
-  // hydration and never cleared, while both dialogs stay permanently mounted and
-  // «Άνοιγμα» is a same-pathname next/link — so nothing remounts and the second
-  // open bailed on the stale ref, landing on the file drop zone with no preview,
-  // no error and no explanation until a full page reload. Silent breakage of the
-  // feature's primary flow.
+  // A reviewer raised this as a Critical: the hydrate-once `useRef` is set on
+  // first hydration, and if it outlived the dialog the second open would bail on
+  // the stale ref and land on the file drop zone with no preview and no error.
+  //
+  // MEASURED, AND IT DOES NOT REPRODUCE. Removing the ref reset from
+  // ImportE9Dialog's handleClose and re-running this exact click path (bell →
+  // «Άνοιγμα» → Escape → bell → «Άνοιγμα», client-side, no reload) still renders
+  // the preview: the route change remounts the dialog, so the ref cannot go
+  // stale across a close. The reset stays as defence — a guard scoped to "while
+  // this review is open" should not depend on remount behaviour to be correct —
+  // but this test is NOT a guard for it, and mutation-testing says so. What it
+  // does cover, and what nothing else did, is that re-opening the same
+  // notification works at all.
   test.skip(
     !E9_FILE_ID,
     'fixture upload failed — the Ε9 dialog needs the original'
