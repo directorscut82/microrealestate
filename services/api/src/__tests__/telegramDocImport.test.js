@@ -69,7 +69,7 @@ function makeDeps({
   parseE9Result = E9_PARSED,
   classifyResult = { kind: 'extension', matchedTenantId: 't-1' }
 } = {}) {
-  const state = { created: [], rows: {}, replies: [], edits: [], updates: [], archives: [], parseBillCalls: 0, extractCalls: 0 };
+  const state = { created: [], rows: {}, replies: [], edits: [], updates: [], archives: [], parseBillCalls: 0, extractCalls: [] };
   const deps = {
     now: () => FIXED_NOW,
     findTelegramRealms: async () => [REALM],
@@ -102,13 +102,13 @@ function makeDeps({
     editReply: async (_b, _c, messageId, text) => {
       state.edits.push({ messageId, text });
     },
-    archiveSource: async (realm, billLikeId, fileName) => {
-      state.archives.push(billLikeId);
+    archiveSource: async (realm, billLikeId, fileName, _buf, contentType) => {
+      state.archives.push({ billLikeId, contentType });
       return `${realm.realmId}/docs/${billLikeId}/${fileName}`;
     },
     tryRecapture: async () => false,
-    extractPdfText: async () => {
-      state.extractCalls++;
+    extractPdfText: async (_buf, maxPages) => {
+      state.extractCalls.push(maxPages ?? null);
       if (extractThrows) throw new Error('pdfjs exploded');
       return pdfText;
     },
@@ -142,7 +142,9 @@ describe('telegram document orchestrator — routing at receipt', () => {
     expect(row.importDoc.summary.title).toContain('999000043');
     expect(row.importDoc.summary.classification).toBe('extension');
     // the original was archived and its key stored — the dialogs re-use it
-    expect(state.archives).toEqual(['tg-100']);
+    expect(state.archives).toEqual([
+      { billLikeId: 'tg-100', contentType: 'application/pdf' }
+    ]);
     expect(row.sourcePdfUrl).toContain('tg-100');
     // the final reply says what arrived and that NOTHING was imported
     const finalText = state.edits[state.edits.length - 1].text;
@@ -228,7 +230,7 @@ describe('telegram document orchestrator — routing at receipt', () => {
     });
     await scanTelegramInbox(deps);
     await _awaitParseQueue();
-    expect(state.extractCalls).toBe(0);
+    expect(state.extractCalls).toEqual([]);
     expect(state.created[0].kind).toBe('bill');
     expect(state.parseBillCalls).toBe(1);
   });
@@ -249,7 +251,7 @@ describe('telegram document orchestrator — routing at receipt', () => {
     });
     await scanTelegramInbox(deps);
     await _awaitParseQueue();
-    expect(state.extractCalls).toBe(0);
+    expect(state.extractCalls).toEqual([]);
     expect(state.created[0].kind).toBe('bill');
   });
 
@@ -262,6 +264,77 @@ describe('telegram document orchestrator — routing at receipt', () => {
     await _awaitParseQueue();
     expect(state.created[0].kind).toBe('bill');
     expect(state.parseBillCalls).toBe(1);
+  });
+
+  it('the TICK extracts only the header; the WORKER extracts in full', async () => {
+    // The tick's await is ahead of the ack and of the 'processing' row, and the
+    // poller's re-entrancy guard means a long extraction there freezes every
+    // realm's ingest with nothing visible anywhere. So the tick reads 2 pages to
+    // route, and the full text is read again in the worker.
+    const { deps, state } = makeDeps({
+      updates: [pdfMsg(1, 120)],
+      pdfText: LEASE_TEXT
+    });
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    // the harness records `maxPages ?? null`: 2 on the tick, uncapped in the worker
+    expect(state.extractCalls).toEqual([2, null]);
+    // and the full parse still produced the payload
+    expect(state.created[0].importDoc.parsed.tenants[0].taxId).toBe('999000043');
+  });
+
+  it('persists the mime type, defaulting a classified PDF to application/pdf', async () => {
+    // A PDF sent as a document with no «.pdf» in its name was archived as
+    // image/jpeg and later served as octet-stream, which the document-upload
+    // middleware refuses — so the lease dialog silently failed to keep the
+    // original.
+    const { deps, state } = makeDeps({
+      updates: [
+        {
+          update_id: 1,
+          message: {
+            message_id: 121,
+            chat: { id: 111 },
+            document: {
+              file_id: 'd-121',
+              // Telegram says PDF; the NAME carries no extension. The old
+              // filename sniff therefore archived it as image/jpeg and served
+              // it as octet-stream, which the upload middleware refuses.
+              file_name: 'Μισθωτήριο',
+              mime_type: 'application/pdf'
+            }
+          }
+        }
+      ],
+      pdfText: LEASE_TEXT
+    });
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    expect(state.created[0].kind).toBe('leaseImport');
+    expect(state.created[0].sourceMimeType).toBe('application/pdf');
+    expect(state.archives[0].contentType).toBe('application/pdf');
+  });
+
+  it('a document with NEITHER a .pdf name nor a PDF mime type is not classified', async () => {
+    // Conservative on purpose: without one of the two signals we cannot know it
+    // is a PDF, so it takes the bill lane (which sniffs the bytes itself).
+    const { deps, state } = makeDeps({
+      updates: [
+        {
+          update_id: 1,
+          message: {
+            message_id: 122,
+            chat: { id: 111 },
+            document: { file_id: 'd-122', file_name: 'σκαναρισμα' }
+          }
+        }
+      ],
+      pdfText: LEASE_TEXT
+    });
+    await scanTelegramInbox(deps);
+    await _awaitParseQueue();
+    expect(state.extractCalls).toEqual([]);
+    expect(state.created[0].kind).toBe('bill');
   });
 
   it('classification failure is advisory: the lease row still lands, without a verdict', async () => {

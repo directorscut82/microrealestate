@@ -502,8 +502,21 @@ export async function checkInboxTtl(
     (async (f: Record<string, any>) => Collections.InboxItem.find(f).lean());
   const items = await findInboxItems({
     status: 'pending',
-    // Legacy docs predate `kind` — missing means bill.
-    $or: [{ kind: 'bill' }, { kind: { $exists: false } }],
+    // Legacy docs predate `kind` — missing means bill. leaseImport/e9Import are
+    // included because the TTL index that reaps these rows
+    // (collections/inboxItem.ts) filters on status:'pending' ALONE and is
+    // therefore kind-agnostic: excluded from this warning, a μισθωτήριο or an Ε9
+    // sent to the bot was silently deleted at day 30 with nothing said, and its
+    // archived original — which the import dialogs need at confirm time —
+    // became unreferenced and reclaimable by the B2 reconcile. kind:'notice' and
+    // kind:'voiceCommand' stay out: a notice about notices recurses, and a
+    // voiceCommand row is never 'pending'.
+    $or: [
+      { kind: 'bill' },
+      { kind: 'leaseImport' },
+      { kind: 'e9Import' },
+      { kind: { $exists: false } }
+    ],
     createdDate: {
       $lte: moment.utc(now).subtract(INBOX_TTL_WARN_AGE_DAYS, 'days').toDate()
     }
@@ -512,7 +525,15 @@ export async function checkInboxTtl(
 
   for (const item of items) {
     try {
-      const message = `🗑 Λογαριασμός στο κουδούνι θα διαγραφεί αυτόματα σε ~${30 - INBOX_TTL_WARN_AGE_DAYS} ημέρες (εκκρεμεί από ${moment.utc(item.createdDate).format('DD/MM')})`;
+      // Name the document the landlord actually sent — «Λογαριασμός» on a
+      // μισθωτήριο row would send them looking for a bill that never existed.
+      const label =
+        item.kind === 'leaseImport'
+          ? 'Μισθωτήριο'
+          : item.kind === 'e9Import'
+            ? 'Ε9'
+            : 'Λογαριασμός';
+      const message = `🗑 ${label} στο κουδούνι θα διαγραφεί αυτόματα σε ~${30 - INBOX_TTL_WARN_AGE_DAYS} ημέρες (εκκρεμεί από ${moment.utc(item.createdDate).format('DD/MM')})`;
       const r = await push(
         {
           realmId: String(item.realmId),

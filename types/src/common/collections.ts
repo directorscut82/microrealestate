@@ -911,6 +911,8 @@ export namespace CollectionTypes {
     } | null;
     warnings: InboxItemWarning[] | [];
     sourceFileName?: string;
+    /** Mime type as Telegram reported it — see the schema comment. */
+    sourceMimeType?: string;
     /** Telegram message id of the bot's own ack, so it can be edited into the result. */
     ackMessageId?: number;
     ackChatId?: string;

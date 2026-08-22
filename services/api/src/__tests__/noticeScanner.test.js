@@ -596,6 +596,52 @@ describe('checkInboxTtl', () => {
     expect(JSON.stringify(capturedFilter.$or)).toContain('bill');
     expect(JSON.stringify(capturedFilter.$or)).not.toContain('notice');
   });
+
+  test('Telegram import kinds are warned too, named for what they are', async () => {
+    // The TTL index that reaps these rows filters on status:'pending' ALONE, so
+    // it is kind-agnostic. Excluded from this warning, a μισθωτήριο or an Ε9 sent
+    // to the bot was DELETED at day 30 with nothing said — and its archived
+    // original, which the import dialogs need at confirm time, became
+    // unreferenced and reclaimable.
+    let capturedFilter = null;
+    const { deps, pushed } = makeDeps({
+      findInboxItems: jest.fn(async (f) => {
+        capturedFilter = f;
+        return [
+          {
+            _id: 'lease',
+            realmId: 'r1',
+            status: 'pending',
+            kind: 'leaseImport',
+            createdDate: moment.utc(FIXED_NOW).subtract(26, 'days').toDate()
+          },
+          {
+            _id: 'e9',
+            realmId: 'r1',
+            status: 'pending',
+            kind: 'e9Import',
+            createdDate: moment.utc(FIXED_NOW).subtract(26, 'days').toDate()
+          }
+        ];
+      })
+    });
+    const r = await checkInboxTtl(deps);
+    expect(r.created).toBe(2);
+    const or = JSON.stringify(capturedFilter.$or);
+    expect(or).toContain('leaseImport');
+    expect(or).toContain('e9Import');
+    // still never notices or voice samples
+    expect(or).not.toContain('notice');
+    expect(or).not.toContain('voiceCommand');
+    // and the message names the document, not «Λογαριασμός»
+    const byId = Object.fromEntries(
+      pushed.map((p) => [p.dedupeKey, p.message])
+    );
+    expect(byId['inbox-ttl:lease']).toContain('Μισθωτήριο');
+    expect(byId['inbox-ttl:lease']).not.toContain('Λογαριασμός');
+    expect(byId['inbox-ttl:e9']).toContain('Ε9');
+    expect(byId['inbox-ttl:e9']).not.toContain('Λογαριασμός');
+  });
 });
 
 describe('resolveResolvedConditions', () => {

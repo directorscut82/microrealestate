@@ -218,6 +218,16 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
   ],
   sourceFileName: String,
   /**
+   * The mime type Telegram reported for the file. Stored because the content
+   * type must NOT be re-derived from the filename: a PDF sent as a document
+   * with no «.pdf» in its name (or none at all → 'telegram-file') was served
+   * from /inbox/:id/original as octet-stream, which the document-upload
+   * middleware then refused — so the lease dialog's persist-the-original step
+   * failed silently on a successful import, and the B2 archive stored a PDF
+   * labelled image/jpeg.
+   */
+  sourceMimeType: String,
+  /**
    * The Telegram message id of the bot's own ACK. Kept so the ack can be EDITED into the
    * outcome instead of the landlord receiving two messages and having to work out which
    * one is current.

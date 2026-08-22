@@ -66,6 +66,41 @@ describe('classifyDocumentText — the orchestrator routing decision', () => {
     expect(classifyDocumentText('ΕΝΤΥΠΟ Ε9 ΣΤΟΙΧΕΙΑ ΑΚΙΝΗΤΩΝ')).toBe('e9');
   });
 
+  it('WHITESPACE-TOLERANT: the lease header survives pdfjs spacing accidents', () => {
+    // fold() does not collapse whitespace, and pdfjs joins per-item strings —
+    // this corpus really does contain multi-space runs («ΑΡ. ΔΗΛΩΣΗΣ   99953…»).
+    // A space-exact needle would miss here, and because a lease legitimately
+    // cites an ΑΤΑΚ «στο Ε9», the weak token would then win and route a
+    // μισθωτήριο to the Ε9 importer.
+    const spaced = LEASE_TEXT.replace(
+      'ΠΛΗΡΟΦΟΡΙΑΚΩΝ ΣΤΟΙΧΕΙΩΝ',
+      'ΠΛΗΡΟΦΟΡΙΑΚΩΝ   ΣΤΟΙΧΕΙΩΝ'
+    );
+    expect(classifyDocumentText(spaced)).toBe('lease');
+
+    const newlined = LEASE_TEXT.replace(
+      'ΣΤΟΙΧΕΙΩΝ ΜΙΣΘΩΣΗΣ',
+      'ΣΤΟΙΧΕΙΩΝ\nΜΙΣΘΩΣΗΣ'
+    );
+    expect(classifyDocumentText(newlined)).toBe('lease');
+
+    // the killer combination: spacing accident AND an Ε9 mention
+    const both =
+      LEASE_TEXT.replace(
+        'ΠΛΗΡΟΦΟΡΙΑΚΩΝ ΣΤΟΙΧΕΙΩΝ',
+        'ΠΛΗΡΟΦΟΡΙΑΚΩΝ  ΣΤΟΙΧΕΙΩΝ'
+      ) + ' ΑΤΑΚ όπως δηλώθηκε στο Ε9 12345678901';
+    expect(classifyDocumentText(both)).toBe('lease');
+  });
+
+  it('the Ε9 strong markers are whitespace-tolerant too', () => {
+    expect(
+      classifyDocumentText(
+        'ΒΕΒΑΙΩΣΗ  ΥΠΟΒΟΛΗΣ   ΔΗΛΩΣΗΣ ΣΤΟΙΧΕΙΩΝ\nΑΚΙΝΗΤΩΝ ΕΤΟΥΣ 2026'
+      )
+    ).toBe('e9');
+  });
+
   it('empty / no-text-layer extraction falls through to the bill lane', () => {
     expect(classifyDocumentText('')).toBe('bill');
     expect(classifyDocumentText('   \n  ')).toBe('bill');

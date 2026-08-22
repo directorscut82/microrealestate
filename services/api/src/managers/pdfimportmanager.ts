@@ -133,16 +133,32 @@ export async function classifyAgainstExisting(
   return { kind: 'new', matchedTenantId: null };
 }
 
-// Exported for the Telegram document orchestrator: the SAME extraction the
-// upload lane trusts, so a PDF classifies and parses identically through both
-// doors. (buildingmanager keeps its own copy for importFromE9 — pre-existing
-// duplication, not widened here.)
-export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+/**
+ * Exported for the Telegram document orchestrator: the SAME extraction the
+ * upload lane trusts, so a PDF classifies and parses identically through both
+ * doors. (buildingmanager keeps its own copy for importFromE9 — pre-existing
+ * duplication, not widened here.)
+ *
+ * `maxPages` bounds the work for the CLASSIFICATION call, which runs on the
+ * Telegram poll tick. Unbounded, a 6MB many-page PDF (the cap deliberately
+ * admits a multi-page CamScanner bundle) holds the tick — and therefore every
+ * realm's ingest, behind the poller's re-entrancy guard — before the ack or the
+ * 'processing' row exist, so the landlord sees nothing at all and the stall
+ * sweep has no row to release. Classification needs only the document header,
+ * so the tick passes 2; the worker re-extracts in full, where the time belongs.
+ */
+export async function extractTextFromPdf(
+  buffer: Buffer,
+  maxPages?: number
+): Promise<string> {
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
   const doc = await getDocument({ data }).promise;
   let fullText = '';
-  for (let i = 1; i <= doc.numPages; i++) {
+  const lastPage = maxPages
+    ? Math.min(doc.numPages, Math.max(1, maxPages))
+    : doc.numPages;
+  for (let i = 1; i <= lastPage; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
     fullText +=

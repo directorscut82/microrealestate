@@ -190,8 +190,10 @@ export async function confirm(req: Req, res: Res): Promise<void> {
       status: 'processing'
     });
     if (processing) {
+      // Kind-neutral: this fires for a μισθωτήριο and an Ε9 too, and calling
+      // either «ο λογαριασμός» names the wrong document.
       throw new ServiceError(
-        'Ο λογαριασμός διαβάζεται ακόμα — δοκιμάστε σε λίγο.',
+        'Το αρχείο διαβάζεται ακόμα — δοκιμάστε σε λίγο.',
         409
       );
     }
@@ -497,10 +499,18 @@ export async function getOriginal(req: Req, res: Res): Promise<void> {
   }
 
   const name = item.sourceFileName || 'document.pdf';
-  res.setHeader(
-    'Content-Type',
-    /\.pdf$/i.test(name) ? 'application/pdf' : 'application/octet-stream'
-  );
+  // The STORED type first. Deriving it from the filename served a PDF sent
+  // without a «.pdf» name as octet-stream, which the document-upload middleware
+  // then refused — so the lease dialog's archive-the-original step failed
+  // silently after a successful import. The two import kinds are always PDFs.
+  const contentType =
+    item.sourceMimeType ||
+    (item.kind === 'leaseImport' || item.kind === 'e9Import'
+      ? 'application/pdf'
+      : /\.pdf$/i.test(name)
+        ? 'application/pdf'
+        : 'application/octet-stream');
+  res.setHeader('Content-Type', contentType);
   res.setHeader(
     'Content-Disposition',
     `attachment; filename*=UTF-8''${encodeURIComponent(name)}`

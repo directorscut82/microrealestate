@@ -52,6 +52,11 @@ const POLL_MS = 60_000;
 // let the duplicated matcher below rot. Asserted parity needs a shared constant,
 // not a sentence.
 const MAX_TG_FILE_BYTES = 6 * 1024 * 1024;
+// Pages the TICK extracts to decide which parser owns a PDF. The AADE lease
+// header and the Ε9 markers are both in the document header; the full text is
+// extracted again in the worker, where a slow document costs one landlord's
+// wait instead of every realm's ingest.
+const CLASSIFICATION_PAGES = 2;
 
 // How many consecutive ticks an update may fail before we declare it poison and
 // skip past it. A transient failure (mongo blip, Telegram file API hiccup) gets
@@ -156,7 +161,8 @@ export interface InboxScanDeps {
     realm: TelegramRealmConfig,
     billLikeId: string,
     fileName: string,
-    buffer: Buffer
+    buffer: Buffer,
+    contentType?: string
   ) => Promise<string | null>;
   /** Acknowledge a message we won't ingest (wrong chat, no file, too big). */
   /** Returns the sent message's id so the ack can later be edited into the result. */
@@ -203,7 +209,7 @@ export interface InboxScanDeps {
    * in the WORKER — pure functions injected so the orchestrator tests need
    * neither pdfjs nor mongo.
    */
-  extractPdfText?: (buffer: Buffer) => Promise<string>;
+  extractPdfText?: (buffer: Buffer, maxPages?: number) => Promise<string>;
   parseLeaseText?: (text: string) => any;
   parseE9Text?: (text: string) => any;
   classifyLease?: (
@@ -597,18 +603,29 @@ async function _archiveSource(
   realm: TelegramRealmConfig,
   billLikeId: string,
   fileName: string,
-  buffer: Buffer
+  buffer: Buffer,
+  /** Telegram's own mime type. Falling back to a filename sniff stored a PDF
+   *  whose name lacked the extension as image/jpeg. */
+  contentType?: string
 ): Promise<string | null> {
-  const b2Config = await _b2ConfigForRealm(realm.realmId);
-  if (!b2Config) return null;
+  // The realm lookup is INSIDE the try. Outside it, a mongo blip here threw out
+  // of a function whose whole contract is "best-effort, never blocks ingest" —
+  // and the throw propagated into the caller's catch, which discards an ALREADY
+  // SUCCESSFUL parse and tells the landlord the analysis failed. Archival must
+  // not be able to lose a parse. (Pre-existing on the bill lane; the two import
+  // kinds inherited it.)
   try {
+    const b2Config = await _b2ConfigForRealm(realm.realmId);
+    if (!b2Config) return null;
     const key = billStorage.billObjectKey(
       realm.realmName,
       realm.realmId,
       billLikeId,
       fileName
     );
-    const ct = /\.pdf$/i.test(fileName) ? 'application/pdf' : 'image/jpeg';
+    const ct =
+      contentType ||
+      (/\.pdf$/i.test(fileName) ? 'application/pdf' : 'image/jpeg');
     const res = await billStorage.uploadBuffer(b2Config, key, buffer, ct);
     return res.key;
   } catch (err: any) {
@@ -1068,9 +1085,11 @@ async function _handleUpdate(
   // Pick the file: document as-is; photo → the largest rendition (last entry).
   let fileId: string | undefined;
   let fileName: string | undefined;
+  let mimeType: string | undefined;
   if (msg.document?.file_id) {
     fileId = msg.document.file_id;
     fileName = msg.document.file_name;
+    mimeType = msg.document.mime_type;
   } else if (msg.photo?.length) {
     // Telegram sends several sizes of the same photo and OCR quality depends
     // entirely on getting the LARGEST. Taking the last element relies on the array
@@ -1087,6 +1106,7 @@ async function _handleUpdate(
     );
     fileId = largest.file_id;
     fileName = `photo-${msg.message_id}.jpg`;
+    mimeType = 'image/jpeg';
   }
   if (!fileId) {
     // TEXT-ONLY. Dropped in total silence until now, so a landlord who typed
@@ -1179,11 +1199,15 @@ async function _handleUpdate(
     !!msg.document &&
     (/\.pdf$/i.test(safeName) || msg.document.mime_type === 'application/pdf');
   let docClass: DocClass = 'bill';
-  let pdfText = '';
   if (isPdfDocument && deps.extractPdfText) {
     try {
-      pdfText = await deps.extractPdfText(file.buffer);
-      docClass = classifyDocumentText(pdfText);
+      // CLASSIFICATION_PAGES, not the whole document. This await sits on the
+      // poll tick, ahead of the ack and the 'processing' row, so its cost is
+      // paid before the landlord or the bell can see anything and — behind the
+      // poller's re-entrancy guard — by every other realm too. The markers are
+      // in the header, so two pages decide it; the worker re-extracts in full.
+      const head = await deps.extractPdfText(file.buffer, CLASSIFICATION_PAGES);
+      docClass = classifyDocumentText(head);
     } catch (err: any) {
       logger.warn(
         `telegram-inbox: pdf text extraction failed for ${safeName} (${err?.message || err}) — routing to the bill lane`
@@ -1218,6 +1242,12 @@ async function _handleUpdate(
           : 'bill',
     parsed: {},
     sourceFileName: safeName,
+    // Stored so no downstream surface has to guess the type from the filename:
+    // a PDF sent with no «.pdf» in its name was archived as image/jpeg and
+    // served as octet-stream. For a classified PDF the type is known regardless
+    // of what Telegram reported.
+    sourceMimeType:
+      docClass === 'bill' ? mimeType : mimeType || 'application/pdf',
     telegramMessageId: msg.message_id,
     telegramFileId: fileId,
     ackMessageId: ackMessageId ?? undefined,
@@ -1238,7 +1268,6 @@ async function _handleUpdate(
     itemId,
     ackMessageId,
     docClass,
-    pdfText,
     deps
   });
   return 'ingested';
@@ -1279,9 +1308,6 @@ type ParseJob = {
   ackMessageId: number | null;
   /** Receipt-time routing decision; 'bill' runs the OCR lane unchanged. */
   docClass: DocClass;
-  /** The extracted text the classification ran on — the lease/e9 parses reuse
-   *  it instead of extracting twice. Empty for photos and no-text-layer PDFs. */
-  pdfText: string;
   deps: InboxScanDeps;
 };
 const parseQueue: ParseJob[] = [];
@@ -1415,8 +1441,13 @@ async function _parseImportDocAndFinish(job: ParseJob): Promise<void> {
   let summary: { title?: string; subtitle?: string; classification?: string } = {};
 
   try {
+    // FULL extraction here, not on the tick: a μισθωτήριο runs to several pages
+    // and an Ε9 to dozens, and the tick only ever read the header to route.
+    const text = deps.extractPdfText
+      ? await deps.extractPdfText(file.buffer)
+      : '';
     if (docKind === 'lease') {
-      parsed = deps.parseLeaseText ? deps.parseLeaseText(job.pdfText) : null;
+      parsed = deps.parseLeaseText ? deps.parseLeaseText(text) : null;
       const hasContent =
         parsed &&
         ((parsed.tenants && parsed.tenants.length > 0) ||
@@ -1467,7 +1498,7 @@ async function _parseImportDocAndFinish(job: ParseJob): Promise<void> {
         };
       }
     } else {
-      parsed = deps.parseE9Text ? deps.parseE9Text(job.pdfText) : null;
+      parsed = deps.parseE9Text ? deps.parseE9Text(text) : null;
       // Mirror importFromE9's own boundary guards, with its distinct messages —
       // «only land plots» must not read as «nothing found».
       if (!parsed?.owner?.taxId) {
@@ -1509,7 +1540,8 @@ async function _parseImportDocAndFinish(job: ParseJob): Promise<void> {
         realm,
         `tg-${msg.message_id}`,
         safeName,
-        file.buffer
+        file.buffer,
+        'application/pdf'
       )
     : null;
 
