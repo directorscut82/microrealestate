@@ -305,6 +305,41 @@ describe('the stall sweep', () => {
     expect(inboxDocs[0].status).toBe('processing');
   });
 
+  it('recovery wording follows the KIND — never «record the bill» for a μισθωτήριο/Ε9', async () => {
+    // A stalled document row told the landlord to «καταχωρήστε τον λογαριασμό
+    // χειροκίνητα» — record the BILL by hand. A μισθωτήριο is not recorded on a
+    // δαπάνη at all; it is imported from Ενοικιαστές. Unachievable advice, the
+    // same defect shape as the «send a closer photo» loop.
+    inboxDocs = [
+      {
+        _id: 'stuck-lease',
+        kind: 'leaseImport',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      },
+      {
+        _id: 'stuck-e9',
+        kind: 'e9Import',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      },
+      {
+        _id: 'stuck-bill',
+        kind: 'bill',
+        status: 'processing',
+        updatedDate: new Date(FIXED_NOW.getTime() - 20 * 60 * 1000)
+      }
+    ];
+    expect(await sweepStalledProcessing(FIXED_NOW)).toBe(3);
+    const [lease, e9, bill] = inboxDocs;
+    expect(lease.parseError).toContain('Ενοικιαστές');
+    expect(lease.parseError).not.toContain('λογαριασμό');
+    expect(e9.parseError).toContain('Κτίρια');
+    expect(e9.parseError).not.toContain('λογαριασμό');
+    // the bill lane keeps its own wording
+    expect(bill.parseError).toContain('λογαριασμό');
+  });
+
   it('ignores rows that already reached a terminal state', async () => {
     inboxDocs = [
       { _id: 'a', status: 'pending', updatedDate: new Date(0) },

@@ -1363,12 +1363,18 @@ async function _runParseJob(job: ParseJob): Promise<void> {
     // `?? true`: when no updateInboxItem is injected there is no row to disagree with, so
     // the normal sentence is the honest one. A discarded update is the case that must not
     // claim a notification the landlord will not find.
+    // Kind-aware: for a lease/Ε9 the remedy is the import dialog, not a δαπάνη.
+    const failKind =
+      job.docClass === 'lease'
+        ? 'leaseImport'
+        : job.docClass === 'e9'
+          ? 'e9Import'
+          : 'bill';
     const landed =
       (await deps
         .updateInboxItem?.(itemId, {
           status: 'pending',
-          parseError:
-            'Η ανάλυση απέτυχε απρόσμενα. Καταχωρήστε τον λογαριασμό χειροκίνητα.'
+          parseError: `Η ανάλυση απέτυχε απρόσμενα. ${_manualFallback(failKind)}`
         })
         .catch(() => true)) ?? true;
     await deps.editReply?.(
@@ -1376,8 +1382,8 @@ async function _runParseJob(job: ParseJob): Promise<void> {
       msg.chat.id,
       ackMessageId,
       landed
-        ? 'Ελήφθη, αλλά η ανάλυση απέτυχε. Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση.'
-        : 'Ελήφθη, αλλά η ανάλυση απέτυχε και η καταχώρηση ακυρώθηκε στο μεταξύ. Στείλτε τον λογαριασμό ξανά αν τον χρειάζεστε.'
+        ? `Ελήφθη, αλλά η ανάλυση απέτυχε. Θα το βρείτε στις ειδοποιήσεις. ${_manualFallback(failKind)}`
+        : 'Ελήφθη, αλλά η ανάλυση απέτυχε και η καταχώρηση ακυρώθηκε στο μεταξύ. Στείλτε το ξανά αν το χρειάζεστε.'
     );
   } finally {
     // Release ownership on EVERY exit, including the throw above — a leaked id would make
@@ -1820,6 +1826,24 @@ async function _botTokenForRealm(
   return token;
 }
 
+/**
+ * Recovery wording BY KIND. Every failure sentence on this path used to say
+ * «καταχωρήστε τον λογαριασμό χειροκίνητα» — record the BILL by hand — which is
+ * the wrong instruction for a μισθωτήριο or an Ε9: those are not recorded on a
+ * δαπάνη at all, they are imported from Ενοικιαστές / Κτίρια. Telling the
+ * landlord to do the impossible is the same unachievable-advice defect as the
+ * «send a closer photo» loop this file already documents.
+ */
+function _manualFallback(kind: string | undefined): string {
+  if (kind === 'leaseImport') {
+    return 'Εισάγετε το μισθωτήριο από την εφαρμογή (Ενοικιαστές → Εισαγωγή PDF) ή στείλτε το ξανά.';
+  }
+  if (kind === 'e9Import') {
+    return 'Εισάγετε το Ε9 από την εφαρμογή (Κτίρια → Εισαγωγή Ε9) ή στείλτε το ξανά.';
+  }
+  return 'Καταχωρήστε τον λογαριασμό χειροκίνητα ή στείλτε τον ξανά.';
+}
+
 export async function sweepStalledProcessing(
   now: Date = new Date(),
   // Startup passes 0: in a process that has just booted, `ownedItemIds` is empty, so any
@@ -1870,8 +1894,7 @@ export async function sweepStalledProcessing(
       {
         $set: {
           status: 'pending',
-          parseError:
-            'Η ανάγνωση διακόπηκε (επανεκκίνηση υπηρεσίας). Καταχωρήστε τον λογαριασμό χειροκίνητα ή στείλτε τον ξανά.',
+          parseError: `Η ανάγνωση διακόπηκε (επανεκκίνηση υπηρεσίας). ${_manualFallback(item.kind)}`,
           updatedDate: new Date()
         }
       }
@@ -1908,7 +1931,7 @@ export async function sweepStalledProcessing(
           token,
           item.ackChatId,
           item.ackMessageId,
-          'Η ανάγνωση διακόπηκε (επανεκκίνηση υπηρεσίας). Θα το βρείτε στις ειδοποιήσεις για χειροκίνητη καταχώρηση — ή στείλτε τον λογαριασμό ξανά.'
+          `Η ανάγνωση διακόπηκε (επανεκκίνηση υπηρεσίας). Θα το βρείτε στις ειδοποιήσεις. ${_manualFallback(item.kind)}`
         ).catch((err: any) =>
           logger.warn(
             `telegram-inbox: could not update the ack for ${item._id}: ${err?.message || err}`
