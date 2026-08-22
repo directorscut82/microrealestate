@@ -1614,5 +1614,12 @@
   "Rent payment": "Καταβολή ενοικίου",
   "Common charges payment": "Πληρωμή κοινοχρήστων",
   "Owner payment": "Καταβολή ιδιοκτήτη",
-  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Δείγματα: {{total}} · Επικυρωμένα: {{validated}} · Σωστά με το πολύ μία διόρθωση: {{good}}/{{validated}}"
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Δείγματα: {{total}} · Επικυρωμένα: {{validated}} · Σωστά με το πολύ μία διόρθωση: {{good}}/{{validated}}",
+  "Reading the document…": "Διαβάζω το έγγραφο…",
+  "Lease declaration": "Μισθωτήριο",
+  "E9 declaration": "Ε9",
+  "Nothing is imported until you review it.": "Δεν εισάγεται τίποτα πριν το ελέγξετε.",
+  "This notification is no longer available — it may have been handled already.": "Η ειδοποίηση δεν είναι πλέον διαθέσιμη — ίσως έχει ήδη διεκπεραιωθεί.",
+  "This notification belongs to a different page.": "Η ειδοποίηση αφορά διαφορετική σελίδα.",
+  "The original file is not available — import it from the app instead.": "Το αρχικό αρχείο δεν είναι διαθέσιμο — εισάγετέ το από την εφαρμογή."
 }

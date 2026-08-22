@@ -1367,5 +1367,12 @@
   "Rent payment": "Pago de renta",
   "Common charges payment": "Pago de cuotas comunes",
   "Owner payment": "Pago al propietario",
-  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Muestras: {{total}} · Validadas: {{validated}} · Correctas con máximo una corrección: {{good}}/{{validated}}"
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Muestras: {{total}} · Validadas: {{validated}} · Correctas con máximo una corrección: {{good}}/{{validated}}",
+  "Reading the document…": "Leyendo el documento…",
+  "Lease declaration": "Declaración de arrendamiento",
+  "E9 declaration": "Declaración E9",
+  "Nothing is imported until you review it.": "Nada se importa hasta que lo revise.",
+  "This notification is no longer available — it may have been handled already.": "Esta notificación ya no está disponible — puede que ya se haya gestionado.",
+  "This notification belongs to a different page.": "Esta notificación pertenece a otra página.",
+  "The original file is not available — import it from the app instead.": "El archivo original no está disponible — impórtelo desde la aplicación."
 }

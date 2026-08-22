@@ -1593,5 +1593,12 @@
   "Rent payment": "Rent payment",
   "Common charges payment": "Common charges payment",
   "Owner payment": "Owner payment",
-  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}"
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}",
+  "Reading the document…": "Reading the document…",
+  "Lease declaration": "Lease declaration",
+  "E9 declaration": "E9 declaration",
+  "Nothing is imported until you review it.": "Nothing is imported until you review it.",
+  "This notification is no longer available — it may have been handled already.": "This notification is no longer available — it may have been handled already.",
+  "This notification belongs to a different page.": "This notification belongs to a different page.",
+  "The original file is not available — import it from the app instead.": "The original file is not available — import it from the app instead."
 }

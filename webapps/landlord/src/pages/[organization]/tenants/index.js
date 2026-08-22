@@ -7,6 +7,7 @@ import {
 import React, { useCallback, useContext, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import ImportTenantDialog from '../../../components/tenants/ImportTenantDialog';
+import useInboxImport from '../../../hooks/useInboxImport';
 import { List } from '../../../components/ResourceList';
 import { LuArchive, LuFileUp, LuPlusCircle } from 'react-icons/lu';
 import NewTenantDialog from '../../../components/tenants/NewTenantDialog';
@@ -103,6 +104,13 @@ function Tenants() {
   const store = useContext(StoreContext);
   const [openNewTenantDialog, setOpenNewTenantDialog] = useState(false);
   const [openImportDialog, setOpenImportDialog] = useState(false);
+  // ?inboxImport=<id> — a Telegram-ingested μισθωτήριο opened from the bell.
+  // The original PDF is best-effort here (it only feeds the archive-to-tenant
+  // step), so the dialog opens even when the bytes are gone.
+  const inboxImport = useInboxImport({
+    expectedKind: 'leaseImport',
+    requireOriginal: false
+  });
   const [showArchived, setShowArchived] = useState(false);
 
   const {
@@ -196,8 +204,12 @@ function Tenants() {
         setOpen={setOpenNewTenantDialog}
       />
       <ImportTenantDialog
-        open={openImportDialog}
-        setOpen={setOpenImportDialog}
+        open={openImportDialog || inboxImport.open}
+        setOpen={(v) => {
+          setOpenImportDialog(v);
+          if (!v && inboxImport.open) inboxImport.clear();
+        }}
+        initialImport={inboxImport.initialImport}
       />
     </Page>
   );

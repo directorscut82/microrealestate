@@ -6,7 +6,7 @@ import {
   LuCheckCircle,
   LuXCircle
 } from 'react-icons/lu';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
 import FileDropZone from '../ui/file-drop-zone';
@@ -16,7 +16,16 @@ import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 
-export default function ImportE9Dialog({ open, setOpen }) {
+/**
+ * `initialImport` (optional) — open pre-filled from a Telegram inbox item:
+ * { preview, fileName, fileBlob, onImported }. `preview` is the SAME shape the
+ * upload parse returns (rebuilt server-side with fresh existing-building/ΑΤΑΚ
+ * matching); `fileBlob` is REQUIRED here, unlike the lease dialog, because the
+ * confirm step re-uploads the file through /buildings/import-pdf?confirmed —
+ * the page refuses to open the dialog without it. onImported fires after a
+ * successful import so the page can consume the inbox item.
+ */
+export default function ImportE9Dialog({ open, setOpen, initialImport }) {
   const { t } = useTranslation('common');
   const queryClient = useQueryClient();
   const [state, setState] = useState('idle');
@@ -34,6 +43,22 @@ export default function ImportE9Dialog({ open, setOpen }) {
   // isLoading lock. Stored in a ref because the controller must
   // survive re-renders without being recreated by useState set calls.
   const abortRef = useRef(null);
+
+  // Hydrate from a Telegram inbox item: land directly on the preview step with
+  // the rehydrated original as the (single) parsed file, so handleConfirm's
+  // existing re-upload loop runs unchanged.
+  useEffect(() => {
+    if (!open || !initialImport?.preview || !initialImport?.fileBlob) return;
+    const file = new File(
+      [initialImport.fileBlob],
+      initialImport.fileName || 'e9.pdf',
+      { type: 'application/pdf' }
+    );
+    setFiles([file]);
+    setFileResults([{ file, status: 'parsed' }]);
+    setPreview(initialImport.preview);
+    setState('preview');
+  }, [open, initialImport]);
 
   const handleClose = useCallback(() => {
     // T2.P1.21: tear down any in-flight axios request before closing so
@@ -354,6 +379,8 @@ export default function ImportE9Dialog({ open, setOpen }) {
       } else {
         toast.success(t('Buildings imported successfully'));
       }
+      // Telegram-opened import: consume the inbox item (success only).
+      if (initialImport?.onImported) initialImport.onImported();
       handleClose();
     } catch (error) {
       const serverMessage = error.response?.data?.message;
@@ -362,7 +389,7 @@ export default function ImportE9Dialog({ open, setOpen }) {
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [fileResults, files, forceOverwrite, handleClose, queryClient, t]);
+  }, [fileResults, files, forceOverwrite, handleClose, initialImport, queryClient, t]);
 
   const isLoading = state === 'loading' || state === 'confirming';
   // T2.P1.16: retry only the files that errored in the previous parse.

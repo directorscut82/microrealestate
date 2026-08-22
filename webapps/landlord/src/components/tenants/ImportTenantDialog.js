@@ -49,7 +49,17 @@ function computeMonths(startStr, endStr) {
   return Math.round(end.diff(start, 'months', true));
 }
 
-export default function ImportTenantDialog({ open, setOpen }) {
+/**
+ * `initialImport` (optional) — open pre-filled from a Telegram inbox item
+ * instead of an upload: { parsed, fileName, fileBlob|null, onImported }.
+ * `parsed` is the SAME shape importTenantPdf returns (the server stored it
+ * verbatim and re-ran the classification fresh); fileBlob feeds the
+ * persist-original-PDF step at confirm time and may be null (that step is
+ * best-effort and skips without it, exactly as it does today when _file is
+ * absent). onImported fires after a successful import so the page can consume
+ * the inbox item.
+ */
+export default function ImportTenantDialog({ open, setOpen, initialImport }) {
   const { t } = useTranslation('common');
   const store = useContext(StoreContext);
   const router = useRouter();
@@ -73,6 +83,23 @@ export default function ImportTenantDialog({ open, setOpen }) {
   // (kind=extension → 'extend', kind=update → 'replace', kind=review →
   //  'new', kind=new → 'new'). The user can override via the radio group.
   const [importStrategies, setImportStrategies] = useState({});
+
+  // Hydrate from a Telegram inbox item: skip the upload phase entirely and
+  // land on the SAME preview the upload path builds. The row shape mirrors
+  // handleParse's `{ ...result, _fileName, _file }` — everything downstream
+  // (lease matching, merge strategies, the confirm) is shared code.
+  useEffect(() => {
+    if (!open || !initialImport?.parsed) return;
+    setParsedResults([
+      {
+        ...initialImport.parsed,
+        classification: initialImport.parsed.classification,
+        _fileName: initialImport.fileName || 'lease.pdf',
+        _file: initialImport.fileBlob || null
+      }
+    ]);
+    setState('preview');
+  }, [open, initialImport]);
 
   const { data: leases = [] } = useQuery({
     queryKey: [QueryKeys.LEASES],
@@ -1116,6 +1143,10 @@ export default function ImportTenantDialog({ open, setOpen }) {
       queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       queryClient.invalidateQueries({ queryKey: [QueryKeys.ACCOUNTING] });
+      // Telegram-opened import: let the page consume the inbox item so the
+      // bell clears. Fires only on SUCCESS — a failed/cancelled import leaves
+      // the notification pending, which is the honest state.
+      if (initialImport?.onImported) initialImport.onImported();
       handleClose();
       // P2.11 / N8: surface skipped count alongside the success message
       // so a single-success import that swallowed N occupied / invalid

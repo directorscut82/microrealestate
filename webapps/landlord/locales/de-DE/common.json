@@ -1367,5 +1367,12 @@
   "Rent payment": "Mietzahlung",
   "Common charges payment": "Nebenkostenzahlung",
   "Owner payment": "Eigentümerzahlung",
-  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Stichproben: {{total}} · Bestätigt: {{validated}} · Korrekt mit höchstens einer Korrektur: {{good}}/{{validated}}"
+  "Samples: {{total}} · Validated: {{validated}} · Correct with at most one correction: {{good}}/{{validated}}": "Stichproben: {{total}} · Bestätigt: {{validated}} · Korrekt mit höchstens einer Korrektur: {{good}}/{{validated}}",
+  "Reading the document…": "Dokument wird gelesen…",
+  "Lease declaration": "Mietvertragserklärung",
+  "E9 declaration": "E9-Erklärung",
+  "Nothing is imported until you review it.": "Nichts wird importiert, bevor Sie es geprüft haben.",
+  "This notification is no longer available — it may have been handled already.": "Diese Benachrichtigung ist nicht mehr verfügbar — sie wurde möglicherweise bereits bearbeitet.",
+  "This notification belongs to a different page.": "Diese Benachrichtigung gehört zu einer anderen Seite.",
+  "The original file is not available — import it from the app instead.": "Die Originaldatei ist nicht verfügbar — importieren Sie sie stattdessen über die App."
 }

@@ -724,6 +724,21 @@ export async function dismissInboxItem(id) {
   return response.data;
 }
 
+// Telegram document imports (leaseImport / e9Import): the payload the import
+// dialog opens with (stored parse + FRESH classification/preview), and the
+// original PDF bytes the dialogs' confirm steps re-use.
+export async function fetchInboxImportPayload(id) {
+  const response = await apiFetcher().get(`/inbox/${id}/import-payload`);
+  return response.data;
+}
+
+export async function fetchInboxOriginal(id) {
+  const response = await apiFetcher().get(`/inbox/${id}/original`, {
+    responseType: 'blob'
+  });
+  return response.data;
+}
+
 // Voice-command validation samples (shadow mode) — read-only list for the
 // settings/third-parties card. Returns {items, stats}.
 export async function fetchVoiceSamples() {

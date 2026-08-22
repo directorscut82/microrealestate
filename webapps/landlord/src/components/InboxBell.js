@@ -8,9 +8,11 @@ import {
 import {
   LuAlertTriangle,
   LuBell,
+  LuBuilding2,
   LuCalendarClock,
   LuCheck,
   LuCoins,
+  LuFileText,
   LuFileWarning,
   LuHome,
   LuPlusCircle,
@@ -182,6 +184,196 @@ function NoticeCard({ item, onGone, onNavigate }) {
                   Layout (outside the page component), so a client-side route
                   change does NOT unmount it — without this the 420px popover
                   stays portaled over the destination page. */}
+                <a onClick={onNavigate}>{t('Open')}</a>
+              </Button>
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/*
+ * ImportDocCard — kind:'leaseImport' / 'e9Import'. Built against the approved
+ * ASCII mock (2026-08-22, in-chat): title/summary lines from the
+ * server-composed importDoc.summary, a classification line for leases, and
+ * «Άνοιγμα» deep-linking to the page that mounts the REAL import dialog
+ * (?inboxImport=<id> → useInboxImport → the same review the in-app upload
+ * shows). No import logic lives here — this card is a doorway, so a wrong
+ * classification can only cost a dismiss.
+ */
+const LEASE_CLASSIFICATION_LABEL = {
+  extension: 'Ανανέωση υπάρχοντος μισθωτηρίου',
+  update: 'Ενημέρωση υπάρχοντος ενοικιαστή',
+  new: 'Νέος ενοικιαστής',
+  review: 'Χρειάζεται έλεγχο — αμφισημία αντιστοίχισης'
+};
+
+function ImportDocCard({ item, onGone, onNavigate }) {
+  const { t } = useTranslation('common');
+  const router = useRouter();
+  const organization = router.query?.organization;
+  const queryClient = useQueryClient();
+  const [error, setError] = useState(null);
+
+  const dismissMutation = useMutation({
+    mutationFn: () => dismissInboxItem(item._id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.INBOX] });
+      onGone();
+    },
+    onError: (err) => {
+      setError(err?.response?.data?.message || t('Something went wrong'));
+    }
+  });
+
+  const isLease = item.kind === 'leaseImport';
+  const Icon = isLease ? LuFileText : LuBuilding2;
+  const summary = item.importDoc?.summary || {};
+  const targetPath = isLease ? 'tenants' : 'buildings';
+  const link = organization
+    ? `/${organization}/${targetPath}?inboxImport=${item._id}`
+    : null;
+
+  // PROCESSING: the document arrived and the parser is still reading it. Same
+  // shape as the bill processing card, named for what it is.
+  if (item.status === 'processing') {
+    return (
+      <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxDocProcessing">
+        <div className="flex items-baseline gap-2">
+          <span className="min-w-0 text-sm font-medium text-ink">
+            {t('Reading the document…')}
+          </span>
+          <span className="shrink-0 text-[11px] border rounded px-1.5 text-muted-foreground">
+            Telegram
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="relative inline-block h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted">
+            <span className="absolute inset-y-0 left-0 w-2/5 rounded-full bg-ink/70 motion-safe:animate-inbox-scan" />
+          </span>
+          <span className="min-w-0 truncate">
+            {item.sourceFileName || t('File')}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={dismissMutation.isPending}
+            onClick={() => dismissMutation.mutate()}
+          >
+            {t('Dismiss')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Unreadable: the parser refused — the parseError is server-composed Greek
+  // naming what failed AND where to import manually.
+  if (item.parseError) {
+    return (
+      <div className="p-4 space-y-2 border-b last:border-b-0">
+        <div className="flex items-baseline gap-2">
+          {/* Same uppercase as the pending card — the two are states of ONE
+              card family and must not read as different kinds. */}
+          <span className="text-sm font-medium uppercase text-muted-foreground">
+            {isLease ? t('Lease declaration') : t('E9 declaration')}
+          </span>
+          <span className="text-[11px] border rounded px-1.5 text-muted-foreground">
+            Telegram
+          </span>
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            {moment(item.createdDate).fromNow()}
+          </span>
+        </div>
+        <div className="text-sm rounded-md bg-destructive/5 border border-destructive/30 p-2.5 text-destructive">
+          {item.parseError}
+        </div>
+        {item.sourceFileName && (
+          <div className="text-xs text-muted-foreground font-mono">
+            {item.sourceFileName}
+          </div>
+        )}
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={dismissMutation.isPending}
+            onClick={() => dismissMutation.mutate()}
+          >
+            {t('Dismiss')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 space-y-2 border-b last:border-b-0" data-cy="inboxDocCard">
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-semibold uppercase">
+          {isLease ? t('Lease declaration') : t('E9 declaration')}
+        </span>
+        <span className="text-[11px] border rounded px-1.5 text-muted-foreground">
+          Telegram
+        </span>
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          {moment(item.createdDate).fromNow()}
+        </span>
+      </div>
+      <div className="flex items-start gap-2.5">
+        <Icon className="size-4 shrink-0 mt-0.5 text-muted-foreground" />
+        <div className="min-w-0 flex-1 space-y-0.5">
+          {summary.title && (
+            <div className="text-sm font-medium text-ink break-words">
+              {summary.title}
+            </div>
+          )}
+          {summary.subtitle && (
+            <div className="text-xs text-muted-foreground break-words">
+              {summary.subtitle}
+            </div>
+          )}
+        </div>
+      </div>
+      {isLease && summary.classification && (
+        <div className="flex items-center gap-1.5 rounded-md bg-success/10 text-success text-xs px-2.5 py-1.5">
+          <LuCheck className="size-3.5 shrink-0" />
+          <span>
+            {LEASE_CLASSIFICATION_LABEL[summary.classification] ||
+              summary.classification}
+          </span>
+        </div>
+      )}
+      {error && (
+        <div className="text-xs rounded-md bg-destructive/5 border border-destructive/30 p-2 text-destructive">
+          {error}
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground">
+          {t('Nothing is imported until you review it.')}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={dismissMutation.isPending}
+            onClick={() => {
+              setError(null);
+              dismissMutation.mutate();
+            }}
+          >
+            {t('Dismiss')}
+          </Button>
+          {link && (
+            <Link href={link} passHref legacyBehavior>
+              <Button asChild size="sm" variant="secondary">
+                {/* Close the popover on navigate — InboxBell is mounted in
+                    Layout, so a client-side route change does not unmount it. */}
                 <a onClick={onNavigate}>{t('Open')}</a>
               </Button>
             </Link>
@@ -762,6 +954,15 @@ export default function InboxBell() {
             pending.map((item) =>
               item.kind === 'notice' ? (
                 <NoticeCard
+                  key={item._id}
+                  item={item}
+                  onGone={() => {
+                    if (count <= 1) setOpen(false);
+                  }}
+                  onNavigate={() => setOpen(false)}
+                />
+              ) : item.kind === 'leaseImport' || item.kind === 'e9Import' ? (
+                <ImportDocCard
                   key={item._id}
                   item={item}
                   onGone={() => {

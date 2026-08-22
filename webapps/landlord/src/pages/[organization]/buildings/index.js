@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import BuildingList from '../../../components/buildings/BuildingList';
 import { Button } from '../../../components/ui/button';
 import ImportE9Dialog from '../../../components/buildings/ImportE9Dialog';
+import useInboxImport from '../../../hooks/useInboxImport';
 import { List } from '../../../components/ResourceList';
 import NewBuildingDialog from '../../../components/buildings/NewBuildingDialog';
 import Page from '../../../components/Page';
@@ -63,6 +64,13 @@ function Buildings() {
 
   const [openNewBuildingDialog, setOpenNewBuildingDialog] = useState(false);
   const [openImportE9Dialog, setOpenImportE9Dialog] = useState(false);
+  // ?inboxImport=<id> — the bell's «Άνοιγμα» on a Telegram-ingested Ε9 lands
+  // here; the SAME dialog opens on the stored parse. requireOriginal: the Ε9
+  // confirm re-uploads the file.
+  const inboxImport = useInboxImport({
+    expectedKind: 'e9Import',
+    requireOriginal: true
+  });
 
   if (isError) {
     toast.error(t('Error fetching buildings'));
@@ -105,8 +113,14 @@ function Buildings() {
         setOpen={setOpenNewBuildingDialog}
       />
       <ImportE9Dialog
-        open={openImportE9Dialog}
-        setOpen={setOpenImportE9Dialog}
+        open={openImportE9Dialog || inboxImport.open}
+        setOpen={(v) => {
+          setOpenImportE9Dialog(v);
+          // Closing a bell-opened dialog strips the query param so a reload
+          // does not resurrect it; the item stays pending unless imported.
+          if (!v && inboxImport.open) inboxImport.clear();
+        }}
+        initialImport={inboxImport.initialImport}
       />
     </Page>
   );
