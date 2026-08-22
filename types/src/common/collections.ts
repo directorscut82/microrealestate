@@ -780,7 +780,27 @@ export namespace CollectionTypes {
     | 'awaiting_confirmation'
     | 'validated'
     | 'abandoned';
-  export type InboxItemKind = 'bill' | 'notice' | 'voiceCommand';
+  export type InboxItemKind =
+    | 'bill'
+    | 'notice'
+    | 'voiceCommand'
+    | 'leaseImport'
+    | 'e9Import';
+
+  // kind:'leaseImport' / kind:'e9Import' payload — a PDF the Telegram
+  // orchestrator routed to the μισθωτήριο / Ε9 parser. `parsed` carries the
+  // parser output VERBATIM (ParsedLease / ParsedE9Result — Mixed in mongoose,
+  // see the schema comment for why); `summary` is the pre-composed Greek the
+  // bell card renders.
+  export type InboxItemImportDoc = {
+    docKind: 'lease' | 'e9';
+    parsed?: unknown;
+    summary?: {
+      title?: string;
+      subtitle?: string;
+      classification?: 'new' | 'update' | 'extension' | 'review';
+    };
+  };
 
   // kind:'voiceCommand' payload — a Telegram money-command dialogue held in
   // SHADOW MODE. A completed row is a validation SAMPLE, never an executed
@@ -846,6 +866,7 @@ export namespace CollectionTypes {
     kind?: InboxItemKind;
     notice?: InboxItemNotice | null;
     voiceCommand?: InboxItemVoiceCommand | null;
+    importDoc?: InboxItemImportDoc | null;
     // Idempotence key for kind:'notice' items (unique+sparse per realm).
     dedupeKey?: string;
     parsed: {

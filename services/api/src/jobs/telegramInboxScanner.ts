@@ -22,12 +22,17 @@
 import { BillTerm, Collections, Crypto, logger } from '@microrealestate/common';
 import axios from 'axios';
 import * as billStorage from '../managers/billstorage.js';
+import { classifyDocumentText, DocClass } from '../utils/docclassify.js';
 import * as recapture from '../managers/recapturesession.js';
 import {
   parseBillPdf,
   looksLikeFullBillText
 } from '../managers/billparser/index.js';
 import { handleVoiceCommand as _routeVoiceCommand } from './voicecommandhandler.js';
+import { extractTextFromPdf as _extractPdfText } from '../managers/pdfimportmanager.js';
+import { parseGreekLease as _parseGreekLease } from '../managers/greekleaseparser.js';
+import { parseE9 as _parseE9 } from '../managers/e9parser.js';
+import { classifyAgainstExisting as _classifyLease } from '../managers/pdfimportmanager.js';
 import { recognize as _recognizeVoice } from '../managers/voiceasrclient.js';
 import type { VoiceSession } from '../managers/voicesession.js';
 import { sweepAbandoned as _sweepAbandonedVoice } from '../managers/voicesession.js';
@@ -189,6 +194,22 @@ export interface InboxScanDeps {
     realm: TelegramRealmConfig,
     msg: NonNullable<TgUpdate['message']>
   ) => Promise<boolean>;
+  /**
+   * Document-orchestrator seams (all optional so the existing bill-lane tests
+   * skip them; wired in _defaultDeps). extractPdfText is the SAME pdfjs
+   * extraction the upload lanes run, used at RECEIPT to classify the PDF
+   * (lease / e9 / bill) so the row is written with the right kind and the bell
+   * names what it is reading. parseLeaseText / parseE9Text / classifyLease run
+   * in the WORKER — pure functions injected so the orchestrator tests need
+   * neither pdfjs nor mongo.
+   */
+  extractPdfText?: (buffer: Buffer) => Promise<string>;
+  parseLeaseText?: (text: string) => any;
+  parseE9Text?: (text: string) => any;
+  classifyLease?: (
+    parsed: any,
+    realmId: string
+  ) => Promise<{ kind: string; matchedTenantId: string | null }>;
 }
 
 export interface TgUpdate {
@@ -787,6 +808,10 @@ export function _defaultDeps(): InboxScanDeps {
     sendReply: _sendReply,
     editReply: _editReply,
     updateInboxItem: _updateInboxItem,
+    extractPdfText: _extractPdfText,
+    parseLeaseText: _parseGreekLease,
+    parseE9Text: _parseE9,
+    classifyLease: _classifyLease,
     handleVoiceCommand: (realm, msg) =>
       _routeVoiceCommand(realm, msg, {
         now: () => new Date(),
@@ -1139,9 +1164,41 @@ async function _handleUpdate(
   // Computed here now (it was declared inside the parse block, which has moved into the
   // worker and therefore no longer sees `fileName`).
   const safeName = fileName || 'telegram-file';
-  const ackText = msg.document
-    ? 'Ελήφθη το αρχείο — το διαβάζω τώρα…'
-    : 'Ελήφθη η φωτογραφία — τη διαβάζω τώρα…';
+
+  // ── DOCUMENT ORCHESTRATOR: classify a PDF before the row exists ─────────────────
+  // A PDF sent to the bot is a bill, a μισθωτήριο, or an Ε9 — three lanes that already
+  // exist. The routing decision happens HERE, at receipt, because the row's `kind` is
+  // what the bell's processing card names («Διαβάζω τον λογαριασμό…» vs «…το
+  // μισθωτήριο…»), and kind is immutable once written. Classification needs the text,
+  // and pdfjs text-layer extraction is tick-cheap (~50ms/page for AADE PDFs; a SCANNED
+  // bill PDF has no text layer, extracts to ~nothing in milliseconds, and falls through
+  // to the bill lane — which is exactly where a scan belongs, its OCR runs in the
+  // worker). Photos and non-PDF files never classify: bills are the only thing
+  // photographed. Extraction failure = 'bill', never a dropped message.
+  const isPdfDocument =
+    !!msg.document &&
+    (/\.pdf$/i.test(safeName) || msg.document.mime_type === 'application/pdf');
+  let docClass: DocClass = 'bill';
+  let pdfText = '';
+  if (isPdfDocument && deps.extractPdfText) {
+    try {
+      pdfText = await deps.extractPdfText(file.buffer);
+      docClass = classifyDocumentText(pdfText);
+    } catch (err: any) {
+      logger.warn(
+        `telegram-inbox: pdf text extraction failed for ${safeName} (${err?.message || err}) — routing to the bill lane`
+      );
+    }
+  }
+
+  const ackText =
+    docClass === 'lease'
+      ? 'Ελήφθη το μισθωτήριο — το διαβάζω τώρα…'
+      : docClass === 'e9'
+        ? 'Ελήφθη το Ε9 — το διαβάζω τώρα…'
+        : msg.document
+          ? 'Ελήφθη το αρχείο — το διαβάζω τώρα…'
+          : 'Ελήφθη η φωτογραφία — τη διαβάζω τώρα…';
   const ackMessageId = (await deps.sendReply?.(
     realm.botToken,
     msg.chat.id,
@@ -1153,7 +1210,12 @@ async function _handleUpdate(
     realmId: realm.realmId,
     source: 'telegram',
     status: 'processing',
-    kind: 'bill',
+    kind:
+      docClass === 'lease'
+        ? 'leaseImport'
+        : docClass === 'e9'
+          ? 'e9Import'
+          : 'bill',
     parsed: {},
     sourceFileName: safeName,
     telegramMessageId: msg.message_id,
@@ -1175,6 +1237,8 @@ async function _handleUpdate(
     safeName,
     itemId,
     ackMessageId,
+    docClass,
+    pdfText,
     deps
   });
   return 'ingested';
@@ -1213,6 +1277,11 @@ type ParseJob = {
   safeName: string;
   itemId: string;
   ackMessageId: number | null;
+  /** Receipt-time routing decision; 'bill' runs the OCR lane unchanged. */
+  docClass: DocClass;
+  /** The extracted text the classification ran on — the lease/e9 parses reuse
+   *  it instead of extracting twice. Empty for photos and no-text-layer PDFs. */
+  pdfText: string;
   deps: InboxScanDeps;
 };
 const parseQueue: ParseJob[] = [];
@@ -1280,7 +1349,11 @@ async function _drainParseQueue(): Promise<void> {
 async function _runParseJob(job: ParseJob): Promise<void> {
   const { realm, file, msg, safeName, itemId, ackMessageId, deps } = job;
   try {
-    await _parseAndFinish(realm, file, msg, safeName, itemId, ackMessageId, deps);
+    if (job.docClass === 'lease' || job.docClass === 'e9') {
+      await _parseImportDocAndFinish(job);
+    } else {
+      await _parseAndFinish(realm, file, msg, safeName, itemId, ackMessageId, deps);
+    }
   } catch (err: any) {
     logger.error(
       `telegram-inbox: parse of item ${itemId} threw: ${err?.message || err}`
@@ -1312,6 +1385,156 @@ async function _runParseJob(job: ParseJob): Promise<void> {
     // mechanism exists to prevent.
     ownedItemIds.delete(itemId);
   }
+}
+
+/**
+ * The lease/Ε9 worker lane — the orchestrator's other half. Same contract as
+ * _parseAndFinish: finish the row the tick created (never create a second one),
+ * respect a dismiss-while-parsing (updateInboxItem returns false), edit the ack
+ * into the outcome, and keep every failure VISIBLE as a parseError row rather
+ * than silence.
+ *
+ * What it deliberately does NOT do: import anything. The row stores the parse
+ * so the bell can open the SAME dialog the in-app upload opens (prefilled from
+ * this payload); creating tenants/buildings stays behind those dialogs' own
+ * endpoints with their own guards. A wrong classification therefore costs a
+ * dismiss, never a wrong record.
+ */
+async function _parseImportDocAndFinish(job: ParseJob): Promise<void> {
+  const { realm, file, msg, safeName, itemId, ackMessageId, deps } = job;
+  const docKind = job.docClass as 'lease' | 'e9';
+
+  let parsed: any = null;
+  let parseError: string | undefined;
+  let summary: { title?: string; subtitle?: string; classification?: string } = {};
+
+  try {
+    if (docKind === 'lease') {
+      parsed = deps.parseLeaseText ? deps.parseLeaseText(job.pdfText) : null;
+      const hasContent =
+        parsed &&
+        ((parsed.tenants && parsed.tenants.length > 0) ||
+          (parsed.properties && parsed.properties.length > 0));
+      if (!hasContent) {
+        // The receipt-time sniff saw the AADE header but the full parser found
+        // neither tenants nor properties — same boundary the upload route 422s
+        // on. Honest dead-end, not a silent re-route: a document carrying the
+        // lease header IS a lease to a human, and pushing it through bill OCR
+        // would produce a garbage «δεν αναγνωρίστηκε ο πάροχος» that misnames
+        // the problem.
+        parsed = null;
+        parseError =
+          'Το PDF έχει επικεφαλίδα μισθωτηρίου αλλά δεν διαβάστηκαν στοιχεία μισθωτή/ακινήτου. Εισάγετέ το από την εφαρμογή (Ενοικιαστές → Εισαγωγή PDF).';
+      } else {
+        const t0 = parsed.tenants?.[0];
+        const prop = parsed.properties?.[0];
+        // Ingest-time classification is ADVISORY (shown on the card); the
+        // dialog recomputes it fresh at open time because tenants change
+        // between ingest and open.
+        let classification: string | undefined;
+        if (deps.classifyLease) {
+          try {
+            classification = (await deps.classifyLease(parsed, realm.realmId))
+              ?.kind;
+          } catch (cerr: any) {
+            logger.warn(
+              `telegram-inbox: lease classification failed (${cerr?.message || cerr}) — card shows no verdict`
+            );
+          }
+        }
+        summary = {
+          title: [t0?.name, t0?.taxId ? `ΑΦΜ ${t0.taxId}` : '']
+            .filter(Boolean)
+            .join(' · '),
+          subtitle: [
+            prop?.address?.street1,
+            parsed.totalMonthlyRent
+              ? `${parsed.totalMonthlyRent} € / μήνα`
+              : '',
+            parsed.validityStart && parsed.validityEnd
+              ? `${parsed.validityStart}–${parsed.validityEnd}`
+              : ''
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          classification
+        };
+      }
+    } else {
+      parsed = deps.parseE9Text ? deps.parseE9Text(job.pdfText) : null;
+      // Mirror importFromE9's own boundary guards, with its distinct messages —
+      // «only land plots» must not read as «nothing found».
+      if (!parsed?.owner?.taxId) {
+        parsed = null;
+        parseError =
+          'Το PDF μοιάζει με Ε9 αλλά δεν διαβάστηκαν στοιχεία ιδιοκτήτη. Εισάγετέ το από την εφαρμογή (Κτίρια → Εισαγωγή Ε9).';
+      } else if (!parsed.buildings?.length) {
+        const landOnly = (parsed.skippedLandPlots || 0) > 0;
+        parsed = null;
+        parseError = landOnly
+          ? 'Το Ε9 περιέχει μόνο γήπεδα/οικόπεδα (ΠΙΝΑΚΑΣ 2) — δεν υπάρχουν κτίρια για εισαγωγή.'
+          : 'Δεν βρέθηκαν κτίρια στο Ε9.';
+      } else {
+        const nUnits = parsed.buildings.reduce(
+          (n: number, b: any) => n + (b.units?.length || 0),
+          0
+        );
+        const firstAddr = parsed.buildings[0]?.address?.street1 || '';
+        const more = parsed.buildings.length - 1;
+        summary = {
+          title: `${parsed.buildings.length} ${parsed.buildings.length === 1 ? 'κτίριο' : 'κτίρια'} · ${nUnits} ${nUnits === 1 ? 'μονάδα' : 'μονάδες'}`,
+          subtitle: more > 0 ? `${firstAddr} + ${more} ακόμη` : firstAddr
+        };
+      }
+    }
+  } catch (err: any) {
+    parsed = null;
+    parseError = `Η ανάλυση απέτυχε: ${err?.message || err}`;
+  }
+
+  // Archive the original — for these kinds it is LOAD-BEARING, not just an
+  // audit copy: the dialogs re-use the file at confirm time (the lease dialog
+  // persists it to the tenant's documents; the Ε9 confirm re-uploads it). Still
+  // best-effort here because the fallback exists: the row keeps telegramFileId
+  // and file_id does not expire, so /inbox/:id/original can re-fetch from
+  // Telegram when B2 is off.
+  const sourcePdfUrl = deps.archiveSource
+    ? await deps.archiveSource(
+        realm,
+        `tg-${msg.message_id}`,
+        safeName,
+        file.buffer
+      )
+    : null;
+
+  const landed = await deps.updateInboxItem?.(itemId, {
+    status: 'pending',
+    parseError,
+    importDoc: parsed
+      ? { docKind, parsed, summary }
+      : { docKind, parsed: null, summary: {} },
+    sourcePdfUrl: sourcePdfUrl || undefined
+  });
+
+  if (landed === false) {
+    await deps.editReply?.(
+      realm.botToken,
+      msg.chat.id,
+      ackMessageId,
+      'Ελήφθη, αλλά η καταχώρηση ακυρώθηκε στο μεταξύ (απορρίφθηκε ή διακόπηκε). Στείλτε το έγγραφο ξανά αν το χρειάζεστε.'
+    );
+    return;
+  }
+
+  const docLabel = docKind === 'lease' ? 'το μισθωτήριο' : 'το Ε9';
+  await deps.editReply?.(
+    realm.botToken,
+    msg.chat.id,
+    ackMessageId,
+    parseError
+      ? `Ελήφθη ${docLabel}, αλλά δεν διαβάστηκε: ${parseError} Θα το βρείτε στις ειδοποιήσεις.`
+      : `Ελήφθη ${docLabel}${summary.title ? ` (${summary.title})` : ''} — ανοίξτε τις ειδοποιήσεις της εφαρμογής για έλεγχο και εισαγωγή. Δεν καταχωρήθηκε τίποτα αυτόματα.`
+  );
 }
 
 /** The OCR/parse/match/archive half — everything that was inline on the poll tick. */

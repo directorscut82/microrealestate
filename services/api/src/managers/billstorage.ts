@@ -83,6 +83,25 @@ export function billObjectKey(
  * failure — callers decide whether a storage failure is fatal (it is NOT for
  * bill archival: the Bill doc must persist regardless, see confirmBills).
  */
+/** Fetch an archived object back — the inbox `original` endpoint re-serves the
+ *  source PDF to the import dialogs (the lease dialog persists it to the
+ *  tenant's documents; the Ε9 confirm re-uploads it). */
+export async function downloadBuffer(
+  b2Config: B2Config,
+  key: string
+): Promise<Buffer | null> {
+  const s3 = _initS3(b2Config);
+  return new Promise((resolve) => {
+    s3.getObject({ Bucket: b2Config.bucket, Key: key }, (err, data) => {
+      if (err) {
+        logger.warn(`bill B2 download ${key} failed: ${err.message}`);
+        return resolve(null);
+      }
+      resolve(Buffer.isBuffer(data.Body) ? data.Body : null);
+    });
+  });
+}
+
 export async function uploadBuffer(
   b2Config: B2Config,
   key: string,

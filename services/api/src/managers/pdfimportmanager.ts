@@ -133,7 +133,11 @@ export async function classifyAgainstExisting(
   return { kind: 'new', matchedTenantId: null };
 }
 
-async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+// Exported for the Telegram document orchestrator: the SAME extraction the
+// upload lane trusts, so a PDF classifies and parses identically through both
+// doors. (buildingmanager keeps its own copy for importFromE9 — pre-existing
+// duplication, not widened here.)
+export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
   const doc = await getDocument({ data }).promise;

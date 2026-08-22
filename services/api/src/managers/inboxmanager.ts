@@ -14,8 +14,12 @@
  * audit trail Slice 6 (receipt matching) wants. GET /inbox returns pending
  * only, so bell behavior is identical.
  */
-import { Collections, ServiceError } from '@microrealestate/common';
+import { Collections, Crypto, ServiceError } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
+import axios from 'axios';
+import * as billStorage from './billstorage.js';
+import { buildE9Preview } from './buildingmanager.js';
+import { classifyAgainstExisting } from './pdfimportmanager.js';
 import { confirmBills } from './billmanager.js';
 import { findDuplicateBillByIdentity } from './billidentity.js';
 import { validateObjectId } from '../validators.js';
@@ -57,6 +61,17 @@ export async function list(req: Req, res: Res): Promise<void> {
   // building+expense there is no scope to probe within.
   const withWarnings = await Promise.all(
     (items as any[]).map(async (item) => {
+      // leaseImport/e9Import rows carry the FULL parser output in
+      // importDoc.parsed — dozens of units for a real Ε9 — and the bell only
+      // renders importDoc.summary. The dialog fetches the payload through
+      // GET /inbox/:id/import-payload when opened; shipping it here would
+      // resend it on every 60s refetch to a surface that never reads it.
+      if (item?.importDoc) {
+        item = {
+          ...item,
+          importDoc: { ...item.importDoc, parsed: undefined }
+        };
+      }
       const p = item?.parsed || {};
       const m = item?.suggestedMatch;
       if (!m?.buildingId || !m?.expenseId || !p.proposedTerm) return item;
@@ -189,6 +204,20 @@ export async function confirm(req: Req, res: Res): Promise<void> {
     throw new ServiceError(
       'Μια ειδοποίηση δεν μπορεί να καταχωρηθεί ως λογαριασμός', 422
     );
+  }
+  // kind:'leaseImport'/'e9Import' — confirm CONSUMES the notification, nothing
+  // more. The actual import already ran through the dialog's own endpoints
+  // (tenants/import via ImportTenantDialog, buildings/import-pdf?confirmed via
+  // ImportE9Dialog) with all their guards; the page calls this afterwards so
+  // the bell clears. Running these through confirmBills would insert a garbage
+  // Bill from an empty `parsed` — the same shape the notice guard blocks.
+  if (item.kind === 'leaseImport' || item.kind === 'e9Import') {
+    await Collections.InboxItem.updateOne(
+      { _id: id, realmId, status: 'pending' },
+      { $set: { status: 'confirmed', updatedDate: new Date() } }
+    );
+    res.json({ ok: true });
+    return;
   }
 
   const {
@@ -365,4 +394,143 @@ export async function dismiss(req: Req, res: Res): Promise<void> {
     throw new ServiceError('Το στοιχείο εισερχομένων δεν βρέθηκε', 404);
   }
   res.json({ ok: true });
+}
+
+/**
+ * GET /inbox/:id/import-payload — what the import dialog needs to open from a
+ * bell item, rebuilt FRESH where freshness matters:
+ *   · leaseImport → { kind, parsed, classification } — the stored parse plus a
+ *     fresh classifyAgainstExisting verdict (tenants change between ingest and
+ *     open; the ingest-time verdict on the card is advisory only).
+ *   · e9Import    → { kind, parsed, preview } — the stored parse plus the SAME
+ *     existing-building/ΑΤΑΚ-matched preview the upload route builds, via the
+ *     shared buildE9Preview.
+ * Pending only: a consumed or dismissed item must not reopen a dialog.
+ */
+export async function getImportPayload(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+  const { id } = req.params;
+  validateObjectId(id, 'inbox item id');
+
+  const item: any = await Collections.InboxItem.findOne({
+    _id: id,
+    realmId,
+    status: 'pending',
+    kind: { $in: ['leaseImport', 'e9Import'] }
+  }).lean();
+  if (!item?.importDoc?.parsed) {
+    throw new ServiceError('Το στοιχείο εισερχομένων δεν βρέθηκε', 404);
+  }
+
+  if (item.kind === 'leaseImport') {
+    let classification: unknown = { kind: 'new', matchedTenantId: null };
+    try {
+      classification = await classifyAgainstExisting(
+        item.importDoc.parsed,
+        String(realmId)
+      );
+    } catch {
+      // Advisory, same contract as the upload route: a classification hiccup
+      // must not block opening the dialog.
+    }
+    res.json({
+      kind: item.kind,
+      sourceFileName: item.sourceFileName || null,
+      parsed: item.importDoc.parsed,
+      classification
+    });
+    return;
+  }
+
+  res.json({
+    kind: item.kind,
+    sourceFileName: item.sourceFileName || null,
+    parsed: item.importDoc.parsed,
+    preview: await buildE9Preview(item.importDoc.parsed, String(realmId))
+  });
+}
+
+/**
+ * GET /inbox/:id/original — the source PDF bytes, for the dialogs' confirm
+ * steps (the lease dialog persists the original to the tenant's documents; the
+ * Ε9 dialog re-uploads it to import). Two sources, tried in order:
+ *   1. the B2 archive key written at ingest (sourcePdfUrl);
+ *   2. re-download from Telegram by telegramFileId — file_id does not expire
+ *      (the stall-sweep comment in the scanner documents this), so the original
+ *      stays reachable even when B2 is not configured.
+ */
+export async function getOriginal(req: Req, res: Res): Promise<void> {
+  const realmId = req.realm?._id;
+  if (!realmId) {
+    throw new ServiceError('Unauthorized', 401);
+  }
+  const { id } = req.params;
+  validateObjectId(id, 'inbox item id');
+
+  const item: any = await Collections.InboxItem.findOne({
+    _id: id,
+    realmId
+  }).lean();
+  if (!item) {
+    throw new ServiceError('Το στοιχείο εισερχομένων δεν βρέθηκε', 404);
+  }
+
+  let buffer: Buffer | null = null;
+  if (item.sourcePdfUrl) {
+    const realm: any = await Collections.Realm.findOne({ _id: realmId }).lean();
+    const b2 = realm?.thirdParties?.b2;
+    if (billStorage.isEnabled(b2)) {
+      buffer = await billStorage.downloadBuffer(b2, item.sourcePdfUrl);
+    }
+  }
+  if (!buffer && item.telegramFileId) {
+    buffer = await _downloadTelegramFile(
+      String(realmId),
+      String(item.telegramFileId)
+    );
+  }
+  if (!buffer) {
+    throw new ServiceError('Το αρχικό αρχείο δεν είναι διαθέσιμο', 404);
+  }
+
+  const name = item.sourceFileName || 'document.pdf';
+  res.setHeader(
+    'Content-Type',
+    /\.pdf$/i.test(name) ? 'application/pdf' : 'application/octet-stream'
+  );
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename*=UTF-8''${encodeURIComponent(name)}`
+  );
+  res.send(buffer);
+}
+
+/** Telegram getFile → download, with the realm's own bot token. */
+async function _downloadTelegramFile(
+  realmId: string,
+  fileId: string
+): Promise<Buffer | null> {
+  try {
+    const realm: any = await Collections.Realm.findOne({ _id: realmId }).lean();
+    const tg = realm?.thirdParties?.telegram;
+    if (!tg?.botToken) return null;
+    const botToken = Crypto.decrypt(tg.botToken);
+    const info = await axios.get(
+      `https://api.telegram.org/bot${botToken}/getFile`,
+      { params: { file_id: fileId }, timeout: 15_000 }
+    );
+    const filePath = info.data?.result?.file_path;
+    if (!filePath) return null;
+    const file = await axios.get(
+      `https://api.telegram.org/file/bot${botToken}/${filePath}`,
+      { responseType: 'arraybuffer', timeout: 30_000 }
+    );
+    return Buffer.from(file.data);
+  } catch (err: any) {
+    // A 404 here is the honest outcome — the caller translates it.
+    return null;
+  }
 }

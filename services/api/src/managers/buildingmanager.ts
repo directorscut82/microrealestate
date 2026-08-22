@@ -6,7 +6,7 @@ import {
 } from '@microrealestate/common';
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import type { CollectionTypes } from '@microrealestate/types';
-import { parseE9 } from './e9parser.js';
+import { parseE9, ParsedE9Result } from './e9parser.js';
 import * as Contract from './contract.js';
 import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
@@ -1532,6 +1532,70 @@ function _mergeCoOwners(ownersArr: any[], parsedUnit: any): void {
   }
 }
 
+/**
+ * The E9 preview the dialog reviews: the parsed buildings/units annotated with
+ * what ALREADY exists in the realm (existing building by address, existing
+ * property by ΑΤΑΚ). Extracted from importFromE9 so the Telegram inbox lane
+ * can rebuild the SAME preview from a stored parse at open time — the
+ * existing-record matching is time-sensitive, so it must run fresh when the
+ * dialog opens, not be frozen at ingest.
+ */
+export async function buildE9Preview(
+  parsed: ParsedE9Result,
+  realmId: string
+): Promise<{
+  owner: ParsedE9Result['owner'] & { name: string };
+  buildings: unknown[];
+  skippedLandPlots: number;
+}> {
+  const previewOwnerName =
+    `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
+  return {
+    owner: { ...parsed.owner, name: previewOwnerName },
+    buildings: await Promise.all(
+      parsed.buildings.map(async (building) => {
+        // Check if building already exists by address first, then atakPrefix
+        let existing = await Collections.Building.findOne({
+          realmId,
+          'address.street1': building.address.street1,
+          'address.zipCode': building.address.zipCode
+        }).lean();
+
+        if (!existing) {
+          existing = await Collections.Building.findOne({
+            realmId,
+            'address.street1': building.address.street1
+          }).lean();
+        }
+
+        // Check which units can be matched to existing properties
+        const unitPreviews = await Promise.all(
+          building.units.map(async (unit) => {
+            const existingProperty = await Collections.Property.findOne({
+              realmId,
+              atakNumber: unit.atakNumber
+            }).lean();
+
+            return {
+              ...unit,
+              existingPropertyId: existingProperty?._id || null,
+              existingPropertyName: existingProperty?.name || null
+            };
+          })
+        );
+
+        return {
+          ...building,
+          existingBuildingId: existing?._id || null,
+          existingBuildingName: existing?.name || null,
+          units: unitPreviews
+        };
+      })
+    ),
+    skippedLandPlots: parsed.skippedLandPlots
+  };
+}
+
 export async function importFromE9(req: Req, res: Res) {
   const realm = req.realm;
   const file = (req as any).file;
@@ -1595,52 +1659,7 @@ export async function importFromE9(req: Req, res: Res) {
   }
 
   // Build preview response
-  const previewOwnerName =
-    `${parsed.owner.lastName} ${parsed.owner.firstName}`.trim();
-  const preview = {
-    owner: { ...parsed.owner, name: previewOwnerName },
-    buildings: await Promise.all(
-      parsed.buildings.map(async (building) => {
-        // Check if building already exists by address first, then atakPrefix
-        let existing = await Collections.Building.findOne({
-          realmId: realm!._id,
-          'address.street1': building.address.street1,
-          'address.zipCode': building.address.zipCode
-        }).lean();
-
-        if (!existing) {
-          existing = await Collections.Building.findOne({
-            realmId: realm!._id,
-            'address.street1': building.address.street1
-          }).lean();
-        }
-
-        // Check which units can be matched to existing properties
-        const unitPreviews = await Promise.all(
-          building.units.map(async (unit) => {
-            const existingProperty = await Collections.Property.findOne({
-              realmId: realm!._id,
-              atakNumber: unit.atakNumber
-            }).lean();
-
-            return {
-              ...unit,
-              existingPropertyId: existingProperty?._id || null,
-              existingPropertyName: existingProperty?.name || null
-            };
-          })
-        );
-
-        return {
-          ...building,
-          existingBuildingId: existing?._id || null,
-          existingBuildingName: existing?.name || null,
-          units: unitPreviews
-        };
-      })
-    ),
-    skippedLandPlots: parsed.skippedLandPlots
-  };
+  const preview = await buildE9Preview(parsed, String(realm!._id));
 
   // If confirmed=true query param, actually create/update
   if (req.query.confirmed === 'true') {

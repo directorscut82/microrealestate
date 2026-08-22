@@ -48,7 +48,16 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
   // 'voiceCommand' — a money-command dialogue held over Telegram (voice OR
   // text), in SHADOW MODE: the completed row is a validation SAMPLE, never an
   // executed operation. Nothing reads these rows into any money pipeline.
-  kind: { type: String, enum: ['bill', 'notice', 'voiceCommand'], default: 'bill' },
+  // 'leaseImport' / 'e9Import' — a PDF sent to the Telegram bot that the
+  // orchestrator routed to the μισθωτήριο / Ε9 parser instead of the bill
+  // lane. The row carries the parse result (importDoc below); the ACTUAL
+  // import runs through the same dialogs and endpoints as the in-app upload,
+  // opened from the bell — confirm here only consumes the notification.
+  kind: {
+    type: String,
+    enum: ['bill', 'notice', 'voiceCommand', 'leaseImport', 'e9Import'],
+    default: 'bill'
+  },
   /**
    * kind:'voiceCommand' payload. EVERY sub-path is declared — mongoose strict
    * mode silently DELETES undeclared paths on write (measured 6.13.6: no
@@ -90,6 +99,38 @@ const InboxItemSchema = new mongoose.Schema<CollectionTypes.InboxItem>({
       ],
       corrections: Number,
       outcome: String // 'validated' | 'rejected' | 'abandoned'
+    },
+    default: null
+  },
+  /**
+   * kind:'leaseImport' / kind:'e9Import' payload.
+   *
+   * `parsed` is Mixed — a DELIBERATE deviation from the declare-every-path rule
+   * that chargeableAmount taught, and for the same underlying reason: silent
+   * loss. It stores parseGreekLease's ParsedLease / parseE9's ParsedE9Result
+   * VERBATIM, ~60 nested paths consumed as a unit by the import dialogs.
+   * Declaring them individually would create a second copy of each parser's
+   * shape that mongoose silently prunes to whenever the parser grows a field —
+   * the exact drop-class bug, now with a bigger surface. Mixed cannot drop
+   * anything (proven by the round-trip test beside the voiceCommand probe).
+   * It is written ONCE at ingest and never mutated, so Mixed's markModified
+   * caveat does not apply.
+   *
+   * `summary` is what the bell card renders WITHOUT digging into `parsed` —
+   * declared normally, composed server-side in Greek like notice.message.
+   */
+  importDoc: {
+    type: {
+      docKind: String, // 'lease' | 'e9'
+      parsed: mongoose.Schema.Types.Mixed,
+      summary: {
+        title: String,
+        subtitle: String,
+        // lease only: ingest-time classifyAgainstExisting verdict
+        // ('new' | 'update' | 'extension' | 'review') — advisory; the dialog
+        // recomputes it fresh at open time.
+        classification: String
+      }
     },
     default: null
   },
