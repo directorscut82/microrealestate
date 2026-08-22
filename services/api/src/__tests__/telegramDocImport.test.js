@@ -16,6 +16,11 @@ import {
   _clearRetries
 } from '../jobs/telegramInboxScanner.js';
 import { parseGreekLease } from '../managers/greekleaseparser.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const FIXED_NOW = new Date('2026-08-22T12:00:00.000Z');
 const REALM = {
@@ -368,33 +373,49 @@ describe('telegram document orchestrator — routing at receipt', () => {
   });
 
   it('the DI seams are optional in the TYPE only — an omitted one is the REAL thing', async () => {
-    // scanTelegramInbox merges {..._defaultDeps(), ...overrides}. A test that
-    // sends a .pdf and omits extractPdfText therefore runs pdfjs for real,
-    // which is how the ack-protocol suite started timing out under load. This
-    // pins the merge behaviour so the trap is stated in a test, not a comment.
+    // WHY THIS TRAP MATTERS: `scanTelegramInbox` merges
+    // `{..._defaultDeps(), ...overrides}`, so a seam a test does not inject is
+    // the PRODUCTION implementation, not a no-op. A bill-lane test that sends a
+    // `.pdf` and omits `extractPdfText` therefore ran real pdfjs on its fixture
+    // buffer and timed out under load.
+    //
+    // HONEST LIMITATION, stated because two earlier versions of this test
+    // overclaimed: this is a SOURCE anchor plus a shape check, NOT a behavioural
+    // pin. Proving the merge behaviourally means letting a run reach a default
+    // seam, and every default here is mongo or pdfjs — unavailable in this suite.
+    // (The first version called a `_defaultDepsForTest` that does not exist, so
+    // its assertions never executed; the second asserted only that
+    // `_defaultDeps()` returns functions, which is true whether or not the merge
+    // happens. Both were mutation-verified as useless AFTER being written, which
+    // is the wrong order.)
     const mod = await import('../jobs/telegramInboxScanner.js');
-    const seen = [];
-    await mod.scanTelegramInbox({
-      findTelegramRealms: async () => [REALM],
-      getOffset: async () => 0,
-      setOffset: async () => {},
-      getUpdates: async () => [],
-      // deliberately NOT injecting extractPdfText / parseBill / createInboxItem
-      sendReply: async (_t, _c, text) => {
-        seen.push(text);
-        return 1;
-      }
-    });
-    // No updates, so nothing ran — the point is that the call SUCCEEDS with
-    // real defaults merged in, i.e. the omitted seams resolved to something.
-    expect(seen).toEqual([]);
-    // and the production wiring really does supply them
-    const defaults = mod._defaultDepsForTest?.();
-    if (defaults) {
-      expect(typeof defaults.extractPdfText).toBe('function');
-      expect(typeof defaults.parseLeaseText).toBe('function');
-      expect(typeof defaults.parseE9Text).toBe('function');
+    const defaults = mod._defaultDeps();
+    for (const seam of [
+      'extractPdfText',
+      'parseLeaseText',
+      'parseE9Text',
+      'classifyLease'
+    ]) {
+      // Production really does supply each one — which is exactly what makes an
+      // omitted seam dangerous rather than absent.
+      expect(typeof defaults[seam]).toBe('function');
     }
+
+    const src = fs.readFileSync(
+      path.join(HERE, '../jobs/telegramInboxScanner.ts'),
+      'utf8'
+    );
+    // SCOPE TO THE FUNCTION BODY. The doc comment on InboxScanDeps quotes the
+    // merge expression verbatim to explain the trap, so a whole-file match is
+    // satisfied by the comment alone — verified: deleting the real merge left
+    // this test green. Same wrong-occurrence trap as anchoring on the first
+    // `kind: 'voiceCommand'` (which was the query, not the create).
+    const fnAt = src.indexOf('export async function scanTelegramInbox');
+    expect(fnAt).toBeGreaterThan(-1);
+    const body = src.slice(fnAt, src.indexOf('\n}', fnAt));
+    expect(body).toMatch(/\{\s*\.\.\._defaultDeps\(\),\s*\.\.\.overrides\s*\}/);
+    // and the corrected warning still stands somewhere in the file
+    expect(src).toContain('Optional in the TYPE only');
   });
 
   it('classification failure is advisory: the lease row still lands, without a verdict', async () => {

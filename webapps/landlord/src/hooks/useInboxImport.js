@@ -70,14 +70,20 @@ export default function useInboxImport({ expectedKind, requireOriginal }) {
     queryFn: () => fetchInboxImportPayload(inboxImportId),
     enabled: !!inboxImportId,
     retry: false,
-    // FETCH ONCE per item. The app's QueryClient defaults to staleTime 0 with
-    // refetch-on-focus, and this endpoint deliberately RECOMPUTES the
-    // classification and the Ε9 preview on every call — so tabbing away to
-    // check the PDF and back could return a materially different payload, give
-    // `payload` a new identity, and re-fire the dialogs' hydration effects,
-    // resetting merge strategies the landlord had already chosen. A review
-    // dialog whose source data changes underneath it is a data-loss surface.
-    staleTime: Infinity,
+    // No FOCUS or RECONNECT refetch: this endpoint deliberately RECOMPUTES the
+    // classification and the Ε9 preview per call, so tabbing away to check the
+    // PDF and back could hand back a materially different payload and re-fire
+    // the dialogs' hydration, resetting merge strategies the landlord had
+    // already chosen.
+    //
+    // But NOT staleTime: Infinity. That also disables refetch-on-mount, so a
+    // re-opened deep link is served from cache for the whole 5-minute gcTime —
+    // which silently re-breaks the two things that must stay true: a CONSUMED
+    // item's link has to 404 and fail VISIBLY (it would instead reopen a
+    // working-looking dialog), and the review data has to be current (a cached
+    // classification defaults the wrong merge strategy, a cached preview says
+    // "will create" for a building that now exists). The refetch flags plus the
+    // dialogs' hydrate-once guard are what stop the clobber; staleness is not.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false
   });

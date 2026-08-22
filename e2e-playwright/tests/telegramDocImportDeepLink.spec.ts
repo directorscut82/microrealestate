@@ -25,7 +25,7 @@
  * Every seeded row carries the MARK so cleanup can never touch a real
  * notification.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, request } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -42,12 +42,95 @@ const ORG = acct.REALM ?? 'landlord';
 const REALM_ID = '6a00d7ce323739077de89e58';
 
 const MARK = 'E2E-DOCIMPORT';
+// The doc card renders ONLY importDoc.summary — `sourceFileName` (where MARK
+// lives) shows on the parseError branch alone. So MARK goes in the TITLE too: a
+// seed leaked by a crashed run must be recognisable as a test row on the
+// landlord's real bell, not a plausible «ΔΟΚΙΜΗ ΒΗΤΑ» card with a live
+// «Άνοιγμα» button that would import a synthetic tenant into production.
+const LEASE_TITLE = `${MARK} · ΔΟΚΙΜΗ ΒΗΤΑ · ΑΦΜ 999000043`;
+const E9_TITLE = `${MARK} · 1 κτίριο · 2 μονάδες`;
 
-// Real Telegram file_ids for the synthetic fixtures, so `original` resolves.
-// Regenerate with sendDocument if Telegram ever invalidates them; the spec
-// skips cleanly when the download fails for the Ε9 (see the test body).
-const LEASE_FILE_ID = process.env.DOCIMPORT_LEASE_FILE_ID ?? '';
-const E9_FILE_ID = process.env.DOCIMPORT_E9_FILE_ID ?? '';
+/**
+ * SELF-PROVISIONED Telegram file_ids, from a fixture GENERATED AT RUN TIME.
+ *
+ * The Ε9 dialog refuses to open without the original bytes (its confirm
+ * re-uploads the file), so its test needs `telegramFileId` to resolve through
+ * GET /inbox/:id/original. Two earlier shapes were both wrong:
+ *   · reading the ids from env vars that existed nowhere in the repo — so on
+ *     every machine but the author's the Ε9 test SKIPPED and the seed wrote an
+ *     empty id: the guard for the crash this spec exists to catch did not guard;
+ *   · committing the two synthetic PDFs as fixtures — correctly refused by the
+ *     pre-commit scanner, because this repo's rule is that documents stay OUTSIDE
+ *     a public repo and a scanner cannot tell a synthetic PDF from a real one.
+ * So the PDF is rendered here, by the browser Playwright already runs, from HTML
+ * held as plain reviewable text, and uploaded to get a durable file_id. Nothing
+ * binary is committed and nothing depends on the author's shell.
+ *
+ * The values are the repo's synthetic placeholders only: the 9990000xx ΑΦΜ band
+ * and ΟΔΟΣ ΑΛΦΑ/ΒΗΤΑ streets.
+ */
+const BOT_FILE = path.resolve(
+  __dirname,
+  '../../.secrets/telegram-microrealestate-bot'
+);
+const bot = fs.existsSync(BOT_FILE)
+  ? dotenv.parse(fs.readFileSync(BOT_FILE))
+  : ({} as Record<string, string>);
+const BOT_TOKEN = bot.BOT_TOKEN ?? '';
+const ADMIN_CHAT_ID = bot.ADMIN_CHAT_ID ?? '';
+
+let LEASE_FILE_ID = '';
+let E9_FILE_ID = '';
+
+const LEASE_HTML = `<html><head><meta charset="utf-8"><style>body{font-family:Helvetica,Arial;font-size:11px}</style></head><body>
+<p>ΑΠΟΔΕΙΞΗ ΥΠΟΒΟΛΗΣ ΔΗΛΩΣΗΣ ΠΛΗΡΟΦΟΡΙΑΚΩΝ ΣΤΟΙΧΕΙΩΝ ΜΙΣΘΩΣΗΣ ΑΚΙΝΗΤΗΣ ΠΕΡΙΟΥΣΙΑΣ</p>
+<p>ΑΡ. ΔΗΛΩΣΗΣ &nbsp; 999532100 &nbsp; ΗΜ/ΝΙΑ ΥΠΟΒΟΛΗΣ &nbsp; 01/09/2026</p>
+<p>ΣΤΟΙΧΕΙΑ ΕΚΜΙΣΘΩΤH: A/A 1 Κύριος &nbsp; ΔΟΚΙΜΗ ΑΛΦΑ (ΑΦΜ Δηλούντος:999000018) Ποσοστό &nbsp; 100</p>
+<p>ΣΤΟΙΧΕΙΑ ΜΙΣΘΩΤH: A/A 1 ΟΝΟΜΑΤΕΠΩΝΥΜΟ/ΕΠΩΝΥΜΙΑ &nbsp; ΔΟΚΙΜΗ ΒΗΤΑ (Α.Φ.Μ:999000043)</p>
+<p>ΣΤΟΙΧΕΙΑ ΑΚΙΝΗΤΟΥ ΔΙΕΥΘΥΝΣΗ ΑΚΙΝΗΤΟΥ &nbsp; ΟΔΟΣ ΑΛΦΑ 12 ΑΘΗΝΑ 11111</p>
+</body></html>`;
+
+const E9_HTML = `<html><head><meta charset="utf-8"><style>body{font-family:Helvetica,Arial;font-size:11px}</style></head><body>
+<p>ΒΕΒΑΙΩΣΗ ΥΠΟΒΟΛΗΣ ΔΗΛΩΣΗΣ ΣΤΟΙΧΕΙΩΝ ΑΚΙΝΗΤΩΝ (Ε9) ΕΤΟΥΣ 2026</p>
+<p>ΣΤΟΙΧΕΙΑ ΦΟΡΟΛΟΓΟΥΜΕΝΟΥ: ΔΟΚΙΜΗ ΑΛΦΑ ΑΦΜ 999000018</p>
+<p>ΠΙΝΑΚΑΣ 1: ΣΤΟΙΧΕΙΑ ΑΚΙΝΗΤΩΝ ΠΟΥ ΥΠΑΡΧΟΥΝ ΤΗΝ 01/01/2026</p>
+<p>1 ΟΔΟΣ ΒΗΤΑ 4 ΑΘΗΝΑ 22222 ΑΤΑΚ 99900000021 ΕΠΙΦΑΝΕΙΑ 90</p>
+</body></html>`;
+
+/** Render HTML to a PDF buffer with the browser Playwright already runs. */
+async function renderPdf(browser: any, html: string): Promise<Buffer> {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(html);
+    return await page.pdf({ format: 'A4' });
+  } finally {
+    await page.close();
+  }
+}
+
+/** Upload a buffer to the admin chat; returns its durable file_id. */
+async function uploadFixture(name: string, buffer: Buffer): Promise<string> {
+  if (!BOT_TOKEN || !ADMIN_CHAT_ID) return '';
+  const api = await request.newContext();
+  try {
+    const r = await api.post(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`,
+      {
+        multipart: {
+          chat_id: ADMIN_CHAT_ID,
+          document: { name: `${name}.pdf`, mimeType: 'application/pdf', buffer }
+        },
+        timeout: 60_000
+      }
+    );
+    const body = await r.json();
+    return body?.result?.document?.file_id ?? '';
+  } catch {
+    return '';
+  } finally {
+    await api.dispose();
+  }
+}
 
 test.use({ viewport: { width: 1500, height: 1050 }, deviceScaleFactor: 2 });
 test.describe.configure({ mode: 'serial', timeout: 5 * 60_000 });
@@ -79,7 +162,7 @@ function seed(): string | null {
             }]
           },
           summary: {
-            title: "ΔΟΚΙΜΗ ΒΗΤΑ · ΑΦΜ 999000043",
+            title: "${LEASE_TITLE}",
             subtitle: "ΟΔΟΣ ΑΛΦΑ 12 · 350 € / μήνα · 01/10/2026–30/09/2029",
             classification: "new"
           }
@@ -106,7 +189,7 @@ function seed(): string | null {
             }],
             skippedLandPlots: 0
           },
-          summary: {title: "1 κτίριο · 2 μονάδες", subtitle: "ΟΔΟΣ ΒΗΤΑ 4"}
+          summary: {title: "${E9_TITLE}", subtitle: "ΟΔΟΣ ΒΗΤΑ 4"}
         },
         sourceFileName: "${MARK}-e9.pdf",
         sourceMimeType: "application/pdf",
@@ -138,9 +221,11 @@ async function signIn(page: any) {
 }
 
 async function openBell(page: any) {
-  await page
-    .getByRole('button', { name: /Ειδοποιήσεις|Notifications/ })
-    .click();
+  const bell = page.getByRole('button', {
+    name: /Ειδοποιήσεις|Notifications/
+  });
+  await expect(bell).toBeVisible({ timeout: 60_000 });
+  await bell.click();
   const popover = page.locator('[data-radix-popper-content-wrapper]');
   await popover.waitFor({ state: 'visible', timeout: 15_000 });
   return popover;
@@ -154,7 +239,20 @@ async function expectNoCrash(page: any) {
   ).toHaveCount(0);
 }
 
-test.beforeAll(() => {
+test.beforeAll(async ({ browser }) => {
+  test.skip(
+    !EMAIL || !PASSWORD,
+    'no landlord account in .secrets — cannot sign in'
+  );
+  // Render, then upload, BEFORE seeding: the row embeds the file_id.
+  const [leasePdf, e9Pdf] = [
+    await renderPdf(browser, LEASE_HTML),
+    await renderPdf(browser, E9_HTML)
+  ];
+  [LEASE_FILE_ID, E9_FILE_ID] = await Promise.all([
+    uploadFixture('synthetic-misthotirio', leasePdf),
+    uploadFixture('synthetic-e9', e9Pdf)
+  ]);
   const out = seed();
   test.skip(out === null, 'no portainer token — cannot seed');
   expect(out).toContain('seeded=2');
@@ -170,15 +268,25 @@ test('the bell shows both document cards with their server-composed summaries', 
   await signIn(page);
   const popover = await openBell(page);
 
-  // Marker-scoped counts, not toBeVisible tautologies.
-  await expect(popover.getByText('ΔΟΚΙΜΗ ΒΗΤΑ · ΑΦΜ 999000043')).toHaveCount(1);
-  await expect(popover.getByText('1 κτίριο · 2 μονάδες')).toHaveCount(1);
-  // the lease classification chip
-  await expect(popover.getByText('Νέος ενοικιαστής')).toHaveCount(1);
-  // both cards carry the shadow-mode assurance
+  // SCOPED TO THE TWO SEEDED CARDS. A popover-wide toHaveCount(2) on the
+  // shadow-mode line breaks the moment the landlord has one REAL μισθωτήριο or
+  // Ε9 pending — the normal state of this feature in production — so counts must
+  // be per-card, not realm-global.
+  const leaseCard = popover
+    .locator('[data-cy="inboxDocCard"]')
+    .filter({ hasText: LEASE_TITLE });
+  const e9Card = popover
+    .locator('[data-cy="inboxDocCard"]')
+    .filter({ hasText: E9_TITLE });
+  await expect(leaseCard).toHaveCount(1);
+  await expect(e9Card).toHaveCount(1);
+  await expect(leaseCard.getByText('Νέος ενοικιαστής')).toHaveCount(1);
   await expect(
-    popover.getByText('Δεν εισάγεται τίποτα πριν το ελέγξετε.')
-  ).toHaveCount(2);
+    leaseCard.getByText('Δεν εισάγεται τίποτα πριν το ελέγξετε.')
+  ).toHaveCount(1);
+  await expect(
+    e9Card.getByText('Δεν εισάγεται τίποτα πριν το ελέγξετε.')
+  ).toHaveCount(1);
   await expectNoCrash(page);
 });
 
@@ -197,7 +305,7 @@ test('Ε9 «Άνοιγμα» opens the REAL import dialog and renders the owner 
   // does not contain the link at all.
   const e9Card = popover
     .locator('[data-cy="inboxDocCard"]')
-    .filter({ hasText: '1 κτίριο · 2 μονάδες' });
+    .filter({ hasText: E9_TITLE });
   await expect(e9Card).toHaveCount(1);
   await e9Card.getByRole('link', { name: 'Άνοιγμα' }).click();
 
@@ -230,6 +338,44 @@ test('Ε9 «Άνοιγμα» opens the REAL import dialog and renders the owner 
   expect((still || '').trim()).toBe('1');
 });
 
+test('re-opening the SAME item re-hydrates — the hydrate-once guard must not outlive the dialog', async ({
+  page
+}) => {
+  // The regression the finding-4 fix introduced: `hydratedRef` was set on first
+  // hydration and never cleared, while both dialogs stay permanently mounted and
+  // «Άνοιγμα» is a same-pathname next/link — so nothing remounts and the second
+  // open bailed on the stale ref, landing on the file drop zone with no preview,
+  // no error and no explanation until a full page reload. Silent breakage of the
+  // feature's primary flow.
+  test.skip(
+    !E9_FILE_ID,
+    'fixture upload failed — the Ε9 dialog needs the original'
+  );
+  await signIn(page);
+
+  for (const pass of ['first', 'second']) {
+    const popover = await openBell(page);
+    await popover
+      .locator('[data-cy="inboxDocCard"]')
+      .filter({ hasText: E9_TITLE })
+      .getByRole('link', { name: 'Άνοιγμα' })
+      .click();
+    await expect(page.locator('[data-cy="confirmImport"]')).toBeVisible({
+      timeout: 30_000
+    });
+    await expectNoCrash(page);
+    // the PREVIEW is present, not just the shell: the drop zone would also
+    // render a dialog, which is exactly what the bug produced
+    await expect(page.getByText('ΟΔΟΣ ΒΗΤΑ 4').first()).toBeVisible();
+    if (pass === 'first') {
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-cy="confirmImport"]')).toHaveCount(0);
+    }
+  }
+
+  await page.keyboard.press('Escape');
+});
+
 test('lease «Άνοιγμα» opens the tenant import dialog prefilled from the stored parse', async ({
   page
 }) => {
@@ -238,7 +384,7 @@ test('lease «Άνοιγμα» opens the tenant import dialog prefilled from the
 
   const leaseCard = popover
     .locator('[data-cy="inboxDocCard"]')
-    .filter({ hasText: 'ΔΟΚΙΜΗ ΒΗΤΑ · ΑΦΜ 999000043' });
+    .filter({ hasText: LEASE_TITLE });
   await expect(leaseCard).toHaveCount(1);
   await leaseCard.getByRole('link', { name: 'Άνοιγμα' }).click();
 
@@ -247,9 +393,17 @@ test('lease «Άνοιγμα» opens the tenant import dialog prefilled from the
     page.getByText('ΔΟΚΙΜΗ ΒΗΤΑ').first().or(page.getByText('Κάτι πήγε στραβά'))
   ).toBeVisible({ timeout: 30_000 });
   await expectNoCrash(page);
-  // the parsed tenant and property reached the review rows
-  await expect(page.getByText('ΔΟΚΙΜΗ ΒΗΤΑ').first()).toBeVisible();
-  await expect(page.getByText('ΟΔΟΣ ΑΛΦΑ 12').first()).toBeVisible();
+  // DIALOG-ONLY anchor: every string on the review rows also appears on the bell
+  // card that opened it (they come from the same parse), so a text assertion
+  // alone would pass with the popover still up and no dialog at all — and both
+  // strings are the repo's shared synthetic placeholders, satisfiable by a
+  // tenant another spec leaked.
+  await expect(page.locator('[data-cy="confirmLeaseImport"]')).toBeVisible({
+    timeout: 30_000
+  });
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('ΔΟΚΙΜΗ ΒΗΤΑ').first()).toBeVisible();
+  await expect(dialog.getByText('ΟΔΟΣ ΑΛΦΑ 12').first()).toBeVisible();
 
   await page.keyboard.press('Escape');
   const still = mongoExec(
@@ -274,20 +428,28 @@ test('a consumed notification’s deep link fails visibly instead of opening an 
   );
 
   await signIn(page);
-  await page.goto(`${BASE}/${ORG}/buildings?inboxImport=${id}`, {
-    waitUntil: 'domcontentloaded'
-  });
-  await expectNoCrash(page);
-  // the review dialog must NOT be open
-  await expect(page.locator('[data-cy="confirmImport"]')).toHaveCount(0);
-  // and the query param is stripped so a reload cannot resurrect it
+  await page.goto(
+    `${BASE}/${encodeURIComponent(ORG)}/buildings?inboxImport=${id}`,
+    {
+      waitUntil: 'domcontentloaded'
+    }
+  );
+  // ORDER MATTERS. These two toHaveCount(0) assertions used to run immediately
+  // after `goto(..., 'domcontentloaded')` — before React had hydrated, let alone
+  // opened a dialog or thrown — so they passed trivially. The poll is the
+  // assertion that actually carries this test; the absences are only meaningful
+  // once the app has settled.
   await expect
     .poll(() => new URL(page.url()).searchParams.get('inboxImport'), {
       timeout: 30_000
     })
     .toBeNull();
+  await expectNoCrash(page);
+  // the review dialog must NOT be open
+  await expect(page.locator('[data-cy="confirmImport"]')).toHaveCount(0);
 
-  // restore for the afterAll cleanup predicate
+  // Restore the status so a re-run starts from the seeded state. NOT needed by
+  // cleanup(), which matches on realmId + sourceFileName only.
   mongoExec(
     `db.inboxitems.updateOne({_id: ObjectId("${id}")}, {$set: {status: "pending"}});`
   );

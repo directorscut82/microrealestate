@@ -274,7 +274,7 @@ Gateway routing order (first match wins):
 
 **Collections — 12** (in `services/common/src/collections/`, all re-exported from `index.ts`): Account, Realm, Tenant (Occupant), Property, Lease, **Building**, **Bill**, **InboxItem**, **TelegramOffset**, Template, Document, Email. Regenerate with `ls services/common/src/collections/` rather than trusting this line — it was missing four of them for months, including the two that back the Telegram bill inbox.
 
-**Backup gap:** `COLLECTIONS_TO_BACKUP` (`services/api/src/managers/databasemanager.ts:13`) names 10 of the 12 — `InboxItem` and `TelegramOffset` are absent, and `accounts` is intentionally emptied for per-realm backups (no `realmId`). A restore therefore loses pending Telegram-inbox bills and resets the poller cursor.
+**Backup coverage:** `COLLECTIONS_TO_BACKUP` (`services/api/src/managers/databasemanager.ts`) now names ALL 12, `inboxitems` and `telegramoffsets` included — verified 2026-08-22 by reading the array. `accounts` is still intentionally emptied for per-realm backups (no `realmId`), so 11 are really captured. The long-standing claim that the two Telegram collections were absent was TRUE once and is now stale; it survived in five docs and was repeated to me by a code reviewer, so re-read the array rather than trusting any prose about it.
 
 **Critical naming gotcha:** The Mongoose model for tenants is registered as `'Occupant'` (`mongoose.model('Occupant', ...)`), but TypeScript types and API routes use `Tenant`. When querying MongoDB directly, use `Occupant`.
 

@@ -323,8 +323,8 @@ erDiagram
 2026-08-02. `InboxItem` (Telegram-bot bill inbox, backs `/api/v2/inbox`, `inboxItem.ts`) and
 `TelegramOffset` (`telegramOffset.ts` — one doc **per realm**, unique index on `realmId`, holds
 `lastUpdateId` for `telegramInboxScanner.ts`) were **missing from this diagram for months**. They are
-also missing from `COLLECTIONS_TO_BACKUP`, so a restore silently drops pending inbox bills and rewinds
-the poll cursor — which then re-ingests old Telegram messages.
+since been ADDED to `COLLECTIONS_TO_BACKUP` (verified 2026-08-22: all 12 collections are named), so a
+restore no longer drops pending inbox bills or rewinds the poll cursor.
 
 ## 5. CI/CD Pipeline
 

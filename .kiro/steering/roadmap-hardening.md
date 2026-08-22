@@ -90,10 +90,10 @@ Shipped on `nas` (HEAD `6e771282`); ~83 commits since the prior reference rev `2
 - Sends SMS to all tenant contacts' phone numbers alongside email
 
 ### 4.7 Database Backup/Restore ✅ COMPLETE (added May 2026)
-- MongoDB backup to JSON (with type markers for ObjectId, Date, Binary) of the **10 collections named
-  in `COLLECTIONS_TO_BACKUP`** (`services/api/src/managers/databasemanager.ts:13`) — **not "all"**.
-  There are **12** collections; `InboxItem` and `TelegramOffset` are excluded, so a restore drops
-  pending Telegram-inbox bills and rewinds the poller cursor. `accounts` is also deliberately emptied
+- MongoDB backup to JSON (with type markers for ObjectId, Date, Binary) of the collections named
+  in `COLLECTIONS_TO_BACKUP` (`services/api/src/managers/databasemanager.ts`) — which as of
+  2026-08-22 is **all 12**, `inboxitems` and `telegramoffsets` included (this entry previously said
+  they were excluded; that is stale). `accounts` is still deliberately emptied
   on a per-realm backup (no `realmId`), so 9 are really captured.
 - Restore with atomic wipe-and-replace per collection
 - Triple-layer production protection (legacy Cypress era):

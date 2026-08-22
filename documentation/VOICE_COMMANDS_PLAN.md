@@ -320,7 +320,7 @@ than the shipped trie, so it is a simplification, not just a feature.
   wrong home (it is action-oriented and its list query filters
   status∈{processing,pending}); the third-parties settings page (where Telegram
   is configured) is the proposed home. Mock pending approval.
-- **Backup gap**: per-realm backups intentionally exclude nothing new here
-  (inboxitems is in `COLLECTIONS_TO_BACKUP`), but remember `TelegramOffset` is
-  not backed up — a restore replays recent messages; the router's dedup makes
-  that a no-op for samples.
+- **Backup coverage**: both `inboxitems` AND `telegramoffsets` are in
+  `COLLECTIONS_TO_BACKUP` (verified 2026-08-22), so voice samples and the poller
+  cursor both survive a restore. The older note here said the offset was not
+  backed up; that is stale.

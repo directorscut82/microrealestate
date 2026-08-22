@@ -300,6 +300,9 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
 
   const handleClose = useCallback(() => {
     setOpen(false);
+    // Reset the hydrate-once guard too — see ImportE9Dialog's note: without it a
+    // second «Άνοιγμα» on the same item opens an empty dialog.
+    hydratedRef.current = null;
     setState('idle');
     setFiles([]);
     setParsedResults([]);
@@ -1618,6 +1621,10 @@ export default function ImportTenantDialog({ open, setOpen, initialImport }) {
           {state === 'preview' && (
             <Button
               onClick={handleConfirm}
+              // Dialog-only anchor for the deep-link spec: every text on the
+              // review rows also appears on the bell card that opened it, so a
+              // text assertion cannot prove the DIALOG rendered.
+              data-cy="confirmLeaseImport"
               // P2.10 / N7: gate the Import button on every importable row
               // having validityEnd > validityStart. We don't filter the
               // invalid rows out — surfacing the per-row warning AND

@@ -75,11 +75,12 @@ with `ls services/common/src/collections/` — do not trust a hand-maintained co
 - `Template` — document templates (HTML/text)
 - `Email` — email sending records
 
-⚠️ **`InboxItem` and `TelegramOffset` are NOT in `COLLECTIONS_TO_BACKUP`**
-(`services/api/src/managers/databasemanager.ts:13` — it names 10 of the 12, and `accounts` is
-deliberately emptied for per-realm backups since it has no `realmId`, so 9 are really captured). A
-backup/restore cycle silently drops every pending Telegram-inbox bill and resets the poller cursor,
-which then re-ingests old messages. Check that list before relying on a backup.
+✅ **`InboxItem` and `TelegramOffset` ARE in `COLLECTIONS_TO_BACKUP`** — verified 2026-08-22 by
+reading the array in `services/api/src/managers/databasemanager.ts`: all 12 collections are named.
+`accounts` is still deliberately emptied for per-realm backups (no `realmId`), so 11 are really
+captured. This paragraph previously said the opposite, which WAS true once; the stale version outlived
+the fix in five separate docs and was quoted back at me by a code reviewer as a live defect. Read the
+array, not the prose.
 
 Types are defined in `types/src/common/collections.ts` as `CollectionTypes` namespace.
 
