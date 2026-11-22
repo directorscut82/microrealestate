@@ -27,6 +27,14 @@ import path from 'path';
 const OUT = process.argv[2] || '.fixtures-bills';
 fs.mkdirSync(OUT, { recursive: true });
 
+// CUSTOM MODE: `node tools/make-bill-fixtures.mjs <outDir> --custom '<json>'`, where <json> is
+// [{ name, kind: 'deh' | 'eydap', params }]. Renders ONLY those documents, through the same
+// templates as the fixed set below. For specs whose bill must be dated relative to the day
+// the spec runs (issued last month / this month): a fixed-date fixture ages out of the
+// seeded tenant's lease, and then the spec is testing a different thing than it says.
+const CUSTOM =
+  process.argv[3] === '--custom' ? JSON.parse(process.argv[4] || '[]') : null;
+
 const CSS = `
   @page { size: A4; margin: 0; }
   body { margin: 0; background: #fff; font-family: Arial, Helvetica, sans-serif;
@@ -54,7 +62,25 @@ const CSS = `
 `;
 
 /** ΔΕΗ — the layout the deh parser is written against. */
-function deh({ supply, rf, total, periodFrom, periodTo, issue, due, kwh, nextRead }) {
+// `issueLabel`: a real ΔΕΗ bill prints «Ημ/νία Έκδοσης», abbreviated, and that is what
+// the parser's issue-date pattern is written against (billparser/deh.ts; the three real
+// scans under services/api/src/__tests__/fixtures/deh-scan-*.txt). The FIXED set below has
+// always said «Ημερομηνία έκδοσης», which that pattern does not match: those bills are
+// read with NO issue date and their charge month falls back to the end of their period.
+// The fixed set is left exactly as it was (three specs were written against it); a
+// CUSTOM document gets the real label, so it can exercise the issue-month rule.
+function deh({
+  supply,
+  rf,
+  total,
+  periodFrom,
+  periodTo,
+  issue,
+  due,
+  kwh,
+  nextRead,
+  issueLabel = 'Ημερομηνία έκδοσης'
+}) {
   return `<!doctype html><html lang="el"><head><meta charset="utf-8"><style>${CSS}</style></head>
 <body><div class="pad">
   <div class="brand">ΔΕΗ Α.Ε.</div>
@@ -103,7 +129,7 @@ function deh({ supply, rf, total, periodFrom, periodTo, issue, due, kwh, nextRea
     <div class="lbl">Η κατανάλωσή σας</div>
     <div class="kv"><span>Κατανάλωση Ηλεκτρικής Ενέργειας</span><span>${kwh} kWh</span></div>
     <div class="kv"><span>Περίοδος κατανάλωσης</span><span>${periodFrom} - ${periodTo}</span></div>
-    <div class="kv"><span>Ημερομηνία έκδοσης</span><span>${issue}</span></div>
+    <div class="kv"><span>${issueLabel}</span><span>${issue}</span></div>
   </div>
 
   <div class="box">
@@ -213,7 +239,7 @@ function eydap({
 const DEH_SUPPLY = '9 99977001-016';
 const EYDAP_ACCOUNT = '99900022233 003';
 
-const DOCS = [
+const FIXED_DOCS = [
   {
     name: 'deh-1',
     html: deh({
@@ -324,6 +350,16 @@ const DOCS = [
   }
 ];
 
+const DOCS = CUSTOM
+  ? CUSTOM.map((d) => ({
+      name: d.name,
+      html:
+        d.kind === 'eydap'
+          ? eydap(d.params)
+          : deh({ issueLabel: 'Ημ/νία Έκδοσης', ...d.params })
+    }))
+  : FIXED_DOCS;
+
 const browser = await chromium.launch();
 const page = await browser.newPage({
   viewport: { width: 1240, height: 1754 },
@@ -341,8 +377,11 @@ for (const d of DOCS) {
   console.log('wrote', d.name + '.png', '+', d.name + '.pdf');
 }
 await browser.close();
-fs.writeFileSync(
-  path.join(OUT, 'ids.json'),
-  JSON.stringify({ dehSupply: DEH_SUPPLY, eydapAccount: EYDAP_ACCOUNT }, null, 2)
-);
-console.log('\nshared ids:', DEH_SUPPLY, '|', EYDAP_ACCOUNT);
+// ids.json describes the FIXED set only; a custom run must not overwrite it.
+if (!CUSTOM) {
+  fs.writeFileSync(
+    path.join(OUT, 'ids.json'),
+    JSON.stringify({ dehSupply: DEH_SUPPLY, eydapAccount: EYDAP_ACCOUNT }, null, 2)
+  );
+  console.log('\nshared ids:', DEH_SUPPLY, '|', EYDAP_ACCOUNT);
+}
