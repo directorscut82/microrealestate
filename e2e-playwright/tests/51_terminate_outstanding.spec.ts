@@ -67,6 +67,10 @@ test.afterAll(async () => {
   // tenants + 5 properties into the live realm. Strip every promo/discount and
   // payment first, then delete; properties only release once no tenant refers
   // to them.
+  // This spec writes to the landlord's own realm, under names that are new on every
+  // run: a fixture it could not remove is never removed by a later run either. So a
+  // failed removal stops the run instead of scrolling past in the log.
+  const leftBehind: string[] = [];
   for (const id of tenantIds) {
     const ledger = await api('GET', `/rents/tenant/${id}`);
     const dirty = (ledger.json?.rents || []).filter(
@@ -90,12 +94,13 @@ test.afterAll(async () => {
       });
     }
     const r = await api('DELETE', `/tenants/${id}`);
-    if (r.status !== 200) console.log('CLEANUP tenant', r.status, JSON.stringify(r.json).slice(0, 90));
+    if (r.status !== 200) leftBehind.push(`tenant ${id}: ${r.status} ${JSON.stringify(r.json).slice(0, 90)}`);
   }
   for (const id of propIds) {
     const r = await api('DELETE', `/properties/${id}`);
-    if (r.status !== 200) console.log('CLEANUP prop', r.status, JSON.stringify(r.json).slice(0, 90));
+    if (r.status !== 200) leftBehind.push(`property ${id}: ${r.status} ${JSON.stringify(r.json).slice(0, 90)}`);
   }
+  expect(leftBehind, 'fixtures this run could not remove from the realm').toEqual([]);
 });
 
 test('T1 terminating with unpaid rent shows the open money and offers a write-off', async ({ page }) => {
@@ -142,10 +147,12 @@ test('T1 terminating with unpaid rent shows the open money and offers a write-of
   await page.waitForTimeout(1200);
 
   await expect(dialog.getByText(/Οφειλές που παραμένουν/)).toBeVisible({ timeout: 10000 });
-  await expect(dialog.getByText(/ανεξόφλητοι μήνες έως τον τερματισμό/)).toBeVisible();
+  // The wording is the one in locales/el/common.json since the 2026-08-09 rewrite of
+  // these warnings (1fbceb32); the patterns here still quoted the text it replaced.
+  await expect(dialog.getByText(/μένουν ανεξόφλητοι μέχρι τον τερματισμό/)).toBeVisible();
   await expect(dialog.getByText(/ΜΕΤΑ την ημερομηνία τερματισμού/)).toBeVisible();
   await expect(dialog.getByText(/Παρακρατούμενη εγγύηση/)).toBeVisible();
-  await expect(dialog.getByText(/Λογιστική διαγραφή των/)).toBeVisible();
+  await expect(dialog.getByText(/Διαγράψτε λογιστικά τα/)).toBeVisible();
 
   // The FIGURE must be right, not merely present. `totalToPay` includes the
   // carried balance, so a naive per-month sum overstates the debt (measured
@@ -165,7 +172,7 @@ test('T1 terminating with unpaid rent shows the open money and offers a write-of
   expect(engineKept, 'the fixture must actually owe money up to the cut').toBeGreaterThan(0);
 
   const panel = await dialog
-    .getByText(/ανεξόφλητοι μήνες έως τον τερματισμό/)
+    .getByText(/μένουν ανεξόφλητοι μέχρι τον τερματισμό/)
     .innerText();
   console.log('ENGINE_KEPT', engineKept, '| PANEL_TEXT', panel);
   // Greek locale renders 1.336,00 € — normalise to a comparable number.
@@ -238,13 +245,12 @@ test('T2 the write-off records a settlement discount and clears the arrears', as
   const box = dialog.locator('input[type="checkbox"]').first();
   await expect(box).toBeVisible({ timeout: 10000 });
   await box.check();
-  // Ticking it must disclose the limit measured below: the discount settles each
-  // month, but later months keep their carried balance. Without this on screen the
-  // landlord reads the unchanged trailing total as a failed write-off.
-  await expect(
-    dialog.getByText(/το μεταφερόμενο υπόλοιπο των επόμενων μηνών δεν ανακαθορίζεται/)
-  ).toBeVisible({ timeout: 10000 });
-  await page.screenshot({ path: '/tmp/t2-writeoff-caveat.png' });
+  await expect(box).toBeChecked();
+  // The window used to add a caveat here («…το μεταφερόμενο υπόλοιπο των επόμενων
+  // μηνών δεν ανακαθορίζεται…») because the carried balance of later months was not
+  // rebuilt. It is rebuilt now (step 4 below asserts the result), so the caveat is
+  // gone from the window.
+  await page.screenshot({ path: '/tmp/t2-writeoff-ticked.png' });
   await dialog.getByRole('button', { name: /^Τερματισμός$/ }).click();
 
   await expect(dialog).toBeHidden({ timeout: 30000 });
@@ -279,15 +285,13 @@ test('T2 the write-off records a settlement discount and clears the arrears', as
   );
   expect(discounted.length, 'the write-off must record a discount').toBeGreaterThan(0);
 
-  // 4. Each written-off month is individually settled. NOT asserted: that the
-  //    tenant's trailing cumulative balance drops to zero. Measured on the live
-  //    engine — a discount zeroes its OWN month, but the carried `balance` baked
-  //    into later months is deliberately NOT rebuilt: the forward carry-in sweep
-  //    skips frozen rents (contract.ts:218) and a past unpaid term is always
-  //    frozen ("closed months are immutable; arrears adjust via settlements, not
-  //    re-pricing", contract.ts payTerm). A plain tenant PATCH does not rebuild
-  //    it either. So the correct, design-conformant assertion is per written-off
-  //    month, not on the trailing carry.
+  // 4. Each written-off month is settled, AND nothing is left carried. A write-off
+  //    on an older month reaches the months after it (Contract.payTerm: a closed
+  //    month keeps what it billed, but what it carries in follows the month before
+  //    it), so after writing off every open month the tenant's last month owes
+  //    nothing. Until 2026-11 the carried balance of later months was not rebuilt
+  //    and the trailing total stayed at the old figure — the write-off looked as
+  //    if it had failed.
   const writtenOff = aRents.filter(
     (r: any) => Number(r.discount) > 0
   );
@@ -308,11 +312,27 @@ test('T2 the write-off records a settlement discount and clears the arrears', as
     'the recorded discount must equal the arrears the panel offered to write off'
   ).toBeCloseTo(engineBefore, 2);
 
+  // No clamp at zero: a positive figure here would be a CREDIT, money the tenant never
+  // paid (the write-off of a tenant who has paid part of it is spec 70). `+ 0` only
+  // turns a rounded -0 into 0.
   const last = aRents[aRents.length - 1];
-  console.log(
-    'ARREARS_AFTER (trailing carry, intentionally not zero)',
-    Math.round(Math.max(0, -(Number(last?.newBalance) || 0)) * 100) / 100
-  );
+  const balanceAfter =
+    Math.round((Number(last?.newBalance) || 0) * 100) / 100 + 0;
+  console.log('BALANCE_AFTER', balanceAfter);
+  expect(
+    balanceAfter,
+    'after the write-off the last month owes nothing and is owed nothing'
+  ).toBe(0);
+  for (const r of aRents) {
+    expect(
+      Math.round((Number(r.balance) || 0) * 100) / 100,
+      `month ${r.term} must carry nothing in from the months before it`
+    ).toBe(0);
+    expect(
+      Math.round((Number(r.totalToPay) || 0) * 100) / 100,
+      `month ${r.term} must have nothing left to pay`
+    ).toBe(0);
+  }
 
   await page.screenshot({ path: '/tmp/t2-writeoff-done.png' });
 });
@@ -374,18 +394,24 @@ test('T3 a single unpaid month renders GREEK SINGULAR, not "1 ανεξόφλητ
   await dialog.locator('#terminationDate').fill(`${yy}-${mm}-${lastDayThis}`);
   await page.waitForTimeout(1500);
 
+  // The whole warning panel (the parent of its title) — both sentences are in it.
   const panelText = await dialog
-    .locator('div')
-    .filter({ hasText: /ανεξόφλητ/ })
-    .last()
+    .getByText('Οφειλές που παραμένουν σε αυτή τη μίσθωση')
+    .locator('xpath=..')
     .innerText();
   console.log('SINGULAR_PANEL', JSON.stringify(panelText));
 
-  // The bug, stated as an assertion: a plural noun must never follow "1".
+  // The bug, stated as an assertion: a plural must never follow "1" — in the wording
+  // these sentences have had since the 2026-08-09 rewrite (1fbceb32).
   expect(panelText, 'plural must not follow the numeral 1').not.toMatch(
-    /\b1 ανεξόφλητοι μήνες/
+    /\b1 μήνες/
   );
-  expect(panelText).toMatch(/1 ανεξόφλητος μήνας/);
+  expect(panelText).toMatch(
+    /1 μήνας μένει ανεξόφλητος μέχρι τον τερματισμό/
+  );
+  expect(panelText).toMatch(
+    /1 μήνας μένει ανεξόφλητος ΜΕΤΑ την ημερομηνία τερματισμού/
+  );
 
   await page.screenshot({ path: '/tmp/t3-singular.png' });
 });

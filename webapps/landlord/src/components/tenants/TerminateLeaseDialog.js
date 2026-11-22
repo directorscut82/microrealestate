@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
 import useFormatNumber from '../../hooks/useFormatNumber';
+import { terminateLease, unpaidAtTermination } from '../../utils/leaseArrears';
 
 const schema = z.object({
   tenantId: z.string().min(1),
@@ -36,6 +37,10 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
   const queryClient = useQueryClient();
   const formRef = useRef();
   const [writeOff, setWriteOff] = useState(false);
+  // What this window remembers between two presses of «Τερματισμός»: the tenant it
+  // has written off for, and the version its last write-off left that tenant at
+  // (utils/leaseArrears terminateLease says why).
+  const memory = useRef({ wroteOffFor: null, version: null });
   const formatNumber = useFormatNumber();
   const fmt = (n) => formatNumber(Number(n) || 0, 'currency', 2);
 
@@ -82,7 +87,7 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
     setValue,
     watch,
     reset,
-    formState: { errors }
+    formState: { errors, isSubmitting }
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: initialValues,
@@ -99,6 +104,17 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
   useEffect(() => {
     setWriteOff(false);
   }, [tenantId]);
+
+  // Closed by ANY route — «Ακύρωση», a finished termination, Esc, the ✕ — the window
+  // forgets what it remembered and unticks the box. Esc and ✕ go straight to the
+  // parent's setter and never reach handleClose below.
+  useEffect(() => {
+    if (!open) {
+      memory.current.wroteOffFor = null;
+      memory.current.version = null;
+      setWriteOff(false);
+    }
+  }, [open]);
 
   const tenants = useMemo(() => {
     if (tenantList) {
@@ -159,44 +175,20 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
       ? Number(moment(terminationDate).format('YYYYMM'))
       : null;
 
-    // `totalToPay` INCLUDES the carried `balance` from prior months, so summing
-    // it per month double-counts the same debt. Measured on live data: a naive
-    // sum reported 23.400 € where the real arrears were 3.600 € — a 6,5×
-    // overstatement, the same shape as the repair-panel figure that had to be
-    // withdrawn. The month's OWN net charge is `totalToPay − balance`; a payment
-    // first clears the carried balance and only the remainder touches this month.
-    const ownNetOwed = (r) => {
-      const own =
-        Math.round(
-          ((Number(r?.totalToPay) || 0) - (Number(r?.balance) || 0)) * 100
-        ) / 100;
-      if (!(own > 0)) return 0;
-      const paid = (r?.payments || []).reduce(
-        (s, pm) => s + (Number(pm?.amount) || 0),
-        0
-      );
-      const carried = Math.max(0, Number(r?.balance) || 0);
-      const appliedToOwn = Math.max(0, Math.round((paid - carried) * 100) / 100);
-      return Math.max(0, Math.round((own - appliedToOwn) * 100) / 100);
-    };
-
-    let keptMonths = 0;
-    let keptAmount = 0;
-    let droppedMonths = 0;
-    let droppedAmount = 0;
-
-    for (const r of rents) {
-      const owed = ownNetOwed(r);
-      if (owed <= 0.005) continue;
-      const rTerm = Math.floor(Number(r?.term || 0) / 10000);
-      if (cutTerm !== null && rTerm > cutTerm) {
-        droppedMonths += 1;
-        droppedAmount += owed;
-      } else {
-        keptMonths += 1;
-        keptAmount += owed;
-      }
-    }
+    // The ledger is read as ONE account, oldest month first (utils/leaseArrears).
+    // A row on its own cannot answer «is this month still unpaid?»:
+    //   · `totalToPay` includes what the month carried in, so adding rows up counts
+    //     the same debt again and again (measured on live data: 23.400 € shown for
+    //     3.600 € of real arrears);
+    //   · a month is usually settled through a payment recorded on a LATER month's
+    //     page — counting such a row offered to write off money already received;
+    //   · a month can be covered by a credit carried in from an earlier one —
+    //     counting such a row listed it as unpaid when nothing is owed on it.
+    const { kept, dropped } = unpaidAtTermination(rents, cutTerm);
+    const keptMonths = kept.months;
+    const keptAmount = kept.amount;
+    const droppedMonths = dropped.months;
+    const droppedAmount = dropped.amount;
 
     const guaranty = Number(tenant?.guaranty || 0);
     const alreadyRefunded = Number(guarantyPayback || tenant?.guarantyPayback || 0);
@@ -235,116 +227,32 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
     };
 
     try {
-      // Write off FIRST, then terminate. A `promo` on a payment becomes a
-      // settlement-origin discount (rentmanager.ts:1236), and Contract.update
-      // REPLAYS settlement discounts across the rebuild (contract.ts:184), so
-      // the write-off survives the truncation the termination then performs.
-      // Doing it after would be pointless: the months are already gone.
-      if (writeOff && outstanding.keptAmount > 0) {
-        const cut = Number(moment(tenantPart.terminationDate).format('YYYYMM'));
-        // Re-fetch rather than reuse the render-time ledger: the query may have
-        // been served from cache while the landlord had the dialog open, and a
-        // stale `payments` array here would be REPLACED onto disk (see below).
-        const fresh = await fetchTenantRents(tenant._id);
-        const ownNet = (r) => {
-          const own =
-            Math.round(
-              ((Number(r?.totalToPay) || 0) - (Number(r?.balance) || 0)) * 100
-            ) / 100;
-          if (!(own > 0)) return 0;
-          const paid = (r?.payments || []).reduce(
-            (s, pm) => s + (Number(pm?.amount) || 0),
-            0
-          );
-          const carried = Math.max(0, Number(r?.balance) || 0);
-          const applied = Math.max(0, Math.round((paid - carried) * 100) / 100);
-          return Math.max(0, Math.round((own - applied) * 100) / 100);
-        };
-
-        const openRents = (fresh?.rents || []).filter(
-          (r) =>
-            ownNet(r) > 0.005 &&
-            Math.floor(Number(r?.term || 0) / 10000) <= cut
-        );
-
-        for (const r of openRents) {
-          const owed = ownNet(r);
-          const term = String(r.term);
-          // The PATCH has REPLACE semantics — the payments array sent OVERWRITES
-          // what is on disk (rentmanager `_updateByTerm`), so existing payments
-          // must be echoed back verbatim or a partially-paid month loses its real
-          // payment (date/reference/allocation). Same trap as ImportTenantDialog L1.
-          const existing = (r.payments || [])
-            .filter((p) => Number(p?.amount) > 0)
-            .map((p) => ({
-              amount: Number(p.amount) || 0,
-              date: p.date || '',
-              type: p.type || 'transfer',
-              reference: p.reference || '',
-              description: p.description || '',
-              promo: Number(p.promo) || 0,
-              notepromo: p.notepromo || '',
-              extracharge: Number(p.extracharge) || 0,
-              noteextracharge: p.noteextracharge || '',
-              allocation: Array.isArray(p.allocation) ? p.allocation : []
-            }));
-
-          // The rent-level `promo` is honoured ONLY when no payment carries its
-          // own promo (rentmanager.ts:1240 `else if (paymentData.promo)`). On a
-          // month whose existing payment already has a promo, a rent-level promo
-          // is silently DROPPED — the write-off would report success and record
-          // nothing. So attach the write-off to a payment when any exists, and
-          // fall back to the rent level only for a month with no payments.
-          const anyPaymentPromo = existing.some((p) => p.promo > 0);
-          const note = t('Written off on lease termination');
-          const payment = {
-            _id: tenant._id,
-            month: Number(term.slice(4, 6)),
-            year: Number(term.slice(0, 4)),
-            description: r.description || '',
-            extracharge: 0,
-            noteextracharge: '',
-            promo: 0,
-            notepromo: ''
-          };
-          if (existing.length && anyPaymentPromo) {
-            // Add the write-off to the first payment's own promo so the
-            // per-payment branch carries it and the cap is respected.
-            payment.payments = existing.map((p, i) =>
-              i === 0
-                ? {
-                    ...p,
-                    promo: Math.round((p.promo + owed) * 100) / 100,
-                    notepromo: p.notepromo ? `${p.notepromo}; ${note}` : note
-                  }
-                : p
-            );
-          } else {
-            payment.payments = existing;
-            payment.promo = owed;
-            payment.notepromo = note;
-          }
-          await payRent({ term, payment });
+      // Write off first when the box is ticked, then terminate — one request per
+      // unpaid month, each from a fresh read of the ledger, and every request sent
+      // at the version this window knows the tenant at (utils/leaseArrears
+      // terminateLease).
+      await terminateLease({
+        tenant: updatedTenant,
+        writeOff: writeOff && outstanding.keptAmount > 0,
+        cutYearMonth: Number(
+          moment(tenantPart.terminationDate).format('YYYYMM')
+        ),
+        note: t('Written off on lease termination'),
+        memory: memory.current,
+        io: {
+          readLedger: () => fetchTenantRents(tenant._id),
+          record: payRent,
+          terminate: (body) => terminateMutation.mutateAsync(body)
         }
-
-        // Each write-off PATCH bumps the tenant's __v, which the terminate PATCH
-        // pins for its optimistic lock (occupantmanager.ts:1509 — a missing or
-        // stale __v is refused, by design). `updatedTenant` was built from the
-        // pre-write-off object, so after N months written off it is N versions
-        // behind and the termination died with "Update conflict: tenant was
-        // modified simultaneously" while the discounts had already landed —
-        // measured in the api log: 4x PATCH 200 then the 409. Re-read the fresh
-        // version before terminating.
-        const reread = await fetchTenantRents(tenant._id);
-        const freshVersion = Number(reread?.occupant?.__v);
-        if (Number.isFinite(freshVersion)) {
-          updatedTenant.__v = freshVersion;
-        }
-      }
-
-      await terminateMutation.mutateAsync(updatedTenant);
+      });
       handleClose();
     } catch (error) {
+      // Write-offs recorded before the failure are on the ledger. Refresh what this
+      // window (and the rents page behind it) shows, so a second attempt is made on
+      // the figures as they now stand and not on the ones from before it.
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.RENTS] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      queryClient.invalidateQueries({ queryKey: [QueryKeys.TENANTS] });
       const status = error?.response?.status;
       // The server's 422 here is ACTIONABLE — it names the months with recorded
       // payments that a termination would orphan ("Some payments will be lost
@@ -360,7 +268,18 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
         case 403:
           return toast.error(t('You are not allowed to update the tenant'));
         case 409:
-          return toast.error(t('Termination date is out of the contract time frame'));
+          // A 409 here is the optimistic lock, from a write-off or from the
+          // termination: the tenant's version is not the one this window knows. It
+          // was saved somewhere else since — or a write-off of this window was saved
+          // without the window learning the version it left (its answer never
+          // arrived, or named none); reloading is right in every case. (A date
+          // outside the lease is a 422 and shows the server's own text above; it
+          // used to be a 409, hence the old message here.)
+          return toast.error(
+            t(
+              'This tenant was changed by another window. Reload the page and try again.'
+            )
+          );
         default:
           return toast.error(t('Something went wrong'));
       }
@@ -371,7 +290,11 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
     <ResponsiveDialog
       open={!!open}
       setOpen={setOpen}
-      isLoading={terminateMutation.isPending}
+      // «Σε εξέλιξη» from the first write-off to the end, not only while the
+      // termination itself is sent: with the buttons still there, a second press
+      // started a second run, and «Ακύρωση» closed the window while the first went
+      // on to terminate the lease unseen.
+      isLoading={isSubmitting || terminateMutation.isPending}
       renderHeader={() => t('Terminate a lease')}
       renderContent={() => (
         <form ref={formRef} onSubmit={handleSubmit(_onSubmit)} autoComplete="off" className="w-full">
@@ -459,19 +382,6 @@ export default function TerminateLeaseDialog({ open, setOpen, tenant: tenantProp
                         )}
                       </span>
                     </label>
-                    {writeOff && (
-                      // Measured, not assumed: the discount settles each month it
-                      // is applied to, but the carried balance on LATER months is
-                      // deliberately not rebuilt (contract.ts:218 skips frozen
-                      // rents). Without this line the landlord ticks the box, sees
-                      // the same trailing total afterwards, and concludes the
-                      // write-off silently failed.
-                      <p className="text-label text-ink-muted pt-1.5">
-                        {t(
-                          "Each written-off month is settled, but the running balance carried by later months is not rebuilt — closed months are immutable in this app, so the tenant's trailing total may still show the old figure."
-                        )}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>

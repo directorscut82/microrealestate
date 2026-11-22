@@ -223,6 +223,15 @@ across multiple sessions.
 - Run the new spec via `yarn playwright test tests/<file>` against deployed NAS.
 - Every test must PASS, or be explicitly `test.fixme(...)` with a one-line
   reason naming WHAT infra is missing.
+- One more case: a test that pins a KNOWN app bug that is not fixed yet. It
+  asserts the CORRECT behaviour under `test.fail(true, '<what, watched when>')`,
+  so it runs every time: an expected failure while the bug reproduces, and
+  «expected to fail, but passed» (a red run) the day it is fixed. `test.fail` is
+  satisfied by ANY failure, so keep every click and every reading in ordinary
+  tests before it, give it a control that passes on the same screen, and let
+  the `test.fail` test do nothing but compare numbers already read. Remove the
+  `test.fail` in the change that fixes the bug. Today:
+  `69_bill_charge_closed_month.spec.ts` (spec 68 carried one until 2026-11).
 - If a test fails, classify before adding more tests:
   - **App bug** → fix the app code in the same PR.
   - **Spec infra missing** → BUILD THE INFRA FIRST (mongo backdoor seeder,

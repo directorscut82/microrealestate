@@ -211,23 +211,59 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
   //
   // Walk forward and recompute total.balance + grandTotal for every
   // non-frozen rent so its balance truly reflects the restored prior.
+  //
+  // A FROZEN (closed) rent keeps the carry-in it was billed with unless the rent
+  // before it is no longer the one it had, or no longer leaves the amount it did.
+  // That only happens when this update moved the lease window over months that are
+  // already over:
+  //   - a closed month that did not exist before (lease extended after its end had
+  //     passed, termination removed, begin moved earlier) was just built by create()
+  //     as if nothing had ever been paid — left alone, its carry-in is every euro
+  //     the tenant ever paid, shown as owed;
+  //   - a restored month that now follows such a month, or whose former predecessor
+  //     was dropped (begin moved later), still holds the old chain's carry-in.
+  // Every other recompute (expenses, units, sibling tenants, repairs) adds or drops
+  // no month, so it rewrites no closed month — not even one whose stored carry-in
+  // does not add up.
   const restoredRents = updatedContract.rents;
-  for (let i = 1; i < restoredRents.length; i++) {
+  // One entry per month, even if the stored list holds a month twice: a month listed
+  // twice would otherwise look as if it followed itself, and every recompute would
+  // rewrite it.
+  const termsBefore = Array.from(
+    new Set(
+      (inputContract.rents || [])
+        .map((rent) => rent.term)
+        .filter((term) => typeof term === 'number')
+    )
+  ).sort((a, b) => a - b);
+  const previousTermBefore = new Map<number, number | undefined>(
+    termsBefore.map((term, i) => [term, i > 0 ? termsBefore[i - 1] : undefined])
+  );
+  const leftUnpaidBefore = new Map<number, number>(
+    (inputContract.rents || []).map((rent) => [rent.term, _leftUnpaid(rent)])
+  );
+  for (let i = 0; i < restoredRents.length; i++) {
     const rent = restoredRents[i];
     if (!rent || !rent.total) continue;
-    if (_isFrozen(rent, currentTerm)) continue;
-    const prev = restoredRents[i - 1];
-    if (!prev || !prev.total) continue;
-    const prevDue = Number(prev.total.grandTotal) || 0;
-    const prevPaid = Number(prev.total.payment) || 0;
-    const newBalance = Math.round((prevDue - prevPaid) * 100) / 100;
-    const oldBalance = Number(rent.total.balance) || 0;
-    if (Math.abs(newBalance - oldBalance) < 0.005) continue;
-    // Re-derive grandTotal: subtract old balance, add new balance.
-    rent.total.balance = newBalance;
-    const oldGrandTotal = Number(rent.total.grandTotal) || 0;
-    rent.total.grandTotal =
-      Math.round((oldGrandTotal - oldBalance + newBalance) * 100) / 100;
+    const prev = i > 0 ? restoredRents[i - 1] : null;
+    if (_isFrozen(rent, currentTerm)) {
+      const hadSamePrevious =
+        previousTermBefore.get(rent.term) === (prev ? prev.term : undefined);
+      if (
+        hadSamePrevious &&
+        (!prev ||
+          Math.abs(
+            _leftUnpaid(prev) - (leftUnpaidBefore.get(prev.term) as number)
+          ) < 0.005)
+      ) {
+        continue;
+      }
+    }
+    // An open month always starts from what the month before it leaves: nothing, when
+    // there is no month before it or that row holds no totals. payTerm and 5_balance
+    // give the same answer; keeping create()'s figure here instead showed every euro
+    // the tenant had ever paid as owed.
+    _followPreviousRent(rent, prev);
   }
 
   return updatedContract;
@@ -285,6 +321,9 @@ export function payTerm(
     previousRentIndex > -1 ? contract.rents[previousRentIndex] : null;
   const targetTerm = Number(term);
   const currentTerm = _currentTermFor(contract);
+  // What each rent left unpaid BEFORE this walk touches anything (same index as
+  // contract.rents — the walk replaces rents in place, it never adds or drops one).
+  const leftUnpaidBefore = contract.rents.map(_leftUnpaid);
   contract.rents.forEach((rent, index) => {
     if (index > previousRentIndex) {
       // Freeze: a past term (paid OR unpaid) that is NOT the term being
@@ -295,6 +334,18 @@ export function payTerm(
       // loop forward; that walk must skip already-frozen rents instead
       // of overwriting their charges.
       if (rent.term !== targetTerm && _isFrozen(rent, currentTerm)) {
+        // What a closed term BILLED stays frozen. What it CARRIES IN is not a price:
+        // it is what the term before it left unpaid, so when a payment (or a
+        // write-off / extra charge) on an older term changes that, the closed terms
+        // after it must follow — otherwise the money stays owed on every later
+        // month for good. Only when the term before it actually moved: a closed term
+        // whose predecessor leaves what it always left is not touched.
+        if (
+          previousRent &&
+          Math.abs(_leftUnpaid(previousRent) - leftUnpaidBefore[index - 1]) >= 0.005
+        ) {
+          _followPreviousRent(rent, previousRent);
+        }
         previousRent = contract.rents[index];
         current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
         return;
@@ -397,8 +448,12 @@ function _freezeBilledCharges(billed: Rent, recomputed: Rent): Rent {
     (v) => v.origin === 'settlement'
   );
   out.vats = [..._.cloneDeep(billedContractVats), ...newSettlementVats];
-  // Carry-in balance is part of the billed bill — pin it to what was billed so
-  // a later upstream re-price can't retroactively change this closed month.
+  // The closed month being paid keeps the carry-in it is stored with. The recompute
+  // above read the month before it as it is stored (payTerm touches no month before
+  // the one being paid), so on a ledger whose carried balances add up the two are
+  // the same figure. On one that does not (written before carried balances followed:
+  // DEFERRED_DECISIONS D-8, «Not rebuilt») the stored figure stays. The months AFTER
+  // it are the ones that follow — see the walk in payTerm.
   if (out.total && billed.total) {
     out.total.balance = Number(billed.total.balance) || 0;
   }
@@ -449,6 +504,65 @@ function _freezeBilledCharges(billed: Rent, recomputed: Rent): Rent {
     ) / 100;
   out.total.grandTotal = Number.isFinite(grand) ? grand : 0;
   return out;
+}
+
+// What a rent leaves unpaid for the term after it; negative = the tenant is in credit.
+// The same arithmetic as businesslogic/tasks/5_balance.ts — on amounts that are
+// figures. One that is not (see _figure) counts as nothing here: read with Number()
+// it could be infinity, and a closed month following it was then written as infinity.
+// The answer is always a finite amount: figures so large that the arithmetic itself
+// overflows (1e307) leave nothing either.
+function _leftUnpaid(rent: Rent | null | undefined): number {
+  if (!rent || !rent.total) return 0;
+  const left =
+    Math.round(
+      ((_figure(rent.total.grandTotal) ?? 0) - (_figure(rent.total.payment) ?? 0)) *
+        100
+    ) / 100;
+  return Number.isFinite(left) ? left : 0;
+}
+
+// A stored amount is a figure when it is a finite number, or text that is nothing but a
+// plain decimal number and converts to one. `rents` is a Mixed array, so a row can hold
+// anything; Number() alone reads true, a blank text, an empty list or a date as amounts.
+function _figure(value: unknown): number | null {
+  const n =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\s*-?\d+(\.\d+)?\s*$/.test(value)
+        ? Number(value)
+        : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+// Point a rent's carry-in at what the previous rent left unpaid (nothing, when there is
+// no previous rent) and move grandTotal by the same amount, so the rent's OWN bill
+// (grandTotal − balance) is to the cent what it was. No line item is touched.
+// NOT floored at zero, on purpose: a negative carry-in is tenant credit — a floor here
+// would delete money the tenant paid (__tests__/expressCreditCarry.test.js).
+function _followPreviousRent(rent: Rent, previousRent: Rent | null): void {
+  if (!rent || !rent.total) return;
+  // A row whose total holds no figure (a damaged or very old row) is left exactly as
+  // stored: there is nothing to move, and inventing a total for a closed month would
+  // be worse than leaving it. A figure stored as text ("800") is a figure.
+  const storedTotal = _figure(rent.total.grandTotal);
+  if (storedTotal === null) return;
+  // Same for what it carries in — except that a row stored WITHOUT a carried balance
+  // carries nothing. Anything else that is not a figure read as «nothing carried»
+  // would put the amount it really carries onto the month's own bill a second time.
+  const rawCarryIn: unknown = rent.total.balance;
+  const storedCarryIn =
+    rawCarryIn === null || rawCarryIn === undefined || rawCarryIn === ''
+      ? 0
+      : _figure(rawCarryIn);
+  if (storedCarryIn === null) return;
+  const carryIn = _leftUnpaid(previousRent);
+  if (Math.abs(carryIn - storedCarryIn) < 0.005) return;
+  const total = Math.round((storedTotal - storedCarryIn + carryIn) * 100) / 100;
+  // Nothing is written to a month that is not a finite amount.
+  if (!Number.isFinite(total)) return;
+  rent.total.balance = carryIn;
+  rent.total.grandTotal = total;
 }
 
 // "Frozen" = a rent that must NOT be re-priced when expenses, properties,

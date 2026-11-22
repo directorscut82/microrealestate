@@ -32,10 +32,7 @@ import ConfirmDialog from '../ConfirmDialog';
 import { cn } from '../../utils';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
-import {
-  applyAllocation,
-  computeOwedLines
-} from '../../utils/paymentAllocation';
+import { owedLinesOf } from '../../utils/paymentAllocation';
 import { BUILDING_TYPE_LABEL_KEY } from '../../utils/lineLabels';
 import AllocationBlock from './AllocationBlock';
 import SavedPaymentEditForm from './SavedPaymentEditForm';
@@ -422,17 +419,14 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
   // see the discrepancy after submit. Reduce each line by what the
   // already-saved payments allocated to it before handing it to the
   // block.
-  const owedLines = useMemo(() => {
-    const baseLines = computeOwedLines(rent);
-    const savedAllocations = (savedPayments || [])
-      .flatMap((sp) =>
-        Array.isArray(sp?.allocation) ? sp.allocation : []
-      )
-      .filter((a) => a && Number(a.amount) > 0);
-    if (savedAllocations.length === 0) return baseLines;
-    const { remainingLines } = applyAllocation(baseLines, savedAllocations);
-    return remainingLines;
-  }, [rent, savedPayments]);
+  // Every euro already saved on the month counts, also when the line it was
+  // attributed to has since shrunk or gone, and when it carries no attribution
+  // at all (utils/paymentAllocation owedLinesOf — which also says why a month
+  // that bills VAT is listed as before).
+  const owedLines = useMemo(
+    () => owedLinesOf(rent, savedPayments),
+    [rent, savedPayments]
+  );
 
   const {
     register,

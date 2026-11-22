@@ -189,10 +189,14 @@ function _computeOwedLines(rent: AnyRecord): OwedLine[] {
 }
 
 /**
- * Express-settle NET owed for a rent, mirroring ExpressPaymentDialog exactly:
- *   monthly  = (grandTotal − balance)  [discount already netted into grandTotal]
- *   previous = balance (carry-in arrears)
- * then subtract what is ALREADY PAID (rent.total.payment), carry-in first then
+ * Express-settle NET owed for a rent, mirroring the drawer exactly
+ * (webapps/landlord/src/utils/expressOwed.js — keep the two in step):
+ *   monthly  = grandTotal − carried DEBT  [discount already netted into grandTotal]
+ *   previous = carried debt (carry-in arrears)
+ * A carried CREDIT (balance < 0) is not split off: it has already paid for part of
+ * the month, so it stays inside grandTotal and the month is asked only for the rest.
+ * Taking it out again recorded a payment nobody made on a month the credit covered.
+ * Then subtract what is ALREADY PAID (rent.total.payment), carry-in first then
  * monthly — so the express amount equals what the user saw in the dialog, NOT
  * the gross owed-line sum (which over-charged every discounted / partially-paid
  * tenant — round-1 H1/H6 + round-2 C1/C2). Pure + exported for unit tests.
@@ -203,7 +207,7 @@ export function _expressNetOwed(targetRent: AnyRecord): {
 } {
   const grandTotal = Number(targetRent?.total?.grandTotal) || 0;
   const balance = Number(targetRent?.total?.balance) || 0;
-  let monthlyOwed = Math.max(0, _round(grandTotal - balance));
+  let monthlyOwed = Math.max(0, _round(grandTotal - Math.max(0, balance)));
   let previousOwed = Math.max(0, _round(balance));
   let paidSoFar = Math.max(0, Number(targetRent?.total?.payment) || 0);
   if (paidSoFar > 0 && previousOwed > 0) {
@@ -567,6 +571,7 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
     term: string;
     amount: number;
     paymentData: AnyRecord;
+    snapshotVersion: number | undefined;
   } | null> = items.map((it: AnyRecord, idx: number) => {
     const tenantId = String(it.tenantId);
     const term = String(it.term);
@@ -674,7 +679,18 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
       extracharge: 0
     };
 
-    return { tenantId, term, amount, paymentData };
+    // The payments above are built from the copy of the tenant read at the top of
+    // this request, and _updateByTerm REPLACES the stored list with them. Keep the
+    // version of that copy so the write is refused (409) when the tenant was saved
+    // in between — otherwise _updateByTerm guards with its OWN later read, sees no
+    // conflict, and a payment recorded meanwhile is deleted.
+    return {
+      tenantId,
+      term,
+      amount,
+      paymentData,
+      snapshotVersion: tenant.__v
+    };
   });
 
   const live = writePlans.filter(
@@ -688,7 +704,9 @@ export async function bulkExpressPayment(req: ReqNoParams, res: Res) {
   // partial-skip message and the user can retry only the failed rows.
   const writeOutcomes = await Promise.allSettled(
     live.map((p) =>
-      _updateByTerm(authorizationHeader, locale, realm, p.term, p.paymentData)
+      _updateByTerm(authorizationHeader, locale, realm, p.term, p.paymentData, {
+        version: p.snapshotVersion
+      })
     )
   );
   const _liveErrorByKey = new Map<string, string>();
@@ -804,7 +822,10 @@ async function _updateByTerm(
   locale: string | undefined,
   realm: CollectionTypes.Realm | null | undefined,
   term: string,
-  paymentData: AnyRecord
+  paymentData: AnyRecord,
+  // Set by a SERVER caller that built `paymentData` from a tenant it read earlier
+  // in the same request (express): the version of that copy.
+  snapshot?: { version: number | undefined }
 ): Promise<AnyRecord> {
   if (!paymentData.promo || Number(paymentData.promo) <= 0) {
     paymentData.promo = 0;
@@ -835,7 +856,8 @@ async function _updateByTerm(
   // read the rent, tab B added a payment, tab A submits its old list → tab B's
   // payment silently deleted). When the client sends the __v it read with the
   // rent, reject a stale baseline up-front with 409 (opt-in — callers that
-  // omit __v keep the prior behavior; PaymentTabs/Express now send it). Mirrors
+  // omit __v keep the prior behavior; PaymentTabs sends it, express hands over
+  // the version of its own read as `snapshot`, checked just below). Mirrors
   // the tenant-PATCH E15 client-version round-trip.
   if (
     paymentData.__v !== undefined &&
@@ -844,6 +866,15 @@ async function _updateByTerm(
   ) {
     throw new ServiceError(
       'This tenant was modified since you loaded the page (a payment may have been recorded elsewhere). Reload and try again.',
+      409
+    );
+  }
+  // Same refusal for a server caller's snapshot. Unlike the check above this one also
+  // fires for "no version" against "a version": a tenant stored without __v gains one
+  // on its first save, and a snapshot taken before that save is just as stale.
+  if (snapshot && snapshot.version !== documentVersion) {
+    throw new ServiceError(
+      'This tenant was modified while the payment was being recorded (a payment may have been recorded elsewhere). Reload and try again.',
       409
     );
   }

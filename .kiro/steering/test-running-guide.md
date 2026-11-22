@@ -457,18 +457,33 @@ entry names the probe to re-run if you think you've found a counterexample.
 pointing at `:315` long after the function moved to `:472`, and two places in
 `documentation/DEFERRED_DECISIONS.md` copied that dead anchor. Cite the symbol.
 
-- **Past-month overpayment propagation** — `_isFrozen` is now purely
-  TERM-based (Tier I-1, commit `2ad674cc`): a future term is never frozen,
-  a PAST term is always frozen (paid OR unpaid), and the current term is
-  frozen only if fully paid. So an overpayment in a past month no longer
-  propagates forward — every past term is locked regardless of settlements
-  (the old "two regimes" in `documentation/DEFERRED_DECISIONS.md` D-8 have
-  collapsed). The `_isFrozen` function is at
-  `services/api/src/managers/contract.ts:472` (**was cited as `:315` here and in
-  two places in `documentation/DEFERRED_DECISIONS.md` — the file has grown since**;
-  `grep -n '_isFrozen' services/api/src/managers/contract.ts` rather than trusting
-  a line number). Its call sites are at `:172`, `:218`, `:297`, `:328`. This guard
-  is intentional and load-bearing.
+- **What a closed month BILLED is frozen; what it CARRIES IN is not** — `_isFrozen`
+  is purely TERM-based (Tier I-1, commit `2ad674cc`): a future term is never frozen,
+  a PAST term is always frozen (paid OR unpaid), and the current term is frozen only
+  if fully paid (`_isFullyPaid`). A frozen month's line items, payments and note are
+  never re-priced by a later edit. This guard is intentional and load-bearing: do not
+  thaw it.
+  Since 2026-11 (owner decision, `documentation/DEFERRED_DECISIONS.md` D-8) the
+  carried balance of a frozen month FOLLOWS the month before it, in two situations
+  only: a payment, write-off or extra charge saved on an older month (`payTerm`),
+  and lease dates edited so that closed months were added or removed in front of it
+  (`update`). Never floored at zero: an overpayment on an older month is a credit
+  for the months after it. Every other recompute leaves every closed month exactly
+  as stored (the exceptions are damaged rows that exist on no realm today, listed
+  under D-8). Before "fixing" a later month that moved after a payment on an older
+  one, read `contract-carry-through-closed-months.test.js`; before "fixing" a
+  negative «Προηγούμενο υπόλοιπο», read `expressCreditCarry.test.js`.
+  Find the functions with
+  `grep -n '_isFrozen\|_isFullyPaid\|_followPreviousRent' services/api/src/managers/contract.ts`
+  rather than trusting a line number (this entry once pointed at `:315` long after
+  the function had moved).
+  **One consequence of the freeze is still pinned as a known bug (2026-11-22):** a
+  bill charged to tenants for a closed month reaches no rent while the app reports
+  it charged (`tests/69_bill_charge_closed_month.spec.ts`, DEFERRED_DECISIONS D-10).
+  That spec ends in `test.fail` tests that assert the correct outcome: an expected
+  failure today, «expected to fail, but passed» once fixed. Do not delete those
+  tests as a wrong contract, and remove each `test.fail` in the change that fixes it
+  (spec 68 carried one until the carry fix shipped).
 - **`submittingRef` 80ms reset fallback** — load-bearing. It lives in
   `webapps/landlord/src/components/payment/NewPaymentDialog.js:79-94` (the
   OUTER dialog — `grep -rn submittingRef webapps/landlord/src` confirms it

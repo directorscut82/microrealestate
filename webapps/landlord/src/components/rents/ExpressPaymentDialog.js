@@ -8,6 +8,7 @@ import {
 import { useCallback, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
+import { expressOwed } from '../../utils/expressOwed';
 import NumberFormat from '../NumberFormat';
 import { QueryKeys } from '../../utils/restcalls';
 import { apiFetcher } from '../../utils/fetch';
@@ -39,37 +40,16 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
   const eligible = useMemo(() => {
     return (rents || [])
       .map((r) => {
-        // Wave-26 round-3s: convention in this codebase is
-        // `rent.balance > 0` means tenant has carry-in DEBT (arrears).
-        // Round-3r had this inverted; carryOwed was always 0 so the
-        // dialog never offered prior-balance rows.
-        const monthlyOwed = Math.max(
-          0,
-          Number(r.totalWithoutBalanceAmount) || 0
-        );
-        const carryOwed = Math.max(0, Number(r.balance) || 0);
-        // Subtract what's already been paid against monthly first.
-        // payment is the lump paid sum; allocate it conceptually:
-        // first to carry-in, then to monthly. Keeps the dialog from
-        // offering already-paid amounts.
-        let monthlyOwedRemaining = monthlyOwed;
-        let carryOwedRemaining = carryOwed;
-        let paid = Number(r.payment) || 0;
-        if (paid > 0 && carryOwedRemaining > 0) {
-          const used = Math.min(paid, carryOwedRemaining);
-          carryOwedRemaining -= used;
-          paid -= used;
-        }
-        if (paid > 0 && monthlyOwedRemaining > 0) {
-          const used = Math.min(paid, monthlyOwedRemaining);
-          monthlyOwedRemaining -= used;
-        }
+        // `rent.balance > 0` means the tenant carries DEBT in from earlier
+        // months; `< 0` is a credit. The split, the carry-first use of what is
+        // already paid, and the credit are all in utils/expressOwed.
+        const { monthly, carry } = expressOwed(r);
         return {
           tenantId: r._id,
           term: r.term,
           name: r.occupant?.name || '',
-          monthly: Math.round(monthlyOwedRemaining * 100) / 100,
-          carry: Math.round(carryOwedRemaining * 100) / 100
+          monthly,
+          carry
         };
       })
       .filter((row) => row.monthly > 0.005 || row.carry > 0.005);

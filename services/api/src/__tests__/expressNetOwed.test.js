@@ -5,10 +5,15 @@
  * ignoring (a) the standing lease discount and (b) any payment already made —
  * over-charging discounted/partially-paid tenants — and OVERWROTE existing
  * payments. _expressNetOwed mirrors ExpressPaymentDialog exactly:
- *   monthly  = (grandTotal − balance)   [discount already netted into grandTotal]
- *   previous = balance
+ *   monthly  = grandTotal − carried DEBT   [discount already netted into grandTotal]
+ *   previous = carried debt
  * minus already-paid (carry-in first, then monthly). These tests assert the
  * dialog and server agree (the bug was a server/dialog divergence).
+ *
+ * A carried CREDIT (balance < 0) is not a debt: it has already paid for part of the
+ * month and stays inside grandTotal. The drawer's side of the same rule is
+ * webapps/landlord/src/utils/expressOwed.js (creditAndCarryInTheWindows.test.js) —
+ * the cases below are the same cases, with the same answers.
  */
 import { jest } from '@jest/globals';
 
@@ -91,5 +96,49 @@ describe('_expressNetOwed (express settle = dialog)', () => {
       mkRent({ grandTotal: 500, payment: 650 })
     );
     expect(monthlyOwed).toBe(0);
+  });
+});
+
+describe('_expressNetOwed with a credit carried in (express settle = drawer)', () => {
+  // Same rows as «what the express drawer offers» in the landlord tests: a 400 bill.
+  it('a credit reduces what the month still needs', () => {
+    // 400 bill, 150 credit → grandTotal 250. It used to answer 400.
+    expect(_expressNetOwed(mkRent({ grandTotal: 250, balance: -150 }))).toEqual(
+      {
+        monthlyOwed: 250,
+        previousOwed: 0
+      }
+    );
+  });
+
+  it('a month the credit covers owes nothing', () => {
+    expect(_expressNetOwed(mkRent({ grandTotal: 0, balance: -400 }))).toEqual({
+      monthlyOwed: 0,
+      previousOwed: 0
+    });
+  });
+
+  it('a credit larger than the bill: nothing, never a negative amount', () => {
+    expect(
+      _expressNetOwed(mkRent({ grandTotal: -400, balance: -800 }))
+    ).toEqual({
+      monthlyOwed: 0,
+      previousOwed: 0
+    });
+  });
+
+  it('a credit and a part payment together', () => {
+    expect(
+      _expressNetOwed(mkRent({ grandTotal: 250, balance: -150, payment: 100 }))
+    ).toEqual({ monthlyOwed: 150, previousOwed: 0 });
+  });
+
+  it('a carried debt is still split off (unchanged)', () => {
+    expect(_expressNetOwed(mkRent({ grandTotal: 1200, balance: 800 }))).toEqual(
+      {
+        monthlyOwed: 400,
+        previousOwed: 800
+      }
+    );
   });
 });
