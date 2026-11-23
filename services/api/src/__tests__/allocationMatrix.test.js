@@ -335,7 +335,11 @@ describe('allocation matrix — absent representation (money with no row anywher
         description: 'ΚΟΙΝΟΧΡΗΣΤΑ',
         amount: 80,
         buildingName: 'ΟΔΟΣ ΑΛΦΑ 1',
-        type: 'cleaning_common'
+        type: 'cleaning_common',
+        // what the line is, whatever the building or the expense is called later
+        // (1_base.ts `_lineIds`)
+        propertyId: 'pA',
+        expenseId: 'exp-koinoxrista'
       }
     ]);
   });

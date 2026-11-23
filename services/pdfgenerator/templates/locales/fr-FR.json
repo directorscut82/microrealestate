@@ -12,6 +12,7 @@
   "Total without VAT": "Total HT",
   "Total before VAT": "Sous total HT",
   "Previous balance": "Solde antérieur",
+  "for {{month}}": "pour {{month}}",
   "Total with VAT": "Total TTC",
   "PAYMENT METHODS": "MODALITES DE PAIEMENT",
   "By bank transfer": "Par virement bancaire",

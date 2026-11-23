@@ -32,6 +32,22 @@ const EL_ACCUSATIVE = [
   'Δεκέμβριο'
 ];
 
+// After a noun — «το ενοίκιο Νοεμβρίου 2026», «η απόδειξη Ιουλίου» — the genitive.
+const EL_GENITIVE = [
+  'Ιανουαρίου',
+  'Φεβρουαρίου',
+  'Μαρτίου',
+  'Απριλίου',
+  'Μαΐου',
+  'Ιουνίου',
+  'Ιουλίου',
+  'Αυγούστου',
+  'Σεπτεμβρίου',
+  'Οκτωβρίου',
+  'Νοεμβρίου',
+  'Δεκεμβρίου'
+];
+
 /**
  * «<Month> <YYYY>» for a slot governed by a preposition that takes the
  * accusative (e.g. the el string «Έχει καταχωρηθεί για {{month}}»).
@@ -64,4 +80,23 @@ export function termMonthYearAccusative(term, lang) {
   const ym = String(term ?? '').slice(0, 6);
   const m = moment(ym, 'YYYYMM', true);
   return m.isValid() ? monthYearAccusative(m, lang) : '';
+}
+
+/**
+ * «<Month> <YYYY>» for a slot that follows a noun (the el string «χρεώθηκε στο
+ * ενοίκιο {{month}}» → «… στο ενοίκιο Νοεμβρίου 2026»): the genitive in Greek,
+ * moment's own month name everywhere else. From a YYYYMMDDHH rent term; ''
+ * for an unparseable one.
+ *
+ * @param {number|string} term
+ * @param {string} lang
+ * @returns {string}
+ */
+export function termMonthYearGenitive(term, lang) {
+  const ym = String(term ?? '').slice(0, 6);
+  const m = moment(ym, 'YYYYMM', true);
+  if (!m.isValid()) return '';
+  return lang === 'el'
+    ? `${EL_GENITIVE[m.month()]} ${m.format('YYYY')}`
+    : m.format('MMMM YYYY');
 }

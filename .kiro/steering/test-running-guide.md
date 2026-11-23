@@ -320,6 +320,25 @@ an untracking can each do it — but it is never a pass either: find out which o
 
 **Mock-factory trap — a factory that spreads `...real` still carries the real singletons.** A `jest.unstable_mockModule('@microrealestate/common', () => ({ ...real, Collections: fake }))` looks conservative but leaks the genuine `Service` singleton. The suite stays green until *a later, unrelated commit* adds a `Service.getInstance()` call to an exercised path — then it breaks with an error that points at the new commit, not at the mock. (Hit in `mediumBatch.test.js`, 2026-07.) Enumerate the exports the code-under-test actually imports and mock each explicitly. Same root cause as the `ShareBasis` breakage noted in CLAUDE.md: **a factory mock must provide EVERY export the module under test imports**, or you get `SyntaxError: does not provide an export named 'X'`.
 
+### A new schema field needs a rebuilt shared library
+
+`services/api` loads the Mongoose schemas from `services/common/dist`, not from
+`services/common/src`. The schemas are strict: a field the BUILT schema does not
+declare is dropped on save without an error. So after adding a field to a collection:
+
+- rebuild the library before running anything that saves (`yarn lint` does it, the
+  commit hook included; `tsc --noEmit` does not), and restart a running api;
+- write one test that puts the field through the REAL model
+  (`new Collections.X({...}).toObject()`), next to the plain-object tests.
+
+Watched on 2026-11-23: a new mark on building rows (`carry`) was set by the statement
+save and never stored, because the local api ran a `dist` from before the field
+existed. Every unit test was green — they exercise plain objects — and the feature
+did nothing. The first end-to-end run on the laptop caught it; `chargeCarry.test.js`
+(«the mark on a building row, through the real schema») now pins it. CI and the
+images build `types → common → api` in order, so a deploy is not affected; a laptop
+is.
+
 ### Mutation-test your own regression tests
 
 A new test that passes proves nothing — it may be asserting something that was already true, or nothing at all. Before claiming a test covers a fix: **break the fix on purpose and confirm the test fails, and that the RIGHT subset fails.**
@@ -477,13 +496,14 @@ pointing at `:315` long after the function moved to `:472`, and two places in
   `grep -n '_isFrozen\|_isFullyPaid\|_followPreviousRent' services/api/src/managers/contract.ts`
   rather than trusting a line number (this entry once pointed at `:315` long after
   the function had moved).
-  **One consequence of the freeze is still pinned as a known bug (2026-11-22):** a
-  bill charged to tenants for a closed month reaches no rent while the app reports
-  it charged (`tests/69_bill_charge_closed_month.spec.ts`, DEFERRED_DECISIONS D-10).
-  That spec ends in `test.fail` tests that assert the correct outcome: an expected
-  failure today, «expected to fail, but passed» once fixed. Do not delete those
-  tests as a wrong contract, and remove each `test.fail` in the change that fixes it
-  (spec 68 carried one until the carry fix shipped).
+  **A share of a building charge for a closed month is NOT added to that month** —
+  it is billed on the tenant's next open month, as a line that says which month it
+  is for (2026-11-23, DEFERRED_DECISIONS D-10; `1_base.ts` `_carriedInto`,
+  `tests/69_bill_charge_closed_month.spec.ts`). Before that it reached no rent at
+  all. Do not "fix" the line by moving it back to its own month, and do not store
+  the month it is billed on: where it is billed is worked out from the ledger every
+  time, on purpose (`building-charge-carried.test.js` says what a stored month
+  broke).
 - **`submittingRef` 80ms reset fallback** — load-bearing. It lives in
   `webapps/landlord/src/components/payment/NewPaymentDialog.js:79-94` (the
   OUTER dialog — `grep -rn submittingRef webapps/landlord/src` confirms it

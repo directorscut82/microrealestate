@@ -457,6 +457,32 @@ export async function tenantSharesFor(
   return shares;
 }
 
+/**
+ * Save a building's statement for one month through the API, with one figure for its
+ * expense — what the «Έξοδα» panel sends when the figure is typed and saved. Returns
+ * what the app answers about each tenant's share (`statementOutcome`).
+ */
+export async function saveStatement(
+  request: APIRequestContext,
+  seed: LeaseSeed,
+  building: BillBuilding,
+  term: number,
+  amount: number
+): Promise<ShareOutcome[]> {
+  const r = await request.post(
+    `${GATEWAY}/api/v2/buildings/${building.buildingId}/monthly-statement`,
+    {
+      headers: auth(seed),
+      data: { term, expenses: [{ expenseId: building.expenseId, amount }] }
+    }
+  );
+  expect(
+    r.status(),
+    `statement of ${term} saved with ${amount}: ${await r.text().catch(() => '')}`
+  ).toBe(200);
+  return ((await r.json()).statementOutcome || []) as ShareOutcome[];
+}
+
 // ── synthetic bills ─────────────────────────────────────────────────────────────
 
 /**
@@ -652,6 +678,116 @@ export function chargeSwitchLabel(month: MonthRef): string {
 }
 
 /**
+ * «για Οκτώβριο 2026» — how a share that is billed on a later month than the one it is
+ * for is marked, on the rent («… · για Οκτώβριο 2026») and on the building's page.
+ */
+export function forMonthLabel(month: MonthRef): string {
+  return `για ${EL_ACCUSATIVE[month.month - 1]} ${month.year}`;
+}
+
+// After a noun («το ενοίκιο Νοεμβρίου») — the genitive (utils/greekMonths.js).
+const EL_GENITIVE = [
+  'Ιανουαρίου',
+  'Φεβρουαρίου',
+  'Μαρτίου',
+  'Απριλίου',
+  'Μαΐου',
+  'Ιουνίου',
+  'Ιουλίου',
+  'Αυγούστου',
+  'Σεπτεμβρίου',
+  'Οκτωβρίου',
+  'Νοεμβρίου',
+  'Δεκεμβρίου'
+];
+
+/** «✓ χρεώθηκε στο ενοίκιο Νοεμβρίου 2026» — the building page, for a share that moved. */
+export function chargedOnRentOf(month: MonthRef): string {
+  return `✓ χρεώθηκε στο ενοίκιο ${EL_GENITIVE[month.month - 1]} ${month.year}`;
+}
+
+/**
+ * The lines of the box that opens when the pointer rests on a tenant's «Μηνιαίο ποσό»
+ * on the rents page that is open: what that month's own bill is made of, one
+ * `label amount` per line, as the landlord reads them.
+ */
+export async function monthlyBreakdownOf(
+  page: Page,
+  tenantName: string
+): Promise<string[]> {
+  const trigger = rentRow(page, tenantName)
+    .locator('div.cursor-default')
+    .first();
+  await expect(
+    trigger,
+    `«Μηνιαίο ποσό» of ${tenantName} has a breakdown to show`
+  ).toHaveCount(1, { timeout: 60_000 });
+  await trigger.hover();
+  const box = page.locator('[role=tooltip]').first();
+  await expect(box, 'the breakdown box').toBeVisible({ timeout: 15_000 });
+  // One row of the box per line of the bill: its label, then its amount. Read row by
+  // row, not by pairing up the lines of the text: the label of a share carried in from
+  // another month is in two parts (the name, which may be cut short, and «· για
+  // Οκτώβριο 2026», which never is), so it does not arrive as one line.
+  const rows = await box
+    .locator('div.flex.justify-between')
+    .evaluateAll((els) =>
+      els.map((el) =>
+        ((el as HTMLElement).innerText || '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      )
+    );
+  // move away, so the box does not cover the next thing the spec reads
+  await page.mouse.move(2, 2);
+  return rows.filter(Boolean);
+}
+
+/**
+ * Open a building's «Έξοδα» for one month and wait for its «Χρεώσεις» table: the
+ * calendar button of that month, then the table's own request.
+ */
+export async function openBuildingMonth(
+  page: Page,
+  realmName: string,
+  buildingId: string,
+  month: MonthRef
+): Promise<void> {
+  await page.goto(`el/${enc(realmName)}/buildings/${buildingId}`);
+  await page.locator('[data-cy=expensesTab]').click();
+  const answered = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/expense-breakdown?term=${month.term}`) &&
+      r.request().method() === 'GET',
+    { timeout: 60_000 }
+  );
+  await page.locator(`[data-cy="expenseMonth-${month.term}"]`).click();
+  expect((await answered).status(), '«Χρεώσεις» of the month').toBe(200);
+}
+
+/**
+ * What the «Χρεώσεις» table of the building page that is open says about where each
+ * tenant share was really charged: one `[colour, text]` per line, top to bottom.
+ */
+export async function shareBillingLines(
+  page: Page
+): Promise<Array<[string, string]>> {
+  return page
+    .locator('[data-cy=shareBilling]')
+    .evaluateAll((els) =>
+      els.map((e) => [
+        e.className.includes('text-olive')
+          ? 'olive'
+          : e.className.includes('text-oxide')
+            ? 'oxide'
+            : 'none',
+        (e.textContent || '').replace(/\u00a0/g, ' ').trim()
+      ])
+    ) as Promise<Array<[string, string]>>;
+}
+
+/**
  * Record a payment for a tenant on the rents page that is open, through the payment
  * window: the cash-register button on the row, «Νέα καταβολή», the amount, «Εκτέλεση».
  * Returns once the app's own request has answered 200 and the row shows the payment.
@@ -744,6 +880,20 @@ export async function removeSavedPayment(
     .toBe(0);
 }
 
+/** Where one tenant's share of a bill ended up, as the app reads it back from the rents. */
+export interface ShareOutcome {
+  tenantName: string;
+  /** The month the share is for. */
+  term: number;
+  amount: number;
+  /** `billed` on its own month, `moved` to a later one, `notCharged`, or `missing`. */
+  status: string;
+  /** The month whose rent holds it. */
+  billedTerm: number | null;
+  billedAmount: number | null;
+  reason?: string;
+}
+
 export interface ConfirmedBill {
   _id: string;
   term: number;
@@ -751,6 +901,7 @@ export interface ConfirmedBill {
   charged?: boolean;
   chargeError?: string;
   saveFailed?: boolean;
+  chargeOutcome?: ShareOutcome[];
 }
 
 /**

@@ -66,7 +66,7 @@ export function RentAmount({
 }
 
 export default function RentDetails({ rent }) {
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
 
   const rentAmounts = getRentAmounts(rent);
   const buildingNonRepair = rentAmounts.buildingCharges.filter(
@@ -122,7 +122,7 @@ export default function RentDetails({ rent }) {
           {buildingNonRepair.map((charge, i) => (
             <div key={`bc-${i}`} className="flex justify-between text-sm">
               <span className="text-muted-foreground">
-                {buildingLineLabel(t, charge)}
+                {buildingLineLabel(t, charge, lang)}
               </span>
               <NumberFormat value={charge.amount} />
             </div>
@@ -139,7 +139,7 @@ export default function RentDetails({ rent }) {
           {buildingRepair.map((charge, i) => (
             <div key={`rp-${i}`} className="flex justify-between text-sm">
               <span className="text-muted-foreground">
-                {buildingLineLabel(t, charge)}
+                {buildingLineLabel(t, charge, lang)}
               </span>
               <NumberFormat value={charge.amount} />
             </div>

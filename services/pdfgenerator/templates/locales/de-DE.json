@@ -12,6 +12,7 @@
   "Total without VAT": "Gesamtbetrag ohne MWST",
   "Total before VAT": "Gesamtbetrag vor MWST",
   "Previous balance": "Vorheriger Saldo",
+  "for {{month}}": "für {{month}}",
   "Total with VAT": "Gesamtbetrag mit MWST",
   "PAYMENT METHODS": "ZAHLUNGSARTEN",
   "By bank transfer": "Per Banküberweisung",

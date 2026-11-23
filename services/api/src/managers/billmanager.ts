@@ -164,7 +164,7 @@ async function bridgeChargeToStatement(
   term: number,
   amount: number,
   description: string
-): Promise<void> {
+): Promise<unknown[]> {
   const building: any = await Collections.Building.findOne({
     _id: buildingId,
     realmId
@@ -193,7 +193,7 @@ async function bridgeChargeToStatement(
     'administrator',
     realmId
   );
-  await axios.post(
+  const saved = await axios.post(
     `http://localhost:${port}/api/v2/buildings/${buildingId}/monthly-statement`,
     { term, expenses },
     {
@@ -203,6 +203,13 @@ async function bridgeChargeToStatement(
       },
       timeout: 30_000
     }
+  );
+  // What became of THIS bill's shares, tenant by tenant, as the statement save read it
+  // back from their rents (buildingmanager saveMonthlyStatement, `statementOutcome`).
+  // The statement holds every expense of the month; a bill answers for its own.
+  const outcome: unknown = saved?.data?.statementOutcome;
+  return (Array.isArray(outcome) ? outcome : []).filter(
+    (o: any) => o && String(o.expenseId) === String(expenseId)
   );
 }
 
@@ -1497,6 +1504,8 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
       // tracking record. Best-effort: the Bill exists regardless; the charge can
       // be retried from the building's monthly statement.
       let chargeError: string | undefined;
+      // where each tenant's share of this bill ended up (see bridgeChargeToStatement)
+      let chargeOutcome: unknown[] = [];
       if (chargeThisMonth) {
         try {
           // THE FIX. This split ΠΛΗΡΩΤΕΟ, so on a bill carrying a prior balance the
@@ -1509,7 +1518,7 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
             chargeableAmount === undefined || chargeableAmount === null
               ? Number(totalAmount)
               : Number(chargeableAmount);
-          await bridgeChargeToStatement(
+          chargeOutcome = await bridgeChargeToStatement(
             realmId,
             buildingId,
             expenseId,
@@ -1535,7 +1544,12 @@ export async function confirmBills(req: Req, res: Res): Promise<void> {
         chargeError
           ? { ...bill.toObject(), chargeRequested: true, chargeError }
           : chargeThisMonth
-            ? { ...bill.toObject(), chargeRequested: true, charged: true }
+            ? {
+                ...bill.toObject(),
+                chargeRequested: true,
+                charged: true,
+                chargeOutcome
+              }
             : bill.toObject()
       );
     } catch (err: any) {

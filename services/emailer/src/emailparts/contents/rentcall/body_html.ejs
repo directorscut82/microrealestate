@@ -27,7 +27,7 @@
             <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%= item.description %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(item.amount, 'currency') %></td></tr>
             <% }); %>
             <% (rent.buildingCharges || []).forEach(function(item) { %>
-            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%= item.buildingName ? item.buildingName + ' - ' : '' %><%= item.description %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(item.amount, 'currency') %></td></tr>
+            <tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><%= item.buildingName ? item.buildingName + ' - ' : '' %><%= item.description %><% if (Number.isInteger(item.forTerm) && _.formatTermFor(item.forTerm)) { %> · <%= _.t('for {{month}}', { month: _.formatTermFor(item.forTerm) }) %><% } %></td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;"><%- _.formatNumber(item.amount, 'currency') %></td></tr>
             <% }); %>
             <%# Round-2 audit M3: reconcile the table to the bold Total. The
                 listed lines above are PRE-TAX; without these rows the visible

@@ -11,6 +11,25 @@ i18n.configure({
   updateFiles: false
 });
 
+// Greek month names in the ACCUSATIVE — the case «για» governs («για Οκτώβριο 2026»).
+// moment's `el` locale gives the nominative («Οκτώβριος») or, next to a day number, the
+// genitive («Οκτωβρίου»); neither is right after «για». The landlord app keeps the same
+// list in webapps/landlord/src/utils/greekMonths.js.
+const EL_ACCUSATIVE_MONTHS = [
+  'Ιανουάριο',
+  'Φεβρουάριο',
+  'Μάρτιο',
+  'Απρίλιο',
+  'Μάιο',
+  'Ιούνιο',
+  'Ιούλιο',
+  'Αύγουστο',
+  'Σεπτέμβριο',
+  'Οκτώβριο',
+  'Νοέμβριο',
+  'Δεκέμβριο'
+];
+
 export default function ({ locale, currency }: { locale: string; currency: string }) {
   moment.locale(locale);
   i18n.setLocale(locale);
@@ -18,6 +37,19 @@ export default function ({ locale, currency }: { locale: string; currency: strin
   return {
     t: (...params: Parameters<typeof i18n.__>) => {
       return i18n.__(...params);
+    },
+    // «<month> <year>» for the slot after «for»/«για»: a building-charge line billed on
+    // a later month says which month it is FOR («… · για Οκτώβριο 2026»). '' when the
+    // term is not a month, so a caller never prints today's month by accident.
+    formatTermFor: (termTxt: string | number): string => {
+      const term = moment(String(termTxt), 'YYYYMMDDHH', true);
+      if (!term.isValid()) {
+        return '';
+      }
+      if (locale === 'el' || locale.startsWith('el-')) {
+        return `${EL_ACCUSATIVE_MONTHS[term.month()]} ${term.format('YYYY')}`;
+      }
+      return term.format('MMMM YYYY');
     },
     formatNumber: (value: number, style = 'decimal', minimumFractionDigits = 2): string => {
       if (['currency', 'decimal'].includes(style)) {

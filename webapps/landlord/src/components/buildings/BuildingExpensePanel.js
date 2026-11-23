@@ -28,6 +28,8 @@ import useFormatNumber from '../../hooks/useFormatNumber';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
 import moment from 'moment';
+import { forMonthSuffix } from '../../utils/lineLabels';
+import { termMonthYearGenitive } from '../../utils/greekMonths';
 import { isVariableExpense } from '../../utils/variableExpense';
 import { billTermIsOutsideExpense } from '../../utils/billTerm';
 import BillSourceDialog from './BillSourceDialog';
@@ -391,7 +393,7 @@ function ExpenseRow({ row, value, onChange, onSave, saving, t, bill, onOpenBill 
 }
 
 export default function BuildingExpensePanel({ building }) {
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
   // Locale-aware money formatting for the warning text below (the rest of the panel
   // renders amounts through <NumberFormat/>, which is not usable inside a t() value).
   const formatNumber = useFormatNumber();
@@ -458,13 +460,6 @@ export default function BuildingExpensePanel({ building }) {
     []
   );
   const isPastTerm = Number(selectedTerm) < Number(currentTerm);
-  // Contract._isFrozen ALSO freezes the CURRENT term once a tenant's rent for it
-  // is fully paid (contract.ts:475 -> _isFullyPaid), so the phantom-receivable
-  // case is not past-only — settling this month then entering a late κοινόχρηστα
-  // figure hits it, which is the likeliest real sequence. Per-tenant paid status
-  // is not in the breakdown payload, so rather than assert a certainty we cannot
-  // compute, the current month carries a conditional note.
-  const isCurrentTerm = Number(selectedTerm) === Number(currentTerm);
   const [visibleYear, setVisibleYear] = useState(() =>
     moment().format('YYYY')
   );
@@ -732,6 +727,7 @@ export default function BuildingExpensePanel({ building }) {
               key={i}
               disabled={isFuture}
               onClick={() => setSelectedTerm(term)}
+              data-cy={`expenseMonth-${term}`}
               className={cn(
                 'relative px-2 py-1.5 text-xs rounded-md transition-all duration-150 border border-transparent',
                 isSelected
@@ -769,12 +765,12 @@ export default function BuildingExpensePanel({ building }) {
         </span>
       </div>
 
-      {/* A past month is CLOSED for tenant billing: Contract.update clones every
-          rent with term < currentTerm verbatim (contract.ts:152), so a charge
-          saved here persists and RENDERS in the breakdown below but can never
-          reach a rent bill — a phantom receivable. saveMonthlyStatement has no
-          frozen-term guard (the repair path has one, _assertChargeTermNotFrozen).
-          Owner-side entries are unaffected, so this warns rather than blocks. */}
+      {/* A past month is CLOSED for tenant billing: its rents are never priced
+          again (contract.ts _isFrozen). A tenant share saved for it is billed on
+          that tenant's NEXT OPEN month instead, as a line that says which month it
+          is for (1_base.ts _carriedInto, DEFERRED_DECISIONS D-10) — and the
+          breakdown below says, share by share, where it was really charged
+          (read back from the tenants' rents). Owner-side entries are unaffected. */}
       {isPastTerm && (
         <div className="mb-4 rounded-md border border-oxide/40 bg-oxide-tint/40 p-3 text-sm text-ink">
           <div className="font-medium">
@@ -784,15 +780,8 @@ export default function BuildingExpensePanel({ building }) {
           </div>
           <div className="mt-1 text-label text-ink-muted">
             {t(
-              'A tenant charge saved for a past month is not added to any rent — it will show in the breakdown below but bill nobody. Enter it in the current month instead. Owner charges are not affected.'
+              'The share of each tenant for this month goes on their next open rent and says which month it is for. The table shows where each one was charged. Owner charges are not affected.'
             )}
-      {isCurrentTerm && (
-        <div className="mb-4 rounded-md border border-stone-line bg-muted/40 p-3 text-sm text-ink-muted">
-          {t(
-            'If a tenant has already paid this month in full, their month is closed too — a charge added now will not reach that tenant. Check before entering a late figure.'
-          )}
-        </div>
-      )}
           </div>
         </div>
       )}
@@ -874,6 +863,7 @@ export default function BuildingExpensePanel({ building }) {
           building={building}
           term={selectedTerm}
           t={t}
+          lang={lang}
         />
       </div>
     </div>
@@ -1195,6 +1185,73 @@ function lineLabel(t, it) {
   return sk ? `${base} — ${t(sk)}` : base;
 }
 
+// «για Οκτώβριο 2026», on a line of its own under the label, for a tenant share
+// that is billed on this month's rent although it is FOR an earlier month (that
+// month was closed for the tenant when the bill arrived). The words are the rent
+// line's («… · για Οκτώβριο 2026», lineLabels.js); here they get their own line so
+// that the label column keeps the width it has on every other month — joined to the
+// label they pushed the calculation next to it onto two lines.
+function ForMonthLine({ it, t, lang }) {
+  const month = forMonthSuffix(t, it, lang).replace(/^\s*·\s*/, '');
+  if (!month) return null;
+  return (
+    <span
+      className="block pl-3.5 text-label text-ink-soft"
+      data-cy="shareForMonth"
+    >
+      {month}
+    </span>
+  );
+}
+
+// Where a tenant share of this month was REALLY charged, when that is not simply
+// this month's rent at the amount shown (`it.billing`, read back from the tenants'
+// rents by the server: chargecarry.ts placeTenantShares). One line per tenant who
+// held the unit that month — almost always one:
+//   moved      → ✓ χρεώθηκε στο ενοίκιο Νοεμβρίου 2026   (olive; a later month's rent)
+//   billed     → ✓ χρεώθηκε στο ενοίκιο Οκτωβρίου 2026   (olive; this month's rent —
+//                 said only when something else on the row has to be said: another
+//                 tenant of the unit was NOT billed here, or the rent holds another
+//                 amount than the one shown)
+//   notCharged → ⚠ δεν χρεώθηκε, η μίσθωση έχει λήξει    (oxide; the lease ended)
+//              → ⚠ δεν χρεώθηκε                           (oxide; any other reason,
+//                 and a share that should be on a rent and is not yet)
+// When the rent holds another amount than the share shown on this row — the figure
+// was changed after that rent was closed, and a closed rent is never rewritten — the
+// amount that WAS charged follows in brackets.
+// Status colour is always paired with its glyph and its words (DESIGN.md).
+function BillingLines({ billing, amount, t, lang, formatNumber }) {
+  if (!Array.isArray(billing) || billing.length === 0) return null;
+  return billing.map((b, i) => {
+    const moved =
+      (b.status === 'moved' || b.status === 'billed') && b.billedTerm;
+    const otherAmount =
+      moved &&
+      Number.isFinite(Number(b.billedAmount)) &&
+      b.billedAmount !== null &&
+      Math.abs(Number(b.billedAmount) - Number(amount)) >= 0.005;
+    const text = moved
+      ? t('charged on the rent of {{month}}', {
+          month: termMonthYearGenitive(b.billedTerm, lang)
+        })
+      : b.status === 'notCharged' && b.reason === 'leaseEnded'
+        ? t('not charged, the lease has ended')
+        : t('not charged');
+    return (
+      <span
+        key={i}
+        className={cn('block', moved ? 'text-olive' : 'text-oxide')}
+        data-cy="shareBilling"
+      >
+        {moved ? '✓ ' : '⚠ '}
+        {text}
+        {otherAmount ? ` (${formatNumber(Number(b.billedAmount))})` : ''}
+        {billing.length > 1 && b.tenantName ? ` (${b.tenantName})` : ''}
+      </span>
+    );
+  });
+}
+
 // Grid 18·4 row emitter: returns the <tr>s for ONE unit — a bold header row plus
 // one row per expense line (color-dot + «Τύπος (Όνομα) — είδος» | FULL allocation
 // calc | amount). A line on a co-owned unit (it.owners.length > 1) expands into
@@ -1202,7 +1259,17 @@ function lineLabel(t, it) {
 // («9,09 € × 50% = 4,55 €») and that owner's € — the user's directive: no name
 // in the header, the breakdown spelled out per owner. A vacant-share line shows
 // a ΚΕΝΟ pill. `tone` alternates the unit-block background.
-function UnitRows({ header, total, items, tone, gap, seq, t, formatNumber }) {
+function UnitRows({
+  header,
+  total,
+  items,
+  tone,
+  gap,
+  seq,
+  t,
+  lang,
+  formatNumber
+}) {
   // ONE uniform 1px border on EVERY cell — no exceptions. (The earlier version
   // mixed border widths / opacity / border-b-0 under border-collapse → uneven
   // doubled hairlines.) Unit separation (user-selected variant 7): a numbered
@@ -1251,6 +1318,7 @@ function UnitRows({ header, total, items, tone, gap, seq, t, formatNumber }) {
                   aria-hidden="true"
                 />
                 {lineLabel(t, it)}
+                <ForMonthLine it={it} t={t} lang={lang} />
               </td>
               {/* Calc: smallest, most muted — the explanation, not the answer. */}
               <td className={cn(cell, 'text-label text-ink-muted/75 tabular-nums leading-snug')}>
@@ -1260,6 +1328,13 @@ function UnitRows({ header, total, items, tone, gap, seq, t, formatNumber }) {
                     {repairVacantShareLine(t, it.basis, formatNumber)}
                   </span>
                 )}
+                <BillingLines
+                  billing={it.billing}
+                  amount={it.amount}
+                  t={t}
+                  lang={lang}
+                  formatNumber={formatNumber}
+                />
               </td>
               <td className={cn(cell, 'text-right tabular-nums text-ink-soft whitespace-nowrap')}>
                 <NumberFormat value={it.amount} />
@@ -1307,7 +1382,8 @@ function truncateAtak(atak) {
   return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
 
-function ChargeBreakdown({ breakdown, building, term, t }) {
+// (exported for src/__tests__/buildingPageShares.test.jsx)
+export function ChargeBreakdown({ breakdown, building, term, t, lang }) {
   const [showUncollected, setShowUncollected] = useState(false);
   // Vacant-units-billed-to-owner section is COLLAPSED by default: in a building
   // with many identical vacant units it was a wall of repeated rows (the user's
@@ -1368,18 +1444,23 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
   }
 
   // Group renter rows by property so each apartment shows its renter + the
-  // expenses charged to them.
+  // expenses charged to them. A share billed on this month for an EARLIER month
+  // (r.forTerm) sits with the unit's rows when the unit's tenant is the one
+  // billed; a tenant who has since left the unit gets a group of their own
+  // (the server says which: r.groupKey).
   const byProperty = new Map();
   for (const r of renterRows) {
-    if (!byProperty.has(r.propertyId)) {
-      byProperty.set(r.propertyId, {
+    const key = r.groupKey || r.propertyId;
+    if (!byProperty.has(key)) {
+      byProperty.set(key, {
+        propertyId: r.propertyId,
         propertyName: r.propertyName,
         recipientName: r.recipientName,
         items: [],
         total: 0
       });
     }
-    const g = byProperty.get(r.propertyId);
+    const g = byProperty.get(key);
     g.items.push(r);
     g.total += r.amount;
   }
@@ -1482,7 +1563,7 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
               </td>
             </tr>
           )}
-          {Array.from(byProperty.entries()).map(([propertyId, g], gi) => (
+          {Array.from(byProperty.values()).map((g, gi) => (
             <UnitRows
               key={`p-${gi}`}
               gap={gi > 0}
@@ -1495,13 +1576,14 @@ function ChargeBreakdown({ breakdown, building, term, t }) {
                     {g.recipientName ? ` — ${g.recipientName}` : ''}
                   </span>
                   <span className="ml-2 font-normal text-label text-ink-muted">
-                    {atakSuffix(propertyId)}
+                    {atakSuffix(g.propertyId)}
                   </span>
                 </>
               }
               total={g.total}
               items={g.items}
               t={t}
+              lang={lang}
               formatNumber={formatNumber}
             />
           ))}

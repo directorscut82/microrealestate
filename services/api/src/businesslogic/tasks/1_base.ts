@@ -1,5 +1,7 @@
 import type { CollectionTypes } from '@microrealestate/types';
 import { logger, OwnerStatement, ShareBasis as ShareBasisUtil } from '@microrealestate/common';
+import { coverRows } from '../carriedshares.js';
+import type { HeldLine, ShareRow } from '../carriedshares.js';
 import moment from 'moment';
 
 export interface Contract {
@@ -23,6 +25,32 @@ export interface Contract {
   // N-fold (200,400,…,2400 for a 200/mo tenant → Σ 15.600 not 2.400). Every
   // other Contract.create caller leaves this undefined → byte-identical output.
   autoPayThroughTerm?: number;
+  // Pricing-time context (NOT persisted): what the tenant's STORED ledger said before
+  // this run touched anything. Set by managers/contract.ts for `update` and `payTerm`;
+  // absent for a brand-new lease. See `LedgerFacts`.
+  ledgerFacts?: LedgerFacts;
+}
+
+// What a tenant's stored ledger says before a pricing run touches it. The engine needs
+// it for one thing: to bill, on the tenant's first open month, the shares of building
+// charges whose own month was already CLOSED for that tenant when they were written.
+//
+// A closed month — over, or paid in full (managers/contract.ts `_isFrozen`) — is never
+// priced again. A share written for one reached no rent at all, while the building
+// listed it as charged (DEFERRED_DECISIONS D-10). WHERE such a share is billed is not
+// stored anywhere: it is worked out from these facts every time a month is priced, so
+// it cannot go stale when a lease is terminated or extended or a payment is removed.
+export interface LedgerFacts {
+  // the month the lease is in now (the start of it, YYYYMMDDHH)
+  currentTerm: number;
+  // …and whether the tenant has already paid it in full
+  currentIsClosed: boolean;
+  // every stored month that is closed for the tenant
+  closedTerms: Set<number>;
+  // The lines of building charges those closed rents hold (carriedshares.ts
+  // `heldLinesOf`): what the tenant has already been billed, and will never be billed
+  // again.
+  held: HeldLine[];
 }
 
 export interface Rent {
@@ -31,7 +59,19 @@ export interface Rent {
   year: number;
   preTaxAmounts: { description: string; amount: number }[];
   charges: { description: string; amount: number }[];
-  buildingCharges?: { description: string; amount: number; buildingName?: string; type?: string }[];
+  // `propertyId` + `expenseId` (or `repairId`) say what a line is, whatever the building
+  // or the expense is called later. `forTerm` is the month a line is FOR when it is
+  // billed on a later one (a share carried in from a month that was closed).
+  buildingCharges?: {
+    description: string;
+    amount: number;
+    buildingName?: string;
+    type?: string;
+    propertyId?: string;
+    expenseId?: string;
+    repairId?: string;
+    forTerm?: number;
+  }[];
   discounts: { origin: string; description: string; amount: number }[];
   debts: { description: string; amount: number; origin?: string }[];
   vats: { origin: string; description: string; rate: number; amount: number }[];
@@ -1038,11 +1078,233 @@ export function repairTenantSharePercentage(repair: any): number {
   return 0;
 }
 
+// What a building line IS: the unit it is for and the expense (or repair) it comes from.
+// A closed rent is never rewritten, so its lines are the only record of what the tenant
+// was billed; with these on it that record survives a renamed building or expense.
+function _lineIds(
+  propertyId: unknown,
+  source: { expenseId?: unknown; repairId?: unknown }
+): { propertyId?: string; expenseId?: string; repairId?: string } {
+  return {
+    ...(propertyId ? { propertyId: String(propertyId) } : {}),
+    ...(source?.repairId
+      ? { repairId: String(source.repairId) }
+      : source?.expenseId
+        ? { expenseId: String(source.expenseId) }
+        : {})
+  };
+}
+
+// Is `term` the tenant's FIRST OPEN month — the month a carried share is billed on?
+// The current month when the tenant has not paid it in full; otherwise the first month
+// after it. `previousRent` is the rent of the month before `term` in this pricing run.
+function _isFirstOpenMonth(
+  term: number,
+  previousRent: Rent | null,
+  facts: LedgerFacts
+): boolean {
+  if (term < facts.currentTerm) return false;
+  if (term === facts.currentTerm) return !facts.currentIsClosed;
+  // A later month: only when no open month comes before it.
+  if (!previousRent || typeof previousRent.term !== 'number') return true;
+  if (previousRent.term < facts.currentTerm) return true;
+  return previousRent.term === facts.currentTerm && facts.currentIsClosed;
+}
+
+// A row of a unit's `monthlyCharges` as `coverRows` asks about it (`held`: the
+// tenant's own window for the unit contains the month), with the row itself.
+type TenantShare = ShareRow & {
+  row: any;
+  amount: number;
+  type: string;
+  index: number;
+  held: boolean;
+};
+
+// Every expense row of the tenant's units that passes `wanted`, with what the engine
+// needs to bill it, and what `coverRows` needs besides: the expenses that exist today
+// and the units that are the tenant's.
+function _tenantShares(
+  contract: Contract,
+  wanted: (month: number) => boolean
+): {
+  shares: TenantShare[];
+  liveExpenseIds: Set<string>;
+  tenantUnits: Set<string>;
+} {
+  const shares: TenantShare[] = [];
+  const liveExpenseIds = new Set<string>();
+  const tenantUnits = new Set<string>();
+  let index = 0;
+  (contract.properties || []).forEach((property) => {
+    if (!property.propertyId) return;
+    const propertyId = String(property.propertyId);
+    if (tenantUnits.has(propertyId)) return;
+    tenantUnits.add(propertyId);
+    const building = (contract.buildings || []).find((b) =>
+      b.units.some((u) => String(u.propertyId) === propertyId)
+    );
+    const unit = building?.units.find(
+      (u) => String(u.propertyId) === propertyId
+    );
+    if (!building || !unit) return;
+    const typeOf = new Map<string, string>();
+    ((building.expenses || []) as any[]).forEach((e) => {
+      if (!e || !e._id) return;
+      liveExpenseIds.add(String(e._id));
+      if (e.type) typeOf.set(String(e._id), String(e.type));
+    });
+    const entryMoment = moment.utc(property.entryDate).startOf('day');
+    const exitMoment = moment.utc(property.exitDate).endOf('day');
+    ((unit.monthlyCharges || []) as any[]).forEach((row) => {
+      if (!row || !row.expenseId || row.repairId) return;
+      const month = Number(row.term);
+      if (!Number.isInteger(month) || !wanted(month)) return;
+      const amount = Math.round(Number(row.amount) * 100) / 100;
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      const itsMonth = moment.utc(String(month), 'YYYYMMDDHH', true);
+      shares.push({
+        row,
+        propertyId,
+        expenseId: String(row.expenseId),
+        month,
+        marked: row.carry === true,
+        description: row.description || 'Building charges',
+        buildingName: String(building.name ?? ''),
+        created: String(row._id ?? ''),
+        amount,
+        type: typeOf.get(String(row.expenseId)) || 'monthly_charge',
+        index: index++,
+        held:
+          itsMonth.isValid() &&
+          itsMonth.isBetween(entryMoment, exitMoment, 'months', '[]')
+      });
+    });
+  });
+  return { shares, liveExpenseIds, tenantUnits };
+}
+
+// The lines for the shares carried into `rent` (DEFERRED_DECISIONS D-10).
+//
+// A share is carried when ALL of this holds:
+//   · the lease is monthly and there is a stored ledger to read (`contract.ledgerFacts`);
+//   · `rent` is the tenant's first open month;
+//   · the row is marked `carry` (only the statement save marks rows, and only shares
+//     that did not exist before — so no row from before the mark existed is ever billed
+//     retroactively), comes from an expense, and has an amount;
+//   · its month is EARLIER, inside the lease, and closed for the tenant;
+//   · the tenant's own window for that unit contains that month — the tenant who was
+//     there pays, whether or not they still hold the unit; one who moved in later never;
+//   · no closed rent already holds it: on its own month, or on a later one as a carried
+//     line. Which line of a closed rent stands for which row is decided in ONE place,
+//     for the engine and for the screens alike: carriedshares.ts `coverRows`. EVERY
+//     earlier row of the tenant's units goes into that question — not marked, or
+//     outside the tenant's window (a unit's exit date recorded after its month was
+//     billed): such a row is never carried, but it is what a line of its closed month
+//     was billed for, and left out that line would be taken for another row's;
+//   · no OLD line of a closed rent (one without ids, or of a deleted expense) may be
+//     for it: when such a line reads like several rows, none of them is billed again.
+// Lines come in the order their rows were created, so a share that arrives later goes
+// after the ones already there.
+function _carriedInto(
+  contract: Contract,
+  rent: Rent,
+  previousRent: Rent | null
+): NonNullable<Rent['buildingCharges']> {
+  const facts = contract.ledgerFacts;
+  if (
+    !facts ||
+    contract.frequency !== 'months' ||
+    !contract.buildings?.length ||
+    !_isFirstOpenMonth(rent.term, previousRent, facts)
+  ) {
+    return [];
+  }
+  const leaseBegins = Number(
+    moment.utc(contract.begin).startOf('month').format('YYYYMMDDHH')
+  );
+  const { shares, liveExpenseIds, tenantUnits } = _tenantShares(
+    contract,
+    (month) => month < rent.term
+  );
+  const mayBeCarried = (s: TenantShare) =>
+    s.marked &&
+    s.held &&
+    s.month >= leaseBegins &&
+    facts.closedTerms.has(s.month);
+  if (!shares.some(mayBeCarried)) return [];
+
+  // not one a closed rent holds — and not one an old line of a closed rent MAY be
+  // for: where the ledger cannot tell, nothing is billed again
+  const { covered, unsure } = coverRows(shares, facts.held, liveExpenseIds, {
+    tenantUnits
+  });
+  return shares
+    .filter((s) => mayBeCarried(s) && !covered.has(s) && !unsure.has(s))
+    .sort((a, b) =>
+      a.created < b.created ? -1 : a.created > b.created ? 1 : a.index - b.index
+    )
+    .map((s) => ({
+      description: s.description,
+      amount: s.amount,
+      buildingName: s.buildingName,
+      type: s.type,
+      propertyId: s.propertyId,
+      expenseId: s.expenseId,
+      forTerm: s.month
+    }));
+}
+
+// The rows of THIS month that a closed rent of a LATER month already bills, as a line
+// carried there. It happens to a month that is priced although it is over: one that
+// the stored ledger does not have — the begin date was moved later (the month was
+// dropped; the later rent, closed, kept the line) and then earlier again — or one that
+// is missing from a damaged ledger. Billed from its row as well, the share was on two
+// rents. Every other month finds nothing here.
+//
+// Only a MARKED row can be what a carried line was billed for — a line is carried for
+// no other — so only marked rows are asked about; a row that is not marked is this
+// month's own share, and the month that is built again bills it, as it always did.
+// (The one exception: a row that the line names outright, unit and expense, whatever
+// its mark says today.)
+function _billedOnALaterRent(contract: Contract, rent: Rent): Set<unknown> {
+  const facts = contract.ledgerFacts;
+  const none = new Set<unknown>();
+  if (!facts || contract.frequency !== 'months' || !contract.buildings?.length) {
+    return none;
+  }
+  const later = facts.held.filter(
+    (line) => line.month === rent.term && line.rentTerm !== rent.term
+  );
+  if (!later.length) return none;
+  const { shares, liveExpenseIds, tenantUnits } = _tenantShares(
+    contract,
+    (month) => month === rent.term
+  );
+  const { covered, unsure } = coverRows(
+    shares.filter((s) => s.marked),
+    later,
+    liveExpenseIds,
+    { tenantUnits }
+  );
+  const namedOutright = (s: TenantShare) =>
+    later.some(
+      (line) =>
+        line.propertyId === s.propertyId && line.expenseId === s.expenseId
+    );
+  return new Set(
+    shares
+      .filter((s) => covered.has(s) || unsure.has(s) || namedOutright(s))
+      .map((s) => s.row)
+  );
+}
+
 export default function taskBase(
   contract: Contract,
   rentDate: string,
-  // Unused here — kept for RentTask signature compatibility (used by 5_balance).
-  _previousRent: Rent | null,
+  // Read only to tell whether this is the tenant's first open month (see
+  // `_isFirstOpenMonth`); the carried balance is 5_balance's business.
+  previousRent: Rent | null,
   settlements: Settlements | undefined,
   rent: Rent
 ): Rent {
@@ -1129,6 +1391,7 @@ export default function taskBase(
   rent.buildingCharges = [];
 
   if (contract.buildings && contract.buildings.length > 0) {
+    const billedOnALaterRent = _billedOnALaterRent(contract, rent);
     properties
       .filter((property) => {
         const entryMoment = moment.utc(property.entryDate).startOf('day');
@@ -1172,6 +1435,9 @@ export default function taskBase(
             .filter((charge) => charge.term === rent.term)
             .forEach((charge) => {
               if (charge.expenseId) monthlyChargeExpenseIds.add(String(charge.expenseId));
+              // …a share that a later, closed rent already bills is not billed here too
+              // (and its expense is not billed live in its place: it is noted above)
+              if (billedOnALaterRent.has(charge)) return;
               // Repair-distributed charges have repairId set (see
               // buildingmanager._distributeRepairCharge). Tag them as
               // type='repair' so they reach the dashboard pie's repair
@@ -1192,7 +1458,8 @@ export default function taskBase(
                 buildingName: building.name,
                 type: _isRepair
                   ? 'repair'
-                  : _resolvedType || 'monthly_charge'
+                  : _resolvedType || 'monthly_charge',
+                ..._lineIds(property.propertyId, charge)
               });
             });
         }
@@ -1216,12 +1483,21 @@ export default function taskBase(
                 description: expense.name,
                 amount: share,
                 buildingName: building.name,
-                type: expense.type
+                type: expense.type,
+                ..._lineIds(property.propertyId, { expenseId: expense._id })
               });
             }
           });
 
       });
+
+    // SHARES CARRIED INTO THIS MONTH. When this is the tenant's first open month, the
+    // shares marked `carry` whose own month is closed for the tenant, and which no
+    // closed rent holds yet, are billed here — after every line of the month itself,
+    // each saying which month it is for. See `_carriedInto`.
+    _carriedInto(contract, rent, previousRent).forEach((line) =>
+      rent.buildingCharges!.push(line)
+    );
   }
 
   if (settlements) {

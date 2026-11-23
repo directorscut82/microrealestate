@@ -37,7 +37,20 @@ const MonthlyChargeSchema = new mongoose.Schema({
   inputAmount: { type: Number, default: null },
   description: String,
   expenseId: { type: String, default: null },
-  repairId: { type: String, default: null }
+  repairId: { type: String, default: null },
+  // «This share may be billed on a LATER month when its own month is closed for the
+  // tenant.» A month can be closed for a tenant when the row is written — it is over,
+  // or the tenant has paid it in full — and a closed month is never priced again: the
+  // share reached no rent while the building listed it as charged (DEFERRED_DECISIONS
+  // D-10). With this mark the rent engine bills it on that tenant's next open month
+  // (services/api/src/businesslogic/tasks/1_base.ts, «shares carried into this month»).
+  //
+  // WHERE it is billed is never stored: it is worked out from the tenant's ledger every
+  // time a month is priced, so nothing can go stale. Only the statement save sets the
+  // mark, on a share that did not exist before that save; a row that is rebuilt keeps
+  // what it had. Rows written before the mark existed never have it — so no old share
+  // is billed retroactively. Never a default, and never taken from a client.
+  carry: { type: Boolean, default: undefined }
 });
 
 const BuildingUnitSchema = new mongoose.Schema({

@@ -1,6 +1,7 @@
 import {
   buildingLineLabel,
   chargeLineLabel,
+  forMonthSuffix,
   rentLineLabel
 } from '../../utils/lineLabels';
 import { getRentAmounts, RentAmount } from './RentDetails';
@@ -12,6 +13,7 @@ import { Checkbox } from '../ui/checkbox';
 import { cn } from '../../utils';
 import { downloadDocument } from '../../utils/fetch';
 import { EmptyIllustration } from '../Illustrations';
+import LineName from '../LineName';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import useFormatNumber from '../../hooks/useFormatNumber';
@@ -99,8 +101,9 @@ function Reminder({ rent, className }) {
   ) : null;
 }
 
-function MonthlyBreakdown({ rentAmounts }) {
-  const { t } = useTranslation('common');
+// Exported for its test only (src/__tests__/rentsHoverCarriedShare.test.jsx).
+export function MonthlyBreakdown({ rentAmounts }) {
+  const { t, lang } = useTranslation('common');
   const hasMultiple = rentAmounts.preTaxAmounts.length > 1;
   const hasCharges = rentAmounts.charges.length > 0;
   const hasBuildingCharges = rentAmounts.buildingCharges.length > 0;
@@ -135,14 +138,27 @@ function MonthlyBreakdown({ rentAmounts }) {
           <NumberFormat value={charge.amount} className="whitespace-nowrap" />
         </div>
       ))}
-      {hasBuildingCharges && rentAmounts.buildingCharges.map((charge, i) => (
-        <div key={`b-${i}`} className="flex justify-between gap-4">
-          <span className="text-muted-foreground truncate">
-            {buildingLineLabel(t, charge)}
-          </span>
-          <NumberFormat value={charge.amount} className="whitespace-nowrap" />
-        </div>
-      ))}
+      {hasBuildingCharges && rentAmounts.buildingCharges.map((charge, i) => {
+        // the name may be cut where room is short; the month a carried share is
+        // for («· για Οκτώβριο 2026») never is
+        const suffix = forMonthSuffix(t, charge, lang);
+        return (
+          <div key={`b-${i}`} className="flex justify-between gap-4">
+            <span
+              className={cn(
+                'text-muted-foreground',
+                suffix ? 'min-w-0' : 'truncate'
+              )}
+            >
+              <LineName
+                label={buildingLineLabel(t, charge, lang)}
+                suffix={suffix}
+              />
+            </span>
+            <NumberFormat value={charge.amount} className="whitespace-nowrap" />
+          </div>
+        );
+      })}
       {hasDiscount && (
         <div className="flex justify-between gap-4 text-olive">
           <span className="truncate">{t('Discount')}</span>

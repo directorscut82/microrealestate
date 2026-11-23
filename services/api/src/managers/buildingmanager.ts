@@ -10,6 +10,17 @@ import { parseE9, ParsedE9Result } from './e9parser.js';
 import * as Contract from './contract.js';
 import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
 import {
+  chargesWithStoredMarks,
+  markedRowProblem,
+  markedRowsProblem,
+  placeTenantShares,
+  shareOutcomes,
+  statementRowIdentity,
+  statementRowsBefore,
+  unitRowsProblem
+} from './chargecarry.js';
+import type { ShareOutcome } from './chargecarry.js';
+import {
   carryOwnerPayments,
   applyCarriedSettlement,
   recomputeOwnerExpensePaid,
@@ -1045,11 +1056,19 @@ export async function add(req: Req, res: Res) {
   // enter via this one path. Validate + normalise each unit's owners here too
   // (same rule, one validator), so no create path is a back door.
   const validatedUnits = (units || []).map((u: any) => {
-    if (u && u.owners !== undefined) {
-      const validatedOwners = _validateUnitOwners(u.owners);
-      return { ...u, owners: validatedOwners };
+    // `carry` is the statement save's own mark (see the schema): never from a
+    // client, and a unit that is being created has no stored row to keep it from.
+    const rowsProblem = unitRowsProblem(u);
+    if (rowsProblem) throw new ServiceError(rowsProblem, 422);
+    const unit =
+      u && typeof u === 'object' && u.monthlyCharges !== undefined
+        ? { ...u, monthlyCharges: chargesWithStoredMarks(u.monthlyCharges, []) }
+        : u;
+    if (unit && unit.owners !== undefined) {
+      const validatedOwners = _validateUnitOwners(unit.owners);
+      return { ...unit, owners: validatedOwners };
     }
-    return u;
+    return unit;
   });
   const building = new Collections.Building({
     name,
@@ -2604,6 +2623,17 @@ export async function addUnit(req: Req, res: Res) {
     }
   }
 
+  // `carry` is the statement save's own mark (see the schema): never from a client.
+  {
+    const rowsProblem = unitRowsProblem(req.body);
+    if (rowsProblem) throw new ServiceError(rowsProblem, 422);
+  }
+  if (req.body.monthlyCharges !== undefined) {
+    req.body.monthlyCharges = chargesWithStoredMarks(
+      req.body.monthlyCharges,
+      []
+    );
+  }
   (building as any).units.push(req.body);
 
   // Building-wide thousandths sums must not exceed 1000 across all units —
@@ -2768,6 +2798,23 @@ export async function updateUnit(req: Req, res: Res) {
     }
   }
 
+  // `carry` is the statement save's own mark (see the schema): never from a client.
+  // A request that sends the unit's rows gets each mark as the stored row has it.
+  {
+    const rowsProblem = unitRowsProblem(req.body);
+    if (rowsProblem) throw new ServiceError(rowsProblem, 422);
+  }
+  if (req.body.monthlyCharges !== undefined) {
+    const storedRows = ((unit.monthlyCharges || []) as any[]).map((c: any) =>
+      typeof c?.toObject === 'function' ? c.toObject() : c
+    );
+    const markedProblem = markedRowsProblem(req.body.monthlyCharges, storedRows);
+    if (markedProblem) throw new ServiceError(markedProblem, 422);
+    req.body.monthlyCharges = chargesWithStoredMarks(
+      req.body.monthlyCharges,
+      storedRows
+    );
+  }
   unit.set(req.body);
   // B-A: recompute owner-side rows on ANY occupancy change (was scoped to
   // owner_occupied transitions only, so rented↔vacant/parking flips left stale
@@ -2985,7 +3032,12 @@ export async function addMonthlyCharge(req: Req, res: Res) {
     throw new ServiceError('Unit does not exist', 404);
   }
 
-  unit.monthlyCharges.push(req.body);
+  // `carry` is the statement save's own mark (see the schema): never from a client.
+  // Nor is the row's `_id`: with the id of a stored row the unit held two rows under one
+  // id, and the next removal by that id — an ordinary statement save — took both, the
+  // stored row's share with it (found by review; the edit below ignores it too).
+  const { carry: _ignoredCarry, _id: _ignoredId, ...newCharge } = req.body;
+  unit.monthlyCharges.push(newCharge);
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
 
@@ -3039,7 +3091,16 @@ export async function updateMonthlyCharge(req: Req, res: Res) {
     throw new ServiceError('Monthly charge does not exist', 404);
   }
 
-  charge.set(req.body);
+  // `carry` is the statement save's own mark (see the schema): never from a client —
+  // and a row that carries it can only change its amount here (`markedRowProblem`).
+  // `_id` is not for a client to change either: rows are removed by it.
+  const { carry: _ignoredCarry, _id: _ignoredId, ...changes } = req.body;
+  const markedProblem = markedRowProblem(
+    changes,
+    typeof charge.toObject === 'function' ? charge.toObject() : charge
+  );
+  if (markedProblem) throw new ServiceError(markedProblem, 422);
+  charge.set(changes);
   (building as any).updatedDate = new Date();
   await _saveBuildingWithVersionCheck(building!);
 
@@ -3391,6 +3452,37 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
   };
   if (expensesProvided) _checkEntryAmounts(expenseEntries, 'expenses');
   if (ownerExpensesProvided) _checkEntryAmounts(ownerExpenses, 'ownerExpenses');
+  // One entry per expense. Two entries for one expense made two rows of it on every
+  // unit. Each was billed, but two shares of one unit, expense and month cannot be told
+  // apart once they are carried to another month (D-10): a payment attributed to one
+  // of them named both. No screen and no bill import sends such a statement (the panel
+  // posts one row per expense, billmanager.buildStatementEntries merges by expense).
+  //
+  // The expense is named as the building holds it: `expenses.id()` casts, so the same
+  // expense spelled another way (`{ _id: X }`, the id in upper case) was found too,
+  // and passed as a second expense (found by review). The id must be text, and from
+  // here on the entry carries the stored one.
+  if (expensesProvided) {
+    const listed = new Set<string>();
+    for (let i = 0; i < expenseEntries.length; i++) {
+      const entry = expenseEntries[i];
+      if (!entry?.expenseId) continue;
+      if (typeof entry.expenseId !== 'string') {
+        throw new ServiceError(`expenses[${i}].expenseId must be text`, 422);
+      }
+      const expenseId = String(
+        (building as any).expenses.id(entry.expenseId)._id
+      );
+      if (listed.has(expenseId)) {
+        throw new ServiceError(
+          `expenseId ${expenseId} is listed twice in expenses`,
+          422
+        );
+      }
+      listed.add(expenseId);
+      entry.expenseId = expenseId;
+    }
+  }
 
   // For each unit, remove existing monthly charges for this term, then add new ones
   for (const unit of units) {
@@ -3455,14 +3547,20 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
       // Owner-side mirror below is scoped to source:'expense' for the same
       // reason. This function's ownership discriminator is: expenseId is SET
       // (made sound for legacy rows by the backfill above).
-      const idsToRemove = unit.monthlyCharges
-        .filter(
-          (c: any) =>
-            c.term === Number(term) &&
-            !(c as any).repairId &&
-            (!!c.expenseId || ambiguousStatementRowIds.has(String(c._id)))
-        )
-        .map((c: any) => c._id);
+      const rowsToRemove = unit.monthlyCharges.filter(
+        (c: any) =>
+          c.term === Number(term) &&
+          !(c as any).repairId &&
+          (!!c.expenseId || ambiguousStatementRowIds.has(String(c._id)))
+      );
+      // What each expense's row WAS before this save (D-10). A share that is rebuilt
+      // keeps its `_id` — carried lines on a rent are ordered by it, so a share that is
+      // merely saved again must not jump behind the ones written after it — and keeps
+      // its `carry` mark exactly as it was: only a share that did NOT exist before this
+      // save gets the mark (below). So rows from before the mark existed never gain
+      // it by being saved again, and their old losses are not billed out of the blue.
+      const previousRows = statementRowsBefore(rowsToRemove);
+      const idsToRemove = rowsToRemove.map((c: any) => c._id);
       for (const chargeId of idsToRemove) {
         unit.monthlyCharges.pull(chargeId);
       }
@@ -3521,7 +3619,8 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
             // share rounds, eroding the value on re-save).
             inputAmount: Math.round(Number(entry.amount) * 100) / 100,
             description,
-            expenseId: entry.expenseId
+            expenseId: entry.expenseId,
+            ...statementRowIdentity(previousRows, entry.expenseId)
           });
         }
       }
@@ -3886,8 +3985,111 @@ export async function saveMonthlyStatement(req: Req, res: Res) {
     );
   }
 
+  // What became of every tenant share of this statement, READ BACK from the tenants'
+  // rents now that they are recomputed: on its own month, on the tenant's next open
+  // month, on no rent — or missing, when a recompute gave up without throwing (it only
+  // logs). Nothing is reported as charged unless a rent holds it (D-10).
+  const statementOutcome = await _statementOutcome(
+    realm!._id as string,
+    building,
+    Number(term)
+  );
+
   const result = await _toBuildingData(realm!._id, [building!.toObject()]);
-  return res.json(result[0]);
+  return res.json({ ...result[0], statementOutcome });
+}
+
+// The tenants who hold (or held) any of `units`, with their stored rents and their own
+// window on each unit: what the ledgers are read back from.
+async function _tenantsWithLedgers(
+  realmId: string,
+  units: any[]
+): Promise<any[]> {
+  return (await Collections.Tenant.find(
+    {
+      realmId,
+      'properties.propertyId': { $in: units.map((u) => String(u.propertyId)) }
+    },
+    {
+      name: 1,
+      frequency: 1,
+      rents: 1,
+      'properties.propertyId': 1,
+      'properties.entryDate': 1,
+      'properties.exitDate': 1
+    }
+  ).lean()) as any[];
+}
+
+// See saveMonthlyStatement: the tenants who hold a unit of this building, with their
+// stored rents, and what those rents say about the statement rows of `term`.
+async function _statementOutcome(
+  realmId: string,
+  building: any,
+  term: number
+): Promise<ShareOutcome[]> {
+  const units = ((building?.units || []) as any[]).filter((u) => u.propertyId);
+  if (!units.length) return [];
+  const tenants = await _tenantsWithLedgers(realmId, units);
+  // UTC, as Contract._currentTermFor and _frozenPropertyIdsForTerm.
+  const currentTerm = Number(
+    moment.utc().startOf('month').format('YYYYMMDDHH')
+  );
+  return shareOutcomes({
+    term,
+    currentTerm,
+    buildingName: building.name,
+    units: units.map((unit) => ({
+      propertyId: String(unit.propertyId),
+      rows: ((unit.monthlyCharges || []) as any[]).map((c) =>
+        typeof c?.toObject === 'function' ? c.toObject() : c
+      )
+    })),
+    expenseIds: _expenseIdsOf(building),
+    billedLiveNames: _namesBilledLive(building, term),
+    tenants
+  });
+}
+
+// The ids of the expenses a building has today (a deleted expense is not among them).
+function _expenseIdsOf(building: any): string[] {
+  return ((building?.expenses || []) as any[])
+    .filter((e) => e && e._id)
+    .map((e) => String(e._id));
+}
+
+// The names of the expenses the engine bills LIVE in `term`, by the engine's own rule
+// (1_base.ts, «Process recurring building expenses»): active that month, and with a
+// share above 0 for a unit that holds no stored row of the expense for that month. So
+// also an expense split by fixed amounts per unit, whose own amount is 0 (found by
+// review: going by the amount, such a fee's line was taken for a share's). Their line
+// on a rent has no row behind it. An expense whose figure is typed in every month is
+// billed from its rows and is not among them — nor is one that had ended by then or
+// had not begun: its name on an old line is no sign that the line is its own.
+function _namesBilledLive(building: any, term: number): string[] {
+  const plain =
+    typeof building?.toObject === 'function' ? building.toObject() : building;
+  const units = ((plain?.units || []) as any[]).filter((u) => u && u.propertyId);
+  const billsLive = (expense: any) =>
+    units.some(
+      (unit) =>
+        !((unit.monthlyCharges || []) as any[]).some(
+          (c) =>
+            Number(c.term) === term &&
+            String(c.expenseId ?? '') === String(expense._id)
+        ) &&
+        computeBuildingChargeForProperty(
+          plain,
+          String(unit.propertyId),
+          expense,
+          term
+        ) > 0
+    );
+  return ((plain?.expenses || []) as any[])
+    .filter(
+      (e) => e && e.name && isExpenseActiveForTerm(e, term) && billsLive(e)
+    )
+    .map((e) => String(e.name));
 }
 
 // GET /buildings/:id/expense-breakdown?term=YYYYMMDDHH
@@ -4494,14 +4696,66 @@ export async function getExpenseBreakdown(req: Req, res: Res) {
       ownerDirect.reduce((s: number, e: any) => s + e.amount, 0) * 100
     ) / 100;
 
+  // WHERE each tenant share of this month is really billed (D-10), read from the
+  // tenants' stored rents — never from a plan. A share whose month was closed for a
+  // tenant when it was written is billed on that tenant's next open month; one whose
+  // tenant has no open month left, or that was written before shares were carried,
+  // is on no rent at all. Listing those as charged here was the lie this page told.
+  const placed = await _placeTenantShares(
+    realm!._id as string,
+    hydrated,
+    term,
+    breakdown.rows as any[]
+  );
+
   return res.json({
     term,
-    rows: breakdown.rows,
+    rows: placed.rows,
     ownerDirect,
-    tenantTotal: breakdown.tenantTotal,
+    tenantTotal: placed.tenantTotal,
     ownerUnbilledTotal: breakdown.ownerUnbilledTotal,
     ownerBilledTotal: breakdown.ownerBilledTotal,
     ownerDirectTotal
+  });
+}
+
+// Reads the tenants' ledgers for chargecarry.ts `placeTenantShares`, which says what
+// they hold of this month's rows (see there).
+async function _placeTenantShares(
+  realmId: string,
+  hydrated: any,
+  term: number,
+  rows: any[]
+): Promise<{ rows: any[]; tenantTotal: number }> {
+  const units = ((hydrated?.units || []) as any[]).filter((u) => u.propertyId);
+  // The calculation of a share moved into this month is the one its own month's page
+  // shows: the engine's breakdown of that month, worked out once per month.
+  const calcOf = new Map<number, any[]>();
+  return placeTenantShares({
+    term,
+    // UTC, as Contract._currentTermFor and _frozenPropertyIdsForTerm.
+    currentTerm: Number(moment.utc().startOf('month').format('YYYYMMDDHH')),
+    buildingName: hydrated?.name,
+    units,
+    expenseIds: _expenseIdsOf(hydrated),
+    billedLiveNames: _namesBilledLive(hydrated, term),
+    rows,
+    tenants: units.length ? await _tenantsWithLedgers(realmId, units) : [],
+    rowOfItsMonth: (forTerm, propertyId, expenseId) => {
+      if (!calcOf.has(forTerm)) {
+        calcOf.set(
+          forTerm,
+          computeBuildingExpenseBreakdown(hydrated, forTerm).rows
+        );
+      }
+      return calcOf
+        .get(forTerm)!
+        .find(
+          (r: any) =>
+            String(r.propertyId) === propertyId &&
+            String(r.expenseId) === expenseId
+        );
+    }
   });
 }
 

@@ -353,6 +353,62 @@ describe('Dashboard computation logic', () => {
       });
     });
 
+    it('a share carried in from an earlier month says which month it is for', () => {
+      const now = moment.utc();
+      const year = now.year();
+      const beginOfYear = moment.utc(now).startOf('year');
+      const endOfYear = moment.utc(now).endOf('year');
+      const term = `${year}050100`;
+      const april = Number(`${year}040100`);
+
+      const tenant = makeTenant({
+        rents: [
+          makeRent(term, {
+            grandTotal: 1080,
+            payment: 0,
+            buildingCharges: [
+              {
+                description: 'Water',
+                amount: 50,
+                type: 'water_common',
+                buildingName: 'B1',
+                propertyId: 'p1',
+                expenseId: 'e1'
+              },
+              {
+                description: 'Common power',
+                amount: 30,
+                type: 'electricity_common',
+                buildingName: 'B1',
+                propertyId: 'p1',
+                expenseId: 'e2',
+                forTerm: april
+              }
+            ]
+          })
+        ]
+      });
+
+      const result = computeRevenues([tenant], beginOfYear, endOfYear, now);
+      const may = result.find((r) => r.month === `05${year}`);
+      // the month's own line is what it always was; the carried one names its month
+      expect(may.tenants[0].buildingChargesLines).toEqual([
+        {
+          description: 'Water',
+          type: 'water_common',
+          buildingName: 'B1',
+          amount: 50
+        },
+        {
+          description: 'Common power',
+          type: 'electricity_common',
+          buildingName: 'B1',
+          amount: 30,
+          forTerm: april
+        }
+      ]);
+    });
+
     it('should round paid/notPaid to 2 decimal places', () => {
       const now = moment.utc();
       const year = now.year();

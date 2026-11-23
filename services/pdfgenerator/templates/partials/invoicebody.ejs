@@ -45,7 +45,12 @@ function buildingLabel(charge) {
   else if (b) paren = '(' + b + ')';
   else if (d) paren = '(' + d + ')';
   else paren = '';
-  return paren ? (typeLabel + '  ' + paren) : typeLabel;
+  var label = paren ? (typeLabel + '  ' + paren) : typeLabel;
+  // A share billed on a LATER month than the one it is for (its own month was closed
+  // for the tenant when the bill arrived) says which month it is for:
+  // «… · για Οκτώβριο 2026». Same wording as the landlord app (lineLabels.js).
+  var forMonth = (charge && Number.isInteger(charge.forTerm)) ? _.formatTermFor(charge.forTerm) : '';
+  return forMonth ? (label + ' · ' + _.t('for {{month}}', { month: forMonth })) : label;
 }
 function debtLabel(debt) {
   var d = (debt && debt.description ? String(debt.description).trim() : '');

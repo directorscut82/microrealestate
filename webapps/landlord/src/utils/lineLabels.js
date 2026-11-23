@@ -17,6 +17,11 @@
 //   charges empty  → Δαπάνη επί του ενοικίου (no paren)
 //   bldg empty     → <TypeLabel>  (<buildingName>)
 //   debts empty    → Έκτακτη χρέωση
+//
+// A building line billed on a LATER month than the one it is for (`forTerm`)
+// says which month it is for: «… · για Οκτώβριο 2026» (forMonthSuffix).
+
+import { termMonthYearAccusative } from './greekMonths';
 
 // SINGLE source of truth for the building-expense type → label. These MUST be
 // the SAME label keys the expense table (ExpenseList.js EXPENSE_TYPES) and the
@@ -59,7 +64,24 @@ export function chargeLineLabel(t, charge) {
   return d ? `${t('Property charge')}  (${d})` : t('Property charge');
 }
 
-export function buildingLineLabel(t, charge) {
+// « · για Οκτώβριο 2026» for a share of a building charge that is billed on a
+// later month than the one it is for: that month was closed for the tenant —
+// over, or paid in full — when the bill arrived, so the share went on the
+// tenant's next open month (services/api/src/businesslogic/tasks/1_base.ts
+// `_carriedInto`, DEFERRED_DECISIONS D-10). '' for every other line.
+// `lang` is the active locale (useTranslation): Greek needs the accusative.
+// The words of the suffix are joined by no-break spaces: where a label wraps, it
+// wraps BEFORE «· για Οκτώβριο 2026», never in the middle of it (a «2026» left alone
+// on a second line of the building page read as a figure).
+export function forMonthSuffix(t, charge, lang) {
+  if (!Number.isInteger(charge?.forTerm)) return '';
+  const month = termMonthYearAccusative(charge.forTerm, lang);
+  if (!month) return '';
+  const phrase = t('for {{month}}', { month }).replace(/ /g, '\u00a0');
+  return ` ·\u00a0${phrase}`;
+}
+
+export function buildingLineLabel(t, charge, lang) {
   const typeKey = BUILDING_TYPE_LABEL_KEY[charge?.type] || 'Other';
   const typeLabel = t(typeKey);
   // Strip the server's legacy English "Repair: <title>" prefix so a repair
@@ -71,7 +93,10 @@ export function buildingLineLabel(t, charge) {
   if (b && d) paren = ` (${b} - ${d})`;
   else if (b) paren = ` (${b})`;
   else if (d) paren = ` (${d})`;
-  return paren ? `${typeLabel} ${paren}`.replace(/\s+\(/, '  (') : typeLabel;
+  const label = paren
+    ? `${typeLabel} ${paren}`.replace(/\s+\(/, '  (')
+    : typeLabel;
+  return `${label}${forMonthSuffix(t, charge, lang)}`;
 }
 
 export function debtLineLabel(t, debt) {

@@ -1,6 +1,7 @@
 import {
   monthYearAccusative,
-  termMonthYearAccusative
+  termMonthYearAccusative,
+  termMonthYearGenitive
 } from '../utils/greekMonths';
 import moment from 'moment';
 import 'moment/locale/el';
@@ -92,6 +93,54 @@ describe('termMonthYearAccusative', () => {
     // month to check for the duplicate.
     for (const bad of [undefined, null, '', 'abc', 0, '20261301']) {
       expect(termMonthYearAccusative(bad, 'el')).toBe('');
+    }
+  });
+});
+
+// «χρεώθηκε στο ενοίκιο {{month}}» (the building page: where a share for a closed
+// month was really charged). After the noun «ενοίκιο» the month is in the GENITIVE:
+// «στο ενοίκιο Νοεμβρίου 2026». The nominative («Νοέμβριος») and the accusative
+// («Νοέμβριο») are both wrong there.
+describe('termMonthYearGenitive', () => {
+  it('returns the GENITIVE month for el, for all twelve', () => {
+    expect(
+      Array.from({ length: 12 }, (x, i) =>
+        termMonthYearGenitive(`2026${String(i + 1).padStart(2, '0')}0100`, 'el')
+      )
+    ).toEqual([
+      'Ιανουαρίου 2026',
+      'Φεβρουαρίου 2026',
+      'Μαρτίου 2026',
+      'Απριλίου 2026',
+      'Μαΐου 2026',
+      'Ιουνίου 2026',
+      'Ιουλίου 2026',
+      'Αυγούστου 2026',
+      'Σεπτεμβρίου 2026',
+      'Οκτωβρίου 2026',
+      'Νοεμβρίου 2026',
+      'Δεκεμβρίου 2026'
+    ]);
+  });
+
+  it('reads a number or a text, and only the month of it', () => {
+    expect(termMonthYearGenitive(2026110100, 'el')).toBe('Νοεμβρίου 2026');
+    expect(termMonthYearGenitive('2026113023', 'el')).toBe('Νοεμβρίου 2026');
+  });
+
+  it('other languages do not inflect: the month name is the app’s own', () => {
+    moment.locale('en');
+    try {
+      expect(termMonthYearGenitive(2026110100, 'en')).toBe('November 2026');
+      expect(termMonthYearGenitive(2026110100, 'fr-FR')).toBe('November 2026');
+    } finally {
+      moment.locale('el');
+    }
+  });
+
+  it('returns empty string for an unparseable term, never today’s month', () => {
+    for (const bad of [undefined, null, '', 'abc', 0, '20261301']) {
+      expect(termMonthYearGenitive(bad, 'el')).toBe('');
     }
   });
 });

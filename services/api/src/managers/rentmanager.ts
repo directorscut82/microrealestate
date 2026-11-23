@@ -1,6 +1,7 @@
 import * as Contract from './contract.js';
 import * as FD from './frontdata.js';
 import { _attachTenantGroupsToBuildings } from './occupantmanager.js';
+import { buildingLineKey } from './chargecarry.js';
 import {
   Collections,
   logger,
@@ -151,7 +152,9 @@ function _computeOwedLines(rent: AnyRecord): OwedLine[] {
     const isRepair = c?.type === 'repair';
     lines.push({
       category: isRepair ? 'repair' : 'buildingCharge',
-      lineKey: `building:${i}`,
+      // `building:<i>` for a line of the month itself, as always; a share carried in
+      // from an earlier month is named by what it is (see `buildingLineKey`).
+      lineKey: buildingLineKey(c, i),
       description: String(c?.description || 'Building charge'),
       amount,
       type: c?.type ? String(c.type) : undefined,
@@ -1039,8 +1042,14 @@ async function _updateByTerm(
             );
             // E3: lineKey is a stable identifier of the form
             // 'preTax:<idx>' / 'charges:<idx>' / 'building:<idx>' / scalar
-            // names. 64 chars is well above the realistic maximum (~20)
-            // and rejects oversized free-text smuggled into the field.
+            // names, or — for a share carried in from an earlier month —
+            // 'building:<propertyId>:<expenseId>:<YYMM>' (63 chars with
+            // database ids; chargecarry.ts `buildingLineKey`). 64 chars rejects
+            // oversized free-text smuggled into the field. The limit is NOT
+            // raised for the carried key, the key is kept under it: every
+            // earlier version of the app applies this same check when a month's
+            // payments are saved again, so a longer key, once stored, would lock
+            // that month's payments after a rollback.
             if (entry.lineKey !== undefined && entry.lineKey !== null) {
               if (typeof entry.lineKey !== 'string') {
                 throw new ServiceError(

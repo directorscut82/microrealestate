@@ -50,7 +50,48 @@ function _basisReconciles(basis, billedShare) {
   return Math.abs(computed - share) <= 0.02;
 }
 
-function _enrichTenantChargeBasis(charges, building, tenantPropertyId, term) {
+// The calculation line of a share carried in from an earlier month. Everything is
+// looked up by what the line says it IS — its own unit, its own expense, the month it
+// is for — never by the rent's month or by a name: the statement figure and the
+// number of parties are those of that month. With the rent's month the receipt
+// printed, under «… · για Οκτώβριο 2026», November's equation. Correct or absent:
+// anything that cannot be resolved, or does not add up to the billed share, prints
+// no calculation line.
+function _carriedChargeBasis(c, building) {
+  const unit = building.units.find(
+    (u) => String(u.propertyId) === String(c.propertyId || '')
+  );
+  const exp = (building.expenses || []).find(
+    (e) => String(e._id) === String(c.expenseId || '')
+  );
+  if (!unit || !exp) return c;
+  const row = (unit.monthlyCharges || []).find(
+    (m) =>
+      Number(m.term) === c.forTerm &&
+      String(m.expenseId || '') === String(exp._id) &&
+      m.inputAmount != null &&
+      Number(m.inputAmount) > 0
+  );
+  if (!row) return c;
+  const basis = ShareBasis.shareBasis(
+    building,
+    unit,
+    exp,
+    Number(row.inputAmount),
+    Number(c.amount) || 0,
+    ShareBasis.equalPartyCount(building, c.forTerm)
+  );
+  if (!_basisReconciles(basis, Number(c.amount) || 0)) return c;
+  return { ...c, basis };
+}
+
+// Exported for the tests only (services/api/src/__tests__/carriedShareOnPaper.test.js).
+export function _enrichTenantChargeBasis(
+  charges,
+  building,
+  tenantPropertyId,
+  term
+) {
   if (!Array.isArray(charges) || charges.length === 0) return charges;
   if (!building || !Array.isArray(building.units)) return charges;
   const unit = building.units.find(
@@ -64,6 +105,12 @@ function _enrichTenantChargeBasis(charges, building, tenantPropertyId, term) {
     // Repairs (type 'repair') have no building.expense — skip (the owner
     // statement carries repair basis).
     if (!c.type || c.type === 'repair') return c;
+    // A share billed on a LATER month than the one it is for (`c.forTerm`: its own
+    // month was closed for the tenant when the bill arrived) is explained with the
+    // figures of the month it is FOR. See _carriedChargeBasis.
+    if (Number.isInteger(c.forTerm)) {
+      return _carriedChargeBasis(c, building);
+    }
     // Resolve the SOURCE building expense for this charge. A live-computed
     // charge is stored with the expense's real type (e.g. 'electricity_common')
     // — match by type, preferring the expense whose name matches. But a

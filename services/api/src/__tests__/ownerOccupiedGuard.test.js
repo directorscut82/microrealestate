@@ -14,6 +14,9 @@ import { jest } from '@jest/globals';
 
 let buildingManager;
 const state = {};
+// the ids of two stored rows, as the database writes them
+const C1 = 'aaaaaaaaaaaaaaaaaaaa40c1';
+const C2 = 'aaaaaaaaaaaaaaaaaaaa40c2';
 
 beforeAll(async () => {
   class ServiceError extends Error {
@@ -222,6 +225,199 @@ describe('Finding D — owner_occupied requires a linked property', () => {
     await buildingManager.updateUnit(updateReq('owner_occupied'), res);
     expect(res.json).toHaveBeenCalled();
     expect(state.building.units[0].occupancyType).toBe('owner_occupied');
+  });
+});
+
+// DEFERRED_DECISIONS D-10. `carry` on a unit's monthly-charge row is the statement
+// save's own mark: a share so marked is billed on the tenant's next open month when its
+// own month is closed. updateUnit takes `monthlyCharges` from the request as it is
+// (`unit.set(req.body)`), so the mark must not come from there: set on a row from
+// before the mark existed, it would bill an old share out of the blue. (The rule
+// itself is pinned in chargeCarry.test.js `chargesWithStoredMarks`; this pins that
+// the endpoint applies it.)
+describe('updateUnit never takes the mark of a carried share from the request', () => {
+  beforeEach(() => {
+    state.building.units[0].occupancyType = 'vacant';
+    state.building.units[0].propertyId = '6a4551f5efd7970071c44001';
+    state.tenants = [];
+    state.building.units[0].monthlyCharges = [
+      { _id: C1, term: 2026050100, amount: 30, expenseId: 'e1' },
+      { _id: C2, term: 2026100100, amount: 20, expenseId: 'e1', carry: true }
+    ];
+  });
+  afterAll(() => {
+    state.building.units[0].monthlyCharges = [];
+  });
+
+  it('a mark added to an old row is dropped; the mark of a row that has one stays', async () => {
+    const req = updateReq('vacant');
+    req.body.monthlyCharges = [
+      { _id: C1, term: 2026050100, amount: 30, expenseId: 'e1', carry: 'true' },
+      { _id: C2, term: 2026100100, amount: 20, expenseId: 'e1', carry: false },
+      { term: 2026060100, amount: 9, expenseId: 'e1', carry: true }
+    ];
+    const res = makeRes();
+    await buildingManager.updateUnit(req, res);
+    expect(res.json).toHaveBeenCalled();
+    expect(state.building.units[0].monthlyCharges).toEqual([
+      { _id: C1, term: 2026050100, amount: 30, expenseId: 'e1' },
+      { _id: C2, term: 2026100100, amount: 20, expenseId: 'e1', carry: true },
+      { term: 2026060100, amount: 9, expenseId: 'e1' }
+    ]);
+  });
+
+  it('a request that sends no rows leaves the rows alone', async () => {
+    const res = makeRes();
+    await buildingManager.updateUnit(updateReq('vacant'), res);
+    expect(state.building.units[0].monthlyCharges).toEqual([
+      { _id: C1, term: 2026050100, amount: 30, expenseId: 'e1' },
+      { _id: C2, term: 2026100100, amount: 20, expenseId: 'e1', carry: true }
+    ]);
+  });
+
+  it.each([
+    [
+      'a single row object (the schema would turn it into a list of one)',
+      { monthlyCharges: { _id: C1, term: 2026050100, amount: 30, expenseId: 'e1', carry: 'true' } }
+    ],
+    ['a path to the mark of a row', { 'monthlyCharges.0.carry': true }],
+    ['a path to a whole row', { 'monthlyCharges.1': { term: 2026050100, amount: 1, carry: true } }]
+  ])('rows sent as %s are refused, and nothing is saved', async (_what, extra) => {
+    const req = updateReq('vacant');
+    Object.assign(req.body, extra);
+    const before = JSON.stringify(state.building.units[0].monthlyCharges);
+    const res = makeRes();
+    await expect(buildingManager.updateUnit(req, res)).rejects.toMatchObject({
+      status: 422
+    });
+    expect(res.json).not.toHaveBeenCalled();
+    expect(JSON.stringify(state.building.units[0].monthlyCharges)).toBe(before);
+  });
+
+  it('two rows with one id are refused: a row is removed by its id, and that would remove both', async () => {
+    // (it used to be accepted, the first row keeping the mark: a later save that took
+    // one of the two rows out by its id took the other out with it — found by review)
+    const req = updateReq('vacant');
+    req.body.monthlyCharges = [
+      { _id: C2, term: 2026100100, amount: 20, expenseId: 'e1' },
+      { _id: C2, term: 2026100100, amount: 99, expenseId: 'e1', carry: true }
+    ];
+    const before = JSON.stringify(state.building.units[0].monthlyCharges);
+    await expect(
+      buildingManager.updateUnit(req, makeRes())
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'two monthlyCharges rows have the same _id'
+    });
+    expect(JSON.stringify(state.building.units[0].monthlyCharges)).toBe(before);
+  });
+
+  it('addUnit refuses rows that are not a list', async () => {
+    const res = makeRes();
+    await expect(
+      buildingManager.addUnit(
+        {
+          realm: { _id: 'r1', locale: 'el' },
+          params: { id: '6a4551f5efd7970071c44002' },
+          body: {
+            atakNumber: 'AT3',
+            isManaged: false,
+            occupancyType: 'vacant',
+            generalThousandths: 0,
+            heatingThousandths: 0,
+            elevatorThousandths: 0,
+            monthlyCharges: { term: 2026050100, amount: 5, carry: true }
+          }
+        },
+        res
+      )
+    ).rejects.toMatchObject({ status: 422 });
+    expect(state.building.units).toHaveLength(1);
+  });
+
+  it('addUnit: a unit that is created with rows gets none of them marked', async () => {
+    const req = {
+      realm: { _id: 'r1', locale: 'el' },
+      params: { id: '6a4551f5efd7970071c44002' },
+      body: {
+        atakNumber: 'AT2',
+        isManaged: false,
+        occupancyType: 'vacant',
+        generalThousandths: 0,
+        heatingThousandths: 0,
+        elevatorThousandths: 0,
+        surface: 10,
+        floor: 2,
+        monthlyCharges: [
+          { term: 2026050100, amount: 5, expenseId: 'e1', carry: true }
+        ]
+      }
+    };
+    const res = makeRes();
+    try {
+      await buildingManager.addUnit(req, res);
+      expect(res.json).toHaveBeenCalled();
+      const created = state.building.units.find((u) => u.atakNumber === 'AT2');
+      expect(created.monthlyCharges).toEqual([
+        { term: 2026050100, amount: 5, expenseId: 'e1' }
+      ]);
+    } finally {
+      // leave the building as the other tests expect it: one unit
+      while (state.building.units.length > 1) state.building.units.pop();
+    }
+  });
+});
+
+// DEFERRED_DECISIONS D-10. Two entries for one expense in one statement made two rows
+// of it on every unit; carried to another month, two shares of one unit, expense and
+// month have one attribution key, and a payment for one of them named both (found by
+// review). The statement save refuses such a body before it touches anything.
+describe('saveMonthlyStatement refuses an expense that is listed twice', () => {
+  const withExpenses = () => {
+    const expenses = [{ _id: 'e1', name: 'ΡΕΥΜΑ', allocationMethod: 'equal' }];
+    expenses.id = (id) => expenses.find((e) => String(e._id) === String(id)) || null;
+    state.building.expenses = expenses;
+  };
+  afterEach(() => {
+    delete state.building.expenses;
+  });
+  const statementReq = (expenses) => ({
+    realm: { _id: 'r1', locale: 'el' },
+    params: { id: '6a4551f5efd7970071c44002' },
+    body: { term: '2026100100', expenses }
+  });
+
+  it('two entries for one expense: 422, and no unit is touched', async () => {
+    withExpenses();
+    const before = JSON.stringify(state.building.units);
+    const res = makeRes();
+    await expect(
+      buildingManager.saveMonthlyStatement(
+        statementReq([
+          { expenseId: 'e1', amount: 20 },
+          { expenseId: 'e1', amount: 30 }
+        ]),
+        res
+      )
+    ).rejects.toMatchObject({
+      status: 422,
+      message: 'expenseId e1 is listed twice in expenses'
+    });
+    expect(res.json).not.toHaveBeenCalled();
+    expect(JSON.stringify(state.building.units)).toBe(before);
+  });
+
+  it('…also when the second entry only clears the figure', async () => {
+    withExpenses();
+    await expect(
+      buildingManager.saveMonthlyStatement(
+        statementReq([
+          { expenseId: 'e1', amount: 20 },
+          { expenseId: 'e1', amount: 0 }
+        ]),
+        makeRes()
+      )
+    ).rejects.toMatchObject({ status: 422 });
   });
 });
 

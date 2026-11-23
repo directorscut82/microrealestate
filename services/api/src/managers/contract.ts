@@ -1,5 +1,7 @@
 import * as BL from '../businesslogic/index.js';
 import type { Contract, Rent, Settlements } from '../businesslogic/index.js';
+import { heldLinesOf } from '../businesslogic/carriedshares.js';
+import type { LedgerFacts } from '../businesslogic/tasks/1_base.js';
 import _ from 'lodash';
 import moment from 'moment';
 
@@ -126,6 +128,14 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
     inputContract
   );
 
+  // What the ledger says AS IT IS STORED, before anything is priced: the engine bills
+  // the shares of building charges whose own month was closed for this tenant on the
+  // tenant's first open month, and needs to know which months are closed and what
+  // they already hold (businesslogic/tasks/1_base.ts `LedgerFacts`). Read from the
+  // input, never from the ledger being rebuilt.
+  const currentTerm = _currentTermFor(modifiedContract);
+  modifiedContract.ledgerFacts = _ledgerFacts(inputContract.rents, currentTerm);
+
   const updatedContract = create(modifiedContract);
 
   // Freeze past terms: re-pricing already-billed past rents is wrong.
@@ -139,7 +149,6 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
   // edits to building expenses or property rent. Current/future rents
   // keep the recomputed base and replay settlements via payTerm so
   // expense changes still take effect going forward.
-  const currentTerm = _currentTermFor(modifiedContract);
   if (inputContract.rents) {
     // Pass 1: clone every past rent from inputContract by term-match.
     // This covers both past-paid (frozen) AND past-unpaid (now frozen
@@ -266,6 +275,8 @@ export function update(inputContract: Contract, modification: Partial<Contract>)
     _followPreviousRent(rent, prev);
   }
 
+  // Pricing-time context only: it is not part of a contract.
+  delete updatedContract.ledgerFacts;
   return updatedContract;
 }
 
@@ -317,85 +328,182 @@ export function payTerm(
     (rent) => rent.term === Number(previousTerm.format('YYYYMMDDHH'))
   );
 
-  let previousRent: Rent | null =
-    previousRentIndex > -1 ? contract.rents[previousRentIndex] : null;
   const targetTerm = Number(term);
   const currentTerm = _currentTermFor(contract);
-  // What each rent left unpaid BEFORE this walk touches anything (same index as
-  // contract.rents — the walk replaces rents in place, it never adds or drops one).
-  const leftUnpaidBefore = contract.rents.map(_leftUnpaid);
-  contract.rents.forEach((rent, index) => {
-    if (index > previousRentIndex) {
-      // Freeze: a past term (paid OR unpaid) that is NOT the term being
-      // paid must not be re-priced when a later term is paid. Tier I-1
-      // (June 2026): past-unpaid rents are now in scope of the freeze
-      // via _isFrozen — closed months stay immutable through any later
-      // settlement walk. The act of paying the current term may walk the
-      // loop forward; that walk must skip already-frozen rents instead
-      // of overwriting their charges.
-      if (rent.term !== targetTerm && _isFrozen(rent, currentTerm)) {
-        // What a closed term BILLED stays frozen. What it CARRIES IN is not a price:
-        // it is what the term before it left unpaid, so when a payment (or a
-        // write-off / extra charge) on an older term changes that, the closed terms
-        // after it must follow — otherwise the money stays owed on every later
-        // month for good. Only when the term before it actually moved: a closed term
-        // whose predecessor leaves what it always left is not touched.
-        if (
-          previousRent &&
-          Math.abs(_leftUnpaid(previousRent) - leftUnpaidBefore[index - 1]) >= 0.005
-        ) {
-          _followPreviousRent(rent, previousRent);
+  // What the stored ledger says about closed months (see `update`). Inside `update` the
+  // facts of the ledger as it was stored are already on the contract and are the ones
+  // to use; a payment recorded on its own reads them here. Either way BEFORE the
+  // payment: the month being paid is still the tenant's first open month while it is
+  // priced, even when this very payment closes it.
+  const readsFactsHere = !contract.ledgerFacts;
+  // One walk over the months, from the one being paid. `paid` are the settlements of
+  // that month; every later month is priced again with its own.
+  const pass = (paid: Settlements): void => {
+    const current = moment.utc(term, 'YYYYMMDDHH');
+    let settlements = paid;
+    let previousRent: Rent | null =
+      previousRentIndex > -1 ? contract.rents[previousRentIndex] : null;
+    // What each rent left unpaid BEFORE this walk touches anything (same index as
+    // contract.rents — the walk replaces rents in place, it never adds or drops one).
+    const leftUnpaidBefore = contract.rents.map(_leftUnpaid);
+    contract.rents.forEach((rent: Rent, index: number): void => {
+      if (index > previousRentIndex) {
+        // Freeze: a past term (paid OR unpaid) that is NOT the term being
+        // paid must not be re-priced when a later term is paid. Tier I-1
+        // (June 2026): past-unpaid rents are now in scope of the freeze
+        // via _isFrozen — closed months stay immutable through any later
+        // settlement walk. The act of paying the current term may walk the
+        // loop forward; that walk must skip already-frozen rents instead
+        // of overwriting their charges.
+        if (rent.term !== targetTerm && _isFrozen(rent, currentTerm)) {
+          // What a closed term BILLED stays frozen. What it CARRIES IN is not a price:
+          // it is what the term before it left unpaid, so when a payment (or a
+          // write-off / extra charge) on an older term changes that, the closed terms
+          // after it must follow — otherwise the money stays owed on every later
+          // month for good. Only when the term before it actually moved: a closed term
+          // whose predecessor leaves what it always left is not touched.
+          if (
+            previousRent &&
+            Math.abs(_leftUnpaid(previousRent) - leftUnpaidBefore[index - 1]) >= 0.005
+          ) {
+            _followPreviousRent(rent, previousRent);
+          }
+          previousRent = contract.rents[index];
+          current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
+          return;
+        }
+        if (index > previousRentIndex + 1) {
+          const { debts, discounts, payments, description } = rent;
+          settlements = {
+            debts,
+            discounts: discounts.filter((d) => d.origin === 'settlement'),
+            payments,
+            // R3 (destructive-write audit 2026-07): carry the rent-level
+            // description through the forward walk. Omitting it made
+            // 1_base set `rent.description = settlements.description || ''`,
+            // wiping a thawed later term's note when an earlier arrear was
+            // settled. Pass-2 (the other settlement replay) already carries it.
+            description
+          };
+        }
+        // Round-1 audit H4: the TARGET term is exempt from the freeze guard above
+        // (so its new payment can be recorded), but if the target is itself a
+        // FROZEN (past, or fully-paid current) term, BL.computeRent would re-price
+        // its base charges against the LIVE contract.buildings / property rent —
+        // e.g. paying a late arrears in a closed month after a building expense
+        // was raised would silently inflate that month's bill. Snapshot the
+        // billed charge line-items first, then (below) restore them so only the
+        // new SETTLEMENT items apply, never the re-priced base charges. This
+        // mirrors Contract.update's freeze (it clones past rents) but still
+        // records the payment, matching the "closed months are immutable; arrears
+        // adjust via settlements, not re-pricing" contract.
+        const _targetIsFrozen =
+          rent.term === targetTerm && _isFrozen(rent, currentTerm);
+        const _billedSnapshot = _targetIsFrozen ? _.cloneDeep(rent) : null;
+        contract.rents[index] = BL.computeRent(
+          contract,
+          current.format('DD/MM/YYYY HH:mm'),
+          previousRent,
+          settlements
+        );
+        if (_billedSnapshot) {
+          contract.rents[index] = _freezeBilledCharges(
+            _billedSnapshot,
+            contract.rents[index]
+          );
         }
         previousRent = contract.rents[index];
         current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
-        return;
       }
-      if (index > previousRentIndex + 1) {
-        const { debts, discounts, payments, description } = rent;
-        settlements = {
-          debts,
-          discounts: discounts.filter((d) => d.origin === 'settlement'),
-          payments,
-          // R3 (destructive-write audit 2026-07): carry the rent-level
-          // description through the forward walk. Omitting it made
-          // 1_base set `rent.description = settlements.description || ''`,
-          // wiping a thawed later term's note when an earlier arrear was
-          // settled. Pass-2 (the other settlement replay) already carries it.
-          description
-        };
-      }
-      // Round-1 audit H4: the TARGET term is exempt from the freeze guard above
-      // (so its new payment can be recorded), but if the target is itself a
-      // FROZEN (past, or fully-paid current) term, BL.computeRent would re-price
-      // its base charges against the LIVE contract.buildings / property rent —
-      // e.g. paying a late arrears in a closed month after a building expense
-      // was raised would silently inflate that month's bill. Snapshot the
-      // billed charge line-items first, then (below) restore them so only the
-      // new SETTLEMENT items apply, never the re-priced base charges. This
-      // mirrors Contract.update's freeze (it clones past rents) but still
-      // records the payment, matching the "closed months are immutable; arrears
-      // adjust via settlements, not re-pricing" contract.
-      const _targetIsFrozen =
-        rent.term === targetTerm && _isFrozen(rent, currentTerm);
-      const _billedSnapshot = _targetIsFrozen ? _.cloneDeep(rent) : null;
-      contract.rents[index] = BL.computeRent(
-        contract,
-        current.format('DD/MM/YYYY HH:mm'),
-        previousRent,
-        settlements
-      );
-      if (_billedSnapshot) {
-        contract.rents[index] = _freezeBilledCharges(
-          _billedSnapshot,
-          contract.rents[index]
-        );
-      }
-      previousRent = contract.rents[index];
-      current.add(1, contract.frequency as moment.unitOfTime.DurationConstructor);
+    });
+  };
+  try {
+    if (readsFactsHere) {
+      contract.ledgerFacts = _ledgerFacts(contract.rents, currentTerm);
     }
-  });
+    const wasClosed =
+      readsFactsHere &&
+      targetTerm === currentTerm &&
+      contract.ledgerFacts!.currentIsClosed;
+    pass(settlements);
+    // A payment taken off a current month that was paid in full RE-OPENS it — and a
+    // share carried from an earlier month may sit on the month after it, where it went
+    // because this month was closed. This month is the tenant's first open month again:
+    // left as it is, the screen showed it without the share, the landlord recorded the
+    // amount on the screen, and only that payment's pricing put the share on it — the
+    // month was «paid» and still short by the share. (Or the other way round: the month
+    // itself holds a carried share whose row has gone since, and showed too much. Or
+    // the share is on no rent at all: the lease ends with this month, there was no
+    // later month to put it on.) So the months are priced once more, against the
+    // ledger as it stands now: every share is at once where the next recompute would
+    // have put it. Only when carrying is in play for this tenant — a carried line on
+    // this month or after it, or a row of the tenant's units that may be carried: a
+    // month that re-opens with neither is left as it always was.
+    const target = contract.rents.find((rent) => rent.term === targetTerm);
+    if (
+      wasClosed &&
+      target &&
+      !_isFrozen(target, currentTerm) &&
+      (_hasMarkedRow(contract) ||
+        contract.rents.some(
+          (rent) =>
+            typeof rent.term === 'number' &&
+            rent.term >= targetTerm &&
+            Array.isArray(rent.buildingCharges) &&
+            rent.buildingCharges.some(
+              (line) => !!line && Number.isInteger(line.forTerm)
+            )
+        ))
+    ) {
+      contract.ledgerFacts = _ledgerFacts(contract.rents, currentTerm);
+      pass(settlements);
+    }
+  } finally {
+    // pricing-time context only: it is not part of a contract
+    if (readsFactsHere) delete contract.ledgerFacts;
+  }
 
   return contract;
+}
+
+// Does a unit of the tenant's hold a row that may be billed on a later month than its
+// own (`carry: true`, set by the statement save — see the building schema)?
+function _hasMarkedRow(contract: Contract): boolean {
+  const units = new Set(
+    (contract.properties || [])
+      .filter((property) => property && property.propertyId)
+      .map((property) => String(property.propertyId))
+  );
+  return (contract.buildings || []).some((building) =>
+    ((building?.units || []) as any[]).some(
+      (unit) =>
+        !!unit &&
+        units.has(String(unit.propertyId)) &&
+        ((unit.monthlyCharges || []) as any[]).some(
+          (row) => !!row && row.carry === true
+        )
+    )
+  );
+}
+
+// What a tenant's STORED ledger says before a pricing run touches it — see
+// `LedgerFacts` in businesslogic/tasks/1_base.ts, which reads it to bill a share of a
+// building charge on the tenant's first open month when its own month was closed.
+function _ledgerFacts(
+  storedRents: Rent[] | undefined,
+  currentTerm: number
+): LedgerFacts {
+  const closed = (Array.isArray(storedRents) ? storedRents : []).filter(
+    (rent) =>
+      !!rent && typeof rent.term === 'number' && _isFrozen(rent, currentTerm)
+  );
+  const closedTerms = new Set(closed.map((rent) => rent.term));
+  return {
+    currentTerm,
+    currentIsClosed: closedTerms.has(currentTerm),
+    closedTerms,
+    held: heldLinesOf(closed)
+  };
 }
 
 // Round-1 audit H4 helper. `billed` = the rent as it was originally billed
@@ -588,6 +696,12 @@ function _isFrozen(rent: Rent, currentTerm: number): boolean {
   if (rent.term > currentTerm) return false;
   if (rent.term < currentTerm) return true;
   return _isFullyPaid(rent);
+}
+
+// The one test of «closed», for readers outside this file that must agree with the
+// ledger about it (managers/chargecarry.ts reads rents back after a recompute).
+export function isClosedRent(rent: unknown, currentTerm: number): boolean {
+  return _isFrozen(rent as Rent, currentTerm);
 }
 
 // Sum payments[].amount and compare to totalToPay/totalAmount. Tolerate a

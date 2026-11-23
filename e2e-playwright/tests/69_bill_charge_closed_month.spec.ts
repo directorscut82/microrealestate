@@ -1,53 +1,42 @@
 /**
- * A UTILITY BILL CHARGED TO TENANTS, followed to the screen that matters: what the rents
- * page says each tenant owes afterwards.
+ * A UTILITY BILL CHARGED TO TENANTS WHOSE MONTH IS CLOSED, followed to the screens that
+ * matter: what the rents page says each tenant owes afterwards, what the rent says the
+ * money is for, and what the building's own page says about where each share went.
  *
  * The landlord imports a common-electricity bill for a building («Έξοδα» → «Εισαγωγή
- * Λογαριασμού»), switches on «Χρέωση ενοικιαστών για <μήνα>» and confirms. The app
- * answers that the tenants were charged. Two situations, two tenants each at half the
- * building:
+ * Λογαριασμού»), switches on «Χρέωση ενοικιαστών για <μήνα>» and confirms. Two
+ * situations, two tenants each at half the building:
  *
  *   · PAST MONTH   the bill is dated last month (100 €). That month is over.
  *   · PAID MONTH   the bill is dated this month (60 €), but one of the two tenants has
  *                  already paid this month in full.
  *
  * A month that is over, or that a tenant has paid in full, is closed for that tenant:
- * nothing can be added to it (contract.ts, `_isFrozen` — deliberate, see spec 68). What
- * is NOT deliberate is the outcome here. The share is written on the building's side —
- * its own «Χρεώσεις» table lists the tenant against the amount — the app reports success,
- * and the tenant is asked for it in no month at all. The landlord pays the utility and
- * recovers nothing, with no warning in the import window.
+ * nothing can be added to it (contract.ts, `_isFrozen` — deliberate, see spec 68). Until
+ * 2026-11 the share was written on the building's side, the app reported success, and
+ * the tenant was asked for it in no month at all (DEFERRED_DECISIONS D-10; this file
+ * held the two cases as expected failures, watched on the NAS on 2026-11-22).
  *
- * Both are KNOWN BUGS, first watched on the NAS on 2026-11-22. Each group below ends in
- * one test that asserts the CORRECT outcome under `test.fail`: today it runs and is
- * reported as an expected failure — the bug still reproduces.
+ * THE RULE NOW (owner, 2026-11-22): the share goes on that tenant's NEXT OPEN month —
+ * this month when they have not paid it, next month when they have — as a line that
+ * says which month it is for («… · για Οκτώβριο 2026»). Where it is billed is worked out
+ * from the tenant's ledger each time (1_base.ts `_carriedInto`); what the app answers
+ * and what the building's page shows are read back from the rents
+ * (managers/chargecarry.ts).
  *
- * HOW EACH GROUP IS BUILT, and why:
+ * HOW EACH GROUP IS BUILT:
  *
- *   1. a CONTROL, as an ordinary test: a charge that must reach a tenant does reach
- *      them, and the readings see it. In PAST MONTH that is a bill dated this month
- *      charged to the same two tenants before anything else; in PAID MONTH it is the
- *      tenant who had not paid, on the very import under test. If charging or reading
- *      were broken in general, the control fails and the group stops there.
- *   2. the import under test, as an ordinary test: every click, every reading.
- *   3. the expected failure: a comparison of numbers already read, and nothing else —
- *      `test.fail` is satisfied by ANY failure, so nothing that can fail for another
- *      reason is allowed inside it.
+ *   1. a CONTROL: a charge to an open month reaches the tenant on that month, exactly
+ *      as before. In PAST MONTH that is a bill dated this month charged to the same two
+ *      tenants before anything else; in PAID MONTH it is the tenant who had not paid,
+ *      on the very import under test.
+ *   2. the import under test: every click, the app's answer (`chargeOutcome`: one line
+ *      per tenant, with the month whose rent holds the share), and the rents page.
+ *   3. the screens that say so: the rent's own breakdown names the month the share is
+ *      for; the building's page of the bill's month says where each share was charged.
+ *   4. (PAST MONTH only) the statement saved again: nothing is charged a second time.
  *
- * WHEN A BUG HERE IS FIXED, expect one of two things, depending on the shape of the fix:
- *
- *   · the tenant ends up owing their share in some open month, and the import still
- *     answers as it does today → the expected-failure test reports «Expected to fail,
- *     but passed». Delete its `test.fail` call; it is now the regression test.
- *   · the fix changes what the import does or answers — it refuses to charge, answers
- *     something other than `charged: true`, or records the charge under another month →
- *     the ORDINARY import test fails first, on the lines that pin today's answer and
- *     today's «Χρεώσεις». That is intended: those lines describe the present contract,
- *     and a fix that changes it must rewrite them, and the expected-failure test with
- *     them, on purpose.
- *
- * Either way the run goes red, so a fix cannot slip past this file. A failure stops only
- * its own group; the other group still runs.
+ * A failure stops only its own group; the other group still runs.
  *
  * The bills are generated for the day the spec runs (tools/make-bill-fixtures.mjs,
  * custom mode): a fixed-date fixture would age out of the tenants' leases. Every
@@ -62,19 +51,26 @@ import path from 'path';
 import { ensureSeedLease, LeaseSeed } from './lib/api';
 import {
   BillBuilding,
+  chargedOnRentOf,
   chargeSwitchLabel,
   createBillBuilding,
   createLedgerTenant,
   expectRowAddsUp,
+  forMonthLabel,
   importBillAndChargeTenants,
+  monthlyBreakdownOf,
   monthRef,
+  openBuildingMonth,
   openRents,
   readRentRow,
   recordPayment,
   removeLedgerFixtures,
   renderDehBill,
   RentRow,
+  saveStatement,
   serverAndBrowserAgreeOnTheMonth,
+  shareBillingLines,
+  ShareOutcome,
   signIn,
   tenantSharesFor
 } from './lib/ledger';
@@ -148,6 +144,27 @@ async function sharesOf(building: BillBuilding, term: number) {
   const shares = await tenantSharesFor(api, seed, building.buildingId, term);
   await api.dispose();
   return shares;
+}
+
+/** The app's answer about each tenant's share, as `name: status → month (amount)`. */
+const outcomeOf = (rows: ShareOutcome[] | undefined) =>
+  (rows || [])
+    .map(
+      (o) =>
+        `${o.tenantName}: ${o.status} → ${o.billedTerm ?? 'no rent'} (${o.billedAmount ?? '-'})`
+    )
+    .sort();
+
+/** The same month's statement saved again, with the figure it already has. */
+async function saveStatementAgain(
+  building: BillBuilding,
+  term: number,
+  amount: number
+): Promise<ShareOutcome[]> {
+  const api = await request.newContext();
+  const outcome = await saveStatement(api, seed, building, term, amount);
+  await api.dispose();
+  return outcome;
 }
 
 test.beforeAll(async () => {
@@ -250,8 +267,9 @@ test.describe('PAST MONTH', () => {
   test.describe.configure({ mode: 'serial' });
 
   const tenants = [PAST.tenantA, PAST.tenantB];
+  const HALF = PAST.amount / 2;
+  const CONTROL_HALF = PAST.controlAmount / 2;
   const seen: {
-    nextBefore?: Record<string, RentRow>;
     nextAfter?: Record<string, RentRow>;
   } = {};
 
@@ -280,6 +298,13 @@ test.describe('PAST MONTH', () => {
       },
       'what the app answered for the import'
     ).toEqual({ term: CURRENT.term, charged: true, chargeError: null });
+    expect(
+      outcomeOf(bill.chargeOutcome),
+      'where the app says each share went: this month, for both'
+    ).toEqual([
+      `${PAST.tenantA}: billed → ${CURRENT.term} (${CONTROL_HALF})`,
+      `${PAST.tenantB}: billed → ${CURRENT.term} (${CONTROL_HALF})`
+    ]);
 
     await openRents(page, seed.realmName, CURRENT, SEARCH);
     const current = await rowsOf(page, tenants, 'this month, after');
@@ -298,13 +323,13 @@ test.describe('PAST MONTH', () => {
         'a charge to an open month reaches the tenant'
       ).toEqual({
         name,
-        monthly: RENT + PAST.controlAmount / 2,
-        owesMoreByNextMonth: PAST.controlAmount / 2
+        monthly: RENT + CONTROL_HALF,
+        owesMoreByNextMonth: CONTROL_HALF
       });
     }
   });
 
-  test('a bill dated last month is imported with «Χρέωση ενοικιαστών» on, and the app reports it charged', async ({
+  test('a bill dated last month is imported with «Χρέωση ενοικιαστών» on: each half goes on this month’s rent', async ({
     page
   }) => {
     await signIn(page);
@@ -322,8 +347,7 @@ test.describe('PAST MONTH', () => {
       path: path.join(WORK, 'past-month-after-import.png'),
       fullPage: true
     });
-    // The window names the closed month in so many words, and warns of nothing.
-    expect(switchLabel, 'the switch names the month it charges').toBe(
+    expect(switchLabel, 'the switch names the month the bill is for').toBe(
       chargeSwitchLabel(LAST_MONTH)
     );
     expect(
@@ -340,57 +364,135 @@ test.describe('PAST MONTH', () => {
       charged: true,
       chargeError: null
     });
-    // The building's side: each tenant is listed against half the bill, for that month.
+    // Read back from the tenants' rents after saving — not assumed.
+    expect(
+      outcomeOf(bill.chargeOutcome),
+      'where the app says each share went'
+    ).toEqual([
+      `${PAST.tenantA}: moved → ${CURRENT.term} (${HALF})`,
+      `${PAST.tenantB}: moved → ${CURRENT.term} (${HALF})`
+    ]);
+    // The building's side: each tenant is listed against half the bill, for the bill's month.
     expect(
       await sharesOf(pastBuilding, LAST_MONTH.term),
       'the building’s «Χρεώσεις» for the bill’s month'
     ).toEqual({
-      [PAST.tenantA]: PAST.amount / 2,
-      [PAST.tenantB]: PAST.amount / 2
+      [PAST.tenantA]: HALF,
+      [PAST.tenantB]: HALF
     });
 
+    await openRents(page, seed.realmName, CURRENT, SEARCH);
+    const current = await rowsOf(page, tenants, 'this month, after');
     await openRents(page, seed.realmName, NEXT, SEARCH);
     const nextAfter = await rowsOf(page, tenants, 'next month, after');
     await page.screenshot({
       path: path.join(WORK, 'past-month-rents-next-month.png'),
       fullPage: true
     });
-
-    seen.nextBefore = nextBefore;
     seen.nextAfter = nextAfter;
-    console.log(
-      tenants
-        .map(
-          (name) =>
-            `[69] PAST MONTH ${name} next month «Συνολική οφειλή»: ` +
-            `${nextBefore[name].totalDue} → ${nextAfter[name].totalDue}`
-        )
-        .join('\n')
-    );
+
+    for (const name of tenants) {
+      expect(
+        {
+          name,
+          monthly: current[name].monthly,
+          owesMoreByNextMonth: cents(
+            nextAfter[name].totalDue - nextBefore[name].totalDue
+          )
+        },
+        'a 100 € bill for a month that is over: each tenant owes their half, on this month’s rent'
+      ).toEqual({
+        name,
+        monthly: RENT + CONTROL_HALF + HALF,
+        owesMoreByNextMonth: HALF
+      });
+    }
   });
 
-  test('KNOWN BUG (expected failure) — a bill reported as charged must be owed by the tenants', async () => {
-    // Preconditions first, outside the expected failure: if the readings are missing
-    // this must fail as an ordinary test, not be counted as «the bug reproduced».
-    expect(seen.nextBefore, 'rows before the import were read').toBeTruthy();
-    expect(seen.nextAfter, 'rows after the import were read').toBeTruthy();
+  test('the rent says which month the share is for', async ({ page }) => {
+    await signIn(page);
+    await openRents(page, seed.realmName, CURRENT, SEARCH);
+    const lines = await monthlyBreakdownOf(page, PAST.tenantA);
+    const label = `Κοινόχρηστο Ρεύμα (${PAST.building} - ${PAST.expense})`;
+    expect(
+      lines.filter((l) => l.includes(PAST.expense)),
+      'the building lines of this month’s rent: its own share, then last month’s'
+    ).toEqual([
+      `${label} ${asShown(CONTROL_HALF)} €`,
+      `${label} · ${forMonthLabel(LAST_MONTH)} ${asShown(HALF)} €`
+    ]);
+  });
 
-    test.fail(
-      true,
-      'KNOWN BUG, watched on the NAS 2026-11-22: a bill charged to a month that is already over is ' +
-        'written on the building and reported as charged, and reaches no tenant’s rent in any month. ' +
-        'See the header for what to do when this starts passing.'
+  test('the building’s page says where each share was charged', async ({
+    page
+  }) => {
+    await signIn(page);
+    await openBuildingMonth(
+      page,
+      seed.realmName,
+      pastBuilding.buildingId,
+      LAST_MONTH
     );
-    const nowOwed = cents(
-      seen.nextAfter![PAST.tenantA].totalDue -
-        seen.nextBefore![PAST.tenantA].totalDue +
-        (seen.nextAfter![PAST.tenantB].totalDue -
-          seen.nextBefore![PAST.tenantB].totalDue)
+    await expect(
+      page.getByText(
+        'Το μερίδιο κάθε ενοικιαστή για αυτόν τον μήνα μπαίνει στο επόμενο ανοιχτό ενοίκιό του'
+      ),
+      'the note on a month that is over'
+    ).toHaveCount(1);
+    await expect
+      .poll(() => shareBillingLines(page), {
+        message: 'where each share of last month was charged',
+        timeout: 30_000
+      })
+      .toEqual([
+        ['olive', chargedOnRentOf(CURRENT)],
+        ['olive', chargedOnRentOf(CURRENT)]
+      ]);
+    await page.screenshot({
+      path: path.join(WORK, 'past-month-building-page.png'),
+      fullPage: true
+    });
+
+    // This month's page lists the two shares under their tenants, each marked with the
+    // month it is for — and has nothing to add about its own.
+    await openBuildingMonth(
+      page,
+      seed.realmName,
+      pastBuilding.buildingId,
+      CURRENT
+    );
+    await expect(
+      page.locator('[data-cy=shareForMonth]'),
+      'the shares billed on this month for another'
+    ).toHaveText([forMonthLabel(LAST_MONTH), forMonthLabel(LAST_MONTH)]);
+    await expect(page.locator('[data-cy=shareBilling]')).toHaveCount(0);
+  });
+
+  test('the same statement saved again charges nothing a second time', async ({
+    page
+  }) => {
+    expect(seen.nextAfter, 'rows after the import were read').toBeTruthy();
+    const outcome = await saveStatementAgain(
+      pastBuilding,
+      LAST_MONTH.term,
+      PAST.amount
     );
     expect(
-      nowOwed,
-      'how much more the two tenants owe by next month, after a 100 € bill was charged to them'
-    ).toBe(PAST.amount);
+      outcomeOf(outcome),
+      'where each share is, after saving again'
+    ).toEqual([
+      `${PAST.tenantA}: moved → ${CURRENT.term} (${HALF})`,
+      `${PAST.tenantB}: moved → ${CURRENT.term} (${HALF})`
+    ]);
+    await signIn(page);
+    await openRents(page, seed.realmName, NEXT, SEARCH);
+    const again = await rowsOf(page, tenants, 'next month, after saving again');
+    for (const name of tenants) {
+      expect(
+        again[name].totalDue,
+        `${name}: «Συνολική οφειλή» of next month is what it was`
+      ).toBe(seen.nextAfter![name].totalDue);
+    }
   });
 });
 
@@ -398,6 +500,7 @@ test.describe('PAID MONTH', () => {
   test.describe.configure({ mode: 'serial' });
 
   const tenants = [PAID.hasPaid, PAID.notPaid];
+  const HALF = PAID.amount / 2;
   const seen: {
     currentAfter?: Record<string, RentRow>;
     nextBefore?: Record<string, RentRow>;
@@ -451,12 +554,20 @@ test.describe('PAID MONTH', () => {
       charged: true,
       chargeError: null
     });
+    // The tenant who had paid this month gets it next month; the other one this month.
+    expect(
+      outcomeOf(bill.chargeOutcome),
+      'where the app says each share went'
+    ).toEqual([
+      `${PAID.hasPaid}: moved → ${NEXT.term} (${HALF})`,
+      `${PAID.notPaid}: billed → ${CURRENT.term} (${HALF})`
+    ]);
     expect(
       await sharesOf(paidBuilding, CURRENT.term),
       'the building’s «Χρεώσεις» for this month'
     ).toEqual({
-      [PAID.hasPaid]: PAID.amount / 2,
-      [PAID.notPaid]: PAID.amount / 2
+      [PAID.hasPaid]: HALF,
+      [PAID.notPaid]: HALF
     });
 
     await openRents(page, seed.realmName, CURRENT, SEARCH);
@@ -471,15 +582,6 @@ test.describe('PAID MONTH', () => {
     seen.currentAfter = currentAfter;
     seen.nextBefore = nextBefore;
     seen.nextAfter = nextAfter;
-    console.log(
-      tenants
-        .map(
-          (name) =>
-            `[69] PAID MONTH ${name} this month «Μηνιαίο ποσό» ${currentAfter[name].monthly}; ` +
-            `next month «Συνολική οφειλή»: ${nextBefore[name].totalDue} → ${nextAfter[name].totalDue}`
-        )
-        .join('\n')
-    );
   });
 
   test('control — the tenant who had not paid is charged their half, this month', async () => {
@@ -487,32 +589,68 @@ test.describe('PAID MONTH', () => {
     expect(
       seen.currentAfter![PAID.notPaid].monthly,
       'this month «Μηνιαίο ποσό»: rent plus half the bill'
-    ).toBe(RENT + PAID.amount / 2);
+    ).toBe(RENT + HALF);
     expect(
       cents(
         seen.nextAfter![PAID.notPaid].totalDue -
           seen.nextBefore![PAID.notPaid].totalDue
       ),
       'how much more this tenant owes by next month'
-    ).toBe(PAID.amount / 2);
+    ).toBe(HALF);
   });
 
-  test('KNOWN BUG (expected failure) — the tenant who had already paid must be asked for their half too', async () => {
+  test('the tenant who had already paid is asked for their half next month, and the month they paid is as they paid it', async () => {
     expect(seen.nextBefore, 'rows before the import were read').toBeTruthy();
     expect(seen.nextAfter, 'rows after the import were read').toBeTruthy();
-
-    test.fail(
-      true,
-      'KNOWN BUG, watched on the NAS 2026-11-22: a tenant who has paid the current month in full is ' +
-        'listed against their share on the building and charged it in no month. ' +
-        'See the header for what to do when this starts passing.'
-    );
     expect(
-      cents(
-        seen.nextAfter![PAID.hasPaid].totalDue -
-          seen.nextBefore![PAID.hasPaid].totalDue
-      ),
-      'how much more this tenant owes by next month, after half of a 60 € bill was charged to them'
-    ).toBe(PAID.amount / 2);
+      {
+        thisMonthMonthly: seen.currentAfter![PAID.hasPaid].monthly,
+        thisMonthLeft: seen.currentAfter![PAID.hasPaid].remaining,
+        nextMonthMonthly: seen.nextAfter![PAID.hasPaid].monthly,
+        owesMoreByNextMonth: cents(
+          seen.nextAfter![PAID.hasPaid].totalDue -
+            seen.nextBefore![PAID.hasPaid].totalDue
+        )
+      },
+      'half of a 60 € bill, for a tenant who had paid this month in full'
+    ).toEqual({
+      thisMonthMonthly: RENT,
+      thisMonthLeft: 0,
+      nextMonthMonthly: RENT + HALF,
+      owesMoreByNextMonth: HALF
+    });
+  });
+
+  test('next month’s rent says which month the share is for, and the building’s page says where it went', async ({
+    page
+  }) => {
+    await signIn(page);
+    await openRents(page, seed.realmName, NEXT, SEARCH);
+    const lines = await monthlyBreakdownOf(page, PAID.hasPaid);
+    expect(
+      lines.filter((l) => l.includes(PAID.expense)),
+      'the building line of next month’s rent'
+    ).toEqual([
+      `Κοινόχρηστο Ρεύμα (${PAID.building} - ${PAID.expense}) · ${forMonthLabel(CURRENT)} ${asShown(HALF)} €`
+    ]);
+
+    // This month's page: the share of the tenant who had paid says where it was
+    // charged; the other one is on this month's rent, and there is nothing to add.
+    await openBuildingMonth(
+      page,
+      seed.realmName,
+      paidBuilding.buildingId,
+      CURRENT
+    );
+    await expect
+      .poll(() => shareBillingLines(page), {
+        message: 'where each share of this month was charged',
+        timeout: 30_000
+      })
+      .toEqual([['olive', chargedOnRentOf(NEXT)]]);
+    await page.screenshot({
+      path: path.join(WORK, 'paid-month-building-page.png'),
+      fullPage: true
+    });
   });
 });

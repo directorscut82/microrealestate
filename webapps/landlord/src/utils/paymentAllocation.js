@@ -26,11 +26,14 @@
  *               'repair' | 'vat' | 'previousBalance' | 'extracharge',
  *     lineKey:  '<sourceArray>:<index>'
  *               // 'preTax:0', 'charges:1', 'building:0',
- *               // or 'previousBalance' / 'vat' / 'extracharge' (scalar)
+ *               // or 'previousBalance' / 'vat' / 'extracharge' (scalar),
+ *               // or, for a share carried in from an earlier month,
+ *               // 'building:<propertyId>:<expenseId>:<YYMM>' (buildingLineKey)
  *     description: string,
  *     amount: number,
  *     type?: string,         // present on building/repair lines
- *     buildingName?: string  // present on building/repair lines
+ *     buildingName?: string, // present on building/repair lines
+ *     forTerm?: number       // the month a carried share is FOR
  *   }
  *
  * Auto-spread order matches rentmanager.AUTO_SPREAD by virtue of the
@@ -40,6 +43,58 @@
  */
 
 const _round = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+/**
+ * The key an attribution uses for a building line of a rent.
+ *
+ * A line of the month itself is named by its position (`building:<i>`), as it
+ * always was. A share carried in from an earlier month (its own month was
+ * closed for the tenant when the bill arrived; the line has `forTerm`) comes
+ * after those lines and can be joined or left by others at any time, so a
+ * position would end up naming another line: it is named by what it is,
+ * `building:<propertyId>:<expenseId>:<YYMM>` (`…:2610` = October 2026).
+ *
+ * Short on purpose: 63 characters with database ids. Every version of the
+ * server refuses a key longer than 64 when a month's payments are saved again,
+ * so a longer one would lock that month's payments after a rollback.
+ *
+ * The same rule as the server's (services/api/src/managers/chargecarry.ts
+ * `buildingLineKey`): keep the two in step.
+ */
+export function buildingLineKey(line, index) {
+  return Number.isInteger(line?.forTerm) && line?.expenseId && line?.propertyId
+    ? `building:${line.propertyId}:${line.expenseId}:${_yearMonth(line.forTerm)}`
+    : `building:${index}`;
+}
+
+// 2026100100 → «2610»
+const _yearMonth = (term) =>
+  String(Math.floor(term / 10000) % 10000).padStart(4, '0');
+
+/**
+ * The building line of `rent` that a saved attribution key names, or null when
+ * that line has gone. A position names a line of the month itself only, never
+ * a carried one that has since slid into that position, and is read as the
+ * number it is (`building:01` is position 1).
+ */
+export function buildingLineOf(rent, lineKey) {
+  const lines = Array.isArray(rent?.buildingCharges)
+    ? rent.buildingCharges
+    : [];
+  const key = String(lineKey ?? '');
+  const position = /^building:(\d+)$/.exec(key);
+  if (position) {
+    const index = Number(position[1]);
+    const line = lines[index];
+    return line && buildingLineKey(line, index) === `building:${index}`
+      ? line
+      : null;
+  }
+  const at = lines.findIndex(
+    (line, index) => buildingLineKey(line, index) === key
+  );
+  return at === -1 ? null : lines[at];
+}
 
 // A stored amount is a figure when it is a finite number, or text holding one.
 const _figure = (value) => {
@@ -111,11 +166,13 @@ function _ownLines(rent) {
     const isRepair = c?.type === 'repair';
     lines.push({
       category: isRepair ? 'repair' : 'buildingCharge',
-      lineKey: `building:${i}`,
+      lineKey: buildingLineKey(c, i),
       description: String(c?.description || 'Building charge'),
       amount,
       type: c?.type ? String(c.type) : undefined,
-      buildingName: c?.buildingName ? String(c.buildingName) : undefined
+      buildingName: c?.buildingName ? String(c.buildingName) : undefined,
+      // the month a carried share is for, so its label can say so
+      ...(Number.isInteger(c?.forTerm) ? { forTerm: c.forTerm } : {})
     });
   });
 

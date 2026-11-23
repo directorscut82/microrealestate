@@ -5,6 +5,7 @@ import { CelebrationIllustration } from '../../components/Illustrations';
 import { ChartContainer } from '../ui/chart';
 import { cn } from '../../utils';
 import { DashboardCard } from './DashboardCard';
+import { forMonthSuffix } from '../../utils/lineLabels';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
 import useFormatNumber from '../../hooks/useFormatNumber';
@@ -348,6 +349,9 @@ export default function MonthFigures({ className, dashboardData }) {
             lineDescription: l.description || '',
             lineSubLabel:
               l.type && TYPE_LABELS[l.type] ? t(TYPE_LABELS[l.type]) : '',
+            // « · για Οκτώβριο 2026» when the share is billed on a later month
+            // than the one it is for; '' for every other line
+            forMonth: forMonthSuffix(t, l, lang),
             owed: lineOwed,
             collected
           });
@@ -408,8 +412,16 @@ export default function MonthFigures({ className, dashboardData }) {
                       <td className="py-0.5 pr-2 text-ink max-w-[16rem]">
                         <div className="truncate">{r.tenantName}</div>
                         {subFragment && (
-                          <div className="text-xs text-ink-muted truncate">
-                            {subFragment}
+                          // The name may be cut short; the month a carried share
+                          // is for never is — it is what tells two lines of the
+                          // same expense apart.
+                          <div className="flex text-xs text-ink-muted">
+                            <span className="truncate">{subFragment}</span>
+                            {r.forMonth && (
+                              <span className="ml-1 shrink-0 whitespace-nowrap">
+                                {r.forMonth.trim()}
+                              </span>
+                            )}
                           </div>
                         )}
                       </td>

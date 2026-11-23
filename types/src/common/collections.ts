@@ -295,6 +295,14 @@ export namespace CollectionTypes {
           // to bucket repair charges separately from regular building
           // expenses.
           type?: string;
+          // What the line is, whatever the building or the expense is called
+          // later: the unit it is for and the expense (or repair) it comes from.
+          propertyId?: string;
+          expenseId?: string;
+          repairId?: string;
+          // The month the share is FOR when it is billed on a later month (a
+          // share carried in from a month that was closed for the tenant).
+          forTerm?: number;
         }[]
       | [];
     paymentInstructions:
@@ -497,6 +505,9 @@ export namespace CollectionTypes {
     description: string;
     expenseId?: string | null;
     repairId?: string | null;
+    // «May be billed on a later month when its own month is closed for the tenant»
+    // (see the schema in services/common/src/collections/building.ts).
+    carry?: boolean;
   };
 
   export type BuildingUnit = {

@@ -12,9 +12,11 @@ import {
 import {
   buildingLineLabel,
   chargeLineLabel,
+  forMonthSuffix,
   rentLineLabel
 } from '../../utils/lineLabels';
 import { Input } from '../ui/input';
+import LineName from '../LineName';
 import useFormatNumber from '../../hooks/useFormatNumber';
 
 // Wave-26 round-3u/3v: scalar-line labels (previousBalance / vat / extracharge)
@@ -52,7 +54,10 @@ export default function AllocationBlock({
   onModeChange,
   onSpecificCategoryChange,
   onCustomAmountChange,
-  t
+  t,
+  // the active locale: a share carried in from an earlier month names that month,
+  // and Greek needs it in the accusative (lineLabels.js forMonthSuffix)
+  lang
 }) {
   // Wave-26 round-3v: locale-aware money formatter (el-GR → "1.234,56 €",
   // en-* → "$1,234.56"). Replaces raw .toFixed(2) which printed dot-decimal
@@ -161,7 +166,7 @@ export default function AllocationBlock({
     if (line.category === 'rent') return rentLineLabel(t, line);
     if (line.category === 'propertyCharge') return chargeLineLabel(t, line);
     if (line.category === 'buildingCharge' || line.category === 'repair') {
-      return buildingLineLabel(t, line);
+      return buildingLineLabel(t, line, lang);
     }
     // Scalar lines (vat / previousBalance / extracharge): use the
     // localized category key. The line's `description` is empty by
@@ -171,6 +176,13 @@ export default function AllocationBlock({
     }
     return line.description?.trim() || line.category || '';
   };
+  // « · για Οκτώβριο 2026» of a share carried in from an earlier month, '' for every
+  // other line (see LineName).
+  const lineSuffix = (line) =>
+    line && (line.category === 'buildingCharge' || line.category === 'repair')
+      ? forMonthSuffix(t, line, lang)
+      : '';
+  const hasCarriedLine = payableLines.some((l) => lineSuffix(l));
 
   return (
     <div className="mt-3 pt-3 border-t border-stone-line/60 space-y-3">
@@ -216,7 +228,8 @@ export default function AllocationBlock({
                   onValueChange={onSpecificCategoryChange}
                 >
                   <SelectTrigger
-                    className="max-w-md"
+                    // wider when a line names its month, so the month is not cut
+                    className={hasCarriedLine ? 'max-w-3xl' : 'max-w-md'}
                     data-cy={`allocSpecificCategory-${index}`}
                   >
                     <SelectValue placeholder={t('Select a category')} />
@@ -269,8 +282,11 @@ export default function AllocationBlock({
                     key={l.lineKey}
                     className="grid grid-cols-3 items-center gap-2 text-sm"
                   >
-                    <div className="truncate" title={lineLabel(l)}>
-                      {lineLabel(l)}
+                    <div
+                      className={lineSuffix(l) ? 'min-w-0' : 'truncate'}
+                      title={lineLabel(l)}
+                    >
+                      <LineName label={lineLabel(l)} suffix={lineSuffix(l)} />
                     </div>
                     <div className="text-muted-foreground tabular-nums">
                       {t('owed')}: {fmt(l.amount)}
@@ -357,8 +373,15 @@ export default function AllocationBlock({
                 const delta = before - after;
                 return (
                   <tr key={l.lineKey}>
-                    <td className="truncate max-w-[14rem]" title={lineLabel(l)}>
-                      {lineLabel(l)}
+                    <td
+                      className={
+                        lineSuffix(l)
+                          ? 'max-w-[14rem]'
+                          : 'truncate max-w-[14rem]'
+                      }
+                      title={lineLabel(l)}
+                    >
+                      <LineName label={lineLabel(l)} suffix={lineSuffix(l)} />
                     </td>
                     <td className="text-right">{fmt(before)}</td>
                     <td className="text-right">

@@ -32,8 +32,11 @@ import ConfirmDialog from '../ConfirmDialog';
 import { cn } from '../../utils';
 import moment from 'moment';
 import { payRent, QueryKeys } from '../../utils/restcalls';
-import { owedLinesOf } from '../../utils/paymentAllocation';
-import { BUILDING_TYPE_LABEL_KEY } from '../../utils/lineLabels';
+import { buildingLineOf, owedLinesOf } from '../../utils/paymentAllocation';
+import {
+  BUILDING_TYPE_LABEL_KEY,
+  forMonthSuffix
+} from '../../utils/lineLabels';
 import AllocationBlock from './AllocationBlock';
 import SavedPaymentEditForm from './SavedPaymentEditForm';
 import { toast } from 'sonner';
@@ -210,12 +213,17 @@ function _resolveLineSource(allocationEntry, rent, owedLines) {
           buildingName: ''
         };
       }
+      // The line these old attributions (a category, no line) are shown as is the
+      // first building line of the month. When that is a share carried in from an
+      // earlier month — the month has no building line of its own — it says which
+      // month it is for, like everywhere else.
       if (category === 'buildingCharge') {
         const entry = (rent.buildingCharges || [])[0];
         return {
           description: String(entry?.description || ''),
           typeLabel: entry?.type ? String(entry.type) : '',
-          buildingName: String(entry?.buildingName || '')
+          buildingName: String(entry?.buildingName || ''),
+          forTerm: entry?.forTerm
         };
       }
       if (category === 'repair') {
@@ -225,7 +233,8 @@ function _resolveLineSource(allocationEntry, rent, owedLines) {
         return {
           description: String(entry?.description || ''),
           typeLabel: entry?.type ? String(entry.type) : '',
-          buildingName: String(entry?.buildingName || '')
+          buildingName: String(entry?.buildingName || ''),
+          forTerm: entry?.forTerm
         };
       }
     }
@@ -252,14 +261,17 @@ function _resolveLineSource(allocationEntry, rent, owedLines) {
         buildingName: ''
       };
     }
-    const buildingMatch = lineKey.match(/^building:(\d+)$/);
-    if (buildingMatch) {
-      const idx = Number(buildingMatch[1]);
-      const entry = (rent.buildingCharges || [])[idx];
+    // `building:<i>` for a line of the month itself; a share carried in from an
+    // earlier month is named by what it is (paymentAllocation.js buildingLineKey).
+    // A position never names a carried line, and a line that has gone gives an
+    // empty paren, as before.
+    if (/^building:/.test(lineKey)) {
+      const entry = buildingLineOf(rent, lineKey);
       return {
         description: String(entry?.description || ''),
         typeLabel: entry?.type ? String(entry.type) : '',
-        buildingName: String(entry?.buildingName || '')
+        buildingName: String(entry?.buildingName || ''),
+        forTerm: entry?.forTerm
       };
     }
   }
@@ -269,17 +281,20 @@ function _resolveLineSource(allocationEntry, rent, owedLines) {
       return {
         description: String(line.description || ''),
         typeLabel: line.type ? String(line.type) : '',
-        buildingName: String(line.buildingName || '')
+        buildingName: String(line.buildingName || ''),
+        forTerm: line.forTerm
       };
     }
   }
   return { description: '', typeLabel: '', buildingName: '' };
 }
 
-function _allocationBullet(entry, t, rent, owedLines) {
+// Exported for its test only (src/__tests__/savedPaymentBullet.test.js): what one
+// attribution of a saved payment reads as on the payment's tile.
+export function _allocationBullet(entry, t, rent, owedLines, lang) {
   const category = String(entry?.category || '');
   const baseLead = t(_CATEGORY_LEAD_KEY[category] || 'Payment of rent');
-  const { description, typeLabel, buildingName } = _resolveLineSource(
+  const { description, typeLabel, buildingName, forTerm } = _resolveLineSource(
     entry,
     rent,
     owedLines
@@ -306,10 +321,14 @@ function _allocationBullet(entry, t, rent, owedLines) {
     if (buildingName && description) paren = ` (${buildingName} - ${description})`;
     else if (buildingName) paren = ` (${buildingName})`;
     else if (description) paren = ` (${description})`;
+    // a share carried in from an earlier month says which month it is for
+    paren += forMonthSuffix(t, { forTerm }, lang);
     return { lead, paren };
   }
   let paren = '';
   if (!isScalar && description) paren = ` (${description})`;
+  // …also on a carried line that names no kind of expense
+  if (!isScalar) paren += forMonthSuffix(t, { forTerm }, lang);
   return { lead: baseLead, paren };
 }
 
@@ -327,7 +346,7 @@ function _formatDate(d) {
 
 function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) {
   const queryClient = useQueryClient();
-  const { t } = useTranslation('common');
+  const { t, lang } = useTranslation('common');
   const formatNumber = useFormatNumber();
   const paymentTypes = usePaymentTypes();
   const initVals = initialFormValues();
@@ -884,7 +903,13 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                                   )
                                   .map((a, ai) => {
                                     const { lead, paren } =
-                                      _allocationBullet(a, t, rent, owedLines);
+                                      _allocationBullet(
+                                        a,
+                                        t,
+                                        rent,
+                                        owedLines,
+                                        lang
+                                      );
                                     return (
                                       <div
                                         key={ai}
@@ -1071,6 +1096,7 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
                       _setAllocCustomAmount(field.id, cat, val)
                     }
                     t={t}
+                    lang={lang}
                   />
                 )}
 

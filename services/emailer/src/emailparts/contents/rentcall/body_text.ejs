@@ -11,7 +11,7 @@
 - <%- item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
 <% }); %>
 <% (rent.buildingCharges || []).forEach(function(item) { %>
-- <%- item.buildingName ? item.buildingName + ' - ' : '' %><%- item.description %>: <%- _.formatNumber(item.amount, 'currency') %>
+- <%- item.buildingName ? item.buildingName + ' - ' : '' %><%- item.description %><% if (Number.isInteger(item.forTerm) && _.formatTermFor(item.forTerm)) { %> · <%- _.t('for {{month}}', { month: _.formatTermFor(item.forTerm) }) %><% } %>: <%- _.formatNumber(item.amount, 'currency') %>
 <% }); %>
 <%# Round-2 audit M3: reconcile listed lines to the Total (see body_html). %>
 <% if (rent.total.discount) { %>

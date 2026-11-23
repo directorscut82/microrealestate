@@ -2,6 +2,7 @@ import { BuildingProjection, Collections, logger, OwnerStatement } from '@micror
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import moment from 'moment';
 import { _isSettledByCarryForward } from './frontdata.js';
+import { buildingLineOf } from './chargecarry.js';
 import { computeOwnerEksodaByMonth } from './buildingmanager.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,13 +104,10 @@ export function _computePaidByBucket(rent: AnyRecord): AnyRecord {
           return;
         }
         if (cat === 'buildingCharge' || cat === 'repair') {
-          // lineKey is 'building:<idx>'. Resolve back to the type by
-          // looking up the underlying buildingCharges array entry.
-          const m = lineKey.match(/^building:(\d+)$/);
-          const idx = m ? Number(m[1]) : -1;
-          const entry = idx >= 0
-            ? (rent.buildingCharges || [])[idx]
-            : null;
+          // lineKey is 'building:<idx>' — or, for a share carried in from an
+          // earlier month, 'building:<propertyId>:<expenseId>:<YYMM>'. Resolve
+          // back to the type by looking up the underlying buildingCharges entry.
+          const entry = buildingLineOf(rent, lineKey);
           const type = entry?.type || (cat === 'repair' ? 'repair' : 'other');
           _add(`building:${type}`, amt);
           return;
@@ -469,7 +467,9 @@ export function _computeRevenues(
             description: String(c?.description || ''),
             type: c?.type ? String(c.type) : 'other',
             buildingName: c?.buildingName ? String(c.buildingName) : '',
-            amount: Number(c?.amount) || 0
+            amount: Number(c?.amount) || 0,
+            // the month a share is FOR when it is billed on a later one
+            ...(Number.isInteger(c?.forTerm) ? { forTerm: c.forTerm } : {})
           })
         );
         acc[key].tenants.push({
