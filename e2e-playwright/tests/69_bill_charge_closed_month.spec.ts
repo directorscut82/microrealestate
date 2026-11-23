@@ -57,9 +57,12 @@ import {
   createLedgerTenant,
   expectRowAddsUp,
   forMonthLabel,
+  hasPaidLabel,
   importBillAndChargeTenants,
+  monthClosedSentence,
   monthlyBreakdownOf,
   monthRef,
+  onRentOf,
   openBuildingMonth,
   openRents,
   readRentRow,
@@ -113,6 +116,8 @@ const FIXTURES = {
 /** The 9-digit body of a printed παροχή — what an expense's billing id is matched on. */
 const supplyBody = (printed: string) => printed.replace(/\D/g, '').slice(0, 9);
 const asShown = (amount: number) => amount.toFixed(2).replace('.', ',');
+/** An amount as the screens print it: «50,00 €». */
+const euro = (amount: number) => `${asShown(amount)} €`;
 const cents = (n: number) => Math.round(n * 100) / 100;
 
 const WORK = path.resolve(__dirname, '../_bill_closed_month');
@@ -280,7 +285,7 @@ test.describe('PAST MONTH', () => {
     await openRents(page, seed.realmName, NEXT, SEARCH);
     const before = await rowsOf(page, tenants, 'next month, before');
 
-    const { bill, switchLabel } = await importBillAndChargeTenants(
+    const { bill, switchLabel, windowSaid } = await importBillAndChargeTenants(
       page,
       seed.realmName,
       pastBuilding.buildingId,
@@ -298,6 +303,23 @@ test.describe('PAST MONTH', () => {
       },
       'what the app answered for the import'
     ).toEqual({ term: CURRENT.term, charged: true, chargeError: null });
+    // The window stays open on where each share went: this month's rent, for both —
+    // and it does not say the month is closed, because it is not.
+    expect(windowSaid, 'what the import window says after saving').toEqual({
+      sentence: null,
+      shares: [
+        [
+          `${PAST.properties[0]} · ${PAST.tenantA}`,
+          euro(CONTROL_HALF),
+          onRentOf(CURRENT)
+        ],
+        [
+          `${PAST.properties[1]} · ${PAST.tenantB}`,
+          euro(CONTROL_HALF),
+          onRentOf(CURRENT)
+        ]
+      ]
+    });
     expect(
       outcomeOf(bill.chargeOutcome),
       'where the app says each share went: this month, for both'
@@ -336,13 +358,30 @@ test.describe('PAST MONTH', () => {
     await openRents(page, seed.realmName, NEXT, SEARCH);
     const nextBefore = await rowsOf(page, tenants, 'next month, before');
 
-    const { bill, switchLabel } = await importBillAndChargeTenants(
+    const { bill, switchLabel, windowSaid } = await importBillAndChargeTenants(
       page,
       seed.realmName,
       pastBuilding.buildingId,
       pdf.past,
       asShown(PAST.amount)
     );
+    // What the landlord is told on the spot: the month is closed, and each share is on
+    // this month's rent. (It used to be «εισήχθη με επιτυχία» and nothing else.)
+    expect(windowSaid, 'what the import window says after saving').toEqual({
+      sentence: monthClosedSentence(LAST_MONTH),
+      shares: [
+        [
+          `${PAST.properties[0]} · ${PAST.tenantA}`,
+          euro(HALF),
+          onRentOf(CURRENT)
+        ],
+        [
+          `${PAST.properties[1]} · ${PAST.tenantB}`,
+          euro(HALF),
+          onRentOf(CURRENT)
+        ]
+      ]
+    });
     await page.screenshot({
       path: path.join(WORK, 'past-month-after-import.png'),
       fullPage: true
@@ -526,13 +565,31 @@ test.describe('PAID MONTH', () => {
     await openRents(page, seed.realmName, NEXT, SEARCH);
     const nextBefore = await rowsOf(page, tenants, 'next month, before');
 
-    const { bill, switchLabel } = await importBillAndChargeTenants(
+    const { bill, switchLabel, windowSaid } = await importBillAndChargeTenants(
       page,
       seed.realmName,
       paidBuilding.buildingId,
       pdf.paid,
       asShown(PAID.amount)
     );
+    // One share is on the bill's own month, so the window does not say «the month is
+    // closed for the tenants»; under the share that went on next month it says why.
+    expect(windowSaid, 'what the import window says after saving').toEqual({
+      sentence: null,
+      shares: [
+        [
+          `${PAID.properties[0]} · ${PAID.hasPaid}`,
+          euro(HALF),
+          onRentOf(NEXT),
+          hasPaidLabel(CURRENT)
+        ],
+        [
+          `${PAID.properties[1]} · ${PAID.notPaid}`,
+          euro(HALF),
+          onRentOf(CURRENT)
+        ]
+      ]
+    });
     await page.screenshot({
       path: path.join(WORK, 'paid-month-after-import.png'),
       fullPage: true

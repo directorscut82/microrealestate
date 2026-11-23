@@ -1300,7 +1300,9 @@ function tenant({
   paid = [],
   end = '2027-06-30',
   frequency = 'months',
-  recomputed = true
+  recomputed = true,
+  // something recorded on the lease after that recompute: it is handed the contract
+  afterwards = null
 } = {}) {
   at('2026-11-15T12:00:00Z');
   let c = Contract.create({
@@ -1329,6 +1331,7 @@ function tenant({
       buildings: [building(rows)]
     });
   }
+  if (afterwards) afterwards(c);
   return { _id: id, name, frequency, properties: units, rents: c.rents };
 }
 const outcomes = (rows, tenants, month = OCT) =>
@@ -1380,6 +1383,85 @@ describe('what became of the shares of a statement, tenant by tenant', () => {
         status: 'moved',
         billedTerm: DEC,
         reason: 'monthPaid'
+      })
+    ]);
+  });
+
+  it('a share for a month that is over, of a tenant who has paid the current month: on next month — and the reason is the paid month', () => {
+    // (what the import window says under it: «έχει εξοφλήσει τον Νοέμβριο». The month
+    // being over would not explain why the share is not on November.)
+    const rows = [share(OCT, 30)];
+    expect(outcomes(rows, [tenant({ rows, paid: [NOV] })])).toEqual([
+      expect.objectContaining({
+        status: 'moved',
+        term: OCT,
+        billedTerm: DEC,
+        billedAmount: 30,
+        reason: 'monthPaid'
+      })
+    ]);
+  });
+
+  it('a share that was carried onto the current month, which the tenant then paid in full: still «closed», not «paid»', () => {
+    // October's share went on November while November was open; the tenant then paid
+    // November, share and all. The share is on the CURRENT month — it is there
+    // because October was over, and «the tenant has paid October» is not what the
+    // app knows.
+    const rows = [share(OCT, 30)];
+    const payNovemberInFull = (c) => {
+      const november = c.rents.find((r) => r.term === NOV);
+      Contract.payTerm(c, String(NOV), {
+        payments: [
+          {
+            amount: november.total.grandTotal,
+            type: 'cash',
+            date: '15/11/2026',
+            reference: ''
+          }
+        ]
+      });
+    };
+    const t = tenant({ rows, afterwards: payNovemberInFull });
+    expect(
+      Contract.isClosedRent(
+        t.rents.find((r) => r.term === NOV),
+        NOV
+      )
+    ).toBe(true);
+    expect(outcomes(rows, [t])).toEqual([
+      expect.objectContaining({
+        status: 'moved',
+        term: OCT,
+        billedTerm: NOV,
+        billedAmount: 30,
+        reason: 'monthClosed'
+      })
+    ]);
+  });
+
+  it('…but once the current month has RE-OPENED, a share that still sits on next month is not «paid»', () => {
+    // (found by review) November was paid in full, so October's share went on
+    // December. Then a late fee is recorded on October: November carries it in and is
+    // no longer paid in full (D-11). The share stays on December until the next
+    // recompute moves it — and «the tenant has paid November» is not true meanwhile.
+    const rows = [share(OCT, 30)];
+    const lateFeeOnOctober = (c) =>
+      Contract.payTerm(c, String(OCT), {
+        payments: [],
+        debts: [{ description: 'late fee', amount: 50 }]
+      });
+    const t = tenant({ rows, paid: [NOV], afterwards: lateFeeOnOctober });
+    // the state this is about, as the engine leaves it: November open again, and the
+    // share still on December
+    const november = t.rents.find((r) => r.term === NOV);
+    expect(Contract.isClosedRent(november, NOV)).toBe(false);
+    expect(outcomes(rows, [t])).toEqual([
+      expect.objectContaining({
+        status: 'moved',
+        term: OCT,
+        billedTerm: DEC,
+        billedAmount: 30,
+        reason: 'monthClosed'
       })
     ]);
   });
@@ -1704,7 +1786,7 @@ describe('the building page of a month', () => {
             status: 'moved',
             billedTerm: DEC,
             billedAmount: 30,
-            reason: 'monthClosed'
+            reason: 'monthPaid'
           }
         ]
       ],

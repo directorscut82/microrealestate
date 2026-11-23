@@ -34,6 +34,7 @@ import {
 import { Button } from '../ui/button';
 import { ExpenseFormDialog } from './ExpenseFormDialog';
 import FileDropZone from '../ui/file-drop-zone';
+import ImportedBillCard from './ImportedBillCard';
 import { Input } from '../ui/input';
 import moment from 'moment';
 import NumberFormat from '../NumberFormat';
@@ -992,6 +993,8 @@ export default function BillImportDialog({ open, setOpen, building }) {
   const [state, setState] = useState('idle');
   const [files, setFiles] = useState([]);
   const [results, setResults] = useState([]);
+  // The bills that were saved, once the window shows its result (state 'done').
+  const [done, setDone] = useState([]);
   const [replaceFlags, setReplaceFlags] = useState({});
   // O3: per-result edited amount (raw string as typed) overriding the parsed
   // total when the operator corrects an OCR misread. {_uid: '123,45'}
@@ -1019,6 +1022,7 @@ export default function BillImportDialog({ open, setOpen, building }) {
       setState('idle');
       setFiles([]);
       setResults([]);
+      setDone([]);
       setReplaceFlags({});
       setChargeFlags({});
       setAssignments({});
@@ -1372,7 +1376,34 @@ export default function BillImportDialog({ open, setOpen, building }) {
           })
         );
       }
-      handleClose();
+      // When tenants were charged the window stays open on the result: where each
+      // tenant's share went, as the server read it back from the rents. It used to
+      // close on «εισήχθη με επιτυχία» whatever had become of the shares — a bill
+      // for a month that was closed for a tenant reached no rent and nothing said so.
+      // Index-aligned: rows[k] ↔ billsToConfirm[k] ↔ confirmable[k].
+      const finished = rows
+        .map((row, k) => ({ row, sent: billsToConfirm[k], from: confirmable[k] }))
+        .filter(({ row, sent, from }) => row && !row.saveFailed && sent && from)
+        .map(({ row, sent, from }) => ({
+          uid: from.r._uid,
+          filename: from.r.filename,
+          provider: sent.provider,
+          term: row.term ?? sent.term,
+          amount: row.totalAmount ?? sent.totalAmount,
+          buildingId: sent.buildingId,
+          expenseName: sent.expenseName,
+          chargeRequested: !!row.chargeRequested,
+          chargeError: row.chargeError || null,
+          chargeOutcome: Array.isArray(row.chargeOutcome)
+            ? row.chargeOutcome
+            : []
+        }));
+      if (finished.some((b) => b.chargeRequested)) {
+        setDone(finished);
+        setState('done');
+      } else {
+        handleClose();
+      }
     } catch (error) {
       console.error('Bill confirm error:', error);
       toast.error(t('Failed to save bills'));
@@ -1546,25 +1577,54 @@ export default function BillImportDialog({ open, setOpen, building }) {
                 ))}
               </div>
             )}
+
+            {state === 'done' && done.length > 0 && (
+              <div
+                className="space-y-4 max-h-[60vh] overflow-y-auto"
+                data-cy="billImportResult"
+              >
+                <div className="flex gap-2 flex-wrap">
+                  <Badge variant="default" className="gap-1">
+                    <LuCheckCircle className="size-3" />
+                    {t('{{count}} recorded', { count: done.length })}
+                  </Badge>
+                </div>
+                {done.map((bill) => (
+                  <ImportedBillCard
+                    key={bill.uid}
+                    bill={bill}
+                    building={(buildings || []).find(
+                      (b) => String(b._id) === String(bill.buildingId)
+                    )}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
-        renderFooter={() => (
-          <>
-            <Button variant="outline" onClick={handleClose}>
-              {t('Cancel')}
+        renderFooter={() =>
+          state === 'done' ? (
+            <Button onClick={handleClose} data-cy="closeBillImport">
+              {t('Close')}
             </Button>
-            {state === 'idle' && files.length > 0 && (
-              <Button onClick={handleParse} data-cy="parseBills">
-                {t('Continue')}
+          ) : (
+            <>
+              <Button variant="outline" onClick={handleClose}>
+                {t('Cancel')}
               </Button>
-            )}
-            {state === 'preview' && confirmableCount > 0 && (
-              <Button onClick={handleConfirm} data-cy="confirmBills">
-                {t('Confirm Import')} ({confirmableCount})
-              </Button>
-            )}
-          </>
-        )}
+              {state === 'idle' && files.length > 0 && (
+                <Button onClick={handleParse} data-cy="parseBills">
+                  {t('Continue')}
+                </Button>
+              )}
+              {state === 'preview' && confirmableCount > 0 && (
+                <Button onClick={handleConfirm} data-cy="confirmBills">
+                  {t('Confirm Import')} ({confirmableCount})
+                </Button>
+              )}
+            </>
+          )
+        }
       />
 
       {/* Inline create-expense: the SAME ExpenseFormDialog, pre-filled, add mode. */}

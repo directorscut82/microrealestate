@@ -1,7 +1,9 @@
 import {
   monthYearAccusative,
+  termMonthAccusative,
   termMonthYearAccusative,
-  termMonthYearGenitive
+  termMonthYearGenitive,
+  termMonthYearNominative
 } from '../utils/greekMonths';
 import moment from 'moment';
 import 'moment/locale/el';
@@ -143,4 +145,95 @@ describe('termMonthYearGenitive', () => {
       expect(termMonthYearGenitive(bad, 'el')).toBe('');
     }
   });
+});
+
+// The upload window and the bell, after a bill is saved (the screens approved on
+// 2026-11-22): «✓ Νοέμβριος 2026» and «Ο Οκτώβριος 2026 έχει κλείσει…» stand on their
+// own — the NOMINATIVE; «έχει εξοφλήσει τον Νοέμβριο» follows «τον» — the ACCUSATIVE,
+// and without the year.
+const twelve = (fn) =>
+  Array.from({ length: 12 }, (x, i) =>
+    fn(`2026${String(i + 1).padStart(2, '0')}0100`, 'el')
+  );
+
+describe('termMonthYearNominative', () => {
+  it('returns the NOMINATIVE month for el, for all twelve — whatever moment’s own language is', () => {
+    const expected = [
+      'Ιανουάριος 2026',
+      'Φεβρουάριος 2026',
+      'Μάρτιος 2026',
+      'Απρίλιος 2026',
+      'Μάιος 2026',
+      'Ιούνιος 2026',
+      'Ιούλιος 2026',
+      'Αύγουστος 2026',
+      'Σεπτέμβριος 2026',
+      'Οκτώβριος 2026',
+      'Νοέμβριος 2026',
+      'Δεκέμβριος 2026'
+    ];
+    expect(twelve(termMonthYearNominative)).toEqual(expected);
+    moment.locale('en');
+    try {
+      expect(twelve(termMonthYearNominative)).toEqual(expected);
+    } finally {
+      moment.locale('el');
+    }
+  });
+
+  it('other languages: the month name is the app’s own', () => {
+    moment.locale('en');
+    try {
+      expect(termMonthYearNominative(2026110100, 'en')).toBe('November 2026');
+    } finally {
+      moment.locale('el');
+    }
+  });
+
+  it.each([[null], [undefined], [''], ['abc'], [202613]])(
+    'no month (%p): an empty text, never today’s month',
+    (bad) => {
+      expect(termMonthYearNominative(bad, 'el')).toBe('');
+    }
+  );
+});
+
+describe('termMonthAccusative', () => {
+  it('returns the ACCUSATIVE month for el, without the year, for all twelve', () => {
+    expect(twelve(termMonthAccusative)).toEqual([
+      'Ιανουάριο',
+      'Φεβρουάριο',
+      'Μάρτιο',
+      'Απρίλιο',
+      'Μάιο',
+      'Ιούνιο',
+      'Ιούλιο',
+      'Αύγουστο',
+      'Σεπτέμβριο',
+      'Οκτώβριο',
+      'Νοέμβριο',
+      'Δεκέμβριο'
+    ]);
+  });
+
+  it('reads a number or a text, and only the month of it', () => {
+    expect(termMonthAccusative(2026110100, 'el')).toBe('Νοέμβριο');
+    expect(termMonthAccusative('2026113023', 'el')).toBe('Νοέμβριο');
+  });
+
+  it('other languages: the month name is the app’s own', () => {
+    moment.locale('en');
+    try {
+      expect(termMonthAccusative(2026110100, 'en')).toBe('November');
+    } finally {
+      moment.locale('el');
+    }
+  });
+
+  it.each([[null], [undefined], [''], ['abc'], [202613]])(
+    'no month (%p): an empty text',
+    (bad) => {
+      expect(termMonthAccusative(bad, 'el')).toBe('');
+    }
+  );
 });

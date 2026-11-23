@@ -35,6 +35,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { buildExpensePrefill } from '../utils/billExpensePrefill';
 import { Button } from './ui/button';
+import ConfirmedBillCard from './ConfirmedBillCard';
 import { ExpenseFormDialog } from './buildings/ExpenseFormDialog';
 import { Label } from './ui/label';
 import moment from 'moment';
@@ -58,6 +59,9 @@ import useTranslation from 'next-translate/useTranslation';
  *   - unreadable (parseError): explanation + dismiss-only
  * A failed confirm (e.g. duplicate bill → 409) shows inline on the card; the
  * item stays pending so nothing is lost.
+ * After «Καταχώρηση» the card turns into what was recorded — and, when the tenants
+ * were charged, where each tenant's share went (ConfirmedBillCard) — until «Εντάξει».
+ * It used to vanish with no message at all.
  */
 
 // Provider → expense `type` used to live here as a second copy of
@@ -390,7 +394,7 @@ function ImportDocCard({ item, onGone, onNavigate }) {
   );
 }
 
-function InboxCard({ item, buildings, onGone }) {
+function InboxCard({ item, buildings, onGone, onConfirmed }) {
   const { t, lang } = useTranslation('common');
   const queryClient = useQueryClient();
   const [assignment, setAssignment] = useState(null); // {buildingId, expenseId}
@@ -456,16 +460,26 @@ function InboxCard({ item, buildings, onGone }) {
           expenseOptions.find((e) => String(e._id) === String(expenseId))?.name
       }),
     onSuccess: (row) => {
+      // The item is recorded: it leaves the list of pending items NOW, not when that
+      // list has been fetched again. Going by the last list — which still names it —
+      // «Εντάξει» on the recorded card, pressed before a slow list arrived, brought
+      // the bill back as a card to record, counted as pending (found by review).
+      queryClient.setQueryData([QueryKeys.INBOX], (old) =>
+        Array.isArray(old) ? old.filter((i) => i._id !== item._id) : old
+      );
       invalidateAfterConfirm(charge);
-      if (row?.chargeError) {
-        setError(
-          t(
-            'Bills saved. {{failed}} could not charge tenants — charge them from the building statement.',
-            { failed: 1 }
-          )
-        );
-      }
-      onGone();
+      // The card turns into what was recorded (ConfirmedBillCard). A failed charge
+      // used to be set as this card's error one line before the card was dropped,
+      // so it was never seen.
+      onConfirmed({
+        id: item._id,
+        provider: parsed.provider,
+        building: selectedBuilding,
+        chargeError: row?.chargeError || null,
+        chargeOutcome: Array.isArray(row?.chargeOutcome)
+          ? row.chargeOutcome
+          : []
+      });
     },
     onError: (err) => {
       setError(err?.response?.data?.message || t('Failed to save bills'));
@@ -541,6 +555,9 @@ function InboxCard({ item, buildings, onGone }) {
   );
 
   const busy = confirmMutation.isPending || dismissMutation.isPending;
+  // The month the charge posts to is the BILL's (parsed.proposedTerm), not the
+  // current one: the switch names it, as the upload window does.
+  const chargeMonth = termMonthYearAccusative(parsed.proposedTerm, lang);
 
   /**
    * PROCESSING card: the file has arrived and the OCR is still running.
@@ -643,7 +660,10 @@ function InboxCard({ item, buildings, onGone }) {
   }
 
   return (
-    <div className="p-4 space-y-3 border-b last:border-b-0">
+    <div
+      className="p-4 space-y-3 border-b last:border-b-0"
+      data-cy="inboxBillCard"
+    >
       <div className="flex items-baseline gap-2">
         <span className="text-sm font-semibold uppercase">
           {PROVIDER_LABEL[parsed.provider] || parsed.provider || t('Bill')}
@@ -855,7 +875,9 @@ function InboxCard({ item, buildings, onGone }) {
             checked={charge}
             onCheckedChange={setCharge}
           />
-          {t('Charge tenants this month')}
+          {chargeMonth
+            ? t('Charge tenants for {{month}}', { month: chargeMonth })
+            : t('Charge tenants this month')}
         </Label>
         <div className="flex gap-2">
           <Button
@@ -910,7 +932,22 @@ export default function InboxBell() {
     enabled: open
   });
 
-  const pending = Array.isArray(items) ? items : [];
+  // Bill cards that were just recorded: each stays, as what was recorded, until
+  // «Εντάξει» — in the place its card had (`index`).
+  const [confirmed, setConfirmed] = useState([]);
+
+  // (a recorded item is taken out of the list when its confirm answers — InboxCard —
+  // and a list that names it all the same does not bring its card back while it is
+  // shown as recorded: it is shown once)
+  const pending = (Array.isArray(items) ? items : []).filter(
+    (i) => !confirmed.some((c) => c.id === i._id)
+  );
+  const cards = pending.map((item) => ({ item }));
+  for (const entry of [...confirmed].sort((a, b) => a.index - b.index)) {
+    cards.splice(Math.min(Math.max(entry.index, 0), cards.length), 0, {
+      entry
+    });
+  }
   const count = pending.length;
   // The badge and the «N εκκρεμούν» label mean "needs your action", which is
   // true of a bill (confirm/dismiss) but NOT of a notice — a notice is an
@@ -949,7 +986,7 @@ export default function InboxBell() {
           )}
         </div>
         <div className="max-h-[520px] overflow-y-auto">
-          {count === 0 ? (
+          {cards.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">
               <div>{t('No pending notifications.')}</div>
               <div className="mt-1 text-xs">
@@ -959,13 +996,24 @@ export default function InboxBell() {
               </div>
             </div>
           ) : (
-            pending.map((item) =>
-              item.kind === 'notice' ? (
+            cards.map(({ item, entry }, at) =>
+              entry ? (
+                <ConfirmedBillCard
+                  key={`recorded-${entry.id}`}
+                  entry={entry}
+                  onOk={() => {
+                    setConfirmed((prev) =>
+                      prev.filter((c) => c.id !== entry.id)
+                    );
+                    if (cards.length <= 1) setOpen(false);
+                  }}
+                />
+              ) : item.kind === 'notice' ? (
                 <NoticeCard
                   key={item._id}
                   item={item}
                   onGone={() => {
-                    if (count <= 1) setOpen(false);
+                    if (cards.length <= 1) setOpen(false);
                   }}
                   onNavigate={() => setOpen(false)}
                 />
@@ -974,7 +1022,7 @@ export default function InboxBell() {
                   key={item._id}
                   item={item}
                   onGone={() => {
-                    if (count <= 1) setOpen(false);
+                    if (cards.length <= 1) setOpen(false);
                   }}
                   onNavigate={() => setOpen(false)}
                 />
@@ -984,8 +1032,14 @@ export default function InboxBell() {
                   item={item}
                   buildings={buildings}
                   onGone={() => {
-                    if (count <= 1) setOpen(false);
+                    if (cards.length <= 1) setOpen(false);
                   }}
+                  onConfirmed={(recorded) =>
+                    setConfirmed((prev) => [
+                      ...prev.filter((c) => c.id !== recorded.id),
+                      { ...recorded, index: at }
+                    ])
+                  }
                 />
               )
             )

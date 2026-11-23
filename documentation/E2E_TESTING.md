@@ -258,7 +258,14 @@ across multiple sessions.
   doing its job. To create the bad-data fixture, use `mongoExec` direct
   insert from `tests/lib/mongoExec.ts` (returns null without portainer
   token; handle that branch with `test.skip(!result, '...')` rather than
-  throwing).
+  throwing). The same goes for a state only another writer produces — a
+  bill waiting in the Telegram bell is written by the scanner alone
+  (`72_bill_recorded_in_the_bell.spec.ts`, `telegramInboxStates.spec.ts`).
+  `mongoExec` talks to the NAS's mongo container; with
+  `E2E_MONGO_SHELL="<mongo shell> <mongodb url>"` set it runs the script
+  in that database instead, which is how such a spec is tried on a laptop
+  against a local copy before it runs on the NAS. The NAS run is still
+  the one that counts.
 
 **Anti-patterns to reject:**
 

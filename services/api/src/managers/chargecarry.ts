@@ -339,6 +339,12 @@ export type ShareOutcome = {
   billedTerm: number | null;
   billedAmount: number | null;
   // why it is not on its own month / not on any
+  // (`monthPaid`: it is on a month AFTER the current one, and the current month is
+  // closed for the tenant — paid in full — whether the share is for the current month
+  // or for an earlier one; `monthClosed`: every other share that is on a later month
+  // than its own: on the current month because its own is over, carried in an earlier
+  // month, or still on a later month although the current one has re-opened since
+  // (D-11) — the next recompute moves that one)
   // (`unclear`: an old line of the month — stored before lines carried ids, or of a
   // deleted expense — may be for this share or for another; it is shown against the
   // likeliest and the others, of which this is one, are not billed again)
@@ -493,6 +499,10 @@ export function shareOutcomes(input: {
       at,
       unsure,
       monthIsClosed: isClosedRent(itsMonth, currentTerm),
+      // the tenant's current month is closed: paid in full (it is not over yet)
+      currentIsClosed: rents.some(
+        (r) => Number(r?.term) === currentTerm && isClosedRent(r, currentTerm)
+      ),
       hasOpenMonth: rents.some(
         (r) =>
           Number(r?.term) >= currentTerm &&
@@ -528,7 +538,7 @@ export function shareOutcomes(input: {
             ...(moved
               ? {
                   reason:
-                    term === currentTerm
+                    line.rentTerm > currentTerm && read.currentIsClosed
                       ? ('monthPaid' as const)
                       : ('monthClosed' as const)
                 }

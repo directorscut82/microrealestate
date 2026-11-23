@@ -4,9 +4,16 @@
  * database correctly. Inline (no local script files) so other team
  * members don't need to copy a Python helper.
  */
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+
+// A LOCAL stack instead of the NAS — the laptop run of a spec, before it runs on the
+// NAS. When E2E_MONGO_SHELL is set to the mongo shell and the database to open, e.g.
+//   E2E_MONGO_SHELL="/path/to/bin/mongo mongodb://127.0.0.1:27099/mre_new"
+// every script runs there. Unset (the default), scripts run in the NAS's mongo
+// container through Portainer, exactly as before.
+const LOCAL_SHELL = (process.env.E2E_MONGO_SHELL || '').trim();
 
 const PORTAINER_TOKEN = (() => {
   try {
@@ -74,6 +81,12 @@ for c in data:
  * happy.
  */
 export function mongoExec(script: string): string | null {
+  if (LOCAL_SHELL) {
+    const [shell, ...args] = LOCAL_SHELL.split(/\s+/);
+    return execFileSync(shell, [...args, '--quiet', '--eval', script], {
+      encoding: 'utf8'
+    }).trim();
+  }
   if (!PORTAINER_TOKEN) return null;
   const cid = _resolveMongoCid();
   // Escape both " (for the --eval double-quoted wrapper) AND $ (the inner

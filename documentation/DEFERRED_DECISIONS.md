@@ -341,7 +341,7 @@ PDF-import / receipt surface pointing here.
 - `services/common/src/collections/building.ts` MonthlyChargeSchema — the
   renter-side `paid` field that does not yet exist.
 
-## D-10 — A building charge for a month that is closed for a tenant reached no rent — RESOLVED for statement shares (2026-11-23, owner decision); repairs and the import window's wording still open
+## D-10 — A building charge for a month that is closed for a tenant reached no rent — RESOLVED for statement shares (2026-11-23, owner decision); repairs still open
 
 **What it was (watched on the NAS, 2026-11-22).** A utility bill charged to tenants
 for a month that is over, or that a tenant has already paid in full, was written on
@@ -472,6 +472,40 @@ says why. Screens approved 2026-11-22.
   changed hands inside the month has BOTH tenants billed its whole share (D-1) and,
   while each is billed the amount shown, the row counts once; and a line whose row
   was removed after its rent closed stays on that rent but is no longer listed.
+- **The import says where each share went** (2026-11-23, the screens approved on
+  2026-11-22). After «Επιβεβαίωση Εισαγωγής» the bill upload window no longer closes
+  on «εισήχθη με επιτυχία» when a charge to the tenants was asked for: it stays
+  open, until «Κλείσιμο», on what was recorded — each bill, and under it one line
+  per tenant share: «✓ στο ενοίκιο Νοεμβρίου 2026», with «έχει εξοφλήσει τον
+  Νοέμβριο» under a share that went past a month the tenant has paid in full, or
+  «⚠ δεν χρεώθηκε» with «η μίσθωση έχει λήξει» when that is why. One sentence above
+  the list («Ο Οκτώβριος 2026 έχει κλείσει για τους ενοικιαστές. Το μερίδιο του
+  καθενός μπήκε στο επόμενο ανοιχτό ενοίκιό του.») is said only when every share
+  went on a later rent — or reached none because its tenant's lease has ended, as in
+  the approved picture — and at least one did go on a later rent. With a share on
+  the bill's own month, or one that is on no rent for another reason (in doubt, from
+  before the change, not there yet), the list speaks for itself. A bill that was
+  saved but whose charge failed reads «⚠ δεν χρεώθηκε» under it. In the
+  Telegram bell the switch names the month it charges («Χρέωση ενοικιαστών για
+  Οκτώβριο 2026» — it said «αυτόν τον μήνα» while charging the bill's month) and,
+  after «Καταχώρηση», the card turns into what was recorded («✓ Καταχωρήθηκε», one
+  line per share with the month: «✓ Νοέμβριος 2026») until «Εντάξει» — it used to
+  vanish with no message, also when the charge had failed. Both lists are the
+  server's `chargeOutcome`, read back from the rents: a «✓» means the share IS on
+  that rent; an entry that is not `billed` or `moved`, or names no month, reads
+  «δεν χρεώθηκε», and an amount that is no figure reads «—». The reason `monthPaid`
+  now means «it is on a month after the current one, and the current month is
+  closed for the tenant: paid in full», whatever month the share is for (it used to
+  be given only for a share of the current month, so a share of an older month that
+  skipped a paid month had no reason to show). A share that still sits on next
+  month after the current month has re-opened (D-11) says `monthClosed` until the
+  next recompute moves it. In the bell the recorded item is taken out of the list of
+  pending items when the confirm answers, not when that list has been fetched
+  again: going by the last list the page had would bring the bill back as a card to
+  record when «Εντάξει» is pressed before a slow list arrives.
+  `utils/chargeOutcome.js` (what an entry shows), `components/buildings/
+  ChargeOutcomeList.js`, `ImportedBillCard.js`, `components/ConfirmedBillCard.js`.
+  A bill that is recorded without charging the tenants closes the window as before.
 - **The line says its month wherever the tenant or the landlord reads it**
   («… · για Οκτώβριο 2026»): the rents page, the rent schedule, the payment window
   and its saved payments (also a payment saved with a category and no line, which is
@@ -593,9 +627,15 @@ says why. Screens approved 2026-11-22.
 
 **Still open.**
 
-- The bill upload window and the Telegram bell still answer only «εισήχθη με
-  επιτυχία»; they do not yet list where each share went (the answer carries it:
-  `chargeOutcome`). The bell's switch still says «αυτόν τον μήνα».
+- When a bell item is recorded through the recovery path (a retry after a crash
+  between saving the bill and marking the item: `inboxmanager.ts`), the answer is the
+  stored bill with no `chargeOutcome`: the card says «✓ Καταχωρήθηκε» and lists
+  nothing, and the tenants are not charged by that retry (same before this change).
+- In a batch where one bill could not be saved AND another was saved but could not
+  charge the tenants, only the first is said in a message (as before this change):
+  the window marks the second «⚠ δεν χρεώθηκε», and what to do about it («χρεώστε
+  τους από τη μηνιαία κατάσταση») is said nowhere. The wording for the two together
+  is the owner's to decide.
 - Repairs: a charge month that is closed is refused only when a tenant has paid
   something for it; otherwise the tenants' part is charged to no one.
 - A tenant share that is charged nowhere (the lease has ended) is in no total: not
@@ -681,7 +721,10 @@ statement save and the manual-row edit, driven through the real schema),
 `carriedShareAttribution` (keys, their length, server and browser in step),
 `carriedShareOnPaper` (the real PDF partial and e-mail templates), the landlord app's
 `carriedShareLines`, `buildingPageShares`, `savedPaymentBullet` and
-`rentsHoverCarriedShare`, and `e2e-playwright/tests/69_bill_charge_closed_month.spec.ts`.
+`rentsHoverCarriedShare`, `chargeOutcome` and `billChargeResult` (what the upload
+window and the bell say, in Greek, through the real strings), and
+`e2e-playwright/tests/69_bill_charge_closed_month.spec.ts` (the upload window),
+`72_bill_recorded_in_the_bell.spec.ts` (the bell).
 
 **A trap worth remembering.** The building schema is strict. The first end-to-end run
 on the laptop carried nothing while every unit test was green: the api was running a

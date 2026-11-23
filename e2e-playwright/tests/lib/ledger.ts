@@ -706,6 +706,37 @@ export function chargedOnRentOf(month: MonthRef): string {
   return `✓ χρεώθηκε στο ενοίκιο ${EL_GENITIVE[month.month - 1]} ${month.year}`;
 }
 
+/** «✓ στο ενοίκιο Νοεμβρίου 2026» — the import window, for a share that is on a rent. */
+export function onRentOf(month: MonthRef): string {
+  return `✓ στο ενοίκιο ${EL_GENITIVE[month.month - 1]} ${month.year}`;
+}
+
+/** «έχει εξοφλήσει τον Νοέμβριο» — under a share that went past a month paid in full. */
+export function hasPaidLabel(month: MonthRef): string {
+  return `έχει εξοφλήσει τον ${EL_ACCUSATIVE[month.month - 1]}`;
+}
+
+// Standing on its own — the nominative (utils/greekMonths.js).
+const EL_NOMINATIVE = [
+  'Ιανουάριος',
+  'Φεβρουάριος',
+  'Μάρτιος',
+  'Απρίλιος',
+  'Μάιος',
+  'Ιούνιος',
+  'Ιούλιος',
+  'Αύγουστος',
+  'Σεπτέμβριος',
+  'Οκτώβριος',
+  'Νοέμβριος',
+  'Δεκέμβριος'
+];
+
+/** What the import window says above the list when the bill's month is closed for all. */
+export function monthClosedSentence(month: MonthRef): string {
+  return `Ο ${EL_NOMINATIVE[month.month - 1]} ${month.year} έχει κλείσει για τους ενοικιαστές. Το μερίδιο του καθενός μπήκε στο επόμενο ανοιχτό ενοίκιό του.`;
+}
+
 /**
  * The lines of the box that opens when the pointer rests on a tenant's «Μηνιαίο ποσό»
  * on the rents page that is open: what that month's own bill is made of, one
@@ -894,6 +925,17 @@ export interface ShareOutcome {
   reason?: string;
 }
 
+/**
+ * What the import window says once the bill is saved — it stays open on it until
+ * «Κλείσιμο»: the sentence above the list when the bill's month is closed for every
+ * tenant listed (else null), and one entry per tenant share — who, how much, where it
+ * was charged and, when there is one, the line under that.
+ */
+export interface ImportWindowResult {
+  sentence: string | null;
+  shares: string[][];
+}
+
 export interface ConfirmedBill {
   _id: string;
   term: number;
@@ -907,7 +949,9 @@ export interface ConfirmedBill {
 /**
  * Import one bill for a building the way the landlord does: Κτίρια → the building →
  * «Έξοδα» → «Εισαγωγή Λογαριασμού» → the file → «Συνέχεια» → switch on «Χρέωση
- * ενοικιαστών για …» → «Επιβεβαίωση Εισαγωγής». Returns what the app was told back.
+ * ενοικιαστών για …» → «Επιβεβαίωση Εισαγωγής» → read what the window then says about
+ * each tenant's share → «Κλείσιμο». Returns what the app was told back, and what the
+ * window said.
  */
 export async function importBillAndChargeTenants(
   page: Page,
@@ -915,7 +959,11 @@ export async function importBillAndChargeTenants(
   buildingId: string,
   pdfPath: string,
   amountAsShown: string
-): Promise<{ bill: ConfirmedBill; switchLabel: string }> {
+): Promise<{
+  bill: ConfirmedBill;
+  switchLabel: string;
+  windowSaid: ImportWindowResult;
+}> {
   await page.goto(`el/${enc(realmName)}/buildings/${buildingId}`);
   await page.locator('[data-cy=expensesTab]').click();
   await page.locator('[data-cy=importBill]').click();
@@ -965,7 +1013,30 @@ export async function importBillAndChargeTenants(
       .filter({ hasText: 'εισήχθη με επιτυχία' }),
     'the success message'
   ).toBeVisible({ timeout: 30_000 });
-  return { bill: rows[0], switchLabel };
+
+  // The window does not close on that message: it shows where each tenant's share
+  // went, as the app read it back from the rents. Read it as the landlord does.
+  const result = page.locator('[data-cy=billImportResult]');
+  await expect(result, 'the result the window stays open on').toBeVisible({
+    timeout: 30_000
+  });
+  const asRead = (text: string) =>
+    text
+      .split('\n')
+      .map((line) => line.replace(/[\s\u00a0]+/g, ' ').trim())
+      .filter(Boolean);
+  const sentence = result.locator('[data-cy=importedBillCharge] p');
+  const windowSaid: ImportWindowResult = {
+    sentence: (await sentence.count())
+      ? asRead(await sentence.first().innerText()).join(' ')
+      : null,
+    shares: (
+      await result.locator('[data-cy=chargeOutcomeRow]').allInnerTexts()
+    ).map(asRead)
+  };
+  await page.locator('[data-cy=closeBillImport]').click();
+  await expect(dialog, '«Κλείσιμο» closes the window').toBeHidden();
+  return { bill: rows[0], switchLabel, windowSaid };
 }
 
 // ── lease dates ─────────────────────────────────────────────────────────────────

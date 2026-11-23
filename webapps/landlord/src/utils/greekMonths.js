@@ -32,6 +32,24 @@ const EL_ACCUSATIVE = [
   'Δεκέμβριο'
 ];
 
+// Standing on its own — a list entry, the subject of a sentence — the nominative.
+// (moment's `el` locale gives it too, but only when moment's locale IS `el`; these
+// helpers go by the `lang` they are handed, like the two below.)
+const EL_NOMINATIVE = [
+  'Ιανουάριος',
+  'Φεβρουάριος',
+  'Μάρτιος',
+  'Απρίλιος',
+  'Μάιος',
+  'Ιούνιος',
+  'Ιούλιος',
+  'Αύγουστος',
+  'Σεπτέμβριος',
+  'Οκτώβριος',
+  'Νοέμβριος',
+  'Δεκέμβριος'
+];
+
 // After a noun — «το ενοίκιο Νοεμβρίου 2026», «η απόδειξη Ιουλίου» — the genitive.
 const EL_GENITIVE = [
   'Ιανουαρίου',
@@ -99,4 +117,38 @@ export function termMonthYearGenitive(term, lang) {
   return lang === 'el'
     ? `${EL_GENITIVE[m.month()]} ${m.format('YYYY')}`
     : m.format('MMMM YYYY');
+}
+
+/**
+ * «<Month> <YYYY>» standing on its own («✓ Νοέμβριος 2026», «Ο Οκτώβριος 2026 έχει
+ * κλείσει…»): the nominative in Greek, moment's own month name everywhere else. From
+ * a YYYYMMDDHH rent term; '' for an unparseable one.
+ *
+ * @param {number|string} term
+ * @param {string} lang
+ * @returns {string}
+ */
+export function termMonthYearNominative(term, lang) {
+  const ym = String(term ?? '').slice(0, 6);
+  const m = moment(ym, 'YYYYMM', true);
+  if (!m.isValid()) return '';
+  return lang === 'el'
+    ? `${EL_NOMINATIVE[m.month()]} ${m.format('YYYY')}`
+    : m.format('MMMM YYYY');
+}
+
+/**
+ * «<Month>», no year, for a slot governed by «τον» («έχει εξοφλήσει τον Νοέμβριο»):
+ * the accusative in Greek, moment's own month name everywhere else. From a
+ * YYYYMMDDHH rent term; '' for an unparseable one.
+ *
+ * @param {number|string} term
+ * @param {string} lang
+ * @returns {string}
+ */
+export function termMonthAccusative(term, lang) {
+  const ym = String(term ?? '').slice(0, 6);
+  const m = moment(ym, 'YYYYMM', true);
+  if (!m.isValid()) return '';
+  return lang === 'el' ? EL_ACCUSATIVE[m.month()] : m.format('MMMM');
 }
