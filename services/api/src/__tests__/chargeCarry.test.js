@@ -472,6 +472,7 @@ describe('where a ledger holds a share', () => {
         { propertyId: 'B', rows: [] }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants: [
         { _id: 't', name: 'T', frequency: 'months', properties: holds(['A', 'B']), rents }
       ]
@@ -653,6 +654,7 @@ describe('where a ledger holds a share', () => {
         }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants: [
         { _id: 't', name: 'T', frequency: 'months', properties: holds(['A', 'X']), rents }
       ]
@@ -694,6 +696,7 @@ describe('where a ledger holds a share', () => {
         { propertyId: 'B', rows: [{ _id: 'b', term: OCT, amount: 20, description: 'Common power', expenseId: 'power', carry: true }] }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants: [
         {
           _id: 't',
@@ -722,6 +725,7 @@ describe('where a ledger holds a share', () => {
         { propertyId: 'B', rows: [{ _id: 'b', term: OCT, amount: 20, description: 'Common power', expenseId: 'power', carry: true }] }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants: [
         {
           _id: 't',
@@ -768,6 +772,7 @@ describe('where a ledger holds a share', () => {
         { propertyId: 'B', rows: [typedAgain('b')] }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants: [
         {
           _id: 't',
@@ -944,6 +949,7 @@ describe('where a ledger holds a share', () => {
         buildingName: 'Building 1',
         units,
         expenseIds: ['power'],
+        billedLiveNames: [],
         tenants: [
           { _id: 't', name: 'T', frequency: 'months', properties: holds(['A', 'B']), rents }
         ]
@@ -1004,6 +1010,7 @@ describe('where a ledger holds a share', () => {
         { propertyId: 'A', rows: [{ _id: 'a', term: OCT, amount: 31, description: 'Common power', expenseId: 'power' }] }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants: [
         {
           _id: 't',
@@ -1331,6 +1338,7 @@ const outcomes = (rows, tenants, month = OCT) =>
     buildingName: 'Building 1',
     units: [{ propertyId: 'A', rows }],
     expenseIds: ['power'],
+    billedLiveNames: [],
     tenants
   });
 
@@ -1509,6 +1517,7 @@ describe('what became of the shares of a statement, tenant by tenant', () => {
           { propertyId: 'A', rows: second }
         ],
         expenseIds: ['power'],
+        billedLiveNames: [],
         tenants: [t]
       }).map((o) => [o.amount, o.status, o.billedTerm, o.billedAmount])
     ).toEqual([
@@ -1786,6 +1795,7 @@ describe('the building page of a month', () => {
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power', 'water'],
+      billedLiveNames: [],
       rows: computeBuildingExpenseBreakdown(hydrated, OCT).rows,
       tenants,
       rowOfItsMonth: () => undefined
@@ -1815,6 +1825,7 @@ describe('the building page of a month', () => {
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: engineRows,
       tenants,
       rowOfItsMonth: () => undefined
@@ -1881,6 +1892,7 @@ describe('the building page of a month', () => {
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: [],
       tenants,
       rowOfItsMonth: () => undefined
@@ -1896,6 +1908,7 @@ describe('the building page of a month', () => {
         currentTerm: NOV,
         units: empty.units,
         expenseIds: ['power'],
+        billedLiveNames: [],
         rows: [],
         tenants,
         rowOfItsMonth: () => undefined
@@ -1921,6 +1934,7 @@ describe('the building page of a month', () => {
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: engineRows,
       tenants: w.tenants,
       rowOfItsMonth: () => undefined
@@ -2098,6 +2112,7 @@ describe('a tenant with two units: each share has its own answer', () => {
         { propertyId: 'B', rows: rows.B || [] }
       ],
       expenseIds: ['power'],
+      billedLiveNames: [],
       tenants
     }).map((o) => [o.propertyId, o.amount, o.status, o.billedTerm, o.billedAmount]);
   const old = (month, amount) => share(month, amount, { carry: undefined });
@@ -2140,6 +2155,7 @@ describe('a tenant with two units: each share has its own answer', () => {
           { propertyId: 'B', rows: rows.B }
         ],
         expenseIds: ['power'],
+        billedLiveNames: [],
         tenants: [t]
       }).map((o) => [o.propertyId, o.status, o.billedTerm, o.billedAmount, o.reason])
     ).toEqual([
@@ -2172,6 +2188,7 @@ describe('a tenant with two units: each share has its own answer', () => {
           { propertyId: 'B', rows: rows.B }
         ],
         expenseIds: ['power'],
+        billedLiveNames: [],
         tenants: [t]
       }).map((o) => [o.propertyId, o.status, o.billedTerm, o.billedAmount, o.reason])
     ).toEqual([
@@ -2199,6 +2216,7 @@ describe('a tenant with two units: each share has its own answer', () => {
         buildingName: 'Building 1',
         units: hydrated.units,
         expenseIds: ['power'],
+        billedLiveNames: [],
         rows: computeBuildingExpenseBreakdown(hydrated, month).rows,
         tenants: [t],
         rowOfItsMonth: () => undefined
@@ -2259,6 +2277,7 @@ describe('the building page when a unit holds two rows of one expense for the mo
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: computeBuildingExpenseBreakdown(hydrated, NOV).rows,
       tenants: [t],
       rowOfItsMonth: () => undefined
@@ -2296,6 +2315,7 @@ describe('the building page when a unit holds two rows of one expense for the mo
       buildingName: 'Building 1',
       units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: computeBuildingExpenseBreakdown(hydrated, NOV).rows,
       tenants: [t],
       rowOfItsMonth: () => undefined
@@ -2332,6 +2352,7 @@ describe('the building page when a unit had two tenants in the month, or a figur
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: computeBuildingExpenseBreakdown(hydrated, month).rows,
       tenants,
       rowOfItsMonth: () => undefined
@@ -2412,6 +2433,7 @@ describe('the building page when a unit had two tenants in the month, or a figur
       buildingName: 'Building 1',
       units: hydrated.units,
       expenseIds: ['power'],
+      billedLiveNames: [],
       rows: engineRows,
       tenants: [leaving, arriving],
       rowOfItsMonth: () => undefined
