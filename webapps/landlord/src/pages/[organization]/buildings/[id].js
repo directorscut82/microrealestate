@@ -13,6 +13,7 @@ import {
 } from '../../../components/ui/tabs';
 import { useCallback, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { buildingDetailsRequest } from '../../../utils/buildingDetails';
 import BuildingForm from '../../../components/buildings/BuildingForm';
 import DocumentsPanel from '../../../components/documents/DocumentsPanel';
 import BuildingDashboard from '../../../components/buildings/BuildingDashboard';
@@ -106,10 +107,8 @@ function Building() {
   const onSubmit = useCallback(
     async (buildingPart) => {
       if (!building) return;
-      const data = {
-        ...building,
-        ...buildingPart
-      };
+      // The form's fields only — never the loaded record (utils/buildingDetails.js).
+      const data = buildingDetailsRequest(building, buildingPart);
       try {
         await saveMutation.mutateAsync(data);
       } catch (error) {

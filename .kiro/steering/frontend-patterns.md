@@ -102,6 +102,10 @@ export function useCreateBuilding() {
 }
 ```
 
+### A save sends the form's fields, not the loaded record
+
+`{ ...record, ...formPart }` looks harmless and is a trap. The api reads **100 KB** of JSON per request (Express's default, kept on purpose: `services/common/src/utils/service.ts`), and some records carry a history that grows by the month — a building holds every stored owner charge (489 KB for the real 11-apartment building in 11/2026). The building details form sent the record: the save failed with a 413 and «Κάτι πήγε στραβά», and since the server's update keeps only an allowlist of fields, the extra bytes never stored anything. Send the id and what the form holds (`src/utils/buildingDetails.js`); `e2e-playwright/tests/74_building_details_big_building.spec.ts` asks it of a 250 KB building.
+
 ## Paginated Lists (Load More pattern)
 
 For paginated endpoints, use `useInfiniteQuery`:
