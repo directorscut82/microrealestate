@@ -8,6 +8,7 @@ import {
 import type { ServiceRequest, ServiceResponse } from '@microrealestate/types';
 import axios from 'axios';
 import moment from 'moment';
+import { rentSmsAmounts } from './smstext.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Req = ServiceRequest<any, any, any>;
@@ -104,47 +105,12 @@ async function _sendSms(
   const termDate = moment.utc(String(term), 'YYYYMMDDHH');
   const monthYear = termDate.format('MM/YYYY');
 
-  // Build an amount breakdown from the tenant's rent for this term.
-  const rentRecord = (tenant.rents || []).find(
-    (r: AnyRecord) => Number(r.term) === Number(term)
+  // The amounts in brackets, from the tenant's rent for this term (smstext.ts).
+  const amountPart = rentSmsAmounts(
+    (tenant.rents || []).find(
+      (r: AnyRecord) => Number(r.term) === Number(term)
+    )
   );
-  const grandTotal = rentRecord?.total?.grandTotal ?? 0;
-  const fmt = (n: number) =>
-    n.toLocaleString('el-GR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + '€';
-
-  let amountPart = '';
-  if (rentRecord) {
-    const parts: string[] = [];
-    const rentAmount = rentRecord.total?.preTaxAmount ?? 0;
-    const buildingCharges = (rentRecord.buildingCharges || []) as AnyRecord[];
-    const repairs = buildingCharges.filter((c: AnyRecord) => c.type === 'repair');
-    const koinoxrhsta = buildingCharges.filter((c: AnyRecord) => c.type !== 'repair');
-    const koinoSum = koinoxrhsta.reduce((s: number, c: AnyRecord) => s + (c.amount || 0), 0);
-    const repairSum = repairs.reduce((s: number, c: AnyRecord) => s + (c.amount || 0), 0);
-    const balance = rentRecord.total?.balance ?? 0;
-
-    if (rentAmount) parts.push(`Ενοίκιο: ${fmt(rentAmount)}`);
-    if (koinoSum) parts.push(`Κοινόχρ: ${fmt(koinoSum)}`);
-    if (repairSum) parts.push(`Επισκευή: ${fmt(repairSum)}`);
-    if (balance > 0) parts.push(`Υπόλοιπο: ${fmt(balance)}`);
-
-    // N4 (audit-2026-07): grandTotal = preTaxAmount + charges + buildingCharges
-    // + debts − discount + vat + balance (businesslogic 7_total). The parts
-    // above only cover rent + building charges + balance, so a VAT tenant (or
-    // one with property charges/debts/discounts) had parts that didn't sum to
-    // the printed ΣΥΝΟΛΟ. Fold everything not itemised above into one «Άλλα»
-    // remainder computed as (grandTotal − shown parts) so the breakdown always
-    // reconciles to the total, whatever the tax/charge mix.
-    const shownSum = rentAmount + koinoSum + repairSum + (balance > 0 ? balance : 0);
-    const other = Math.round((grandTotal - shownSum) * 100) / 100;
-    if (Math.abs(other) > 0.005) parts.push(`Άλλα: ${fmt(other)}`);
-
-    if (parts.length > 1) {
-      amountPart = ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${fmt(grandTotal)})`;
-    } else {
-      amountPart = ` (${fmt(grandTotal)})`;
-    }
-  }
 
   const textMap: Record<string, string> = {
     rentcall: `Ειδοποίηση πληρωμής ${monthYear} - ${tenant.name}${amountPart}`,

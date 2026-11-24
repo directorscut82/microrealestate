@@ -512,7 +512,10 @@ says why. Screens approved 2026-11-22.
   shown as the month's first building line), the dashboard tooltip, the printed
   notice and receipt (whose calculation line uses the figures of the month the share
   is FOR), and the rent-call e-mail. Where a name is cut for lack of room the month
-  is not (`components/LineName.js`). The SMS is the exception: see «Still open».
+  is not (`components/LineName.js`). The rent SMS lists it as its own item, one per
+  older month, oldest first — «Ενοίκιο: 400€, Κοινόχρ: 40€, Κοινόχρ 10/2026: 30€»
+  (owner, 24/11/2026; `managers/smstext.ts`, `smsRentText.test.js`): folded into
+  «Κοινόχρ» it made the month's common charges look higher than the tenant is used to.
 - **A payment attributed to a carried line** names it by what it is
   (`building:<propertyId>:<expenseId>:<YYMM>`, `chargecarry.ts` `buildingLineKey`,
   mirrored in the landlord app's `paymentAllocation.js`), not by its position:
@@ -681,9 +684,6 @@ says why. Screens approved 2026-11-22.
 - On the building page the bold amount next to a unit is the sum of the rows listed
   under it, as approved: on the month a bill is FOR that is the unit's share, also
   when the line under it says the share was charged on another month's rent.
-- The SMS rent notice adds a carried share into «Κοινόχρ» of the month it is billed
-  on and names no month (`emailmanager.ts`); the amount is right, the PDF it comes
-  with says the month. Wording to be decided by the owner.
 - The dashboard tooltip spreads what was collected for a kind of expense over the
   lines of that kind in proportion (as it always did). A month now routinely has
   two lines of one kind — its own and a carried one — so a payment attributed to
