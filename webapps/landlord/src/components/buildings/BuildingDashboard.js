@@ -17,6 +17,7 @@ import { cn } from '../../utils';
 import { LuArchive, LuBuilding2, LuCar, LuHome, LuUser } from 'react-icons/lu';
 import moment from 'moment';
 import { isVariableExpense } from '../../utils/variableExpense';
+import { enteredFiguresOfYear } from '../../utils/expenseRows';
 import NumberFormat from '../NumberFormat';
 import { Button } from '../ui/button';
 import UncollectedPaymentDialog from './UncollectedPaymentDialog';
@@ -841,25 +842,17 @@ export default function BuildingDashboard({ building }) {
     let variableYtdEksoda = 0;
     let variableProjectedEksoda = 0;
     for (const e of (building?.expenses || []).filter(_isVariableExpense)) {
-      // Collect this year's entered per-term totals (inputAmount once per term,
-      // legacy fallback = Σ per-unit shares), keyed + sorted by term.
-      const perTerm = new Map(); // term -> { input: number|null, shareSum }
-      for (const unit of building?.units || []) {
-        for (const c of unit.monthlyCharges || []) {
-          const inYear = Math.floor(Number(c.term || 0) / 1000000) === currentYear;
-          const matches =
-            String(c.expenseId) === String(e._id) || c.description === e.name;
-          if (!inYear || !matches) continue;
-          const slot = perTerm.get(c.term) || { input: null, shareSum: 0 };
-          if (c.inputAmount != null) slot.input = Number(c.inputAmount) || 0;
-          else slot.shareSum += Number(c.amount) || 0;
-          perTerm.set(c.term, slot);
-        }
-      }
-      // Per-term entered amount, oldest→newest.
-      const entered = [...perTerm.entries()]
-        .sort((a, b) => a[0] - b[0])
-        .map(([, s]) => (s.input != null ? s.input : s.shareSum));
+      // This year's entered per-term totals, oldest→newest (inputAmount once per
+      // term, legacy fallback = Σ per-unit shares). A row is the expense's by its
+      // id — by its name only when it has no id and no other expense has the name
+      // (utils/expenseRows.js): two expenses of one name used to count each
+      // other's months.
+      const entered = enteredFiguresOfYear(
+        building?.units,
+        building?.expenses,
+        e,
+        currentYear
+      );
       const actual = entered.reduce((s, v) => s + v, 0);
       variableYtdEksoda += actual;
       // Remaining ACTIVE months of the year for this variable expense.

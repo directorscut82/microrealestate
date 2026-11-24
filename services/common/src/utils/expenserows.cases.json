@@ -1,0 +1,487 @@
+[
+  {
+    "name": "a row is its own expense's by its id",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "e1"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e2",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "and never another expense's, though the two are called the same",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "e1"
+    },
+    "expense": {
+      "_id": "e2",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e2",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "nor another's when only that other one is left with the name",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "e1"
+    },
+    "expense": {
+      "_id": "e2",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e2",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "an id decides whatever the row's text says (the expense was renamed)",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΝΕΡΟ (παλιό όνομα)",
+      "expenseId": "e3"
+    },
+    "expense": {
+      "_id": "e3",
+      "name": "ΕΥΔΑΠ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e3",
+        "name": "ΕΥΔΑΠ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "a row with no id is the expense's whose name it bears, when no other has that name",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e3",
+        "name": "ΕΥΔΑΠ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "a row with no id is not an expense's of another name",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e3",
+      "name": "ΕΥΔΑΠ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e3",
+        "name": "ΕΥΔΑΠ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "a row with no id is nobody's when two expenses have the name (first)",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e2",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "a row with no id is nobody's when two expenses have the name (second)",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e2",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e2",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "spaces around the row's text do not matter",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "  ΔΕΗ "
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "spaces around the expense's name do not matter",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ  "
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ  "
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "two names that differ only by spaces are the same name: nobody's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e9",
+        "name": " ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "an empty id counts as no id",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": ""
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "a null id counts as no id",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": null
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "a repair's row (it has a repair id) is not the expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "repairId": "r1"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "a repair's old row («Repair: …») is not the expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "Repair: ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "Repair: ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "Repair: ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "a row with no text is not the expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": ""
+    },
+    "expense": {
+      "_id": "e1",
+      "name": ""
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": ""
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "a hand-typed charge called something else is not the expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ Μαρτίου"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "names are compared as written: capitals matter",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "δεη"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "a list of expenses with holes in it breaks nothing",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      null,
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {}
+    ],
+    "expected": true
+  },
+  {
+    "name": "no list of expenses: a row with no id is nobody's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": null,
+    "expected": false
+  },
+  {
+    "name": "no list of expenses: a row with an id is still its expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "e1"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": null,
+    "expected": true
+  },
+  {
+    "name": "no row",
+    "row": null,
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "no expense",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "e1"
+    },
+    "expense": null,
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  }
+]

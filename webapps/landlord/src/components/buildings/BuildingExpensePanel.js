@@ -31,6 +31,7 @@ import moment from 'moment';
 import { forMonthSuffix } from '../../utils/lineLabels';
 import { termMonthYearGenitive } from '../../utils/greekMonths';
 import { isVariableExpense } from '../../utils/variableExpense';
+import { isRowOfExpense } from '../../utils/expenseRows';
 import { billTermIsOutsideExpense } from '../../utils/billTerm';
 import BillSourceDialog from './BillSourceDialog';
 import {
@@ -187,10 +188,11 @@ export function buildRowsForTerm(building, term, isOwnerSide) {
         for (const unit of units) {
           if (!unit.monthlyCharges) continue;
           for (const c of unit.monthlyCharges) {
+            // By the row's id; by its text only for a row that has no id, and
+            // then only if no other expense has the name (utils/expenseRows.js).
             if (
               c.term === Number(term) &&
-              (String(c.expenseId) === String(expense._id) ||
-                c.description === expense.name)
+              isRowOfExpense(c, expense, expenses)
             ) {
               if (c.inputAmount != null) {
                 persisted = c.inputAmount;

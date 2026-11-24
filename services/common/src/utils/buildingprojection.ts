@@ -12,6 +12,7 @@
  */
 
 import { isRecurringExpense, isVariableExpense } from './variableexpense.js';
+import { isRowOfExpense } from './expenserows.js';
 // IMPORTANT: `common` has NO moment dependency (see ownerstatement.ts /
 // sharebasis.ts). All date math here is moment-free — DD/MM/YYYY strings are
 // parsed to {month, year} and compared as year*100+month integers.
@@ -296,8 +297,8 @@ export function computeBuildingProjection(
       for (const c of unit.monthlyCharges || []) {
         const inYear =
           Math.floor(Number(c.term || 0) / 1000000) === currentYear;
-        const matches =
-          String(c.expenseId) === String(e._id) || c.description === e.name;
+        // by the row's id; by its text only for a row with no id (expenserows.ts)
+        const matches = isRowOfExpense(c, e, building.expenses);
         if (!inYear || !matches) continue;
         const slot = perTerm.get(c.term!) || 0;
         perTerm.set(c.term!, Math.max(slot, Number(c.inputAmount ?? c.amount) || 0));
