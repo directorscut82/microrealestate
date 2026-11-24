@@ -1248,7 +1248,7 @@
   "on the rent of {{month}}": "sur le loyer de {{month}}",
   "has paid {{month}} in full": "a réglé {{month}} en totalité",
   "the lease has ended": "le bail est terminé",
-  "The share of each tenant for this month goes on their next open rent and says which month it is for. The table shows where each one was charged. Owner charges are not affected.": "La part de chaque locataire pour ce mois est ajoutée à son prochain loyer ouvert et indique le mois concerné. Le tableau montre où chaque part a été facturée. Les charges des propriétaires ne sont pas concernées.",
+  "What you enter now for this month goes on each tenant's next open rent and says which month it is for. The table shows where each share was charged. Owner charges are not affected.": "Ce que vous saisissez maintenant pour ce mois est ajouté au prochain loyer ouvert de chaque locataire et indique le mois concerné. Le tableau montre où chaque part a été facturée. Les charges des propriétaires ne sont pas concernées.",
   "Issue Date": "Date d'émission",
   "Replace the existing bill": "Remplacer la facture existante",
   "A vacant apartment is charged to its owner": "Un appartement vacant est facturé à son propriétaire",
