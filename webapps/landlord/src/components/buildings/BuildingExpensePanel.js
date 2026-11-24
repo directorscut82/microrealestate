@@ -144,11 +144,34 @@ export function buildRowsForTerm(building, term, isOwnerSide) {
       let persisted = 0;
       let hasPersisted = false;
       if (isOwnerSide) {
-        const e = ownerEntries.find(
-          (o) => o.term === Number(term) && String(o.expenseId) === String(expense._id)
+        // The owner amount that was ENTERED for this month: what the statement
+        // save wrote as `source: 'expense'` entries — one per apartment, or one
+        // building-wide entry before the per-apartment split (entries from before
+        // `source` existed carry none) — added back up. NOT «the first owner
+        // entry of the month that names the expense»: the share of an empty
+        // apartment (`source: 'vacant'`) or of one its owner lives in, a fixed
+        // owner row and a credit name it too. Reading one of those pre-filled
+        // this input with a figure nobody had entered — the «Ιδιοκτήτες» total
+        // was that much too high — and the next «Αποθήκευση» sent it as the
+        // building's owner amount: new owner charges out of nothing (found
+        // 24/11/2026 on a copy of the real data: 100 → 20 → 4 € per apartment,
+        // save after save, because one per-apartment entry read back alone is a
+        // fifth of what was entered).
+        // The sum IS what was entered when the split hands out the whole amount.
+        // Custom shares that cover less than 100% still read back less than was
+        // typed — the typed owner amount is not stored: MONEY_SURFACE_MATRIX.
+        const entered = ownerEntries.filter(
+          (o) =>
+            o &&
+            Number(o.term) === Number(term) &&
+            String(o.expenseId) === String(expense._id) &&
+            (o.source || 'expense') === 'expense'
         );
-        if (e) {
-          persisted = e.amount || 0;
+        if (entered.length > 0) {
+          persisted =
+            Math.round(
+              entered.reduce((sum, o) => sum + (Number(o.amount) || 0), 0) * 100
+            ) / 100;
           hasPersisted = true;
         }
       } else {
@@ -829,7 +852,10 @@ export default function BuildingExpensePanel({ building }) {
                 <span className="text-sm font-semibold uppercase tracking-wide text-ink-soft">
                   {t('Owners')}
                 </span>
-                <span className="w-28 text-right text-base font-semibold text-ink tabular-nums">
+                <span
+                  className="w-28 text-right text-base font-semibold text-ink tabular-nums"
+                  data-cy="ownersMonthTotal"
+                >
                   <NumberFormat value={ownerTotal} />
                 </span>
               </div>

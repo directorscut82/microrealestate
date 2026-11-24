@@ -175,6 +175,8 @@ export async function createBillBuilding(
     expenseName: string;
     billingId: string;
     startTerm: number;
+    /** More fields for the expense, over the defaults below (its type, who else is charged…). */
+    expenseExtra?: Record<string, unknown>;
   }
 ): Promise<BillBuilding> {
   const building = await request.post(`${GATEWAY}/api/v2/buildings`, {
@@ -228,7 +230,8 @@ export async function createBillBuilding(
         allocationMethod: 'general_thousandths',
         isRecurring: true,
         startTerm: o.startTerm,
-        billingId: o.billingId
+        billingId: o.billingId,
+        ...(o.expenseExtra || {})
       }
     }
   );

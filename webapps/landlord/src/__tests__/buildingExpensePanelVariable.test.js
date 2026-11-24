@@ -255,3 +255,168 @@ describe('calendar dots — termsWithData', () => {
     expect(() => buildRowsForTerm(building, TERM, false)).not.toThrow();
   });
 });
+
+/**
+ * THE OWNER AMOUNT OF A MONTH IS WHAT WAS ENTERED FOR IT — AND NOTHING ELSE.
+ *
+ * Found on 24/11/2026 while rehearsing a correction on a copy of the real data. An
+ * owner-tracked expense with no fixed owner amount (the heating of two buildings) gets
+ * an input under «Ιδιοκτήτες». The panel pre-filled it with `ownerEntries.find(term,
+ * expenseId).amount` — the FIRST owner entry of the month that names the expense, of
+ * ANY kind. In a month with an empty apartment that entry is the apartment's own share
+ * (`source: 'vacant'`), so the input read «100», the «Ιδιοκτήτες» total was 100 too
+ * high, and the next «Αποθήκευση» sent it as the building's owner amount: the server
+ * split it over the five apartments as new owner charges (20 € each). The next save
+ * then read ONE of those rows back (20) and split that (4 € each) — and so on.
+ *
+ * What the statement save writes for an entered owner amount is `source: 'expense'`
+ * rows (one per apartment; one building-wide row before the per-apartment split;
+ * rows from before `source` existed carry none). Their sum is the amount entered
+ * whenever the split hands out the whole amount — every allocation but custom shares
+ * that cover less than 100% (MONEY_SURFACE_MATRIX: the typed owner amount is not
+ * stored yet; that case still reads back less than was typed).
+ */
+describe('the owner amount of a month is what was entered for it, and nothing else', () => {
+  const tracked = {
+    ...base,
+    amount: 0,
+    trackOwnerExpense: true,
+    ownerAmount: 0
+  };
+  const ownerRow = (ownerMonthlyExpenses) =>
+    buildRowsForTerm(
+      { ...withExpense(tracked), ownerMonthlyExpenses },
+      TERM,
+      true
+    )[0];
+  const entry = (extra) => ({
+    expenseId: 'e1',
+    term: Number(TERM),
+    amount: 100,
+    propertyId: 'p1',
+    ...extra
+  });
+  const perApartment = (amount, n = 5) =>
+    Array.from({ length: n }, (_, i) =>
+      entry({ source: 'expense', amount, propertyId: `p${i + 1}` })
+    );
+
+  it('nothing entered: the input is blank', () => {
+    expect(ownerRow([])).toMatchObject({
+      kind: 'variable',
+      amount: '',
+      isOwner: true
+    });
+  });
+
+  it.each([
+    ['the share of an empty apartment', 'vacant'],
+    ['a fixed owner amount', 'owner-fixed'],
+    ['the share of an apartment its owner lives in', 'owner-resident'],
+    ['a credit that keeps a payment', 'credit'],
+    ['a repair', 'repair'],
+    ['the share of a repair on an empty apartment', 'repair-vacant'],
+    ['an entry of a kind this version does not know', 'somethingNew']
+  ])(
+    '%s names the expense too, and is NOT an entered amount: the input stays blank',
+    (_what, source) => {
+      expect(ownerRow([entry({ source })]).amount).toBe('');
+      expect(
+        ownerRow([
+          entry({ source }),
+          entry({ source, propertyId: 'p2' }),
+          entry({ source, propertyId: 'p3' })
+        ]).amount
+      ).toBe('');
+    }
+  );
+
+  it('entered, and split over five apartments: the amount that was entered — not one apartment’s share', () => {
+    expect(ownerRow(perApartment(20)).amount).toBe(100);
+  });
+
+  it('…whatever else of the month names the expense: empty apartments’ shares and a credit are not added', () => {
+    expect(
+      ownerRow([
+        entry({ source: 'vacant', amount: 77, propertyId: 'p3' }),
+        ...perApartment(20),
+        entry({ source: 'credit', amount: 0, propertyId: null }),
+        entry({ source: 'vacant', amount: 77, propertyId: 'p4' })
+      ]).amount
+    ).toBe(100);
+  });
+
+  it.each([
+    ['with its kind written', { source: 'expense' }],
+    ['from before entries said their kind', {}]
+  ])(
+    'an amount saved as one building-wide entry, %s: that amount',
+    (_what, extra) => {
+      expect(
+        ownerRow([entry({ ...extra, amount: 60, propertyId: null })]).amount
+      ).toBe(60);
+    }
+  );
+
+  it('shares that do not divide evenly add back to the cent', () => {
+    expect(
+      ownerRow([
+        entry({ source: 'expense', amount: 33.33, propertyId: 'p1' }),
+        entry({ source: 'expense', amount: 33.33, propertyId: 'p2' }),
+        entry({ source: 'expense', amount: 33.34, propertyId: 'p3' })
+      ]).amount
+    ).toBe(100);
+    expect(ownerRow(perApartment(0.1, 3)).amount).toBe(0.3);
+  });
+
+  it('entries of another month, or of another expense, are not this month’s amount', () => {
+    expect(
+      ownerRow([
+        entry({ source: 'expense', term: 2026070100 }),
+        entry({ source: 'expense', expenseId: 'e2' })
+      ]).amount
+    ).toBe('');
+    expect(
+      ownerRow([
+        entry({ source: 'expense', term: 2026070100 }),
+        ...perApartment(20),
+        entry({ source: 'expense', expenseId: 'e2' })
+      ]).amount
+    ).toBe(100);
+  });
+
+  it('a month stored as text is the same month', () => {
+    expect(
+      ownerRow(perApartment(20).map((e) => ({ ...e, term: TERM }))).amount
+    ).toBe(100);
+  });
+
+  it.each([[null], [undefined], ['abc'], [NaN], [{}]])(
+    'an entry whose amount is %p adds nothing (and breaks nothing)',
+    (amount) => {
+      expect(
+        ownerRow([
+          ...perApartment(20, 2),
+          entry({ source: 'expense', amount, propertyId: 'p9' })
+        ]).amount
+      ).toBe(40);
+    }
+  );
+
+  it('an empty slot among the entries breaks nothing', () => {
+    expect(ownerRow([null, ...perApartment(20), undefined]).amount).toBe(100);
+    expect(ownerRow([null]).amount).toBe('');
+  });
+
+  it('the fixed owner amount of an expense is still that expense’s own figure, whatever the month holds', () => {
+    const rows = buildRowsForTerm(
+      {
+        ...withExpense({ ...tracked, ownerAmount: 30 }),
+        ownerMonthlyExpenses: perApartment(20)
+      },
+      TERM,
+      true
+    );
+    expect(rows[0]).toMatchObject({ kind: 'fixed', amount: 30 });
+  });
+});
