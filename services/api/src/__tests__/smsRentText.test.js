@@ -435,3 +435,34 @@ describe('the SMS names a month exactly where the printed notice and the e-mail 
     expect(namedBySms).toEqual([2026100100, 2026110100, 2026120100]);
   });
 });
+
+describe('the SMS lists no zero item, a carried share included', () => {
+  const OCT = 2026100100;
+
+  it('a carried share of 0 that is the only line leaves the bare total', () => {
+    const r = rent({
+      total: { preTaxAmount: 0, grandTotal: 0, balance: 0 },
+      buildingCharges: [line(0, { forTerm: OCT })]
+    });
+    expect(rentSmsAmounts(r)).toBe(' (0€)');
+  });
+
+  it('two carried lines of one month that cancel out leave what the rent alone gives', () => {
+    const r = rent({
+      total: { preTaxAmount: 400, grandTotal: 400, balance: 0 },
+      buildingCharges: [line(30, { forTerm: OCT }), line(-30, { forTerm: OCT })]
+    });
+    expect(rentSmsAmounts(r)).toBe(' (400€)');
+    expect(rentSmsAmounts(r)).toBe(rentSmsAmounts(rent()));
+  });
+
+  it('a carried share of 0 beside the month’s own charges is left out', () => {
+    const r = rent({
+      total: { preTaxAmount: 400, grandTotal: 440, balance: 0 },
+      buildingCharges: [line(40), line(0, { forTerm: OCT })]
+    });
+    expect(rentSmsAmounts(r)).toBe(
+      ' (Ενοίκιο: 400€, Κοινόχρ: 40€, ΣΥΝΟΛΟ: 440€)'
+    );
+  });
+});

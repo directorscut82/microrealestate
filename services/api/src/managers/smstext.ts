@@ -17,9 +17,10 @@ const _sum = (lines: AnyRecord[]) =>
  * CARRIED onto this rent from another month (`forTerm`, DEFERRED_DECISIONS D-10) —
  * else null. The test is the one the printed notice and the e-mail use
  * (`formatTermFor` of pdfgenerator and emailer, behind `Number.isInteger(forTerm)`):
- * an integer that parses strictly as a ten-digit `YYYYMMDDHH` term. So the SMS
- * names a month exactly where they do, the rent's own month included, and never
- * prints a date it could not read.
+ * an integer that parses strictly as a ten-digit `YYYYMMDDHH` term. So, for a share
+ * that is not zero, the SMS names a month exactly where they do, the rent's own
+ * month included, and never prints a date it could not read. Like every other item
+ * of the SMS, a share that sums to zero is not listed.
  */
 function _carriedMonth(line: AnyRecord): string | null {
   const forTerm = line?.forTerm;

@@ -528,7 +528,9 @@ says why. Screens approved 2026-11-22.
   `managers/smstext.ts`, `smsRentText.test.js`): folded into «Κοινόχρ» it made the
   month's common charges look higher than the tenant is used to. A line counts as
   carried by the test of the printed notice and the e-mail (`formatTermFor`: an
-  integer `forTerm` that is a whole ten-digit month term); a repair stays under
+  integer `forTerm` that is a whole ten-digit month term), so for a share that is not
+  zero the SMS names a month where they do; like every other item of the SMS, a share
+  that sums to zero is not listed. A repair stays under
   «Επισκευή». The landlord's screens read only the first six digits of `forTerm`
   (`greekMonths.js`), so for a malformed term, which the engine never writes, they
   would name a month where paper and SMS do not.
