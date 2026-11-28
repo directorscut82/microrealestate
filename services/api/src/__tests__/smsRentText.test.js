@@ -158,6 +158,26 @@ describe('a share carried in from an older month', () => {
     );
   });
 
+  it('a late share that is the only amount still names its month', () => {
+    const r = {
+      term: 2026110100,
+      total: { preTaxAmount: 0, balance: 0, grandTotal: 30 },
+      buildingCharges: [
+        { amount: 30, type: 'electricity_private', forTerm: 2026100100 }
+      ]
+    };
+    expect(rentSmsAmounts(r)).toBe(' (Κοινόχρ 10/2026: 30€, ΣΥΝΟΛΟ: 30€)');
+  });
+
+  it('a single amount that is not a late share stays bare', () => {
+    const r = {
+      term: 2026110100,
+      total: { preTaxAmount: 0, balance: 0, grandTotal: 30 },
+      buildingCharges: [{ amount: 30, type: 'electricity_private' }]
+    };
+    expect(rentSmsAmounts(r)).toBe(' (30€)');
+  });
+
   it('with no charges of the month itself there is no bare «Κοινόχρ» item', () => {
     const r = rent({
       total: { preTaxAmount: 400, grandTotal: 430, balance: 0 },
@@ -203,12 +223,31 @@ describe('a share carried in from an older month', () => {
   });
 
   it.each([
-    ['is this very month', NOV],
-    ['is text that is no month', 'October'],
-    ['is a number that is no month', 20261001],
+    ['is the rent’s own month', NOV, 'Κοινόχρ 11/2026'],
+    ['is a later month', 2026120100, 'Κοινόχρ 12/2026']
+  ])(
+    'a line whose «for» month %s is a carried share, as on the printed notice and in the e-mail',
+    (_, forTerm, item) => {
+      const r = rent({
+        total: { preTaxAmount: 400, grandTotal: 470, balance: 0 },
+        buildingCharges: [line(40), line(30, { forTerm })]
+      });
+      expect(rentSmsAmounts(r)).toBe(
+        ` (Ενοίκιο: 400€, Κοινόχρ: 40€, ${item}: 30€, ΣΥΝΟΛΟ: 470€)`
+      );
+    }
+  );
+
+  it.each([
+    ['is six digits long', 202610],
+    ['has odd trailing digits', 2026109900],
+    ['is eight digits long', 20261001],
     ['has month 13', 2026130100],
+    ['is 99', 99],
+    ['is 0', 0],
     ['is null', null],
-    ['is 0', 0]
+    ['is text that is no month', 'October'],
+    ['is a month kept as text', '2026100100']
   ])(
     'a line whose «for» month %s counts with the month’s own charges — no unreadable date in an SMS',
     (_, forTerm) => {
@@ -221,6 +260,19 @@ describe('a share carried in from an older month', () => {
       );
     }
   );
+
+  it('a repair stays «Επισκευή» whatever month it says it is for', () => {
+    const r = rent({
+      total: { preTaxAmount: 400, grandTotal: 470, balance: 0 },
+      buildingCharges: [
+        line(40),
+        line(30, { type: 'repair', repairId: 'roof', forTerm: 2026100100 })
+      ]
+    });
+    expect(rentSmsAmounts(r)).toBe(
+      ' (Ενοίκιο: 400€, Κοινόχρ: 40€, Επισκευή: 30€, ΣΥΝΟΛΟ: 470€)'
+    );
+  });
 
   it('a «for» month stored as text is not a carried share — the printed notice and the e-mail do not name a month for it either', () => {
     const r = rent({
@@ -285,9 +337,7 @@ describe('everything else is as it was', () => {
     for (let i = 0; i < 5000; i++) {
       const charges = Array.from({ length: Math.floor(rnd() * 6) }, () =>
         line(rnd() < 0.1 ? 0 : money(200), {
-          type: types[Math.floor(rnd() * types.length)],
-          // some lines say the rent's own month: that is not a carried share
-          ...(rnd() < 0.2 ? { forTerm: NOV } : {})
+          type: types[Math.floor(rnd() * types.length)]
         })
       );
       const pre = rnd() < 0.15 ? 0 : money(900);
@@ -343,5 +393,45 @@ describe('everything else is as it was', () => {
       expect(strip(now)).toBe(strip(was));
       expect(addedUp(now)).toEqual(addedUp(was));
     }
+  });
+});
+
+// The helpers that decide, on the printed notice and in the e-mail, whether a line is
+// dated (`Number.isInteger(forTerm)` and a non-empty `formatTermFor`) — the real ones,
+// loaded as carriedShareOnPaper.test.js loads them.
+describe('the SMS names a month exactly where the printed notice and the e-mail do', () => {
+  let pdf;
+  let mail;
+  beforeAll(async () => {
+    const open = async (file) => {
+      const mod = await import(file);
+      return (mod.default?.default ?? mod.default)({
+        locale: 'el',
+        currency: 'EUR'
+      });
+    };
+    pdf = await open('../../../pdfgenerator/src/utils/templatefunctions.js');
+    mail = await open('../../../emailer/src/utils/templatefunctions.js');
+  });
+
+  it('for every shape of «for» month', () => {
+    const forTerms = [
+      2026100100, 2026110100, 2026120100, 202610, 2026109900, 2026130100, 99, 0
+    ];
+    const namedBySms = forTerms.filter((forTerm) => {
+      const r = rent({
+        total: { preTaxAmount: 400, grandTotal: 470, balance: 0 },
+        buildingCharges: [line(40), line(30, { forTerm })]
+      });
+      return /Κοινόχρ \d\d\/\d{4}: 30€/.test(rentSmsAmounts(r));
+    });
+    expect(forTerms.filter((t) => pdf.formatTermFor(t) !== '')).toEqual(
+      namedBySms
+    );
+    expect(forTerms.filter((t) => mail.formatTermFor(t) !== '')).toEqual(
+      namedBySms
+    );
+    // and the comparison is not an empty one
+    expect(namedBySms).toEqual([2026100100, 2026110100, 2026120100]);
   });
 });

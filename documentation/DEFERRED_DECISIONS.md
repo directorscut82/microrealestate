@@ -513,9 +513,15 @@ says why. Screens approved 2026-11-22.
   notice and receipt (whose calculation line uses the figures of the month the share
   is FOR), and the rent-call e-mail. Where a name is cut for lack of room the month
   is not (`components/LineName.js`). The rent SMS lists it as its own item, one per
-  older month, oldest first — «Ενοίκιο: 400€, Κοινόχρ: 40€, Κοινόχρ 10/2026: 30€»
-  (owner, 24/11/2026; `managers/smstext.ts`, `smsRentText.test.js`): folded into
-  «Κοινόχρ» it made the month's common charges look higher than the tenant is used to.
+  month the share is for, oldest first, also when it is the only amount —
+  «Ενοίκιο: 400€, Κοινόχρ: 40€, Κοινόχρ 10/2026: 30€» (owner, 24/11/2026;
+  `managers/smstext.ts`, `smsRentText.test.js`): folded into «Κοινόχρ» it made the
+  month's common charges look higher than the tenant is used to. A line counts as
+  carried by the test of the printed notice and the e-mail (`formatTermFor`: an
+  integer `forTerm` that is a whole ten-digit month term); a repair stays under
+  «Επισκευή». The landlord's screens read only the first six digits of `forTerm`
+  (`greekMonths.js`), so for a malformed term, which the engine never writes, they
+  would name a month where paper and SMS do not.
 - **A payment attributed to a carried line** names it by what it is
   (`building:<propertyId>:<expenseId>:<YYMM>`, `chargecarry.ts` `buildingLineKey`,
   mirrored in the landlord app's `paymentAllocation.js`), not by its position:

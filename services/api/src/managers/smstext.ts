@@ -14,18 +14,16 @@ const _sum = (lines: AnyRecord[]) =>
 
 /**
  * The month a building-charge line is FOR, as `MM/YYYY`, when the line is a share
- * CARRIED onto this rent from an older month (`forTerm`, DEFERRED_DECISIONS D-10) —
- * else null. The test is the one the printed notice, the e-mail and the landlord's
- * screens use (`Number.isInteger(forTerm)`: pdfgenerator invoicebody.ejs, emailer
- * rentcall bodies, landlord utils/lineLabels.js), so the SMS names a month exactly
- * where they do. On top of it, a `forTerm` that is the rent's own month or is no real
- * month is not a carried share: the line then counts with the month's own charges, and
- * the SMS never prints a date it could not read.
+ * CARRIED onto this rent from another month (`forTerm`, DEFERRED_DECISIONS D-10) —
+ * else null. The test is the one the printed notice and the e-mail use
+ * (`formatTermFor` of pdfgenerator and emailer, behind `Number.isInteger(forTerm)`):
+ * an integer that parses strictly as a ten-digit `YYYYMMDDHH` term. So the SMS
+ * names a month exactly where they do, the rent's own month included, and never
+ * prints a date it could not read.
  */
-function _carriedMonth(line: AnyRecord, rentTerm: number): string | null {
+function _carriedMonth(line: AnyRecord): string | null {
   const forTerm = line?.forTerm;
-  if (!Number.isInteger(forTerm) || forTerm === Number(rentTerm)) return null;
-  // strict: ten digits that are a real month, or nothing
+  if (!Number.isInteger(forTerm)) return null;
   const month = moment.utc(String(forTerm), 'YYYYMMDDHH', true);
   return month.isValid() ? month.format('MM/YYYY') : null;
 }
@@ -66,7 +64,7 @@ export function rentSmsAmounts(
   const carried = new Map<string, { term: number; lines: AnyRecord[] }>();
   const own: AnyRecord[] = [];
   for (const line of koinoxrhsta) {
-    const month = _carriedMonth(line, rentRecord.term);
+    const month = _carriedMonth(line);
     if (!month) {
       own.push(line);
       continue;
@@ -80,13 +78,16 @@ export function rentSmsAmounts(
   }
   const ownSum = _sum(own);
 
+  let dated = false;
   if (rentAmount) parts.push(`Ενοίκιο: ${_fmt(rentAmount)}`);
   if (ownSum) parts.push(`Κοινόχρ: ${_fmt(ownSum)}`);
   [...carried.entries()]
     .sort((a, b) => a[1].term - b[1].term)
     .forEach(([month, { lines }]) => {
       const sum = _sum(lines);
-      if (sum) parts.push(`Κοινόχρ ${month}: ${_fmt(sum)}`);
+      if (!sum) return;
+      parts.push(`Κοινόχρ ${month}: ${_fmt(sum)}`);
+      dated = true;
     });
   if (repairSum) parts.push(`Επισκευή: ${_fmt(repairSum)}`);
   if (balance > 0) parts.push(`Υπόλοιπο: ${_fmt(balance)}`);
@@ -96,7 +97,7 @@ export function rentSmsAmounts(
   const other = Math.round((grandTotal - shownSum) * 100) / 100;
   if (Math.abs(other) > 0.005) parts.push(`Άλλα: ${_fmt(other)}`);
 
-  return parts.length > 1
+  return parts.length > 1 || dated
     ? ` (${parts.join(', ')}, ΣΥΝΟΛΟ: ${_fmt(grandTotal)})`
     : ` (${_fmt(grandTotal)})`;
 }
