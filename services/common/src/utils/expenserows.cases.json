@@ -50,7 +50,7 @@
     "expected": false
   },
   {
-    "name": "nor another's when only that other one is left with the name",
+    "name": "a row whose id names no expense is read by its text: the one expense of that name has it",
     "row": {
       "term": 2026110100,
       "amount": 100,
@@ -66,6 +66,120 @@
       {
         "_id": "e2",
         "name": "ΔΕΗ"
+      }
+    ],
+    "expected": true
+  },
+  {
+    "name": "an id that names no expense, and two expenses of the row's name: nobody's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "gone"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e2",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "an id that names no expense, and the row's text is another name: not this expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΕΥΔΑΠ",
+      "expenseId": "gone"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "an id that names no expense, on a repair's row (it has a repair id): not the expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "gone",
+      "repairId": "r1"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "an id that names no expense, on a repair's old row («Repair: …»): not the expense's",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "Repair: ΔΕΗ",
+      "expenseId": "gone"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "Repair: ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "Repair: ΔΕΗ"
+      }
+    ],
+    "expected": false
+  },
+  {
+    "name": "an id of another EXISTING expense decides, though the row's text is this expense's name",
+    "row": {
+      "term": 2026110100,
+      "amount": 100,
+      "inputAmount": 100,
+      "description": "ΔΕΗ",
+      "expenseId": "e3"
+    },
+    "expense": {
+      "_id": "e1",
+      "name": "ΔΕΗ"
+    },
+    "expenses": [
+      {
+        "_id": "e1",
+        "name": "ΔΕΗ"
+      },
+      {
+        "_id": "e3",
+        "name": "ΕΥΔΑΠ"
       }
     ],
     "expected": false

@@ -188,8 +188,9 @@ export function buildRowsForTerm(building, term, isOwnerSide) {
         for (const unit of units) {
           if (!unit.monthlyCharges) continue;
           for (const c of unit.monthlyCharges) {
-            // By the row's id; by its text only for a row that has no id, and
-            // then only if no other expense has the name (utils/expenseRows.js).
+            // By the row's id; by its text for a row with no id, or with an id that
+            // names no expense, and then only if no other expense has the name
+            // (utils/expenseRows.js).
             if (
               c.term === Number(term) &&
               isRowOfExpense(c, expense, expenses)

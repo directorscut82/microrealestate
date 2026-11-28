@@ -55,9 +55,17 @@ describe('isRowOfExpense', () => {
     expect(isRowOfExpense(row({ expenseId: 'e1' }), e2, [e1, e2])).toBe(false);
   });
 
-  it('nor another’s when only that other one is left with the name', () => {
+  it('a row whose id names no expense is read by its text: the one expense of that name has it', () => {
     // the first «ΔΕΗ» was removed; its old row still names its id
-    expect(isRowOfExpense(row({ expenseId: 'e1' }), e2, [e2])).toBe(false);
+    expect(isRowOfExpense(row({ expenseId: 'e1' }), e2, [e2])).toBe(true);
+  });
+
+  it('the id of an expense of the list is compared as text, as the row’s is', () => {
+    // another expense, whose id is an object: it still decides over the row's text
+    const other = { _id: { toString: () => 'e3' }, name: 'ΕΥΔΑΠ' };
+    expect(isRowOfExpense(row({ expenseId: 'e3' }), e1, [e1, other])).toBe(
+      false
+    );
   });
 
   it('an id stored as an object is compared as text', () => {
@@ -276,6 +284,56 @@ describe('one expense of its name reads back as before', () => {
       })
     ]);
     expect(amountOf(b, 'e1')).toBe(500);
+  });
+});
+
+describe('a figure stored under an id that names no expense', () => {
+  // the manual-charge door (POST /buildings/:id/units/:unitId/charges) stores any
+  // expenseId it is given
+  const building = (expenses) => ({
+    _id: 'b1',
+    name: 'ΟΔΟΣ ΑΛΦΑ 24',
+    units: [
+      {
+        _id: 'u1',
+        propertyId: 'p1',
+        monthlyCharges: [
+          row({
+            expenseId: 'gone',
+            description: 'ΔΕΗ',
+            inputAmount: 100,
+            amount: 100
+          })
+        ]
+      }
+    ],
+    expenses,
+    ownerMonthlyExpenses: []
+  });
+  const amounts = (b) =>
+    buildRowsForTerm(b, String(TERM), false).map((r) => [
+      r.expenseId,
+      r.amount
+    ]);
+
+  it('shows in the expense of its name', () => {
+    expect(amounts(building([variable({ _id: 'e1', name: 'ΔΕΗ' })]))).toEqual([
+      ['e1', 100]
+    ]);
+  });
+
+  it('with two expenses of the name: both stay blank', () => {
+    expect(
+      amounts(
+        building([
+          variable({ _id: 'e1', name: 'ΔΕΗ' }),
+          variable({ _id: 'e2', name: 'ΔΕΗ' })
+        ])
+      )
+    ).toEqual([
+      ['e1', ''],
+      ['e2', '']
+    ]);
   });
 });
 

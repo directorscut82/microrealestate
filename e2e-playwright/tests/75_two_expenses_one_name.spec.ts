@@ -21,6 +21,11 @@
  *
  * Self-cleaning: the tenants, the building and both apartments are removed before and
  * after the run. Every identifier is from the reserved synthetic bands.
+ *
+ * A SECOND TEST, ON ITS OWN BUILDING (one monthly expense, one rented apartment): the
+ * manual-charge door stores any expenseId it is given, so a row of the month can name NO
+ * expense of the building. Its figure shows in the input of the expense of its name, and an
+ * ordinary save keeps it, under that expense's id.
  */
 import { expect, request, test } from '@playwright/test';
 import type { APIRequestContext, Page } from '@playwright/test';
@@ -37,6 +42,7 @@ import {
   signIn,
   tenantSharesFor
 } from './lib/ledger';
+import { mongoExec } from './lib/mongoExec';
 
 const GATEWAY = process.env.GATEWAY_URL || 'http://192.168.0.96:1350';
 const CURRENT = monthRef(0);
@@ -102,13 +108,8 @@ const inputOf = (page: Page, expenseId: string) =>
     `[data-cy=tenantExpenseRow][data-expense="${expenseId}"] input[type=number]`
   );
 
-/** Type `amount` for one expense of the month and press its «Αποθήκευση». */
-async function saveFigure(
-  page: Page,
-  expenseId: string,
-  amount: number
-): Promise<void> {
-  await inputOf(page, expenseId).fill(String(amount));
+/** Press the «Αποθήκευση» of one expense of the month, whatever its input says. */
+async function pressSave(page: Page, expenseId: string): Promise<void> {
   const saved = page.waitForResponse(
     (r) =>
       r.url().includes('/monthly-statement') && r.request().method() === 'POST',
@@ -119,6 +120,16 @@ async function saveFigure(
     .getByRole('button', { name: 'Αποθήκευση' })
     .click();
   expect((await saved).status(), 'the month is saved').toBe(200);
+}
+
+/** Type `amount` for one expense of the month and press its «Αποθήκευση». */
+async function saveFigure(
+  page: Page,
+  expenseId: string,
+  amount: number
+): Promise<void> {
+  await inputOf(page, expenseId).fill(String(amount));
+  await pressSave(page, expenseId);
 }
 
 test.beforeAll(async () => {
@@ -257,4 +268,131 @@ test('a figure typed for one of two expenses with the same name is not the other
     [F.tenants[1]]: SECOND
   });
   await api.dispose();
+});
+
+/** Every row stored for this month, per the expense id it names (an id that names none too). */
+async function storedFiguresOf(
+  api: APIRequestContext,
+  buildingId: string
+): Promise<Record<string, number[]>> {
+  const r = await api.get(`${GATEWAY}/api/v2/buildings/${buildingId}`, {
+    headers: headers()
+  });
+  expect(r.status(), 'the building').toBe(200);
+  const units = ((await r.json()).units || []) as Array<{
+    monthlyCharges?: Array<{
+      term: number;
+      expenseId?: string;
+      amount: number;
+    }>;
+  }>;
+  const out: Record<string, number[]> = {};
+  for (const unit of units) {
+    for (const c of unit.monthlyCharges || []) {
+      if (Number(c.term) !== CURRENT.term) continue;
+      (out[String(c.expenseId)] ||= []).push(Number(c.amount));
+    }
+  }
+  return out;
+}
+
+test.describe('a stored figure whose id names no expense', () => {
+  const G = {
+    building: 'E2E-NAMESAKE2',
+    atakPrefix: '999752',
+    expense: 'E2E-NAMESAKE2 ELECTRICITY',
+    tenant: 'E2E-NAMESAKE2-First',
+    apartment: 'E2E-NAMESAKE2-Apt1'
+  };
+  const ORPHAN_FIXTURES = {
+    tenants: [G.tenant],
+    buildings: [G.building],
+    properties: [G.apartment]
+  };
+  // an id that is no expense of the building
+  const GONE_ID = '5f0000000000000000000a11';
+  const FIGURE = 100;
+  let single: BillBuilding;
+
+  test.beforeAll(async () => {
+    test.setTimeout(5 * 60_000);
+    const api = await request.newContext();
+    await removeLedgerFixtures(api, seed, ORPHAN_FIXTURES);
+    const tenant = await createLedgerTenant(api, seed, {
+      tenantName: G.tenant,
+      propertyName: G.apartment,
+      afmFirst8: '99900011',
+      rent: 400,
+      monthsBack: 1
+    });
+    single = await createBillBuilding(api, seed, {
+      name: G.building,
+      atakPrefix: G.atakPrefix,
+      propertyIds: [tenant.propertyId],
+      expenseName: G.expense,
+      billingId: '999752001',
+      startTerm: monthRef(-1).term,
+      expenseExtra: {
+        type: 'electricity_private',
+        allocationMethod: 'single_unit',
+        customAllocations: [{ propertyId: tenant.propertyId, value: 100 }]
+      }
+    });
+    // straight into the database, as the manual-charge door would store it
+    const wrote = mongoExec(
+      `var r = db.buildings.updateOne(
+         { _id: ObjectId('${single.buildingId}'), name: '${G.building}' },
+         { $push: { 'units.0.monthlyCharges': {
+             _id: new ObjectId(),
+             term: ${CURRENT.term},
+             amount: ${FIGURE},
+             inputAmount: ${FIGURE},
+             description: '${G.expense}',
+             expenseId: '${GONE_ID}'
+         } } }
+       );
+       print('modified ' + r.modifiedCount);`
+    );
+    test.skip(
+      wrote === null,
+      'No way to write to the database from here (no Portainer token, no local shell).'
+    );
+    expect(wrote, 'the row is written').toContain('modified 1');
+    await api.dispose();
+  });
+
+  test.afterAll(async () => {
+    const api = await request.newContext();
+    await removeLedgerFixtures(api, seed, ORPHAN_FIXTURES);
+    await api.dispose();
+  });
+
+  test('an ordinary save keeps it, under the expense of its name', async ({
+    page
+  }) => {
+    const api = await request.newContext();
+    await signIn(page);
+    await openBuildingMonth(page, seed.realmName, single.buildingId, CURRENT);
+    expect(
+      await storedFiguresOf(api, single.buildingId),
+      'the figure is stored under the id that is no expense'
+    ).toEqual({ [GONE_ID]: [FIGURE] });
+
+    // the input of the expense of that name shows it; nothing is typed
+    await expect(
+      inputOf(page, single.expenseId),
+      'the stored figure is in the input of the expense of its name'
+    ).toHaveValue(String(FIGURE));
+    await pressSave(page, single.expenseId);
+
+    expect(
+      await storedFiguresOf(api, single.buildingId),
+      'the month, saved as it stands, holds the figure under the expense'
+    ).toEqual({ [single.expenseId]: [FIGURE] });
+    expect(
+      await tenantSharesFor(api, seed, single.buildingId, CURRENT.term),
+      'who is charged what this month'
+    ).toEqual({ [G.tenant]: FIGURE });
+    await api.dispose();
+  });
 });

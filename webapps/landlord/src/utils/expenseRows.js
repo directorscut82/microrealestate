@@ -1,15 +1,18 @@
 /**
  * Does this stored unit charge (a row of `unit.monthlyCharges`) belong to this expense?
  *
- * A row written by the monthly statement carries the expense's id, and that id decides:
- * a row of one expense is never another expense's, whatever the two are called.
+ * A row written by the monthly statement carries the expense's id, and when that id names an
+ * expense of the building it decides: a row of one expense is never another expense's,
+ * whatever the two are called.
  *
- * Only a row with NO id at all — written on 01–03/05/2026, before rows carried one — is
+ * A row with NO id — written on 01–03/05/2026, before rows carried one — or with an id that
+ * names NO expense of the building (the manual-charge door stores any id it is given) is
  * recognised by its text, and only when exactly ONE expense of the building has that
- * name: the rule the server uses when it saves a month (buildingmanager.ts
- * `saveMonthlyStatement`, «LEGACY BACKFILL»; `_stampLegacyChargesBeforeRename`:
- * «never guess between two candidates»). Mirrored in services/common
- * `utils/expenserows.ts`.
+ * name: the rule the server uses for a row with no id when it saves a month
+ * (buildingmanager.ts `saveMonthlyStatement`, «LEGACY BACKFILL»;
+ * `_stampLegacyChargesBeforeRename`: «never guess between two candidates»). A row that is
+ * nobody's shows in no input, and the next save of its month strips it. Mirrored in
+ * services/common `utils/expenserows.ts`.
  *
  * The readers used to say `expenseId === id || description === name`. With two expenses
  * of one name — one «ΔΕΗ» per apartment, which is what the bill import creates — the
@@ -19,10 +22,17 @@
  */
 export function isRowOfExpense(row, expense, expenses) {
   if (!row || !expense) return false;
-  if (row.expenseId) return String(row.expenseId) === String(expense._id);
+  if (row.expenseId) {
+    const id = String(row.expenseId);
+    // no list to look the id up in: the id decides, as it always did
+    if (!expenses) return id === String(expense._id);
+    if (expenses.some((e) => e?._id != null && String(e._id) === id)) {
+      return id === String(expense._id);
+    }
+  }
   if (row.repairId) return false;
   const text = String(row.description || '').trim();
-  // 'Repair: …' rows without an id are the repairs' own old rows
+  // 'Repair: …' rows are the repairs' own old rows
   if (!text || /^Repair: /.test(text)) return false;
   const name = String(expense.name || '').trim();
   if (text !== name) return false;

@@ -35,6 +35,14 @@ describe('isRowOfExpense — server implementation', () => {
     });
   }
 
+  it('the id of an expense of the list is compared as text, as the row’s is', () => {
+    // another expense, whose id is an object: it still decides over the row's text
+    const other = { _id: { toString: () => 'e3' }, name: 'ΕΥΔΑΠ' };
+    const e1 = { _id: 'e1', name: 'ΔΕΗ' };
+    const stored = { expenseId: 'e3', description: 'ΔΕΗ', amount: 100 };
+    expect(isRowOfExpense(stored, e1, [e1, other])).toBe(false);
+  });
+
   it('the table is not empty and says both yes and no', () => {
     expect(CASES.length).toBeGreaterThan(15);
     expect(CASES.some((c) => c.expected === true)).toBe(true);
@@ -95,6 +103,16 @@ describe('the yearly owner figure of one of two expenses with the same name', ()
     expect(variableOwnerYtd(onlyFirst)).toBe(100);
     expect(variableOwnerYtd(onlySecond)).toBe(60);
     expect(variableOwnerYtd(both)).toBe(160);
+  });
+
+  it('a figure stored under an id that names no expense counts for the expense of its name', () => {
+    const b = building([row('gone', 100)], [], [expense('e1')]);
+    expect(variableOwnerYtd(b)).toBe(100);
+  });
+
+  it('and for nobody when two expenses have the name', () => {
+    const b = building([row('gone', 100)], [], [expense('e1'), expense('e2')]);
+    expect(variableOwnerYtd(b)).toBe(0);
   });
 
   it('a second expense of the name with nothing typed adds nothing', () => {
