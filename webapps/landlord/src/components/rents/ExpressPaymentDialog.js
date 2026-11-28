@@ -5,7 +5,7 @@ import {
   DrawerHeader,
   DrawerTitle
 } from '../ui/drawer';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
 import { expressOwed } from '../../utils/expressOwed';
@@ -95,6 +95,10 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
     return { total: Math.round(total * 100) / 100, count };
   }, [eligible, selection]);
 
+  // `isPending` reaches the button only after a re-render; a second press that
+  // arrives before it would send the batch again.
+  const sendingRef = useRef(false);
+
   const submitMutation = useMutation({
     mutationFn: async () => {
       const items = eligible
@@ -172,8 +176,17 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
         err?.message ||
         'Something went wrong';
       toast.error(String(msg));
+    },
+    onSettled: () => {
+      sendingRef.current = false;
     }
   });
+
+  const handleSubmit = () => {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    submitMutation.mutate();
+  };
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
@@ -288,7 +301,7 @@ export default function ExpressPaymentDialog({ open, setOpen, rents }) {
               disabled={
                 totals.count === 0 || submitMutation.isPending
               }
-              onClick={() => submitMutation.mutate()}
+              onClick={handleSubmit}
             >
               {submitMutation.isPending ? t('Saving') : t('Record')}
             </Button>
