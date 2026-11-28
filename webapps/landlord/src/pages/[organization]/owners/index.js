@@ -24,6 +24,7 @@ import { List } from '../../../components/ResourceList';
 import moment from 'moment';
 import OwnerList from '../../../components/owners/OwnerList';
 import Page from '../../../components/Page';
+import { searchKey } from '../../../utils/searchKey';
 import { StoreContext } from '../../../store';
 import { toast } from 'sonner';
 import useTranslation from 'next-translate/useTranslation';
@@ -37,14 +38,11 @@ function _filterData(data = [], filters) {
     items = items.filter(({ status }) => filters.statuses.includes(status));
   }
   if (filters.searchText) {
-    const norm = (s) =>
-      String(s || '')
-        .replace(/\s|\.|-/gi, '')
-        .toLowerCase()
-        .replace(/ς/g, 'σ');
-    const q = norm(filters.searchText);
+    const q = searchKey(filters.searchText);
     items = items.filter(
-      (o) => norm(o.name).indexOf(q) !== -1 || norm(o.taxId).indexOf(q) !== -1
+      (o) =>
+        searchKey(o.name).indexOf(q) !== -1 ||
+        searchKey(o.taxId).indexOf(q) !== -1
     );
   }
   return items;

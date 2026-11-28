@@ -18,6 +18,7 @@ import moment from 'moment';
 import Page from '../../../../components/Page';
 import { RentOverview } from '../../../../components/rents/RentOverview';
 import RentTable from '../../../../components/rents/RentTable';
+import { searchKey } from '../../../../utils/searchKey';
 import { StoreContext } from '../../../../store';
 import { toast } from 'sonner';
 import { useRouter } from 'next/router';
@@ -37,22 +38,16 @@ function _filterData(data, filters) {
       : _rents;
 
   if (filters.searchText) {
-    const regExp = /\s|\.|-/gi;
-    // Greek final-sigma normalization: ς (U+03C2, word-final) must match
-    // σ (U+03C3, medial). Without this, "ΔΟΚΙΜΑΣΤΗΣ" lowercased with spaces
-    // stripped produces "δοκιμαστησ" (medial σ) in the stored name but
-    // "δοκιμαστης" (final ς) in the typed search — no match.
-    const norm = (s) => s.replace(regExp, '').toLowerCase().replace(/ς/g, 'σ');
-    const cleanedSearchText = norm(filters.searchText);
+    const cleanedSearchText = searchKey(filters.searchText);
 
     filteredItems = filteredItems.filter(
       ({ occupant: { isCompany, name, manager, contacts }, payments }) => {
         // Search match name
-        let found = norm(String(name ?? '')).indexOf(cleanedSearchText) != -1;
+        let found = searchKey(name).indexOf(cleanedSearchText) != -1;
 
         // Search match manager
         if (!found && isCompany) {
-          found = norm(String(manager ?? '')).indexOf(cleanedSearchText) != -1;
+          found = searchKey(manager).indexOf(cleanedSearchText) != -1;
         }
 
         // Search match contact — schema stores phone1 and phone2 (the
@@ -70,11 +65,11 @@ function _filterData(data, filters) {
                 phone1 = '',
                 phone2 = ''
               }) => ({
-                contact: contact.replace(regExp, '').toLowerCase(),
-                email: email.toLowerCase(),
-                phone: phone.replace(regExp, ''),
-                phone1: phone1.replace(regExp, ''),
-                phone2: phone2.replace(regExp, '')
+                contact: searchKey(contact),
+                email: searchKey(email),
+                phone: searchKey(phone),
+                phone1: searchKey(phone1),
+                phone2: searchKey(phone2)
               })
             )
             .filter(
@@ -91,10 +86,7 @@ function _filterData(data, filters) {
         if (!found) {
           found = !!payments?.find(
             ({ reference = '' }) =>
-              reference
-                .replace(regExp, '')
-                .toLowerCase()
-                .indexOf(cleanedSearchText) != -1
+              searchKey(reference).indexOf(cleanedSearchText) != -1
           );
         }
 

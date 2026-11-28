@@ -12,6 +12,7 @@ import { List } from '../../../components/ResourceList';
 import { LuArchive, LuFileUp, LuPlusCircle } from 'react-icons/lu';
 import NewTenantDialog from '../../../components/tenants/NewTenantDialog';
 import Page from '../../../components/Page';
+import { searchKey } from '../../../utils/searchKey';
 import { StoreContext } from '../../../store';
 import { Switch } from '../../../components/ui/switch';
 import { Label } from '../../../components/ui/label';
@@ -33,21 +34,16 @@ function _filterData(data = [], filters) {
   }
 
   if (filters.searchText) {
-    const regExp = /\s|\.|-/gi;
-    // Greek ς (final sigma) / σ (medial sigma) normalization — same fix as
-    // the rents page filter. Without this, searching for a name with uppercase
-    // Σ at word-end fails after toLowerCase + space-strip changes positions.
-    const norm = (s) => s.replace(regExp, '').toLowerCase().replace(/ς/g, 'σ');
-    const cleanedSearchText = norm(filters.searchText);
+    const cleanedSearchText = searchKey(filters.searchText);
 
     filteredItems = filteredItems.filter(
       ({ isCompany, name, manager, contacts, properties }) => {
         // Search match name
-        let found = norm(String(name ?? '')).indexOf(cleanedSearchText) != -1;
+        let found = searchKey(name).indexOf(cleanedSearchText) != -1;
 
         // Search match manager
         if (!found && isCompany) {
-          found = norm(String(manager ?? '')).indexOf(cleanedSearchText) != -1;
+          found = searchKey(manager).indexOf(cleanedSearchText) != -1;
         }
 
         // Search match contact — schema stores phone1 and phone2 (the
@@ -64,11 +60,11 @@ function _filterData(data = [], filters) {
                 phone1 = '',
                 phone2 = ''
               }) => ({
-                contact: contact.replace(regExp, '').toLowerCase(),
-                email: email.toLowerCase(),
-                phone: phone.replace(regExp, ''),
-                phone1: phone1.replace(regExp, ''),
-                phone2: phone2.replace(regExp, '')
+                contact: searchKey(contact),
+                email: searchKey(email),
+                phone: searchKey(phone),
+                phone1: searchKey(phone1),
+                phone2: searchKey(phone2)
               })
             )
             .filter(
@@ -85,10 +81,7 @@ function _filterData(data = [], filters) {
         if (!found) {
           found = !!properties?.filter(
             ({ property: { name } }) =>
-              name
-                .replace(regExp, '')
-                .toLowerCase()
-                .indexOf(cleanedSearchText) != -1
+              searchKey(name).indexOf(cleanedSearchText) != -1
           ).length;
         }
         return found;

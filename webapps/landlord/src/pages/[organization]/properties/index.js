@@ -6,6 +6,7 @@ import { LuPlusCircle } from 'react-icons/lu';
 import NewPropertyDialog from '../../../components/properties/NewPropertyDialog';
 import Page from '../../../components/Page';
 import PropertyList from '../../../components/properties/PropertyList';
+import { searchKey } from '../../../utils/searchKey';
 import { StoreContext } from '../../../store';
 import { toast } from 'sonner';
 import types from '../../../components/properties/types';
@@ -39,18 +40,9 @@ function _filterData(data = [], filters) {
   }
 
   if (filters.searchText) {
-    const regExp = /\s|\.|-/gi;
-    const cleanedSearchText = filters.searchText
-      .replace(regExp, '')
-      .toLowerCase()
-      .replace(/ς/g, 'σ');
+    const cleanedSearchText = searchKey(filters.searchText);
 
-    const matchField = (val) =>
-      String(val ?? '')
-        .replace(regExp, '')
-        .toLowerCase()
-        .replace(/ς/g, 'σ')
-        .indexOf(cleanedSearchText) != -1;
+    const matchField = (val) => searchKey(val).indexOf(cleanedSearchText) != -1;
     filteredItems = filteredItems.filter(
       ({ name, atakNumber, address, surface }) =>
         matchField(name) ||

@@ -18,6 +18,7 @@ import OutgoingTenants from '../../../components/accounting/OutgoingTenants';
 import OwnerStatements from '../../../components/accounting/OwnerStatements';
 import Page from '../../../components/Page';
 import PeriodPicker from '../../../components/PeriodPicker';
+import { searchKey } from '../../../utils/searchKey';
 import SearchFilterBar from '../../../components/SearchFilterBar';
 import TenantSettlements from '../../../components/accounting/TenantSettlements';
 import { useQuery } from '@tanstack/react-query';
@@ -78,42 +79,32 @@ function Accounting() {
   const filteredOwners = useMemo(() => {
     const list = ownersData || [];
     if (!searchText) return list;
-    // Round-1 audit L7: normalize taxId the SAME way the Owners page does
-    // (lowercase + strip space/dot/dash) so the same query yields the same
-    // owner set on both surfaces and a separator-containing taxId still matches.
-    const norm = (s) =>
-      String(s || '')
-        .replace(/\s|\.|-/gi, '')
-        .toLowerCase()
-        .replace(/ς/g, 'σ');
-    const q = norm(searchText);
+    // Round-1 audit L7: key taxId the SAME way the Owners page does
+    // (searchKey) so the same query yields the same owner set on both
+    // surfaces and a separator-containing taxId still matches.
+    const q = searchKey(searchText);
     return list.filter(
-      (o) => norm(o.name).includes(q) || norm(o.taxId).includes(q)
+      (o) => searchKey(o.name).includes(q) || searchKey(o.taxId).includes(q)
     );
   }, [ownersData, searchText]);
 
   const filteredData = useMemo(() => {
     if (!accountingData) return {};
     if (!searchText) return accountingData;
-    const norm = (s) =>
-      String(s ?? '')
-        .replace(/\s|\.|-/gi, '')
-        .toLowerCase()
-        .replace(/ς/g, 'σ');
-    const q = norm(searchText);
+    const q = searchKey(searchText);
     return {
       ...accountingData,
       incomingTenants:
         accountingData.incomingTenants?.filter((t) =>
-          norm(t.name).includes(q)
+          searchKey(t.name).includes(q)
         ) || [],
       outgoingTenants:
         accountingData.outgoingTenants?.filter((t) =>
-          norm(t.name).includes(q)
+          searchKey(t.name).includes(q)
         ) || [],
       settlements:
         accountingData.settlements?.filter((s) =>
-          norm(s.tenant).includes(q)
+          searchKey(s.tenant).includes(q)
         ) || []
     };
   }, [accountingData, searchText]);

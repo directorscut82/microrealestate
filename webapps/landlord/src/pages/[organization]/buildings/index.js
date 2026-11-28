@@ -8,6 +8,7 @@ import useInboxImport from '../../../hooks/useInboxImport';
 import { List } from '../../../components/ResourceList';
 import NewBuildingDialog from '../../../components/buildings/NewBuildingDialog';
 import Page from '../../../components/Page';
+import { searchKey } from '../../../utils/searchKey';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import useTranslation from 'next-translate/useTranslation';
@@ -26,26 +27,13 @@ function _filterData(data = [], filters) {
   }
 
   if (filters.searchText) {
-    // Wave-24 B3: the previous `\s|\.-` regex matched a literal "." followed
-    // by "-" rather than the intended "any of space, dot, or hyphen".
-    // Fix to a true character class.
-    //
     // L1 (June 2026): the predicate was using `field?.replace(...)...indexOf(cleaned) !== -1`,
     // which short-circuits to `undefined` when the field is missing — and
     // `undefined !== -1` evaluates to `true`, so any building lacking a
     // description/street1/city matched every query. Coerce to '' first so
     // the chain resolves to a real number.
-    const regExp = /\s|\.|-/gi;
-    const cleaned = filters.searchText
-      .replace(regExp, '')
-      .toLowerCase()
-      .replace(/ς/g, 'σ');
-    const matchField = (val) =>
-      String(val ?? '')
-        .replace(regExp, '')
-        .toLowerCase()
-        .replace(/ς/g, 'σ')
-        .indexOf(cleaned) !== -1;
+    const cleaned = searchKey(filters.searchText);
+    const matchField = (val) => searchKey(val).indexOf(cleaned) !== -1;
     filteredItems = filteredItems.filter(
       (b) =>
         matchField(b.name) ||
