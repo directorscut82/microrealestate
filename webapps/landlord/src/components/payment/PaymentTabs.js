@@ -760,7 +760,15 @@ function PaymentTabs({ rent, onSubmit, onError, lockDateToToday = false }, ref) 
           (typeof error?.response?.data === 'string'
             ? error.response.data
             : null);
-        toast.error(apiMsg ? String(apiMsg) : t('Something went wrong'));
+        toast.error(
+          error?.response?.status === 409
+            ? t(
+                'This tenant was changed by another window. Reload the page and try again.'
+              )
+            : apiMsg
+              ? String(apiMsg)
+              : t('Something went wrong')
+        );
         onError?.();
       }
     },
