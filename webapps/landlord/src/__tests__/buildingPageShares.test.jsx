@@ -330,7 +330,7 @@ describe('no English on the Greek page', () => {
       'not charged, the lease has ended',
       'not charged',
       'for {{month}}',
-      "What you enter now for this month goes on each tenant's next open rent and says which month it is for. The table shows where each share was charged. Owner charges are not affected."
+      "What you enter now for this month goes on each tenant's next open rent and says which month it is for. If a tenant's lease has ended, their share is not charged. The table shows where each share was charged. Owner charges are not affected."
     ].forEach((key) => {
       expect(typeof el[key]).toBe('string');
       expect(el[key]).not.toBe(key);
@@ -346,7 +346,7 @@ describe('no English on the Greek page', () => {
         'not charged, the lease has ended',
         'not charged',
         'for {{month}}',
-        "What you enter now for this month goes on each tenant's next open rent and says which month it is for. The table shows where each share was charged. Owner charges are not affected."
+        "What you enter now for this month goes on each tenant's next open rent and says which month it is for. If a tenant's lease has ended, their share is not charged. The table shows where each share was charged. Owner charges are not affected."
       ].forEach((key) => expect(typeof strings[key]).toBe('string'));
     });
   });

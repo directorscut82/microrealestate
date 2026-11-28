@@ -1415,7 +1415,7 @@
   "on the rent of {{month}}": "στο ενοίκιο {{month}}",
   "has paid {{month}} in full": "έχει εξοφλήσει τον {{month}}",
   "the lease has ended": "η μίσθωση έχει λήξει",
-  "What you enter now for this month goes on each tenant's next open rent and says which month it is for. The table shows where each share was charged. Owner charges are not affected.": "Ό,τι καταχωρίσετε τώρα για αυτόν τον μήνα μπαίνει στο επόμενο ανοιχτό ενοίκιο κάθε ενοικιαστή και γράφει τον μήνα που αφορά. Ο πίνακας δείχνει πού χρεώθηκε κάθε μερίδιο. Οι χρεώσεις ιδιοκτητών δεν επηρεάζονται.",
+  "What you enter now for this month goes on each tenant's next open rent and says which month it is for. If a tenant's lease has ended, their share is not charged. The table shows where each share was charged. Owner charges are not affected.": "Ό,τι καταχωρίσετε τώρα για αυτόν τον μήνα μπαίνει στο επόμενο ανοιχτό ενοίκιο κάθε ενοικιαστή και γράφει τον μήνα που αφορά. Αν η μίσθωση ενός ενοικιαστή έχει λήξει, το μερίδιό του δεν χρεώνεται. Ο πίνακας δείχνει πού χρεώθηκε κάθε μερίδιο. Οι χρεώσεις ιδιοκτητών δεν επηρεάζονται.",
   "Issue Date": "Ημερομηνία έκδοσης",
   "Replace the existing bill": "Αντικατάσταση υπάρχοντος λογαριασμού",
   "A vacant apartment is charged to its owner": "Το κενό διαμέρισμα χρεώνεται στον ιδιοκτήτη του",

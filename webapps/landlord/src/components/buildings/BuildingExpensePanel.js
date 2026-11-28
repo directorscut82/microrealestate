@@ -806,7 +806,7 @@ export default function BuildingExpensePanel({ building }) {
           </div>
           <div className="mt-1 text-label text-ink-muted">
             {t(
-              "What you enter now for this month goes on each tenant's next open rent and says which month it is for. The table shows where each share was charged. Owner charges are not affected."
+              "What you enter now for this month goes on each tenant's next open rent and says which month it is for. If a tenant's lease has ended, their share is not charged. The table shows where each share was charged. Owner charges are not affected."
             )}
           </div>
         </div>

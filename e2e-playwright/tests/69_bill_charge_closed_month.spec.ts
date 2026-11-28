@@ -478,6 +478,12 @@ test.describe('PAST MONTH', () => {
       ),
       'the note on a month that is over'
     ).toHaveCount(1);
+    await expect(
+      page.getByText(
+        'Αν η μίσθωση ενός ενοικιαστή έχει λήξει, το μερίδιό του δεν χρεώνεται.'
+      ),
+      'the note says what happens when a lease has ended'
+    ).toHaveCount(1);
     await expect
       .poll(() => shareBillingLines(page), {
         message: 'where each share of last month was charged',
