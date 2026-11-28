@@ -26,6 +26,38 @@ import { useRouter } from 'next/router';
 import useTranslation from 'next-translate/useTranslation';
 import { withAuthentication } from '../../../components/Authentication';
 
+function _filterOwners(ownersData, searchText) {
+  const list = ownersData || [];
+  if (!searchText) return list;
+  // Round-1 audit L7: key taxId the SAME way the Owners page does
+  // (searchKey) so the same query yields the same owner set on both
+  // surfaces and a separator-containing taxId still matches.
+  const q = searchKey(searchText);
+  return list.filter(
+    (o) => searchKey(o.name).includes(q) || searchKey(o.taxId).includes(q)
+  );
+}
+
+function _filterAccounting(accountingData, searchText) {
+  if (!accountingData) return {};
+  if (!searchText) return accountingData;
+  const q = searchKey(searchText);
+  return {
+    ...accountingData,
+    incomingTenants:
+      accountingData.incomingTenants?.filter((t) =>
+        searchKey(t.name).includes(q)
+      ) || [],
+    outgoingTenants:
+      accountingData.outgoingTenants?.filter((t) =>
+        searchKey(t.name).includes(q)
+      ) || [],
+    settlements:
+      accountingData.settlements?.filter((s) =>
+        searchKey(s.tenant).includes(q)
+      ) || []
+  };
+}
 function TopBar({ onSearch }) {
   const router = useRouter();
   const year = router.query.year || moment().year();
@@ -76,38 +108,15 @@ function Accounting() {
     enabled: !!year
   });
 
-  const filteredOwners = useMemo(() => {
-    const list = ownersData || [];
-    if (!searchText) return list;
-    // Round-1 audit L7: key taxId the SAME way the Owners page does
-    // (searchKey) so the same query yields the same owner set on both
-    // surfaces and a separator-containing taxId still matches.
-    const q = searchKey(searchText);
-    return list.filter(
-      (o) => searchKey(o.name).includes(q) || searchKey(o.taxId).includes(q)
-    );
-  }, [ownersData, searchText]);
+  const filteredOwners = useMemo(
+    () => _filterOwners(ownersData, searchText),
+    [ownersData, searchText]
+  );
 
-  const filteredData = useMemo(() => {
-    if (!accountingData) return {};
-    if (!searchText) return accountingData;
-    const q = searchKey(searchText);
-    return {
-      ...accountingData,
-      incomingTenants:
-        accountingData.incomingTenants?.filter((t) =>
-          searchKey(t.name).includes(q)
-        ) || [],
-      outgoingTenants:
-        accountingData.outgoingTenants?.filter((t) =>
-          searchKey(t.name).includes(q)
-        ) || [],
-      settlements:
-        accountingData.settlements?.filter((s) =>
-          searchKey(s.tenant).includes(q)
-        ) || []
-    };
-  }, [accountingData, searchText]);
+  const filteredData = useMemo(
+    () => _filterAccounting(accountingData, searchText),
+    [accountingData, searchText]
+  );
 
   const getSettlementsAsCsv = useCallback(
     async (e) => {

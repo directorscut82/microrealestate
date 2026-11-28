@@ -102,9 +102,10 @@ describe('searchKey', () => {
 
 // ── the seven places ───────────────────────────────────────────────────────────
 // Each list page keeps its own filter; none of them is exported, so the tests
-// read the page source. The five whose filter is a function of its own
-// (`_filterData`) are also RUN, on stored values written the way the tax office
-// prints them and typed the way Greek is typed.
+// read the page source and RUN the filter functions out of it (`_filterData`;
+// on the accounting page `_filterOwners` and `_filterAccounting`), on stored
+// values written the way the tax office prints them and typed the way Greek is
+// typed.
 
 const PAGES = path.resolve(__dirname, '../pages/[organization]');
 const PAGE_FILES = {
@@ -117,17 +118,16 @@ const PAGE_FILES = {
 };
 const source = (page) =>
   fs.readFileSync(path.join(PAGES, PAGE_FILES[page]), 'utf8');
-const flat = (text) => text.replace(/\s+/g, ' ');
 
-function filterOf(page) {
+function filterOf(page, name = '_filterData') {
   const src = source(page);
-  const from = src.indexOf('function _filterData(');
+  const from = src.indexOf(`function ${name}(`);
   const to = src.indexOf('\n}\n', from);
   expect(from).toBeGreaterThanOrEqual(0);
   // eslint-disable-next-line no-new-func
   return new Function(
     'searchKey',
-    `${src.slice(from, to + 2)}\nreturn _filterData;`
+    `${src.slice(from, to + 2)}\nreturn ${name};`
   )(searchKey);
 }
 const found = (filter, data, searchText, key = '_id') =>
@@ -318,20 +318,175 @@ describe('owners list', () => {
 });
 
 describe('accounting page', () => {
-  // The two filters live inside the page component, so they are read, not run.
-  const src = flat(source('accounting'));
-  const count = (needle) => src.split(needle).length - 1;
+  const owners = filterOf('accounting', '_filterOwners');
+  const accounting = filterOf('accounting', '_filterAccounting');
+  const ids = (rows) => rows.map((row) => row._id);
 
-  it('keys the typed text of both filters', () => {
-    expect(count('const q = searchKey(searchText);')).toBe(2);
+  describe('owners tab', () => {
+    const data = [
+      { _id: 'name', name: 'ΙΔΙΟΚΤΗΤΗΣ ΑΛΦΑ', taxId: '999000001' },
+      { _id: 'taxId', name: 'Χ', taxId: 'ΑΦΜ-ΒΗΤΑ 7' },
+      { _id: 'nothing', name: null, taxId: null }
+    ];
+
+    it.each([
+      ['ιδιοκτήτης άλφα', 'name'],
+      ['999 000 001', 'name'],
+      ['αφμ βήτα 7', 'taxId']
+    ])('«%s» finds %s', (typed, id) => {
+      expect(ids(owners(data, typed))).toEqual([id]);
+    });
+
+    it('a query that matches nothing finds nothing', () => {
+      expect(owners(data, 'ΘΗΤΑ')).toEqual([]);
+    });
+
+    it('an empty query returns the data as it is, and a missing list is empty', () => {
+      expect(owners(data, '')).toBe(data);
+      expect(owners(undefined, 'α')).toEqual([]);
+      expect(owners(undefined, '')).toEqual([]);
+    });
   });
 
-  it.each([
-    ['searchKey(o.name).includes(q)', 1],
-    ['searchKey(o.taxId).includes(q)', 1],
-    ['searchKey(t.name).includes(q)', 2],
-    ['searchKey(s.tenant).includes(q)', 1]
-  ])('keys the stored field in «%s»', (needle, times) => {
-    expect(count(needle)).toBe(times);
+  describe('incoming tenants, outgoing tenants and settlements', () => {
+    const data = {
+      year: 2026,
+      incomingTenants: [
+        { _id: 'in', name: 'ΕΙΣΕΡΧΟΜΕΝΟΣ ΑΛΦΑ' },
+        { _id: 'in-other', name: 'ΑΛΛΟΣ ΒΗΤΑ' }
+      ],
+      outgoingTenants: [
+        { _id: 'out', name: 'ΕΞΕΡΧΟΜΕΝΟΣ ΒΗΤΑ' },
+        { _id: 'out-other', name: 'ΑΛΛΟΣ ΓΑΜΑ' }
+      ],
+      settlements: [
+        { _id: 'set', tenant: 'ΕΞΟΦΛΗΣΗ ΓΑΜΑ' },
+        { _id: 'set-other', tenant: 'ΑΛΛΟΣ ΔΕΛΤΑ' }
+      ]
+    };
+
+    it.each([
+      ['incomingTenants', 'εισερχόμενος άλφα', 'in'],
+      ['outgoingTenants', 'ΕΞΕΡΧΟΜΕΝΟΣ βήτα', 'out'],
+      ['settlements', 'εξόφληση γάμα', 'set']
+    ])(
+      'an accented query finds the capitals name in %s only',
+      (list, typed, id) => {
+        const result = accounting(data, typed);
+        expect(ids(result[list])).toEqual([id]);
+        for (const other of [
+          'incomingTenants',
+          'outgoingTenants',
+          'settlements'
+        ]) {
+          if (other !== list) expect(result[other]).toEqual([]);
+        }
+      }
+    );
+
+    it('a query that matches nothing finds nothing, in any of the three', () => {
+      expect(accounting(data, 'ΘΗΤΑ')).toEqual({
+        year: 2026,
+        incomingTenants: [],
+        outgoingTenants: [],
+        settlements: []
+      });
+    });
+
+    it('an empty query returns the data as it is, and no data is an empty object', () => {
+      expect(accounting(data, '')).toBe(data);
+      expect(accounting(undefined, 'α')).toEqual({});
+      expect(accounting(undefined, '')).toEqual({});
+    });
+
+    it('keeps every other field, and a list that is missing stays empty', () => {
+      expect(accounting({ year: 2026, incomingTenants: [] }, 'α')).toEqual({
+        year: 2026,
+        incomingTenants: [],
+        outgoingTenants: [],
+        settlements: []
+      });
+    });
+  });
+});
+
+// A search used to THROW on a missing value in three places, and the list then
+// fell back silently (List.handleSearch): the tenants list showed everything
+// unfiltered, the rents list showed nothing. searchKey() reads a missing value
+// as '', so the search applies and finds the right rows. This is the one place
+// where a search now returns other rows than it did.
+describe('searches that used to throw on a missing value', () => {
+  const tenant = (_id, fields) => ({
+    _id,
+    isCompany: false,
+    name: 'ΑΛΛΟΣ',
+    manager: '',
+    contacts: [],
+    properties: [],
+    ...fields
+  });
+  const rent = (_id, occupant, payments = []) => ({
+    _id,
+    status: 'notpaid',
+    occupant: {
+      isCompany: false,
+      name: 'ΑΛΛΟΣ',
+      manager: '',
+      contacts: [],
+      ...occupant
+    },
+    payments
+  });
+
+  it('tenants: a property without a name does not stop the search', () => {
+    const data = [
+      tenant('nameless', {
+        properties: [{ property: {} }, { property: { name: null } }]
+      }),
+      tenant('named', { properties: [{ property: { name: 'ΟΔΟΣ ΑΛΦΑ 1' } }] }),
+      tenant('none')
+    ];
+    expect(found(filterOf('tenants'), data, 'οδός άλφα 1')).toEqual(['named']);
+  });
+
+  it('tenants: a contact without an e-mail does not stop the search', () => {
+    const data = [
+      tenant('no-email', {
+        contacts: [{ contact: 'ΕΠΑΦΗ ΕΨΙΛΟΝ', email: null }]
+      }),
+      tenant('email', {
+        contacts: [{ contact: 'ΑΛΛΗ', email: 'a@example.com' }]
+      })
+    ];
+    const filter = filterOf('tenants');
+    expect(found(filter, data, 'επαφή έψιλον')).toEqual(['no-email']);
+    expect(found(filter, data, 'a@example.com')).toEqual(['email']);
+  });
+
+  it('rents: a contact without an e-mail does not stop the search', () => {
+    const data = {
+      rents: [
+        rent('no-email', {
+          contacts: [{ contact: 'ΕΠΑΦΗ ΕΨΙΛΟΝ', email: null }]
+        }),
+        rent('email', {
+          contacts: [{ contact: 'ΑΛΛΗ', email: 'a@example.com' }]
+        })
+      ]
+    };
+    const filter = filterOf('rents');
+    expect(found(filter, data, 'επαφή έψιλον')).toEqual(['no-email']);
+    expect(found(filter, data, 'a@example.com')).toEqual(['email']);
+  });
+
+  it('rents: a payment without a reference does not stop the search', () => {
+    const data = {
+      rents: [
+        rent('nameless', {}, [{ reference: null }, {}]),
+        rent('named', {}, [{ reference: null }, { reference: 'ΠΛΗΡΩΜΗ ΗΤΑ' }]),
+        rent('none')
+      ]
+    };
+    expect(found(filterOf('rents'), data, 'πληρωμή ήτα')).toEqual(['named']);
   });
 });
