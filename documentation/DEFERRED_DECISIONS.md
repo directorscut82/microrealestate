@@ -6,6 +6,16 @@ behavior, the EUR/UX impact, and what would need to change.
 
 ## D-1 — Mid-month termination billing (lifecycle audit L-6)
 
+**Decision (owner, 28/11/2026): a month the lease touches is billed whole. Keep it.**
+The question was put with the real figures: a lease written from the 2nd of a month
+to the 1st of the same month two years later touches 25 calendar months and is billed
+25 rents, the last one for a single day; most of the real leases are written that
+way, and a lease that starts or ends mid-month bills that month in full too. Not
+billing a last month of one day, and billing the last month by days, were offered and
+declined. This is the product's rule, not a defect: do not «fix» it and do not ask
+again without new evidence. A last month the landlord does not want to collect is
+written off when the lease is terminated («Τερματισμός μίσθωσης»).
+
 **Current behavior.** When a tenant has `terminationDate` set in the
 middle of a month (e.g. 2026-06-15), the rent for that month is still
 billed in full. Building charges (κοινόχρηστα) for the same month are
