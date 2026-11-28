@@ -10,9 +10,14 @@
  * recognised by its text, and only when exactly ONE expense of the building has that
  * name: the rule the server uses for a row with no id when it saves a month
  * (buildingmanager.ts `saveMonthlyStatement`, «LEGACY BACKFILL»;
- * `_stampLegacyChargesBeforeRename`: «never guess between two candidates»). A row that is
- * nobody's shows in no input, and the next save of its month strips it. Mirrored in
- * services/common `utils/expenserows.ts`.
+ * `_stampLegacyChargesBeforeRename`: «never guess between two candidates»).
+ *
+ * A row that is no expense's shows in no input. A save of its month, in a unit that has an
+ * apartment, removes every row with an expense id and every row with no id whose text two
+ * expenses share, and builds the month again from the figures the page sends; a row with a
+ * repair id stays, and so does a row with no id whose text is empty, starts with
+ * «Repair: » or names no expense.
+ * Mirrored in services/common `utils/expenserows.ts`.
  *
  * The readers used to say `expenseId === id || description === name`. With two expenses
  * of one name — one «ΔΕΗ» per apartment, which is what the bill import creates — the

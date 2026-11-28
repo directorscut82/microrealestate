@@ -10,9 +10,14 @@
  * recognised by its text, and only when exactly ONE expense of the building has that
  * name: the rule the api uses for a row with no id when it saves a month
  * (buildingmanager.ts `saveMonthlyStatement`, «LEGACY BACKFILL»;
- * `_stampLegacyChargesBeforeRename`: «never guess between two candidates»). A row that is
- * nobody's shows in no input, and the next save of its month strips it. The landlord app
- * mirrors this file in `webapps/landlord/src/utils/expenseRows.js`;
+ * `_stampLegacyChargesBeforeRename`: «never guess between two candidates»).
+ *
+ * A row that is no expense's shows in no input. A save of its month, in a unit that has an
+ * apartment, removes every row with an expense id and every row with no id whose text two
+ * expenses share, and builds the month again from the figures the page sends; a row with a
+ * repair id stays, and so does a row with no id whose text is empty, starts with
+ * «Repair: » or names no expense.
+ * The landlord app mirrors this file in `webapps/landlord/src/utils/expenseRows.js`;
  * `expenseRowsParity.test.js` in the api holds the two to the same answers.
  *
  * The readers used to say `expenseId === id || description === name`. With two expenses
