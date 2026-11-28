@@ -1394,5 +1394,6 @@
   "Per-file status": "Status je Datei",
   "Retry failed ({{count}})": "Fehlgeschlagene wiederholen ({{count}})",
   "All files failed to parse ({{count}})": "Keine Datei konnte gelesen werden ({{count}})",
-  "{{count}} of {{total}} files failed; review errors below": "{{count}} von {{total}} Dateien fehlgeschlagen; Fehler unten prüfen"
+  "{{count}} of {{total}} files failed; review errors below": "{{count}} von {{total}} Dateien fehlgeschlagen; Fehler unten prüfen",
+  "Add an amount, or clear the discount, extra charge and note.": "Geben Sie einen Betrag ein oder löschen Sie Rabatt, Zusatzbelastung und Mitteilung."
 }

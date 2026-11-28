@@ -1638,5 +1638,6 @@
   "Per-file status": "Κατάσταση ανά αρχείο",
   "Retry failed ({{count}})": "Επανάληψη για όσα απέτυχαν ({{count}})",
   "All files failed to parse ({{count}})": "Κανένα αρχείο δεν διαβάστηκε ({{count}})",
-  "{{count}} of {{total}} files failed; review errors below": "{{count}} από {{total}} αρχεία απέτυχαν — δείτε τα σφάλματα παρακάτω"
+  "{{count}} of {{total}} files failed; review errors below": "{{count}} από {{total}} αρχεία απέτυχαν — δείτε τα σφάλματα παρακάτω",
+  "Add an amount, or clear the discount, extra charge and note.": "Συμπληρώστε ποσό, ή σβήστε την έκπτωση, την επιπλέον χρέωση και τη σημείωση."
 }

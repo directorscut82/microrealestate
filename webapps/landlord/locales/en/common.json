@@ -1617,5 +1617,6 @@
   "Per-file status": "Per-file status",
   "Retry failed ({{count}})": "Retry failed ({{count}})",
   "All files failed to parse ({{count}})": "All files failed to parse ({{count}})",
-  "{{count}} of {{total}} files failed; review errors below": "{{count}} of {{total}} files failed; review errors below"
+  "{{count}} of {{total}} files failed; review errors below": "{{count}} of {{total}} files failed; review errors below",
+  "Add an amount, or clear the discount, extra charge and note.": "Add an amount, or clear the discount, extra charge and note."
 }
